@@ -26,7 +26,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import { exchangeGitHubCode } from "../identity/oauth/github"
-// REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 8)
+// REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 8)
 import {
     ipfsStatus,
     ipfsAdd,
@@ -44,6 +44,11 @@ import {
     ipfsBootstrapList,
     ipfsClusterPin,
     ipfsDemosPeers,
+    // REVIEW: Public Bridge (Phase 5)
+    ipfsPublicFetch,
+    ipfsPublicPublish,
+    ipfsPublicCheck,
+    ipfsRateLimitStatus,
 } from "./routines/nodecalls/ipfs"
 
 export interface NodeCall {
@@ -541,6 +546,19 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "ipfsDemosPeers":
             return await ipfsDemosPeers()
+
+        // REVIEW: Public Bridge endpoints (Phase 5)
+        case "ipfsPublicFetch":
+            return await ipfsPublicFetch(data)
+
+        case "ipfsPublicPublish":
+            return await ipfsPublicPublish(data)
+
+        case "ipfsPublicCheck":
+            return await ipfsPublicCheck(data)
+
+        case "ipfsRateLimitStatus":
+            return await ipfsRateLimitStatus()
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

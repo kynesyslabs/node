@@ -24,6 +24,11 @@ export { default as ipfsSwarmDisconnect } from "./ipfsSwarmDisconnect"
 export { default as ipfsBootstrapList } from "./ipfsBootstrapList"
 export { default as ipfsClusterPin } from "./ipfsClusterPin"
 export { default as ipfsDemosPeers } from "./ipfsDemosPeers"
+// REVIEW: Public Bridge endpoints (Phase 5)
+export { default as ipfsPublicFetch } from "./ipfsPublicFetch"
+export { default as ipfsPublicPublish } from "./ipfsPublicPublish"
+export { default as ipfsPublicCheck } from "./ipfsPublicCheck"
+export { default as ipfsRateLimitStatus } from "./ipfsRateLimitStatus"
 
 export {
     getIpfsManager,

@@ -281,3 +281,136 @@ export const SWARM_DEFAULTS = {
     /** Connection timeout for peer connections */
     PEER_CONNECT_TIMEOUT: 10000,
 } as const
+
+
+// ============================================================================
+// REVIEW: Public Bridge Types (Phase 5)
+// ============================================================================
+
+/**
+ * Configuration for public IPFS network bridge
+ *
+ * Allows optional access to public IPFS network for content retrieval.
+ * By default, Demos nodes operate in private-only mode.
+ */
+export interface PublicBridgeConfig {
+    /** Whether public bridge is enabled (default: false) */
+    enabled: boolean
+    /** Public IPFS gateway URL for fetching content */
+    gatewayUrl: string
+    /** Whether to allow publishing to public IPFS (default: false) */
+    allowPublish: boolean
+    /** Request timeout for public gateway in milliseconds */
+    timeout: number
+    /** Rate limit: maximum requests per minute */
+    maxRequestsPerMinute: number
+    /** Rate limit: maximum bytes per minute */
+    maxBytesPerMinute: number
+}
+
+/**
+ * Result of fetching content from public IPFS gateway
+ */
+export interface PublicFetchResult {
+    /** Whether fetch was successful */
+    success: boolean
+    /** Content data if successful */
+    content?: Buffer
+    /** Size in bytes */
+    size?: number
+    /** Source gateway URL used */
+    gateway?: string
+    /** Error message if failed */
+    error?: string
+    /** Response time in milliseconds */
+    responseTimeMs?: number
+}
+
+/**
+ * Result of publishing content to public IPFS
+ */
+export interface PublicPublishResult {
+    /** Whether publish was successful */
+    success: boolean
+    /** CID of the published content */
+    cid?: string
+    /** Error message if failed */
+    error?: string
+}
+
+/**
+ * Status of public bridge availability check
+ */
+export interface PublicAvailabilityResult {
+    /** Whether content is available on public IPFS */
+    available: boolean
+    /** Gateway where content was found */
+    gateway?: string
+    /** Response time in milliseconds */
+    responseTimeMs?: number
+    /** Error message if check failed */
+    error?: string
+}
+
+/**
+ * Rate limit status for public bridge
+ */
+export interface RateLimitStatus {
+    /** Current requests this minute */
+    requestsThisMinute: number
+    /** Current bytes transferred this minute */
+    bytesThisMinute: number
+    /** Whether rate limit is exceeded */
+    isLimited: boolean
+    /** Seconds until rate limit resets */
+    resetInSeconds: number
+}
+
+/**
+ * Get public bridge configuration from environment variables
+ */
+export function getPublicBridgeConfigFromEnv(): PublicBridgeConfig {
+    const enabled = process.env.DEMOS_IPFS_PUBLIC_BRIDGE_ENABLED === "true"
+    const gatewayUrl = process.env.DEMOS_IPFS_PUBLIC_GATEWAY || "https://ipfs.io"
+    const allowPublish = process.env.DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH === "true"
+    const timeout = process.env.DEMOS_IPFS_PUBLIC_TIMEOUT
+        ? parseInt(process.env.DEMOS_IPFS_PUBLIC_TIMEOUT, 10)
+        : PUBLIC_BRIDGE_DEFAULTS.TIMEOUT
+    const maxRequestsPerMinute = process.env.DEMOS_IPFS_PUBLIC_MAX_REQUESTS
+        ? parseInt(process.env.DEMOS_IPFS_PUBLIC_MAX_REQUESTS, 10)
+        : PUBLIC_BRIDGE_DEFAULTS.MAX_REQUESTS_PER_MINUTE
+    const maxBytesPerMinute = process.env.DEMOS_IPFS_PUBLIC_MAX_BYTES
+        ? parseInt(process.env.DEMOS_IPFS_PUBLIC_MAX_BYTES, 10)
+        : PUBLIC_BRIDGE_DEFAULTS.MAX_BYTES_PER_MINUTE
+
+    return {
+        enabled,
+        gatewayUrl,
+        allowPublish,
+        timeout,
+        maxRequestsPerMinute,
+        maxBytesPerMinute,
+    }
+}
+
+/**
+ * Default public bridge configuration values
+ */
+export const PUBLIC_BRIDGE_DEFAULTS = {
+    /** Default gateway URL */
+    GATEWAY_URL: "https://ipfs.io",
+    /** Alternative public gateways for fallback */
+    FALLBACK_GATEWAYS: [
+        "https://dweb.link",
+        "https://cloudflare-ipfs.com",
+        "https://gateway.pinata.cloud",
+    ] as string[],
+    /** Default timeout in milliseconds */
+    TIMEOUT: 30000,
+    /** Maximum requests per minute (rate limiting) */
+    MAX_REQUESTS_PER_MINUTE: 30,
+    /** Maximum bytes per minute (100 MB) */
+    MAX_BYTES_PER_MINUTE: 100 * 1024 * 1024,
+    /** Cache TTL for availability checks in milliseconds */
+    AVAILABILITY_CACHE_TTL: 60000,
+} as const

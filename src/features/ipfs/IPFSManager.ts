@@ -41,9 +41,17 @@ import {
     type BootstrapNode,
     type ClusterPinOptions,
     type ClusterPinResult,
+    // REVIEW: Public Bridge Types (Phase 5)
+    type PublicBridgeConfig,
+    type PublicFetchResult,
+    type PublicPublishResult,
+    type PublicAvailabilityResult,
+    type RateLimitStatus,
     IPFS_DEFAULTS,
     SWARM_DEFAULTS,
+    PUBLIC_BRIDGE_DEFAULTS,
     getSwarmConfigFromEnv,
+    getPublicBridgeConfigFromEnv,
 } from "./types"
 import {
     getSwarmKeyFromEnv,
@@ -71,6 +79,14 @@ export class IPFSManager {
     private swarmConfig: SwarmConfig
     private demosPeerAddresses: Map<string, string> = new Map() // peerId -> multiaddr
 
+    // REVIEW: Public Bridge state (Phase 5)
+    private publicBridgeConfig: PublicBridgeConfig
+    private rateLimitState = {
+        requestsThisMinute: 0,
+        bytesThisMinute: 0,
+        lastResetTime: Date.now(),
+    }
+
     /**
      * Create a new IPFSManager instance
      *
@@ -83,6 +99,9 @@ export class IPFSManager {
 
         // REVIEW: Initialize swarm configuration from environment (Phase 4)
         this.swarmConfig = getSwarmConfigFromEnv()
+
+        // REVIEW: Initialize public bridge configuration from environment (Phase 5)
+        this.publicBridgeConfig = getPublicBridgeConfigFromEnv()
 
         this.logDebug(`IPFSManager created with API URL: ${this.apiUrl}`)
     }
@@ -1058,6 +1077,345 @@ export class IPFSManager {
         // For now, just return local status
         this.logDebug(`Cluster replication count for ${cid}: ${count}`)
         return count
+    }
+
+    // =========================================================================
+    // REVIEW: Public Bridge Operations (Phase 5)
+    // =========================================================================
+
+    /**
+     * Fetch content from a public IPFS gateway
+     *
+     * Attempts to retrieve content by CID from the configured public gateway.
+     * This is an opt-in feature that must be explicitly enabled via configuration.
+     *
+     * @param cid - Content Identifier to fetch
+     * @returns Result containing content or error information
+     */
+    async fetchFromPublic(cid: string): Promise<PublicFetchResult> {
+        this.validateCid(cid)
+
+        // Check if public bridge is enabled
+        if (!this.publicBridgeConfig.enabled) {
+            return {
+                success: false,
+                error: "Public bridge is not enabled",
+            }
+        }
+
+        // Check rate limits
+        const rateStatus = this.checkRateLimit()
+        if (rateStatus.isLimited) {
+            return {
+                success: false,
+                error: `Rate limit exceeded. Reset in ${rateStatus.resetInSeconds} seconds`,
+            }
+        }
+
+        this.logDebug(`Fetching from public gateway: ${cid}`)
+        const startTime = Date.now()
+
+        // Try primary gateway first, then fallbacks
+        const gatewaysToTry = [
+            this.publicBridgeConfig.gatewayUrl,
+            ...PUBLIC_BRIDGE_DEFAULTS.FALLBACK_GATEWAYS,
+        ]
+
+        for (const gateway of gatewaysToTry) {
+            try {
+                const result = await this.fetchFromGateway(cid, gateway, startTime)
+                if (result.success) {
+                    // Update rate limit counters
+                    this.incrementRateLimit(result.size || 0)
+                    return result
+                }
+            } catch (error) {
+                this.logDebug(`Gateway ${gateway} failed: ${error}`)
+                // Continue to next gateway
+            }
+        }
+
+        return {
+            success: false,
+            error: "All public gateways failed",
+            responseTimeMs: Date.now() - startTime,
+        }
+    }
+
+    /**
+     * Publish content to the public IPFS network
+     *
+     * Makes locally pinned content available on the public IPFS network.
+     * Requires allowPublish to be enabled in configuration.
+     *
+     * @param cid - Content Identifier to publish
+     * @returns Result of the publish operation
+     */
+    async publishToPublic(cid: string): Promise<PublicPublishResult> {
+        this.validateCid(cid)
+
+        // Check if public bridge and publishing is enabled
+        if (!this.publicBridgeConfig.enabled) {
+            return {
+                success: false,
+                error: "Public bridge is not enabled",
+            }
+        }
+
+        if (!this.publicBridgeConfig.allowPublish) {
+            return {
+                success: false,
+                error: "Publishing to public IPFS is not allowed",
+            }
+        }
+
+        // Check rate limits
+        const rateStatus = this.checkRateLimit()
+        if (rateStatus.isLimited) {
+            return {
+                success: false,
+                error: `Rate limit exceeded. Reset in ${rateStatus.resetInSeconds} seconds`,
+            }
+        }
+
+        this.logDebug(`Publishing to public IPFS: ${cid}`)
+
+        // Verify content exists locally first
+        const isPinned = await this.isPinned(cid)
+        if (!isPinned) {
+            return {
+                success: false,
+                error: "Content must be pinned locally before publishing",
+            }
+        }
+
+        try {
+            // For publishing, we need to ensure the content is available via DHT
+            // The Kubo node will automatically make pinned content available
+            // We can trigger DHT provide to announce the content
+            await this.apiRequest(`/api/v0/dht/provide?arg=${encodeURIComponent(cid)}`, "POST")
+
+            this.incrementRateLimit(0) // Just count the request
+            this.logDebug(`Content published to public IPFS: ${cid}`)
+
+            return {
+                success: true,
+                cid,
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
+            this.logDebug(`Failed to publish to public IPFS: ${errorMessage}`)
+
+            return {
+                success: false,
+                error: errorMessage,
+            }
+        }
+    }
+
+    /**
+     * Check if content is available on the public IPFS network
+     *
+     * Performs a HEAD request to the public gateway to check availability.
+     *
+     * @param cid - Content Identifier to check
+     * @returns Availability result
+     */
+    async isPubliclyAvailable(cid: string): Promise<PublicAvailabilityResult> {
+        this.validateCid(cid)
+
+        // Check if public bridge is enabled
+        if (!this.publicBridgeConfig.enabled) {
+            return {
+                available: false,
+                error: "Public bridge is not enabled",
+            }
+        }
+
+        this.logDebug(`Checking public availability: ${cid}`)
+        const startTime = Date.now()
+
+        // Try primary gateway
+        const gateway = this.publicBridgeConfig.gatewayUrl
+        const url = `${gateway}/ipfs/${cid}`
+
+        try {
+            const controller = new AbortController()
+            const timeoutId = setTimeout(
+                () => controller.abort(),
+                Math.min(this.publicBridgeConfig.timeout, 10000), // Max 10s for availability check
+            )
+
+            const response = await fetch(url, {
+                method: "HEAD",
+                signal: controller.signal,
+            })
+
+            clearTimeout(timeoutId)
+            const responseTimeMs = Date.now() - startTime
+
+            if (response.ok) {
+                this.logDebug(`Content is publicly available: ${cid}`)
+                return {
+                    available: true,
+                    gateway,
+                    responseTimeMs,
+                }
+            }
+
+            return {
+                available: false,
+                gateway,
+                responseTimeMs,
+                error: `Gateway returned ${response.status}`,
+            }
+        } catch (error) {
+            const responseTimeMs = Date.now() - startTime
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
+
+            this.logDebug(`Public availability check failed: ${errorMessage}`)
+
+            return {
+                available: false,
+                gateway,
+                responseTimeMs,
+                error: errorMessage,
+            }
+        }
+    }
+
+    /**
+     * Get current rate limit status for the public bridge
+     *
+     * @returns Current rate limit status
+     */
+    getRateLimitStatus(): RateLimitStatus {
+        return this.checkRateLimit()
+    }
+
+    /**
+     * Get public bridge configuration
+     *
+     * @returns Current public bridge configuration
+     */
+    getPublicBridgeConfig(): PublicBridgeConfig {
+        return { ...this.publicBridgeConfig }
+    }
+
+    /**
+     * Check if public bridge is enabled
+     *
+     * @returns true if public bridge is enabled
+     */
+    isPublicBridgeEnabled(): boolean {
+        return this.publicBridgeConfig.enabled
+    }
+
+    /**
+     * Fetch content from a specific gateway
+     *
+     * @param cid - Content Identifier
+     * @param gateway - Gateway URL
+     * @param startTime - Request start time for response time calculation
+     * @returns Fetch result
+     */
+    private async fetchFromGateway(
+        cid: string,
+        gateway: string,
+        startTime: number,
+    ): Promise<PublicFetchResult> {
+        const url = `${gateway}/ipfs/${cid}`
+
+        const controller = new AbortController()
+        const timeoutId = setTimeout(
+            () => controller.abort(),
+            this.publicBridgeConfig.timeout,
+        )
+
+        try {
+            this.logDebug(`Attempting fetch from gateway: ${gateway}`)
+
+            const response = await fetch(url, {
+                method: "GET",
+                signal: controller.signal,
+            })
+
+            clearTimeout(timeoutId)
+            const responseTimeMs = Date.now() - startTime
+
+            if (!response.ok) {
+                return {
+                    success: false,
+                    gateway,
+                    responseTimeMs,
+                    error: `Gateway returned ${response.status}`,
+                }
+            }
+
+            const arrayBuffer = await response.arrayBuffer()
+            const content = Buffer.from(arrayBuffer)
+
+            this.logDebug(`Successfully fetched from ${gateway}: ${content.length} bytes`)
+
+            return {
+                success: true,
+                content,
+                size: content.length,
+                gateway,
+                responseTimeMs,
+            }
+        } catch (error) {
+            clearTimeout(timeoutId)
+            const responseTimeMs = Date.now() - startTime
+
+            return {
+                success: false,
+                gateway,
+                responseTimeMs,
+                error: error instanceof Error ? error.message : "Unknown error",
+            }
+        }
+    }
+
+    /**
+     * Check rate limit status and reset if needed
+     *
+     * @returns Current rate limit status
+     */
+    private checkRateLimit(): RateLimitStatus {
+        const now = Date.now()
+        const elapsed = now - this.rateLimitState.lastResetTime
+        const minuteMs = 60 * 1000
+
+        // Reset counters if a minute has passed
+        if (elapsed >= minuteMs) {
+            this.rateLimitState.requestsThisMinute = 0
+            this.rateLimitState.bytesThisMinute = 0
+            this.rateLimitState.lastResetTime = now
+        }
+
+        const isLimited =
+            this.rateLimitState.requestsThisMinute >= this.publicBridgeConfig.maxRequestsPerMinute ||
+            this.rateLimitState.bytesThisMinute >= this.publicBridgeConfig.maxBytesPerMinute
+
+        const resetInSeconds = Math.ceil((minuteMs - (now - this.rateLimitState.lastResetTime)) / 1000)
+
+        return {
+            requestsThisMinute: this.rateLimitState.requestsThisMinute,
+            bytesThisMinute: this.rateLimitState.bytesThisMinute,
+            isLimited,
+            resetInSeconds,
+        }
+    }
+
+    /**
+     * Increment rate limit counters
+     *
+     * @param bytes - Number of bytes transferred
+     */
+    private incrementRateLimit(bytes: number): void {
+        this.rateLimitState.requestsThisMinute++
+        this.rateLimitState.bytesThisMinute += bytes
     }
 
     // =========================================================================
