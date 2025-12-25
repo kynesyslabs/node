@@ -43,9 +43,34 @@ export type {
     StreamProgressCallback,
     AddStreamOptions,
     GetStreamOptions,
+    // REVIEW: Phase 4 - Swarm types
+    SwarmConfig,
+    SwarmPeerInfo,
+    ClusterPinOptions,
+    ClusterPinResult,
+    SwarmConnectResult,
+    BootstrapNode,
 } from "./types"
 
-export { IPFS_DEFAULTS, STREAM_CHUNK_SIZE } from "./types"
+export {
+    IPFS_DEFAULTS,
+    STREAM_CHUNK_SIZE,
+    // REVIEW: Phase 4 - Swarm defaults
+    SWARM_DEFAULTS,
+    getSwarmConfigFromEnv,
+} from "./types"
+
+// REVIEW: Phase 4 - Swarm key utilities
+export {
+    generateSwarmKey,
+    formatSwarmKeyFile,
+    parseSwarmKeyFile,
+    isValidSwarmKey,
+    swarmKeysMatch,
+    getSwarmKeyFromEnv,
+    isPrivateNetworkEnabled,
+    logSwarmKeyStatus,
+} from "./swarmKey"
 
 // Errors
 export {

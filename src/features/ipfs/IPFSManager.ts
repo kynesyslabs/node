@@ -35,8 +35,21 @@ import {
     type IpfsHealthStatus,
     type AddStreamOptions,
     type GetStreamOptions,
+    type SwarmPeerInfo,
+    type SwarmConfig,
+    type SwarmConnectResult,
+    type BootstrapNode,
+    type ClusterPinOptions,
+    type ClusterPinResult,
     IPFS_DEFAULTS,
+    SWARM_DEFAULTS,
+    getSwarmConfigFromEnv,
 } from "./types"
+import {
+    getSwarmKeyFromEnv,
+    isPrivateNetworkEnabled,
+    logSwarmKeyStatus,
+} from "./swarmKey"
 
 /**
  * IPFSManager - Core IPFS integration for Demos Network
@@ -54,6 +67,10 @@ export class IPFSManager {
     private cachedNodeInfo: IpfsNodeInfo | null = null
     private lastHealthCheck: IpfsHealthStatus | null = null
 
+    // REVIEW: Swarm configuration (Phase 4)
+    private swarmConfig: SwarmConfig
+    private demosPeerAddresses: Map<string, string> = new Map() // peerId -> multiaddr
+
     /**
      * Create a new IPFSManager instance
      *
@@ -63,6 +80,9 @@ export class IPFSManager {
         this.apiUrl = config.apiUrl ?? IPFS_DEFAULTS.API_URL
         this.timeout = config.timeout ?? IPFS_DEFAULTS.TIMEOUT
         this.debug = config.debug ?? false
+
+        // REVIEW: Initialize swarm configuration from environment (Phase 4)
+        this.swarmConfig = getSwarmConfigFromEnv()
 
         this.logDebug(`IPFSManager created with API URL: ${this.apiUrl}`)
     }
@@ -88,6 +108,15 @@ export class IPFSManager {
             this.cachedNodeInfo = await this.fetchNodeInfo()
             this.initialized = true
             this.logDebug(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
+
+            // REVIEW: Log swarm key status (Phase 4)
+            logSwarmKeyStatus()
+
+            // If private network is enabled, configure bootstrap nodes
+            if (isPrivateNetworkEnabled()) {
+                log.info("[IPFS] Private network mode enabled")
+                await this.configureBootstrapNodes()
+            }
         } catch (error) {
             throw new IPFSConnectionError(
                 `Failed to initialize IPFS connection to ${this.apiUrl}`,
@@ -675,6 +704,360 @@ export class IPFSManager {
                 }
             },
         })
+    }
+
+    // =========================================================================
+    // REVIEW: Swarm Management Operations (Phase 4)
+    // =========================================================================
+
+    /**
+     * Get list of connected swarm peers
+     *
+     * Returns information about all peers currently connected to this IPFS node.
+     *
+     * @returns Array of connected peer information
+     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     */
+    async getSwarmPeers(): Promise<SwarmPeerInfo[]> {
+        this.logDebug("Getting swarm peers...")
+
+        const response = await this.apiRequest("/api/v0/swarm/peers?verbose=true", "POST")
+        const data = await response.json()
+
+        const peers: SwarmPeerInfo[] = (data.Peers || []).map((peer: {
+            Peer: string
+            Addr: string
+            Direction: number
+            Latency: string
+            Streams?: Array<{ Protocol: string }>
+        }) => {
+            // Parse latency if available (e.g., "12ms" -> 12)
+            let latency: number | undefined
+            if (peer.Latency && peer.Latency !== "") {
+                const match = peer.Latency.match(/^(\d+(?:\.\d+)?)(ms|s|us)?$/)
+                if (match) {
+                    const value = parseFloat(match[1])
+                    const unit = match[2] || "ms"
+                    latency = unit === "s" ? value * 1000 : unit === "us" ? value / 1000 : value
+                }
+            }
+
+            // Check if this is a Demos network node
+            const isDemosNode = this.demosPeerAddresses.has(peer.Peer)
+
+            return {
+                peerId: peer.Peer,
+                addr: peer.Addr,
+                direction: peer.Direction === 0 ? "inbound" : "outbound" as const,
+                latency,
+                streams: peer.Streams?.map((s) => s.Protocol),
+                isDemosNode,
+            }
+        })
+
+        this.logDebug(`Found ${peers.length} connected peers`)
+        return peers
+    }
+
+    /**
+     * Connect to a specific peer by multiaddress
+     *
+     * @param multiaddr - Multiaddress of the peer to connect to
+     * @returns Connection result
+     */
+    async connectPeer(multiaddr: string): Promise<SwarmConnectResult> {
+        this.logDebug(`Connecting to peer: ${multiaddr}`)
+
+        try {
+            const response = await this.apiRequest(
+                `/api/v0/swarm/connect?arg=${encodeURIComponent(multiaddr)}`,
+                "POST",
+            )
+            const data = await response.json()
+
+            // Extract peer ID from multiaddr (last component after /p2p/)
+            const peerIdMatch = multiaddr.match(/\/p2p\/([^/]+)$/)
+            const peerId = peerIdMatch?.[1]
+
+            this.logDebug(`Connected to peer: ${peerId || multiaddr}`)
+
+            return {
+                success: true,
+                peerId,
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
+            this.logDebug(`Failed to connect to peer: ${errorMessage}`)
+
+            return {
+                success: false,
+                error: errorMessage,
+            }
+        }
+    }
+
+    /**
+     * Disconnect from a specific peer
+     *
+     * @param peerId - Peer ID to disconnect from
+     * @returns true if disconnected successfully
+     */
+    async disconnectPeer(peerId: string): Promise<boolean> {
+        this.logDebug(`Disconnecting from peer: ${peerId}`)
+
+        try {
+            await this.apiRequest(
+                `/api/v0/swarm/disconnect?arg=/p2p/${encodeURIComponent(peerId)}`,
+                "POST",
+            )
+            this.logDebug(`Disconnected from peer: ${peerId}`)
+            return true
+        } catch (error) {
+            this.logDebug(`Failed to disconnect from peer: ${error}`)
+            return false
+        }
+    }
+
+    /**
+     * Get list of bootstrap nodes
+     *
+     * @returns Array of bootstrap node information
+     */
+    async getBootstrapList(): Promise<BootstrapNode[]> {
+        this.logDebug("Getting bootstrap list...")
+
+        const response = await this.apiRequest("/api/v0/bootstrap/list", "POST")
+        const data = await response.json()
+
+        const nodes: BootstrapNode[] = (data.Peers || []).map((addr: string) => ({
+            addr,
+        }))
+
+        this.logDebug(`Found ${nodes.length} bootstrap nodes`)
+        return nodes
+    }
+
+    /**
+     * Add a bootstrap node
+     *
+     * @param multiaddr - Multiaddress of the bootstrap node
+     * @returns true if added successfully
+     */
+    async addBootstrap(multiaddr: string): Promise<boolean> {
+        this.logDebug(`Adding bootstrap node: ${multiaddr}`)
+
+        try {
+            await this.apiRequest(
+                `/api/v0/bootstrap/add?arg=${encodeURIComponent(multiaddr)}`,
+                "POST",
+            )
+            this.logDebug(`Added bootstrap node: ${multiaddr}`)
+            return true
+        } catch (error) {
+            this.logDebug(`Failed to add bootstrap node: ${error}`)
+            return false
+        }
+    }
+
+    /**
+     * Remove a bootstrap node
+     *
+     * @param multiaddr - Multiaddress of the bootstrap node to remove
+     * @returns true if removed successfully
+     */
+    async removeBootstrap(multiaddr: string): Promise<boolean> {
+        this.logDebug(`Removing bootstrap node: ${multiaddr}`)
+
+        try {
+            await this.apiRequest(
+                `/api/v0/bootstrap/rm?arg=${encodeURIComponent(multiaddr)}`,
+                "POST",
+            )
+            this.logDebug(`Removed bootstrap node: ${multiaddr}`)
+            return true
+        } catch (error) {
+            this.logDebug(`Failed to remove bootstrap node: ${error}`)
+            return false
+        }
+    }
+
+    /**
+     * Remove all default bootstrap nodes (for private network setup)
+     *
+     * @returns true if all default nodes were removed
+     */
+    async clearBootstrapList(): Promise<boolean> {
+        this.logDebug("Clearing bootstrap list...")
+
+        try {
+            await this.apiRequest("/api/v0/bootstrap/rm/all", "POST")
+            this.logDebug("Bootstrap list cleared")
+            return true
+        } catch (error) {
+            this.logDebug(`Failed to clear bootstrap list: ${error}`)
+            return false
+        }
+    }
+
+    /**
+     * Configure bootstrap nodes for private Demos network
+     *
+     * Clears public IPFS bootstrap nodes and adds Demos network nodes.
+     * Called during initialization if private network mode is enabled.
+     */
+    private async configureBootstrapNodes(): Promise<void> {
+        this.logDebug("Configuring bootstrap nodes for private network...")
+
+        // Clear existing bootstrap nodes (public IPFS nodes)
+        if (this.swarmConfig.forcePrivateNetwork) {
+            await this.clearBootstrapList()
+        }
+
+        // Add configured bootstrap nodes from environment
+        for (const addr of this.swarmConfig.bootstrapNodes) {
+            await this.addBootstrap(addr)
+        }
+
+        const currentList = await this.getBootstrapList()
+        this.logDebug(`Bootstrap configuration complete. ${currentList.length} nodes configured`)
+    }
+
+    /**
+     * Register a Demos network peer address
+     *
+     * Called by peer discovery to track which IPFS peers are also Demos nodes.
+     *
+     * @param peerId - Peer ID of the Demos node
+     * @param multiaddr - IPFS multiaddress of the peer
+     */
+    registerDemosPeer(peerId: string, multiaddr: string): void {
+        this.demosPeerAddresses.set(peerId, multiaddr)
+        this.logDebug(`Registered Demos peer: ${peerId}`)
+    }
+
+    /**
+     * Unregister a Demos network peer
+     *
+     * @param peerId - Peer ID to unregister
+     */
+    unregisterDemosPeer(peerId: string): void {
+        this.demosPeerAddresses.delete(peerId)
+        this.logDebug(`Unregistered Demos peer: ${peerId}`)
+    }
+
+    /**
+     * Get all registered Demos peers
+     *
+     * @returns Map of peer IDs to multiaddresses
+     */
+    getDemosPeers(): Map<string, string> {
+        return new Map(this.demosPeerAddresses)
+    }
+
+    /**
+     * Check if private network mode is enabled
+     *
+     * @returns true if running in private network mode
+     */
+    isPrivateNetwork(): boolean {
+        return isPrivateNetworkEnabled()
+    }
+
+    /**
+     * Get current swarm configuration
+     *
+     * @returns Current swarm configuration
+     */
+    getSwarmConfig(): SwarmConfig {
+        return { ...this.swarmConfig }
+    }
+
+    // =========================================================================
+    // REVIEW: Cluster Pinning Operations (Phase 4)
+    // =========================================================================
+
+    /**
+     * Pin content across multiple nodes in the Demos network cluster
+     *
+     * Attempts to replicate content to the specified number of nodes.
+     * Uses registered Demos peers for cluster pinning.
+     *
+     * @param cid - Content Identifier to pin
+     * @param options - Cluster pinning options
+     * @returns Result of the cluster pin operation
+     */
+    async clusterPin(cid: string, options: ClusterPinOptions = {}): Promise<ClusterPinResult> {
+        this.validateCid(cid)
+        const replication = options.replication ?? SWARM_DEFAULTS.DEFAULT_REPLICATION
+
+        this.logDebug(`Cluster pin requested. CID: ${cid}, replication: ${replication}`)
+
+        // First, pin locally
+        await this.pin(cid)
+
+        const result: ClusterPinResult = {
+            cid,
+            replicatedTo: 1, // Local pin counts as 1
+            targetReplication: replication,
+            pinnedBy: [await this.getNodeId()],
+            errors: [],
+        }
+
+        // If replication is 1, we're done (local only)
+        if (replication <= 1) {
+            return result
+        }
+
+        // Get connected Demos peers for cluster pinning
+        const demosPeers = Array.from(this.demosPeerAddresses.entries())
+        const targetPeers = demosPeers.slice(0, replication - 1) // -1 because we already pinned locally
+
+        if (targetPeers.length === 0) {
+            this.logDebug("No Demos peers available for cluster pinning")
+            return result
+        }
+
+        // Request each peer to pin the content
+        // Note: This requires peers to expose a pin RPC endpoint
+        // In a full implementation, this would use the Demos P2P protocol
+        for (const [peerId] of targetPeers) {
+            try {
+                // For now, just track that we would replicate to this peer
+                // Full implementation would use Demos RPC to request remote pin
+                this.logDebug(`Would request cluster pin from peer: ${peerId}`)
+                // result.replicatedTo++
+                // result.pinnedBy.push(peerId)
+            } catch (error) {
+                result.errors!.push({
+                    peerId,
+                    error: error instanceof Error ? error.message : "Unknown error",
+                })
+            }
+        }
+
+        this.logDebug(`Cluster pin complete. Replicated to ${result.replicatedTo} nodes`)
+        return result
+    }
+
+    /**
+     * Get cluster replication status for a CID
+     *
+     * Checks how many Demos nodes have the content pinned.
+     *
+     * @param cid - Content Identifier to check
+     * @returns Number of nodes with this content pinned
+     */
+    async getClusterReplicationCount(cid: string): Promise<number> {
+        this.validateCid(cid)
+
+        // Check local pin status
+        const localPinned = await this.isPinned(cid)
+        const count = localPinned ? 1 : 0
+
+        // In a full implementation, we would query other Demos nodes
+        // For now, just return local status
+        this.logDebug(`Cluster replication count for ${cid}: ${count}`)
+        return count
     }
 
     // =========================================================================

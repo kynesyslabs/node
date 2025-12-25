@@ -142,3 +142,142 @@ export interface GetStreamOptions {
  * Default chunk size for streaming operations (256KB)
  */
 export const STREAM_CHUNK_SIZE = 256 * 1024
+
+
+// ============================================================================
+// REVIEW: Swarm and Cluster Types (Phase 4)
+// ============================================================================
+
+/**
+ * Swarm configuration for private IPFS network
+ * Uses swarm key to create isolated network of Demos nodes
+ */
+export interface SwarmConfig {
+    /** 64-byte hex swarm key for private network */
+    swarmKey?: string
+    /** Bootstrap node multiaddresses */
+    bootstrapNodes: string[]
+    /** Force private network mode (LIBP2P_FORCE_PNET=1) */
+    forcePrivateNetwork: boolean
+    /** Maximum number of peer connections */
+    maxPeers?: number
+    /** Minimum number of peer connections to maintain */
+    minPeers?: number
+}
+
+/**
+ * Information about a connected swarm peer
+ */
+export interface SwarmPeerInfo {
+    /** Peer ID (base58 encoded) */
+    peerId: string
+    /** Multiaddress of the peer connection */
+    addr: string
+    /** Connection direction: inbound or outbound */
+    direction: "inbound" | "outbound"
+    /** Latency in milliseconds (if available) */
+    latency?: number
+    /** Streams/protocols supported by this peer */
+    streams?: string[]
+    /** Whether this is a Demos network node */
+    isDemosNode?: boolean
+}
+
+/**
+ * Options for cluster-wide pinning
+ */
+export interface ClusterPinOptions {
+    /** Target replication factor (number of nodes to pin on) */
+    replication?: number
+    /** Pin name/label for identification */
+    name?: string
+    /** Pin expiration timestamp (Unix ms) */
+    expiresAt?: number
+    /** Optional metadata */
+    metadata?: Record<string, unknown>
+}
+
+/**
+ * Result of a cluster pin operation
+ */
+export interface ClusterPinResult {
+    /** Content identifier */
+    cid: string
+    /** Number of nodes that successfully pinned */
+    replicatedTo: number
+    /** Target replication factor */
+    targetReplication: number
+    /** Peer IDs that pinned the content */
+    pinnedBy: string[]
+    /** Any errors during replication */
+    errors?: Array<{ peerId: string; error: string }>
+}
+
+/**
+ * Swarm connection result
+ */
+export interface SwarmConnectResult {
+    /** Whether connection was successful */
+    success: boolean
+    /** Peer ID connected to */
+    peerId?: string
+    /** Error message if failed */
+    error?: string
+}
+
+/**
+ * Bootstrap node information
+ */
+export interface BootstrapNode {
+    /** Multiaddress of the bootstrap node */
+    addr: string
+    /** Whether this node is currently reachable */
+    reachable?: boolean
+    /** Last seen timestamp */
+    lastSeen?: number
+}
+
+/**
+ * Get swarm configuration from environment variables
+ */
+export function getSwarmConfigFromEnv(): SwarmConfig {
+    const swarmKey = process.env.DEMOS_IPFS_SWARM_KEY
+    const bootstrapNodesStr = process.env.DEMOS_IPFS_BOOTSTRAP_NODES || ""
+    const forcePrivateNetwork = process.env.LIBP2P_FORCE_PNET === "1"
+    const maxPeers = process.env.DEMOS_IPFS_MAX_PEERS
+        ? parseInt(process.env.DEMOS_IPFS_MAX_PEERS, 10)
+        : undefined
+    const minPeers = process.env.DEMOS_IPFS_MIN_PEERS
+        ? parseInt(process.env.DEMOS_IPFS_MIN_PEERS, 10)
+        : undefined
+
+    // Parse bootstrap nodes (comma-separated multiaddresses)
+    const bootstrapNodes = bootstrapNodesStr
+        .split(",")
+        .map((addr) => addr.trim())
+        .filter((addr) => addr.length > 0)
+
+    return {
+        swarmKey,
+        bootstrapNodes,
+        forcePrivateNetwork,
+        maxPeers,
+        minPeers,
+    }
+}
+
+/**
+ * Default swarm configuration values
+ */
+export const SWARM_DEFAULTS = {
+    /** Default maximum peers */
+    MAX_PEERS: 100,
+    /** Default minimum peers to maintain */
+    MIN_PEERS: 4,
+    /** Default replication factor for cluster pins */
+    DEFAULT_REPLICATION: 3,
+    /** Peer discovery interval in milliseconds */
+    PEER_DISCOVERY_INTERVAL: 60000,
+    /** Connection timeout for peer connections */
+    PEER_CONNECT_TIMEOUT: 10000,
+} as const

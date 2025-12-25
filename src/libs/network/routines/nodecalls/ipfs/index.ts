@@ -17,6 +17,13 @@ export { default as ipfsPins } from "./ipfsPins"
 // REVIEW: Streaming endpoints for large files (Phase 8)
 export { default as ipfsAddStream } from "./ipfsAddStream"
 export { default as ipfsGetStream } from "./ipfsGetStream"
+// REVIEW: Swarm management endpoints (Phase 4)
+export { default as ipfsSwarmPeers } from "./ipfsSwarmPeers"
+export { default as ipfsSwarmConnect } from "./ipfsSwarmConnect"
+export { default as ipfsSwarmDisconnect } from "./ipfsSwarmDisconnect"
+export { default as ipfsBootstrapList } from "./ipfsBootstrapList"
+export { default as ipfsClusterPin } from "./ipfsClusterPin"
+export { default as ipfsDemosPeers } from "./ipfsDemosPeers"
 
 export {
     getIpfsManager,

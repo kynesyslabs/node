@@ -26,7 +26,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import { exchangeGitHubCode } from "../identity/oauth/github"
-// REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 8)
+// REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 8)
 import {
     ipfsStatus,
     ipfsAdd,
@@ -37,6 +37,13 @@ import {
     ipfsPins,
     ipfsAddStream,
     ipfsGetStream,
+    // REVIEW: Swarm management (Phase 4)
+    ipfsSwarmPeers,
+    ipfsSwarmConnect,
+    ipfsSwarmDisconnect,
+    ipfsBootstrapList,
+    ipfsClusterPin,
+    ipfsDemosPeers,
 } from "./routines/nodecalls/ipfs"
 
 export interface NodeCall {
@@ -515,6 +522,25 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "ipfsGetStream":
             return await ipfsGetStream(data)
+
+        // REVIEW: Swarm management endpoints (Phase 4)
+        case "ipfsSwarmPeers":
+            return await ipfsSwarmPeers()
+
+        case "ipfsSwarmConnect":
+            return await ipfsSwarmConnect(data)
+
+        case "ipfsSwarmDisconnect":
+            return await ipfsSwarmDisconnect(data)
+
+        case "ipfsBootstrapList":
+            return await ipfsBootstrapList()
+
+        case "ipfsClusterPin":
+            return await ipfsClusterPin(data)
+
+        case "ipfsDemosPeers":
+            return await ipfsDemosPeers()
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
