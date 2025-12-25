@@ -25,11 +25,11 @@ import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
-    host: "localhost",
+    host: process.env.PG_HOST || "localhost",
     port: parseInt(process.env.PG_PORT) || 5332,
-    username: "demosuser",
-    password: "demospassword",
-    database: "demos",
+    username: process.env.PG_USER || "demosuser",
+    password: process.env.PG_PASSWORD || "demospassword",
+    database: process.env.PG_DATABASE || "demos",
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,
