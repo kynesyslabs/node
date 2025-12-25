@@ -199,3 +199,9 @@ prop_agent
 TYPE_CHECK_REPORT.md
 qodo-fetch.py
 docs
+docs/IPFS_TOKENOMICS_SPEC.md
+
+# Devnet runtime files (generated, not tracked)
+devnet/identities/
+devnet/.env
+devnet/postgres-data/
