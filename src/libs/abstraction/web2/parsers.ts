@@ -2,6 +2,11 @@ import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 export abstract class Web2ProofParser {
     formats = {
+        github: [
+            "https://gist.github.com",
+            "https://raw.githubusercontent.com",
+            "https://gist.githubusercontent.com",
+        ],
         twitter: ["https://x.com", "https://twitter.com"],
         discord: [
             "https://discord.com/channels",
