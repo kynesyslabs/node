@@ -7,8 +7,27 @@ import { Twitter } from "../identity/tools/twitter"
 import log from "src/utilities/logger"
 import { TelegramSignedAttestation } from "@kynesyslabs/demosdk/abstraction"
 import { getSharedState } from "@/utilities/sharedState"
-import { SignedGitHubOAuthAttestation } from "../identity/oauth/github"
-import { SignedDiscordOAuthAttestation } from "../identity/oauth/discord"
+
+// Generic OAuth attestation type that works for any provider
+interface SignedOAuthAttestation {
+    attestation: {
+        provider: string
+        userId: string
+        username: string
+        timestamp: number
+        nodePublicKey: string
+    }
+    signature: string
+    signatureType: string
+}
+
+function canonicalJSON(obj: Record<string, unknown>): string {
+    const sortedObj: Record<string, unknown> = {}
+    Object.keys(obj).sort().forEach(key => {
+        sortedObj[key] = obj[key]
+    })
+    return JSON.stringify(sortedObj)
+}
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
@@ -33,6 +52,133 @@ async function checkBotAuthorization(botAddress: string): Promise<boolean> {
     }
 
     return false
+}
+
+/**
+ * Generic OAuth attestation verification for any provider (GitHub, Discord, etc.)
+ *
+ * @param payload - The web2 identity payload containing proof and user info
+ * @param provider - The OAuth provider name (e.g., "github", "discord")
+ * @returns Verification result with success status and message
+ */
+async function verifySignedOAuthAttestation(
+    payload: Web2CoreTargetIdentityPayload,
+    provider: string,
+): Promise<{ success: boolean; message: string }> {
+    try {
+        let signedAttestation: SignedOAuthAttestation
+
+        // Parse the proof - it could be a string or already an object
+        if (typeof payload.proof === "string") {
+            signedAttestation = JSON.parse(payload.proof)
+        } else {
+            signedAttestation = payload.proof as unknown as SignedOAuthAttestation
+        }
+
+        // Validate attestation structure
+        if (
+            !signedAttestation?.attestation ||
+            !signedAttestation?.signature ||
+            !signedAttestation?.signatureType
+        ) {
+            return {
+                success: false,
+                message: `Invalid ${provider} OAuth attestation structure`,
+            }
+        }
+
+        const { attestation, signature, signatureType } = signedAttestation
+
+        // Verify attestation data matches payload
+        if (attestation.provider !== provider) {
+            return {
+                success: false,
+                message: `Invalid provider in attestation: expected ${provider}, got ${attestation.provider}`,
+            }
+        }
+
+        if (attestation.userId !== payload.userId) {
+            return {
+                success: false,
+                message: `User ID mismatch: expected ${payload.userId}, got ${attestation.userId}`,
+            }
+        }
+
+        if (attestation.username !== payload.username) {
+            return {
+                success: false,
+                message: `Username mismatch: expected ${payload.username}, got ${attestation.username}`,
+            }
+        }
+
+        // Check attestation is not too old (5 minutes)
+        const maxAge = 5 * 60 * 1000
+        if (Date.now() - attestation.timestamp > maxAge) {
+            return {
+                success: false,
+                message: `${provider} OAuth attestation has expired`,
+            }
+        }
+
+        // Validate signature algorithm
+        const allowedAlgorithms = ["ed25519", "ml-dsa", "falcon"] as const
+        if (!allowedAlgorithms.includes(signatureType as typeof allowedAlgorithms[number])) {
+            return {
+                success: false,
+                message: `Unsupported signature algorithm: ${signatureType}`,
+            }
+        }
+
+        // Verify the signature using canonical JSON for deterministic hashing
+        const attestationString = canonicalJSON(attestation as unknown as Record<string, unknown>)
+        const hash = Hashing.sha256(attestationString)
+
+        const nodePublicKeyHex = attestation.nodePublicKey.replace("0x", "")
+        const publicKeyBytes = hexToUint8Array(nodePublicKeyHex)
+        const signatureBytes = hexToUint8Array(signature)
+
+        const isValid = await ucrypto.verify({
+            algorithm: signatureType as typeof allowedAlgorithms[number],
+            message: new TextEncoder().encode(hash),
+            signature: signatureBytes,
+            publicKey: publicKeyBytes,
+        })
+
+        if (!isValid) {
+            return {
+                success: false,
+                message: `Invalid ${provider} OAuth attestation signature`,
+            }
+        }
+
+        // Check that the signing node is authorized (exists in genesis identities)
+        const nodeAddress = attestation.nodePublicKey.replace("0x", "")
+        const ownPublicKey = getSharedState.publicKeyHex?.replace("0x", "")
+        const isOwnNode = nodeAddress === ownPublicKey
+
+        const nodeAuthorized = isOwnNode || await checkBotAuthorization(nodeAddress)
+        if (!nodeAuthorized) {
+            return {
+                success: false,
+                message: "Unauthorized node - not found in genesis addresses",
+            }
+        }
+
+        log.info(
+            `${provider} OAuth attestation verified: userId=${payload.userId}, username=${payload.username}`,
+        )
+
+        return {
+            success: true,
+            message: `Verified ${provider} OAuth attestation`,
+        }
+    } catch (error) {
+        log.error(`${provider} OAuth attestation verification error: ${error}`)
+        return {
+            success: false,
+            message: `${provider} OAuth attestation verification failed: ${error instanceof Error ? error.message : String(error)}`,
+        }
+    }
 }
 
 async function verifyTelegramProof(
@@ -172,217 +318,19 @@ export async function verifyWeb2Proof(
         | typeof TwitterProofParser
         | typeof DiscordProofParser
 
-    // Handle OAuth-based proofs with signed attestation
-    // The proof should be a SignedGitHubOAuthAttestation object (stringified)
-    if (payload.context === "github") {
-        try {
-            let signedAttestation: SignedGitHubOAuthAttestation
+    // Handle OAuth-based proofs with signed attestation (GitHub, Discord, etc.)
+    // Check if proof is a JSON object (OAuth attestation) vs URL string (legacy proof)
+    // OAuth proof can be: 1) a string starting with "{", 2) an object with attestation property
+    const oauthProviders = ["github", "discord"]
+    const isStringProof = typeof payload.proof === "string"
+    const isOAuthStringProof = isStringProof && (payload.proof as string).trim().startsWith("{")
+    const isOAuthObjectProof = !isStringProof &&
+        typeof payload.proof === "object" &&
+        payload.proof !== null &&
+        "attestation" in payload.proof
 
-            // Parse the proof - it could be a string or already an object
-            if (typeof payload.proof === "string") {
-                signedAttestation = JSON.parse(payload.proof)
-            } else {
-                signedAttestation = payload.proof as unknown as SignedGitHubOAuthAttestation
-            }
-
-            // Validate attestation structure
-            if (
-                !signedAttestation?.attestation ||
-                !signedAttestation?.signature ||
-                !signedAttestation?.signatureType
-            ) {
-                return {
-                    success: false,
-                    message: "Invalid GitHub OAuth attestation structure",
-                }
-            }
-
-            const { attestation, signature, signatureType } = signedAttestation
-
-            // Verify attestation data matches payload
-            if (attestation.provider !== "github") {
-                return {
-                    success: false,
-                    message: "Invalid provider in attestation",
-                }
-            }
-
-            if (attestation.userId !== payload.userId) {
-                return {
-                    success: false,
-                    message: `User ID mismatch: expected ${payload.userId}, got ${attestation.userId}`,
-                }
-            }
-
-            if (attestation.username !== payload.username) {
-                return {
-                    success: false,
-                    message: `Username mismatch: expected ${payload.username}, got ${attestation.username}`,
-                }
-            }
-
-            // Check attestation is not too old (5 minutes)
-            const maxAge = 5 * 60 * 1000
-            if (Date.now() - attestation.timestamp > maxAge) {
-                return {
-                    success: false,
-                    message: "GitHub OAuth attestation has expired",
-                }
-            }
-
-            // Verify the signature
-            const attestationString = JSON.stringify(attestation)
-            const hash = Hashing.sha256(attestationString)
-
-            const nodePublicKeyHex = attestation.nodePublicKey.replace("0x", "")
-            const publicKeyBytes = hexToUint8Array(nodePublicKeyHex)
-            const signatureBytes = hexToUint8Array(signature)
-
-            const isValid = await ucrypto.verify({
-                algorithm: signatureType as "ed25519" | "ml-dsa" | "falcon",
-                message: new TextEncoder().encode(hash),
-                signature: signatureBytes,
-                publicKey: publicKeyBytes,
-            })
-
-            if (!isValid) {
-                return {
-                    success: false,
-                    message: "Invalid GitHub OAuth attestation signature",
-                }
-            }
-
-            // Check that the signing node is authorized (exists in genesis identities)
-            const nodeAddress = attestation.nodePublicKey.replace("0x", "")
-            const ownPublicKey = getSharedState.publicKeyHex?.replace("0x", "")
-            const isOwnNode = nodeAddress === ownPublicKey
-
-            const nodeAuthorized = isOwnNode || await checkBotAuthorization(nodeAddress)
-            if (!nodeAuthorized) {
-                return {
-                    success: false,
-                    message: "Unauthorized node - not found in genesis addresses",
-                }
-            }
-
-            log.info(
-                `GitHub OAuth attestation verified: userId=${payload.userId}, username=${payload.username}`,
-            )
-
-            return {
-                success: true,
-                message: "Verified GitHub OAuth attestation",
-            }
-        } catch (error) {
-            log.error(`GitHub OAuth attestation verification error: ${error}`)
-            return {
-                success: false,
-                message: `GitHub OAuth attestation verification failed: ${error instanceof Error ? error.message : String(error)}`,
-            }
-        }
-    }
-
-    // Handle Discord OAuth-based proofs with signed attestation
-    // Check if the proof is a JSON-stringified SignedDiscordOAuthAttestation
-    if (payload.context === "discord" && typeof payload.proof === "string" && payload.proof.startsWith("{")) {
-        try {
-            const signedAttestation: SignedDiscordOAuthAttestation = JSON.parse(payload.proof)
-
-            // Validate attestation structure
-            if (
-                !signedAttestation?.attestation ||
-                !signedAttestation?.signature ||
-                !signedAttestation?.signatureType
-            ) {
-                return {
-                    success: false,
-                    message: "Invalid Discord OAuth attestation structure",
-                }
-            }
-
-            const { attestation, signature, signatureType } = signedAttestation
-
-            // Verify attestation data matches payload
-            if (attestation.provider !== "discord") {
-                return {
-                    success: false,
-                    message: "Invalid provider in attestation",
-                }
-            }
-
-            if (attestation.userId !== payload.userId) {
-                return {
-                    success: false,
-                    message: `User ID mismatch: expected ${payload.userId}, got ${attestation.userId}`,
-                }
-            }
-
-            if (attestation.username !== payload.username) {
-                return {
-                    success: false,
-                    message: `Username mismatch: expected ${payload.username}, got ${attestation.username}`,
-                }
-            }
-
-            // Check attestation is not too old (5 minutes)
-            const maxAge = 5 * 60 * 1000
-            if (Date.now() - attestation.timestamp > maxAge) {
-                return {
-                    success: false,
-                    message: "Discord OAuth attestation has expired",
-                }
-            }
-
-            // Verify the signature
-            const attestationString = JSON.stringify(attestation)
-            const hash = Hashing.sha256(attestationString)
-
-            const nodePublicKeyHex = attestation.nodePublicKey.replace("0x", "")
-            const publicKeyBytes = hexToUint8Array(nodePublicKeyHex)
-            const signatureBytes = hexToUint8Array(signature)
-
-            const isValid = await ucrypto.verify({
-                algorithm: signatureType as "ed25519" | "ml-dsa" | "falcon",
-                message: new TextEncoder().encode(hash),
-                signature: signatureBytes,
-                publicKey: publicKeyBytes,
-            })
-
-            if (!isValid) {
-                return {
-                    success: false,
-                    message: "Invalid Discord OAuth attestation signature",
-                }
-            }
-
-            // Check that the signing node is authorized (exists in genesis identities)
-            const nodeAddress = attestation.nodePublicKey.replace("0x", "")
-            const ownPublicKey = getSharedState.publicKeyHex?.replace("0x", "")
-            const isOwnNode = nodeAddress === ownPublicKey
-
-            const nodeAuthorized = isOwnNode || await checkBotAuthorization(nodeAddress)
-            if (!nodeAuthorized) {
-                return {
-                    success: false,
-                    message: "Unauthorized node - not found in genesis addresses",
-                }
-            }
-
-            log.info(
-                `Discord OAuth attestation verified: userId=${payload.userId}, username=${payload.username}`,
-            )
-
-            return {
-                success: true,
-                message: "Verified Discord OAuth attestation",
-            }
-        } catch (error) {
-            log.error(`Discord OAuth attestation verification error: ${error}`)
-            return {
-                success: false,
-                message: `Discord OAuth attestation verification failed: ${error instanceof Error ? error.message : String(error)}`,
-            }
-        }
+    if (oauthProviders.includes(payload.context) && (isOAuthStringProof || isOAuthObjectProof || payload.context === "github")) {
+        return await verifySignedOAuthAttestation(payload, payload.context)
     }
 
     switch (payload.context) {

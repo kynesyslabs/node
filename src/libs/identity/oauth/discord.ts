@@ -43,11 +43,19 @@ export interface DiscordOAuthResult {
     error?: string
 }
 
+function canonicalJSON(obj: Record<string, unknown>): string {
+    const sortedObj: Record<string, unknown> = {}
+    Object.keys(obj).sort().forEach(key => {
+        sortedObj[key] = obj[key]
+    })
+    return JSON.stringify(sortedObj)
+}
+
 /**
  * Sign the OAuth attestation with the node's private key
  */
 async function signAttestation(attestation: DiscordOAuthAttestation): Promise<SignedDiscordOAuthAttestation> {
-    const attestationString = JSON.stringify(attestation)
+    const attestationString = canonicalJSON(attestation as unknown as Record<string, unknown>)
     const hash = Hashing.sha256(attestationString)
 
     const signature = await ucrypto.sign(
