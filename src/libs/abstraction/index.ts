@@ -329,7 +329,7 @@ export async function verifyWeb2Proof(
         payload.proof !== null &&
         "attestation" in payload.proof
 
-    if (oauthProviders.includes(payload.context) && (isOAuthStringProof || isOAuthObjectProof || payload.context === "github")) {
+    if (oauthProviders.includes(payload.context) && (isOAuthStringProof || isOAuthObjectProof)) {
         return await verifySignedOAuthAttestation(payload, payload.context)
     }
 
