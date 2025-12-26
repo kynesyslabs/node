@@ -1,13 +1,20 @@
+import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
-import { Hashing, hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { Twitter } from "../identity/tools/twitter"
+import type { GenesisBlock } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/blocks" // TODO Properly import from types
 import log from "src/utilities/logger"
-import { TelegramSignedAttestation } from "@kynesyslabs/demosdk/abstraction"
+import {
+    TelegramAttestationPayload,
+    TelegramSignedAttestation,
+} from "@kynesyslabs/demosdk/abstraction"
+import { toInteger } from "lodash"
+import Chain from "../blockchain/chain"
+import fs from "fs"
 import { getSharedState } from "@/utilities/sharedState"
-import { SignedGitHubOAuthAttestation } from "../identity/oauth/github"
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
@@ -43,7 +50,7 @@ async function verifyTelegramProof(
         const telegramAttestation = payload.proof as TelegramSignedAttestation
         log.info(
             "telegramAttestation" +
-            JSON.stringify(telegramAttestation, null, 2),
+                JSON.stringify(telegramAttestation, null, 2),
         )
 
         // Validate attestation structure
@@ -169,121 +176,15 @@ export async function verifyWeb2Proof(
 ) {
     let parser:
         | typeof TwitterProofParser
+        | typeof GithubProofParser
         | typeof DiscordProofParser
-
-    // Handle OAuth-based proofs with signed attestation
-    // The proof should be a SignedGitHubOAuthAttestation object (stringified)
-    if (payload.context === "github") {
-        try {
-            let signedAttestation: SignedGitHubOAuthAttestation
-
-            // Parse the proof - it could be a string or already an object
-            if (typeof payload.proof === "string") {
-                signedAttestation = JSON.parse(payload.proof)
-            } else {
-                signedAttestation = payload.proof as unknown as SignedGitHubOAuthAttestation
-            }
-
-            // Validate attestation structure
-            if (
-                !signedAttestation?.attestation ||
-                !signedAttestation?.signature ||
-                !signedAttestation?.signatureType
-            ) {
-                return {
-                    success: false,
-                    message: "Invalid GitHub OAuth attestation structure",
-                }
-            }
-
-            const { attestation, signature, signatureType } = signedAttestation
-
-            // Verify attestation data matches payload
-            if (attestation.provider !== "github") {
-                return {
-                    success: false,
-                    message: "Invalid provider in attestation",
-                }
-            }
-
-            if (attestation.userId !== payload.userId) {
-                return {
-                    success: false,
-                    message: `User ID mismatch: expected ${payload.userId}, got ${attestation.userId}`,
-                }
-            }
-
-            if (attestation.username !== payload.username) {
-                return {
-                    success: false,
-                    message: `Username mismatch: expected ${payload.username}, got ${attestation.username}`,
-                }
-            }
-
-            // Check attestation is not too old (5 minutes)
-            const maxAge = 5 * 60 * 1000
-            if (Date.now() - attestation.timestamp > maxAge) {
-                return {
-                    success: false,
-                    message: "GitHub OAuth attestation has expired",
-                }
-            }
-
-            // Verify the signature
-            const attestationString = JSON.stringify(attestation)
-            const hash = Hashing.sha256(attestationString)
-
-            const nodePublicKeyHex = attestation.nodePublicKey.replace("0x", "")
-            const publicKeyBytes = hexToUint8Array(nodePublicKeyHex)
-            const signatureBytes = hexToUint8Array(signature)
-
-            const isValid = await ucrypto.verify({
-                algorithm: signatureType as "ed25519" | "ml-dsa" | "falcon",
-                message: new TextEncoder().encode(hash),
-                signature: signatureBytes,
-                publicKey: publicKeyBytes,
-            })
-
-            if (!isValid) {
-                return {
-                    success: false,
-                    message: "Invalid GitHub OAuth attestation signature",
-                }
-            }
-
-            // Check that the signing node is authorized (exists in genesis identities)
-            const nodeAddress = attestation.nodePublicKey.replace("0x", "")
-            const ownPublicKey = getSharedState.publicKeyHex?.replace("0x", "")
-            const isOwnNode = nodeAddress === ownPublicKey
-
-            const nodeAuthorized = isOwnNode || await checkBotAuthorization(nodeAddress)
-            if (!nodeAuthorized) {
-                return {
-                    success: false,
-                    message: "Unauthorized node - not found in genesis addresses",
-                }
-            }
-
-            log.info(
-                `GitHub OAuth attestation verified: userId=${payload.userId}, username=${payload.username}`,
-            )
-
-            return {
-                success: true,
-                message: "Verified GitHub OAuth attestation",
-            }
-        } catch (error) {
-            log.error(`GitHub OAuth attestation verification error: ${error}`)
-            return {
-                success: false,
-                message: `GitHub OAuth attestation verification failed: ${error instanceof Error ? error.message : String(error)}`,
-            }
-        }
-    }
 
     switch (payload.context) {
         case "twitter":
             parser = TwitterProofParser
+            break
+        case "github":
+            parser = GithubProofParser
             break
         case "telegram":
             // Telegram uses dual signature validation, handle separately
@@ -343,8 +244,9 @@ export async function verifyWeb2Proof(
         } catch (error: any) {
             return {
                 success: false,
-                message: `Failed to verify ${payload.context
-                    } proof: ${error.toString()}`,
+                message: `Failed to verify ${
+                    payload.context
+                } proof: ${error.toString()}`,
             }
         }
     } catch (error: any) {
