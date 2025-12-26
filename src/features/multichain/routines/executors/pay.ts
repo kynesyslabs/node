@@ -251,7 +251,7 @@ async function handleXRPLPay(
             }
         }
 
-        if (!txBlob || typeof txBlob !== 'string') {
+        if (!txBlob || typeof txBlob !== "string") {
             return {
                 result: "error",
                 error: `Invalid tx_blob value for XRPL operation (${operation.chain}.${operation.subchain}). Expected non-empty string.`,
@@ -267,10 +267,10 @@ async function handleXRPLPay(
             ? (meta as { TransactionResult: string }).TransactionResult
             : (res.result as any).engine_result) as string | undefined
         const txHash = res.result.hash
-        const resultMessage = ((res.result as any).engine_result_message || '') as string
+        const resultMessage = ((res.result as any).engine_result_message || "") as string
 
         // Only tesSUCCESS indicates actual success
-        if (txResult === 'tesSUCCESS') {
+        if (txResult === "tesSUCCESS") {
             return {
                 result: "success",
                 hash: txHash,

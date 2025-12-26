@@ -204,3 +204,9 @@ attestation_20251204_125424.txt
 prop_agent
 TYPE_CHECK_REPORT.md
 qodo-fetch.py
+docs/IPFS_TOKENOMICS_SPEC.md
+
+# Devnet runtime files (generated, not tracked)
+devnet/identities/
+devnet/.env
+devnet/postgres-data/
