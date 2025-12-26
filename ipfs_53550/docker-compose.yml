@@ -1,0 +1,41 @@
+# Demos Network IPFS Integration
+# Kubo (Go-IPFS) node for decentralized storage
+#
+# Started automatically by ./run script (like PostgreSQL)
+# Uses port-based instance isolation: ipfs_${PORT}
+#
+# Note: Uses internal Docker network only.
+# All IPFS operations are proxied through Demos RPC.
+
+services:
+    ipfs:
+        image: ipfs/kubo:v0.26.0
+        container_name: ipfs_${PORT:-53550}
+        environment:
+            # Server profile: optimized for always-on operation
+            - IPFS_PROFILE=server
+            # Disable public gateway (we proxy through Demos RPC)
+            - IPFS_GATEWAY_WRITABLE=false
+        volumes:
+            # Persistent storage for IPFS data (port-based isolation like postgres)
+            - ./data_${PORT:-53550}/ipfs:/data/ipfs
+            # Optional: mount swarm key for private network (Phase 4)
+            # - ./swarm.key:/data/ipfs/swarm.key:ro
+        ports:
+            # Expose API on localhost only for IPFSManager access
+            # IPFS_API_PORT is calculated as PORT + 1000 by the run script
+            - "127.0.0.1:${IPFS_API_PORT:-54550}:5001"
+        healthcheck:
+            test: ["CMD-SHELL", "ipfs id || exit 1"]
+            interval: 30s
+            timeout: 10s
+            retries: 3
+            start_period: 10s
+        restart: unless-stopped
+        # Resource limits (adjust based on node requirements)
+        deploy:
+            resources:
+                limits:
+                    memory: 2G
+                reservations:
+                    memory: 512M
