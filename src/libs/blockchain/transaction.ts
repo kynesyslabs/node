@@ -460,7 +460,14 @@ export default class Transaction implements ITransaction {
     }
 
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
-        log.debug(`[TX] fromRawTransaction - Creating transaction from raw tx hash: ${rawTx.hash}`)
+        if (!rawTx) {
+            return null
+        }
+
+        console.log(
+            "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
+                rawTx.hash,
+        )
         const tx = new Transaction()
 
         tx.blockNumber = rawTx.blockNumber

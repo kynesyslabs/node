@@ -8,7 +8,7 @@ import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { SigningAlgorithm, ValidityData } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
@@ -59,6 +59,11 @@ export default class SharedState {
     // Mempool
     inGetMempool = false
     inCleanMempool = false
+    // REVIEW Mempool caching
+
+    // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
+    // Stores ValidityData for transactions that need to be relayed to validators
+    validityDataCache = new Map<string, ValidityData>() // txHash -> ValidityData
 
     // States
     runMainLoop = true

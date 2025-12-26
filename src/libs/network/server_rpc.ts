@@ -200,7 +200,7 @@ async function processPayload(
             log.info(
                 "[RPC Call] Received mempool merge request from: " + sender,
             )
-            var res = await ServerHandlers.handleMempool(payload.params[0])
+            var res = await ServerHandlers.handleMempool(payload.params)
             log.info("[RPC Call] Merged mempool from: " + sender)
             log.info(JSON.stringify(res))
             return res
@@ -418,7 +418,7 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format" }, 400)
+                return jsonResponse({ error: "Invalid request format. Not an RPCRequest" }, 400)
             }
 
             log.info(
@@ -447,6 +447,7 @@ export async function serverRpcBun() {
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
+            console.error("Error in serverRpcBun: " + e)
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })

@@ -29,6 +29,7 @@ export class Waiter {
         GREEN_LIGHT: "greenLight",
         SET_WAIT_STATUS: "setWaitStatus",
         WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
+        DTR_WAIT_FOR_BLOCK: "dtrWaitForBlock",
         // etc
     }
 

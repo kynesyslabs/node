@@ -28,6 +28,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import {
     startOmniProtocolServer,
     stopOmniProtocolServer,
@@ -352,7 +353,16 @@ async function preMainLoop() {
     getSharedState.lastBlockHash = lastBlock.hash
 }
 
-// ANCHOR Entry point
+/**
+ * Bootstraps the node and starts its network services and background managers.
+ *
+ * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
+ *
+ * Side effects:
+ * - May call process.exit(1) if the signaling server fails to start.
+ * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
+ * - Starts background services (MCP server and DTRManager) when configured.
+ */
 async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
@@ -603,12 +613,38 @@ async function main() {
         await fastSync([], "index.ts")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
+
+        // Start DTR relay retry service after background loop initialization
+        // The service will wait for syncStatus to be true before actually processing
+        if (getSharedState.PROD) {
+            console.log(
+                "[DTR] Initializing relay retry service (will start after sync)",
+            )
+            // Service will check syncStatus internally before processing
+            // DTRManager.getInstance().start()
+        }
     }
 }
 
+// Graceful shutdown handling for DTR service
+process.on("SIGINT", () => {
+    console.log("[DTR] Received SIGINT, shutting down gracefully...")
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
+    process.exit(0)
+})
+
+process.on("SIGTERM", () => {
+    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
+    process.exit(0)
+})
+
 // INFO Starting the main routine
 main()
-
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
     console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)

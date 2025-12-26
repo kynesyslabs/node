@@ -10,8 +10,8 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         promises.push(
             peer.longCall(
                 {
-                    method: "mempool", // see server_rpc.ts
-                    params: [{ data: mempool }], // ? If possible, we should send the mempool directly without wrapping it in an object
+                    method: "mempool",
+                    params: mempool,
                 },
                 true,
                 250,

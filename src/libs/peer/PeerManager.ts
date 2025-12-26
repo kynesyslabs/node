@@ -285,6 +285,7 @@ export default class PeerManager {
             return
         }
 
+        peer.status.online = true
         peer.status.timestamp = Date.now()
     }
 

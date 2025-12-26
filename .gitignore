@@ -111,6 +111,9 @@ src/GTAGS
 # Output files
 output/*
 .env
+CLAUDE.md
+data/l2ps/example/config.json
+data/l2ps/example/iv.key
 data/l2ps/example/config.json
 data/l2ps/example/iv.key
 data/l2ps/*
@@ -174,6 +177,9 @@ PR_REVIEW_RAW.md
 ZK_CEREMONY_GIT_WORKFLOW.md
 ZK_CEREMONY_GUIDE.md
 zk_ceremony
+CEREMONY_COORDINATION.md
+attestation_20251204_125424.txt
+prop_agent
 CEREMONY_COORDINATION.md
 attestation_20251204_125424.txt
 prop_agent

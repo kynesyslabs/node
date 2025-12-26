@@ -1,4 +1,4 @@
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
 import eggs from "./routines/eggs"
@@ -18,7 +18,9 @@ import getTransactions from "./routines/nodecalls/getTransactions"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import TxUtils from "../blockchain/transaction"
+import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
@@ -26,6 +28,12 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import { exchangeGitHubCode } from "../identity/oauth/github"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
+import { DTRManager } from "./dtr/dtrmanager"
 
 export interface NodeCall {
     message: string
@@ -33,7 +41,12 @@ export interface NodeCall {
     muid: string
 }
 
-// REVIEW Is this module too big?
+/**
+ * Dispatches an incoming NodeCall message to the appropriate handler and produces an RPCResponse.
+ *
+ * @param content - NodeCall containing `message` (the RPC action to perform), `data` (payload for the action), and `muid` (message unique id)
+ * @returns An RPCResponse containing the numeric status, the response payload for the requested action, and optional `extra` diagnostic data
+ */
 export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
@@ -94,8 +107,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getLastBlockHash":
             response.response = await Chain.getLastBlockHash()
             break
-        case "getBlockByNumber":
+        case "getBlockByNumber": {
             return await getBlockByNumber(data)
+        }
         case "getBlocks":
             return await getBlocks(data)
         case "getTransactions":
@@ -140,6 +154,18 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+
+        case "getBlockTransactions": {
+            if (!data.blockHash) {
+                response.result = 400
+                response.response = "No block hash specified"
+                break
+            }
+
+            response.response = await Chain.getBlockTransactions(data.blockHash)
+            break
+        }
+
         case "getMempool":
             response.response = await Mempool.getMempool()
             break
@@ -474,10 +500,16 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
+        // REVIEW DTR: Handle relayed transactions from non-validator nodes
+        case "RELAY_TX":
+            return await DTRManager.receiveRelayedTransactions(
+                data as ValidityData[],
+            )
         case "hots":
             log.debug("[SERVER] Received hots")
             response.response = eggs.hots()
             break
+
         default:
             log.warning("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes

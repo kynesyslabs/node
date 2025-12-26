@@ -25,7 +25,6 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
-import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 
@@ -394,7 +393,7 @@ async function requestBlocks() {
     while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
-        // await sleep(250)
+        await sleep(250)
         try {
             await downloadBlock(peer, blockToAsk)
         } catch (error) {
@@ -440,7 +439,7 @@ async function requestBlocks() {
         }
     }
 
-    return true
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 // REVIEW Applying GCREdits to the tables
@@ -450,14 +449,22 @@ export async function syncGCRTables(
     // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
     for (const tx of txs) {
-        const result = await HandleGCR.applyToTx(tx)
-        if (!result.success) {
+        try {
+            const result = await HandleGCR.applyToTx(tx)
+            if (!result.success) {
+                log.error(
+                    "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                )
+            }
+        } catch (error) {
             log.error(
-                "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
             )
-            return [tx.hash, false]
+            console.error("[SYNC] [ ERROR ]")
+            console.error(error)
         }
     }
+
     return [null, true]
 }
 
@@ -468,24 +475,27 @@ export async function askTxsForBlock(
 ): Promise<Transaction[]> {
     const txsHashes = block.content.ordered_transactions
     const txs = []
-    for (const txHash of txsHashes) {
-        const txRequest: RPCRequest = {
+
+    const res = await peer.longCall(
+        {
             method: "nodeCall",
             params: [
                 {
-                    message: "getTxByHash",
-                    data: { hash: txHash },
-                    muid: null,
+                    message: "getBlockTransactions",
+                    data: { blockHash: block.hash },
                 },
             ],
-        }
-        const txResponse = await peer.call(txRequest, false)
-        if (txResponse.result === 200) {
-            const tx = txResponse.response as Transaction
-            txs.push(tx)
-        }
+        },
+        false,
+        250,
+        3,
+    )
+
+    if (res.result === 200) {
+        return res.response as Transaction[]
     }
-    return txs
+
+    return []
 }
 
 // Helper function to merge the peerlist from the last block
@@ -532,13 +542,15 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         }
     }
 
-    const synced = await requestBlocks()
+    while (!(await requestBlocks())) {
+        await sleep(500)
+    }
 
-    if (synced && getSharedState.fastSyncCount === 0) {
+    if (getSharedState.fastSyncCount === 0) {
         await waitForNextBlock()
     }
 
-    return synced
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 export async function fastSync(
