@@ -42,7 +42,7 @@ export interface GitHubOAuthResult {
 
 function canonicalJSON(obj: Record<string, unknown>): string {
     const sortedObj: Record<string, unknown> = {}
-    Object.keys(obj).sort().forEach(key => {
+    Object.keys(obj).sort((a, b) => a.localeCompare(b)).forEach(key => {
         sortedObj[key] = obj[key]
     })
     return JSON.stringify(sortedObj)
