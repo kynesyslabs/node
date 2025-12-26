@@ -70,6 +70,7 @@ export default async function handlePayOperation(
             break
 
         case "ibc":
+        case "atom":
             result = await genericJsonRpcPay(multichain.IBC, rpcUrl, operation)
             break
 
@@ -83,6 +84,10 @@ export default async function handlePayOperation(
 
         case "ton":
             result = await genericJsonRpcPay(multichain.TON, rpcUrl, operation)
+            break
+
+        case "near":
+            result = await genericJsonRpcPay(multichain.NEAR, rpcUrl, operation)
             break
 
         case "btc":
@@ -223,22 +228,84 @@ async function handleXRPLPay(
     log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
     try {
-        log.debug("[XMScript Parser]: debugging operation")
-        log.debug(operation.task)
-        log.debug(JSON.stringify(operation.task))
-        const result = await xrplInstance.sendTransaction(
-            operation.task.signedPayloads[0],
-        )
-        log.debug("[XMScript Parser] Ripple Pay: result: ")
-        log.debug(result)
+        // Validate signedPayloads exists and has at least one element
+        if (!operation.task.signedPayloads || operation.task.signedPayloads.length === 0) {
+            return {
+                result: "error",
+                error: `Missing signed payloads for XRPL operation (${operation.chain}.${operation.subchain})`,
+            }
+        }
 
-        return result
-    } catch (error) {
-        log.error("[XMScript Parser] Ripple Pay: error: ")
-        log.error(error)
+        const signedTx = operation.task.signedPayloads[0]
+
+        // Extract tx_blob - handle both string and object formats
+        let txBlob: string
+        if (typeof signedTx === "string") {
+            txBlob = signedTx
+        } else if (signedTx && typeof signedTx === "object" && "tx_blob" in signedTx) {
+            txBlob = (signedTx as { tx_blob: string }).tx_blob
+        } else {
+            return {
+                result: "error",
+                error: `Invalid signed payload format for XRPL operation (${operation.chain}.${operation.subchain}). Expected string or object with tx_blob property.`,
+            }
+        }
+
+        if (!txBlob || typeof txBlob !== 'string') {
+            return {
+                result: "error",
+                error: `Invalid tx_blob value for XRPL operation (${operation.chain}.${operation.subchain}). Expected non-empty string.`,
+            }
+        }
+
+        // Submit transaction and wait for validation
+        const res = await xrplInstance.provider.submitAndWait(txBlob)
+
+        // Extract transaction result - handle different response formats
+        const meta = res.result.meta
+        const txResult = (typeof meta === "object" && meta !== null && "TransactionResult" in meta
+            ? (meta as { TransactionResult: string }).TransactionResult
+            : (res.result as any).engine_result) as string | undefined
+        const txHash = res.result.hash
+        const resultMessage = ((res.result as any).engine_result_message || '') as string
+
+        // Only tesSUCCESS indicates actual success
+        if (txResult === 'tesSUCCESS') {
+            return {
+                result: "success",
+                hash: txHash,
+            }
+        }
+
+        // XRPL transaction result code prefixes and their meanings
+        const xrplErrorMessages: Record<string, string> = {
+            tec: "Transaction failed (fee charged)",  // tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
+            tem: "Malformed transaction",              // temREDUNDANT, temBAD_FEE, temINVALID
+            ter: "Transaction provisional/queued",     // terQUEUED
+            tef: "Transaction rejected",               // tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
+        }
+
+        const errorPrefix = txResult?.substring(0, 3)
+        if (errorPrefix && xrplErrorMessages[errorPrefix]) {
+            return {
+                result: "error",
+                error: `${xrplErrorMessages[errorPrefix]}: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated },
+            }
+        }
+
         return {
             result: "error",
-            error: error,
+            error: `Unknown transaction result: ${txResult} - ${resultMessage}`,
+            hash: txHash,
+            extra: { code: txResult, validated: res.result.validated },
+        }
+    } catch (error) {
+        console.log("[XMScript Parser] Ripple Pay: error:", error)
+        return {
+            result: "error",
+            error: error instanceof Error ? error.message : String(error),
         }
     }
 }

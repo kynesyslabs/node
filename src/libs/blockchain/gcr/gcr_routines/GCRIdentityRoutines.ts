@@ -34,6 +34,7 @@ export default class GCRIdentityRoutines {
             signature,
             timestamp,
             signedData,
+            displayAddress,
         } = editOperation.data
 
         // REVIEW: Is there a better way to check this?
@@ -49,9 +50,10 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Invalid edit operation data" }
         }
 
+        const addressToStore = displayAddress || targetAddress
         const normalizedAddress = isEVM
-            ? targetAddress.toLowerCase()
-            : targetAddress
+            ? addressToStore.toLowerCase()
+            : addressToStore
 
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
@@ -257,9 +259,9 @@ export default class GCRIdentityRoutines {
                     context === "telegram"
                         ? "Telegram attestation validation failed"
                         : "Sha256 proof mismatch: Expected " +
-                          data.proofHash +
-                          " but got " +
-                          Hashing.sha256(data.proof),
+                        data.proofHash +
+                        " but got " +
+                        Hashing.sha256(data.proof),
             }
         }
 
@@ -571,9 +573,8 @@ export default class GCRIdentityRoutines {
         if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid network: ${
-                    payload.network
-                }. Must be one of: ${validNetworks.join(", ")}`,
+                message: `Invalid network: ${payload.network
+                    }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
         if (!validRegistryTypes.includes(payload.registryType)) {
