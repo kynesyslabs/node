@@ -1407,6 +1407,7 @@ export class PointSystem {
      * Deduct points for unlinking a Nomis score
      * @param userId The user's Demos address
      * @param chain The Nomis score chain type: "evm" | "solana"
+     * @param nomisScore The Nomis score used to compute points
      * @returns RPCResponse
      */
     async deductNomisScorePoints(
@@ -1425,6 +1426,25 @@ export class PointSystem {
                     response: invalidChainMessage,
                     require_reply: false,
                     extra: null,
+                }
+            }
+
+            const account = await ensureGCRForUser(userId)
+            const currentNomisForChain =
+                account.points.breakdown?.nomisScores?.[chain] ?? 0
+
+            if (currentNomisForChain <= 0) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `No Nomis points to deduct for ${chain}`,
+                    },
+                    require_reply: false,
+                    extra: {},
                 }
             }
 
