@@ -34,7 +34,7 @@ export default class SharedState {
     referenceBlockRoom = 1
     shardSize = parseInt(process.env.SHARD_SIZE) || 4
     mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
- 
+
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
@@ -48,7 +48,7 @@ export default class SharedState {
     startingConsensus = false
     isSignalingServerStarted = false
     isMCPServerStarted = false
-    isOmniProtocolEnabled = false
+    isOmniProtocolEnabled = true
 
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
@@ -281,10 +281,13 @@ export default class SharedState {
             log.debug("[SharedState] OmniProtocol adapter already initialized")
             return
         }
+
         this._omniAdapter = new PeerOmniAdapter()
         this._omniAdapter.migrationMode = mode
         this.isOmniProtocolEnabled = true
-        log.info(`[SharedState] OmniProtocol adapter initialized with mode: ${mode}`)
+        log.info(
+            `[SharedState] ✅ OmniProtocol adapter initialized with mode: ${mode}`,
+        )
     }
 
     /**

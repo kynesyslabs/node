@@ -75,7 +75,7 @@ const indexState: {
     MCP_ENABLED: true,
     mcpServer: null,
     tuiManager: null,
-    OMNI_ENABLED: false,
+    OMNI_ENABLED: true,
     OMNI_PORT: 0,
     omniServer: null,
 }
@@ -238,7 +238,7 @@ async function warmup() {
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
 
     // OmniProtocol TCP Server configuration
-    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true"
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || true
     indexState.OMNI_PORT =
         parseInt(process.env.OMNI_PORT, 10) || indexState.SERVER_PORT + 1
 
@@ -446,6 +446,80 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+
+    // Start OmniProtocol TCP server (optional)
+    if (indexState.OMNI_ENABLED) {
+        try {
+            const omniServer = await startOmniProtocolServer({
+                enabled: true,
+                port: indexState.OMNI_PORT,
+                maxConnections: 1000,
+                authTimeout: 5000,
+                connectionTimeout: 600000, // 10 minutes
+                // TLS configuration
+                tls: {
+                    enabled: process.env.OMNI_TLS_ENABLED === "true",
+                    mode:
+                        (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
+                        "self-signed",
+                    certPath:
+                        process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
+                    keyPath:
+                        process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
+                    caPath: process.env.OMNI_CA_PATH,
+                    minVersion:
+                        (process.env.OMNI_TLS_MIN_VERSION as
+                            | "TLSv1.2"
+                            | "TLSv1.3") || "TLSv1.3",
+                },
+                // Rate limiting configuration
+                rateLimit: {
+                    enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+                    maxConnectionsPerIP: parseInt(
+                        process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
+                        10,
+                    ),
+                    maxRequestsPerSecondPerIP: parseInt(
+                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
+                            "100",
+                        10,
+                    ),
+                    maxRequestsPerSecondPerIdentity: parseInt(
+                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
+                            "200",
+                        10,
+                    ),
+                },
+            })
+            indexState.omniServer = omniServer
+            console.log(
+                `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
+            )
+
+            // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
+            // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
+            const omniMode =
+                (process.env.OMNI_MODE as
+                    | "HTTP_ONLY"
+                    | "OMNI_PREFERRED"
+                    | "OMNI_ONLY") || "OMNI_ONLY"
+            getSharedState.initOmniProtocol(omniMode)
+            console.log(
+                `[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`,
+            )
+        } catch (error) {
+            console.log(
+                "[MAIN] ⚠️  Failed to start OmniProtocol server:",
+                error,
+            )
+            process.exit(1)
+            // Continue without OmniProtocol (failsafe - falls back to HTTP)
+        }
+    } else {
+        console.log(
+            "[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
+        )
+    }
     // INFO Preparing the main loop
     await preMainLoop()
 
@@ -489,83 +563,6 @@ async function main() {
         } else {
             log.error("[NETWORK] Failed to start the signaling server")
             process.exit(1)
-        }
-
-        // Start OmniProtocol TCP server (optional)
-        if (indexState.OMNI_ENABLED) {
-            try {
-                const omniServer = await startOmniProtocolServer({
-                    enabled: true,
-                    port: indexState.OMNI_PORT,
-                    maxConnections: 1000,
-                    authTimeout: 5000,
-                    connectionTimeout: 600000, // 10 minutes
-                    // TLS configuration
-                    tls: {
-                        enabled: process.env.OMNI_TLS_ENABLED === "true",
-                        mode:
-                            (process.env.OMNI_TLS_MODE as
-                                | "self-signed"
-                                | "ca") || "self-signed",
-                        certPath:
-                            process.env.OMNI_CERT_PATH ||
-                            "./certs/node-cert.pem",
-                        keyPath:
-                            process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
-                        caPath: process.env.OMNI_CA_PATH,
-                        minVersion:
-                            (process.env.OMNI_TLS_MIN_VERSION as
-                                | "TLSv1.2"
-                                | "TLSv1.3") || "TLSv1.3",
-                    },
-                    // Rate limiting configuration
-                    rateLimit: {
-                        enabled:
-                            process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
-                        maxConnectionsPerIP: parseInt(
-                            process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
-                            10,
-                        ),
-                        maxRequestsPerSecondPerIP: parseInt(
-                            process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                                "100",
-                            10,
-                        ),
-                        maxRequestsPerSecondPerIdentity: parseInt(
-                            process.env
-                                .OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                                "200",
-                            10,
-                        ),
-                    },
-                })
-                indexState.omniServer = omniServer
-                console.log(
-                    `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
-                )
-
-                // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
-                // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
-                const omniMode =
-                    (process.env.OMNI_MODE as
-                        | "HTTP_ONLY"
-                        | "OMNI_PREFERRED"
-                        | "OMNI_ONLY") || "OMNI_ONLY"
-                getSharedState.initOmniProtocol(omniMode)
-                console.log(
-                    `[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`,
-                )
-            } catch (error) {
-                console.log(
-                    "[MAIN] ⚠️  Failed to start OmniProtocol server:",
-                    error,
-                )
-                // Continue without OmniProtocol (failsafe - falls back to HTTP)
-            }
-        } else {
-            console.log(
-                "[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
-            )
         }
 
         // Start MCP server (failsafe)

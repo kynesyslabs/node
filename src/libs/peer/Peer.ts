@@ -162,7 +162,9 @@ export default class Peer {
                 ? `${request.method}.${request.params[0].method}`
                 : request.method
         log.error(
-            "[PEER] [LONG CALL] [" + this.connection.string + "] Max retries reached for method: " +
+            "[PEER] [LONG CALL] [" +
+                this.connection.string +
+                "] Max retries reached for method: " +
                 methodString +
                 " - " +
                 response,
@@ -216,7 +218,10 @@ export default class Peer {
         isAuthenticated = true,
     ): Promise<RPCResponse> {
         // REVIEW: Check if OmniProtocol should be used for this peer
-        if (getSharedState.isOmniProtocolEnabled && getSharedState.omniAdapter) {
+        if (
+            getSharedState.isOmniProtocolEnabled &&
+            getSharedState.omniAdapter
+        ) {
             try {
                 const response = await getSharedState.omniAdapter.adaptCall(
                     this,
@@ -225,12 +230,19 @@ export default class Peer {
                 )
                 return response
             } catch (error) {
-                log.warning(
+                log.error(
                     `[Peer] OmniProtocol adaptCall failed, falling back to HTTP: ${error}`,
                 )
                 // Fall through to HTTP call below
             }
         }
+
+        log.error("OmniProtocol adaptCall failed, killing self!")
+        log.error(
+            "isOmniProtocolEnabled: " + getSharedState.isOmniProtocolEnabled,
+        )
+        log.error("omniAdapter: " + getSharedState.omniAdapter)
+        process.exit(1)
 
         // HTTP fallback / default path
         return this.httpCall(request, isAuthenticated)

@@ -402,10 +402,11 @@ export default class PeerManager {
         response: RPCResponse,
         peer: Peer,
     ): { url: string; publicKey: string }[] {
-        log.info(
+        log.only(
             "[Hello Peer] Response received from peer: " + peer.identity,
             false,
         )
+        log.only("Hello Peer Callback response: " + JSON.stringify(response))
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
