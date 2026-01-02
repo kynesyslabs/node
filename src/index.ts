@@ -75,7 +75,7 @@ const indexState: {
     MCP_ENABLED: true,
     mcpServer: null,
     tuiManager: null,
-    OMNI_ENABLED: true,
+    OMNI_ENABLED: false,
     OMNI_PORT: 0,
     omniServer: null,
 }
@@ -126,7 +126,7 @@ async function digestArguments() {
                     log.info("[MAIN] TUI disabled, using scrolling log output")
                     indexState.TUI_ENABLED = false
                     break
-                case "log-level":
+                case "log-level": {
                     const level = param[1]?.toLowerCase()
                     if (
                         [
@@ -152,6 +152,7 @@ async function digestArguments() {
                         )
                     }
                     break
+                }
                 default:
                     log.warning("[MAIN] Invalid parameter: " + param)
             }
@@ -238,7 +239,7 @@ async function warmup() {
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
 
     // OmniProtocol TCP Server configuration
-    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || true
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || false
     indexState.OMNI_PORT =
         parseInt(process.env.OMNI_PORT, 10) || indexState.SERVER_PORT + 1
 

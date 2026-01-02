@@ -237,13 +237,6 @@ export default class Peer {
             }
         }
 
-        log.error("OmniProtocol adaptCall failed, killing self!")
-        log.error(
-            "isOmniProtocolEnabled: " + getSharedState.isOmniProtocolEnabled,
-        )
-        log.error("omniAdapter: " + getSharedState.omniAdapter)
-        process.exit(1)
-
         // HTTP fallback / default path
         return this.httpCall(request, isAuthenticated)
     }
