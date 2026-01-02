@@ -279,9 +279,22 @@ export default class PeerManager {
     }
 
     updatePeerLastSeen(pubkey: string) {
-        const peer = this.peerList[pubkey]
-        if (!peer) {
-            log.error("[PEERMANAGER] Peer not found: " + pubkey)
+        let peer = this.peerList[pubkey]
+
+        offlineCheck: if (!peer) {
+            // check if peer is in offlinePeers
+            if (this.offlinePeers[pubkey]) {
+                log.warn(
+                    "[PEERMANAGER] Peer is in offlinePeers: removing from offlinePeers and adding to peer list",
+                )
+
+                this.addPeer(this.offlinePeers[pubkey])
+                this.removeOfflinePeer(pubkey)
+                peer = this.peerList[pubkey]
+
+                break offlineCheck
+            }
+
             return
         }
 

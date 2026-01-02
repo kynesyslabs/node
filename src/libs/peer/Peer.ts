@@ -1,10 +1,11 @@
 import log from "src/utilities/logger"
 import { IPeer, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
-import axios from "axios"
+import axios, { AxiosError } from "axios"
 import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import PeerManager from "./PeerManager"
 
 export interface SyncData {
     status: boolean
@@ -336,6 +337,34 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
+            // Handle ECONNREFUSED error
+            if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
+                log.warn(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Connection refused to: " +
+                        connectionUrl,
+                )
+
+                PeerManager.getInstance().addOfflinePeer(this)
+                PeerManager.getInstance().removeOnlinePeer(this.identity)
+
+                this.status.online = false
+                this.status.timestamp = Date.now()
+
+                return {
+                    result: 503,
+                    response: "Connection refused",
+                    require_reply: false,
+                    extra: {
+                        code: error.code,
+                        url: connectionUrl,
+                    },
+                }
+            }
+
             log.error(
                 "[RPC Call] [" +
                     method +
