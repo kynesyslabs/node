@@ -123,6 +123,15 @@ export function isTLSNotaryDebug(): boolean {
 }
 
 /**
+ * Check if TLSNotary proxy mode is enabled
+ * When TLSNOTARY_PROXY=true, a TCP proxy intercepts and logs all incoming data
+ * before forwarding to the Rust server. Useful for debugging what data is arriving.
+ */
+export function isTLSNotaryProxy(): boolean {
+  return process.env.TLSNOTARY_PROXY?.toLowerCase() === "true"
+}
+
+/**
  * Get TLSNotary configuration from environment variables
  *
  * Environment variables:
@@ -134,6 +143,7 @@ export function isTLSNotaryDebug(): boolean {
  * - TLSNOTARY_AUTO_START: Auto-start on initialization (default: true)
  * - TLSNOTARY_FATAL: Make TLSNotary errors fatal for debugging (default: false)
  * - TLSNOTARY_DEBUG: Enable verbose debug logging (default: false)
+ * - TLSNOTARY_PROXY: Enable TCP proxy to log incoming data before forwarding (default: false)
  *
  * Signing Key Resolution Priority:
  * 1. TLSNOTARY_SIGNING_KEY environment variable
@@ -291,6 +301,7 @@ export class TLSNotaryService {
   async start(): Promise<void> {
     const debug = isTLSNotaryDebug()
     const fatal = isTLSNotaryFatal()
+    const proxyEnabled = isTLSNotaryProxy()
 
     if (!this.ffi) {
       const error = new Error("Service not initialized. Call initialize() first.")
@@ -313,13 +324,23 @@ export class TLSNotaryService {
         log.info("[TLSNotary] Non-GET requests (POST, PUT, etc.) will fail with WebSocket upgrade error")
       }
 
-      await this.ffi.startServer(this.config.port)
+      // REVIEW: Debug proxy mode - intercepts and logs all incoming data before forwarding
+      if (proxyEnabled) {
+        await this.startWithProxy()
+      } else {
+        await this.ffi.startServer(this.config.port)
+      }
+
       this.running = true
       log.info(`[TLSNotary] Server started on port ${this.config.port}`)
 
       if (debug) {
         log.info(`[TLSNotary] Public key: ${this.ffi.getPublicKeyHex()}`)
         log.info("[TLSNotary] Waiting for prover connections...")
+      }
+
+      if (proxyEnabled) {
+        log.warning("[TLSNotary] DEBUG PROXY ENABLED - All incoming data will be logged!")
       }
     } catch (error) {
       log.error(`[TLSNotary] Failed to start server on port ${this.config.port}: ${error}`)
@@ -329,6 +350,71 @@ export class TLSNotaryService {
       }
       throw error
     }
+  }
+
+  /**
+   * Start with a debug proxy that logs all incoming data
+   * The proxy listens on the configured port and forwards to Rust on port+1
+   * @private
+   */
+  private async startWithProxy(): Promise<void> {
+    const net = await import("net")
+    const publicPort = this.config.port
+    const rustPort = this.config.port + 1
+
+    // Start Rust server on internal port
+    await this.ffi!.startServer(rustPort)
+    log.info(`[TLSNotary] Rust server started on internal port ${rustPort}`)
+
+    // Create proxy server on public port
+    const proxyServer = net.createServer((clientSocket) => {
+      const clientAddr = `${clientSocket.remoteAddress}:${clientSocket.remotePort}`
+      log.info(`[TLSNotary-Proxy] New connection from ${clientAddr}`)
+
+      // Connect to Rust server
+      const rustSocket = net.connect(rustPort, "127.0.0.1", () => {
+        log.debug(`[TLSNotary-Proxy] Connected to Rust server for ${clientAddr}`)
+      })
+
+      // Log and forward data from client to Rust
+      clientSocket.on("data", (data) => {
+        const preview = data.slice(0, 500).toString("utf-8")
+        const hexPreview = data.slice(0, 100).toString("hex")
+        log.info(`[TLSNotary-Proxy] <<< FROM ${clientAddr} (${data.length} bytes):`)
+        log.info(`[TLSNotary-Proxy] Text: ${preview}`)
+        log.info(`[TLSNotary-Proxy] Hex:  ${hexPreview}`)
+        rustSocket.write(data)
+      })
+
+      // Forward data from Rust to client (no logging needed)
+      rustSocket.on("data", (data) => {
+        clientSocket.write(data)
+      })
+
+      // Handle errors and close
+      clientSocket.on("error", (err) => {
+        log.warning(`[TLSNotary-Proxy] Client error ${clientAddr}: ${err.message}`)
+        rustSocket.destroy()
+      })
+
+      rustSocket.on("error", (err) => {
+        log.warning(`[TLSNotary-Proxy] Rust connection error for ${clientAddr}: ${err.message}`)
+        clientSocket.destroy()
+      })
+
+      clientSocket.on("close", () => {
+        log.debug(`[TLSNotary-Proxy] Client ${clientAddr} disconnected`)
+        rustSocket.destroy()
+      })
+
+      rustSocket.on("close", () => {
+        clientSocket.destroy()
+      })
+    })
+
+    proxyServer.listen(publicPort, () => {
+      log.info(`[TLSNotary-Proxy] Listening on port ${publicPort}, forwarding to ${rustPort}`)
+    })
   }
 
   /**

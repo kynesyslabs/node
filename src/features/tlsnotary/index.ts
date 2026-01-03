@@ -28,6 +28,9 @@
  * - TLSNOTARY_MAX_SENT_DATA: Max sent bytes (default: 16384)
  * - TLSNOTARY_MAX_RECV_DATA: Max recv bytes (default: 65536)
  * - TLSNOTARY_AUTO_START: Auto-start on init (default: true)
+ * - TLSNOTARY_FATAL: Make errors fatal for debugging (default: false)
+ * - TLSNOTARY_DEBUG: Enable verbose debug logging (default: false)
+ * - TLSNOTARY_PROXY: Enable TCP proxy to log incoming data (default: false)
  *
  * ## Usage
  *
@@ -57,7 +60,7 @@ import { registerTLSNotaryRoutes } from "./routes"
 import log from "@/utilities/logger"
 
 // Re-export types and classes
-export { TLSNotaryService, getTLSNotaryService, getConfigFromEnv, isTLSNotaryFatal, isTLSNotaryDebug } from "./TLSNotaryService"
+export { TLSNotaryService, getTLSNotaryService, getConfigFromEnv, isTLSNotaryFatal, isTLSNotaryDebug, isTLSNotaryProxy } from "./TLSNotaryService"
 export { TLSNotaryFFI } from "./ffi"
 export type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./ffi"
 export type { TLSNotaryServiceConfig, TLSNotaryServiceStatus } from "./TLSNotaryService"
