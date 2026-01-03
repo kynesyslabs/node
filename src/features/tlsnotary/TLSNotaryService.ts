@@ -1,0 +1,375 @@
+/**
+ * TLSNotary Service for Demos Node
+ *
+ * High-level service class that wraps the FFI bindings with lifecycle management,
+ * configuration from environment, and integration with the Demos node ecosystem.
+ *
+ * @module features/tlsnotary/TLSNotaryService
+ */
+
+// REVIEW: TLSNotaryService - new service for managing HTTPS attestation
+import { TLSNotaryFFI, type NotaryConfig, type VerificationResult, type NotaryHealthStatus } from "./ffi"
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/**
+ * Service configuration options
+ */
+export interface TLSNotaryServiceConfig {
+  /** Port to run the notary WebSocket server on */
+  port: number;
+  /** 32-byte secp256k1 private key (hex string or Uint8Array) */
+  signingKey: string | Uint8Array;
+  /** Maximum bytes the prover can send (default: 16KB) */
+  maxSentData?: number;
+  /** Maximum bytes the prover can receive (default: 64KB) */
+  maxRecvData?: number;
+  /** Whether to auto-start the server on initialization */
+  autoStart?: boolean;
+}
+
+/**
+ * Service status information
+ */
+export interface TLSNotaryServiceStatus {
+  /** Whether the service is enabled */
+  enabled: boolean;
+  /** Whether the service is running */
+  running: boolean;
+  /** Port the service is listening on */
+  port: number;
+  /** Health status from the underlying notary */
+  health: NotaryHealthStatus;
+}
+
+// ============================================================================
+// Environment Configuration
+// ============================================================================
+
+/**
+ * Get TLSNotary configuration from environment variables
+ *
+ * Environment variables:
+ * - TLSNOTARY_ENABLED: Enable/disable the service (default: false)
+ * - TLSNOTARY_PORT: Port for the notary server (default: 7047)
+ * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (required if enabled)
+ * - TLSNOTARY_MAX_SENT_DATA: Maximum sent data bytes (default: 16384)
+ * - TLSNOTARY_MAX_RECV_DATA: Maximum received data bytes (default: 65536)
+ * - TLSNOTARY_AUTO_START: Auto-start on initialization (default: true)
+ *
+ * @returns Configuration object or null if service is disabled
+ */
+export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
+  const enabled = process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true"
+
+  if (!enabled) {
+    return null
+  }
+
+  const signingKey = process.env.TLSNOTARY_SIGNING_KEY
+  if (!signingKey) {
+    console.warn("[TLSNotary] TLSNOTARY_ENABLED is true but TLSNOTARY_SIGNING_KEY is not set")
+    return null
+  }
+
+  // Validate signing key length (64 hex chars = 32 bytes)
+  if (signingKey.length !== 64) {
+    console.warn("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
+    return null
+  }
+
+  return {
+    port: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    signingKey,
+    maxSentData: parseInt(process.env.TLSNOTARY_MAX_SENT_DATA ?? "16384", 10),
+    maxRecvData: parseInt(process.env.TLSNOTARY_MAX_RECV_DATA ?? "65536", 10),
+    autoStart: process.env.TLSNOTARY_AUTO_START?.toLowerCase() !== "false",
+  }
+}
+
+// ============================================================================
+// TLSNotaryService Class
+// ============================================================================
+
+/**
+ * TLSNotary Service
+ *
+ * Manages the TLSNotary instance lifecycle, provides health checks,
+ * and exposes verification functionality.
+ *
+ * @example
+ * ```typescript
+ * import { TLSNotaryService } from '@/features/tlsnotary/TLSNotaryService';
+ *
+ * // Initialize from environment
+ * const service = TLSNotaryService.fromEnvironment();
+ * if (service) {
+ *   await service.start();
+ *   console.log('TLSNotary running on port', service.getPort());
+ *   console.log('Public key:', service.getPublicKeyHex());
+ * }
+ *
+ * // Or with explicit config
+ * const service = new TLSNotaryService({
+ *   port: 7047,
+ *   signingKey: '0x...',  // 64 hex chars
+ * });
+ * await service.start();
+ * ```
+ */
+export class TLSNotaryService {
+  private ffi: TLSNotaryFFI | null = null
+  private readonly config: TLSNotaryServiceConfig
+  private running = false
+
+  /**
+   * Create a new TLSNotaryService instance
+   * @param config - Service configuration
+   */
+  constructor(config: TLSNotaryServiceConfig) {
+    this.config = config
+  }
+
+  /**
+   * Create a TLSNotaryService from environment variables
+   * @returns Service instance or null if not enabled/configured
+   */
+  static fromEnvironment(): TLSNotaryService | null {
+    const config = getConfigFromEnv()
+    if (!config) {
+      return null
+    }
+    return new TLSNotaryService(config)
+  }
+
+  /**
+   * Initialize and optionally start the notary service
+   * @throws Error if initialization fails
+   */
+  async initialize(): Promise<void> {
+    if (this.ffi) {
+      console.warn("[TLSNotary] Service already initialized")
+      return
+    }
+
+    // Convert signing key to Uint8Array if it's a hex string
+    let signingKeyBytes: Uint8Array
+    if (typeof this.config.signingKey === "string") {
+      signingKeyBytes = Buffer.from(this.config.signingKey, "hex")
+    } else {
+      signingKeyBytes = this.config.signingKey
+    }
+
+    if (signingKeyBytes.length !== 32) {
+      throw new Error("Signing key must be exactly 32 bytes")
+    }
+
+    const ffiConfig: NotaryConfig = {
+      signingKey: signingKeyBytes,
+      maxSentData: this.config.maxSentData,
+      maxRecvData: this.config.maxRecvData,
+    }
+
+    this.ffi = new TLSNotaryFFI(ffiConfig)
+    console.log("[TLSNotary] Service initialized")
+
+    // Auto-start if configured
+    if (this.config.autoStart) {
+      await this.start()
+    }
+  }
+
+  /**
+   * Start the notary WebSocket server
+   * @throws Error if not initialized or server fails to start
+   */
+  async start(): Promise<void> {
+    if (!this.ffi) {
+      throw new Error("Service not initialized. Call initialize() first.")
+    }
+
+    if (this.running) {
+      console.warn("[TLSNotary] Server already running")
+      return
+    }
+
+    await this.ffi.startServer(this.config.port)
+    this.running = true
+    console.log(`[TLSNotary] Server started on port ${this.config.port}`)
+  }
+
+  /**
+   * Stop the notary WebSocket server
+   */
+  async stop(): Promise<void> {
+    if (!this.ffi) {
+      return
+    }
+
+    if (!this.running) {
+      return
+    }
+
+    await this.ffi.stopServer()
+    this.running = false
+    console.log("[TLSNotary] Server stopped")
+  }
+
+  /**
+   * Shutdown the service completely
+   * Stops the server and releases all resources
+   */
+  async shutdown(): Promise<void> {
+    await this.stop()
+
+    if (this.ffi) {
+      this.ffi.destroy()
+      this.ffi = null
+    }
+
+    console.log("[TLSNotary] Service shutdown complete")
+  }
+
+  /**
+   * Verify an attestation
+   * @param attestation - Serialized attestation bytes (Uint8Array or base64 string)
+   * @returns Verification result
+   */
+  verify(attestation: Uint8Array | string): VerificationResult {
+    if (!this.ffi) {
+      return {
+        success: false,
+        error: "Service not initialized",
+      }
+    }
+
+    let attestationBytes: Uint8Array
+    if (typeof attestation === "string") {
+      // Assume base64 encoded
+      attestationBytes = Buffer.from(attestation, "base64")
+    } else {
+      attestationBytes = attestation
+    }
+
+    return this.ffi.verifyAttestation(attestationBytes)
+  }
+
+  /**
+   * Get the notary's public key as bytes
+   * @returns Compressed secp256k1 public key (33 bytes)
+   * @throws Error if service not initialized
+   */
+  getPublicKey(): Uint8Array {
+    if (!this.ffi) {
+      throw new Error("Service not initialized")
+    }
+    return this.ffi.getPublicKey()
+  }
+
+  /**
+   * Get the notary's public key as hex string
+   * @returns Hex-encoded compressed public key
+   * @throws Error if service not initialized
+   */
+  getPublicKeyHex(): string {
+    if (!this.ffi) {
+      throw new Error("Service not initialized")
+    }
+    return this.ffi.getPublicKeyHex()
+  }
+
+  /**
+   * Get the configured port
+   */
+  getPort(): number {
+    return this.config.port
+  }
+
+  /**
+   * Check if the service is running
+   */
+  isRunning(): boolean {
+    return this.running
+  }
+
+  /**
+   * Check if the service is initialized
+   */
+  isInitialized(): boolean {
+    return this.ffi !== null
+  }
+
+  /**
+   * Get full service status
+   * @returns Service status object
+   */
+  getStatus(): TLSNotaryServiceStatus {
+    const health: NotaryHealthStatus = this.ffi
+      ? this.ffi.getHealthStatus()
+      : {
+          healthy: false,
+          initialized: false,
+          serverRunning: false,
+          error: "Service not initialized",
+        }
+
+    return {
+      enabled: true,
+      running: this.running,
+      port: this.config.port,
+      health,
+    }
+  }
+
+  /**
+   * Health check for the service
+   * @returns True if service is healthy
+   */
+  isHealthy(): boolean {
+    if (!this.ffi) {
+      return false
+    }
+    return this.ffi.getHealthStatus().healthy
+  }
+}
+
+// Export singleton management
+let serviceInstance: TLSNotaryService | null = null
+
+/**
+ * Get or create the global TLSNotaryService instance
+ * Uses environment configuration
+ * @returns Service instance or null if not enabled
+ */
+export function getTLSNotaryService(): TLSNotaryService | null {
+  if (serviceInstance === null) {
+    serviceInstance = TLSNotaryService.fromEnvironment()
+  }
+  return serviceInstance
+}
+
+/**
+ * Initialize and start the global TLSNotaryService
+ * @returns Service instance or null if not enabled
+ */
+export async function initializeTLSNotaryService(): Promise<TLSNotaryService | null> {
+  const service = getTLSNotaryService()
+  if (service && !service.isInitialized()) {
+    await service.initialize()
+  }
+  return service
+}
+
+/**
+ * Shutdown the global TLSNotaryService
+ */
+export async function shutdownTLSNotaryService(): Promise<void> {
+  if (serviceInstance) {
+    await serviceInstance.shutdown()
+    serviceInstance = null
+  }
+}
+
+export default TLSNotaryService

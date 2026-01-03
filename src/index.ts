@@ -53,6 +53,10 @@ const indexState: {
     OMNI_ENABLED: boolean
     OMNI_PORT: number
     omniServer: any
+    // REVIEW: TLSNotary configuration - new HTTPS attestation feature
+    TLSNOTARY_ENABLED: boolean
+    TLSNOTARY_PORT: number
+    tlsnotaryService: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -73,6 +77,10 @@ const indexState: {
     OMNI_ENABLED: false,
     OMNI_PORT: 0,
     omniServer: null,
+    // REVIEW: TLSNotary defaults - disabled by default, requires signing key
+    TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
+    TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    tlsnotaryService: null,
 }
 
 // SECTION Preparation methods
@@ -523,6 +531,28 @@ async function main() {
                 // Continue without MCP (failsafe)
             }
         }
+
+        // REVIEW: Start TLSNotary service (failsafe - optional HTTPS attestation feature)
+        // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
+        if (indexState.TLSNOTARY_ENABLED) {
+            try {
+                const { initializeTLSNotary, getTLSNotaryService } = await import("./features/tlsnotary")
+                // Initialize without passing BunServer - routes are registered separately in server_rpc.ts
+                const initialized = await initializeTLSNotary()
+                if (initialized) {
+                    indexState.tlsnotaryService = getTLSNotaryService()
+                    log.info(`[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`)
+                } else {
+                    log.warning("[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)")
+                }
+            } catch (error) {
+                log.error("[TLSNotary] Failed to start TLSNotary service: " + error)
+                // Continue without TLSNotary (failsafe)
+            }
+        } else {
+            log.info("[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)")
+        }
+
         log.info("[MAIN] ✅ Starting the background loop")
 
         // Update TUI status to running
@@ -559,6 +589,17 @@ async function gracefulShutdown(signal: string) {
                 await indexState.mcpServer.stop()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping MCP server:", error)
+            }
+        }
+
+        // REVIEW: Stop TLSNotary service if running
+        if (indexState.tlsnotaryService) {
+            console.log("[SHUTDOWN] Stopping TLSNotary service...")
+            try {
+                const { shutdownTLSNotary } = await import("./features/tlsnotary")
+                await shutdownTLSNotary()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
             }
         }
 
