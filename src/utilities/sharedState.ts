@@ -13,6 +13,7 @@ import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
+import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 
 dotenv.config()
 
@@ -52,6 +53,10 @@ export default class SharedState {
 
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
+
+    // SECTION TLSNotary Proxy Manager State
+    // Stores wstcp proxy processes and port pool for TLS attestation
+    tlsnotary: TLSNotaryState | null = null
 
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true

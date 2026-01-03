@@ -454,6 +454,57 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
+        // REVIEW: TLSNotary proxy request endpoint for SDK
+        case "requestTLSNproxy": {
+            try {
+                const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
+
+                if (!data.targetUrl) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing targetUrl parameter",
+                    }
+                    break
+                }
+
+                // Validate URL is HTTPS
+                if (!data.targetUrl.startsWith("https://")) {
+                    response.result = 400
+                    response.response = {
+                        error: ProxyError.INVALID_URL,
+                        message: "Only HTTPS URLs are supported for TLS attestation",
+                    }
+                    break
+                }
+
+                // TODO: Future authentication check
+                // if (data.authentication) {
+                //     const { pubKey, signature } = data.authentication
+                //     // Verify signature...
+                // }
+
+                const result = await requestProxy(data.targetUrl, data.requestOrigin)
+
+                if ("error" in result) {
+                    // Error response
+                    response.result = 500
+                    response.response = result
+                } else {
+                    // Success response
+                    response.response = result
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] requestTLSNproxy error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to request TLSNotary proxy",
+                }
+            }
+            break
+        }
+
         // REVIEW: TLSNotary discovery endpoint for SDK auto-configuration
         case "tlsnotary.getInfo": {
             // Dynamic import to avoid circular dependencies and check if enabled
