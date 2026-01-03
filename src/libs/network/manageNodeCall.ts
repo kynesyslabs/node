@@ -454,6 +454,52 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
+        // REVIEW: TLSNotary discovery endpoint for SDK auto-configuration
+        case "tlsnotary.getInfo": {
+            // Dynamic import to avoid circular dependencies and check if enabled
+            try {
+                const { getTLSNotaryService } = await import("@/features/tlsnotary")
+                const service = getTLSNotaryService()
+
+                if (!service || !service.isRunning()) {
+                    response.result = 503
+                    response.response = {
+                        success: false,
+                        error: "TLSNotary service is not enabled or not running",
+                    }
+                    break
+                }
+
+                const publicKey = service.getPublicKeyHex()
+                const port = service.getPort()
+
+                // Build the notary WebSocket URL
+                // The node's host is used - SDK connects to the same host it's already connected to
+                // Port is the TLSNotary WebSocket port
+                const notaryUrl = `wss://${getSharedState.host || "localhost"}:${port}`
+
+                // WebSocket proxy URL for TCP tunneling (browser needs this to connect to arbitrary hosts)
+                // This uses a separate port - typically 55688 or configured via TLSNOTARY_PROXY_PORT
+                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+                const proxyUrl = `wss://${getSharedState.host || "localhost"}:${proxyPort}`
+
+                response.response = {
+                    notaryUrl,
+                    proxyUrl,
+                    publicKey,
+                    version: "0.1.0", // TLSNotary integration version
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Failed to get TLSNotary info",
+                }
+            }
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
         case "hots":

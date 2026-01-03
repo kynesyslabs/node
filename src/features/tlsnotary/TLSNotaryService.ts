@@ -9,6 +9,9 @@
 
 // REVIEW: TLSNotaryService - new service for managing HTTPS attestation
 import { TLSNotaryFFI, type NotaryConfig, type VerificationResult, type NotaryHealthStatus } from "./ffi"
+import { existsSync, readFileSync, writeFileSync } from "fs"
+import { join } from "path"
+import { randomBytes } from "crypto"
 
 // ============================================================================
 // Types
@@ -48,16 +51,75 @@ export interface TLSNotaryServiceStatus {
 // Environment Configuration
 // ============================================================================
 
+// REVIEW: Key file path for persistent storage of auto-generated keys
+const SIGNING_KEY_FILE = ".tlsnotary-key"
+
+/**
+ * Resolve the TLSNotary signing key with priority: ENV > file > auto-generate
+ *
+ * Priority order:
+ * 1. TLSNOTARY_SIGNING_KEY environment variable (highest priority)
+ * 2. .tlsnotary-key file in project root
+ * 3. Auto-generate and save to .tlsnotary-key file
+ *
+ * @returns 64-character hex string (32-byte key) or null on error
+ */
+function resolveSigningKey(): string | null {
+  // Priority 1: Environment variable
+  const envKey = process.env.TLSNOTARY_SIGNING_KEY
+  if (envKey && envKey.length === 64) {
+    console.log("[TLSNotary] Using signing key from environment variable")
+    return envKey
+  } else if (envKey && envKey.length !== 64) {
+    console.warn("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
+    return null
+  }
+
+  // Priority 2: Key file
+  const keyFilePath = join(process.cwd(), SIGNING_KEY_FILE)
+  if (existsSync(keyFilePath)) {
+    try {
+      const fileKey = readFileSync(keyFilePath, "utf-8").trim()
+      if (fileKey.length === 64) {
+        console.log(`[TLSNotary] Using signing key from ${SIGNING_KEY_FILE}`)
+        return fileKey
+      } else {
+        console.warn(`[TLSNotary] Invalid key in ${SIGNING_KEY_FILE} (must be 64 hex characters)`)
+        return null
+      }
+    } catch (error) {
+      console.warn(`[TLSNotary] Failed to read ${SIGNING_KEY_FILE}: ${error}`)
+      return null
+    }
+  }
+
+  // Priority 3: Auto-generate and save
+  try {
+    const generatedKey = randomBytes(32).toString("hex")
+    writeFileSync(keyFilePath, generatedKey, { mode: 0o600 }) // Restrictive permissions
+    console.log(`[TLSNotary] Auto-generated signing key saved to ${SIGNING_KEY_FILE}`)
+    return generatedKey
+  } catch (error) {
+    console.error(`[TLSNotary] Failed to auto-generate signing key: ${error}`)
+    return null
+  }
+}
+
 /**
  * Get TLSNotary configuration from environment variables
  *
  * Environment variables:
  * - TLSNOTARY_ENABLED: Enable/disable the service (default: false)
  * - TLSNOTARY_PORT: Port for the notary server (default: 7047)
- * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (required if enabled)
+ * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (optional, auto-generated if not set)
  * - TLSNOTARY_MAX_SENT_DATA: Maximum sent data bytes (default: 16384)
  * - TLSNOTARY_MAX_RECV_DATA: Maximum received data bytes (default: 65536)
  * - TLSNOTARY_AUTO_START: Auto-start on initialization (default: true)
+ *
+ * Signing Key Resolution Priority:
+ * 1. TLSNOTARY_SIGNING_KEY environment variable
+ * 2. .tlsnotary-key file in project root
+ * 3. Auto-generate and save to .tlsnotary-key
  *
  * @returns Configuration object or null if service is disabled
  */
@@ -68,15 +130,9 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
     return null
   }
 
-  const signingKey = process.env.TLSNOTARY_SIGNING_KEY
+  const signingKey = resolveSigningKey()
   if (!signingKey) {
-    console.warn("[TLSNotary] TLSNOTARY_ENABLED is true but TLSNOTARY_SIGNING_KEY is not set")
-    return null
-  }
-
-  // Validate signing key length (64 hex chars = 32 bytes)
-  if (signingKey.length !== 64) {
-    console.warn("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
+    console.warn("[TLSNotary] Failed to resolve signing key")
     return null
   }
 

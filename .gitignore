@@ -205,3 +205,4 @@ devnet/identities/
 devnet/.env
 devnet/postgres-data/
 ipfs_53550/data_53550/ipfs
+.tlsnotary-key
