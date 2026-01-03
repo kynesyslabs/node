@@ -199,6 +199,8 @@ const ALL_CATEGORIES: LogCategory[] = [
     "MCP",
     "MULTICHAIN",
     "DAHR",
+    "TLSN",
+    "CMD",
 ]
 
 /**
