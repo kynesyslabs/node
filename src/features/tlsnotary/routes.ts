@@ -13,6 +13,7 @@
 import { getTLSNotaryService } from "./TLSNotaryService"
 import type { BunServer } from "@/libs/network/bunServer"
 import { jsonResponse } from "@/libs/network/bunServer"
+import log from "@/utilities/logger"
 
 // ============================================================================
 // Request/Response Types
@@ -219,7 +220,7 @@ export function registerTLSNotaryRoutes(server: BunServer): void {
   // Verify attestation
   server.post("/tlsnotary/verify", verifyHandler)
 
-  console.log("[TLSNotary] Routes registered: /tlsnotary/health, /tlsnotary/info, /tlsnotary/verify")
+  log.info("[TLSNotary] Routes registered: /tlsnotary/health, /tlsnotary/info, /tlsnotary/verify")
 }
 
 export default registerTLSNotaryRoutes

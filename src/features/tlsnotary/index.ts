@@ -54,6 +54,7 @@ import {
   getConfigFromEnv,
 } from "./TLSNotaryService"
 import { registerTLSNotaryRoutes } from "./routes"
+import log from "@/utilities/logger"
 
 // Re-export types and classes
 export { TLSNotaryService, getTLSNotaryService, getConfigFromEnv } from "./TLSNotaryService"
@@ -74,7 +75,7 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
   const config = getConfigFromEnv()
 
   if (!config) {
-    console.log("[TLSNotary] Feature disabled (TLSNOTARY_ENABLED != true)")
+    log.info("[TLSNotary] Feature disabled (TLSNOTARY_ENABLED != true)")
     return false
   }
 
@@ -83,7 +84,7 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
     const service = await initializeTLSNotaryService()
 
     if (!service) {
-      console.warn("[TLSNotary] Failed to create service instance")
+      log.warning("[TLSNotary] Failed to create service instance")
       return false
     }
 
@@ -93,13 +94,13 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
     }
 
     const publicKeyHex = service.getPublicKeyHex()
-    console.log("[TLSNotary] Feature initialized successfully")
-    console.log(`[TLSNotary] WebSocket server on port: ${service.getPort()}`)
-    console.log(`[TLSNotary] Public key: ${publicKeyHex}`)
+    log.info("[TLSNotary] Feature initialized successfully")
+    log.info(`[TLSNotary] WebSocket server on port: ${service.getPort()}`)
+    log.info(`[TLSNotary] Public key: ${publicKeyHex}`)
 
     return true
   } catch (error) {
-    console.error("[TLSNotary] Failed to initialize:", error)
+    log.error("[TLSNotary] Failed to initialize:", error)
     return false
   }
 }
@@ -112,9 +113,9 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
 export async function shutdownTLSNotary(): Promise<void> {
   try {
     await shutdownTLSNotaryService()
-    console.log("[TLSNotary] Feature shutdown complete")
+    log.info("[TLSNotary] Feature shutdown complete")
   } catch (error) {
-    console.error("[TLSNotary] Error during shutdown:", error)
+    log.error("[TLSNotary] Error during shutdown:", error)
   }
 }
 

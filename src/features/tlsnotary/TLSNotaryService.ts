@@ -12,6 +12,7 @@ import { TLSNotaryFFI, type NotaryConfig, type VerificationResult, type NotaryHe
 import { existsSync, readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { randomBytes } from "crypto"
+import log from "@/utilities/logger"
 
 // ============================================================================
 // Types
@@ -68,10 +69,10 @@ function resolveSigningKey(): string | null {
   // Priority 1: Environment variable
   const envKey = process.env.TLSNOTARY_SIGNING_KEY
   if (envKey && envKey.length === 64) {
-    console.log("[TLSNotary] Using signing key from environment variable")
+    log.info("[TLSNotary] Using signing key from environment variable")
     return envKey
   } else if (envKey && envKey.length !== 64) {
-    console.warn("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
+    log.warning("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
     return null
   }
 
@@ -81,14 +82,14 @@ function resolveSigningKey(): string | null {
     try {
       const fileKey = readFileSync(keyFilePath, "utf-8").trim()
       if (fileKey.length === 64) {
-        console.log(`[TLSNotary] Using signing key from ${SIGNING_KEY_FILE}`)
+        log.info(`[TLSNotary] Using signing key from ${SIGNING_KEY_FILE}`)
         return fileKey
       } else {
-        console.warn(`[TLSNotary] Invalid key in ${SIGNING_KEY_FILE} (must be 64 hex characters)`)
+        log.warning(`[TLSNotary] Invalid key in ${SIGNING_KEY_FILE} (must be 64 hex characters)`)
         return null
       }
     } catch (error) {
-      console.warn(`[TLSNotary] Failed to read ${SIGNING_KEY_FILE}: ${error}`)
+      log.warning(`[TLSNotary] Failed to read ${SIGNING_KEY_FILE}: ${error}`)
       return null
     }
   }
@@ -97,10 +98,10 @@ function resolveSigningKey(): string | null {
   try {
     const generatedKey = randomBytes(32).toString("hex")
     writeFileSync(keyFilePath, generatedKey, { mode: 0o600 }) // Restrictive permissions
-    console.log(`[TLSNotary] Auto-generated signing key saved to ${SIGNING_KEY_FILE}`)
+    log.info(`[TLSNotary] Auto-generated signing key saved to ${SIGNING_KEY_FILE}`)
     return generatedKey
   } catch (error) {
-    console.error(`[TLSNotary] Failed to auto-generate signing key: ${error}`)
+    log.error(`[TLSNotary] Failed to auto-generate signing key: ${error}`)
     return null
   }
 }
@@ -132,7 +133,7 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
 
   const signingKey = resolveSigningKey()
   if (!signingKey) {
-    console.warn("[TLSNotary] Failed to resolve signing key")
+    log.warning("[TLSNotary] Failed to resolve signing key")
     return null
   }
 
@@ -206,7 +207,7 @@ export class TLSNotaryService {
    */
   async initialize(): Promise<void> {
     if (this.ffi) {
-      console.warn("[TLSNotary] Service already initialized")
+      log.warning("[TLSNotary] Service already initialized")
       return
     }
 
@@ -229,7 +230,7 @@ export class TLSNotaryService {
     }
 
     this.ffi = new TLSNotaryFFI(ffiConfig)
-    console.log("[TLSNotary] Service initialized")
+    log.info("[TLSNotary] Service initialized")
 
     // Auto-start if configured
     if (this.config.autoStart) {
@@ -247,13 +248,13 @@ export class TLSNotaryService {
     }
 
     if (this.running) {
-      console.warn("[TLSNotary] Server already running")
+      log.warning("[TLSNotary] Server already running")
       return
     }
 
     await this.ffi.startServer(this.config.port)
     this.running = true
-    console.log(`[TLSNotary] Server started on port ${this.config.port}`)
+    log.info(`[TLSNotary] Server started on port ${this.config.port}`)
   }
 
   /**
@@ -270,7 +271,7 @@ export class TLSNotaryService {
 
     await this.ffi.stopServer()
     this.running = false
-    console.log("[TLSNotary] Server stopped")
+    log.info("[TLSNotary] Server stopped")
   }
 
   /**
@@ -285,7 +286,7 @@ export class TLSNotaryService {
       this.ffi = null
     }
 
-    console.log("[TLSNotary] Service shutdown complete")
+    log.info("[TLSNotary] Service shutdown complete")
   }
 
   /**
