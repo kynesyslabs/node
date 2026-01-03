@@ -253,7 +253,8 @@ export class TLSNotaryFFI {
       throw new Error("Server already running")
     }
 
-    const result = this.lib.symbols.tlsn_notary_start_server(this.handle as unknown as number, port)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = this.lib.symbols.tlsn_notary_start_server(this.handle as any, port)
 
     if (result !== 0) {
       throw new Error(`Failed to start server: error code ${result}`)
@@ -274,7 +275,8 @@ export class TLSNotaryFFI {
       return
     }
 
-    this.lib.symbols.tlsn_notary_stop_server(this.handle as unknown as number)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.lib.symbols.tlsn_notary_stop_server(this.handle as any)
     this.serverRunning = false
   }
 
@@ -319,7 +321,8 @@ export class TLSNotaryFFI {
       //   recv_len: u32 (4 bytes)
       //   error_message: *mut c_char (8 bytes)
 
-      const resultBuffer = toArrayBuffer(resultPtr as unknown as number, 0, 40)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const resultBuffer = toArrayBuffer(resultPtr as any, 0, 40)
       const view = new DataView(resultBuffer)
 
       const status = view.getInt32(0, true)
@@ -331,12 +334,14 @@ export class TLSNotaryFFI {
 
       let serverName: string | undefined
       if (serverNamePtr !== 0n) {
-        serverName = new CString(Number(serverNamePtr)).toString()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        serverName = new CString(Number(serverNamePtr) as any).toString()
       }
 
       let errorMessage: string | undefined
       if (errorMessagePtr !== 0n) {
-        errorMessage = new CString(Number(errorMessagePtr)).toString()
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        errorMessage = new CString(Number(errorMessagePtr) as any).toString()
       }
 
       if (status === 0) {
@@ -355,7 +360,8 @@ export class TLSNotaryFFI {
       }
     } finally {
       // Free the result struct
-      this.lib.symbols.tlsn_free_verification_result(resultPtr as unknown as number)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.lib.symbols.tlsn_free_verification_result(resultPtr as any)
     }
   }
 
@@ -373,8 +379,9 @@ export class TLSNotaryFFI {
     const keyBuffer = new Uint8Array(33)
     const keyPtr = ptr(keyBuffer)
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = this.lib.symbols.tlsn_notary_get_public_key(
-      this.handle as unknown as number,
+      this.handle as any,
       keyPtr,
       BigInt(33),
     )
@@ -433,7 +440,8 @@ export class TLSNotaryFFI {
    */
   destroy(): void {
     if (this.handle) {
-      this.lib.symbols.tlsn_notary_destroy(this.handle as unknown as number)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      this.lib.symbols.tlsn_notary_destroy(this.handle as any)
       this.handle = null
     }
     this.initialized = false
