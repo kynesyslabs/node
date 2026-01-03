@@ -127,7 +127,7 @@ async function digestArguments() {
                     log.info("[MAIN] TUI disabled, using scrolling log output")
                     indexState.TUI_ENABLED = false
                     break
-                case "log-level":
+                case "log-level": {
                     const level = param[1]?.toLowerCase()
                     if (["debug", "info", "warning", "error", "critical"].includes(level)) {
                         CategorizedLogger.getInstance().setMinLevel(level as "debug" | "info" | "warning" | "error" | "critical")
@@ -136,6 +136,7 @@ async function digestArguments() {
                         log.warning(`[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`)
                     }
                     break
+                }
                 default:
                     log.warning("[MAIN] Invalid parameter: " + param)
             }
@@ -542,6 +543,16 @@ async function main() {
                 if (initialized) {
                     indexState.tlsnotaryService = getTLSNotaryService()
                     log.info(`[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`)
+                    // Update TUI with TLSNotary info
+                    if (indexState.TUI_ENABLED && indexState.tuiManager) {
+                        indexState.tuiManager.updateNodeInfo({
+                            tlsnotary: {
+                                enabled: true,
+                                port: indexState.TLSNOTARY_PORT,
+                                running: true,
+                            },
+                        })
+                    }
                 } else {
                     log.warning("[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)")
                 }

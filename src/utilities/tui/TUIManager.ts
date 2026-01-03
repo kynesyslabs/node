@@ -24,6 +24,12 @@ export interface NodeInfo {
     peersCount: number
     blockNumber: number
     isSynced: boolean
+    // TLSNotary service info (optional)
+    tlsnotary?: {
+        enabled: boolean
+        port: number
+        running: boolean
+    }
 }
 
 export interface TUIConfig {
@@ -1074,8 +1080,17 @@ export class TUIManager extends EventEmitter {
         }
         term.brightWhite(keyDisplay)
 
-        // Line 5: Empty separator
+        // Line 5: TLSNotary status (if enabled)
         term.moveTo(infoStartX, 5)
+        if (this.nodeInfo.tlsnotary?.enabled) {
+            term.yellow("🔐 ")
+            term.gray("TLSN: ")
+            if (this.nodeInfo.tlsnotary.running) {
+                term.bgGreen.black(` ✓ :${this.nodeInfo.tlsnotary.port} `)
+            } else {
+                term.bgRed.white(" ✗ STOPPED ")
+            }
+        }
 
         // Line 6: Port
         term.moveTo(infoStartX, 6)
