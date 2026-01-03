@@ -537,7 +537,27 @@ async function main() {
         // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
         if (indexState.TLSNOTARY_ENABLED) {
             try {
-                const { initializeTLSNotary, getTLSNotaryService } = await import("./features/tlsnotary")
+                const { initializeTLSNotary, getTLSNotaryService, isTLSNotaryFatal, isTLSNotaryDebug } = await import("./features/tlsnotary")
+                const fatal = isTLSNotaryFatal()
+                const debug = isTLSNotaryDebug()
+
+                // REVIEW: Check for port collision with OmniProtocol
+                // OmniProtocol derives peer ports as HTTP_PORT + 1, which could collide with TLSNotary
+                if (indexState.OMNI_ENABLED) {
+                    // Check if TLSNotary port could be hit by OmniProtocol peer connections
+                    // This happens when a peer runs on HTTP port (TLSNotary port - 1)
+                    const potentialCollisionPort = indexState.TLSNOTARY_PORT - 1
+                    log.warning(`[TLSNotary] ⚠️ OmniProtocol is enabled. If any peer runs on HTTP port ${potentialCollisionPort}, OmniProtocol will try to connect to port ${indexState.TLSNOTARY_PORT} (TLSNotary)`)
+                    log.warning("[TLSNotary] This can cause 'WebSocket upgrade failed: Unsupported HTTP method' errors")
+                    log.warning("[TLSNotary] Consider using a different TLSNOTARY_PORT to avoid collisions")
+                }
+
+                if (debug) {
+                    log.info("[TLSNotary] Debug mode: TLSNOTARY_DEBUG=true")
+                    log.info(`[TLSNotary] Fatal mode: TLSNOTARY_FATAL=${fatal}`)
+                    log.info(`[TLSNotary] Port: ${indexState.TLSNOTARY_PORT}`)
+                }
+
                 // Initialize without passing BunServer - routes are registered separately in server_rpc.ts
                 const initialized = await initializeTLSNotary()
                 if (initialized) {
@@ -554,10 +574,20 @@ async function main() {
                         })
                     }
                 } else {
-                    log.warning("[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)")
+                    const msg = "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
+                    if (fatal) {
+                        log.error("[TLSNotary] FATAL: " + msg)
+                        process.exit(1)
+                    }
+                    log.warning(msg)
                 }
             } catch (error) {
                 log.error("[TLSNotary] Failed to start TLSNotary service: " + error)
+                const { isTLSNotaryFatal } = await import("./features/tlsnotary")
+                if (isTLSNotaryFatal()) {
+                    log.error("[TLSNotary] FATAL: Exiting due to TLSNotary failure")
+                    process.exit(1)
+                }
                 // Continue without TLSNotary (failsafe)
             }
         } else {

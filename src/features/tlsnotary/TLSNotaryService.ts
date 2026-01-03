@@ -107,6 +107,22 @@ function resolveSigningKey(): string | null {
 }
 
 /**
+ * Check if TLSNotary errors should be fatal (for debugging)
+ * When TLSNOTARY_FATAL=true, errors will cause process exit
+ */
+export function isTLSNotaryFatal(): boolean {
+  return process.env.TLSNOTARY_FATAL?.toLowerCase() === "true"
+}
+
+/**
+ * Check if TLSNotary debug mode is enabled
+ * When TLSNOTARY_DEBUG=true, additional logging is enabled
+ */
+export function isTLSNotaryDebug(): boolean {
+  return process.env.TLSNOTARY_DEBUG?.toLowerCase() === "true"
+}
+
+/**
  * Get TLSNotary configuration from environment variables
  *
  * Environment variables:
@@ -116,6 +132,8 @@ function resolveSigningKey(): string | null {
  * - TLSNOTARY_MAX_SENT_DATA: Maximum sent data bytes (default: 16384)
  * - TLSNOTARY_MAX_RECV_DATA: Maximum received data bytes (default: 65536)
  * - TLSNOTARY_AUTO_START: Auto-start on initialization (default: true)
+ * - TLSNOTARY_FATAL: Make TLSNotary errors fatal for debugging (default: false)
+ * - TLSNOTARY_DEBUG: Enable verbose debug logging (default: false)
  *
  * Signing Key Resolution Priority:
  * 1. TLSNOTARY_SIGNING_KEY environment variable
@@ -211,6 +229,16 @@ export class TLSNotaryService {
       return
     }
 
+    const debug = isTLSNotaryDebug()
+    const fatal = isTLSNotaryFatal()
+
+    if (debug) {
+      log.info("[TLSNotary] Debug mode enabled - verbose logging active")
+    }
+    if (fatal) {
+      log.warning("[TLSNotary] Fatal mode enabled - errors will cause process exit")
+    }
+
     // Convert signing key to Uint8Array if it's a hex string
     let signingKeyBytes: Uint8Array
     if (typeof this.config.signingKey === "string") {
@@ -220,7 +248,12 @@ export class TLSNotaryService {
     }
 
     if (signingKeyBytes.length !== 32) {
-      throw new Error("Signing key must be exactly 32 bytes")
+      const error = new Error("Signing key must be exactly 32 bytes")
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: " + error.message)
+        process.exit(1)
+      }
+      throw error
     }
 
     const ffiConfig: NotaryConfig = {
@@ -229,8 +262,21 @@ export class TLSNotaryService {
       maxRecvData: this.config.maxRecvData,
     }
 
-    this.ffi = new TLSNotaryFFI(ffiConfig)
-    log.info("[TLSNotary] Service initialized")
+    try {
+      this.ffi = new TLSNotaryFFI(ffiConfig)
+      log.info("[TLSNotary] Service initialized")
+
+      if (debug) {
+        log.info(`[TLSNotary] Config: port=${this.config.port}, maxSentData=${this.config.maxSentData}, maxRecvData=${this.config.maxRecvData}`)
+      }
+    } catch (error) {
+      log.error("[TLSNotary] Failed to initialize FFI: " + error)
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: Exiting due to initialization failure")
+        process.exit(1)
+      }
+      throw error
+    }
 
     // Auto-start if configured
     if (this.config.autoStart) {
@@ -243,8 +289,16 @@ export class TLSNotaryService {
    * @throws Error if not initialized or server fails to start
    */
   async start(): Promise<void> {
+    const debug = isTLSNotaryDebug()
+    const fatal = isTLSNotaryFatal()
+
     if (!this.ffi) {
-      throw new Error("Service not initialized. Call initialize() first.")
+      const error = new Error("Service not initialized. Call initialize() first.")
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: " + error.message)
+        process.exit(1)
+      }
+      throw error
     }
 
     if (this.running) {
@@ -252,9 +306,29 @@ export class TLSNotaryService {
       return
     }
 
-    await this.ffi.startServer(this.config.port)
-    this.running = true
-    log.info(`[TLSNotary] Server started on port ${this.config.port}`)
+    try {
+      if (debug) {
+        log.info(`[TLSNotary] Starting WebSocket server on port ${this.config.port}...`)
+        log.info("[TLSNotary] NOTE: TLSNotary only accepts WebSocket connections via HTTP GET")
+        log.info("[TLSNotary] Non-GET requests (POST, PUT, etc.) will fail with WebSocket upgrade error")
+      }
+
+      await this.ffi.startServer(this.config.port)
+      this.running = true
+      log.info(`[TLSNotary] Server started on port ${this.config.port}`)
+
+      if (debug) {
+        log.info(`[TLSNotary] Public key: ${this.ffi.getPublicKeyHex()}`)
+        log.info("[TLSNotary] Waiting for prover connections...")
+      }
+    } catch (error) {
+      log.error(`[TLSNotary] Failed to start server on port ${this.config.port}: ${error}`)
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: Exiting due to server start failure")
+        process.exit(1)
+      }
+      throw error
+    }
   }
 
   /**
