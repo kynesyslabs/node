@@ -33,6 +33,7 @@ export type LogCategory =
     | "MCP" // MCP server operations
     | "MULTICHAIN" // Cross-chain/XM operations
     | "DAHR" // DAHR-specific operations
+    | "TLSN" // TLSNotary HTTPS attestation operations
     | "CMD" // Command execution and TUI commands
 
 /**
