@@ -113,14 +113,23 @@ export default class ServerHandlers {
             })
             // Hashing both the gcredits
             const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
-            log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
+            )
             const txGcrEditsHash = Hashing.sha256(
                 JSON.stringify(tx.content.gcr_edits),
             )
-            log.debug("[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
+            )
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
-                log.error("[handleValidateTransaction] GCREdit mismatch: " + txGcrEditsHash + " <> " + gcrEditsHash)
+                log.error(
+                    "[handleValidateTransaction] GCREdit mismatch: " +
+                        txGcrEditsHash +
+                        " <> " +
+                        gcrEditsHash,
+                )
             }
             if (comparison) {
                 log.info("[handleValidateTransaction] GCREdit hash match")
@@ -174,7 +183,10 @@ export default class ServerHandlers {
         sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
-        log.debug("[handleExecuteTransaction] Validated Data: " + JSON.stringify(validatedData))
+        log.debug(
+            "[handleExecuteTransaction] Validated Data: " +
+                JSON.stringify(validatedData),
+        )
 
         const fname = "[handleExecuteTransaction] "
         const result: ExecutionResult = {
@@ -206,7 +218,10 @@ export default class ServerHandlers {
                     queriedTx.blockNumber,
             )
         }
-        log.debug("[handleExecuteTransaction] Queried tx processing in block: " + queriedTx.blockNumber)
+        log.debug(
+            "[handleExecuteTransaction] Queried tx processing in block: " +
+                queriedTx.blockNumber,
+        )
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
@@ -286,7 +301,10 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
-                log.debug("[handleExecuteTransaction] Included XM Chainscript: " + JSON.stringify(payload[1]))
+                log.debug(
+                    "[handleExecuteTransaction] Included XM Chainscript: " +
+                        JSON.stringify(payload[1]),
+                )
                 // TODO Better types on answers
                 var xmResult = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
@@ -301,7 +319,10 @@ export default class ServerHandlers {
 
             case "subnet":
                 payload = tx.content.data
-                log.debug("[handleExecuteTransaction] Subnet payload: " + JSON.stringify(payload[1]))
+                log.debug(
+                    "[handleExecuteTransaction] Subnet payload: " +
+                        JSON.stringify(payload[1]),
+                )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
                     payload[1] as any, // TODO Add proper type when l2ps is implemented correctly
                 )
@@ -457,7 +478,10 @@ export default class ServerHandlers {
                         response: {
                             message: "Transaction relayed to validators",
                         },
-                        extra: null,
+                        extra: {
+                            confirmationBlock:
+                                getSharedState.lastBlockNumber + 2,
+                        },
                         require_reply: false,
                     }
                 }
@@ -483,7 +507,10 @@ export default class ServerHandlers {
                         response: {
                             message: "Transaction relayed to validators",
                         },
-                        extra: null,
+                        extra: {
+                            confirmationBlock:
+                                getSharedState.lastBlockNumber + 2,
+                        },
                         require_reply: false,
                     }
                 }
@@ -495,7 +522,11 @@ export default class ServerHandlers {
             }
 
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)
-            log.debug("[handleExecuteTransaction] Adding tx with hash: " + queriedTx.hash + " to the mempool")
+            log.debug(
+                "[handleExecuteTransaction] Adding tx with hash: " +
+                    queriedTx.hash +
+                    " to the mempool",
+            )
             try {
                 const { confirmationBlock, error } =
                     await Mempool.addTransaction({
@@ -503,7 +534,9 @@ export default class ServerHandlers {
                         reference_block: validatedData.data.reference_block,
                     })
 
-                log.debug("[handleExecuteTransaction] Transaction added to mempool")
+                log.debug(
+                    "[handleExecuteTransaction] Transaction added to mempool",
+                )
 
                 if (error) {
                     result.success = false
@@ -584,7 +617,9 @@ export default class ServerHandlers {
             type: "registerTx",
             data: {
                 uid: content.uid,
-                encryptedTransaction: JSON.parse(content.data) as EncryptedTransaction,
+                encryptedTransaction: JSON.parse(
+                    content.data,
+                ) as EncryptedTransaction,
             },
             extra: "register",
         }

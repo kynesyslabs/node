@@ -239,7 +239,7 @@ async function warmup() {
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
 
     // OmniProtocol TCP Server configuration
-    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || false
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || true
     indexState.OMNI_PORT =
         parseInt(process.env.OMNI_PORT, 10) || indexState.SERVER_PORT + 1
 
