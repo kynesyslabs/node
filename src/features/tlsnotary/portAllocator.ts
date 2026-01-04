@@ -52,13 +52,9 @@ export async function isPortAvailable(port: number): Promise<boolean> {
     const net = require("net")
     const server = net.createServer()
 
-    server.once("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        resolve(false)
-      } else {
-        // Other errors - assume port is unavailable
-        resolve(false)
-      }
+    server.once("error", () => {
+      // Any error (EADDRINUSE, EACCES, etc.) means port is unavailable
+      resolve(false)
     })
 
     server.once("listening", () => {
