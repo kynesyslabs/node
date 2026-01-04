@@ -14,6 +14,7 @@ import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
+import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 
 dotenv.config()
 
@@ -57,6 +58,10 @@ export default class SharedState {
     // SECTION TLSNotary Proxy Manager State
     // Stores wstcp proxy processes and port pool for TLS attestation
     tlsnotary: TLSNotaryState | null = null
+
+    // SECTION TLSNotary Token Store
+    // In-memory token store for paid attestation access
+    tlsnTokenStore: TokenStoreState | null = null
 
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true

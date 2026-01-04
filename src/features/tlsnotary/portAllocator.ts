@@ -9,10 +9,6 @@
 
 // REVIEW: TLSNotary port pool management for wstcp proxy instances
 import log from "@/utilities/logger"
-import { exec } from "child_process"
-import { promisify } from "util"
-
-const execAsync = promisify(exec)
 
 /**
  * Configuration constants for port allocation
@@ -47,20 +43,33 @@ export function initPortPool(): PortPoolState {
 }
 
 /**
- * Check if a port is available using lsof
+ * Check if a port is available by attempting to bind to it
  * @param port - Port number to check
  * @returns True if port is available
  */
 export async function isPortAvailable(port: number): Promise<boolean> {
-  try {
-    // Use lsof to check if port is in use
-    await execAsync(`lsof -i :${port}`)
-    // If lsof succeeds, port is in use
-    return false
-  } catch {
-    // If lsof fails, port is available
-    return true
-  }
+  return new Promise(resolve => {
+    const net = require("net")
+    const server = net.createServer()
+
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        resolve(false)
+      } else {
+        // Other errors - assume port is unavailable
+        resolve(false)
+      }
+    })
+
+    server.once("listening", () => {
+      // Port is available - close the server and return true
+      server.close(() => {
+        resolve(true)
+      })
+    })
+
+    server.listen(port, "0.0.0.0")
+  })
 }
 
 /**

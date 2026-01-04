@@ -266,7 +266,7 @@ async function spawnProxy(
   const args = ["--bind-addr", `0.0.0.0:${localPort}`, `${domain}:${targetPort}`]
   log.info(`[TLSNotary] Spawning wstcp: wstcp ${args.join(" ")}`)
 
-  const process = spawn("wstcp", args, {
+  const childProcess = spawn("wstcp", args, {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
   })
@@ -280,33 +280,86 @@ async function spawnProxy(
     domain,
     targetPort,
     port: localPort,
-    process,
+    process: childProcess,
     lastActivity: now,
     spawnedAt: now,
     websocketProxyUrl,
   }
 
-  // Attach activity monitors
-  attachActivityMonitor(process, proxyInfo, state)
-
-  // Wait a short time to ensure process started successfully
+  // Wait for either success (INFO message) or failure (panic/error)
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      resolve() // Process started OK
-    }, 500)
+    let stderrBuffer = ""
+    let resolved = false
 
-    process.on("error", err => {
-      clearTimeout(timeout)
-      reject(err)
+    const cleanup = () => {
+      resolved = true
+      childProcess.stderr?.removeAllListeners("data")
+      childProcess.removeAllListeners("error")
+      childProcess.removeAllListeners("exit")
+    }
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        cleanup()
+        // No output after timeout - assume failure
+        reject(new Error(`wstcp startup timeout - no response after ${PORT_CONFIG.SPAWN_TIMEOUT_MS}ms`))
+      }
+    }, PORT_CONFIG.SPAWN_TIMEOUT_MS)
+
+    // wstcp writes all output to stderr (Rust tracing)
+    childProcess.stderr?.on("data", (data: Buffer) => {
+      const output = data.toString()
+      stderrBuffer += output
+
+      // Check for panic (Rust panic message)
+      if (output.includes("panicked at") || output.includes("thread 'main'")) {
+        clearTimeout(timeout)
+        if (!resolved) {
+          cleanup()
+          // Extract useful error message
+          const addrInUse = stderrBuffer.includes("AddrInUse") || stderrBuffer.includes("Address already in use")
+          if (addrInUse) {
+            reject(new Error(`Port ${localPort} already in use`))
+          } else {
+            reject(new Error(`wstcp panic: ${output.trim().substring(0, 200)}`))
+          }
+        }
+        return
+      }
+
+      // Check for success (INFO Starts a WebSocket proxy server)
+      if (output.includes("INFO") && output.includes("Starts a WebSocket")) {
+        clearTimeout(timeout)
+        if (!resolved) {
+          cleanup()
+          log.info(`[TLSNotary] wstcp started successfully on port ${localPort}`)
+          resolve()
+        }
+        return
+      }
     })
 
-    process.on("exit", code => {
-      if (code !== null && code !== 0) {
-        clearTimeout(timeout)
-        reject(new Error(`wstcp exited with code ${code}`))
+    childProcess.on("error", err => {
+      clearTimeout(timeout)
+      if (!resolved) {
+        cleanup()
+        reject(err)
+      }
+    })
+
+    childProcess.on("exit", code => {
+      clearTimeout(timeout)
+      if (!resolved) {
+        cleanup()
+        if (code !== null && code !== 0) {
+          reject(new Error(`wstcp exited with code ${code}: ${stderrBuffer.trim().substring(0, 200)}`))
+        }
       }
     })
   })
+
+  // Attach activity monitors after successful spawn
+  attachActivityMonitor(childProcess, proxyInfo, state)
 
   return proxyInfo
 }
