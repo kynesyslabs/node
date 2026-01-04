@@ -79,7 +79,7 @@ export async function isPortAvailable(port: number): Promise<boolean> {
  * @returns Allocated port number or null if exhausted
  */
 export async function allocatePort(
-  pool: PortPoolState
+  pool: PortPoolState,
 ): Promise<number | null> {
   // First try recycled ports
   while (pool.recycled.length > 0) {
@@ -90,7 +90,7 @@ export async function allocatePort(
     }
     // Port was recycled but is now in use, skip it
     log.debug(
-      `[TLSNotary] Recycled port ${recycledPort} is in use, trying next`
+      `[TLSNotary] Recycled port ${recycledPort} is in use, trying next`,
     )
   }
 

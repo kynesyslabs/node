@@ -118,7 +118,7 @@ export function extractDomain(targetUrl: string): string {
 export function createToken(
   owner: string,
   targetUrl: string,
-  txHash: string
+  txHash: string,
 ): AttestationToken {
   const store = getTokenStore()
   const now = Date.now()
@@ -161,7 +161,7 @@ export interface TokenValidationResult {
 export function validateToken(
   tokenId: string,
   owner: string,
-  targetUrl: string
+  targetUrl: string,
 ): TokenValidationResult {
   const store = getTokenStore()
   const token = store.tokens.get(tokenId)
@@ -228,7 +228,7 @@ export function consumeRetry(tokenId: string, proxyId: string): AttestationToken
 
   log.info(`[TLSNotary] Token ${tokenId} consumed retry (${token.retriesLeft} left), proxyId: ${proxyId}`)
 
-  if (token.retriesLeft <= 0 && token.status !== TokenStatus.COMPLETED) {
+  if (token.retriesLeft <= 0) {
     log.warning(`[TLSNotary] Token ${tokenId} has no retries left`)
   }
 

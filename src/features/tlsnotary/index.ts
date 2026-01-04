@@ -22,7 +22,7 @@
  *
  * ## Environment Variables
  *
- * - TLSNOTARY_ENABLED: Enable/disable (default: false)
+ * - TLSNOTARY_DISABLED: Disable the feature (default: false, i.e. enabled by default)
  * - TLSNOTARY_PORT: WebSocket port (default: 7047)
  * - TLSNOTARY_SIGNING_KEY: 32-byte hex secp256k1 key (required if enabled)
  * - TLSNOTARY_MAX_SENT_DATA: Max sent bytes (default: 16384)
@@ -78,7 +78,7 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
   const config = getConfigFromEnv()
 
   if (!config) {
-    log.info("[TLSNotary] Feature disabled (TLSNOTARY_ENABLED != true)")
+    log.info("[TLSNotary] Feature disabled (TLSNOTARY_DISABLED=true)")
     return false
   }
 

@@ -1,13 +1,17 @@
 /**
  * TLSNotary Service for Demos Node
  *
- * High-level service class that wraps the FFI bindings with lifecycle management,
+ * High-level service class that wraps TLSNotary functionality with lifecycle management,
  * configuration from environment, and integration with the Demos node ecosystem.
+ *
+ * Supports two modes:
+ * - FFI Mode: Uses Rust FFI bindings (requires libtlsn_notary.so) - DEPRECATED
+ * - Docker Mode: Uses official Docker notary-server image (recommended)
  *
  * @module features/tlsnotary/TLSNotaryService
  */
 
-// REVIEW: TLSNotaryService - new service for managing HTTPS attestation
+// REVIEW: TLSNotaryService - updated to support Docker mode alongside FFI
 import { TLSNotaryFFI, type NotaryConfig, type VerificationResult, type NotaryHealthStatus } from "./ffi"
 import { existsSync, readFileSync, writeFileSync } from "fs"
 import { join } from "path"
@@ -19,19 +23,26 @@ import log from "@/utilities/logger"
 // ============================================================================
 
 /**
+ * TLSNotary operational mode
+ */
+export type TLSNotaryMode = "ffi" | "docker";
+
+/**
  * Service configuration options
  */
 export interface TLSNotaryServiceConfig {
   /** Port to run the notary WebSocket server on */
   port: number;
-  /** 32-byte secp256k1 private key (hex string or Uint8Array) */
-  signingKey: string | Uint8Array;
+  /** 32-byte secp256k1 private key (hex string or Uint8Array) - only used in FFI mode */
+  signingKey?: string | Uint8Array;
   /** Maximum bytes the prover can send (default: 16KB) */
   maxSentData?: number;
   /** Maximum bytes the prover can receive (default: 64KB) */
   maxRecvData?: number;
   /** Whether to auto-start the server on initialization */
   autoStart?: boolean;
+  /** Operational mode: 'ffi' (Rust FFI) or 'docker' (Docker container) */
+  mode?: TLSNotaryMode;
 }
 
 /**
@@ -46,6 +57,8 @@ export interface TLSNotaryServiceStatus {
   port: number;
   /** Health status from the underlying notary */
   health: NotaryHealthStatus;
+  /** Operating mode: docker or ffi */
+  mode?: TLSNotaryMode;
 }
 
 // ============================================================================
@@ -135,9 +148,10 @@ export function isTLSNotaryProxy(): boolean {
  * Get TLSNotary configuration from environment variables
  *
  * Environment variables:
- * - TLSNOTARY_ENABLED: Enable/disable the service (default: false)
+ * - TLSNOTARY_DISABLED: Disable the service (default: false, i.e. enabled by default)
+ * - TLSNOTARY_MODE: Operational mode - 'docker' (default) or 'ffi'
  * - TLSNOTARY_PORT: Port for the notary server (default: 7047)
- * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (optional, auto-generated if not set)
+ * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (only for FFI mode)
  * - TLSNOTARY_MAX_SENT_DATA: Maximum sent data bytes (default: 16384)
  * - TLSNOTARY_MAX_RECV_DATA: Maximum received data bytes (default: 65536)
  * - TLSNOTARY_AUTO_START: Auto-start on initialization (default: true)
@@ -145,7 +159,7 @@ export function isTLSNotaryProxy(): boolean {
  * - TLSNOTARY_DEBUG: Enable verbose debug logging (default: false)
  * - TLSNOTARY_PROXY: Enable TCP proxy to log incoming data before forwarding (default: false)
  *
- * Signing Key Resolution Priority:
+ * Signing Key Resolution Priority (FFI mode only):
  * 1. TLSNOTARY_SIGNING_KEY environment variable
  * 2. .tlsnotary-key file in project root
  * 3. Auto-generate and save to .tlsnotary-key
@@ -153,16 +167,23 @@ export function isTLSNotaryProxy(): boolean {
  * @returns Configuration object or null if service is disabled
  */
 export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
-  const enabled = process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true"
+  const disabled = process.env.TLSNOTARY_DISABLED?.toLowerCase() === "true"
 
-  if (!enabled) {
+  if (disabled) {
     return null
   }
 
-  const signingKey = resolveSigningKey()
-  if (!signingKey) {
-    log.warning("[TLSNotary] Failed to resolve signing key")
-    return null
+  // Determine mode: default to 'docker' as it's more compatible with tlsn-js
+  const mode = (process.env.TLSNOTARY_MODE?.toLowerCase() === "ffi" ? "ffi" : "docker") as TLSNotaryMode
+
+  // Only require signing key for FFI mode
+  let signingKey: string | undefined
+  if (mode === "ffi") {
+    signingKey = resolveSigningKey() ?? undefined
+    if (!signingKey) {
+      log.warning("[TLSNotary] Failed to resolve signing key for FFI mode")
+      return null
+    }
   }
 
   return {
@@ -171,6 +192,7 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
     maxSentData: parseInt(process.env.TLSNOTARY_MAX_SENT_DATA ?? "16384", 10),
     maxRecvData: parseInt(process.env.TLSNOTARY_MAX_RECV_DATA ?? "65536", 10),
     autoStart: process.env.TLSNOTARY_AUTO_START?.toLowerCase() !== "false",
+    mode,
   }
 }
 
@@ -208,13 +230,24 @@ export class TLSNotaryService {
   private ffi: TLSNotaryFFI | null = null
   private readonly config: TLSNotaryServiceConfig
   private running = false
+  private dockerPublicKey: string | null = null  // Cached public key from Docker notary
 
   /**
    * Create a new TLSNotaryService instance
    * @param config - Service configuration
    */
   constructor(config: TLSNotaryServiceConfig) {
-    this.config = config
+    this.config = {
+      ...config,
+      mode: config.mode ?? "docker",  // Default to docker mode
+    }
+  }
+
+  /**
+   * Get the operational mode
+   */
+  getMode(): TLSNotaryMode {
+    return this.config.mode ?? "docker"
   }
 
   /**
@@ -234,13 +267,9 @@ export class TLSNotaryService {
    * @throws Error if initialization fails
    */
   async initialize(): Promise<void> {
-    if (this.ffi) {
-      log.warning("[TLSNotary] Service already initialized")
-      return
-    }
-
     const debug = isTLSNotaryDebug()
     const fatal = isTLSNotaryFatal()
+    const mode = this.getMode()
 
     if (debug) {
       log.info("[TLSNotary] Debug mode enabled - verbose logging active")
@@ -249,12 +278,69 @@ export class TLSNotaryService {
       log.warning("[TLSNotary] Fatal mode enabled - errors will cause process exit")
     }
 
+    log.info(`[TLSNotary] Initializing in ${mode.toUpperCase()} mode`)
+
+    if (mode === "docker") {
+      // Docker mode: just verify the container is accessible
+      await this.initializeDockerMode()
+    } else {
+      // FFI mode: initialize Rust FFI
+      await this.initializeFFIMode()
+    }
+
+    // Auto-start if configured
+    if (this.config.autoStart) {
+      await this.start()
+    }
+  }
+
+  /**
+   * Initialize Docker mode - verify container is running
+   * @private
+   */
+  private async initializeDockerMode(): Promise<void> {
+    const debug = isTLSNotaryDebug()
+
+    if (debug) {
+      log.info(`[TLSNotary] Docker mode: expecting container on port ${this.config.port}`)
+    }
+
+    // In Docker mode, we don't start the container here - that's handled by the run script
+    // We just mark as initialized and will check connectivity in start()
+    log.info("[TLSNotary] Docker mode initialized (container managed externally)")
+
+    if (debug) {
+      log.info(`[TLSNotary] Config: port=${this.config.port}`)
+      log.info("[TLSNotary] Container should be started via: cd tlsnotary && docker compose up -d")
+    }
+  }
+
+  /**
+   * Initialize FFI mode - load Rust library
+   * @private
+   */
+  private async initializeFFIMode(): Promise<void> {
+    if (this.ffi) {
+      log.warning("[TLSNotary] FFI already initialized")
+      return
+    }
+
+    const debug = isTLSNotaryDebug()
+    const fatal = isTLSNotaryFatal()
+
     // Convert signing key to Uint8Array if it's a hex string
     let signingKeyBytes: Uint8Array
     if (typeof this.config.signingKey === "string") {
       signingKeyBytes = Buffer.from(this.config.signingKey, "hex")
-    } else {
+    } else if (this.config.signingKey) {
       signingKeyBytes = this.config.signingKey
+    } else {
+      const error = new Error("Signing key required for FFI mode")
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: " + error.message)
+        process.exit(1)
+      }
+      throw error
     }
 
     if (signingKeyBytes.length !== 32) {
@@ -274,7 +360,7 @@ export class TLSNotaryService {
 
     try {
       this.ffi = new TLSNotaryFFI(ffiConfig)
-      log.info("[TLSNotary] Service initialized")
+      log.info("[TLSNotary] FFI service initialized")
 
       if (debug) {
         log.info(`[TLSNotary] Config: port=${this.config.port}, maxSentData=${this.config.maxSentData}, maxRecvData=${this.config.maxRecvData}`)
@@ -287,11 +373,6 @@ export class TLSNotaryService {
       }
       throw error
     }
-
-    // Auto-start if configured
-    if (this.config.autoStart) {
-      await this.start()
-    }
   }
 
   /**
@@ -299,22 +380,83 @@ export class TLSNotaryService {
    * @throws Error if not initialized or server fails to start
    */
   async start(): Promise<void> {
+    const mode = this.getMode()
+
+    if (this.running) {
+      log.warning("[TLSNotary] Server already running")
+      return
+    }
+
+    if (mode === "docker") {
+      await this.startDockerMode()
+    } else {
+      await this.startFFIMode()
+    }
+  }
+
+  /**
+   * Start in Docker mode - verify container is running and accessible
+   * @private
+   */
+  private async startDockerMode(): Promise<void> {
+    const debug = isTLSNotaryDebug()
+    const fatal = isTLSNotaryFatal()
+
+    log.info(`[TLSNotary] Docker mode: checking container on port ${this.config.port}...`)
+
+    try {
+      // Try to fetch /info endpoint to verify container is running
+      const infoUrl = `http://localhost:${this.config.port}/info`
+      const response = await fetch(infoUrl, { signal: AbortSignal.timeout(5000) })
+
+      if (!response.ok) {
+        throw new Error(`Notary server returned ${response.status}`)
+      }
+
+      const info = await response.json() as { publicKey?: string; version?: string }
+      this.dockerPublicKey = info.publicKey ?? null
+
+      this.running = true
+      log.info("[TLSNotary] Docker container is running and accessible")
+
+      if (debug) {
+        log.info(`[TLSNotary] Notary info: ${JSON.stringify(info)}`)
+      }
+
+      if (this.dockerPublicKey) {
+        log.info(`[TLSNotary] Notary public key: ${this.dockerPublicKey}`)
+      }
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error(`[TLSNotary] Failed to connect to Docker notary on port ${this.config.port}: ${message}`)
+      log.error("[TLSNotary] Make sure the Docker container is running:")
+      log.error("[TLSNotary]   cd tlsnotary && TLSNOTARY_PORT=${TLSNOTARY_PORT} docker compose up -d")
+
+      if (fatal) {
+        log.error("[TLSNotary] FATAL: Exiting due to Docker container not available")
+        process.exit(1)
+      }
+      throw new Error(`Docker notary container not accessible: ${message}`)
+    }
+  }
+
+  /**
+   * Start in FFI mode - start the Rust WebSocket server
+   * @private
+   */
+  private async startFFIMode(): Promise<void> {
     const debug = isTLSNotaryDebug()
     const fatal = isTLSNotaryFatal()
     const proxyEnabled = isTLSNotaryProxy()
 
     if (!this.ffi) {
-      const error = new Error("Service not initialized. Call initialize() first.")
+      const error = new Error("FFI not initialized. Call initialize() first.")
       if (fatal) {
         log.error("[TLSNotary] FATAL: " + error.message)
         process.exit(1)
       }
       throw error
-    }
-
-    if (this.running) {
-      log.warning("[TLSNotary] Server already running")
-      return
     }
 
     try {
@@ -332,7 +474,7 @@ export class TLSNotaryService {
       }
 
       this.running = true
-      log.info(`[TLSNotary] Server started on port ${this.config.port}`)
+      log.info(`[TLSNotary] FFI server started on port ${this.config.port}`)
 
       if (debug) {
         log.info(`[TLSNotary] Public key: ${this.ffi.getPublicKeyHex()}`)
@@ -343,7 +485,7 @@ export class TLSNotaryService {
         log.warning("[TLSNotary] DEBUG PROXY ENABLED - All incoming data will be logged!")
       }
     } catch (error) {
-      log.error(`[TLSNotary] Failed to start server on port ${this.config.port}: ${error}`)
+      log.error(`[TLSNotary] Failed to start FFI server on port ${this.config.port}: ${error}`)
       if (fatal) {
         log.error("[TLSNotary] FATAL: Exiting due to server start failure")
         process.exit(1)
@@ -419,13 +561,25 @@ export class TLSNotaryService {
 
   /**
    * Stop the notary WebSocket server
+   * In Docker mode, this is a no-op as the container is managed externally
    */
   async stop(): Promise<void> {
-    if (!this.ffi) {
+    if (!this.running) {
       return
     }
 
-    if (!this.running) {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      // In Docker mode, we don't control the container lifecycle
+      // Just mark as not running from our perspective
+      this.running = false
+      log.info("[TLSNotary] Docker mode - marked as stopped (container still running)")
+      return
+    }
+
+    // FFI mode
+    if (!this.ffi) {
       return
     }
 
@@ -437,10 +591,20 @@ export class TLSNotaryService {
   /**
    * Shutdown the service completely
    * Stops the server and releases all resources
+   * In Docker mode, only clears local state (container managed externally)
    */
   async shutdown(): Promise<void> {
     await this.stop()
 
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      this.dockerPublicKey = null
+      log.info("[TLSNotary] Docker mode - service shutdown complete (container still running)")
+      return
+    }
+
+    // FFI mode
     if (this.ffi) {
       this.ffi.destroy()
       this.ffi = null
@@ -453,8 +617,22 @@ export class TLSNotaryService {
    * Verify an attestation
    * @param attestation - Serialized attestation bytes (Uint8Array or base64 string)
    * @returns Verification result
+   * @note In Docker mode, verification is not yet supported (attestations are verified client-side)
    */
   verify(attestation: Uint8Array | string): VerificationResult {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      // Docker notary-server handles verification internally
+      // Client-side tlsn-js also verifies attestations
+      // For now, we don't have a way to verify via HTTP API
+      return {
+        success: false,
+        error: "Verification not supported in Docker mode - use client-side verification",
+      }
+    }
+
+    // FFI mode
     if (!this.ffi) {
       return {
         success: false,
@@ -479,6 +657,17 @@ export class TLSNotaryService {
    * @throws Error if service not initialized
    */
   getPublicKey(): Uint8Array {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      if (!this.dockerPublicKey) {
+        throw new Error("Docker public key not available - service not started")
+      }
+      // Convert hex string to Uint8Array
+      return Buffer.from(this.dockerPublicKey, "hex")
+    }
+
+    // FFI mode
     if (!this.ffi) {
       throw new Error("Service not initialized")
     }
@@ -491,6 +680,16 @@ export class TLSNotaryService {
    * @throws Error if service not initialized
    */
   getPublicKeyHex(): string {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      if (!this.dockerPublicKey) {
+        throw new Error("Docker public key not available - service not started")
+      }
+      return this.dockerPublicKey
+    }
+
+    // FFI mode
     if (!this.ffi) {
       throw new Error("Service not initialized")
     }
@@ -515,6 +714,12 @@ export class TLSNotaryService {
    * Check if the service is initialized
    */
   isInitialized(): boolean {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      return this.dockerPublicKey !== null
+    }
+
     return this.ffi !== null
   }
 
@@ -523,20 +728,34 @@ export class TLSNotaryService {
    * @returns Service status object
    */
   getStatus(): TLSNotaryServiceStatus {
-    const health: NotaryHealthStatus = this.ffi
-      ? this.ffi.getHealthStatus()
-      : {
-          healthy: false,
-          initialized: false,
-          serverRunning: false,
-          error: "Service not initialized",
-        }
+    const mode = this.getMode()
+
+    let health: NotaryHealthStatus
+
+    if (mode === "docker") {
+      health = {
+        healthy: this.running && this.dockerPublicKey !== null,
+        initialized: this.dockerPublicKey !== null,
+        serverRunning: this.running,
+        error: this.running ? undefined : "Docker container not accessible",
+      }
+    } else {
+      health = this.ffi
+        ? this.ffi.getHealthStatus()
+        : {
+            healthy: false,
+            initialized: false,
+            serverRunning: false,
+            error: "Service not initialized",
+          }
+    }
 
     return {
       enabled: true,
       running: this.running,
       port: this.config.port,
       health,
+      mode, // Include mode in status
     }
   }
 
@@ -545,6 +764,13 @@ export class TLSNotaryService {
    * @returns True if service is healthy
    */
   isHealthy(): boolean {
+    const mode = this.getMode()
+
+    if (mode === "docker") {
+      return this.running && this.dockerPublicKey !== null
+    }
+
+    // FFI mode
     if (!this.ffi) {
       return false
     }

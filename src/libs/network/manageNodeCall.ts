@@ -454,10 +454,21 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
-        // REVIEW: TLSNotary proxy request endpoint for SDK
+        // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
         case "requestTLSNproxy": {
             try {
                 const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
+                const { validateToken, consumeRetry } = await import("@/features/tlsnotary/tokenManager")
+
+                // Require tokenId and owner (pubkey) for paid access
+                if (!data.tokenId || !data.owner) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing tokenId or owner parameter",
+                    }
+                    break
+                }
 
                 if (!data.targetUrl) {
                     response.result = 400
@@ -478,21 +489,38 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     break
                 }
 
-                // TODO: Future authentication check
-                // if (data.authentication) {
-                //     const { pubKey, signature } = data.authentication
-                //     // Verify signature...
-                // }
+                // Validate the token
+                const validation = validateToken(data.tokenId, data.owner, data.targetUrl)
+                if (!validation.valid) {
+                    response.result = validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.response = {
+                        error: validation.error,
+                        message: `Token validation failed: ${validation.error}`,
+                        domain: validation.token?.domain, // Show expected domain on mismatch
+                    }
+                    break
+                }
 
+                // Request the proxy (this spawns wstcp if needed)
                 const result = await requestProxy(data.targetUrl, data.requestOrigin)
 
                 if ("error" in result) {
-                    // Error response
+                    // Error response - don't consume retry on internal errors
                     response.result = 500
                     response.response = result
                 } else {
-                    // Success response
-                    response.response = result
+                    // Success - consume a retry and link proxyId to token
+                    const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                    if (updatedToken) {
+                        log.info(`[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`)
+                    }
+
+                    // Add token info to response
+                    response.response = {
+                        ...result,
+                        tokenId: data.tokenId,
+                        retriesLeft: updatedToken?.retriesLeft ?? 0,
+                    }
                 }
             } catch (error) {
                 log.error("[manageNodeCall] requestTLSNproxy error: " + error)
@@ -557,6 +585,74 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     success: false,
                     error: "Failed to get TLSNotary info",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token lookup by transaction hash
+        case "tlsnotary.getToken": {
+            try {
+                const { getTokenByTxHash, getToken } = await import("@/features/tlsnotary/tokenManager")
+
+                // Support lookup by either tokenId or txHash
+                const { tokenId, txHash } = data as { tokenId?: string; txHash?: string }
+
+                let token
+                if (tokenId) {
+                    token = getToken(tokenId)
+                } else if (txHash) {
+                    token = getTokenByTxHash(txHash)
+                } else {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Either tokenId or txHash is required",
+                    }
+                    break
+                }
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: "No token found for the provided identifier",
+                    }
+                } else {
+                    response.response = {
+                        token: {
+                            id: token.id,
+                            owner: token.owner,
+                            domain: token.domain,
+                            status: token.status,
+                            expiresAt: token.expiresAt,
+                            retriesLeft: token.retriesLeft,
+                        },
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getToken error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token stats for monitoring
+        case "tlsnotary.getTokenStats": {
+            try {
+                const { getTokenStats } = await import("@/features/tlsnotary/tokenManager")
+                const stats = getTokenStats()
+                response.response = { stats }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getTokenStats error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token stats",
                 }
             }
             break

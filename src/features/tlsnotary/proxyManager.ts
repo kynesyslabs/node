@@ -213,26 +213,26 @@ export function getPublicUrl(localPort: number, requestOrigin?: string): string 
 function attachActivityMonitor(
   process: ChildProcess,
   proxyInfo: ProxyInfo,
-  state: TLSNotaryState
+  state: TLSNotaryState,
 ): void {
   // Any stdout activity resets the idle timer
   process.stdout?.on("data", (data: Buffer) => {
     proxyInfo.lastActivity = Date.now()
     log.debug(
-      `[TLSNotary] Proxy ${proxyInfo.domain} stdout: ${data.toString().trim()}`
+      `[TLSNotary] Proxy ${proxyInfo.domain} stdout: ${data.toString().trim()}`,
     )
   })
 
   process.stderr?.on("data", (data: Buffer) => {
     proxyInfo.lastActivity = Date.now()
     log.debug(
-      `[TLSNotary] Proxy ${proxyInfo.domain} stderr: ${data.toString().trim()}`
+      `[TLSNotary] Proxy ${proxyInfo.domain} stderr: ${data.toString().trim()}`,
     )
   })
 
   process.on("exit", code => {
     log.info(
-      `[TLSNotary] Proxy for ${proxyInfo.domain} exited with code ${code}`
+      `[TLSNotary] Proxy for ${proxyInfo.domain} exited with code ${code}`,
     )
     // Remove from registry
     const key = `${proxyInfo.domain}:${proxyInfo.targetPort}`
@@ -258,7 +258,7 @@ async function spawnProxy(
   domain: string,
   targetPort: number,
   localPort: number,
-  requestOrigin?: string
+  requestOrigin?: string,
 ): Promise<ProxyInfo> {
   const state = getTLSNotaryState()
 
@@ -377,8 +377,8 @@ export function cleanupStaleProxies(): void {
     if (proxy.lastActivity < staleThreshold) {
       log.info(
         `[TLSNotary] Cleaning up stale proxy for ${proxy.domain} (idle ${Math.floor(
-          (now - proxy.lastActivity) / 1000
-        )}s)`
+          (now - proxy.lastActivity) / 1000,
+        )}s)`,
       )
       // Kill the process
       try {
@@ -416,7 +416,7 @@ function isProxyAlive(proxy: ProxyInfo): boolean {
  */
 export async function requestProxy(
   targetUrl: string,
-  requestOrigin?: string
+  requestOrigin?: string,
 ): Promise<ProxyRequestSuccess | ProxyRequestError> {
   // 1. Ensure wstcp is available
   try {
@@ -480,13 +480,13 @@ export async function requestProxy(
         domain,
         targetPort,
         localPort,
-        requestOrigin
+        requestOrigin,
       )
 
       // Register in state
       state.proxies.set(key, proxyInfo)
       log.info(
-        `[TLSNotary] Spawned proxy for ${domain}:${targetPort} on port ${localPort}`
+        `[TLSNotary] Spawned proxy for ${domain}:${targetPort} on port ${localPort}`,
       )
 
       return {
@@ -498,7 +498,7 @@ export async function requestProxy(
     } catch (err: any) {
       lastError = err.message
       log.warning(
-        `[TLSNotary] Spawn attempt ${attempt + 1} failed for ${domain}: ${lastError}`
+        `[TLSNotary] Spawn attempt ${attempt + 1} failed for ${domain}: ${lastError}`,
       )
       // Release the port since spawn failed
       releasePort(state.portPool, localPort)
