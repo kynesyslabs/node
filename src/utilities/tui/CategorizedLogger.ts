@@ -922,18 +922,7 @@ export class CategorizedLogger extends EventEmitter {
      * Get all available categories
      */
     static getCategories(): LogCategory[] {
-        return [
-            "CORE",
-            "NETWORK",
-            "PEER",
-            "CHAIN",
-            "SYNC",
-            "CONSENSUS",
-            "IDENTITY",
-            "MCP",
-            "MULTICHAIN",
-            "DAHR",
-        ]
+        return [...ALL_CATEGORIES]
     }
 
     /**

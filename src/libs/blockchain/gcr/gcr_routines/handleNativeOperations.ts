@@ -23,13 +23,12 @@ export class HandleNativeOperations {
         // Switching on the native operation type
         switch (nativePayload.nativeOperation) {
             // Balance operations for the send native method
-            case "send":
-                // eslint-disable-next-line no-var
-                var [to, amount] = nativePayload.args
+            case "send": {
+                const [to, amount] = nativePayload.args
                 // First, remove the amount from the sender's balance
                 log.debug("to: " + to)
                 log.debug("amount: " + amount)
-                var subtractEdit: GCREdit = {
+                const subtractEdit: GCREdit = {
                     type: "balance",
                     operation: "remove",
                     isRollback: isRollback,
@@ -39,7 +38,7 @@ export class HandleNativeOperations {
                 }
                 edits.push(subtractEdit)
                 // Then, add the amount to the receiver's balance
-                var addEdit: GCREdit = {
+                const addEdit: GCREdit = {
                     type: "balance",
                     operation: "add",
                     isRollback: isRollback,
@@ -49,10 +48,10 @@ export class HandleNativeOperations {
                 }
                 edits.push(addEdit)
                 break
+            }
             // REVIEW: TLSNotary attestation request - burns 1 DEM fee, creates token
-            case "tlsn_request":
-                // eslint-disable-next-line no-var
-                var [targetUrl] = nativePayload.args as [string]
+            case "tlsn_request": {
+                const [targetUrl] = nativePayload.args as [string]
                 log.info(`[TLSNotary] Processing tlsn_request for ${targetUrl} from ${tx.content.from}`)
 
                 // Validate URL format and extract domain
@@ -66,8 +65,7 @@ export class HandleNativeOperations {
                 }
 
                 // Burn the fee (remove from sender, no add - effectively burns the token)
-                // eslint-disable-next-line no-var
-                var burnFeeEdit: GCREdit = {
+                const burnFeeEdit: GCREdit = {
                     type: "balance",
                     operation: "remove",
                     isRollback: isRollback,
@@ -95,16 +93,15 @@ export class HandleNativeOperations {
                     }
                 }
                 break
+            }
 
             // REVIEW: TLSNotary proof storage - burns fee based on size, stores proof
-            case "tlsn_store":
-                // eslint-disable-next-line no-var
-                var [tokenId, proof, storageType] = nativePayload.args
+            case "tlsn_store": {
+                const [tokenId, proof, storageType] = nativePayload.args
                 log.info(`[TLSNotary] Processing tlsn_store for token ${tokenId}, storage: ${storageType}`)
 
                 // Validate token exists and belongs to sender
-                // eslint-disable-next-line no-var
-                var token = getToken(tokenId)
+                const token = getToken(tokenId)
                 if (!token) {
                     log.error(`[TLSNotary] Token not found: ${tokenId}`)
                     break
@@ -120,15 +117,12 @@ export class HandleNativeOperations {
                 }
 
                 // Calculate storage fee: base + per KB
-                // eslint-disable-next-line no-var
-                var proofSizeKB = Math.ceil(proof.length / 1024)
-                // eslint-disable-next-line no-var
-                var storageFee = TLSN_STORE_BASE_FEE + (proofSizeKB * TLSN_STORE_PER_KB_FEE)
+                const proofSizeKB = Math.ceil(proof.length / 1024)
+                const storageFee = TLSN_STORE_BASE_FEE + (proofSizeKB * TLSN_STORE_PER_KB_FEE)
                 log.info(`[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} DEM`)
 
                 // Burn the storage fee
-                // eslint-disable-next-line no-var
-                var burnStorageFeeEdit: GCREdit = {
+                const burnStorageFeeEdit: GCREdit = {
                     type: "balance",
                     operation: "remove",
                     isRollback: isRollback,
@@ -140,8 +134,7 @@ export class HandleNativeOperations {
 
                 // Store the proof (on-chain via GCR)
                 // For IPFS: in future, proof will be IPFS hash, actual data stored externally
-                // eslint-disable-next-line no-var
-                var storeProofEdit: GCREdit = {
+                const storeProofEdit: GCREdit = {
                     type: "tlsnotary",
                     operation: "store",
                     account: tx.content.from as string,
@@ -163,6 +156,7 @@ export class HandleNativeOperations {
                     log.info(`[TLSNotary] Token ${tokenId} marked as stored`)
                 }
                 break
+            }
 
             default: {
                 // Exhaustive check - this should never be reached if all operations are handled

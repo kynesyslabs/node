@@ -8,6 +8,7 @@
  */
 
 // REVIEW: TLSNotary token management for paid attestation access
+import { randomUUID } from "crypto"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -56,14 +57,10 @@ export interface TokenStoreState {
 }
 
 /**
- * Generate a simple UUID for token IDs
+ * Generate a cryptographically secure UUID for token IDs
  */
 function generateTokenId(): string {
-  return "tlsn_" + "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, c => {
-    const r = (Math.random() * 16) | 0
-    const v = c === "x" ? r : (r & 0x3) | 0x8
-    return v.toString(16)
-  })
+  return `tlsn_${randomUUID()}`
 }
 
 /**

@@ -414,7 +414,7 @@ export default class HandleGCR {
      */
     private static async processNativeSideEffects(
         tx: Transaction,
-        simulate: boolean = false
+        simulate = false,
     ): Promise<void> {
         const nativeData = tx.content.data as ["native", INativePayload]
         const nativePayload = nativeData[1]
