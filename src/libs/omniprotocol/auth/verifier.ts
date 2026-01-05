@@ -1,4 +1,5 @@
-import * as ed25519 from "@noble/ed25519"
+import forge from "node-forge"
+// import * as ed25519 from "@noble/ed25519"
 import { keccak_256 } from "@noble/hashes/sha3.js"
 import { AuthBlock, SignatureAlgorithm, SignatureMode, VerificationResult } from "./types"
 import type { OmniMessageHeader } from "../types/message"
@@ -183,7 +184,12 @@ export class SignatureVerifier {
             }
 
             // Verify using noble/ed25519
-            const valid = await ed25519.verify(signature, data, publicKey)
+            // const valid = await ed25519.verify(signature, data, publicKey)
+            const valid = forge.pki.ed25519.verify({
+                message: data,
+                signature: signature,
+                publicKey: publicKey,
+            })
             return valid
         } catch (error) {
             log.error("[SignatureVerifier] Ed25519 verification error: " + error)
