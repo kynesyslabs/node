@@ -58,10 +58,9 @@ export class HandleNativeOperations {
                 try {
                     extractDomain(targetUrl) // Validates URL format
                     log.debug(`[TLSNotary] URL validated: ${targetUrl}`)
-                } catch (urlError) {
+                } catch {
                     log.error(`[TLSNotary] Invalid URL in tlsn_request: ${targetUrl}`)
-                    // Return empty edits - tx will fail validation elsewhere
-                    break
+                    throw new Error("Invalid URL in tlsn_request")
                 }
 
                 // Burn the fee (remove from sender, no add - effectively burns the token)
