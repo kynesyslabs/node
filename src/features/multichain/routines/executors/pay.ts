@@ -227,46 +227,14 @@ async function handleXRPLPay(
     console.log("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
     try {
-        // Validate signedPayloads exists and has at least one element
-        if (!operation.task.signedPayloads || operation.task.signedPayloads.length === 0) {
-            return {
-                result: "error",
-                error: `Missing signed payloads for XRPL operation (${operation.chain}.${operation.subchain})`,
-            }
-        }
-
         const signedTx = operation.task.signedPayloads[0]
 
-        // Extract tx_blob - handle both string and object formats
-        let txBlob: string
-        if (typeof signedTx === "string") {
-            txBlob = signedTx
-        } else if (signedTx && typeof signedTx === "object" && "tx_blob" in signedTx) {
-            txBlob = (signedTx as { tx_blob: string }).tx_blob
-        } else {
-            return {
-                result: "error",
-                error: `Invalid signed payload format for XRPL operation (${operation.chain}.${operation.subchain}). Expected string or object with tx_blob property.`,
-            }
-        }
-
-        if (!txBlob || typeof txBlob !== 'string') {
-            return {
-                result: "error",
-                error: `Invalid tx_blob value for XRPL operation (${operation.chain}.${operation.subchain}). Expected non-empty string.`,
-            }
-        }
-
         // Submit transaction and wait for validation
-        const res = await xrplInstance.provider.submitAndWait(txBlob)
+        const res = await xrplInstance.provider.submitAndWait(signedTx.tx_blob)
 
-        // Extract transaction result - handle different response formats
-        const meta = res.result.meta
-        const txResult = (typeof meta === "object" && meta !== null && "TransactionResult" in meta
-            ? (meta as { TransactionResult: string }).TransactionResult
-            : (res.result as any).engine_result) as string | undefined
+        const txResult = res.result.meta?.TransactionResult || res.result.engine_result
         const txHash = res.result.hash
-        const resultMessage = ((res.result as any).engine_result_message || '') as string
+        const resultMessage = res.result.engine_result_message || ''
 
         // Only tesSUCCESS indicates actual success
         if (txResult === 'tesSUCCESS') {
@@ -276,21 +244,48 @@ async function handleXRPLPay(
             }
         }
 
-        // XRPL transaction result code prefixes and their meanings
-        const xrplErrorMessages: Record<string, string> = {
-            tec: "Transaction failed (fee charged)",  // tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
-            tem: "Malformed transaction",              // temREDUNDANT, temBAD_FEE, temINVALID
-            ter: "Transaction provisional/queued",     // terQUEUED
-            tef: "Transaction rejected",               // tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
-        }
-
-        const errorPrefix = txResult?.substring(0, 3)
-        if (errorPrefix && xrplErrorMessages[errorPrefix]) {
+        // tec* codes: Transaction failed but fee was charged
+        // The transaction was applied to ledger but did not achieve its intended purpose
+        // Example: tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
+        if (txResult?.startsWith('tec')) {
             return {
                 result: "error",
-                error: `${xrplErrorMessages[errorPrefix]}: ${txResult} - ${resultMessage}`,
+                error: `Transaction failed (fee charged): ${txResult} - ${resultMessage}`,
                 hash: txHash,
-                extra: { code: txResult, validated: res.result.validated },
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
+        // tem* codes: Malformed transaction (not applied to ledger)
+        // Example: temREDUNDANT (sending to self), temBAD_FEE, temINVALID
+        if (txResult?.startsWith('tem')) {
+            return {
+                result: "error",
+                error: `Malformed transaction: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
+        // ter* codes: Provisional/retryable result (not final)
+        // Example: terQUEUED (transaction queued for future ledger)
+        if (txResult?.startsWith('ter')) {
+            return {
+                result: "error",
+                error: `Transaction provisional/queued: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
+            }
+        }
+
+        // tef* codes: Local failure (not applied to ledger)
+        // Example: tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
+        if (txResult?.startsWith('tef')) {
+            return {
+                result: "error",
+                error: `Transaction rejected: ${txResult} - ${resultMessage}`,
+                hash: txHash,
+                extra: { code: txResult, validated: res.result.validated }
             }
         }
 
@@ -298,13 +293,13 @@ async function handleXRPLPay(
             result: "error",
             error: `Unknown transaction result: ${txResult} - ${resultMessage}`,
             hash: txHash,
-            extra: { code: txResult, validated: res.result.validated },
+            extra: { code: txResult, validated: res.result.validated }
         }
     } catch (error) {
         console.log("[XMScript Parser] Ripple Pay: error:", error)
         return {
             result: "error",
-            error: error instanceof Error ? error.message : String(error),
+            error: error.toString(),
         }
     }
 }
