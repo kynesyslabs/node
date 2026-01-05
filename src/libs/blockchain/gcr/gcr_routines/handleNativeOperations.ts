@@ -88,16 +88,16 @@ export class HandleNativeOperations {
                 const token = getToken(tokenId)
                 if (!token) {
                     log.error(`[TLSNotary] Token not found: ${tokenId}`)
-                    break
+                    throw new Error("Token not found")
                 }
                 if (token.owner !== tx.content.from) {
                     log.error(`[TLSNotary] Token owner mismatch: ${token.owner} !== ${tx.content.from}`)
-                    break
+                    throw new Error("Token owner mismatch")
                 }
                 // Token should be completed (attestation done) or active (in progress)
                 if (token.status !== TokenStatus.COMPLETED && token.status !== TokenStatus.ACTIVE) {
                     log.error(`[TLSNotary] Token not ready for storage: ${token.status}`)
-                    break
+                    throw new Error("Token not ready for storage")
                 }
 
                 // Calculate storage fee: base + per KB (use byte length, not string length)
