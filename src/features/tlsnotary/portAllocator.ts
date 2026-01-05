@@ -51,22 +51,20 @@ export function initPortPool(): PortPoolState {
 export async function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
     const server = net.createServer()
+    let settled = false
 
-    server.once("error", (_err) => {
-      // Any error (EADDRINUSE, EACCES, etc.) means port is unavailable
-      resolve(false)
+    const finish = (available: boolean) => {
+      if (settled) return
+      settled = true
+      resolve(available)
+    }
+
+    server.once("error", () => {
+      server.close(() => finish(false))
     })
 
     server.once("listening", () => {
-      // Port is available - close the server and return true
-      server.close((err) => {
-        // Resolve even if close fails - port was available
-        if (err) {
-          resolve(false)
-        } else {
-          resolve(true)
-        }
-      })
+      server.close(() => finish(true))
     })
 
     server.listen(port, "0.0.0.0")
