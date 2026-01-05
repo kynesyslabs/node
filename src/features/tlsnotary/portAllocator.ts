@@ -8,6 +8,7 @@
  */
 
 // REVIEW: TLSNotary port pool management for wstcp proxy instances
+import * as net from "net"
 import log from "@/utilities/logger"
 
 /**
@@ -49,18 +50,22 @@ export function initPortPool(): PortPoolState {
  */
 export async function isPortAvailable(port: number): Promise<boolean> {
   return new Promise(resolve => {
-    const net = require("net")
     const server = net.createServer()
 
-    server.once("error", () => {
+    server.once("error", (_err) => {
       // Any error (EADDRINUSE, EACCES, etc.) means port is unavailable
       resolve(false)
     })
 
     server.once("listening", () => {
       // Port is available - close the server and return true
-      server.close(() => {
-        resolve(true)
+      server.close((err) => {
+        // Resolve even if close fails - port was available
+        if (err) {
+          resolve(false)
+        } else {
+          resolve(true)
+        }
       })
     })
 
