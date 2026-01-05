@@ -446,6 +446,13 @@ export class TLSNotaryFFI {
    */
   destroy(): void {
     if (this.handle) {
+      // Best-effort stop if server is still running
+      if (this.serverRunning) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        this.lib.symbols.tlsn_notary_stop_server(this.handle as any)
+        this.serverRunning = false
+      }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.lib.symbols.tlsn_notary_destroy(this.handle as any)
       this.handle = null
