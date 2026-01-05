@@ -231,6 +231,7 @@ export class TLSNotaryService {
   private readonly config: TLSNotaryServiceConfig
   private running = false
   private dockerPublicKey: string | null = null  // Cached public key from Docker notary
+  private proxyServer: import("net").Server | null = null
 
   /**
    * Create a new TLSNotaryService instance
@@ -508,8 +509,18 @@ export class TLSNotaryService {
     await this.ffi!.startServer(rustPort)
     log.info(`[TLSNotary] Rust server started on internal port ${rustPort}`)
 
+    // Close any previous proxy server (defensive)
+    if (this.proxyServer) {
+      try {
+        this.proxyServer.close()
+      } catch {
+        // ignore
+      }
+      this.proxyServer = null
+    }
+
     // Create proxy server on public port
-    const proxyServer = net.createServer((clientSocket) => {
+    this.proxyServer = net.createServer((clientSocket) => {
       const clientAddr = `${clientSocket.remoteAddress}:${clientSocket.remotePort}`
       log.info(`[TLSNotary-Proxy] New connection from ${clientAddr}`)
 
@@ -554,7 +565,7 @@ export class TLSNotaryService {
       })
     })
 
-    proxyServer.listen(publicPort, () => {
+    this.proxyServer.listen(publicPort, () => {
       log.info(`[TLSNotary-Proxy] Listening on port ${publicPort}, forwarding to ${rustPort}`)
     })
   }
@@ -581,6 +592,16 @@ export class TLSNotaryService {
     // FFI mode
     if (!this.ffi) {
       return
+    }
+
+    // Close the proxy server if it exists
+    if (this.proxyServer) {
+      try {
+        this.proxyServer.close()
+      } catch {
+        // ignore
+      }
+      this.proxyServer = null
     }
 
     await this.ffi.stopServer()
