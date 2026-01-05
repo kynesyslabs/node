@@ -312,8 +312,9 @@ export class L2PSHashService {
 
                     log.debug(`[L2PS Hash Service] Validator ${validator.identity.substring(0, 8)}... rejected hash update: ${result.response}`)
 
-                } catch (error: any) {
-                    log.debug(`[L2PS Hash Service] Validator ${validator.identity.substring(0, 8)}... error: ${error.message}`)
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : String(error)
+                    log.debug(`[L2PS Hash Service] Validator ${validator.identity.substring(0, 8)}... error: ${message}`)
                     continue // Try next validator
                 }
             }
@@ -321,7 +322,7 @@ export class L2PSHashService {
             // If we reach here, all validators failed
             throw new Error(`All ${availableValidators.length} validators failed to accept L2PS hash update`)
             
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Hash Service] Failed to relay hash update to validators:", error)
             throw error
         }

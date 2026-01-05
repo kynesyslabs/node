@@ -161,10 +161,11 @@ export default class L2PSConsensus {
 
             return result
 
-        } catch (error: any) {
-            log.error(`[L2PS Consensus] Error applying proofs: ${error.message}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Consensus] Error applying proofs: ${message}`)
             result.success = false
-            result.message = `Error: ${error.message}`
+            result.message = `Error: ${message}`
             return result
         }
     }
@@ -276,8 +277,9 @@ export default class L2PSConsensus {
 
             return proofResult
 
-        } catch (error: any) {
-            proofResult.message = `Error: ${error.message}`
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            proofResult.message = `Error: ${message}`
             if (!simulate) {
                 await L2PSProofManager.markProofRejected(proof.id, proofResult.message)
             }

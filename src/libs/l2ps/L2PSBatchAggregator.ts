@@ -291,7 +291,8 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error(`[L2PS Batch Aggregator] Error in aggregation: ${error instanceof Error ? error.message : String(error)}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Batch Aggregator] Error in aggregation: ${message}`)
             throw error
         }
     }
@@ -355,7 +356,8 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${error instanceof Error ? error.message : String(error)}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${message}`)
             this.stats.failedSubmissions++
         }
     }
@@ -690,7 +692,8 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            log.error(`[L2PS Batch Aggregator] Error during cleanup: ${error instanceof Error ? error.message : String(error)}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Batch Aggregator] Error during cleanup: ${message}`)
         }
     }
 

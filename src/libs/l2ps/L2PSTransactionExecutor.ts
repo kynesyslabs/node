@@ -142,11 +142,12 @@ export default class L2PSTransactionExecutor {
                 affected_accounts: [...new Set(affectedAccounts)]
             }
 
-        } catch (error: any) {
-            log.error(`[L2PS Executor] Error: ${error.message}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Executor] Error: ${message}`)
             return {
                 success: false,
-                message: `Execution failed: ${error.message}`
+                message: `Execution failed: ${message}`
             }
         }
     }

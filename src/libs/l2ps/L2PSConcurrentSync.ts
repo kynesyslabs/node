@@ -57,9 +57,10 @@ export async function discoverL2PSParticipants(
                             log.debug(`[L2PS Sync] Peer ${peer.muid} participates in L2PS ${l2psUid}`)
                         }
                     }
-                } catch (error: any) {
+                } catch (error) {
                     // Gracefully handle peer failures (don't break discovery)
-                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}:`, error.message)
+                    const message = error instanceof Error ? error.message : String(error)
+                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}:`, message)
                 }
             })()
 
@@ -182,8 +183,9 @@ export async function syncL2PSWithPeer(
             for (const tx of existingTxs) {
                 existingHashes.add(tx.hash)
             }
-        } catch (error: any) {
-            log.error("[L2PS Sync] Failed to batch check duplicates:", error.message)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error("[L2PS Sync] Failed to batch check duplicates:", message)
             throw error
         }
 
@@ -214,14 +216,16 @@ export async function syncL2PSWithPeer(
                         log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
                     }
                 }
-            } catch (error: any) {
-                log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}:`, error.message)
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}:`, message)
             }
         }
 
         log.info(`[L2PS Sync] Sync complete for ${l2psUid}: ${insertedCount} new, ${duplicateCount} duplicates`)
-    } catch (error: any) {
-        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}:`, error.message)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}:`, message)
         throw error
     }
 }
@@ -268,9 +272,10 @@ export async function exchangeL2PSParticipation(
                 })
             }
             log.debug(`[L2PS Sync] Exchanged participation info with peer ${peer.muid}`)
-        } catch (error: any) {
+        } catch (error) {
             // Gracefully handle failures (don't break exchange process)
-            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}:`, error.message)
+            const message = error instanceof Error ? error.message : String(error)
+            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}:`, message)
         }
     })
 

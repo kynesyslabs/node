@@ -94,6 +94,52 @@ function logLagrange(logger: any, Fr: any, L: any[]) {
     }
 }
 
+async function initializeCurve(vk_verifier: any) {
+    // CRITICAL: Use singleThread to avoid Bun worker crashes
+    return await getCurveFromName(vk_verifier.curve, { singleThread: true })
+}
+
+function validateInputs(vk_verifier: any, publicSignals: any[], proof: any, curve: any, logger?: any): boolean {
+    if (!isWellConstructed(curve, proof)) {
+        if (logger) logger.error("Proof is not well constructed")
+        return false
+    }
+
+    if (publicSignals.length !== vk_verifier.nPublic) {
+        if (logger) logger.error("Invalid number of public inputs")
+        return false
+    }
+    return true
+}
+
+function performCalculations(curve: any, proof: any, publicSignals: any[], vk_verifier: any, logger?: any) {
+    const Fr = curve.Fr
+    const G1 = curve.G1
+
+    const challenges = calculateChallenges(curve, proof, publicSignals, vk_verifier)
+    if (logger) logChallenges(logger, Fr, challenges)
+
+    const L = calculateLagrangeEvaluations(curve, challenges, vk_verifier)
+    if (logger) logLagrange(logger, Fr, L)
+
+    const pi = calculatePI(curve, publicSignals, L)
+    if (logger) logger.debug("PI(xi): " + Fr.toString(pi, 16))
+
+    const r0 = calculateR0(curve, proof, challenges, pi, L[1])
+    const D = calculateD(curve, proof, challenges, vk_verifier, L[1])
+    const F = calculateF(curve, proof, challenges, vk_verifier, D)
+    const E = calculateE(curve, proof, challenges, r0)
+
+    if (logger) {
+        logger.debug("r0: " + Fr.toString(r0, 16))
+        logger.debug("D: " + G1.toString(G1.toAffine(D), 16))
+        logger.debug("F: " + G1.toString(G1.toAffine(F), 16))
+        logger.debug("E: " + G1.toString(G1.toAffine(E), 16))
+    }
+
+    return { challenges, E, F }
+}
+
 /**
  * Verify a PLONK proof (Bun-compatible, single-threaded)
  * 
@@ -109,59 +155,21 @@ export async function plonkVerifyBun(
     let curve: any = null
     
     try {
-        let vk_verifier = unstringifyBigInts(_vk_verifier)
+        const vk_verifier_raw = unstringifyBigInts(_vk_verifier)
         const proofRaw = unstringifyBigInts(_proof)
         const publicSignals = unstringifyBigInts(_publicSignals)
 
-        // CRITICAL: Use singleThread to avoid Bun worker crashes
-        curve = await getCurveFromName(vk_verifier.curve, { singleThread: true })
-
-        const Fr = curve.Fr
-        const G1 = curve.G1
-
+        curve = await initializeCurve(vk_verifier_raw)
         if (logger) logger.info("PLONK VERIFIER STARTED (Bun-compatible)")
 
         const proof = fromObjectProof(curve, proofRaw)
-        vk_verifier = fromObjectVk(curve, vk_verifier)
+        const vk_verifier = fromObjectVk(curve, vk_verifier_raw)
 
-        if (!isWellConstructed(curve, proof)) {
-            if (logger) logger.error("Proof is not well constructed")
+        if (!validateInputs(vk_verifier, publicSignals, proof, curve, logger)) {
             return false
         }
 
-        if (publicSignals.length !== vk_verifier.nPublic) {
-            if (logger) logger.error("Invalid number of public inputs")
-            return false
-        }
-
-        const challenges = calculateChallenges(curve, proof, publicSignals, vk_verifier)
-
-        if (logger) {
-            logChallenges(logger, Fr, challenges)
-        }
-
-        const L = calculateLagrangeEvaluations(curve, challenges, vk_verifier)
-        
-        if (logger) {
-            logLagrange(logger, Fr, L)
-        }
-
-        const pi = calculatePI(curve, publicSignals, L)
-        if (logger) {
-            logger.debug("PI(xi): " + Fr.toString(pi, 16))
-        }
-
-        const r0 = calculateR0(curve, proof, challenges, pi, L[1])
-        const D = calculateD(curve, proof, challenges, vk_verifier, L[1])
-        const F = calculateF(curve, proof, challenges, vk_verifier, D)
-        const E = calculateE(curve, proof, challenges, r0)
-
-        if (logger) {
-            logger.debug("r0: " + Fr.toString(r0, 16))
-            logger.debug("D: " + G1.toString(G1.toAffine(D), 16))
-            logger.debug("F: " + G1.toString(G1.toAffine(F), 16))
-            logger.debug("E: " + G1.toString(G1.toAffine(E), 16))
-        }
+        const { challenges, E, F } = performCalculations(curve, proof, publicSignals, vk_verifier, logger)
 
         const res = await isValidPairing(curve, proof, challenges, vk_verifier, E, F)
 

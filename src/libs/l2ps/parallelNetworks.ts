@@ -155,8 +155,9 @@ export default class ParallelNetworks {
             nodeConfig = JSON.parse(
                 fs.readFileSync(configPath, "utf8"),
             )
-        } catch (error: any) {
-            throw new Error(`Failed to parse L2PS config for ${uid}: ${error.message}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            throw new Error(`Failed to parse L2PS config for ${uid}: ${message}`)
         }
 
         if (!nodeConfig.uid || !nodeConfig.enabled) {
@@ -205,8 +206,9 @@ export default class ParallelNetworks {
     async getL2PS(uid: string): Promise<L2PS | undefined> {
         try {
             return await this.loadL2PS(uid)
-        } catch (error: any) {
-            log.error(`[L2PS] Failed to load L2PS ${uid}: ${error?.message || error}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             return undefined
         }
     }
@@ -242,8 +244,9 @@ export default class ParallelNetworks {
                 await this.loadL2PS(uid)
                 l2psJoinedUids.push(uid)
                 log.info(`[L2PS] Loaded L2PS: ${uid}`)
-            } catch (error: any) {
-                log.error(`[L2PS] Failed to load L2PS ${uid}: ${error?.message || error}`)
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             }
         }
         getSharedState.l2psJoinedUids = l2psJoinedUids
@@ -344,8 +347,9 @@ export default class ParallelNetworks {
                 const encryptedPayload = payload as L2PSEncryptedPayload
                 return encryptedPayload.l2ps_uid
             }
-        } catch (error: any) {
-            log.error(`[L2PS] Error extracting L2PS UID from transaction: ${error?.message || error}`)
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS] Error extracting L2PS UID from transaction: ${message}`)
         }
 
         return undefined
@@ -401,10 +405,11 @@ export default class ParallelNetworks {
                 l2ps_uid: l2psUid,
                 processed: true,
             }
-        } catch (error: any) {
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
             return {
                 success: false,
-                error: `Failed to process L2PS transaction: ${error.message}`,
+                error: `Failed to process L2PS transaction: ${message}`,
             }
         }
     }
