@@ -98,6 +98,10 @@ export default async function handlePayOperation(
             result = await handleAptosPayRest(operation)
             break
 
+        case "tron":
+            result = await genericJsonRpcPay(multichain.TRON, rpcUrl, operation)
+            break
+
         default:
             result = {
                 result: "error",
