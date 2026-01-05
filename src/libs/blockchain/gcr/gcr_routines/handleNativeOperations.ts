@@ -161,7 +161,8 @@ export class HandleNativeOperations {
 
             default: {
                 // Log unknown operations - INativePayload may have more operations than handled here
-                log.warning("Unknown native operation: " + nativePayload.nativeOperation)
+                // Cast needed because TypeScript narrows to never after exhaustive switch
+                log.warning("Unknown native operation: " + (nativePayload as INativePayload).nativeOperation)
                 break
             }
         }
