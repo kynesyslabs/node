@@ -520,13 +520,17 @@ export class TUIManager extends EventEmitter {
                 this.setActiveTab(10) // DAHR tab
                 break
 
-            case "=":
-                this.setActiveTab(11) // TLSN tab
+            case "=": {
+                const idx = TABS.findIndex(t => t.category === "TLSN")
+                if (idx >= 0) this.setActiveTab(idx)
                 break
+            }
 
-            case "\\":
-                this.setActiveTab(12) // CMD tab
+            case "\\": {
+                const idx = TABS.findIndex(t => t.category === "CMD")
+                if (idx >= 0) this.setActiveTab(idx)
                 break
+            }
 
             // Tab navigation
             case "TAB":
