@@ -3,7 +3,7 @@ import { GCREdit } from "node_modules/@kynesyslabs/demosdk/build/types/blockchai
 import { Transaction } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import log from "src/utilities/logger"
-import { createToken, extractDomain, getToken, markStored, TokenStatus } from "@/features/tlsnotary/tokenManager"
+import { extractDomain, getToken, markStored, TokenStatus } from "@/features/tlsnotary/tokenManager"
 
 // REVIEW: TLSNotary native operation pricing (1 DEM = 1 unit, no decimals)
 const TLSN_REQUEST_FEE = 1
@@ -75,24 +75,8 @@ export class HandleNativeOperations {
                 }
                 edits.push(burnFeeEdit)
 
-                // Create the attestation token (only if not a rollback)
-                // Token creation is side-effect that happens during tx processing
-                if (!isRollback) {
-                    try {
-                        const token = createToken(
-                            tx.content.from as string,
-                            targetUrl,
-                            tx.hash,
-                        )
-                        log.info(`[TLSNotary] Created token ${token.id} for tx ${tx.hash}`)
-                        // Token ID is stored in the transaction result/logs
-                        // The SDK will extract it from the tx response
-                    } catch (tokenError) {
-                        log.error(`[TLSNotary] Failed to create token: ${tokenError}`)
-                        // Propagate failure to abort transaction - fee should not be burned without token
-                        throw tokenError
-                    }
-                }
+                // Token creation is handled as a native side-effect during mempool simulation
+                // in `HandleGCR.processNativeSideEffects()` to avoid duplicate tokens.
                 break
             }
 
