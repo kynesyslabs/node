@@ -644,16 +644,29 @@ export class DTRManager {
     static async waitForBlockThenRelay() {
         let cvsa: string
 
-        try {
-            cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 30_000)
-            log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
-        } catch (error) {
-            log.error("[waitForBlockThenRelay] Error waiting for block")
-            console.error("waitForBlockThenRelay error: " + error)
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            try {
+                cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 30_000)
+                log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
+                break
+            } catch (error) {
+                if (!getSharedState.inConsensusLoop) {
+                    const { commonValidatorSeed } =
+                        await getCommonValidatorSeed()
+                    cvsa = commonValidatorSeed
+                    break
+                }
+
+                log.error(
+                    "[waitForBlockThenRelay] Error waiting for block, retrying...",
+                )
+            }
         }
 
-        const txs = Array.from(DTRManager.validityDataCache.values())
         const validators = await getShard(cvsa)
+
+        const txs = Array.from(DTRManager.validityDataCache.values())
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
