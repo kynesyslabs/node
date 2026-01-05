@@ -2,6 +2,7 @@
 import log from "src/utilities/logger"
 import { Socket } from "net"
 import * as ed25519 from "@noble/ed25519"
+import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
@@ -20,6 +21,7 @@ import {
     AuthenticationError,
     SigningError,
 } from "../types/errors"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * PeerConnection manages a single TCP connection to a peer node
@@ -215,10 +217,23 @@ export class PeerConnection {
         // Sign with Ed25519
         let signature: Uint8Array
         try {
-            signature = await ed25519.sign(dataToSign, privateKey)
+            // signature = await ed25519.sign(dataToSign, privateKey)
+            signature = forge.pki.ed25519.sign({
+                message: dataToSign,
+                privateKey: getSharedState.keypair.privateKey as Uint8Array,
+            })
+
+            // verify the signature using noble/ed25519
+            const valid = await ed25519.verify(signature, dataToSign, publicKey)
+            if (!valid) {
+                throw new Error("Ed25519 signature verification failed")
+                process.exit(1)
+            }
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${privateKey.length} bytes): ${error instanceof Error ? error.message : error}`,
+                `Ed25519 signing failed (privateKey length: ${
+                    privateKey.length
+                } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )
         }
@@ -258,7 +273,11 @@ export class PeerConnection {
                 payloadLength: payload.length,
             }
 
-            const messageBuffer = MessageFramer.encodeMessage(header, payload, auth)
+            const messageBuffer = MessageFramer.encodeMessage(
+                header,
+                payload,
+                auth,
+            )
             this.socket!.write(messageBuffer)
 
             this.lastActivity = Date.now()
@@ -328,7 +347,7 @@ export class PeerConnection {
         }
 
         // Close socket
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             if (this.socket) {
                 this.socket.once("close", () => {
                     this.setState("CLOSED")
@@ -406,7 +425,9 @@ export class PeerConnection {
             // This is an unsolicited message (e.g., broadcast, push notification)
             // Wave 8.1: Log for now, will handle in Wave 8.4 (push message support)
             log.warning(
-                `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(16)}, sequence=${header.sequence}`,
+                `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(
+                    16,
+                )}, sequence=${header.sequence}`,
             )
         }
     }
