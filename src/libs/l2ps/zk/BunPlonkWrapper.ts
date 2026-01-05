@@ -27,8 +27,8 @@ const POLYNOMIAL = 0
 const SCALAR = 1
 
 class Keccak256Transcript {
-    private G1: any
-    private Fr: any
+    private readonly G1: any
+    private readonly Fr: any
     private data: Array<{ type: number; data: any }>
 
     constructor(curve: any) {
@@ -62,18 +62,35 @@ class Keccak256Transcript {
         const buffer = new Uint8Array(nScalars * this.Fr.n8 + nPolynomials * this.G1.F.n8 * 2)
         let offset = 0
 
-        for (let i = 0; i < this.data.length; i++) {
-            if (POLYNOMIAL === this.data[i].type) {
-                this.G1.toRprUncompressed(buffer, offset, this.data[i].data)
+        for (const item of this.data) {
+            if (POLYNOMIAL === item.type) {
+                this.G1.toRprUncompressed(buffer, offset, item.data)
                 offset += this.G1.F.n8 * 2
             } else {
-                this.Fr.toRprBE(buffer, offset, this.data[i].data)
+                this.Fr.toRprBE(buffer, offset, item.data)
                 offset += this.Fr.n8
             }
         }
 
         const value = Scalar.fromRprBE(new Uint8Array(keccak256.arrayBuffer(buffer)))
         return this.Fr.e(value)
+    }
+}
+
+function logChallenges(logger: any, Fr: any, challenges: any) {
+    logger.debug("beta: " + Fr.toString(challenges.beta, 16))
+    logger.debug("gamma: " + Fr.toString(challenges.gamma, 16))
+    logger.debug("alpha: " + Fr.toString(challenges.alpha, 16))
+    logger.debug("xi: " + Fr.toString(challenges.xi, 16))
+    for (let i = 1; i < 6; i++) {
+        logger.debug("v: " + Fr.toString(challenges.v[i], 16))
+    }
+    logger.debug("u: " + Fr.toString(challenges.u, 16))
+}
+
+function logLagrange(logger: any, Fr: any, L: any[]) {
+    for (let i = 1; i < L.length; i++) {
+        logger.debug(`L${i}(xi)=` + Fr.toString(L[i], 16))
     }
 }
 
@@ -120,22 +137,13 @@ export async function plonkVerifyBun(
         const challenges = calculateChallenges(curve, proof, publicSignals, vk_verifier)
 
         if (logger) {
-            logger.debug("beta: " + Fr.toString(challenges.beta, 16))
-            logger.debug("gamma: " + Fr.toString(challenges.gamma, 16))
-            logger.debug("alpha: " + Fr.toString(challenges.alpha, 16))
-            logger.debug("xi: " + Fr.toString(challenges.xi, 16))
-            for (let i = 1; i < 6; i++) {
-                logger.debug("v: " + Fr.toString(challenges.v[i], 16))
-            }
-            logger.debug("u: " + Fr.toString(challenges.u, 16))
+            logChallenges(logger, Fr, challenges)
         }
 
         const L = calculateLagrangeEvaluations(curve, challenges, vk_verifier)
         
         if (logger) {
-            for (let i = 1; i < L.length; i++) {
-                logger.debug(`L${i}(xi)=` + Fr.toString(L[i], 16))
-            }
+            logLagrange(logger, Fr, L)
         }
 
         const pi = calculatePI(curve, publicSignals, L)
@@ -144,22 +152,14 @@ export async function plonkVerifyBun(
         }
 
         const r0 = calculateR0(curve, proof, challenges, pi, L[1])
+        const D = calculateD(curve, proof, challenges, vk_verifier, L[1])
+        const F = calculateF(curve, proof, challenges, vk_verifier, D)
+        const E = calculateE(curve, proof, challenges, r0)
+
         if (logger) {
             logger.debug("r0: " + Fr.toString(r0, 16))
-        }
-
-        const D = calculateD(curve, proof, challenges, vk_verifier, L[1])
-        if (logger) {
             logger.debug("D: " + G1.toString(G1.toAffine(D), 16))
-        }
-
-        const F = calculateF(curve, proof, challenges, vk_verifier, D)
-        if (logger) {
             logger.debug("F: " + G1.toString(G1.toAffine(F), 16))
-        }
-
-        const E = calculateE(curve, proof, challenges, r0)
-        if (logger) {
             logger.debug("E: " + G1.toString(G1.toAffine(E), 16))
         }
 
@@ -176,7 +176,8 @@ export async function plonkVerifyBun(
         return res
 
     } catch (error) {
-        console.error("PLONK Verify error:", error)
+        const message = error instanceof Error ? error.message : String(error)
+        console.error("PLONK Verify error:", message)
         return false
     } finally {
         // Terminate curve to prevent memory leaks
@@ -258,8 +259,8 @@ function calculateChallenges(curve: any, proof: any, publicSignals: any[], vk: a
     transcript.addPolCommitment(vk.S2)
     transcript.addPolCommitment(vk.S3)
 
-    for (let i = 0; i < publicSignals.length; i++) {
-        transcript.addScalar(Fr.e(publicSignals[i]))
+    for (const signal of publicSignals) {
+        transcript.addScalar(Fr.e(signal))
     }
 
     transcript.addPolCommitment(proof.A)
@@ -340,8 +341,8 @@ function calculatePI(curve: any, publicSignals: any[], L: any[]) {
     const Fr = curve.Fr
 
     let pi = Fr.zero
-    for (let i = 0; i < publicSignals.length; i++) {
-        const w = Fr.e(publicSignals[i])
+    for (const [i, signal] of publicSignals.entries()) {
+        const w = Fr.e(signal)
         pi = Fr.sub(pi, Fr.mul(w, L[i + 1]))
     }
     return pi

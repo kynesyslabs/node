@@ -6,7 +6,7 @@ import log from "@/utilities/logger"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getNetworkTimestamp } from "@/libs/utils/calibrateTime"
 import crypto from "crypto"
-import { L2PSBatchProver, BatchProof } from "@/libs/l2ps/zk/L2PSBatchProver"
+import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 
 /**
  * L2PS Batch Payload Interface
@@ -250,7 +250,8 @@ export class L2PSBatchAggregator {
             
         } catch (error: any) {
             this.stats.failedCycles++
-            log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${error instanceof Error ? error.message : String(error)}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
             
         } finally {
             this.isAggregating = false
@@ -660,7 +661,8 @@ export class L2PSBatchAggregator {
             return true
 
         } catch (error: any) {
-            log.error(`[L2PS Batch Aggregator] Error submitting batch to mempool: ${error.message || error}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Batch Aggregator] Error submitting batch to mempool: ${message}`)
             if (error.stack) {
                 log.debug(`[L2PS Batch Aggregator] Stack trace: ${error.stack}`)
             }

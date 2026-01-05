@@ -162,10 +162,11 @@ export default class L2PSProofManager {
                 transactions_hash: transactionsHash
             }
         } catch (error: any) {
-            log.error(`[L2PS ProofManager] Failed to create proof: ${error.message}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS ProofManager] Failed to create proof: ${message}`)
             return {
                 success: false,
-                message: `Proof creation failed: ${error.message}`
+                message: `Proof creation failed: ${message}`
             }
         }
     }

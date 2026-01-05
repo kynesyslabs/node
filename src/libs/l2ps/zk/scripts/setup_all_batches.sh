@@ -30,13 +30,14 @@ download_ptau() {
     local file="powersOfTau28_hez_final_${size}.ptau"
     local url="https://storage.googleapis.com/zkevm/ptau/$file"
     
-    if [ ! -f "$PTAU_DIR/$file" ] || [ $(stat -c%s "$PTAU_DIR/$file") -lt 1000000 ]; then
+    if [[ ! -f "$PTAU_DIR/$file" ]] || [[ $(stat -c%s "$PTAU_DIR/$file") -lt 1000000 ]]; then
         echo -e "${YELLOW}Downloading pot${size}...${NC}"
         rm -f "$PTAU_DIR/$file"
         curl -L -o "$PTAU_DIR/$file" "$url"
     else
         echo "pot${size} already exists"
     fi
+    return 0
 }
 
 # Download ptau files (16=64MB, 17=128MB)
@@ -78,6 +79,7 @@ setup_batch() {
         "$output_dir/verification_key.json"
     
     echo -e "${GREEN}✓ batch_${size} setup complete${NC}"
+    return 0
 }
 
 # Setup all batch sizes

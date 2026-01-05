@@ -7,7 +7,7 @@
  */
 
 // Bun compatibility: patch web-worker before importing snarkjs
-const isBun = typeof (globalThis as any).Bun !== 'undefined';
+const isBun = (globalThis as any).Bun !== undefined;
 if (isBun) {
     // Suppress web-worker errors in Bun by patching dispatchEvent
     const originalDispatchEvent = EventTarget.prototype.dispatchEvent;
@@ -24,9 +24,9 @@ if (isBun) {
 
 import * as snarkjs from 'snarkjs';
 import { buildPoseidon } from 'circomlibjs';
-import * as path from 'path';
-import * as fs from 'fs';
-import { fileURLToPath } from 'url';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { plonkVerifyBun } from './BunPlonkWrapper.js';
 import log from '@/utilities/logger';
 
@@ -65,8 +65,8 @@ export interface BatchProof {
 export class L2PSBatchProver {
     private poseidon: any;
     private initialized = false;
-    private keysDir: string;
-    private loadedKeys: Map<BatchSize, { zkey: any; wasm: string }> = new Map();
+    private readonly keysDir: string;
+    private readonly loadedKeys: Map<BatchSize, { zkey: any; wasm: string }> = new Map();
 
     constructor(keysDir?: string) {
         this.keysDir = keysDir || path.join(__dirname, 'keys');
@@ -137,8 +137,9 @@ export class L2PSBatchProver {
      * Load circuit keys for a specific batch size
      */
     private async loadKeys(batchSize: BatchSize): Promise<{ zkey: any; wasm: string }> {
-        if (this.loadedKeys.has(batchSize)) {
-            return this.loadedKeys.get(batchSize)!;
+        const existing = this.loadedKeys.get(batchSize);
+        if (existing) {
+            return existing;
         }
 
         const batchDir = path.join(this.keysDir, `batch_${batchSize}`);
@@ -296,7 +297,7 @@ export class L2PSBatchProver {
         const startTime = Date.now();
         
         // Use Bun-compatible wrapper (uses singleThread mode to avoid worker crashes)
-        const isBun = typeof (globalThis as any).Bun !== 'undefined';
+        const isBun = (globalThis as any).Bun !== undefined;
         let valid: boolean;
         
         if (isBun) {
