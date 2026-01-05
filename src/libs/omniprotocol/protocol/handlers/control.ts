@@ -82,7 +82,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         log.info(`[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`)
 
         // ServerHandlers.handleMempool expects content with .data property
-        const content = request.params[0] ?? { data: [] }
+        const mempoolParams = Array.isArray(request.params) ? request.params : []
+        const content = mempoolParams[0] ?? { data: [] }
         const response = await serverHandlers.handleMempool(content)
 
         return encodeNodeCallResponse({
@@ -100,7 +101,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
 
         log.debug(`[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`)
 
-        const helloPeerRequest = request.params[0]
+        const params = Array.isArray(request.params) ? request.params : []
+        const helloPeerRequest = params[0]
         if (!helloPeerRequest || typeof helloPeerRequest !== "object") {
             return encodeNodeCallResponse({
                 status: 400,
@@ -129,7 +131,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         )
 
         // Extract the inner consensus method from params[0]
-        const consensusPayload = request.params[0]
+        const consensusParams = Array.isArray(request.params) ? request.params : []
+        const consensusPayload = consensusParams[0]
         if (!consensusPayload || typeof consensusPayload !== "object") {
             return encodeNodeCallResponse({
                 status: 400,
