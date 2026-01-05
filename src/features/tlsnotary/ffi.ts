@@ -169,6 +169,9 @@ export class TLSNotaryFFI {
   private initialized = false
   private serverRunning = false
   private readonly config: NotaryConfig
+  // Strong references to buffers passed to native code to prevent GC
+  private _signingKey: Uint8Array | null = null
+  private _configBuffer: Uint8Array | null = null
 
   /**
    * Create a new TLSNotary FFI instance
@@ -219,8 +222,9 @@ export class TLSNotaryFFI {
     const configBuffer = new ArrayBuffer(40)
     const configView = new DataView(configBuffer)
 
-    // Get pointer to signing key (must keep the Uint8Array alive)
-    const signingKeyPtr = ptr(this.config.signingKey)
+    // Store strong reference to signing key to prevent GC while native code holds pointer
+    this._signingKey = this.config.signingKey
+    const signingKeyPtr = ptr(this._signingKey)
 
     // Write struct fields (little-endian)
     configView.setBigUint64(0, BigInt(signingKeyPtr), true) // signing_key ptr
@@ -229,7 +233,9 @@ export class TLSNotaryFFI {
     configView.setBigUint64(24, BigInt(this.config.maxRecvData ?? 65536), true) // max_recv_data
     configView.setUint16(32, 0, true) // server_port (0 = don't auto-start)
 
-    const configPtr = ptr(new Uint8Array(configBuffer))
+    // Store strong reference to config buffer to prevent GC
+    this._configBuffer = new Uint8Array(configBuffer)
+    const configPtr = ptr(this._configBuffer)
     this.handle = this.lib.symbols.tlsn_notary_create(configPtr) as number
 
     if (this.handle === 0 || this.handle === null) {
@@ -444,6 +450,9 @@ export class TLSNotaryFFI {
       this.lib.symbols.tlsn_notary_destroy(this.handle as any)
       this.handle = null
     }
+    // Clear buffer references after native handle is released
+    this._signingKey = null
+    this._configBuffer = null
     this.initialized = false
     this.serverRunning = false
   }
