@@ -1,3 +1,5 @@
+import { inspect } from "node:util"
+
 export function getErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message) {
         return error.message
@@ -17,6 +19,6 @@ export function getErrorMessage(error: unknown): string {
     try {
         return JSON.stringify(error)
     } catch {
-        return String(error)
+        return inspect(error, { depth: 2 })
     }
 }

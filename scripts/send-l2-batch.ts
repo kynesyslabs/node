@@ -111,17 +111,23 @@ function parseArgs(argv: string[]): CliOptions {
         },
     }
 
-    for (let idx = 2; idx < argv.length; idx++) {
+    let idx = 2
+    while (idx < argv.length) {
         const arg = argv[idx]
-        if (!arg.startsWith("--")) continue
+        if (!arg.startsWith("--")) {
+            idx += 1
+            continue
+        }
 
         const handler = flagHandlers[arg]
         if (!handler) {
             throw new Error(`Unknown argument: ${arg}`)
         }
 
-        const value = argsWithValues.has(arg) ? argv[++idx] : undefined
+        const hasValue = argsWithValues.has(arg)
+        const value = hasValue ? argv[idx + 1] : undefined
         handler(value)
+        idx += hasValue ? 2 : 1
     }
 
     if (!options.uid) {
