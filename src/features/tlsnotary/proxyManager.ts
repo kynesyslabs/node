@@ -171,11 +171,16 @@ export function extractDomainAndPort(targetUrl: string): {
  * @returns WebSocket URL like "ws://node.demos.sh:55123"
  */
 export function getPublicUrl(localPort: number, requestOrigin?: string): string {
+  const build = (base: string) => {
+    const url = new URL(base)
+    const wsScheme = url.protocol === "https:" ? "wss" : "ws"
+    return `${wsScheme}://${url.hostname}:${localPort}`
+  }
+
   // 1. Try auto-detect from request origin (if available in headers)
   if (requestOrigin) {
     try {
-      const url = new URL(requestOrigin)
-      return `ws://${url.hostname}:${localPort}`
+      return build(requestOrigin)
     } catch {
       // Invalid origin, continue to fallback
     }
@@ -184,8 +189,7 @@ export function getPublicUrl(localPort: number, requestOrigin?: string): string 
   // 2. Fall back to EXPOSED_URL
   if (process.env.EXPOSED_URL) {
     try {
-      const url = new URL(process.env.EXPOSED_URL)
-      return `ws://${url.hostname}:${localPort}`
+      return build(process.env.EXPOSED_URL)
     } catch {
       // Invalid EXPOSED_URL, continue to fallback
     }
@@ -194,8 +198,7 @@ export function getPublicUrl(localPort: number, requestOrigin?: string): string 
   // 3. Fall back to sharedState.exposedUrl
   const sharedState = getSharedState
   try {
-    const url = new URL(sharedState.exposedUrl)
-    return `ws://${url.hostname}:${localPort}`
+    return build(sharedState.exposedUrl)
   } catch {
     // Last resort: localhost
     return `ws://localhost:${localPort}`
