@@ -151,6 +151,10 @@ export class BroadcastManager {
         const successful = responses.filter(res => res.result.result === 200)
 
         for (const res of responses) {
+            if (res.result.result !== 200) {
+                continue
+            }
+
             await this.handleUpdatePeerSyncData(
                 res.pubkey,
                 res.result.response.syncData,
