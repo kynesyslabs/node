@@ -47,6 +47,7 @@ export class ConnectionPool {
 
     /**
      * Acquire a connection to a peer (create if needed)
+     * 
      * @param peerIdentity Peer public key or identifier
      * @param connectionString Connection string (e.g., "tcp://ip:port")
      * @param options Connection options
@@ -302,7 +303,13 @@ export class ConnectionPool {
     ): PeerConnection | null {
         const peerConnections = this.connections.get(peerIdentity)
         if (!peerConnections) {
+            log.only("NO CONNECTIONS FOR " + peerIdentity)
             return null
+        }
+
+        log.only("FINDING READY CONNECTION FOR " + peerIdentity)
+        for (const conn of peerConnections) {
+            log.only("CONNECTION STATE: " + conn.getState())
         }
 
         // Find first READY connection
