@@ -117,8 +117,13 @@ export class HandleNativeOperations {
                     break
                 }
 
-                // Calculate storage fee: base + per KB
-                const proofSizeKB = Math.ceil(proof.length / 1024)
+                // Calculate storage fee: base + per KB (use byte length, not string length)
+                const proofBytes =
+                    typeof proof === "string"
+                        ? Buffer.byteLength(proof, "utf8")
+                        : (proof as Uint8Array).byteLength
+
+                const proofSizeKB = Math.ceil(proofBytes / 1024)
                 const storageFee = TLSN_STORE_BASE_FEE + (proofSizeKB * TLSN_STORE_PER_KB_FEE)
                 log.info(`[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} DEM`)
 
