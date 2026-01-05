@@ -53,14 +53,27 @@ export async function isPortAvailable(port: number): Promise<boolean> {
     const server = net.createServer()
     let settled = false
 
+    const timer = setTimeout(() => {
+      try {
+        server.close()
+      } finally {
+        finish(false)
+      }
+    }, PORT_CONFIG.SPAWN_TIMEOUT_MS)
+
     const finish = (available: boolean) => {
       if (settled) return
       settled = true
+      clearTimeout(timer)
       resolve(available)
     }
 
     server.once("error", () => {
-      server.close(() => finish(false))
+      try {
+        server.close()
+      } finally {
+        finish(false)
+      }
     })
 
     server.once("listening", () => {
