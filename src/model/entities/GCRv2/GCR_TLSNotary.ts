@@ -34,8 +34,15 @@ export class GCRTLSNotary {
     @Column({ type: "text", name: "txhash" })
     txhash: string
 
-    @Column({ type: "bigint", name: "proofTimestamp" })
-    proofTimestamp: number
+    @Column({
+        type: "bigint",
+        name: "proofTimestamp",
+        transformer: {
+            to: (v: string) => v,
+            from: (v: string | number) => String(v),
+        },
+    })
+    proofTimestamp: string
 
     @CreateDateColumn({ type: "timestamp", name: "createdAt" })
     createdAt: Date

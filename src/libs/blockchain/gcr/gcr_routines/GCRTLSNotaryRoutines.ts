@@ -71,7 +71,7 @@ export class GCRTLSNotaryRoutines {
             proofEntry.proof = tlsnEdit.data.proof
             proofEntry.storageType = tlsnEdit.data.storageType
             proofEntry.txhash = tlsnEdit.txhash
-            proofEntry.proofTimestamp = tlsnEdit.data.timestamp
+            proofEntry.proofTimestamp = String(tlsnEdit.data.timestamp)
 
             if (!simulate) {
                 try {
