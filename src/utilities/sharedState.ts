@@ -32,7 +32,7 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-    shardSize = parseInt(process.env.SHARD_SIZE) || 4
+    shardSize = parseInt(process.env.SHARD_SIZE) || 2
     mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
 
     // NOTE See calibrateTime.ts for this value
