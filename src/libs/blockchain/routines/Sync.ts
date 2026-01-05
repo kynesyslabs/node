@@ -283,7 +283,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     // REVIEW Insert the txs into the transactions database table
     if (txs.length > 0) {
         log.info("[fastSync] Inserting transactions into the database", true)
-        const success = await Chain.insertTransactions(txs)
+        const success = await Chain.insertTransactionsFromSync(txs)
         if (success) {
             log.info("[fastSync] Transactions inserted successfully")
             return true

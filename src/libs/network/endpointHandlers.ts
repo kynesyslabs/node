@@ -433,93 +433,84 @@ export default class ServerHandlers {
             // REVIEW We add the transaction to the mempool
             // DTR: Check if we should relay instead of storing locally (Production only)
             log.debug("PROD: " + getSharedState.PROD)
-            if (getSharedState.PROD) {
-                const { isValidator, validators } =
-                    await isValidatorForNextBlock()
+            const { isValidator, validators } = await isValidatorForNextBlock()
 
-                if (!isValidator) {
-                    log.debug(
-                        "[DTR] Non-validator node: attempting relay to all validators",
-                    )
-                    const availableValidators = validators.sort(
-                        () => Math.random() - 0.5,
-                    ) // Random order for load balancing
-
-                    log.debug(
-                        `[DTR] Found ${availableValidators.length} available validators, trying all`,
-                    )
-
-                    // Try ALL validators in random order
-                    const results = await Promise.allSettled(
-                        availableValidators.map(validator =>
-                            DTRManager.relayTransactions(validator, [
-                                validatedData,
-                            ]),
-                        ),
-                    )
-
-                    for (const result of results) {
-                        if (result.status === "fulfilled") {
-                            const response = result.value
-                            if (response.result == 200) {
-                                continue
-                            }
-
-                            // TODO: Handle response codes individually
-                            DTRManager.validityDataCache.set(
-                                response.extra.peer,
-                                validatedData,
-                            )
-                        }
-                    }
-
-                    return {
-                        success: true,
-                        response: {
-                            message: "Transaction relayed to validators",
-                        },
-                        extra: {
-                            confirmationBlock:
-                                getSharedState.lastBlockNumber + 2,
-                        },
-                        require_reply: false,
-                    }
-                }
-
-                if (getSharedState.inConsensusLoop) {
-                    log.debug(
-                        "in consensus loop, setting tx in cache: " +
-                            queriedTx.hash,
-                    )
-                    DTRManager.validityDataCache.set(
-                        queriedTx.hash,
-                        validatedData,
-                    )
-
-                    // INFO: Start the relay waiter
-                    if (!DTRManager.isWaitingForBlock) {
-                        log.debug("not waiting for block, starting relay")
-                        DTRManager.waitForBlockThenRelay()
-                    }
-
-                    return {
-                        success: true,
-                        response: {
-                            message: "Transaction relayed to validators",
-                        },
-                        extra: {
-                            confirmationBlock:
-                                getSharedState.lastBlockNumber + 2,
-                        },
-                        require_reply: false,
-                    }
-                }
+            if (!isValidator) {
+                log.debug(
+                    "[DTR] Non-validator node: attempting relay to all validators",
+                )
+                const availableValidators = validators.sort(
+                    () => Math.random() - 0.5,
+                ) // Random order for load balancing
 
                 log.debug(
-                    "👀 not in consensus loop, adding tx to mempool: " +
-                        queriedTx.hash,
+                    `[DTR] Found ${availableValidators.length} available validators, trying all`,
                 )
+
+                // Try ALL validators in random order
+                const results = await Promise.allSettled(
+                    availableValidators.map(validator =>
+                        DTRManager.relayTransactions(validator, [
+                            validatedData,
+                        ]),
+                    ),
+                )
+
+                for (const result of results) {
+                    if (result.status === "fulfilled") {
+                        const response = result.value
+                        if (response.result == 200) {
+                            continue
+                        }
+
+                        // TODO: Handle response codes individually
+                        DTRManager.validityDataCache.set(
+                            response.extra.peer,
+                            validatedData,
+                        )
+                    }
+                }
+
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                    },
+                    require_reply: false,
+                }
             }
+
+            if (getSharedState.inConsensusLoop) {
+                log.debug(
+                    "in consensus loop, setting tx in cache: " + queriedTx.hash,
+                )
+                DTRManager.validityDataCache.set(queriedTx.hash, validatedData)
+
+                // INFO: Start the relay waiter
+                if (!DTRManager.isWaitingForBlock) {
+                    log.debug("not waiting for block, starting relay")
+                    DTRManager.waitForBlockThenRelay()
+                }
+
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                    },
+                    require_reply: false,
+                }
+            }
+
+            log.debug(
+                "👀 not in consensus loop, adding tx to mempool: " +
+                    queriedTx.hash,
+            )
 
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)
             log.debug(
