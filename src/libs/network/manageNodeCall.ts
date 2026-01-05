@@ -552,26 +552,30 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 const publicKey = service.getPublicKeyHex()
                 const port = service.getPort()
 
-                // Extract host from exposedUrl for notary WebSocket URLs
+                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+
+                // Extract host and determine WebSocket scheme from exposedUrl
                 // The node's host is used - SDK connects to the same host it's already connected to
                 let nodeHost = "localhost"
-                try {
-                    const exposedUrl = getSharedState.exposedUrl
-                    if (exposedUrl) {
-                        const url = new URL(exposedUrl)
-                        nodeHost = url.hostname
+                const wsScheme = (() => {
+                    try {
+                        const exposedUrl = getSharedState.exposedUrl
+                        if (exposedUrl) {
+                            const url = new URL(exposedUrl)
+                            nodeHost = url.hostname
+                            return url.protocol === "https:" ? "wss" : "ws"
+                        }
+                    } catch {
+                        // Fall back to localhost and ws if URL parsing fails
                     }
-                } catch {
-                    // Fall back to localhost if URL parsing fails
-                }
+                    return "ws"
+                })()
 
                 // Build the notary WebSocket URL - Port is the TLSNotary WebSocket port
-                const notaryUrl = `wss://${nodeHost}:${port}`
+                const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
 
-                // WebSocket proxy URL for TCP tunneling (browser needs this to connect to arbitrary hosts)
-                // This uses a separate port - typically 55688 or configured via TLSNOTARY_PROXY_PORT
-                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
-                const proxyUrl = `wss://${nodeHost}:${proxyPort}`
+                // WebSocket proxy URL for TCP tunneling
+                const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
 
                 response.response = {
                     notaryUrl,
