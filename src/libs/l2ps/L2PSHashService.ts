@@ -173,7 +173,7 @@ export class L2PSHashService {
             
         } catch (error: any) {
             this.stats.failedCycles++
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Hash Service] Hash generation cycle failed: ${message}`)
             
         } finally {
@@ -207,7 +207,7 @@ export class L2PSHashService {
             }
 
         } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Hash Service] Error in hash generation: ${message}`)
             throw error
         }
@@ -261,7 +261,7 @@ export class L2PSHashService {
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)
 
         } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}: ${message}`)
             // Continue processing other L2PS networks even if one fails
         }

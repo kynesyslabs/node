@@ -77,7 +77,8 @@ function parseArgs(argv: string[]): CliOptions {
         "--value", "--data", "--count"
     ])
 
-    for (let idx = 2; idx < argv.length; idx++) {
+    let idx = 2
+    while (idx < argv.length) {
         const arg = argv[idx]
         const hasValue = argsWithValues.has(arg)
         const value = hasValue ? argv[idx + 1] : undefined
@@ -117,9 +118,11 @@ function parseArgs(argv: string[]): CliOptions {
                 options.data = value
                 break
             case "--count":
-                options.count = Number.parseInt(value!, 10)
-                if (options.count < 1) {
-                    throw new Error("--count must be at least 1")
+                if (value) {
+                    options.count = Number.parseInt(value, 10)
+                    if (options.count < 1) {
+                        throw new Error("--count must be at least 1")
+                    }
                 }
                 break
             case "--wait":
@@ -134,9 +137,7 @@ function parseArgs(argv: string[]): CliOptions {
                 }
         }
 
-        if (hasValue) {
-            idx++
-        }
+        idx += hasValue ? 2 : 1
     }
 
     if (!options.uid) {

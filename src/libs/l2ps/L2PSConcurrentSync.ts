@@ -174,12 +174,10 @@ async function processSyncTransactions(transactions: any[], l2psUid: string): Pr
 
             if (result.success) {
                 insertedCount++
+            } else if (result.error?.includes("already")) {
+                duplicateCount++
             } else {
-                if (result.error?.includes("already")) {
-                    duplicateCount++
-                } else {
-                    log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
-                }
+                log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
             }
         } catch (error) {
             log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}: ${getErrorMessage(error)}`)
