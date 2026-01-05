@@ -162,7 +162,7 @@ export default class L2PSConsensus {
             return result
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Consensus] Error applying proofs: ${message}`)
             result.success = false
             result.message = `Error: ${message}`
@@ -278,7 +278,7 @@ export default class L2PSConsensus {
             return proofResult
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             proofResult.message = `Error: ${message}`
             if (!simulate) {
                 await L2PSProofManager.markProofRejected(proof.id, proofResult.message)

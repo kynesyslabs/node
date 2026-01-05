@@ -250,7 +250,7 @@ export default class L2PSProofManager {
             log.debug(`[L2PS ProofManager] Proof ${proof.id} verified`)
             return true
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS ProofManager] Proof verification failed: ${message}`)
             return false
         }

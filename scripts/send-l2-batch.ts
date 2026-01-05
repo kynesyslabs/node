@@ -71,56 +71,53 @@ function parseArgs(argv: string[]): CliOptions {
         waitStatus: false,
     }
 
-    for (let i = 2; i < argv.length; i++) {
-        const arg = argv[i]
+    const argsWithValues = new Set([
+        "--node", "--uid", "--config", "--key", "--iv",
+        "--mnemonic", "--mnemonic-file", "--from", "--to",
+        "--value", "--data", "--count"
+    ])
+
+    for (let idx = 2; idx < argv.length; idx++) {
+        const arg = argv[idx]
+        const hasValue = argsWithValues.has(arg)
+        const value = hasValue ? argv[idx + 1] : undefined
+
         switch (arg) {
             case "--node":
-                options.nodeUrl = argv[i + 1]
-                i++
+                options.nodeUrl = value!
                 break
             case "--uid":
-                options.uid = argv[i + 1]
-                i++
+                options.uid = value!
                 break
             case "--config":
-                options.configPath = argv[i + 1]
-                i++
+                options.configPath = value
                 break
             case "--key":
-                options.keyPath = argv[i + 1]
-                i++
+                options.keyPath = value
                 break
             case "--iv":
-                options.ivPath = argv[i + 1]
-                i++
+                options.ivPath = value
                 break
             case "--mnemonic":
-                options.mnemonic = argv[i + 1]
-                i++
+                options.mnemonic = value
                 break
             case "--mnemonic-file":
-                options.mnemonicFile = argv[i + 1]
-                i++
+                options.mnemonicFile = value
                 break
             case "--from":
-                options.from = argv[i + 1]
-                i++
+                options.from = value
                 break
             case "--to":
-                options.to = argv[i + 1]
-                i++
+                options.to = value
                 break
             case "--value":
-                options.value = argv[i + 1]
-                i++
+                options.value = value
                 break
             case "--data":
-                options.data = argv[i + 1]
-                i++
+                options.data = value
                 break
             case "--count":
-                options.count = Number.parseInt(argv[i + 1], 10)
-                i++
+                options.count = Number.parseInt(value!, 10)
                 if (options.count < 1) {
                     throw new Error("--count must be at least 1")
                 }
@@ -131,11 +128,14 @@ function parseArgs(argv: string[]): CliOptions {
             case "--help":
                 printUsage()
                 process.exit(0)
-                break
             default:
                 if (arg.startsWith("--")) {
                     throw new Error(`Unknown argument: ${arg}`)
                 }
+        }
+
+        if (hasValue) {
+            idx++
         }
     }
 

@@ -172,7 +172,7 @@ export class L2PSBatchAggregator {
         } catch (error) {
             this.zkEnabled = false
             this.zkProver = null
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            const errorMessage = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.warning(`[L2PS Batch Aggregator] ZK Prover not available: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batches will be submitted without ZK proofs")
             log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
@@ -250,7 +250,7 @@ export class L2PSBatchAggregator {
             
         } catch (error: any) {
             this.stats.failedCycles++
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
             
         } finally {
@@ -291,7 +291,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Batch Aggregator] Error in aggregation: ${message}`)
             throw error
         }
@@ -356,7 +356,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${message}`)
             this.stats.failedSubmissions++
         }
@@ -494,7 +494,7 @@ export class L2PSBatchAggregator {
                 totalVolume: proof.totalVolume.toString(),
             }
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            const errorMessage = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.warning(`[L2PS Batch Aggregator] ZK proof generation failed: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batch will be submitted without ZK proof")
             return undefined

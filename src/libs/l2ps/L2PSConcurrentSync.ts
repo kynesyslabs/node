@@ -4,6 +4,15 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
 
+function getErrorMessage(error: unknown): string {
+    if (error instanceof Error) return error.message
+    try {
+        return JSON.stringify(error)
+    } catch {
+        return String(error)
+    }
+}
+
 /**
  * Discover which peers participate in specific L2PS UIDs
  *
@@ -59,8 +68,7 @@ export async function discoverL2PSParticipants(
                     }
                 } catch (error) {
                     // Gracefully handle peer failures (don't break discovery)
-                    const message = error instanceof Error ? error.message : String(error)
-                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}: ${message}`)
+                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}: ${getErrorMessage(error)}`)
                 }
             })()
 
@@ -80,6 +88,105 @@ export async function discoverL2PSParticipants(
     log.info(`[L2PS Sync] Discovery complete: ${totalParticipants} total participants across ${l2psUids.length} networks`)
 
     return participantMap
+}
+
+async function getPeerMempoolInfo(peer: Peer, l2psUid: string): Promise<number> {
+    const infoResponse: RPCResponse = await peer.call({
+        message: "getL2PSMempoolInfo",
+        data: { l2psUid },
+        muid: `sync_info_${l2psUid}_${randomUUID()}`,
+    })
+
+    if (infoResponse.result !== 200 || !infoResponse.response) {
+        log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid mempool info for ${l2psUid}`)
+        return 0
+    }
+
+    return infoResponse.response.transactionCount || 0
+}
+
+async function getLocalMempoolInfo(l2psUid: string): Promise<{ count: number, lastTimestamp: any }> {
+    const localTxs = await L2PSMempool.getByUID(l2psUid, "processed")
+    return {
+        count: localTxs.length,
+        lastTimestamp: localTxs.length > 0 ? localTxs[localTxs.length - 1].timestamp : 0
+    }
+}
+
+async function fetchPeerTransactions(peer: Peer, l2psUid: string, sinceTimestamp: any): Promise<any[]> {
+    const txResponse: RPCResponse = await peer.call({
+        message: "getL2PSTransactions",
+        data: {
+            l2psUid,
+            since_timestamp: sinceTimestamp,
+        },
+        muid: `sync_txs_${l2psUid}_${randomUUID()}`,
+    })
+
+    if (txResponse.result !== 200 || !txResponse.response?.transactions) {
+        log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid transactions for ${l2psUid}`)
+        return []
+    }
+
+    return txResponse.response.transactions
+}
+
+async function processSyncTransactions(transactions: any[], l2psUid: string): Promise<{ inserted: number, duplicates: number }> {
+    if (transactions.length === 0) return { inserted: 0, duplicates: 0 }
+
+    let insertedCount = 0
+    let duplicateCount = 0
+
+    const txHashes = transactions.map(tx => tx.hash)
+    const existingHashes = new Set<string>()
+
+    try {
+        if (!L2PSMempool.repo) {
+            throw new Error("[L2PS Sync] L2PSMempool repository not initialized")
+        }
+
+        const existingTxs = await L2PSMempool.repo.createQueryBuilder("tx")
+            .where("tx.hash IN (:...hashes)", { hashes: txHashes })
+            .select("tx.hash")
+            .getMany()
+
+        for (const tx of existingTxs) {
+            existingHashes.add(tx.hash)
+        }
+    } catch (error) {
+        log.error(`[L2PS Sync] Failed to batch check duplicates: ${getErrorMessage(error)}`)
+        throw error
+    }
+
+    for (const tx of transactions) {
+        try {
+            if (existingHashes.has(tx.hash)) {
+                duplicateCount++
+                continue
+            }
+
+            const result = await L2PSMempool.addTransaction(
+                tx.l2ps_uid,
+                tx.encrypted_tx,
+                tx.original_hash,
+                "processed",
+            )
+
+            if (result.success) {
+                insertedCount++
+            } else {
+                if (result.error?.includes("already")) {
+                    duplicateCount++
+                } else {
+                    log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
+                }
+            }
+        } catch (error) {
+            log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}: ${getErrorMessage(error)}`)
+        }
+    }
+
+    return { inserted: insertedCount, duplicates: duplicateCount }
 }
 
 /**
@@ -109,123 +216,28 @@ export async function syncL2PSWithPeer(
     try {
         log.debug(`[L2PS Sync] Starting sync with peer ${peer.muid} for L2PS ${l2psUid}`)
 
-        // Step 1: Get peer's mempool info
-        const infoResponse: RPCResponse = await peer.call({
-            message: "getL2PSMempoolInfo",
-            data: { l2psUid },
-            muid: `sync_info_${l2psUid}_${randomUUID()}`,
-        })
-
-        if (infoResponse.result !== 200 || !infoResponse.response) {
-            log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid mempool info for ${l2psUid}`)
-            return
-        }
-
-        const peerInfo = infoResponse.response
-        const peerTxCount = peerInfo.transactionCount || 0
-
+        const peerTxCount = await getPeerMempoolInfo(peer, l2psUid)
         if (peerTxCount === 0) {
             log.debug(`[L2PS Sync] Peer ${peer.muid} has no transactions for ${l2psUid}`)
             return
         }
 
-        // Step 2: Get local mempool info
-        const localTxs = await L2PSMempool.getByUID(l2psUid, "processed")
-        const localTxCount = localTxs.length
-        const localLastTimestamp = localTxs.length > 0
-            ? localTxs[localTxs.length - 1].timestamp
-            : 0
-
+        const { count: localTxCount, lastTimestamp: localLastTimestamp } = await getLocalMempoolInfo(l2psUid)
         log.debug(`[L2PS Sync] Local: ${localTxCount} txs, Peer: ${peerTxCount} txs for ${l2psUid}`)
 
-        // Step 3: Request transactions newer than our latest (incremental sync)
-        const txResponse: RPCResponse = await peer.call({
-            message: "getL2PSTransactions",
-            data: {
-                l2psUid,
-                since_timestamp: localLastTimestamp, // Only get newer transactions
-            },
-            muid: `sync_txs_${l2psUid}_${randomUUID()}`,
-        })
-
-        if (txResponse.result !== 200 || !txResponse.response?.transactions) {
-            log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid transactions for ${l2psUid}`)
-            return
-        }
-
-        const transactions = txResponse.response.transactions
+        const transactions = await fetchPeerTransactions(peer, l2psUid, localLastTimestamp)
         log.debug(`[L2PS Sync] Received ${transactions.length} transactions from peer ${peer.muid}`)
-
-        // Step 5: Insert transactions into local mempool
-        let insertedCount = 0
-        let duplicateCount = 0
 
         if (transactions.length === 0) {
             log.debug("[L2PS Sync] No transactions to process")
             return
         }
 
-        // Batch duplicate detection: check all hashes at once
-        const txHashes = transactions.map(tx => tx.hash)
-        const existingHashes = new Set<string>()
+        const { inserted, duplicates } = await processSyncTransactions(transactions, l2psUid)
+        log.info(`[L2PS Sync] Sync complete for ${l2psUid}: ${inserted} new, ${duplicates} duplicates`)
 
-        // Query database once for all hashes
-        try {
-            if (!L2PSMempool.repo) {
-                throw new Error("[L2PS Sync] L2PSMempool repository not initialized")
-            }
-
-            const existingTxs = await L2PSMempool.repo.createQueryBuilder("tx")
-                .where("tx.hash IN (:...hashes)", { hashes: txHashes })
-                .select("tx.hash")
-                .getMany()
-
-            for (const tx of existingTxs) {
-                existingHashes.add(tx.hash)
-            }
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
-            log.error(`[L2PS Sync] Failed to batch check duplicates: ${message}`)
-            throw error
-        }
-
-        // Filter out duplicates and insert new transactions
-        for (const tx of transactions) {
-            try {
-                // Check against pre-fetched duplicates
-                if (existingHashes.has(tx.hash)) {
-                    duplicateCount++
-                    continue
-                }
-
-                // Insert transaction into local mempool
-                const result = await L2PSMempool.addTransaction(
-                    tx.l2ps_uid,
-                    tx.encrypted_tx,
-                    tx.original_hash,
-                    "processed",
-                )
-
-                if (result.success) {
-                    insertedCount++
-                } else {
-                    // addTransaction failed (validation or duplicate)
-                    if (result.error?.includes("already")) {
-                        duplicateCount++
-                    } else {
-                        log.error(`[L2PS Sync] Failed to add transaction ${tx.hash}: ${result.error}`)
-                    }
-                }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error)
-                log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}: ${message}`)
-            }
-        }
-
-        log.info(`[L2PS Sync] Sync complete for ${l2psUid}: ${insertedCount} new, ${duplicateCount} duplicates`)
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}: ${message}`)
+        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}: ${getErrorMessage(error)}`)
         throw error
     }
 }
@@ -274,8 +286,7 @@ export async function exchangeL2PSParticipation(
             log.debug(`[L2PS Sync] Exchanged participation info with peer ${peer.muid}`)
         } catch (error) {
             // Gracefully handle failures (don't break exchange process)
-            const message = error instanceof Error ? error.message : String(error)
-            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}: ${message}`)
+            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}: ${getErrorMessage(error)}`)
         }
     })
 

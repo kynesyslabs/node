@@ -184,7 +184,7 @@ export async function plonkVerifyBun(
         return res
 
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
+        const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
         console.error("PLONK Verify error:", message)
         return false
     } finally {

@@ -143,7 +143,7 @@ export default class L2PSTransactionExecutor {
             }
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
             log.error(`[L2PS Executor] Error: ${message}`)
             return {
                 success: false,
