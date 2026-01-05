@@ -1082,6 +1082,7 @@ export class TUIManager extends EventEmitter {
 
         // Line 5: TLSNotary status (if enabled)
         term.moveTo(infoStartX, 5)
+        term.eraseLine()
         if (this.nodeInfo.tlsnotary?.enabled) {
             term.yellow("🔐 ")
             term.gray("TLSN: ")
