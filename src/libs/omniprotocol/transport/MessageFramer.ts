@@ -201,7 +201,11 @@ export class MessageFramer {
 
         // Validate payload size to prevent DoS attacks
         if (payloadLength > MessageFramer.MAX_PAYLOAD_SIZE) {
-            throw new Error(`Payload size ${payloadLength} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`)
+            // Drop buffered data so we don't retain attacker-controlled bytes in memory
+            this.buffer = Buffer.alloc(0)
+            throw new Error(
+                `Payload size ${payloadLength} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`,
+            )
         }
 
         // Sequence/Message ID (4 bytes)
