@@ -60,7 +60,7 @@ export async function discoverL2PSParticipants(
                 } catch (error) {
                     // Gracefully handle peer failures (don't break discovery)
                     const message = error instanceof Error ? error.message : String(error)
-                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}:`, message)
+                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}: ${message}`)
                 }
             })()
 
@@ -185,7 +185,7 @@ export async function syncL2PSWithPeer(
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error)
-            log.error("[L2PS Sync] Failed to batch check duplicates:", message)
+            log.error(`[L2PS Sync] Failed to batch check duplicates: ${message}`)
             throw error
         }
 
@@ -218,14 +218,14 @@ export async function syncL2PSWithPeer(
                 }
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error)
-                log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}:`, message)
+                log.error(`[L2PS Sync] Failed to insert transaction ${tx.hash}: ${message}`)
             }
         }
 
         log.info(`[L2PS Sync] Sync complete for ${l2psUid}: ${insertedCount} new, ${duplicateCount} duplicates`)
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}:`, message)
+        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}: ${message}`)
         throw error
     }
 }
@@ -275,7 +275,7 @@ export async function exchangeL2PSParticipation(
         } catch (error) {
             // Gracefully handle failures (don't break exchange process)
             const message = error instanceof Error ? error.message : String(error)
-            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}:`, message)
+            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}: ${message}`)
         }
     })
 

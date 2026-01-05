@@ -173,7 +173,8 @@ export class L2PSHashService {
             
         } catch (error: any) {
             this.stats.failedCycles++
-            log.error("[L2PS Hash Service] Hash generation cycle failed:", error)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Hash Service] Hash generation cycle failed: ${message}`)
             
         } finally {
             this.isGenerating = false
@@ -206,7 +207,8 @@ export class L2PSHashService {
             }
 
         } catch (error: any) {
-            log.error("[L2PS Hash Service] Error in hash generation:", error)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Hash Service] Error in hash generation: ${message}`)
             throw error
         }
     }
@@ -259,7 +261,8 @@ export class L2PSHashService {
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)
 
         } catch (error: any) {
-            log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}:`, error)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}: ${message}`)
             // Continue processing other L2PS networks even if one fails
         }
     }
@@ -323,7 +326,8 @@ export class L2PSHashService {
             throw new Error(`All ${availableValidators.length} validators failed to accept L2PS hash update`)
             
         } catch (error) {
-            log.error("[L2PS Hash Service] Failed to relay hash update to validators:", error)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Hash Service] Failed to relay hash update to validators: ${message}`)
             throw error
         }
     }

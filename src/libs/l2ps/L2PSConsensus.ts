@@ -365,7 +365,8 @@ export default class L2PSConsensus {
             }
 
         } catch (error: any) {
-            log.error(`[L2PS Consensus] Error creating L1 batch tx: ${error.message}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Consensus] Error creating L1 batch tx: ${message}`)
             return null
         }
     }
@@ -430,7 +431,8 @@ export default class L2PSConsensus {
             log.info(`[L2PS Consensus] Rolled back ${proofsToRollback.length} proofs`)
 
         } catch (error: any) {
-            log.error(`[L2PS Consensus] Error rolling back proofs: ${error.message}`)
+            const message = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Consensus] Error rolling back proofs: ${message}`)
             throw error
         }
     }

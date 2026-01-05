@@ -1,8 +1,8 @@
 #!/usr/bin/env tsx
 
-import { existsSync, readFileSync } from "fs"
-import path from "path"
-import process from "process"
+import { existsSync, readFileSync } from "node:fs"
+import path from "node:path"
+import process from "node:process"
 import forge from "node-forge"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
@@ -75,40 +75,52 @@ function parseArgs(argv: string[]): CliOptions {
         const arg = argv[i]
         switch (arg) {
             case "--node":
-                options.nodeUrl = argv[++i]
+                options.nodeUrl = argv[i + 1]
+                i++
                 break
             case "--uid":
-                options.uid = argv[++i]
+                options.uid = argv[i + 1]
+                i++
                 break
             case "--config":
-                options.configPath = argv[++i]
+                options.configPath = argv[i + 1]
+                i++
                 break
             case "--key":
-                options.keyPath = argv[++i]
+                options.keyPath = argv[i + 1]
+                i++
                 break
             case "--iv":
-                options.ivPath = argv[++i]
+                options.ivPath = argv[i + 1]
+                i++
                 break
             case "--mnemonic":
-                options.mnemonic = argv[++i]
+                options.mnemonic = argv[i + 1]
+                i++
                 break
             case "--mnemonic-file":
-                options.mnemonicFile = argv[++i]
+                options.mnemonicFile = argv[i + 1]
+                i++
                 break
             case "--from":
-                options.from = argv[++i]
+                options.from = argv[i + 1]
+                i++
                 break
             case "--to":
-                options.to = argv[++i]
+                options.to = argv[i + 1]
+                i++
                 break
             case "--value":
-                options.value = argv[++i]
+                options.value = argv[i + 1]
+                i++
                 break
             case "--data":
-                options.data = argv[++i]
+                options.data = argv[i + 1]
+                i++
                 break
             case "--count":
-                options.count = parseInt(argv[++i], 10)
+                options.count = Number.parseInt(argv[i + 1], 10)
+                i++
                 if (options.count < 1) {
                     throw new Error("--count must be at least 1")
                 }
@@ -186,7 +198,8 @@ function resolveL2psKeyMaterial(options: CliOptions): { privateKey: string; iv: 
             keyPath = keyPath || config.keys?.private_key_path
             ivPath = ivPath || config.keys?.iv_path
         } catch (error) {
-            throw new Error(`Failed to parse L2PS config ${resolvedConfigPath}: ${error}`)
+            const errorMessage = error instanceof Error ? error.message : String(error)
+            throw new Error(`Failed to parse L2PS config ${resolvedConfigPath}: ${errorMessage}`)
         }
     }
 
@@ -207,7 +220,7 @@ function sanitizeHexValue(value: string, label: string): string {
         throw new Error(`Missing ${label}`)
     }
 
-    const cleaned = value.trim().replace(/^0x/, "").replace(/\s+/g, "")
+    const cleaned = value.trim().replace(/^0x/, "").replaceAll(/\s+/g, "")
 
     if (cleaned.length === 0) {
         throw new Error(`${label} is empty`)
@@ -268,139 +281,135 @@ async function waitForStatus(demos: Demos, txHash: string): Promise<void> {
     console.log("📦 Status:", status)
 }
 
-async function main(): Promise<void> {
-    try {
-        const options = parseArgs(process.argv)
-        const mnemonic = loadMnemonic(options)
-        const { privateKey, iv } = resolveL2psKeyMaterial(options)
+try {
+    const options = parseArgs(process.argv)
+    const mnemonic = loadMnemonic(options)
+    const { privateKey, iv } = resolveL2psKeyMaterial(options)
 
-        const demos = new Demos()
-        console.log(`🌐 Connecting to ${options.nodeUrl}...`)
-        await demos.connect(options.nodeUrl)
+    const demos = new Demos()
+    console.log(`🌐 Connecting to ${options.nodeUrl}...`)
+    await demos.connect(options.nodeUrl)
 
-        console.log("🔑 Connecting wallet...")
-        await demos.connectWallet(mnemonic)
+    console.log("🔑 Connecting wallet...")
+    await demos.connectWallet(mnemonic)
 
-        const signerAddress = normalizeHex(await demos.getAddress())
-        const ed25519Address = normalizeHex(await demos.getEd25519Address())
-        const fromAddress = normalizeHex(options.from || signerAddress)
-        const nonceAccount = options.from ? fromAddress : ed25519Address
-        const toAddress = normalizeHex(options.to || fromAddress)
+    const signerAddress = normalizeHex(await demos.getAddress())
+    const ed25519Address = normalizeHex(await demos.getEd25519Address())
+    const fromAddress = normalizeHex(options.from || signerAddress)
+    const nonceAccount = options.from ? fromAddress : ed25519Address
+    const toAddress = normalizeHex(options.to || fromAddress)
 
-        console.log(`\n📦 Preparing to send ${options.count} L2 transactions...`)
-        console.log(`   From: ${fromAddress}`)
-        console.log(`   To: ${toAddress}`)
+    console.log(`\n📦 Preparing to send ${options.count} L2 transactions...`)
+    console.log(`   From: ${fromAddress}`)
+    console.log(`   To: ${toAddress}`)
 
-        const hexKey = sanitizeHexValue(privateKey, "L2PS key")
-        const hexIv = sanitizeHexValue(iv, "L2PS IV")
-        const keyBytes = forge.util.hexToBytes(hexKey)
-        const ivBytes = forge.util.hexToBytes(hexIv)
-        
-        const l2ps = await L2PS.create(keyBytes, ivBytes)
-        l2ps.setConfig({ uid: options.uid, config: { created_at_block: 0, known_rpcs: [options.nodeUrl] } })
+    const hexKey = sanitizeHexValue(privateKey, "L2PS key")
+    const hexIv = sanitizeHexValue(iv, "L2PS IV")
+    const keyBytes = forge.util.hexToBytes(hexKey)
+    const ivBytes = forge.util.hexToBytes(hexIv)
 
-        const results = []
-        const amount = options.value ? Number(options.value) : 0
+    const l2ps = await L2PS.create(keyBytes, ivBytes)
+    l2ps.setConfig({ uid: options.uid, config: { created_at_block: 0, known_rpcs: [options.nodeUrl] } })
 
-        // Get initial nonce and track locally to avoid conflicts
-        let currentNonce = (await demos.getAddressNonce(nonceAccount)) + 1
-        console.log(`   Starting nonce: ${currentNonce}`)
+    const results = []
+    const amount = options.value ? Number(options.value) : 0
 
-        for (let i = 0; i < options.count; i++) {
-            console.log(`\n🔄 Transaction ${i + 1}/${options.count} (nonce: ${currentNonce})`)
+    // Get initial nonce and track locally to avoid conflicts
+    let currentNonce = (await demos.getAddressNonce(nonceAccount)) + 1
+    console.log(`   Starting nonce: ${currentNonce}`)
 
-            const payload: TxPayload = {
-                l2ps_uid: options.uid,
-            }
-            if (options.data) {
-                payload.message = `${options.data} [${i + 1}/${options.count}]`
-            }
+    for (let i = 0; i < options.count; i++) {
+        console.log(`\n🔄 Transaction ${i + 1}/${options.count} (nonce: ${currentNonce})`)
 
-            console.log("  🧱 Building inner transaction (L2 payload)...")
-            const innerTx = await buildInnerTransaction(
-                demos,
-                toAddress,
-                amount,
-                payload,
+        const payload: TxPayload = {
+            l2ps_uid: options.uid,
+        }
+        if (options.data) {
+            payload.message = `${options.data} [${i + 1}/${options.count}]`
+        }
+
+        console.log("  🧱 Building inner transaction (L2 payload)...")
+        const innerTx = await buildInnerTransaction(
+            demos,
+            toAddress,
+            amount,
+            payload,
+        )
+
+        console.log("  🔐 Encrypting with L2PS key material...")
+        const encryptedTx = await l2ps.encryptTx(innerTx)
+        const [, encryptedPayload] = encryptedTx.content.data
+
+        console.log("  🧱 Building outer L2PS transaction...")
+        const subnetTx = await buildL2PSTransaction(
+            demos,
+            encryptedPayload as L2PSEncryptedPayload,
+            toAddress,
+            currentNonce,
+        )
+
+        console.log("  ✅ Confirming transaction with node...")
+        const validityResponse = await demos.confirm(subnetTx)
+        const validityData = validityResponse.response
+
+        if (!validityData?.data?.valid) {
+            throw new Error(
+                `Transaction invalid: ${validityData?.data?.message ?? "Unknown error"}`,
             )
-
-            console.log("  🔐 Encrypting with L2PS key material...")
-            const encryptedTx = await l2ps.encryptTx(innerTx)
-            const [, encryptedPayload] = encryptedTx.content.data
-
-            console.log("  🧱 Building outer L2PS transaction...")
-            const subnetTx = await buildL2PSTransaction(
-                demos,
-                encryptedPayload as L2PSEncryptedPayload,
-                toAddress,
-                currentNonce,
-            )
-
-            console.log("  ✅ Confirming transaction with node...")
-            const validityResponse = await demos.confirm(subnetTx)
-            const validityData = validityResponse.response
-
-            if (!validityData?.data?.valid) {
-                throw new Error(
-                    `Transaction invalid: ${validityData?.data?.message ?? "Unknown error"}`,
-                )
-            }
-
-            console.log("  📤 Broadcasting encrypted L2PS transaction to L1...")
-            const broadcastResponse = await demos.broadcast(validityResponse)
-
-            const txResult = {
-                index: i + 1,
-                hash: subnetTx.hash,
-                innerHash: innerTx.hash,
-                nonce: currentNonce,
-                payload: payload,
-                response: broadcastResponse,
-            }
-
-            results.push(txResult)
-
-            console.log(`  ✅ Outer hash: ${subnetTx.hash}`)
-            console.log(`  ✅ Inner hash: ${innerTx.hash}`)
-
-            // Small delay between transactions to avoid nonce conflicts
-            if (i < options.count - 1) {
-                await new Promise(resolve => setTimeout(resolve, 500))
-            }
         }
 
-        console.log(`\n🎉 Successfully submitted ${results.length} L2 transactions!`)
-        console.log("\n📋 Transaction Summary:")
-        results.forEach(r => {
-            console.log(`  ${r.index}. Outer: ${r.hash}`)
-            console.log(`     Inner: ${r.innerHash}`)
-        })
+        console.log("  📤 Broadcasting encrypted L2PS transaction to L1...")
+        const broadcastResponse = await demos.broadcast(validityResponse)
 
-        console.log(`\n💡 Transactions are now in L2PS mempool (UID: ${options.uid})`)
-        console.log("   The L2PS loop will:")
-        console.log("   1. Collect these transactions from L2PS mempool")
-        console.log("   2. Encrypt them together")
-        console.log("   3. Create ONE consolidated encrypted transaction")
-        console.log("   4. Broadcast it to L1 main mempool")
-        console.log("\n⚠️  Check L2PS loop logs to confirm processing")
+        const txResult = {
+            index: i + 1,
+            hash: subnetTx.hash,
+            innerHash: innerTx.hash,
+            nonce: currentNonce,
+            payload: payload,
+            response: broadcastResponse,
+        }
 
-        if (options.waitStatus) {
-            console.log("\n⏳ Fetching transaction statuses...")
-            for (const result of results) {
-                console.log(`\n📦 Status for transaction ${result.index} (${result.hash}):`)
-                await waitForStatus(demos, result.hash)
-            }
+        results.push(txResult)
+
+        console.log(`  ✅ Outer hash: ${subnetTx.hash}`)
+        console.log(`  ✅ Inner hash: ${innerTx.hash}`)
+
+        // Small delay between transactions to avoid nonce conflicts
+        if (i < options.count - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500))
         }
-    } catch (error) {
-        console.error("❌ Failed to send L2 transactions")
-        if (error instanceof Error) {
-            console.error(error.message)
-            console.error(error.stack)
-        } else {
-            console.error(error)
-        }
-        process.exit(1)
     }
-}
 
-main()
+    console.log(`\n🎉 Successfully submitted ${results.length} L2 transactions!`)
+    console.log("\n📋 Transaction Summary:")
+    results.forEach(r => {
+        console.log(`  ${r.index}. Outer: ${r.hash}`)
+        console.log(`     Inner: ${r.innerHash}`)
+    })
+
+    console.log(`\n💡 Transactions are now in L2PS mempool (UID: ${options.uid})`)
+    console.log("   The L2PS loop will:")
+    console.log("   1. Collect these transactions from L2PS mempool")
+    console.log("   2. Encrypt them together")
+    console.log("   3. Create ONE consolidated encrypted transaction")
+    console.log("   4. Broadcast it to L1 main mempool")
+    console.log("\n⚠️  Check L2PS loop logs to confirm processing")
+
+    if (options.waitStatus) {
+        console.log("\n⏳ Fetching transaction statuses...")
+        for (const result of results) {
+            console.log(`\n📦 Status for transaction ${result.index} (${result.hash}):`)
+            await waitForStatus(demos, result.hash)
+        }
+    }
+} catch (error) {
+    console.error("❌ Failed to send L2 transactions")
+    if (error instanceof Error) {
+        console.error(error.message)
+        console.error(error.stack)
+    } else {
+        console.error(error)
+    }
+    process.exit(1)
+}
