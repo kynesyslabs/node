@@ -73,8 +73,19 @@ export async function hashTLSNotaryTable(): Promise<string> {
         },
     })
 
-    const tableString = JSON.stringify(records)
-    return Hashing.sha256(tableString)
+    // Normalize to plain objects with fixed field order for deterministic hashing
+    const normalized = records.map(r => ({
+        tokenId: r.tokenId,
+        owner: r.owner,
+        domain: r.domain,
+        proof: r.proof,
+        storageType: r.storageType,
+        txhash: r.txhash,
+        proofTimestamp: String(r.proofTimestamp),
+        createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+    }))
+
+    return Hashing.sha256(JSON.stringify(normalized))
 }
 
 /**
