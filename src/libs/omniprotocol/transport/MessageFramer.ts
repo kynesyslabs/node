@@ -277,6 +277,11 @@ export class MessageFramer {
         auth?: AuthBlock | null,
         flags?: number,
     ): Buffer {
+        // Validate payload size before encoding
+        if (payload.length > MessageFramer.MAX_PAYLOAD_SIZE) {
+            throw new Error(`Payload size ${payload.length} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`)
+        }
+
         // Determine flags
         const flagsByte = flags !== undefined ? flags : (auth ? 0x01 : 0x00)
 

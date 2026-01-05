@@ -419,6 +419,12 @@ export default class HandleGCR {
         const nativeData = tx.content.data as ["native", INativePayload]
         const nativePayload = nativeData[1]
 
+        // Validate args exists before any destructuring
+        if (!nativePayload.args || !Array.isArray(nativePayload.args)) {
+            log.error(`[TLSNotary] Invalid nativePayload.args: ${JSON.stringify(nativePayload.args)}`)
+            return
+        }
+
         switch (nativePayload.nativeOperation) {
             case "tlsn_request": {
                 const [targetUrl] = nativePayload.args

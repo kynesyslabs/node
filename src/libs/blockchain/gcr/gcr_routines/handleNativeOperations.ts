@@ -54,10 +54,10 @@ export class HandleNativeOperations {
                 const [targetUrl] = nativePayload.args as [string]
                 log.info(`[TLSNotary] Processing tlsn_request for ${targetUrl} from ${tx.content.from}`)
 
-                // Validate URL format and extract domain
+                // Validate URL format
                 try {
-                    const domain = extractDomain(targetUrl)
-                    log.debug(`[TLSNotary] Domain extracted: ${domain}`)
+                    extractDomain(targetUrl) // Validates URL format
+                    log.debug(`[TLSNotary] URL validated: ${targetUrl}`)
                 } catch (urlError) {
                     log.error(`[TLSNotary] Invalid URL in tlsn_request: ${targetUrl}`)
                     // Return empty edits - tx will fail validation elsewhere
@@ -89,7 +89,8 @@ export class HandleNativeOperations {
                         // The SDK will extract it from the tx response
                     } catch (tokenError) {
                         log.error(`[TLSNotary] Failed to create token: ${tokenError}`)
-                        // Continue - the fee was already burned, token creation failure is logged
+                        // Propagate failure to abort transaction - fee should not be burned without token
+                        throw tokenError
                     }
                 }
                 break
@@ -159,9 +160,8 @@ export class HandleNativeOperations {
             }
 
             default: {
-                // Exhaustive check - this should never be reached if all operations are handled
-                const _exhaustiveCheck: never = nativePayload
-                log.warning("Unknown native operation: " + (_exhaustiveCheck as INativePayload).nativeOperation)
+                // Log unknown operations - INativePayload may have more operations than handled here
+                log.warning("Unknown native operation: " + nativePayload.nativeOperation)
                 break
             }
         }
