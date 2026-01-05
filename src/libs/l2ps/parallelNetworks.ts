@@ -11,6 +11,7 @@ import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Configuration interface for an L2PS node.
@@ -156,7 +157,7 @@ export default class ParallelNetworks {
                 fs.readFileSync(configPath, "utf8"),
             )
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             throw new Error(`Failed to parse L2PS config for ${uid}: ${message}`)
         }
 
@@ -207,7 +208,7 @@ export default class ParallelNetworks {
         try {
             return await this.loadL2PS(uid)
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             return undefined
         }
@@ -245,7 +246,7 @@ export default class ParallelNetworks {
                 l2psJoinedUids.push(uid)
                 log.info(`[L2PS] Loaded L2PS: ${uid}`)
             } catch (error) {
-                const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+                const message = getErrorMessage(error)
                 log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             }
         }
@@ -348,7 +349,7 @@ export default class ParallelNetworks {
                 return encryptedPayload.l2ps_uid
             }
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS] Error extracting L2PS UID from transaction: ${message}`)
         }
 
@@ -406,7 +407,7 @@ export default class ParallelNetworks {
                 processed: true,
             }
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             return {
                 success: false,
                 error: `Failed to process L2PS transaction: ${message}`,

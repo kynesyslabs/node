@@ -7,6 +7,7 @@ import forge from "node-forge"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 interface CliOptions {
     nodeUrl: string
@@ -77,67 +78,50 @@ function parseArgs(argv: string[]): CliOptions {
         "--value", "--data", "--count"
     ])
 
-    let idx = 2
-    while (idx < argv.length) {
-        const arg = argv[idx]
-        const hasValue = argsWithValues.has(arg)
-        const value = hasValue ? argv[idx + 1] : undefined
+    const flagHandlers: Record<string, (value?: string) => void> = {
+        "--node": (value) => {
+            if (!value) throw new Error("--node requires a value")
+            options.nodeUrl = value
+        },
+        "--uid": (value) => {
+            if (!value) throw new Error("--uid requires a value")
+            options.uid = value
+        },
+        "--config": (value) => { options.configPath = value },
+        "--key": (value) => { options.keyPath = value },
+        "--iv": (value) => { options.ivPath = value },
+        "--mnemonic": (value) => { options.mnemonic = value },
+        "--mnemonic-file": (value) => { options.mnemonicFile = value },
+        "--from": (value) => { options.from = value },
+        "--to": (value) => { options.to = value },
+        "--value": (value) => { options.value = value },
+        "--data": (value) => { options.data = value },
+        "--count": (value) => {
+            if (!value) throw new Error("--count requires a value")
+            const count = Number.parseInt(value, 10)
+            if (!Number.isInteger(count) || count < 1) {
+                throw new Error("--count must be at least 1")
+            }
+            options.count = count
+        },
+        "--wait": () => { options.waitStatus = true },
+        "--help": () => {
+            printUsage()
+            process.exit(0)
+        },
+    }
 
-        switch (arg) {
-            case "--node":
-                options.nodeUrl = value!
-                break
-            case "--uid":
-                options.uid = value!
-                break
-            case "--config":
-                options.configPath = value
-                break
-            case "--key":
-                options.keyPath = value
-                break
-            case "--iv":
-                options.ivPath = value
-                break
-            case "--mnemonic":
-                options.mnemonic = value
-                break
-            case "--mnemonic-file":
-                options.mnemonicFile = value
-                break
-            case "--from":
-                options.from = value
-                break
-            case "--to":
-                options.to = value
-                break
-            case "--value":
-                options.value = value
-                break
-            case "--data":
-                options.data = value
-                break
-            case "--count":
-                if (value) {
-                    options.count = Number.parseInt(value, 10)
-                    if (options.count < 1) {
-                        throw new Error("--count must be at least 1")
-                    }
-                }
-                break
-            case "--wait":
-                options.waitStatus = true
-                break
-            case "--help":
-                printUsage()
-                process.exit(0)
-            default:
-                if (arg.startsWith("--")) {
-                    throw new Error(`Unknown argument: ${arg}`)
-                }
+    for (let idx = 2; idx < argv.length; idx++) {
+        const arg = argv[idx]
+        if (!arg.startsWith("--")) continue
+
+        const handler = flagHandlers[arg]
+        if (!handler) {
+            throw new Error(`Unknown argument: ${arg}`)
         }
 
-        idx += hasValue ? 2 : 1
+        const value = argsWithValues.has(arg) ? argv[++idx] : undefined
+        handler(value)
     }
 
     if (!options.uid) {
@@ -199,7 +183,7 @@ function resolveL2psKeyMaterial(options: CliOptions): { privateKey: string; iv: 
             keyPath = keyPath || config.keys?.private_key_path
             ivPath = ivPath || config.keys?.iv_path
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            const errorMessage = getErrorMessage(error)
             throw new Error(`Failed to parse L2PS config ${resolvedConfigPath}: ${errorMessage}`)
         }
     }

@@ -17,6 +17,7 @@ import jsSha3 from "js-sha3"
 const { keccak256 } = jsSha3
 
 const { unstringifyBigInts } = utils
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 // ============================================================================
 // Keccak256Transcript - Fiat-Shamir transcript for PLONK challenges
@@ -184,7 +185,7 @@ export async function plonkVerifyBun(
         return res
 
     } catch (error) {
-        const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+        const message = getErrorMessage(error)
         console.error("PLONK Verify error:", message)
         return false
     } finally {

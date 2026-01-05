@@ -3,6 +3,7 @@ import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
 import Mempool from "@/libs/blockchain/mempool_v2"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getNetworkTimestamp } from "@/libs/utils/calibrateTime"
 import crypto from "crypto"
@@ -172,7 +173,7 @@ export class L2PSBatchAggregator {
         } catch (error) {
             this.zkEnabled = false
             this.zkProver = null
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            const errorMessage = getErrorMessage(error)
             log.warning(`[L2PS Batch Aggregator] ZK Prover not available: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batches will be submitted without ZK proofs")
             log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
@@ -250,7 +251,7 @@ export class L2PSBatchAggregator {
             
         } catch (error) {
             this.stats.failedCycles++
-            const message = error instanceof Error ? error.message : String(error)
+            const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
             
         } finally {
@@ -291,7 +292,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error in aggregation: ${message}`)
             throw error
         }
@@ -356,7 +357,7 @@ export class L2PSBatchAggregator {
             }
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : String(error)
+            const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${message}`)
             this.stats.failedSubmissions++
         }
@@ -494,7 +495,7 @@ export class L2PSBatchAggregator {
                 totalVolume: proof.totalVolume.toString(),
             }
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error)
+            const errorMessage = getErrorMessage(error)
             log.warning(`[L2PS Batch Aggregator] ZK proof generation failed: ${errorMessage}`)
             log.warning("[L2PS Batch Aggregator] Batch will be submitted without ZK proof")
             return undefined
@@ -662,10 +663,10 @@ export class L2PSBatchAggregator {
             log.info(`[L2PS Batch Aggregator] Batch ${batchPayload.batch_hash.substring(0, 16)}... submitted to mempool (block ${result.confirmationBlock})`)
             return true
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error submitting batch to mempool: ${message}`)
-            if (error.stack) {
+            if (error instanceof Error && error.stack) {
                 log.debug(`[L2PS Batch Aggregator] Stack trace: ${error.stack}`)
             }
             return false
@@ -691,8 +692,8 @@ export class L2PSBatchAggregator {
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
             }
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error during cleanup: ${message}`)
         }
     }

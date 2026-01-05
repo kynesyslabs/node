@@ -5,6 +5,7 @@ import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 import getShard from "@/libs/consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * L2PS Hash Generation Service
@@ -171,9 +172,9 @@ export class L2PSHashService {
             this.stats.successfulCycles++
             this.updateCycleTime(Date.now() - cycleStartTime)
             
-        } catch (error: any) {
+        } catch (error: unknown) {
             this.stats.failedCycles++
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Hash generation cycle failed: ${message}`)
             
         } finally {
@@ -206,8 +207,8 @@ export class L2PSHashService {
                 await this.processL2PSNetwork(l2psUid)
             }
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Error in hash generation: ${message}`)
             throw error
         }
@@ -260,8 +261,8 @@ export class L2PSHashService {
 
             log.debug(`[L2PS Hash Service] Generated hash for ${l2psUid}: ${consolidatedHash} (${transactionCount} txs)`)
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}: ${message}`)
             // Continue processing other L2PS networks even if one fails
         }
@@ -316,7 +317,7 @@ export class L2PSHashService {
                     log.debug(`[L2PS Hash Service] Validator ${validator.identity.substring(0, 8)}... rejected hash update: ${result.response}`)
 
                 } catch (error) {
-                    const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+                    const message = getErrorMessage(error)
                     log.debug(`[L2PS Hash Service] Validator ${validator.identity.substring(0, 8)}... error: ${message}`)
                     continue // Try next validator
                 }
@@ -326,7 +327,7 @@ export class L2PSHashService {
             throw new Error(`All ${availableValidators.length} validators failed to accept L2PS hash update`)
             
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Failed to relay hash update to validators: ${message}`)
             throw error
         }

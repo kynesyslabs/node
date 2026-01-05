@@ -23,6 +23,7 @@ import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/
 import L2PSProofManager from "./L2PSProofManager"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
 import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Result of executing an L2PS transaction
@@ -143,7 +144,7 @@ export default class L2PSTransactionExecutor {
             }
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS Executor] Error: ${message}`)
             return {
                 success: false,

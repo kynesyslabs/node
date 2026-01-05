@@ -3,15 +3,7 @@ import { Peer } from "@/libs/peer/Peer"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
-
-function getErrorMessage(error: unknown): string {
-    if (error instanceof Error) return error.message
-    try {
-        return JSON.stringify(error)
-    } catch {
-        return String(error)
-    }
-}
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Discover which peers participate in specific L2PS UIDs
@@ -107,9 +99,10 @@ async function getPeerMempoolInfo(peer: Peer, l2psUid: string): Promise<number> 
 
 async function getLocalMempoolInfo(l2psUid: string): Promise<{ count: number, lastTimestamp: any }> {
     const localTxs = await L2PSMempool.getByUID(l2psUid, "processed")
+    const lastTx = localTxs.at(-1)
     return {
         count: localTxs.length,
-        lastTimestamp: localTxs.length > 0 ? localTxs[localTxs.length - 1].timestamp : 0
+        lastTimestamp: lastTx ? lastTx.timestamp : 0
     }
 }
 

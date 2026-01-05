@@ -26,6 +26,7 @@ import { L2PSProof, L2PSProofStatus } from "@/model/entities/L2PSProofs"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import Hashing from "@/libs/crypto/hashing"
 import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Deterministic JSON stringify that sorts keys alphabetically
@@ -161,8 +162,8 @@ export default class L2PSProofManager {
                 proof_id: saved.id,
                 transactions_hash: transactionsHash
             }
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS ProofManager] Failed to create proof: ${message}`)
             return {
                 success: false,
@@ -250,7 +251,7 @@ export default class L2PSProofManager {
             log.debug(`[L2PS ProofManager] Proof ${proof.id} verified`)
             return true
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS ProofManager] Proof verification failed: ${message}`)
             return false
         }

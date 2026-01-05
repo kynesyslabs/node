@@ -21,6 +21,7 @@ import Chain from "@/libs/blockchain/chain"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Result of applying a single proof
@@ -162,7 +163,7 @@ export default class L2PSConsensus {
             return result
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             log.error(`[L2PS Consensus] Error applying proofs: ${message}`)
             result.success = false
             result.message = `Error: ${message}`
@@ -278,7 +279,7 @@ export default class L2PSConsensus {
             return proofResult
 
         } catch (error) {
-            const message = error instanceof Error ? error.message : ((error as any)?.message || String(error))
+            const message = getErrorMessage(error)
             proofResult.message = `Error: ${message}`
             if (!simulate) {
                 await L2PSProofManager.markProofRejected(proof.id, proofResult.message)
@@ -364,8 +365,8 @@ export default class L2PSConsensus {
                 return null
             }
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Consensus] Error creating L1 batch tx: ${message}`)
             return null
         }
@@ -430,8 +431,8 @@ export default class L2PSConsensus {
 
             log.info(`[L2PS Consensus] Rolled back ${proofsToRollback.length} proofs`)
 
-        } catch (error: any) {
-            const message = error instanceof Error ? error.message : String(error)
+        } catch (error: unknown) {
+            const message = getErrorMessage(error)
             log.error(`[L2PS Consensus] Error rolling back proofs: ${message}`)
             throw error
         }
