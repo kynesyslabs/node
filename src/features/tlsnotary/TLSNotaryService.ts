@@ -512,7 +512,10 @@ export class TLSNotaryService {
     // Close any previous proxy server (defensive)
     if (this.proxyServer) {
       try {
-        this.proxyServer.close()
+        await new Promise<void>((resolve, reject) => {
+          this.proxyServer!.once("error", reject)
+          this.proxyServer!.close((err) => (err ? reject(err) : resolve()))
+        })
       } catch {
         // ignore
       }
@@ -565,8 +568,12 @@ export class TLSNotaryService {
       })
     })
 
-    this.proxyServer.listen(publicPort, () => {
-      log.info(`[TLSNotary-Proxy] Listening on port ${publicPort}, forwarding to ${rustPort}`)
+    await new Promise<void>((resolve, reject) => {
+      this.proxyServer!.once("error", reject)
+      this.proxyServer!.listen(publicPort, () => {
+        log.info(`[TLSNotary-Proxy] Listening on port ${publicPort}, forwarding to ${rustPort}`)
+        resolve()
+      })
     })
   }
 
