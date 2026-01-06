@@ -27,6 +27,9 @@ services:
     environment:
       - IPFS_PROFILE=server
       - IPFS_GATEWAY_WRITABLE=false
+      # Demos Network private swarm key (performance isolation)
+      - IPFS_SWARM_KEY=/key/swarm/psk/1.0.0/\n/base16/\n1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+      - LIBP2P_FORCE_PNET=1
     volumes:
       - ${PERSISTENT:+ipfs-1-data:/data/ipfs}
     healthcheck:
@@ -52,6 +55,9 @@ services:
     environment:
       - IPFS_PROFILE=server
       - IPFS_GATEWAY_WRITABLE=false
+      # Demos Network private swarm key (performance isolation)
+      - IPFS_SWARM_KEY=/key/swarm/psk/1.0.0/\n/base16/\n1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+      - LIBP2P_FORCE_PNET=1
     volumes:
       - ${PERSISTENT:+ipfs-2-data:/data/ipfs}
     healthcheck:
@@ -77,6 +83,9 @@ services:
     environment:
       - IPFS_PROFILE=server
       - IPFS_GATEWAY_WRITABLE=false
+      # Demos Network private swarm key (performance isolation)
+      - IPFS_SWARM_KEY=/key/swarm/psk/1.0.0/\n/base16/\n1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+      - LIBP2P_FORCE_PNET=1
     volumes:
       - ${PERSISTENT:+ipfs-3-data:/data/ipfs}
     healthcheck:
@@ -102,6 +111,9 @@ services:
     environment:
       - IPFS_PROFILE=server
       - IPFS_GATEWAY_WRITABLE=false
+      # Demos Network private swarm key (performance isolation)
+      - IPFS_SWARM_KEY=/key/swarm/psk/1.0.0/\n/base16/\n1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+      - LIBP2P_FORCE_PNET=1
     volumes:
       - ${PERSISTENT:+ipfs-4-data:/data/ipfs}
     healthcheck:

@@ -24,6 +24,39 @@ const SWARM_KEY_HEADER = "/key/swarm/psk/1.0.0/\n"
 const SWARM_KEY_CODEC = "/base16/\n"
 const SWARM_KEY_LENGTH = 32 // 32 bytes = 256 bits
 
+/**
+ * Official Demos Network IPFS Swarm Key
+ *
+ * This key defines the Demos private IPFS network. All Demos nodes use this
+ * same key to form an isolated IPFS swarm for performance optimization.
+ *
+ * Security Note: This key is intentionally public. It only controls IPFS
+ * network membership, not Demos blockchain access (which requires authentication).
+ * Making it public allows anyone to join the IPFS layer, but:
+ * - Writing (pinning) still requires DEM tokens via Demos transactions
+ * - Blockchain operations still require valid Demos identity
+ * - Content is public anyway (blockchain transparency)
+ *
+ * The key provides performance isolation from the public IPFS network,
+ * not security isolation.
+ *
+ * Generated: 2026-01-06
+ */
+export const DEMOS_IPFS_SWARM_KEY = "1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4"
+
+/**
+ * Get the formatted swarm.key file content for Demos network
+ * Ready to write directly to ~/.ipfs/swarm.key or pass to Kubo
+ */
+export const DEMOS_IPFS_SWARM_KEY_FILE = formatSwarmKeyFileContent(DEMOS_IPFS_SWARM_KEY)
+
+/**
+ * Internal helper to format key without circular dependency
+ */
+function formatSwarmKeyFileContent(hexKey: string): string {
+    return `${SWARM_KEY_HEADER}${SWARM_KEY_CODEC}${hexKey.toLowerCase()}\n`
+}
+
 // ============================================================================
 // Swarm Key Generation
 // ============================================================================
@@ -146,54 +179,73 @@ export function swarmKeysMatch(key1: string, key2: string): boolean {
 // ============================================================================
 
 /**
- * Get swarm key from environment variable
+ * Get the active swarm key for this node
  *
- * @returns Swarm key from DEMOS_IPFS_SWARM_KEY env var, or undefined
+ * Priority:
+ * 1. DEMOS_IPFS_SWARM_KEY env var (for custom/test networks)
+ * 2. Built-in DEMOS_IPFS_SWARM_KEY constant (default Demos network)
+ *
+ * @returns Swarm key (always returns a valid key - defaults to Demos network key)
+ */
+export function getSwarmKey(): string {
+    const envKey = process.env.DEMOS_IPFS_SWARM_KEY
+
+    if (envKey) {
+        if (!isValidSwarmKey(envKey)) {
+            log.warning("[IPFS] DEMOS_IPFS_SWARM_KEY env var is invalid, using default Demos key")
+            return DEMOS_IPFS_SWARM_KEY
+        }
+        log.debug("[IPFS] Using custom swarm key from environment")
+        return envKey.toLowerCase()
+    }
+
+    // Default to the official Demos network key
+    return DEMOS_IPFS_SWARM_KEY
+}
+
+/**
+ * @deprecated Use getSwarmKey() instead - now always returns a key
  */
 export function getSwarmKeyFromEnv(): string | undefined {
-    const key = process.env.DEMOS_IPFS_SWARM_KEY
-    if (!key) {
-        return undefined
-    }
-
-    if (!isValidSwarmKey(key)) {
-        log.warning("[IPFS] DEMOS_IPFS_SWARM_KEY is invalid (must be 64 hex characters)")
-        return undefined
-    }
-
-    return key.toLowerCase()
+    return getSwarmKey()
 }
 
 /**
  * Check if private network mode is enabled
  *
- * Private network is enabled when:
- * 1. DEMOS_IPFS_SWARM_KEY is set and valid, OR
- * 2. LIBP2P_FORCE_PNET=1 is set
+ * With the built-in Demos swarm key, private network is ALWAYS enabled
+ * unless explicitly disabled via DEMOS_IPFS_PUBLIC_MODE=true
  *
- * @returns true if private network mode is enabled
+ * @returns true if private network mode is enabled (default: true)
  */
 export function isPrivateNetworkEnabled(): boolean {
-    const swarmKey = getSwarmKeyFromEnv()
-    const forcePnet = process.env.LIBP2P_FORCE_PNET === "1"
-
-    return !!swarmKey || forcePnet
+    // Only disable private network if explicitly requested
+    if (process.env.DEMOS_IPFS_PUBLIC_MODE === "true") {
+        return false
+    }
+    // Private network is now the default
+    return true
 }
 
 /**
  * Log swarm key status (without exposing the actual key)
  */
 export function logSwarmKeyStatus(): void {
-    const swarmKey = getSwarmKeyFromEnv()
-    const forcePnet = process.env.LIBP2P_FORCE_PNET === "1"
+    const swarmKey = getSwarmKey()
+    const isCustom = process.env.DEMOS_IPFS_SWARM_KEY !== undefined
+    const isPublicMode = process.env.DEMOS_IPFS_PUBLIC_MODE === "true"
 
-    if (swarmKey) {
-        // Only log first 8 and last 8 characters for identification
-        const masked = `${swarmKey.slice(0, 8)}...${swarmKey.slice(-8)}`
-        log.info(`[IPFS] Swarm key configured: ${masked}`)
-    } else if (forcePnet) {
-        log.warning("[IPFS] LIBP2P_FORCE_PNET=1 but no swarm key configured")
+    if (isPublicMode) {
+        log.info("[IPFS] Running in PUBLIC mode (connected to public IPFS network)")
+        return
+    }
+
+    // Only log first 8 and last 8 characters for identification
+    const masked = `${swarmKey.slice(0, 8)}...${swarmKey.slice(-8)}`
+
+    if (isCustom) {
+        log.info(`[IPFS] Using CUSTOM swarm key: ${masked}`)
     } else {
-        log.debug("[IPFS] No swarm key configured (public IPFS mode)")
+        log.info(`[IPFS] Using Demos network swarm key: ${masked}`)
     }
 }

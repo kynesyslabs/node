@@ -25,7 +25,6 @@ import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
-<<<<<<< HEAD
 import { exchangeGitHubCode } from "../identity/oauth/github"
 // REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 8)
 import {
@@ -51,8 +50,6 @@ import {
     ipfsPublicCheck,
     ipfsRateLimitStatus,
 } from "./routines/nodecalls/ipfs"
-=======
->>>>>>> custom_protocol
 
 export interface NodeCall {
     message: string
@@ -482,7 +479,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
-<<<<<<< HEAD
         // =========================================================================
         // REVIEW: IPFS Operations (Phase 2)
         // =========================================================================
@@ -546,7 +542,11 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "ipfsRateLimitStatus":
             return await ipfsRateLimitStatus()
-=======
+
+        // =========================================================================
+        // REVIEW: TLSNotary Operations
+        // =========================================================================
+
         // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
         case "requestTLSNproxy": {
             try {
@@ -766,7 +766,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
             break
         }
->>>>>>> custom_protocol
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

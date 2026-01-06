@@ -13,7 +13,7 @@ import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { HelloPeerRequest } from "../network/manageHelloPeer"
+import { HelloPeerRequest, PeerCapabilities } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import fs from "fs"
 
@@ -313,6 +313,9 @@ export default class PeerManager {
                 uint8ArrayToHex(signedConnectionString.signature),
         )
 
+        // REVIEW: Phase 9 - Include IPFS capabilities for swarm discovery
+        const capabilities = await PeerManager.getOurCapabilities()
+
         // Sending the transmission to the peer
         const helloRequest: HelloPeerRequest = {
             url: connectionString,
@@ -326,6 +329,7 @@ export default class PeerManager {
                 block_hash: getSharedState.lastBlockHash,
                 status: getSharedState.syncStatus,
             },
+            capabilities,
         }
 
         log.debug(
@@ -407,5 +411,53 @@ export default class PeerManager {
         await Promise.all(
             allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
         )
+    }
+
+    // REVIEW: Phase 9 - IPFS capabilities for peer discovery
+    /**
+     * Get our node's capabilities to advertise to peers
+     * Currently includes IPFS info for swarm discovery
+     */
+    static async getOurCapabilities(): Promise<PeerCapabilities | undefined> {
+        try {
+            // Lazy import to avoid circular dependencies and startup issues
+            const { ensureIpfsManager } = await import(
+                "@/libs/network/routines/nodecalls/ipfs/ipfsManager"
+            )
+
+            const ipfs = await ensureIpfsManager()
+            const nodeInfo = await ipfs.getNodeInfo()
+
+            if (!nodeInfo.peerId || nodeInfo.addresses.length === 0) {
+                log.debug("[Hello Peer] IPFS not ready - no capabilities to advertise")
+                return undefined
+            }
+
+            // Filter addresses to only include routable ones
+            // Exclude localhost/127.0.0.1 addresses as they're not useful for remote peers
+            const routableAddresses = nodeInfo.addresses.filter(addr => {
+                return !addr.includes("/127.0.0.1/") &&
+                       !addr.includes("/::1/") &&
+                       !addr.includes("/localhost/")
+            })
+
+            if (routableAddresses.length === 0) {
+                log.debug("[Hello Peer] No routable IPFS addresses to advertise")
+                return undefined
+            }
+
+            log.debug(`[Hello Peer] Advertising IPFS peer ${nodeInfo.peerId} with ${routableAddresses.length} addresses`)
+
+            return {
+                ipfs: {
+                    peerId: nodeInfo.peerId,
+                    addresses: routableAddresses,
+                },
+            }
+        } catch (error) {
+            // IPFS not available - that's fine, capabilities are optional
+            log.debug(`[Hello Peer] Could not get IPFS capabilities: ${error}`)
+            return undefined
+        }
     }
 }

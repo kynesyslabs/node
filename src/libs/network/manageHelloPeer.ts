@@ -7,6 +7,27 @@ import _ from "lodash"
 import { SyncData } from "../peer/Peer"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
+// REVIEW: Phase 9 - IPFS peer discovery via hello_peer
+/**
+ * IPFS capabilities exchanged during peer discovery
+ * Enables dynamic IPFS swarm formation through Demos peer network
+ */
+export interface IpfsCapabilities {
+    /** IPFS peer ID (base58 encoded) */
+    peerId: string
+    /** IPFS multiaddrs for direct connection (e.g., /ip4/x.x.x.x/tcp/4001/p2p/QmXXX) */
+    addresses: string[]
+}
+
+/**
+ * Optional capabilities advertised by peers
+ * Extensible for future features (e.g., relay, storage, compute)
+ */
+export interface PeerCapabilities {
+    /** IPFS node info for swarm discovery */
+    ipfs?: IpfsCapabilities
+}
+
 export interface HelloPeerRequest {
     url: string
     publicKey: string
@@ -15,6 +36,8 @@ export interface HelloPeerRequest {
         data: string
     }
     syncData: SyncData
+    /** Optional capabilities - for backward compatibility with older nodes */
+    capabilities?: PeerCapabilities
 }
 
 // Hello Peer takes the request of an already authenticated client and treat the client as a peer
@@ -113,5 +136,46 @@ export async function manageHelloPeer(
         syncData: peerManager.ourSyncData,
     }
 
+    // REVIEW: Phase 9 - Connect IPFS peers dynamically
+    // Handle IPFS capabilities if present (non-blocking, best-effort)
+    if (content.capabilities?.ipfs) {
+        handleIpfsCapabilities(content.capabilities.ipfs, peerObject.identity).catch((err) => {
+            log.debug(`[Hello Peer] IPFS peer connection failed (non-critical): ${err}`)
+        })
+    }
+
     return response
+}
+
+/**
+ * Handle IPFS capabilities from a peer - connect to their IPFS node
+ * This runs asynchronously and doesn't block the hello_peer response
+ */
+async function handleIpfsCapabilities(
+    ipfsCapabilities: IpfsCapabilities,
+    demosIdentity: string,
+): Promise<void> {
+    // Lazy import to avoid circular dependencies
+    const { ensureIpfsManager } = await import("@/libs/network/routines/nodecalls/ipfs/ipfsManager")
+
+    try {
+        const ipfs = await ensureIpfsManager()
+
+        log.info(`[Hello Peer] Connecting to IPFS peer ${ipfsCapabilities.peerId} from Demos peer ${demosIdentity.slice(0, 16)}...`)
+
+        // Try each address until one succeeds
+        for (const addr of ipfsCapabilities.addresses) {
+            const result = await ipfs.connectPeer(addr)
+            if (result.success) {
+                log.info(`[Hello Peer] Connected to IPFS peer ${ipfsCapabilities.peerId} via ${addr}`)
+                // Register the Demos-IPFS peer mapping for future reference
+                ipfs.registerDemosPeer(ipfsCapabilities.peerId, addr)
+                return
+            }
+        }
+
+        log.debug(`[Hello Peer] Could not connect to IPFS peer ${ipfsCapabilities.peerId} (all addresses failed)`)
+    } catch (error) {
+        log.debug(`[Hello Peer] IPFS connection error: ${error}`)
+    }
 }

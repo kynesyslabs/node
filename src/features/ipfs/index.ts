@@ -60,14 +60,19 @@ export {
     getSwarmConfigFromEnv,
 } from "./types"
 
-// REVIEW: Phase 4 - Swarm key utilities
+// Swarm key utilities (Phase 9 - Private Network)
 export {
+    // Official Demos network key
+    DEMOS_IPFS_SWARM_KEY,
+    DEMOS_IPFS_SWARM_KEY_FILE,
+    // Key management
     generateSwarmKey,
     formatSwarmKeyFile,
     parseSwarmKeyFile,
     isValidSwarmKey,
     swarmKeysMatch,
-    getSwarmKeyFromEnv,
+    getSwarmKey,
+    getSwarmKeyFromEnv, // deprecated
     isPrivateNetworkEnabled,
     logSwarmKeyStatus,
 } from "./swarmKey"

@@ -104,13 +104,9 @@ const TABS: Tab[] = [
     { key: "7", label: "ID", category: "IDENTITY" },
     { key: "8", label: "MCP", category: "MCP" },
     { key: "9", label: "XM", category: "MULTICHAIN" },
-<<<<<<< HEAD
     { key: "-", label: "IPFS", category: "IPFS" },
     { key: "=", label: "DAHR", category: "DAHR" },
-=======
-    { key: "-", label: "DAHR", category: "DAHR" },
-    { key: "=", label: "TLSN", category: "TLSN" },
->>>>>>> custom_protocol
+    { key: "`", label: "TLSN", category: "TLSN" },
     { key: "\\", label: "CMD", category: "CMD" },
 ]
 
@@ -521,28 +517,27 @@ export class TUIManager extends EventEmitter {
                 this.setActiveTab(Number.parseInt(key, 10))
                 break
 
-            case "-":
-                this.setActiveTab(10) // IPFS tab
+            case "-": {
+                const ipfsIdx = TABS.findIndex(t => t.category === "IPFS")
+                if (ipfsIdx >= 0) this.setActiveTab(ipfsIdx)
                 break
+            }
 
-<<<<<<< HEAD
-            case "=":
-                this.setActiveTab(11) // DAHR tab
-                break
-
-            case "\\":
-                this.setActiveTab(12) // CMD tab
-=======
             case "=": {
-                const idx = TABS.findIndex(t => t.category === "TLSN")
-                if (idx >= 0) this.setActiveTab(idx)
->>>>>>> custom_protocol
+                const dahrIdx = TABS.findIndex(t => t.category === "DAHR")
+                if (dahrIdx >= 0) this.setActiveTab(dahrIdx)
+                break
+            }
+
+            case "`": {
+                const tlsnIdx = TABS.findIndex(t => t.category === "TLSN")
+                if (tlsnIdx >= 0) this.setActiveTab(tlsnIdx)
                 break
             }
 
             case "\\": {
-                const idx = TABS.findIndex(t => t.category === "CMD")
-                if (idx >= 0) this.setActiveTab(idx)
+                const cmdIdx = TABS.findIndex(t => t.category === "CMD")
+                if (cmdIdx >= 0) this.setActiveTab(cmdIdx)
                 break
             }
 
