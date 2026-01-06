@@ -513,7 +513,6 @@ async function main() {
                 "[MAIN] ⚠️  Failed to start OmniProtocol server:",
                 error,
             )
-            process.exit(1)
             // Continue without OmniProtocol (failsafe - falls back to HTTP)
         }
     } else {

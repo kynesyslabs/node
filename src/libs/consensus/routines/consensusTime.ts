@@ -37,7 +37,6 @@ export async function checkConsensusTime(
         "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
         true,
     )
-    //process.exit(0)
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     log.info(

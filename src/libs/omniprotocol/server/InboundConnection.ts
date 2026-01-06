@@ -5,7 +5,7 @@ import { MessageFramer } from "../transport/MessageFramer"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import { RateLimiter } from "../ratelimit"
-import { ConnectionError } from "../types/errors"
+import { ConnectionError, InvalidAuthBlockFormatError } from "../types/errors"
 
 export type ConnectionState =
     | "PENDING_AUTH" // Waiting for hello_peer
@@ -95,11 +95,18 @@ export class InboundConnection extends EventEmitter {
         // Add to framer
         this.framer.addData(chunk)
 
-        // Extract all complete messages
-        let message = this.framer.extractMessage()
-        while (message) {
-            await this.handleMessage(message)
-            message = this.framer.extractMessage()
+        try {
+            // Extract all complete messages
+            let message = this.framer.extractMessage()
+            while (message) {
+                await this.handleMessage(message)
+                message = this.framer.extractMessage()
+            }
+        } catch (error) {
+            console.error(error)
+            if (error instanceof InvalidAuthBlockFormatError) {
+                return
+            }
         }
     }
 

@@ -31,7 +31,6 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
     ): Promise<RPCResponse> {
         if (!this.shouldUseOmni(peer.identity)) {
             // Use httpCall directly to avoid recursion through call()
-            process.exit(1)
             return peer.httpCall(request, isAuthenticated)
         }
 

@@ -20,6 +20,7 @@ import {
     ConnectionTimeoutError,
     AuthenticationError,
     SigningError,
+    InvalidAuthBlockFormatError,
 } from "../types/errors"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -236,11 +237,6 @@ export class PeerConnection {
                 signature: signature,
                 publicKey: publicKey,
             })
-
-            if (!valid) {
-                throw new Error("Ed25519 signature verification failed")
-                process.exit(1)
-            }
         } catch (error) {
             throw new SigningError(
                 `Ed25519 signing failed (privateKey length: ${
@@ -412,11 +408,18 @@ export class PeerConnection {
         // Add data to framer
         this.framer.addData(chunk)
 
-        // Extract all complete messages
-        let message = this.framer.extractMessage()
-        while (message) {
-            this.handleMessage(message.header, message.payload as Buffer)
-            message = this.framer.extractMessage()
+        try {
+            // Extract all complete messages
+            let message = this.framer.extractMessage()
+            while (message) {
+                this.handleMessage(message.header, message.payload as Buffer)
+                message = this.framer.extractMessage()
+            }
+        } catch (error) {
+            console.error(error)
+            if (error instanceof InvalidAuthBlockFormatError) {
+                return
+            }
         }
     }
 

@@ -238,8 +238,6 @@ export default class Peer {
             }
         }
 
-        log.error("[Peer] OmniProtocol adaptCall failed, falling back to HTTP")
-        process.exit(1)
         // HTTP fallback / default path
         return this.httpCall(request, isAuthenticated)
     }
@@ -249,10 +247,6 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated = true,
     ): Promise<RPCResponse> {
-        console.error("httpCall called")
-        log.error("HTTP CALL PAYLOAD: " + JSON.stringify(request, null, 2))
-        process.exit(1)
-
         log.info(
             "[RPC Call] [" +
                 request.method +
