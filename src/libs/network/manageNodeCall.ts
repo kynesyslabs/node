@@ -505,8 +505,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 const result = await requestProxy(data.targetUrl, data.requestOrigin)
 
                 if ("error" in result) {
-                    // Error response - don't consume retry on internal errors
-                    response.result = 500
+                    // Map proxy errors to appropriate HTTP status codes
+                    switch (result.error) {
+                        case ProxyError.INVALID_URL:
+                            response.result = 400 // Bad Request - client error
+                            break
+                        case ProxyError.PORT_EXHAUSTED:
+                            response.result = 503 // Service Unavailable - temporary
+                            break
+                        case ProxyError.WSTCP_NOT_AVAILABLE:
+                        case ProxyError.PROXY_SPAWN_FAILED:
+                        default:
+                            response.result = 500 // Internal Server Error
+                            break
+                    }
                     response.response = result
                 } else {
                     // Success - consume a retry and link proxyId to token
