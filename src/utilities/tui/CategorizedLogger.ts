@@ -33,6 +33,7 @@ export type LogCategory =
     | "MCP" // MCP server operations
     | "MULTICHAIN" // Cross-chain/XM operations
     | "DAHR" // DAHR-specific operations
+    | "TLSN" // TLSNotary HTTPS attestation operations
     | "CMD" // Command execution and TUI commands
 
 /**
@@ -198,6 +199,8 @@ const ALL_CATEGORIES: LogCategory[] = [
     "MCP",
     "MULTICHAIN",
     "DAHR",
+    "TLSN",
+    "CMD",
 ]
 
 /**
@@ -919,18 +922,7 @@ export class CategorizedLogger extends EventEmitter {
      * Get all available categories
      */
     static getCategories(): LogCategory[] {
-        return [
-            "CORE",
-            "NETWORK",
-            "PEER",
-            "CHAIN",
-            "SYNC",
-            "CONSENSUS",
-            "IDENTITY",
-            "MCP",
-            "MULTICHAIN",
-            "DAHR",
-        ]
+        return [...ALL_CATEGORIES]
     }
 
     /**

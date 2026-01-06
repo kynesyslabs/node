@@ -448,6 +448,16 @@ export async function serverRpcBun() {
         }
     })
 
+    // REVIEW: Register TLSNotary routes if enabled
+    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+        try {
+            const { registerTLSNotaryRoutes } = await import("@/features/tlsnotary/routes")
+            registerTLSNotaryRoutes(server)
+        } catch (error) {
+            log.warning("[RPC] Failed to register TLSNotary routes: " + error)
+        }
+    }
+
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
 }
