@@ -380,6 +380,12 @@ function ctrl_c() {
         docker compose down
         cd ..
     fi
+    # Stop TLSNotary container if running (enabled by default)
+    if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
+        (cd tlsnotary && docker compose down --timeout 5 2>/dev/null) || true
+        # Force kill if still running
+        docker rm -f "tlsn-notary-${TLSNOTARY_PORT:-7047}" 2>/dev/null || true
+    fi
 }
 
 # Function to check if we are on the first run with the .RUN file
@@ -775,6 +781,51 @@ if [ "$EXTERNAL_DB" = false ]; then
     fi
 fi
 
+# TLSNotary Docker container management (enabled by default)
+# Set TLSNOTARY_DISABLED=true to disable
+if [ "$TLSNOTARY_DISABLED" != "true" ]; then
+    TLSNOTARY_PORT="${TLSNOTARY_PORT:-7047}"
+    echo "🔐 Starting TLSNotary notary container..."
+
+    if [ -d "tlsnotary" ]; then
+        cd tlsnotary
+
+        # Stop any existing container
+        docker compose down > /dev/null 2>&1 || true
+
+        # Start the TLSNotary container
+        log_verbose "Starting TLSNotary container on port $TLSNOTARY_PORT"
+        if ! TLSNOTARY_PORT=$TLSNOTARY_PORT docker compose up -d; then
+            echo "⚠️  Warning: Failed to start TLSNotary container"
+            echo "💡 TLSNotary attestation features will not be available"
+        else
+            echo "✅ TLSNotary container started on port $TLSNOTARY_PORT"
+
+            # Wait for TLSNotary to be healthy (max 15 seconds)
+            log_verbose "Waiting for TLSNotary to be healthy..."
+            TLSN_TIMEOUT=15
+            TLSN_COUNT=0
+            while ! curl -sf "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
+                TLSN_COUNT=$((TLSN_COUNT+1))
+                if [ $TLSN_COUNT -gt $TLSN_TIMEOUT ]; then
+                    echo "⚠️  Warning: TLSNotary health check timeout"
+                    break
+                fi
+                sleep 1
+            done
+
+            if [ $TLSN_COUNT -le $TLSN_TIMEOUT ]; then
+                echo "✅ TLSNotary is ready"
+            fi
+        fi
+        cd ..
+    else
+        echo "⚠️  Warning: tlsnotary folder not found, skipping TLSNotary setup"
+    fi
+else
+    log_verbose "TLSNotary disabled (TLSNOTARY_DISABLED=true)"
+fi
+
 # Ensuring the logs folder exists
 mkdir -p logs
 
@@ -912,6 +963,26 @@ if [ "$EXTERNAL_DB" = false ]; then
         echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
     fi
     cd ..
+fi
+
+# Stop TLSNotary container if it was started (enabled by default)
+if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
+    echo "🛑 Stopping TLSNotary container..."
+    TLSN_CONTAINER="tlsn-notary-${TLSNOTARY_PORT:-7047}"
+
+    # Try graceful shutdown first with short timeout
+    cd tlsnotary
+    docker compose down --timeout 5 2>/dev/null || true
+    cd ..
+
+    # Force kill if still running
+    if docker ps -q -f "name=$TLSN_CONTAINER" 2>/dev/null | grep -q .; then
+        echo "   Force stopping TLSNotary container..."
+        docker kill "$TLSN_CONTAINER" 2>/dev/null || true
+        docker rm -f "$TLSN_CONTAINER" 2>/dev/null || true
+    fi
+
+    echo "✅ TLSNotary stopped"
 fi
 
 echo ""

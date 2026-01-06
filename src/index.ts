@@ -53,6 +53,10 @@ const indexState: {
     OMNI_ENABLED: boolean
     OMNI_PORT: number
     omniServer: any
+    // REVIEW: TLSNotary configuration - new HTTPS attestation feature
+    TLSNOTARY_ENABLED: boolean
+    TLSNOTARY_PORT: number
+    tlsnotaryService: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -73,6 +77,10 @@ const indexState: {
     OMNI_ENABLED: false,
     OMNI_PORT: 0,
     omniServer: null,
+    // REVIEW: TLSNotary defaults - disabled by default, requires signing key
+    TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
+    TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    tlsnotaryService: null,
 }
 
 // SECTION Preparation methods
@@ -119,7 +127,7 @@ async function digestArguments() {
                     log.info("[MAIN] TUI disabled, using scrolling log output")
                     indexState.TUI_ENABLED = false
                     break
-                case "log-level":
+                case "log-level": {
                     const level = param[1]?.toLowerCase()
                     if (["debug", "info", "warning", "error", "critical"].includes(level)) {
                         CategorizedLogger.getInstance().setMinLevel(level as "debug" | "info" | "warning" | "error" | "critical")
@@ -128,6 +136,7 @@ async function digestArguments() {
                         log.warning(`[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`)
                     }
                     break
+                }
                 default:
                     log.warning("[MAIN] Invalid parameter: " + param)
             }
@@ -523,6 +532,68 @@ async function main() {
                 // Continue without MCP (failsafe)
             }
         }
+
+        // REVIEW: Start TLSNotary service (failsafe - optional HTTPS attestation feature)
+        // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
+        if (indexState.TLSNOTARY_ENABLED) {
+            try {
+                const { initializeTLSNotary, getTLSNotaryService, isTLSNotaryFatal, isTLSNotaryDebug } = await import("./features/tlsnotary")
+                const fatal = isTLSNotaryFatal()
+                const debug = isTLSNotaryDebug()
+
+                // REVIEW: Check for port collision with OmniProtocol
+                // OmniProtocol derives peer ports as HTTP_PORT + 1, which could collide with TLSNotary
+                if (indexState.OMNI_ENABLED) {
+                    // Check if TLSNotary port could be hit by OmniProtocol peer connections
+                    // This happens when a peer runs on HTTP port (TLSNotary port - 1)
+                    const potentialCollisionPort = indexState.TLSNOTARY_PORT - 1
+                    log.warning(`[TLSNotary] ⚠️ OmniProtocol is enabled. If any peer runs on HTTP port ${potentialCollisionPort}, OmniProtocol will try to connect to port ${indexState.TLSNOTARY_PORT} (TLSNotary)`)
+                    log.warning("[TLSNotary] This can cause 'WebSocket upgrade failed: Unsupported HTTP method' errors")
+                    log.warning("[TLSNotary] Consider using a different TLSNOTARY_PORT to avoid collisions")
+                }
+
+                if (debug) {
+                    log.info("[TLSNotary] Debug mode: TLSNOTARY_DEBUG=true")
+                    log.info(`[TLSNotary] Fatal mode: TLSNOTARY_FATAL=${fatal}`)
+                    log.info(`[TLSNotary] Port: ${indexState.TLSNOTARY_PORT}`)
+                }
+
+                // Initialize without passing BunServer - routes are registered separately in server_rpc.ts
+                const initialized = await initializeTLSNotary()
+                if (initialized) {
+                    indexState.tlsnotaryService = getTLSNotaryService()
+                    log.info(`[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`)
+                    // Update TUI with TLSNotary info
+                    if (indexState.TUI_ENABLED && indexState.tuiManager) {
+                        indexState.tuiManager.updateNodeInfo({
+                            tlsnotary: {
+                                enabled: true,
+                                port: indexState.TLSNOTARY_PORT,
+                                running: true,
+                            },
+                        })
+                    }
+                } else {
+                    const msg = "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
+                    if (fatal) {
+                        log.error("[TLSNotary] FATAL: " + msg)
+                        process.exit(1)
+                    }
+                    log.warning(msg)
+                }
+            } catch (error) {
+                log.error("[TLSNotary] Failed to start TLSNotary service: " + error)
+                const { isTLSNotaryFatal } = await import("./features/tlsnotary")
+                if (isTLSNotaryFatal()) {
+                    log.error("[TLSNotary] FATAL: Exiting due to TLSNotary failure")
+                    process.exit(1)
+                }
+                // Continue without TLSNotary (failsafe)
+            }
+        } else {
+            log.info("[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)")
+        }
+
         log.info("[MAIN] ✅ Starting the background loop")
 
         // Update TUI status to running
@@ -559,6 +630,17 @@ async function gracefulShutdown(signal: string) {
                 await indexState.mcpServer.stop()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping MCP server:", error)
+            }
+        }
+
+        // REVIEW: Stop TLSNotary service if running
+        if (indexState.tlsnotaryService) {
+            console.log("[SHUTDOWN] Stopping TLSNotary service...")
+            try {
+                const { shutdownTLSNotary } = await import("./features/tlsnotary")
+                await shutdownTLSNotary()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
             }
         }
 

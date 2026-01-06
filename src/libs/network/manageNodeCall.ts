@@ -25,6 +25,7 @@ import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
+<<<<<<< HEAD
 import { exchangeGitHubCode } from "../identity/oauth/github"
 // REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 8)
 import {
@@ -50,6 +51,8 @@ import {
     ipfsPublicCheck,
     ipfsRateLimitStatus,
 } from "./routines/nodecalls/ipfs"
+=======
+>>>>>>> custom_protocol
 
 export interface NodeCall {
     message: string
@@ -378,23 +381,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
-        case "exchangeGitHubOAuthCode": {
-            if (!data.code) {
-                response.result = 400
-                response.response = {
-                    success: false,
-                    error: "No authorization code provided",
-                }
-                break
-            }
-
-            const oauthResult = await exchangeGitHubCode(data.code)
-
-            response.result = oauthResult.success ? 200 : 400
-            response.response = oauthResult
-            break
-        }
-
         // INFO: Tests if twitter account is a bot
         // case "checkIsBot": {
         //     if (!data.username || !data.userId) {
@@ -496,6 +482,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
+<<<<<<< HEAD
         // =========================================================================
         // REVIEW: IPFS Operations (Phase 2)
         // =========================================================================
@@ -559,6 +546,227 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "ipfsRateLimitStatus":
             return await ipfsRateLimitStatus()
+=======
+        // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
+        case "requestTLSNproxy": {
+            try {
+                const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
+                const { validateToken, consumeRetry } = await import("@/features/tlsnotary/tokenManager")
+
+                // Require tokenId and owner (pubkey) for paid access
+                if (!data.tokenId || !data.owner) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing tokenId or owner parameter",
+                    }
+                    break
+                }
+
+                if (!data.targetUrl) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing targetUrl parameter",
+                    }
+                    break
+                }
+
+                // Validate URL is HTTPS
+                if (!data.targetUrl.startsWith("https://")) {
+                    response.result = 400
+                    response.response = {
+                        error: ProxyError.INVALID_URL,
+                        message: "Only HTTPS URLs are supported for TLS attestation",
+                    }
+                    break
+                }
+
+                // Validate the token
+                const validation = validateToken(data.tokenId, data.owner, data.targetUrl)
+                if (!validation.valid) {
+                    response.result = validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.response = {
+                        error: validation.error,
+                        message: `Token validation failed: ${validation.error}`,
+                        domain: validation.token?.domain, // Show expected domain on mismatch
+                    }
+                    break
+                }
+
+                // Request the proxy (this spawns wstcp if needed)
+                const result = await requestProxy(data.targetUrl, data.requestOrigin)
+
+                if ("error" in result) {
+                    // Map proxy errors to appropriate HTTP status codes
+                    switch (result.error) {
+                        case ProxyError.INVALID_URL:
+                            response.result = 400 // Bad Request - client error
+                            break
+                        case ProxyError.PORT_EXHAUSTED:
+                            response.result = 503 // Service Unavailable - temporary
+                            break
+                        case ProxyError.WSTCP_NOT_AVAILABLE:
+                        case ProxyError.PROXY_SPAWN_FAILED:
+                        default:
+                            response.result = 500 // Internal Server Error
+                            break
+                    }
+                    response.response = result
+                } else {
+                    // Success - consume a retry and link proxyId to token
+                    const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                    if (updatedToken) {
+                        log.info(`[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`)
+                    }
+
+                    // Add token info to response
+                    response.response = {
+                        ...result,
+                        tokenId: data.tokenId,
+                        retriesLeft: updatedToken?.retriesLeft ?? 0,
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] requestTLSNproxy error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to request TLSNotary proxy",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary discovery endpoint for SDK auto-configuration
+        case "tlsnotary.getInfo": {
+            // Dynamic import to avoid circular dependencies and check if enabled
+            try {
+                const { getTLSNotaryService } = await import("@/features/tlsnotary")
+                const service = getTLSNotaryService()
+
+                if (!service || !service.isRunning()) {
+                    response.result = 503
+                    response.response = {
+                        success: false,
+                        error: "TLSNotary service is not enabled or not running",
+                    }
+                    break
+                }
+
+                const publicKey = service.getPublicKeyHex()
+                const port = service.getPort()
+
+                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+
+                // Extract host and determine WebSocket scheme from exposedUrl
+                // The node's host is used - SDK connects to the same host it's already connected to
+                let nodeHost = "localhost"
+                const wsScheme = (() => {
+                    try {
+                        const exposedUrl = getSharedState.exposedUrl
+                        if (exposedUrl) {
+                            const url = new URL(exposedUrl)
+                            nodeHost = url.hostname
+                            return url.protocol === "https:" ? "wss" : "ws"
+                        }
+                    } catch {
+                        // Fall back to localhost and ws if URL parsing fails
+                    }
+                    return "ws"
+                })()
+
+                // Build the notary WebSocket URL - Port is the TLSNotary WebSocket port
+                const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
+
+                // WebSocket proxy URL for TCP tunneling
+                const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+
+                response.response = {
+                    notaryUrl,
+                    proxyUrl,
+                    publicKey,
+                    version: "0.1.0", // TLSNotary integration version
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Failed to get TLSNotary info",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token lookup by transaction hash
+        case "tlsnotary.getToken": {
+            try {
+                const { getTokenByTxHash, getToken } = await import("@/features/tlsnotary/tokenManager")
+
+                // Support lookup by either tokenId or txHash
+                const { tokenId, txHash } = data as { tokenId?: string; txHash?: string }
+
+                let token
+                if (tokenId) {
+                    token = getToken(tokenId)
+                } else if (txHash) {
+                    token = getTokenByTxHash(txHash)
+                } else {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Either tokenId or txHash is required",
+                    }
+                    break
+                }
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: "No token found for the provided identifier",
+                    }
+                } else {
+                    response.response = {
+                        token: {
+                            id: token.id,
+                            owner: token.owner,
+                            domain: token.domain,
+                            status: token.status,
+                            expiresAt: token.expiresAt,
+                            retriesLeft: token.retriesLeft,
+                        },
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getToken error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token stats for monitoring
+        case "tlsnotary.getTokenStats": {
+            try {
+                const { getTokenStats } = await import("@/features/tlsnotary/tokenManager")
+                const stats = getTokenStats()
+                response.response = { stats }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getTokenStats error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token stats",
+                }
+            }
+            break
+        }
+>>>>>>> custom_protocol
 
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen

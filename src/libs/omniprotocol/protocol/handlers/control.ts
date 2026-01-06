@@ -82,13 +82,43 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         log.info(`[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`)
 
         // ServerHandlers.handleMempool expects content with .data property
-        const content = request.params[0] ?? { data: [] }
+        const mempoolParams = Array.isArray(request.params) ? request.params : []
+        const content = mempoolParams[0] ?? { data: [] }
         const response = await serverHandlers.handleMempool(content)
 
         return encodeNodeCallResponse({
             status: response.result ?? 200,
             value: response.response,
             requireReply: response.requireReply ?? false,
+            extra: response.extra ?? null,
+        })
+    }
+
+    // REVIEW: Handle hello_peer - peer handshake/discovery
+    // Format: { method: "hello_peer", params: [{ url, publicKey, signature, syncData }] }
+    if (request.method === "hello_peer") {
+        const { manageHelloPeer } = await import("src/libs/network/manageHelloPeer")
+
+        log.debug(`[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`)
+
+        const params = Array.isArray(request.params) ? request.params : []
+        const helloPeerRequest = params[0]
+        if (!helloPeerRequest || typeof helloPeerRequest !== "object") {
+            return encodeNodeCallResponse({
+                status: 400,
+                value: "Invalid hello_peer payload",
+                requireReply: false,
+                extra: null,
+            })
+        }
+
+        // Call manageHelloPeer with sender identity from OmniProtocol auth
+        const response = await manageHelloPeer(helloPeerRequest, context.peerIdentity ?? "")
+
+        return encodeNodeCallResponse({
+            status: response.result,
+            value: response.response,
+            requireReply: response.require_reply ?? false,
             extra: response.extra ?? null,
         })
     }
@@ -101,7 +131,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         )
 
         // Extract the inner consensus method from params[0]
-        const consensusPayload = request.params[0]
+        const consensusParams = Array.isArray(request.params) ? request.params : []
+        const consensusPayload = consensusParams[0]
         if (!consensusPayload || typeof consensusPayload !== "object") {
             return encodeNodeCallResponse({
                 status: 400,

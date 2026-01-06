@@ -94,7 +94,12 @@ function deserializePeerEntry(buffer: Buffer, offset: number): { entry: Peerlist
 
     let metadata: Record<string, unknown> | undefined
     if (metadataBytes.value.length > 0) {
-        metadata = JSON.parse(metadataBytes.value.toString("utf8")) as Record<string, unknown>
+        try {
+            metadata = JSON.parse(metadataBytes.value.toString("utf8")) as Record<string, unknown>
+        } catch {
+            // Malformed metadata, leave as undefined
+            metadata = undefined
+        }
     }
 
     return {

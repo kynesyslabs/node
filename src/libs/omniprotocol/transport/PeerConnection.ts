@@ -1,7 +1,7 @@
 // REVIEW: PeerConnection - TCP socket wrapper for single peer connection with state management
 import log from "src/utilities/logger"
 import { Socket } from "net"
-import * as ed25519 from "@noble/ed25519"
+import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
@@ -212,10 +212,15 @@ export class PeerConnection {
         const payloadHash = Buffer.from(keccak_256(payload))
         const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
 
-        // Sign with Ed25519
+        // Sign with Ed25519 using node-forge (same as SDK)
         let signature: Uint8Array
         try {
-            signature = await ed25519.sign(dataToSign, privateKey)
+            // node-forge expects the message as a string and privateKey as NativeBuffer
+            const signatureBuffer = forge.pki.ed25519.sign({
+                message: dataToSign,
+                privateKey: privateKey as forge.pki.ed25519.NativeBuffer,
+            })
+            signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
                 `Ed25519 signing failed (privateKey length: ${privateKey.length} bytes): ${error instanceof Error ? error.message : error}`,

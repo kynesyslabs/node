@@ -34,6 +34,7 @@ export type LogCategory =
     | "MULTICHAIN" // Cross-chain/XM operations
     | "IPFS" // IPFS storage operations
     | "DAHR" // DAHR-specific operations
+    | "TLSN" // TLSNotary HTTPS attestation operations
     | "CMD" // Command execution and TUI commands
 
 /**
@@ -200,6 +201,8 @@ const ALL_CATEGORIES: LogCategory[] = [
     "MULTICHAIN",
     "IPFS",
     "DAHR",
+    "TLSN",
+    "CMD",
 ]
 
 /**
@@ -921,6 +924,7 @@ export class CategorizedLogger extends EventEmitter {
      * Get all available categories
      */
     static getCategories(): LogCategory[] {
+<<<<<<< HEAD
         return [
             "CORE",
             "NETWORK",
@@ -934,6 +938,9 @@ export class CategorizedLogger extends EventEmitter {
             "IPFS",
             "DAHR",
         ]
+=======
+        return [...ALL_CATEGORIES]
+>>>>>>> custom_protocol
     }
 
     /**
