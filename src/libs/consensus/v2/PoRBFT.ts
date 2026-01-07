@@ -234,6 +234,7 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        console.error(error)
         log.error(`[CONSENSUS] Fatal consensus error: ${error}`)
         process.exit(1)
     } finally {
