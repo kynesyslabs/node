@@ -1,3 +1,5 @@
+import log from "@/utilities/logger"
+
 // INFO forgeBuffer comes in as the raw result of forge methods
 export function forgeToHex(forgeBuffer: any): string {
     try {
@@ -5,7 +7,7 @@ export function forgeToHex(forgeBuffer: any): string {
             forgeBuffer = forgeBuffer.data
         }
     } catch (e) {
-        console.log("[ForgeToHex] Not a buffer")
+        log.debug("[ForgeToHex] Not a buffer")
     }
     //console.log(forgeBuffer)
     const rebuffer = Buffer.from(forgeBuffer)
@@ -35,7 +37,7 @@ export function hexToForge(forgeString: string): Uint8Array {
     }
     // NOTE This is an horrible, yet working solution to the above problem
     if (trimmedArray.length == 63 || trimmedArray.length == 31) {
-        console.log("[HexToForge] Suspicious length: " + trimmedArray.length)
+        log.warning("[HexToForge] Suspicious length: " + trimmedArray.length)
         const finalArray = new Uint8Array(trimmedArray.length + 1)
         for (let i = 0; i < trimmedArray.length; i++) {
             finalArray[i] = trimmedArray[i]

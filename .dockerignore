@@ -1,0 +1,15 @@
+# Exclude git directory
+.git
+
+# Exclude node_modules (installed fresh during build)
+node_modules
+
+# Exclude devnet runtime files
+devnet/identities
+devnet/.env
+devnet/demos_peerlist.json
+devnet/postgres-data
+
+# Exclude unnecessary files
+*.log
+.DS_Store

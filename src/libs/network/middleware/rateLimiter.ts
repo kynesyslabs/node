@@ -91,7 +91,7 @@ export class RateLimiter {
         try {
             await fs.promises.writeFile(
                 filePath,
-                JSON.stringify(allIPs, null, 2),
+                JSON.stringify(allIPs),
             )
         } catch (error) {
             log.error(`[Rate Limiter] Failed to dump IPs: ${error}`)

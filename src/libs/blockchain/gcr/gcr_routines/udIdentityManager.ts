@@ -345,7 +345,7 @@ export class UDIdentityManager {
             domain,
             UD_RECORD_KEYS,
         )
-        console.log("solanaResult: ", solanaResult)
+        log.debug("solanaResult: " + JSON.stringify(solanaResult))
 
         if (solanaResult.exists) {
             log.debug(

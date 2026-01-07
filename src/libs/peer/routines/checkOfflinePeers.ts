@@ -1,31 +1,35 @@
+import log from "src/utilities/logger"
 import PeerManager from "../PeerManager"
 import { getSharedState } from "src/utilities/sharedState"
-import log from "src/utilities/logger"
 
 // REVIEW Check offline peers asynchronously
 export default async function checkOfflinePeers(): Promise<void> {
     // INFO add a reentrancy check
     if (getSharedState.inPeerRecheckLoop) {
-        console.log("[MAIN LOOP] [PEER RECHECK] Reentrancy detected: we are already checking offline peers")
         return
     }
+
     getSharedState.inPeerRecheckLoop = true
-    const offlinePeers = PeerManager.getInstance().getOfflinePeers()
-    for (const offlinePeerIdentity in offlinePeers) {
-        const offlinePeer = offlinePeers[offlinePeerIdentity]
-        const offlinePeerString = offlinePeer.connection.string
-        console.log("[MAIN LOOP] [PEER RECHECK] Checking offline peer: ", offlinePeerString)
-        // TODO Add sanity checks
-        const isOnline = await offlinePeer.connect()
-        if (isOnline) {
-            console.log("[MAIN LOOP] [PEER RECHECK] Peer is online: ", offlinePeerString)
-            // Add the peer to the peer manager and online list
-            PeerManager.getInstance().addPeer(offlinePeer)
-            // Remove the peer from the offline list
-            PeerManager.getInstance().removeOfflinePeer(offlinePeerString)
-        } else {
-            console.log("[MAIN LOOP] [PEER RECHECK] Peer is still offline: ", offlinePeerString)
-        }
+    const now = Date.now()
+
+    if (
+        now - getSharedState.lastPeerRecheck <
+        getSharedState.peerRecheckSleepTime
+    ) {
+        getSharedState.inPeerRecheckLoop = false
+        return
     }
+
+    log.info("[PEER RECHECK] Checking offline peers")
+    getSharedState.lastPeerRecheck = now
+    const peerman = PeerManager.getInstance()
+
+    const offlinePeers = peerman.getOfflinePeers()
+    const checkPromises = Object.values(offlinePeers).map(async offlinePeer => {
+        await PeerManager.sayHelloToPeer(offlinePeer)
+    })
+
+    await Promise.all(checkPromises)
     getSharedState.inPeerRecheckLoop = false
+    log.info("[PEER RECHECK] Finished checking offline peers")
 }

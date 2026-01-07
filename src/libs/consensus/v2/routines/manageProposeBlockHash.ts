@@ -18,7 +18,7 @@ export default async function manageProposeBlockHash(
     const response = _.cloneDeep(emptyResponse)
     log.info("[Consensus Message Received] Propose Block Hash")
     log.info("Block Hash: " + blockHash)
-    log.info("Validation Data: \n" + JSON.stringify(validationData, null, 2))
+    log.debug("Validation Data: " + JSON.stringify(validationData))
     log.info("Peer ID: " + peerId)
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard
@@ -47,13 +47,12 @@ export default async function manageProposeBlockHash(
     const candidateBlockFormed = await ensureCandidateBlockFormed()
     log.debug(
         "[manageProposeBlockHash] Candidate block formed: " +
-            JSON.stringify(candidateBlockFormed, null, 2),
+            JSON.stringify(candidateBlockFormed),
     )
     if (!candidateBlockFormed) {
         log.error(
             "[manageProposeBlockHash] Candidate block not formed: refusing the block hash",
         )
-        // process.exit(0)
 
         response.result = 401
         response.response = getSharedState.publicKeyHex

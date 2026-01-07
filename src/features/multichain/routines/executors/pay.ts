@@ -7,6 +7,7 @@ import { TransactionResponse } from "sdk/localsdk/multichain/types/multichain"
 import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
+import log from "@/utilities/logger"
 
 /**
  * Executes a XM pay operation and returns
@@ -20,12 +21,12 @@ export default async function handlePayOperation(
 ) {
     let result: TransactionResponse
 
-    console.log("[XMScript Parser] Pay task. Examining payloads (require 1)...")
+    log.debug("[XMScript Parser] Pay task. Examining payloads (require 1)...")
     // NOTE For the following tasks we need to check the signed payloads against checkSignedPayloads()
 
     // NOTE Generic sanity check on payloads
     if (!checkSignedPayloads(1, operation.task.signedPayloads)) {
-        console.log(
+        log.debug(
             "[XMScript Parser] Pay task failed: Invalid payloads (require 1 has 0)",
         )
         return {
@@ -33,7 +34,7 @@ export default async function handlePayOperation(
             error: "Invalid signedPayloads length",
         }
     }
-    console.log(
+    log.debug(
         "[XMScript Parser] Pay task payloads are ok: Valid payloads (require 1 has 1)",
     )
     // ANCHOR EVM (which is quite simple: send a signed transaction. Done.)
@@ -43,7 +44,7 @@ export default async function handlePayOperation(
     }
 
     // SECTION: Non EVM Section has more complexity
-    console.log("[XMScript Parser] Non-EVM PAY")
+    log.debug("[XMScript Parser] Non-EVM PAY")
 
     // ANCHOR Ripple
     const rpcUrl =
@@ -105,8 +106,8 @@ export default async function handlePayOperation(
             }
     }
 
-    console.log("[XMScript Parser] Non-EVM PAY: result")
-    console.log(result)
+    log.debug("[XMScript Parser] Non-EVM PAY: result")
+    log.debug(result)
 
     // REVIEW is this ok here?
     return result
@@ -122,7 +123,7 @@ export async function genericJsonRpcPay(
     rpcUrl: string,
     operation: IOperation,
 ) {
-    console.log([
+    log.debug([
         `[XMScript Parser] Generic JSON RPC Pay on: ${operation.chain}.${operation.subchain}`,
     ])
     let instance: multichain.IBC
@@ -142,13 +143,13 @@ export async function genericJsonRpcPay(
 
         // INFO: Send payload and return the result
         const result = await instance.sendTransaction(signedTx)
-        console.log("[XMScript Parser] Generic JSON RPC Pay: result: ")
-        console.log(result)
+        log.debug("[XMScript Parser] Generic JSON RPC Pay: result: ")
+        log.debug(result)
 
         return result
     } catch (error) {
-        console.log("[XMScript Parser] Generic JSON RPC Pay: error: ")
-        console.log(error)
+        log.error("[XMScript Parser] Generic JSON RPC Pay: error: ")
+        log.error(error)
         return {
             result: "error",
             error: error.toString(),
@@ -160,14 +161,14 @@ export async function genericJsonRpcPay(
  * Executes an EVM Pay operation and returns the result
  */
 async function handleEVMPay(chainID: number, operation: IOperation) {
-    console.log(
+    log.debug(
         "[XMScript Parser] EVM Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
-    console.log(chainID)
+    log.debug(chainID)
 
-    console.log(operation.task.signedPayloads)
+    log.debug(operation.task.signedPayloads)
 
-    console.log(operation.task.signedPayloads[0])
+    log.debug(operation.task.signedPayloads[0])
 
     let evmInstance = multichain.EVM.getInstance(chainID)
 
@@ -191,18 +192,18 @@ async function handleXRPLPay(
     rpcUrl: string,
     operation: IOperation,
 ): Promise<TransactionResponse> {
-    console.log(
+    log.debug(
         `[XMScript Parser] Ripple Pay: ${operation.chain} on ${operation.subchain}`,
     )
-    console.log(
+    log.debug(
         `[XMScript Parser] Ripple Pay: we will use ${rpcUrl} to connect to ${operation.chain} on ${operation.subchain}`,
     )
-    console.log(
+    log.debug(
         "[XMScript Parser] Ripple Pay: trying to send the payload as a signed transaction...",
     ) // REVIEW Simulations?
     const xrplInstance = new multichain.XRPL(rpcUrl)
     const connected = await xrplInstance.connect()
-    console.log("CONNECT RETURNED: ", connected)
+    log.debug("CONNECT RETURNED: ", connected)
 
     if (!connected) {
         return {
@@ -217,14 +218,14 @@ async function handleXRPLPay(
         await new Promise(resolve => setTimeout(resolve, 300))
         timer += 300
         if (timer > 10000) {
-            console.log("[XMScript Parser] Ripple Pay: timeout")
+            log.debug("[XMScript Parser] Ripple Pay: timeout")
             return {
                 result: "error",
                 error: "Timeout in connecting to the XRP network",
             }
         }
     }
-    console.log("[XMScript Parser] Ripple Pay: connected to the XRP network")
+    log.debug("[XMScript Parser] Ripple Pay: connected to the XRP network")
 
     try {
         // Validate signedPayloads exists and has at least one element
@@ -250,7 +251,7 @@ async function handleXRPLPay(
             }
         }
 
-        if (!txBlob || typeof txBlob !== 'string') {
+        if (!txBlob || typeof txBlob !== "string") {
             return {
                 result: "error",
                 error: `Invalid tx_blob value for XRPL operation (${operation.chain}.${operation.subchain}). Expected non-empty string.`,
@@ -266,10 +267,10 @@ async function handleXRPLPay(
             ? (meta as { TransactionResult: string }).TransactionResult
             : (res.result as any).engine_result) as string | undefined
         const txHash = res.result.hash
-        const resultMessage = ((res.result as any).engine_result_message || '') as string
+        const resultMessage = ((res.result as any).engine_result_message || "") as string
 
         // Only tesSUCCESS indicates actual success
-        if (txResult === 'tesSUCCESS') {
+        if (txResult === "tesSUCCESS") {
             return {
                 result: "success",
                 hash: txHash,

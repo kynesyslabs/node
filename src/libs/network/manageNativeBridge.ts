@@ -23,8 +23,10 @@ export async function manageNativeBridge(
     // eslint-disable-next-line prefer-const
     let compiledOperation: bridge.NativeBridgeOperationCompiled = {
         content: derivedContent,
-        signature: "",
-        rpc: getSharedState.identity.ed25519_hex.publicKey, 
+        // FIXME: Signature generation not yet implemented - operation is unsigned
+        // Once implemented: sign derivedContent with node's private key, set type to signing algorithm
+        signature: { type: "", data: "" },
+        rpcPublicKey: getSharedState.identity.ed25519_hex.publicKey,
     }
     // TODO Generate the validUntil value based on current block + 3
     // Incorporate the compiled operation into a RPCResponse
@@ -40,9 +42,9 @@ export async function manageNativeBridge(
  */
 function parseOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
     let derivedContent: bridge.NativeBridgeOperationCompiled["content"]
-    if (operation.originChain === "EVM") {
+    if (operation.originChainType === "EVM") {
         derivedContent = parseEVMOperation(operation)
-    } else if (operation.originChain === "SOLANA") {
+    } else if (operation.originChainType === "SOLANA") {
         derivedContent = parseSOLANAOperation(operation)
     }
     return derivedContent

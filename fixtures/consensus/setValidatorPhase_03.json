@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "consensus_routine",
+    "params": [
+      {
+        "method": "setValidatorPhase",
+        "params": [
+          5,
+          "128f548171a61410cdd3cac8c26dd29fbd3c688f64934e9a9db8b48d520038d9",
+          17
+        ]
+      }
+    ]
+  },
+  "response": {
+    "result": 200,
+    "response": "Validator phase set to 5",
+    "require_reply": false,
+    "extra": {
+      "greenlight": true,
+      "timestamp": 1762006251,
+      "blockRef": 17
+    }
+  },
+  "frame_request": "18",
+  "frame_response": "21"
+}

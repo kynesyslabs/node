@@ -3,6 +3,7 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Aptos, AptosConfig, Network } from "@aptos-labs/ts-sdk"
 import axios, { AxiosError } from "axios"
+import log from "@/utilities/logger"
 
 /**
  * This function is used to read from a smart contract using the Aptos REST API
@@ -10,7 +11,7 @@ import axios, { AxiosError } from "axios"
  * @returns The result of the read operation
  */
 export async function handleAptosContractReadRest(operation: IOperation) {
-    console.log("[XM Method] Aptos Contract Read")
+    log.debug("[XM Method] Aptos Contract Read")
 
     try {
         const providerUrl = chainProviders.aptos[operation.subchain]
@@ -22,11 +23,11 @@ export async function handleAptosContractReadRest(operation: IOperation) {
         }
 
         const params = operation.task.params
-        console.log("parsed params: " + JSON.stringify(params))
+        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos contract reads
         if (!params.moduleAddress) {
-            console.log("Missing moduleAddress")
+            log.debug("Missing moduleAddress")
             return {
                 result: "error",
                 error: "Missing moduleAddress",
@@ -34,7 +35,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
         }
 
         if (!params.moduleName) {
-            console.log("Missing moduleName")
+            log.debug("Missing moduleName")
             return {
                 result: "error",
                 error: "Missing moduleName",
@@ -42,7 +43,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
         }
 
         if (!params.functionName) {
-            console.log("Missing functionName")
+            log.debug("Missing functionName")
             return {
                 result: "error",
                 error: "Missing functionName",
@@ -56,7 +57,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
                     ? params.args
                     : JSON.parse(params.args)
             } catch (error) {
-                console.log("Invalid function arguments format")
+                log.debug("Invalid function arguments format")
                 return {
                     result: "error",
                     error: "Invalid function arguments format. Expected array or JSON string.",
@@ -71,7 +72,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
                     ? params.typeArguments
                     : JSON.parse(params.typeArguments)
             } catch (error) {
-                console.log("Invalid type arguments format")
+                log.debug("Invalid type arguments format")
                 return {
                     result: "error",
                     error: "Invalid type arguments format. Expected array or JSON string.",
@@ -79,11 +80,11 @@ export async function handleAptosContractReadRest(operation: IOperation) {
             }
         }
 
-        console.log(
+        log.debug(
             `calling Move view function: ${params.moduleAddress}::${params.moduleName}::${params.functionName}`,
         )
-        console.log("calling with args: " + JSON.stringify(functionArgs))
-        console.log(
+        log.debug("calling with args: " + JSON.stringify(functionArgs))
+        log.debug(
             "calling with type arguments: " + JSON.stringify(typeArguments),
         )
 
@@ -100,14 +101,14 @@ export async function handleAptosContractReadRest(operation: IOperation) {
             arguments: params.args || [],
         })
 
-        console.log("response", response.data)
+        log.debug("response", response.data)
 
         return {
             result: response.data,
             status: "success",
         }
     } catch (error) {
-        console.error("Aptos contract read error:", error)
+        log.error("Aptos contract read error:", error)
         if (error instanceof AxiosError) {
             return {
                 status: "failed",
@@ -122,7 +123,7 @@ export async function handleAptosContractReadRest(operation: IOperation) {
 }
 
 export default async function handleAptosContractRead(operation: IOperation) {
-    console.log("[XM Method] Aptos Contract Read")
+    log.debug("[XM Method] Aptos Contract Read")
 
     try {
         // Get the provider URL from our configuration
@@ -134,10 +135,10 @@ export default async function handleAptosContractRead(operation: IOperation) {
             }
         }
 
-        console.log(
+        log.debug(
             `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
         )
-        console.log(`[XM Method]: providerUrl: ${providerUrl}`)
+        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
 
         // Map subchain to Network enum
         const networkMap = {
@@ -158,16 +159,16 @@ export default async function handleAptosContractRead(operation: IOperation) {
         const aptosInstance = new multichain.APTOS(providerUrl, network)
         await aptosInstance.connect()
 
-        console.log("params: \n")
-        console.log(operation.task.params)
-        console.log("\n end params: \n")
+        log.debug("params: \n")
+        log.debug(operation.task.params)
+        log.debug("\n end params: \n")
 
         const params = operation.task.params
-        console.log("parsed params: " + JSON.stringify(params))
+        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos contract reads
         if (!params.moduleAddress) {
-            console.log("Missing moduleAddress")
+            log.debug("Missing moduleAddress")
             return {
                 result: "error",
                 error: "Missing moduleAddress",
@@ -175,7 +176,7 @@ export default async function handleAptosContractRead(operation: IOperation) {
         }
 
         if (!params.moduleName) {
-            console.log("Missing moduleName")
+            log.debug("Missing moduleName")
             return {
                 result: "error",
                 error: "Missing moduleName",
@@ -183,7 +184,7 @@ export default async function handleAptosContractRead(operation: IOperation) {
         }
 
         if (!params.functionName) {
-            console.log("Missing functionName")
+            log.debug("Missing functionName")
             return {
                 result: "error",
                 error: "Missing functionName",
@@ -198,7 +199,7 @@ export default async function handleAptosContractRead(operation: IOperation) {
                     ? params.args
                     : JSON.parse(params.args)
             } catch (error) {
-                console.log("Invalid function arguments format")
+                log.debug("Invalid function arguments format")
                 return {
                     result: "error",
                     error: "Invalid function arguments format. Expected array or JSON string.",
@@ -214,7 +215,7 @@ export default async function handleAptosContractRead(operation: IOperation) {
                     ? params.typeArguments
                     : JSON.parse(params.typeArguments)
             } catch (error) {
-                console.log("Invalid type arguments format")
+                log.debug("Invalid type arguments format")
                 return {
                     result: "error",
                     error: "Invalid type arguments format. Expected array or JSON string.",
@@ -222,11 +223,11 @@ export default async function handleAptosContractRead(operation: IOperation) {
             }
         }
 
-        console.log(
+        log.debug(
             `calling Move view function: ${params.moduleAddress}::${params.moduleName}::${params.functionName}`,
         )
-        console.log("calling with args: " + JSON.stringify(functionArgs))
-        console.log(
+        log.debug("calling with args: " + JSON.stringify(functionArgs))
+        log.debug(
             "calling with type arguments: " + JSON.stringify(typeArguments),
         )
 
@@ -239,15 +240,15 @@ export default async function handleAptosContractRead(operation: IOperation) {
             typeArguments,
         )
 
-        console.log("result from Aptos view call received")
-        console.log("result:", JSON.stringify(result))
+        log.debug("result from Aptos view call received")
+        log.debug("result:", JSON.stringify(result))
 
         return {
             result: result,
             status: true,
         }
     } catch (error) {
-        console.error("Aptos contract read error:", error)
+        log.error("Aptos contract read error:", error)
         return {
             result: "error",
             error: error.toString(),
