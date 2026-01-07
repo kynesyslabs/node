@@ -81,6 +81,8 @@ export default class IPFSOperations {
         const from = operation.actor
         const payload = operation.params?.payload as IPFSPayload
         const transactionAmount = operation.params?.amount ?? 0
+        // REVIEW: Phase 9 - Extract custom_charges for cost control
+        const customCharges = operation.params?.custom_charges?.ipfs
 
         // REVIEW: Validate payload structure
         if (!payload || !isIPFSAddPayload(payload)) {
@@ -125,11 +127,31 @@ export default class IPFSOperations {
                 ipfsState.freeAllocationBytes,
             )
 
-            // Validate transaction amount covers the cost
-            if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
-                return {
-                    success: false,
-                    message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+            // REVIEW: Phase 9 - Use custom_charges for cost validation if present
+            // custom_charges.max_cost_dem is the signed maximum user agreed to pay
+            // We charge actualCost which must be <= max_cost_dem (fair pricing)
+            if (customCharges?.max_cost_dem !== undefined) {
+                // Parse max_cost_dem as bigint for comparison
+                const maxCostDem = BigInt(
+                    Math.floor(parseFloat(String(customCharges.max_cost_dem)) * 1e8),
+                )
+                if (costResult.totalCost > maxCostDem) {
+                    return {
+                        success: false,
+                        message: `Actual cost ${costResult.totalCost} exceeds signed maximum ${maxCostDem} DEM`,
+                    }
+                }
+                // Log the fair pricing in action
+                log.debug(
+                    `[IPFSOperations] IPFS_ADD: Using custom_charges - max=${maxCostDem}, actual=${costResult.totalCost}`,
+                )
+            } else {
+                // Legacy validation using transactionAmount
+                if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
+                    return {
+                        success: false,
+                        message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+                    }
                 }
             }
 
@@ -152,6 +174,7 @@ export default class IPFSOperations {
             }
 
             // REVIEW: Process fee payment (only if cost > 0)
+            // Fair pricing: charge actual cost, not the signed maximum
             if (costResult.totalCost > 0n) {
                 const feeResult = await IPFSOperations.processFeePayment(
                     from,
@@ -231,6 +254,8 @@ export default class IPFSOperations {
         const from = operation.actor
         const payload = operation.params?.payload as IPFSPayload
         const transactionAmount = operation.params?.amount ?? 0
+        // REVIEW: Phase 9 - Extract custom_charges for cost control
+        const customCharges = operation.params?.custom_charges?.ipfs
 
         // REVIEW: Validate payload structure
         if (!payload || !isIPFSPinPayload(payload)) {
@@ -291,11 +316,31 @@ export default class IPFSOperations {
                 ipfsState.freeAllocationBytes,
             )
 
-            // Validate transaction amount covers the cost
-            if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
-                return {
-                    success: false,
-                    message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+            // REVIEW: Phase 9 - Use custom_charges for cost validation if present
+            // custom_charges.max_cost_dem is the signed maximum user agreed to pay
+            // We charge actualCost which must be <= max_cost_dem (fair pricing)
+            if (customCharges?.max_cost_dem !== undefined) {
+                // Parse max_cost_dem as bigint for comparison
+                const maxCostDem = BigInt(
+                    Math.floor(parseFloat(String(customCharges.max_cost_dem)) * 1e8),
+                )
+                if (costResult.totalCost > maxCostDem) {
+                    return {
+                        success: false,
+                        message: `Actual cost ${costResult.totalCost} exceeds signed maximum ${maxCostDem} DEM`,
+                    }
+                }
+                // Log the fair pricing in action
+                log.debug(
+                    `[IPFSOperations] IPFS_PIN: Using custom_charges - max=${maxCostDem}, actual=${costResult.totalCost}`,
+                )
+            } else {
+                // Legacy validation using transactionAmount
+                if (!isTransactionAmountSufficient(transactionAmount, costResult.totalCost)) {
+                    return {
+                        success: false,
+                        message: `Insufficient payment: required ${costResult.totalCost} DEM, provided ${transactionAmount} DEM`,
+                    }
                 }
             }
 
@@ -309,6 +354,7 @@ export default class IPFSOperations {
             }
 
             // REVIEW: Process fee payment (only if cost > 0)
+            // Fair pricing: charge actual cost, not the signed maximum
             if (costResult.totalCost > 0n) {
                 const feeResult = await IPFSOperations.processFeePayment(
                     from,

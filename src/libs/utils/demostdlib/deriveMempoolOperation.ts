@@ -131,7 +131,11 @@ export async function createOperation(
     operation.operator = "Web2Certification" // FIXME New method bls
     operation.nonce = 0 // TODO Get it from chain or gcr or whatever it is
     operation.timestamp = transaction.content.timestamp
-    operation.params = transaction.content.data
+    // REVIEW: Phase 9 - Include custom_charges in operation params for IPFS cost control
+    operation.params = {
+        ...transaction.content.data,
+        custom_charges: transaction.content.custom_charges,
+    }
     operation.status = true // TODO Get it from the content itself somehow
 
     // TODO Fee calculation logic here
