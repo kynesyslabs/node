@@ -44,6 +44,8 @@ export default class SharedState {
     inConsensusLoop = false
     inSyncLoop = false
     inPeerRecheckLoop = false
+    lastPeerRecheck = 0 
+    peerRecheckSleepTime = 10_000 // 10 seconds
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false

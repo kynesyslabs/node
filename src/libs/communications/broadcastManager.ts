@@ -1,9 +1,10 @@
-import { Peer, PeerManager } from "../peer"
+import log from "src/utilities/logger"
 import Block from "../blockchain/block"
 import Chain from "../blockchain/chain"
+import { Peer, PeerManager } from "../peer"
 import { syncBlock } from "../blockchain/routines/Sync"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
-import log from "src/utilities/logger"
+import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
 
 /**
@@ -80,6 +81,14 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+            return {
+                result: 200,
+                message: "Cannot handle new block when waiting for hello peer",
+                syncData: PeerManager.getInstance().ourSyncDataString,
+            }
+        }
+
         // TODO: HANDLE RECEIVING THIS WHEN IN SYNC LOOP
         const peerman = PeerManager.getInstance()
 

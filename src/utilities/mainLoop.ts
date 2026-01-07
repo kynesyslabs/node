@@ -44,6 +44,7 @@ async function mainLoopCycle() {
     if (getSharedState.mainLoopPaused) {
         return
     }
+
     // If it is not in pause, we set (or force set) the mainLoop flag to be on
     getSharedState.inMainLoop = true
 
@@ -57,7 +58,7 @@ async function mainLoopCycle() {
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // let currentlyOnlinePeers: Peer[] = await peerRoutine()
-    // await checkOfflinePeers()
+    checkOfflinePeers()
     // await yieldToEventLoop()
 
     // await peerGossip()

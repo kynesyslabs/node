@@ -1,11 +1,12 @@
-import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import _ from "lodash"
+import log from "src/utilities/logger"
+import { SyncData } from "../peer/Peer"
+import { Waiter } from "@/utilities/waiter"
+import { PeerManager, Peer } from "../peer"
 import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
-import { PeerManager, Peer } from "../peer"
-import log from "src/utilities/logger"
-import _ from "lodash"
-import { SyncData } from "../peer/Peer"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 export interface HelloPeerRequest {
     url: string
@@ -126,6 +127,10 @@ export async function manageHelloPeer(
                     peer.publicKey !== getSharedState.publicKeyHex &&
                     peer.publicKey !== content.publicKey,
             ),
+    }
+
+    if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+        Waiter.resolve(Waiter.keys.STARTUP_HELLO_PEER, response)
     }
 
     return response

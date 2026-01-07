@@ -47,7 +47,7 @@ export class ConnectionPool {
 
     /**
      * Acquire a connection to a peer (create if needed)
-     * 
+     *
      * @param peerIdentity Peer public key or identifier
      * @param connectionString Connection string (e.g., "tcp://ip:port")
      * @param options Connection options
@@ -72,7 +72,10 @@ export class ConnectionPool {
             )
         }
 
-        const peerConnections = this.connections.get(peerIdentity) || []
+        const peerConnections =
+            (this.connections
+                .get(peerIdentity) || [])
+                .filter(conn => conn.getState() === "READY")
         if (peerConnections.length >= this.config.maxConnectionsPerPeer) {
             throw new PoolCapacityError(
                 `Max connections to peer ${peerIdentity}: ${peerConnections.length}/${this.config.maxConnectionsPerPeer}`,
@@ -248,7 +251,7 @@ export class ConnectionPool {
      */
     getConnectionInfo(peerIdentity: string): ConnectionInfo[] {
         const peerConnections = this.connections.get(peerIdentity) || []
-        return peerConnections.map((conn) => conn.getInfo())
+        return peerConnections.map(conn => conn.getInfo())
     }
 
     /**
@@ -261,7 +264,7 @@ export class ConnectionPool {
         for (const [peerIdentity, connections] of this.connections.entries()) {
             result.set(
                 peerIdentity,
-                connections.map((conn) => conn.getInfo()),
+                connections.map(conn => conn.getInfo()),
             )
         }
 
@@ -298,9 +301,7 @@ export class ConnectionPool {
      * Find an existing READY connection for a peer
      * @private
      */
-    private findReadyConnection(
-        peerIdentity: string,
-    ): PeerConnection | null {
+    private findReadyConnection(peerIdentity: string): PeerConnection | null {
         const peerConnections = this.connections.get(peerIdentity)
         if (!peerConnections) {
             log.only("NO CONNECTIONS FOR " + peerIdentity)
@@ -313,9 +314,7 @@ export class ConnectionPool {
         }
 
         // Find first READY connection
-        return (
-            peerConnections.find((conn) => conn.getState() === "READY") || null
-        )
+        return peerConnections.find(conn => conn.getState() === "READY") || null
     }
 
     /**
@@ -325,8 +324,13 @@ export class ConnectionPool {
     private getTotalConnectionCount(): number {
         let count = 0
         for (const peerConnections of this.connections.values()) {
-            count += peerConnections.length
+            // filter by ready state
+            const readyConnections = peerConnections.filter(
+                conn => conn.getState() === "READY",
+            )
+            count += readyConnections.length
         }
+
         return count
     }
 
@@ -371,30 +375,31 @@ export class ConnectionPool {
         const now = Date.now()
         const connectionsToClose: PeerConnection[] = []
 
-        for (const [peerIdentity, peerConnections] of this.connections.entries()) {
-            const remainingConnections = peerConnections.filter(
-                (connection) => {
-                    const state = connection.getState()
-                    const info = connection.getInfo()
+        for (const [
+            peerIdentity,
+            peerConnections,
+        ] of this.connections.entries()) {
+            const remainingConnections = peerConnections.filter(connection => {
+                const state = connection.getState()
+                const info = connection.getInfo()
 
-                    // Remove CLOSED or ERROR connections
-                    if (state === "CLOSED" || state === "ERROR") {
+                // Remove CLOSED or ERROR connections
+                if (state === "CLOSED" || state === "ERROR") {
+                    connectionsToClose.push(connection)
+                    return false
+                }
+
+                // Close IDLE_PENDING connections with no in-flight requests
+                if (state === "IDLE_PENDING" && info.inFlightCount === 0) {
+                    const idleTime = now - info.lastActivity
+                    if (idleTime > this.config.idleTimeout) {
                         connectionsToClose.push(connection)
                         return false
                     }
+                }
 
-                    // Close IDLE_PENDING connections with no in-flight requests
-                    if (state === "IDLE_PENDING" && info.inFlightCount === 0) {
-                        const idleTime = now - info.lastActivity
-                        if (idleTime > this.config.idleTimeout) {
-                            connectionsToClose.push(connection)
-                            return false
-                        }
-                    }
-
-                    return true
-                },
-            )
+                return true
+            })
 
             // Update or remove peer entry
             if (remainingConnections.length === 0) {

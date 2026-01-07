@@ -16,24 +16,25 @@ import "reflect-metadata"
 import * as dotenv from "dotenv"
 import { Peer } from "./libs/peer"
 import { PeerManager } from "./libs/peer"
-import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
+import { Waiter } from "./utilities/waiter"
+import { TimeoutError } from "./exceptions"
+import {
+    startOmniProtocolServer,
+    stopOmniProtocolServer,
+} from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import { fastSync } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
-import { DTRManager } from "./libs/network/dtr/dtrmanager"
-import {
-    startOmniProtocolServer,
-    stopOmniProtocolServer,
-} from "./libs/omniprotocol/integration/startup"
-import { fastSync } from "./libs/blockchain/routines/Sync"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 
 dotenv.config()
 
@@ -605,6 +606,26 @@ async function main() {
                 status: "running",
                 isSynced: getSharedState.syncStatus,
             })
+        }
+
+        const peers = indexState.peerManager.getPeers()
+
+        if (
+            peers.length === 1 &&
+            peers[0].identity === getSharedState.publicKeyHex
+        ) {
+            log.info(
+                "[MAIN] We are the anchor node, listening for peers ... (15s)",
+            )
+            // INFO: Wait for hello peer if we are the anchor node
+            // useful when anchor node is re-joining the network
+            try {
+                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 10 seconds
+            } catch (error) {
+                if (error instanceof TimeoutError) {
+                    log.info("[MAIN] No wild peers found, starting sync loop")
+                }
+            }
         }
 
         await fastSync([], "index.ts")
