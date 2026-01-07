@@ -24,6 +24,12 @@ export interface NodeInfo {
     peersCount: number
     blockNumber: number
     isSynced: boolean
+    // TLSNotary service info (optional)
+    tlsnotary?: {
+        enabled: boolean
+        port: number
+        running: boolean
+    }
 }
 
 export interface TUIConfig {
@@ -99,7 +105,8 @@ const TABS: Tab[] = [
     { key: "8", label: "MCP", category: "MCP" },
     { key: "9", label: "XM", category: "MULTICHAIN" },
     { key: "-", label: "DAHR", category: "DAHR" },
-    { key: "=", label: "CMD", category: "CMD" },
+    { key: "=", label: "TLSN", category: "TLSN" },
+    { key: "\\", label: "CMD", category: "CMD" },
 ]
 
 // SECTION Command definitions for CMD tab
@@ -513,9 +520,17 @@ export class TUIManager extends EventEmitter {
                 this.setActiveTab(10) // DAHR tab
                 break
 
-            case "=":
-                this.setActiveTab(11) // CMD tab
+            case "=": {
+                const idx = TABS.findIndex(t => t.category === "TLSN")
+                if (idx >= 0) this.setActiveTab(idx)
                 break
+            }
+
+            case "\\": {
+                const idx = TABS.findIndex(t => t.category === "CMD")
+                if (idx >= 0) this.setActiveTab(idx)
+                break
+            }
 
             // Tab navigation
             case "TAB":
@@ -1069,8 +1084,18 @@ export class TUIManager extends EventEmitter {
         }
         term.brightWhite(keyDisplay)
 
-        // Line 5: Empty separator
+        // Line 5: TLSNotary status (if enabled)
         term.moveTo(infoStartX, 5)
+        term.eraseLine()
+        if (this.nodeInfo.tlsnotary?.enabled) {
+            term.yellow("🔐 ")
+            term.gray("TLSN: ")
+            if (this.nodeInfo.tlsnotary.running) {
+                term.bgGreen.black(` ✓ :${this.nodeInfo.tlsnotary.port} `)
+            } else {
+                term.bgRed.white(" ✗ STOPPED ")
+            }
+        }
 
         // Line 6: Port
         term.moveTo(infoStartX, 6)

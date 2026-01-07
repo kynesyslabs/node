@@ -35,5 +35,5 @@ const identity = await ucrypto.getIdentity("ed25519")
 // uint8ArrayToHex already includes 0x prefix
 const pubkeyHex = uint8ArrayToHex(identity.publicKey)
 
-console.log('MNEMONIC:' + mnemonic)
-console.log('PUBKEY:' + pubkeyHex)
+console.log("MNEMONIC:" + mnemonic)
+console.log("PUBKEY:" + pubkeyHex)

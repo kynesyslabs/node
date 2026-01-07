@@ -38,6 +38,8 @@ export class MessageFramer {
     /** Minimum complete message size */
     private static readonly MIN_MESSAGE_SIZE =
         MessageFramer.HEADER_SIZE + MessageFramer.CHECKSUM_SIZE
+    /** Maximum payload size (16MB) to prevent DoS attacks */
+    private static readonly MAX_PAYLOAD_SIZE = 16 * 1024 * 1024
 
     /**
      * Add data received from TCP socket
@@ -210,6 +212,15 @@ export class MessageFramer {
             PrimitiveDecoder.decodeUInt32(this.buffer, offset)
         offset += lengthBytes
 
+        // Validate payload size to prevent DoS attacks
+        if (payloadLength > MessageFramer.MAX_PAYLOAD_SIZE) {
+            // Drop buffered data so we don't retain attacker-controlled bytes in memory
+            this.buffer = Buffer.alloc(0)
+            throw new Error(
+                `Payload size ${payloadLength} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`,
+            )
+        }
+
         // Sequence/Message ID (4 bytes)
         const { value: sequence, bytesRead: sequenceBytes } =
             PrimitiveDecoder.decodeUInt32(this.buffer, offset)
@@ -283,6 +294,11 @@ export class MessageFramer {
         auth?: AuthBlock | null,
         flags?: number,
     ): Buffer {
+        // Validate payload size before encoding
+        if (payload.length > MessageFramer.MAX_PAYLOAD_SIZE) {
+            throw new Error(`Payload size ${payload.length} exceeds maximum ${MessageFramer.MAX_PAYLOAD_SIZE}`)
+        }
+
         // Determine flags
         const flagsByte = flags !== undefined ? flags : auth ? 0x01 : 0x00
 

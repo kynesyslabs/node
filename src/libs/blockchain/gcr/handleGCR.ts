@@ -48,7 +48,12 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
+import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 import { Referrals } from "@/features/incentive/referrals"
+// REVIEW: TLSNotary token management for native operations
+import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
+import { INativePayload } from "@kynesyslabs/demosdk/types"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -279,6 +284,19 @@ export default class HandleGCR {
                 // TODO implementations
                 log.debug(`Assigning GCREdit ${editOperation.type}`)
                 return { success: true, message: "Not implemented" }
+            case "smartContract":
+            case "storageProgram":
+            case "escrow":
+                // TODO implementations
+                log.debug(`GCREdit ${editOperation.type} not yet implemented`)
+                return { success: true, message: "Not implemented" }
+            // REVIEW: TLSNotary attestation proof storage
+            case "tlsnotary":
+                return GCRTLSNotaryRoutines.apply(
+                    editOperation,
+                    repositories.tlsnotary as Repository<GCRTLSNotary>,
+                    simulate,
+                )
             default:
                 return { success: false, message: "Invalid GCREdit type" }
         }
@@ -369,7 +387,75 @@ export default class HandleGCR {
             }
         }
 
+        // REVIEW: Post-processing hook for native transaction side-effects
+        // This handles side-effects that aren't part of GCR edits (e.g., token creation)
+        // Token creation happens during simulation (mempool entry) so user can immediately use it
+        // The token is created optimistically - if tx fails consensus, token will expire unused
+        if (!isRollback && tx.content.type === "native") {
+            try {
+                await this.processNativeSideEffects(tx, simulate)
+            } catch (sideEffectError) {
+                log.error(`[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`)
+                // Side-effect errors are logged but don't fail the transaction
+                // The GCR edits (fee burning) have already been applied
+            }
+        }
+
         return { success: true, message: "" }
+    }
+
+    /**
+     * Process side-effects for native transactions that aren't captured in GCR edits
+     * Currently handles:
+     * - tlsn_request: Creates attestation token when tx enters mempool (simulate=true)
+     *                 so user can immediately use the proxy
+     *
+     * Token creation is idempotent - if token already exists for this tx, it's skipped
+     */
+    private static async processNativeSideEffects(
+        tx: Transaction,
+        simulate = false,
+    ): Promise<void> {
+        const nativeData = tx.content.data as ["native", INativePayload]
+        const nativePayload = nativeData[1]
+
+        // Validate args exists before any destructuring
+        if (!nativePayload.args || !Array.isArray(nativePayload.args)) {
+            log.error(`[TLSNotary] Invalid nativePayload.args: ${JSON.stringify(nativePayload.args)}`)
+            return
+        }
+
+        switch (nativePayload.nativeOperation) {
+            case "tlsn_request": {
+                const [targetUrl] = nativePayload.args
+
+                // Only create token once - during simulation (mempool entry)
+                // Skip if called again during block finalization
+                if (!simulate) {
+                    log.debug(`[TLSNotary] Skipping token creation for finalized tx ${tx.hash} (already created at mempool entry)`)
+                    break
+                }
+
+                log.info(`[TLSNotary] Processing tlsn_request side-effect for ${targetUrl}`)
+
+                // Validate URL and extract domain
+                const domain = extractDomain(targetUrl)
+                log.debug(`[TLSNotary] Domain extracted: ${domain}`)
+
+                // Create the attestation token (idempotent - tokenManager handles duplicates)
+                const token = createToken(
+                    tx.content.from as string,
+                    targetUrl,
+                    tx.hash,
+                )
+                log.info(`[TLSNotary] Created token ${token.id} for tx ${tx.hash}`)
+                break
+            }
+            // tlsn_store side-effects are handled in GCRTLSNotaryRoutines.apply()
+            default:
+                // No side-effects for other native operations
+                break
+        }
     }
 
     /**
@@ -462,6 +548,7 @@ export default class HandleGCR {
             hashes: dataSource.getRepository(GCRHashes),
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCRTracker),
+            tlsnotary: dataSource.getRepository(GCRTLSNotary),
         }
     }
 
