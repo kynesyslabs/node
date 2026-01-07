@@ -29,6 +29,8 @@ export { default as ipfsPublicFetch } from "./ipfsPublicFetch"
 export { default as ipfsPublicPublish } from "./ipfsPublicPublish"
 export { default as ipfsPublicCheck } from "./ipfsPublicCheck"
 export { default as ipfsRateLimitStatus } from "./ipfsRateLimitStatus"
+// REVIEW: Phase 9 - Cost estimation endpoint
+export { default as ipfsQuote } from "./ipfsQuote"
 
 export {
     getIpfsManager,

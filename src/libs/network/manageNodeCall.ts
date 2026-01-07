@@ -49,6 +49,8 @@ import {
     ipfsPublicPublish,
     ipfsPublicCheck,
     ipfsRateLimitStatus,
+    // REVIEW: Phase 9 - Cost estimation
+    ipfsQuote,
 } from "./routines/nodecalls/ipfs"
 
 export interface NodeCall {
@@ -542,6 +544,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "ipfsRateLimitStatus":
             return await ipfsRateLimitStatus()
+
+        // REVIEW: Phase 9 - Cost estimation endpoint
+        case "ipfsQuote":
+            return await ipfsQuote(data, sender)
 
         // =========================================================================
         // REVIEW: TLSNotary Operations
