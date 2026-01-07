@@ -80,7 +80,7 @@ export class Waiter {
                 promise: null,
             })
 
-            log.debug(`[WAITER] 😒😒😒😒😒😒😒😒😒 Created wait entry for ${id}`)
+            log.debug(`[WAITER] Created wait entry for ${id}`)
         })
 
         Waiter.waitList.get(id).promise = promise

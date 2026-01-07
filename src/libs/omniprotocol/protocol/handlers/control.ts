@@ -65,8 +65,6 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     message,
     context,
 }) => {
-    log.only("handleNodeCall: " + JSON.stringify(message))
-    log.only("context: " + JSON.stringify(context))
     if (
         !message.payload ||
         !Buffer.isBuffer(message.payload) ||
@@ -90,7 +88,7 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
             "src/libs/network/endpointHandlers"
         )
         const log = await import("src/utilities/logger").then(m => m.default)
-        log.only(
+        log.info(
             `[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`,
         )
 
@@ -226,7 +224,6 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
     const actualMuid = innerCall?.muid ?? ""
 
-    log.only("actualMessage: " + actualMessage)
     const response = await manageNodeCall({
         message: actualMessage,
         data: actualData,

@@ -17,29 +17,12 @@ export class BroadcastManager {
      * @param block The new block to broadcast
      */
     static async broadcastNewBlock(block: Block) {
-        log.only("BROADCASTING NEW BLOCK TO THE NETWORK: " + block.number)
         const peerlist = PeerManager.getInstance().getPeers()
-        log.only(
-            "PEERLIST: " +
-                JSON.stringify(
-                    peerlist.map(p => p.connection.string),
-                    null,
-                    2,
-                ),
-        )
 
         // filter by block signers
         const peers = peerlist.filter(
             peer =>
                 block.validation_data.signatures[peer.identity] == undefined,
-        )
-        log.only(
-            "PEERS TO SEND TO: " +
-                JSON.stringify(
-                    peers.map(p => p.connection.string),
-                    null,
-                    2,
-                ),
         )
 
         const promises = peers.map(async peer => {
@@ -48,7 +31,6 @@ export class BroadcastManager {
                 params: [{ method: "syncNewBlock", params: [block] }],
             }
 
-            log.only("Sending to peer: " + peer.connection.string)
             return {
                 pubkey: peer.identity,
                 result: await peer.longCall(request, true, 250, 3, [400]),
@@ -56,7 +38,6 @@ export class BroadcastManager {
         })
 
         const responses = await Promise.all(promises)
-        log.only("RESULTS: " + JSON.stringify(responses, null, 2))
         const successful = responses.filter(res => res.result.result === 200)
 
         for (const res of responses) {
@@ -100,10 +81,8 @@ export class BroadcastManager {
             }
         }
 
-        log.only("HANDLING NEW BLOCK: " + block.number + " from: " + sender)
         // check if we already have the block
         const existing = await Chain.getBlockByHash(block.hash)
-        log.only("EXISTING BLOCK: " + (existing ? "YES" : "NO"))
         if (existing) {
             return {
                 result: 200,
@@ -113,9 +92,7 @@ export class BroadcastManager {
         }
 
         const peer = peerman.getPeer(sender)
-        log.only("SYNCING BLOCK from PEER: " + peer.connection.string)
         const res = await syncBlock(block, peer)
-        log.only("SYNC BLOCK RESULT: " + res ? "SUCCESS" : "FAILED")
 
         // REVIEW: Should we await this?
         await this.broadcastOurSyncData()
@@ -131,8 +108,6 @@ export class BroadcastManager {
      * Broadcasts our sync data to the network
      */
     static async broadcastOurSyncData() {
-        log.only("BROADCASTING OUR SYNC DATA TO THE NETWORK")
-
         const peerlist = PeerManager.getInstance().getPeers()
         const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
@@ -156,7 +131,6 @@ export class BroadcastManager {
         })
 
         const responses = await Promise.all(promises)
-        log.only("RESULTS: " + JSON.stringify(responses, null, 2))
         const successful = responses.filter(res => res.result.result === 200)
 
         for (const res of responses) {
@@ -190,9 +164,6 @@ export class BroadcastManager {
             }
         }
 
-        log.only(
-            "HANDLING UPDATE PEER SYNC DATA: " + syncData + " from: " + sender,
-        )
         const peer = new Peer(ePeer.connection.string, sender)
 
         const splits = syncData.trim().split(":")

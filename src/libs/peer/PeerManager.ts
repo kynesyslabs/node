@@ -275,7 +275,7 @@ export default class PeerManager {
         peer.sync.block = getSharedState.lastBlockNumber
         peer.sync.block_hash = getSharedState.lastBlockHash
 
-        log.only("OUR PEER SYNC DATA UPDATED: " + JSON.stringify(peer.sync))
+        log.info("OUR PEER SYNC DATA UPDATED: " + JSON.stringify(peer.sync))
     }
 
     updatePeerLastSeen(pubkey: string) {
@@ -335,14 +335,6 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static async sayHelloToPeer(peer: Peer, recursive = false) {
-        log.only(
-            "SAYING HELLO TO PEER: " +
-                peer.connection.string +
-                " 😂😂😂😂😂😂😂😂",
-        )
-        log.only("RECURSIVE: " + recursive)
-        // getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
-
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
@@ -391,11 +383,6 @@ export default class PeerManager {
             return
         }
 
-        log.only(
-            "NEW PEERS UNFILTERED: 👀👀👀👀👀👀👀👀 " +
-                JSON.stringify(newPeersUnfiltered),
-        )
-
         // INFO: Recursively say hello to the new peers
         const peerManager = PeerManager.getInstance()
         const newPeers = newPeersUnfiltered.filter(
@@ -415,11 +402,6 @@ export default class PeerManager {
         response: RPCResponse,
         peer: Peer,
     ): { url: string; publicKey: string }[] {
-        log.only(
-            "[Hello Peer] Response received from peer: " + peer.identity,
-            false,
-        )
-        log.only("Hello Peer Callback response: " + JSON.stringify(response))
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
