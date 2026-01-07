@@ -27,6 +27,38 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 - High-performance SSD storage
 - 1 Gbps internet connection
 
+### Network Requirements (Firewall/Router)
+
+Node operators **MUST** open the following ports for proper network operation:
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| **53550** | TCP | Demos RPC (main node API) |
+| **53551** | TCP | OmniProtocol (Demos P2P communications) |
+| **7047** | TCP | TLSNotary Service |
+| **4001** | TCP + UDP | IPFS Swarm (P2P peer discovery) |
+| **55000-60000** | TCP | TLSNotary WebSocket proxies |
+
+**Note**: Port 5001 (IPFS API) is localhost-only and does not require firewall configuration.
+
+#### Quick Firewall Setup (Ubuntu/Debian)
+```bash
+sudo ufw allow 53550/tcp       # Demos RPC
+sudo ufw allow 53551/tcp       # OmniProtocol P2P
+sudo ufw allow 7047/tcp        # TLSNotary Service
+sudo ufw allow 4001/tcp        # IPFS Swarm TCP
+sudo ufw allow 4001/udp        # IPFS Swarm QUIC
+sudo ufw allow 55000:60000/tcp # TLSNotary WebSockets
+```
+
+#### Router Port Forwarding (NAT)
+If running behind NAT, forward these ports to your node's internal IP:
+- **53550 TCP** -> Node IP (Demos RPC)
+- **53551 TCP** -> Node IP (OmniProtocol P2P)
+- **7047 TCP** -> Node IP (TLSNotary)
+- **4001 TCP+UDP** -> Node IP (IPFS Swarm)
+- **55000-60000 TCP** -> Node IP (TLSNotary WebSockets)
+
 ## Installation
 
 For detailed installation instructions, please refer to [INSTALL.md](INSTALL.md). The installation guide covers:

@@ -28,6 +28,8 @@ export async function peerlistCheck(localList: Peer[]): Promise<Peer[]> {
 export default async function peerBootstrap(
     localList: Peer[],
 ): Promise<Peer[]> {
+    log.info("[PEER] ===== BOOTSTRAP ENTRY: " + localList.length + " peers =====")
+    log.info("[DEBUG HELLO PEER] peerBootstrap called with " + localList.length + " peers")
     log.info("[BOOTSTRAP] Loading peers...")
     // Validity check
     for (let i = 0; i < localList.length; i++) {
@@ -75,6 +77,7 @@ export default async function peerBootstrap(
         //         publicKey: currentPublicKey,
         //     }],
         // }, true, 250, 3)
+        log.info("[DEBUG HELLO PEER] About to call sayHelloToPeer for " + verifiedPeer.identity.slice(0, 16) + "...")
         await PeerManager.sayHelloToPeer(verifiedPeer)
         // console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
     }

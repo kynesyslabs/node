@@ -63,6 +63,13 @@ export default class SharedState {
     // In-memory token store for paid attestation access
     tlsnTokenStore: TokenStoreState | null = null
 
+    // REVIEW: Phase 9 - IPFS status for TUI display
+    ipfsStatus: {
+        status: "active" | "error" | "disabled"
+        peerId?: string
+        peerCount?: number
+    } | null = null
+
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true
 

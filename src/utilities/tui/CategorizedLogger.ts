@@ -36,6 +36,7 @@ export type LogCategory =
     | "DAHR" // DAHR-specific operations
     | "TLSN" // TLSNotary HTTPS attestation operations
     | "CMD" // Command execution and TUI commands
+    | "DEBUG" // Debug-specific logs for development/troubleshooting
 
 /**
  * A single log entry
@@ -203,6 +204,7 @@ const ALL_CATEGORIES: LogCategory[] = [
     "DAHR",
     "TLSN",
     "CMD",
+    "DEBUG",
 ]
 
 /**

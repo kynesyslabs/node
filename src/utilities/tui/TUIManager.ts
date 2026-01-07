@@ -30,6 +30,12 @@ export interface NodeInfo {
         port: number
         running: boolean
     }
+    // REVIEW: Phase 9 - IPFS status info
+    ipfs?: {
+        status: "active" | "error" | "disabled"
+        peerId?: string
+        peerCount?: number
+    }
 }
 
 export interface TUIConfig {
@@ -166,10 +172,42 @@ const COMMANDS: Command[] = [
     },
     {
         name: "peers",
-        description: "Show connected peers",
+        description: "Show connected peers with capabilities",
         handler: (_args, tui) => {
-            tui.addCmdOutput("Peers: (emit command to main app)")
-            tui.emit("command", "peers")
+            const peerManager = PeerManager.getInstance()
+            const peers = peerManager.getAll()
+
+            tui.addCmdOutput("╔════════════════════════════════════════════════════════════════╗")
+            tui.addCmdOutput("║                     CONNECTED PEERS                            ║")
+            tui.addCmdOutput("╠════════════════════════════════════════════════════════════════╣")
+
+            if (peers.length === 0) {
+                tui.addCmdOutput("║  No peers connected                                            ║")
+            } else {
+                for (const peer of peers) {
+                    const shortId = peer.identity.slice(0, 16) + "..."
+                    const status = peer.status.online ? "🟢" : "🔴"
+                    const synced = peer.sync.status ? "✓" : "✗"
+
+                    tui.addCmdOutput(`║  ${status} ${shortId}`)
+                    tui.addCmdOutput(`║     URL: ${peer.connection.string || "N/A"}`)
+                    tui.addCmdOutput(`║     Block: #${peer.sync.block || 0} | Synced: ${synced}`)
+
+                    // Show capabilities
+                    if (peer.capabilities?.ipfs) {
+                        const ipfs = peer.capabilities.ipfs
+                        tui.addCmdOutput(`║     IPFS: ${ipfs.peerId.slice(0, 20)}...`)
+                        tui.addCmdOutput(`║       Addrs: ${ipfs.addresses.length} multiaddr(s)`)
+                    } else {
+                        tui.addCmdOutput("║     IPFS: Not available")
+                    }
+                    tui.addCmdOutput("║  ─────────────────────────────────────────────────────────────")
+                }
+            }
+
+            tui.addCmdOutput("╠════════════════════════════════════════════════════════════════╣")
+            tui.addCmdOutput(`║  Total: ${peers.length} peer(s)                                             ║`)
+            tui.addCmdOutput("╚════════════════════════════════════════════════════════════════╝")
         },
     },
     {
@@ -538,6 +576,12 @@ export class TUIManager extends EventEmitter {
             case "\\": {
                 const cmdIdx = TABS.findIndex(t => t.category === "CMD")
                 if (cmdIdx >= 0) this.setActiveTab(cmdIdx)
+                break
+            }
+
+            case ".": {
+                const debugIdx = TABS.findIndex(t => t.category === "DEBUG")
+                if (debugIdx >= 0) this.setActiveTab(debugIdx)
                 break
             }
 
@@ -1040,6 +1084,8 @@ export class TUIManager extends EventEmitter {
         const statusIcon = this.getStatusIcon()
         const logoWidth = 22 // Logo width + padding
         const infoStartX = logoWidth + 2
+        // REVIEW: Phase 9 - Second column for IPFS status
+        const ipfsColumnX = Math.max(this.width - 25, infoStartX + 35)
 
         // Render logo on the left (11 lines)
         for (let i = 0; i < DEMOS_LOGO.length; i++) {
@@ -1081,7 +1127,7 @@ export class TUIManager extends EventEmitter {
         term.moveTo(infoStartX, 4)
         term.yellow("🔑 ")
         term.gray("Identity: ")
-        const availableWidth = this.width - infoStartX - 15 // Account for emoji + "Identity: "
+        const availableWidth = ipfsColumnX - infoStartX - 15 // Account for emoji + "Identity: "
         let keyDisplay = "Loading..."
         if (this.nodeInfo.publicKey) {
             if (this.nodeInfo.publicKey.length <= availableWidth) {
@@ -1154,6 +1200,52 @@ export class TUIManager extends EventEmitter {
             term.green("[▼ AUTO]")
         } else {
             term.gray("[█ MANUAL]")
+        }
+
+        // REVIEW: Phase 9 - IPFS status column (right side)
+        // Read live from sharedState.ipfsStatus (set by IPFSManager)
+        const ipfsStatus = getSharedState.ipfsStatus
+
+        // Line 4: IPFS header
+        term.moveTo(ipfsColumnX, 4)
+        term.bgMagenta.white(" ◆ IPFS ")
+
+        // Line 5: IPFS status
+        term.moveTo(ipfsColumnX, 5)
+        if (ipfsStatus) {
+            switch (ipfsStatus.status) {
+                case "active":
+                    term.bgGreen.black(" ✓ ACTIVE ")
+                    break
+                case "error":
+                    term.bgRed.white(" ✗ ERROR ")
+                    break
+                case "disabled":
+                    term.bgGray.white(" - OFF ")
+                    break
+            }
+        } else {
+            term.bgGray.white(" ? INIT ")
+        }
+
+        // Line 6: IPFS Peer ID (truncated)
+        term.moveTo(ipfsColumnX, 6)
+        term.yellow("🆔 ")
+        if (ipfsStatus?.peerId) {
+            const shortPeerId = ipfsStatus.peerId.slice(-8)
+            term.gray("...").brightWhite(shortPeerId)
+        } else {
+            term.gray("-")
+        }
+
+        // Line 7: IPFS Swarm peers
+        term.moveTo(ipfsColumnX, 7)
+        term.yellow("🔗 ")
+        term.gray("Swarm: ")
+        if (ipfsStatus?.peerCount !== undefined) {
+            term.brightWhite(String(ipfsStatus.peerCount))
+        } else {
+            term.gray("-")
         }
 
         // Line 11: Separator before tabs

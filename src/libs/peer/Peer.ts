@@ -5,6 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { PeerCapabilities } from "../network/manageHelloPeer"
 
 export interface SyncData {
     status: boolean
@@ -37,6 +38,9 @@ export default class Peer {
         ready: boolean // is the peer ready to be used (aka 1. synced, 2. verified, 3. online, 4. not in an error state)  // TODO Implement
     }
 
+    // REVIEW: Phase 9 - Peer capabilities (IPFS, etc.)
+    public capabilities: PeerCapabilities | undefined
+
     get isLocalNode(): boolean {
         return (
             this.identity ===
@@ -65,6 +69,7 @@ export default class Peer {
             timestamp: null,
             ready: false,
         }
+        this.capabilities = undefined
     }
 
     // Importing a peer from an IPeer

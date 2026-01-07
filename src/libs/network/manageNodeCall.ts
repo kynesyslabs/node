@@ -25,7 +25,7 @@ import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
-import { exchangeGitHubCode } from "../identity/oauth/github"
+// DEPRECATED: GitHub OAuth removed - import { exchangeGitHubCode } from "../identity/oauth/github"
 // REVIEW: IPFS NodeCall handlers (Phase 2 + Phase 3 + Phase 4 + Phase 5 + Phase 8)
 import {
     ipfsStatus,

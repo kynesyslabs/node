@@ -50,12 +50,15 @@ export async function manageHelloPeer(
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
+    log.info(`[DEBUG HELLO PEER] Received hello_peer from sender ${sender.slice(0, 16)}...`, false)
     log.info("[Handle Hello Peer] Handling hello peer...")
     log.info("[Hello Peer Listener] Building peer object...")
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
-    if (peerObject.identity == getSharedState.publicKeyHex) {
+    // FIXME: Remove this debug bypass once capabilities exchange is verified working
+    const DEBUG_SKIP_SELF_CHECK = true
+    if (!DEBUG_SKIP_SELF_CHECK && peerObject.identity == getSharedState.publicKeyHex) {
         log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
@@ -108,6 +111,15 @@ export async function manageHelloPeer(
     // INFO: Write the sync data for the peer
     peerObject.sync = content.syncData
 
+    // REVIEW: Phase 9 - Store capabilities on peer object
+    if (content.capabilities) {
+        peerObject.capabilities = content.capabilities
+        log.info(
+            "[DEBUG CAPABILITIES] Incoming peer capabilities: " +
+                JSON.stringify(peerObject.capabilities),
+        )
+    }
+
     log.debug(
         "[Hello Peer Listener] Sender sync data: " +
             JSON.stringify(peerObject.sync),
@@ -119,6 +131,9 @@ export async function manageHelloPeer(
     log.info(
         "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
     )
+    log.info(
+        "[DEBUG CAPABILITIES] Final peer capabilities stored: " + JSON.stringify(peerObject.capabilities),
+    )
     const isAddedToPeerlist = peerManager.addPeer(peerObject)
     if (!isAddedToPeerlist) {
         response.result = 400
@@ -129,18 +144,32 @@ export async function manageHelloPeer(
         return response
     }
 
+    // REVIEW: Phase 9 - Save peer list after adding peer with capabilities
+    peerManager.savePeerList()
+
     response.result = 200
     response.response = true
+
+    // REVIEW: Phase 9 - Get our capabilities to send back in response
+    // Import lazily to avoid circular dependencies
+    // Pass peer URL to filter addresses based on local/remote network
+    const { PeerManager: PM } = await import("../peer")
+    const ourCapabilities = await PM.getOurCapabilities(content.url)
+
     response.extra = {
         msg: "Peer connected",
         syncData: peerManager.ourSyncData,
+        capabilities: ourCapabilities, // REVIEW: Phase 9 - Include our capabilities in response
     }
 
+    log.info(`[DEBUG CAPABILITIES] Sending response with our capabilities: ${JSON.stringify(ourCapabilities)}`)
+
     // REVIEW: Phase 9 - Connect IPFS peers dynamically
-    // Handle IPFS capabilities if present (non-blocking, best-effort)
+    // DEBUG: Making errors fatal - removed .catch() for debugging
     if (content.capabilities?.ipfs) {
         handleIpfsCapabilities(content.capabilities.ipfs, peerObject.identity).catch((err) => {
-            log.debug(`[Hello Peer] IPFS peer connection failed (non-critical): ${err}`)
+            log.critical(`[Hello Peer] FATAL: IPFS peer connection failed: ${err}`)
+            process.exit(1)
         })
     }
 
@@ -150,6 +179,8 @@ export async function manageHelloPeer(
 /**
  * Handle IPFS capabilities from a peer - connect to their IPFS node
  * This runs asynchronously and doesn't block the hello_peer response
+ *
+ * DEBUG: Errors are fatal for debugging purposes
  */
 async function handleIpfsCapabilities(
     ipfsCapabilities: IpfsCapabilities,
@@ -158,24 +189,30 @@ async function handleIpfsCapabilities(
     // Lazy import to avoid circular dependencies
     const { ensureIpfsManager } = await import("@/libs/network/routines/nodecalls/ipfs/ipfsManager")
 
-    try {
-        const ipfs = await ensureIpfsManager()
+    const ipfs = await ensureIpfsManager()
 
-        log.info(`[Hello Peer] Connecting to IPFS peer ${ipfsCapabilities.peerId} from Demos peer ${demosIdentity.slice(0, 16)}...`)
-
-        // Try each address until one succeeds
-        for (const addr of ipfsCapabilities.addresses) {
-            const result = await ipfs.connectPeer(addr)
-            if (result.success) {
-                log.info(`[Hello Peer] Connected to IPFS peer ${ipfsCapabilities.peerId} via ${addr}`)
-                // Register the Demos-IPFS peer mapping for future reference
-                ipfs.registerDemosPeer(ipfsCapabilities.peerId, addr)
-                return
-            }
-        }
-
-        log.debug(`[Hello Peer] Could not connect to IPFS peer ${ipfsCapabilities.peerId} (all addresses failed)`)
-    } catch (error) {
-        log.debug(`[Hello Peer] IPFS connection error: ${error}`)
+    // REVIEW: Phase 9 - Skip connecting to ourselves (IPFS/libp2p rejects self-dial)
+    const ourNodeInfo = await ipfs.getNodeInfo()
+    if (ourNodeInfo.peerId === ipfsCapabilities.peerId) {
+        log.debug("[IPFS] Skipping self-connection")
+        return
     }
+
+    log.info(`[IPFS] Connecting to peer ${ipfsCapabilities.peerId.slice(0, 16)}... from ${demosIdentity.slice(0, 8)}`)
+
+    // Try each address until one succeeds
+    for (const addr of ipfsCapabilities.addresses) {
+        log.debug(`[IPFS] Trying address: ${addr.slice(0, 50)}...`)
+        const result = await ipfs.connectPeer(addr)
+        if (result.success) {
+            log.info(`[IPFS] Connected to peer ${ipfsCapabilities.peerId.slice(0, 16)}...`)
+            // Register the Demos-IPFS peer mapping for future reference
+            ipfs.registerDemosPeer(ipfsCapabilities.peerId, addr)
+            return
+        }
+        log.debug(`[IPFS] Address failed: ${result.error}`)
+    }
+
+    // REVIEW: Phase 9 - Connection failures are expected for NAT/firewall peers
+    log.warn(`[IPFS] Could not connect to peer ${ipfsCapabilities.peerId.slice(0, 16)}... (${ipfsCapabilities.addresses.length} addresses tried)`)
 }

@@ -124,6 +124,11 @@ export const TAG_TO_CATEGORY: Record<string, LogCategory> = {
     TLSN: "TLSN",
     NOTARY: "TLSN",
     ATTESTATION: "TLSN",
+
+    // DEBUG - Debug-specific logs for development/troubleshooting
+    DEBUG: "DEBUG",
+    "DEBUG HELLO PEER": "DEBUG",
+    "DEBUG CAPABILITIES": "DEBUG",
 }
 
 // Re-export LogCategory for convenience

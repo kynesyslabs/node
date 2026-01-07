@@ -39,7 +39,9 @@ export default class PeerManager {
         return this.instance
     }
 
-    // Loading the peer list from the demos_peer.json
+    // REVIEW: Phase 9 - Enhanced peer list format with capabilities
+    // Old format: { "pubkey": "http://url" }
+    // New format: { "pubkey": { url: "http://url", capabilities?: {...} } }
     loadPeerList() {
         let rawPeerList = "{}"
 
@@ -58,15 +60,54 @@ export default class PeerManager {
 
         // INFO: If this peer is not in peer list, add it
         if (!peerList[getSharedState.publicKeyHex]) {
-            peerList[getSharedState.publicKeyHex] =
-                getSharedState.connectionString
+            peerList[getSharedState.publicKeyHex] = {
+                url: getSharedState.connectionString,
+            }
         }
 
-        // Creating a peer object for each peer in the peer list, assigning the connection string and adding it to the peer list
+        // Creating a peer object for each peer in the peer list
         for (const peer in peerList) {
             const peerObject = this.createNewPeer(peer)
-            peerObject.connection.string = peerList[peer]
+            const peerData = peerList[peer]
+
+            // Support both old format (string) and new format (object)
+            if (typeof peerData === "string") {
+                // Old format: just URL
+                peerObject.connection.string = peerData
+            } else {
+                // New format: { url, capabilities? }
+                peerObject.connection.string = peerData.url
+                if (peerData.capabilities) {
+                    peerObject.capabilities = peerData.capabilities
+                }
+            }
             this.addPeer(peerObject)
+        }
+    }
+
+    // REVIEW: Phase 9 - Save peer list with capabilities
+    savePeerList() {
+        const peerListData: Record<string, { url: string; capabilities?: PeerCapabilities }> = {}
+
+        for (const identity in this.peerList) {
+            const peer = this.peerList[identity]
+            peerListData[identity] = {
+                url: peer.connection.string,
+            }
+            if (peer.capabilities) {
+                peerListData[identity].capabilities = peer.capabilities
+            }
+        }
+
+        try {
+            fs.writeFileSync(
+                getSharedState.peerListFile,
+                JSON.stringify(peerListData, null, 2),
+                "utf8",
+            )
+            log.info(`[PEERMANAGER] Saved peer list with ${Object.keys(peerListData).length} peers`)
+        } catch (error) {
+            log.error("[PEERMANAGER] Error saving peer list: " + error)
         }
     }
 
@@ -230,6 +271,12 @@ export default class PeerManager {
                 )
                 existingPeer.connection.string = peer.connection.string
             }
+
+            // REVIEW: Phase 9 - Update capabilities if provided
+            if (peer.capabilities) {
+                existingPeer.capabilities = peer.capabilities
+                log.debug("[PEERMANAGER] Updated peer capabilities")
+            }
         } else {
             log.info("[PEERMANAGER] Adding new peer: " + peer.identity, true)
             this.peerList[identity] = peer
@@ -300,6 +347,7 @@ export default class PeerManager {
         getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
 
         // TODO test and finalize this method
+        log.info(`[DEBUG HELLO PEER] Starting hello_peer handshake with peer ${peer.identity.slice(0, 16)}...`, false)
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
         const signedConnectionString = await ucrypto.sign(
@@ -314,7 +362,9 @@ export default class PeerManager {
         )
 
         // REVIEW: Phase 9 - Include IPFS capabilities for swarm discovery
-        const capabilities = await PeerManager.getOurCapabilities()
+        // Pass peer URL to filter addresses based on local/remote network
+        const capabilities = await PeerManager.getOurCapabilities(peer.connection.string)
+        log.info(`[DEBUG CAPABILITIES] Our capabilities to send: ${JSON.stringify(capabilities)}`, false)
 
         // Sending the transmission to the peer
         const helloRequest: HelloPeerRequest = {
@@ -355,7 +405,7 @@ export default class PeerManager {
     }
 
     // Callback for the hello peer
-    static helloPeerCallback(response: RPCResponse, peer: Peer) {
+    static async helloPeerCallback(response: RPCResponse, peer: Peer) {
         log.info(
             "[Hello Peer] Response received from peer: " + peer.identity,
             false,
@@ -375,7 +425,7 @@ export default class PeerManager {
                 false,
             )
             log.info(
-                "[Hello Peer] Received sync data: " + response.extra.syncData,
+                "[Hello Peer] Received sync data: " + JSON.stringify(response.extra.syncData),
                 false,
             )
 
@@ -383,13 +433,34 @@ export default class PeerManager {
                 peer.sync = response.extra.syncData
             }
 
+            // REVIEW: Phase 9 - Extract capabilities from response
+            log.info("[DEBUG HELLO PEER] Raw response.extra: " + JSON.stringify(response.extra), false)
+            // DEBUG: Write to file for full inspection
+            await log.custom("hello_peer_debug", `CLIENT RECEIVED response.extra: ${JSON.stringify(response.extra, null, 2)}`, false)
+            if (response.extra.capabilities) {
+                peer.capabilities = response.extra.capabilities
+                log.info(
+                    "[DEBUG CAPABILITIES] Received capabilities from peer: " + JSON.stringify(response.extra.capabilities),
+                    false,
+                )
+            } else {
+                log.info("[DEBUG CAPABILITIES] No capabilities in response from peer", false)
+            }
+
             log.debug(
-                "[Hello Peer] Final Peer sync data: " +
+                "[DEBUG HELLO PEER] Final Peer sync data: " +
                     JSON.stringify(peer.sync),
+            )
+            log.debug(
+                "[DEBUG CAPABILITIES] Final Peer capabilities: " +
+                    JSON.stringify(peer.capabilities),
             )
 
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
+
+            // REVIEW: Phase 9 - Save peer list after updating capabilities
+            PeerManager.getInstance().savePeerList()
         } else {
             log.info(
                 "[Hello Peer] Failed to connect to peer: " +
@@ -417,47 +488,150 @@ export default class PeerManager {
     /**
      * Get our node's capabilities to advertise to peers
      * Currently includes IPFS info for swarm discovery
+     *
+     * DEBUG: Errors are fatal for debugging purposes
      */
-    static async getOurCapabilities(): Promise<PeerCapabilities | undefined> {
+
+    /**
+     * REVIEW: Phase 9 - Check if a URL/hostname is on a local network
+     * Used to determine whether to include local IPFS addresses in capabilities
+     */
+    static isLocalNetwork(urlOrHost: string): boolean {
         try {
-            // Lazy import to avoid circular dependencies and startup issues
-            const { ensureIpfsManager } = await import(
-                "@/libs/network/routines/nodecalls/ipfs/ipfsManager"
-            )
-
-            const ipfs = await ensureIpfsManager()
-            const nodeInfo = await ipfs.getNodeInfo()
-
-            if (!nodeInfo.peerId || nodeInfo.addresses.length === 0) {
-                log.debug("[Hello Peer] IPFS not ready - no capabilities to advertise")
-                return undefined
+            // Extract hostname from URL or use as-is if it's already a hostname
+            let hostname: string
+            try {
+                const parsed = new URL(urlOrHost)
+                hostname = parsed.hostname
+            } catch {
+                // Not a URL, treat as hostname/IP directly
+                hostname = urlOrHost
             }
 
-            // Filter addresses to only include routable ones
-            // Exclude localhost/127.0.0.1 addresses as they're not useful for remote peers
-            const routableAddresses = nodeInfo.addresses.filter(addr => {
-                return !addr.includes("/127.0.0.1/") &&
-                       !addr.includes("/::1/") &&
-                       !addr.includes("/localhost/")
-            })
-
-            if (routableAddresses.length === 0) {
-                log.debug("[Hello Peer] No routable IPFS addresses to advertise")
-                return undefined
+            // Check for localhost patterns
+            if (hostname === "localhost" ||
+                hostname === "127.0.0.1" ||
+                hostname === "::1" ||
+                hostname.endsWith(".local") ||
+                hostname.endsWith(".localhost")) {
+                return true
             }
 
-            log.debug(`[Hello Peer] Advertising IPFS peer ${nodeInfo.peerId} with ${routableAddresses.length} addresses`)
-
-            return {
-                ipfs: {
-                    peerId: nodeInfo.peerId,
-                    addresses: routableAddresses,
-                },
+            // Check for private IP ranges (RFC 1918)
+            // 10.0.0.0/8
+            if (hostname.startsWith("10.")) {
+                return true
             }
-        } catch (error) {
-            // IPFS not available - that's fine, capabilities are optional
-            log.debug(`[Hello Peer] Could not get IPFS capabilities: ${error}`)
+
+            // 192.168.0.0/16
+            if (hostname.startsWith("192.168.")) {
+                return true
+            }
+
+            // 172.16.0.0/12 (172.16.x.x - 172.31.x.x)
+            if (hostname.startsWith("172.")) {
+                const secondOctet = parseInt(hostname.split(".")[1], 10)
+                if (secondOctet >= 16 && secondOctet <= 31) {
+                    return true
+                }
+            }
+
+            // REVIEW: Phase 9 - Check if peer's public IP matches our own public IP
+            // This handles the case where two nodes behind the same NAT both advertise
+            // their public IP - they're on the same local network
+            try {
+                const ourExposedUrl = getSharedState.exposedUrl
+                if (ourExposedUrl) {
+                    const ourHostname = new URL(ourExposedUrl).hostname
+                    if (hostname === ourHostname) {
+                        log.info(`[isLocalNetwork] Peer ${hostname} matches our public IP - treating as local network`)
+                        return true
+                    }
+                }
+            } catch {
+                // Ignore errors in checking our own URL
+            }
+
+            return false
+        } catch (err) {
+            log.warning(`[isLocalNetwork] Failed to parse URL: ${urlOrHost}, assuming remote`)
+            return false
+        }
+    }
+
+    static async getOurCapabilities(peerUrl?: string): Promise<PeerCapabilities | undefined> {
+        // Lazy import to avoid circular dependencies and startup issues
+        const { ensureIpfsManager } = await import(
+            "@/libs/network/routines/nodecalls/ipfs/ipfsManager"
+        )
+
+        const ipfs = await ensureIpfsManager()
+        const nodeInfo = await ipfs.getNodeInfo()
+
+        if (!nodeInfo.peerId || nodeInfo.addresses.length === 0) {
+            log.error("[IPFS] Cannot build capabilities - IPFS not ready")
             return undefined
+        }
+
+        // REVIEW: Phase 9 - Determine if peer is on local network
+        const isLocalPeer = peerUrl ? PeerManager.isLocalNetwork(peerUrl) : false
+
+        // REVIEW: Phase 9 - Filter IPFS addresses for hello_peer capability exchange
+        // Always filter out: localhost, 0.0.0.0, and all IPv6 addresses
+        // For local peers: keep LAN + public addresses
+        // For remote peers: only keep public addresses
+        const filteredAddresses = nodeInfo.addresses.filter(addr => {
+            // Always exclude localhost addresses (never useful for peer-to-peer)
+            if (addr.includes("/127.") || addr.includes("/0.0.0.0/") || addr.includes("/localhost/")) {
+                return false
+            }
+
+            // Always exclude IPv6 addresses (we don't use them)
+            if (addr.includes("/ip6/") || addr.includes("/::1/") || addr.includes("/::/")) {
+                return false
+            }
+
+            // Check if this is a private/LAN address
+            const isLanAddr = addr.includes("/192.168.") ||
+                              addr.includes("/10.") ||
+                              addr.includes("/172.16.") ||
+                              addr.includes("/172.17.") ||
+                              addr.includes("/172.18.") ||
+                              addr.includes("/172.19.") ||
+                              addr.includes("/172.20.") ||
+                              addr.includes("/172.21.") ||
+                              addr.includes("/172.22.") ||
+                              addr.includes("/172.23.") ||
+                              addr.includes("/172.24.") ||
+                              addr.includes("/172.25.") ||
+                              addr.includes("/172.26.") ||
+                              addr.includes("/172.27.") ||
+                              addr.includes("/172.28.") ||
+                              addr.includes("/172.29.") ||
+                              addr.includes("/172.30.") ||
+                              addr.includes("/172.31.")
+
+            if (isLocalPeer) {
+                // For local peers, include both LAN and public addresses
+                return true
+            } else {
+                // For remote peers, only include public addresses (exclude LAN)
+                return !isLanAddr
+            }
+        })
+
+        if (filteredAddresses.length === 0) {
+            log.warn("[IPFS] No addresses to advertise after filtering")
+            return undefined
+        }
+
+        log.debug(`[IPFS] Capabilities: ${filteredAddresses.length} addresses (local peer: ${isLocalPeer})`)
+
+        return {
+            ipfs: {
+                peerId: nodeInfo.peerId,
+                addresses: filteredAddresses,
+            },
         }
     }
 }

@@ -4,27 +4,33 @@
 # Started automatically by ./run script (like PostgreSQL)
 # Uses port-based instance isolation: ipfs_${PORT}
 #
-# Note: Uses internal Docker network only.
-# All IPFS operations are proxied through Demos RPC.
+# REVIEW: Phase 9 - Host networking for direct LAN address announcement
 
 services:
     ipfs:
         image: ipfs/kubo:v0.26.0
         container_name: ipfs_${PORT:-53550}
+        # REVIEW: Phase 9 - Host networking allows IPFS to see real network interfaces
+        # This enables announcement of LAN addresses (192.168.x.x) for local peer discovery
+        network_mode: host
         environment:
             # Server profile: optimized for always-on operation
             - IPFS_PROFILE=server
             # Disable public gateway (we proxy through Demos RPC)
             - IPFS_GATEWAY_WRITABLE=false
+            # REVIEW: Phase 9 - Pass API port for host networking configuration
+            - IPFS_API_PORT=${IPFS_API_PORT:-54550}
         volumes:
             # Persistent storage for IPFS data (port-based isolation like postgres)
             - ./data_${PORT:-53550}/ipfs:/data/ipfs
+            # REVIEW: Phase 9 - Mount init script for port configuration
+            - ./init-ipfs.sh:/container-init.d/init-ipfs.sh:ro
             # Optional: mount swarm key for private network (Phase 4)
             # - ./swarm.key:/data/ipfs/swarm.key:ro
-        ports:
-            # Expose API on localhost only for IPFSManager access
-            # IPFS_API_PORT is calculated as PORT + 1000 by the run script
-            - "127.0.0.1:${IPFS_API_PORT:-54550}:5001"
+        # REVIEW: Phase 9 - Use custom entrypoint to configure fixed port 4001
+        entrypoint: ["/bin/sh", "/container-init.d/init-ipfs.sh"]
+        # Note: ports section removed - host networking exposes ports directly
+        # Swarm: 4001 (TCP/UDP), API: IPFS_API_PORT (default 54550)
         healthcheck:
             test: ["CMD-SHELL", "ipfs id || exit 1"]
             interval: 30s

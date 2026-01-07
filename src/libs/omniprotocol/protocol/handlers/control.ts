@@ -99,6 +99,7 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
     if (request.method === "hello_peer") {
         const { manageHelloPeer } = await import("src/libs/network/manageHelloPeer")
 
+        log.info(`[DEBUG HELLO PEER] Received hello_peer via NODE_CALL from peer: "${context.peerIdentity?.slice(0, 16)}..."`)
         log.debug(`[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`)
 
         const params = Array.isArray(request.params) ? request.params : []
@@ -114,6 +115,10 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
 
         // Call manageHelloPeer with sender identity from OmniProtocol auth
         const response = await manageHelloPeer(helloPeerRequest, context.peerIdentity ?? "")
+
+        log.info(`[DEBUG HELLO PEER] manageHelloPeer response.extra: ${JSON.stringify(response.extra)}`)
+        // DEBUG: Write to file for full inspection
+        await log.custom("hello_peer_debug", `SERVER SENDING response.extra: ${JSON.stringify(response.extra, null, 2)}`, false)
 
         return encodeNodeCallResponse({
             status: response.result,

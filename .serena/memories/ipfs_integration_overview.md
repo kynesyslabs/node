@@ -57,16 +57,34 @@ Full blockchain integration of IPFS (Kubo) into Demos Network for decentralized 
 - `getStream()` for streaming downloads
 - Memory-efficient large file handling (1GB+ without issues)
 
-### Phase 9: Cluster Sync 🔲
+### Phase 9: Peer Discovery via hello_peer ✅
+- IPFS capabilities exchange during hello_peer handshake
+- Dynamic IPFS swarm formation through Demos peer network
+- Local/public address filtering based on peer network location
+- Docker swarm port exposed (4001 TCP/UDP)
+- PeerCapabilities interface with ipfs.peerId and ipfs.addresses
+
+### Phase 10: Cluster Sync 🔲
 - Private IPFS network configuration
 - Swarm key management
 - Cluster-wide pinning
 - **Beads**: `node-zmh` (open, P2)
 
-### Phase 10: Public Bridge 🔲
+### Phase 11: Public Bridge 🔲
 - Optional public IPFS gateway access
 - Dual-network routing
 - **Beads**: `node-6qh` (open, P3)
+
+## Network Ports (Node Operators)
+
+| Port | Protocol | Purpose |
+|------|----------|---------|
+| **53550** | TCP | Demos RPC (main node API) |
+| **53551** | TCP | OmniProtocol (Demos P2P communications) |
+| **7047** | TCP | TLSNotary Service |
+| **4001** | TCP + UDP | IPFS Swarm (P2P peer discovery) |
+| **5001** | TCP | IPFS API (localhost only) |
+| **55000-60000** | TCP | TLSNotary WebSocket proxies |
 
 ## Key Files
 - `src/features/ipfs/IPFSManager.ts` - Core operations + streaming

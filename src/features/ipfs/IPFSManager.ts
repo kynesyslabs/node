@@ -128,6 +128,15 @@ export class IPFSManager {
             this.initialized = true
             this.logDebug(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
 
+            // REVIEW: Phase 9 - Update shared state with IPFS status
+            const { default: SharedState } = await import("@/utilities/sharedState")
+            const peerCount = await this.fetchPeerCount()
+            SharedState.getInstance().ipfsStatus = {
+                status: "active",
+                peerId: this.cachedNodeInfo.peerId,
+                peerCount: peerCount,
+            }
+
             // REVIEW: Log swarm key status (Phase 4)
             logSwarmKeyStatus()
 
@@ -137,6 +146,15 @@ export class IPFSManager {
                 await this.configureBootstrapNodes()
             }
         } catch (error) {
+            // REVIEW: Phase 9 - Update shared state with error status
+            try {
+                const { default: SharedState } = await import("@/utilities/sharedState")
+                SharedState.getInstance().ipfsStatus = {
+                    status: "error",
+                }
+            } catch {
+                // Ignore errors updating shared state
+            }
             throw new IPFSConnectionError(
                 `Failed to initialize IPFS connection to ${this.apiUrl}`,
                 error instanceof Error ? error : undefined,
@@ -170,6 +188,18 @@ export class IPFSManager {
                 timestamp,
             }
 
+            // REVIEW: Phase 9 - Update shared state with IPFS status
+            try {
+                const { default: SharedState } = await import("@/utilities/sharedState")
+                SharedState.getInstance().ipfsStatus = {
+                    status: "active",
+                    peerId: nodeInfo.peerId,
+                    peerCount: peerCount,
+                }
+            } catch {
+                // Ignore errors updating shared state
+            }
+
             this.lastHealthCheck = status
             return status
         } catch (error) {
@@ -177,6 +207,16 @@ export class IPFSManager {
                 healthy: false,
                 error: error instanceof Error ? error.message : "Unknown error",
                 timestamp,
+            }
+
+            // REVIEW: Phase 9 - Update shared state with error status
+            try {
+                const { default: SharedState } = await import("@/utilities/sharedState")
+                SharedState.getInstance().ipfsStatus = {
+                    status: "error",
+                }
+            } catch {
+                // Ignore errors updating shared state
             }
 
             this.lastHealthCheck = status
