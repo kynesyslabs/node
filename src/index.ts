@@ -248,9 +248,11 @@ async function warmup() {
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
 
     // OmniProtocol TCP Server configuration
-    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED === "true" || true
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED
+        ? process.env.OMNI_ENABLED.toLowerCase() === "true"
+        : true
     indexState.OMNI_PORT =
-        parseInt(process.env.OMNI_PORT, 10) || indexState.SERVER_PORT + 1
+        parseInt(process.env.OMNI_PORT ?? "", 10) || indexState.SERVER_PORT + 1
 
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
@@ -611,7 +613,12 @@ async function main() {
         // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
         if (indexState.TLSNOTARY_ENABLED) {
             try {
-                const { initializeTLSNotary, getTLSNotaryService, isTLSNotaryFatal, isTLSNotaryDebug } = await import("./features/tlsnotary")
+                const {
+                    initializeTLSNotary,
+                    getTLSNotaryService,
+                    isTLSNotaryFatal,
+                    isTLSNotaryDebug,
+                } = await import("./features/tlsnotary")
                 const fatal = isTLSNotaryFatal()
                 const debug = isTLSNotaryDebug()
 
@@ -621,9 +628,15 @@ async function main() {
                     // Check if TLSNotary port could be hit by OmniProtocol peer connections
                     // This happens when a peer runs on HTTP port (TLSNotary port - 1)
                     const potentialCollisionPort = indexState.TLSNOTARY_PORT - 1
-                    log.warning(`[TLSNotary] ⚠️ OmniProtocol is enabled. If any peer runs on HTTP port ${potentialCollisionPort}, OmniProtocol will try to connect to port ${indexState.TLSNOTARY_PORT} (TLSNotary)`)
-                    log.warning("[TLSNotary] This can cause 'WebSocket upgrade failed: Unsupported HTTP method' errors")
-                    log.warning("[TLSNotary] Consider using a different TLSNOTARY_PORT to avoid collisions")
+                    log.warning(
+                        `[TLSNotary] ⚠️ OmniProtocol is enabled. If any peer runs on HTTP port ${potentialCollisionPort}, OmniProtocol will try to connect to port ${indexState.TLSNOTARY_PORT} (TLSNotary)`,
+                    )
+                    log.warning(
+                        "[TLSNotary] This can cause 'WebSocket upgrade failed: Unsupported HTTP method' errors",
+                    )
+                    log.warning(
+                        "[TLSNotary] Consider using a different TLSNOTARY_PORT to avoid collisions",
+                    )
                 }
 
                 if (debug) {
@@ -636,7 +649,9 @@ async function main() {
                 const initialized = await initializeTLSNotary()
                 if (initialized) {
                     indexState.tlsnotaryService = getTLSNotaryService()
-                    log.info(`[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`)
+                    log.info(
+                        `[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`,
+                    )
                     // Update TUI with TLSNotary info
                     if (indexState.TUI_ENABLED && indexState.tuiManager) {
                         indexState.tuiManager.updateNodeInfo({
@@ -648,7 +663,8 @@ async function main() {
                         })
                     }
                 } else {
-                    const msg = "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
+                    const msg =
+                        "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
                     if (fatal) {
                         log.error("[TLSNotary] FATAL: " + msg)
                         process.exit(1)
@@ -656,16 +672,24 @@ async function main() {
                     log.warning(msg)
                 }
             } catch (error) {
-                log.error("[TLSNotary] Failed to start TLSNotary service: " + error)
-                const { isTLSNotaryFatal } = await import("./features/tlsnotary")
+                log.error(
+                    "[TLSNotary] Failed to start TLSNotary service: " + error,
+                )
+                const { isTLSNotaryFatal } = await import(
+                    "./features/tlsnotary"
+                )
                 if (isTLSNotaryFatal()) {
-                    log.error("[TLSNotary] FATAL: Exiting due to TLSNotary failure")
+                    log.error(
+                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                    )
                     process.exit(1)
                 }
                 // Continue without TLSNotary (failsafe)
             }
         } else {
-            log.info("[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)")
+            log.info(
+                "[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)",
+            )
         }
 
         log.info("[MAIN] ✅ Starting the background loop")
@@ -758,7 +782,9 @@ async function gracefulShutdown(signal: string) {
         if (indexState.tlsnotaryService) {
             console.log("[SHUTDOWN] Stopping TLSNotary service...")
             try {
-                const { shutdownTLSNotary } = await import("./features/tlsnotary")
+                const { shutdownTLSNotary } = await import(
+                    "./features/tlsnotary"
+                )
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
