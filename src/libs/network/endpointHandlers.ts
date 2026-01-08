@@ -152,20 +152,23 @@ export default class ServerHandlers {
                 }
 
                 // Attach actual cost breakdown to validityData for client review
-                // REVIEW: ValidityDataCustomCharges is a flat structure (type, actual_cost_dem, max_cost_dem, breakdown)
+                // REVIEW: ValidityDataCustomCharges uses IPFSCostBreakdown (base_cost, size_cost, duration_cost?, additional_costs?)
                 validationData.data.custom_charges = {
                     type: "ipfs",
                     actual_cost_dem: String(actualCostDemNum),
                     max_cost_dem: String(maxCostNum),
                     breakdown: {
-                        total_cost: actualCostDemNum,
-                        free_tier_bytes: actualCostResult.freeBytes,
-                        chargeable_bytes: actualCostResult.chargeableBytes,
-                        used_free_tier: actualCostResult.usedFreeTier,
-                        // REVIEW: Additional IPFS-specific info
-                        file_size_bytes: fileSizeBytes,
-                        operation: ipfsOperation,
-                        is_genesis_rate: isGenesis,
+                        base_cost: "0", // No base cost for IPFS operations
+                        size_cost: String(actualCostDemNum), // Full cost is size-based
+                        // REVIEW: Additional IPFS-specific info stored in additional_costs
+                        additional_costs: {
+                            free_tier_bytes: String(actualCostResult.freeBytes),
+                            chargeable_bytes: String(actualCostResult.chargeableBytes),
+                            used_free_tier: String(actualCostResult.usedFreeTier),
+                            file_size_bytes: String(fileSizeBytes),
+                            operation: ipfsOperation,
+                            is_genesis_rate: String(isGenesis),
+                        },
                     },
                 }
 
