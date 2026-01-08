@@ -1,5 +1,5 @@
 import { Entity, PrimaryColumn, Column, Index } from "typeorm"
-import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 
 /**
  * L2PS Mempool Entity
@@ -75,6 +75,21 @@ export class L2PSMempoolTx {
      * Target block number for inclusion (follows main mempool pattern)
      */
     @Index()
-    @Column("integer") 
+    @Column("integer")
     block_number: number
+
+    /**
+     * GCR edits generated during transaction execution
+     * Stored temporarily until batch aggregation creates a unified proof
+     * @example [{ type: "balance", operation: "add", account: "0x...", amount: 100 }]
+     */
+    @Column("jsonb", { nullable: true })
+    gcr_edits: GCREdit[] | null
+
+    /**
+     * Number of accounts affected by this transaction's GCR edits
+     * Only stores count to preserve L2PS privacy (not actual addresses)
+     */
+    @Column("integer", { nullable: true, default: 0 })
+    affected_accounts_count: number | null
 }   

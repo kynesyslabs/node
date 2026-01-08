@@ -27,6 +27,7 @@ import { buildPoseidon } from 'circomlibjs';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawn, ChildProcess } from 'node:child_process';
 import { plonkVerifyBun } from './BunPlonkWrapper.js';
 import log from '@/utilities/logger';
 
@@ -68,15 +69,31 @@ export class L2PSBatchProver {
     private readonly keysDir: string;
     private readonly loadedKeys: Map<BatchSize, { zkey: any; wasm: string }> = new Map();
 
+    /** Child process for non-blocking proof generation */
+    private childProcess: ChildProcess | null = null;
+    private processReady = false;
+    private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }> = new Map();
+    private requestCounter = 0;
+    private responseBuffer = '';
+
+    /** Whether to use subprocess (non-blocking) or main thread */
+    private useSubprocess = true;
+
     constructor(keysDir?: string) {
         this.keysDir = keysDir || path.join(__dirname, 'keys');
+
+        // Check environment variable to disable subprocess
+        if (process.env.L2PS_ZK_USE_MAIN_THREAD === 'true') {
+            this.useSubprocess = false;
+            log.info('[L2PSBatchProver] Subprocess disabled by L2PS_ZK_USE_MAIN_THREAD');
+        }
     }
 
     async initialize(): Promise<void> {
         if (this.initialized) return;
-        
+
         this.poseidon = await buildPoseidon();
-        
+
         // Verify at least one batch size is available
         const available = this.getAvailableBatchSizes();
         if (available.length === 0) {
@@ -85,9 +102,183 @@ export class L2PSBatchProver {
                 `Run setup_all_batches.sh to generate keys.`
             );
         }
-        
-        log.info(`[L2PSBatchProver] Available batch sizes: ${available.join(', ')}`);
+
+        // Initialize subprocess for non-blocking proof generation
+        if (this.useSubprocess) {
+            await this.initializeSubprocess();
+        }
+
+        log.info(`[L2PSBatchProver] Available batch sizes: ${available.join(', ')} (subprocess: ${this.useSubprocess && this.processReady})`);
         this.initialized = true;
+    }
+
+    /**
+     * Initialize child process for proof generation
+     */
+    private async initializeSubprocess(): Promise<void> {
+        return new Promise((resolve) => {
+            try {
+                const processPath = path.join(__dirname, 'zkProofProcess.ts');
+
+                // Spawn child process using bun or node
+                const runtime = isBun ? 'bun' : 'npx';
+                const args = isBun
+                    ? [processPath, this.keysDir]
+                    : ['tsx', processPath, this.keysDir];
+
+                log.debug(`[L2PSBatchProver] Spawning: ${runtime} ${args.join(' ')}`);
+
+                this.childProcess = spawn(runtime, args, {
+                    stdio: ['pipe', 'pipe', 'pipe'],
+                    cwd: process.cwd()
+                });
+
+                // Handle stdout - responses from child process
+                this.childProcess.stdout?.on('data', (data: Buffer) => {
+                    this.responseBuffer += data.toString();
+                    this.processResponseBuffer();
+                });
+
+                // Handle stderr - log errors
+                this.childProcess.stderr?.on('data', (data: Buffer) => {
+                    const msg = data.toString().trim();
+                    if (msg) {
+                        log.debug(`[L2PSBatchProver] Process stderr: ${msg}`);
+                    }
+                });
+
+                this.childProcess.on('error', (error) => {
+                    log.error(`[L2PSBatchProver] Process error: ${error.message}`);
+                    this.processReady = false;
+                    // Reject all pending requests
+                    for (const [id, pending] of this.pendingRequests) {
+                        pending.reject(error);
+                        this.pendingRequests.delete(id);
+                    }
+                });
+
+                this.childProcess.on('exit', (code) => {
+                    if (code !== 0 && code !== null) {
+                        log.error(`[L2PSBatchProver] Process exited with code ${code}`);
+                    }
+                    this.processReady = false;
+                    this.childProcess = null;
+                });
+
+                // Wait for ready signal
+                const readyTimeout = setTimeout(() => {
+                    if (!this.processReady) {
+                        log.warning('[L2PSBatchProver] Process initialization timeout, using main thread');
+                        this.useSubprocess = false;
+                        resolve();
+                    }
+                }, 15000);
+
+                // Set up ready handler
+                const checkReady = (response: any) => {
+                    if (response.type === 'ready') {
+                        clearTimeout(readyTimeout);
+                        this.processReady = true;
+                        log.info('[L2PSBatchProver] Subprocess initialized');
+                        resolve();
+                    }
+                };
+                this.pendingRequests.set('__ready__', { resolve: checkReady, reject: () => {} });
+
+            } catch (error) {
+                log.warning(`[L2PSBatchProver] Failed to spawn subprocess: ${error instanceof Error ? error.message : error}`);
+                this.useSubprocess = false;
+                resolve(); // Continue without subprocess
+            }
+        });
+    }
+
+    /**
+     * Process buffered responses from child process
+     */
+    private processResponseBuffer(): void {
+        const lines = this.responseBuffer.split('\n');
+        this.responseBuffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+                const response = JSON.parse(line);
+
+                // Handle ready signal
+                if (response.type === 'ready') {
+                    const readyHandler = this.pendingRequests.get('__ready__');
+                    if (readyHandler) {
+                        this.pendingRequests.delete('__ready__');
+                        readyHandler.resolve(response);
+                    }
+                    continue;
+                }
+
+                // Handle regular responses
+                const pending = this.pendingRequests.get(response.id);
+                if (pending) {
+                    this.pendingRequests.delete(response.id);
+                    if (response.type === 'error') {
+                        pending.reject(new Error(response.error || 'Unknown process error'));
+                    } else {
+                        pending.resolve(response.data);
+                    }
+                }
+            } catch (e) {
+                log.debug(`[L2PSBatchProver] Failed to parse response: ${line}`);
+            }
+        }
+    }
+
+    /**
+     * Send request to subprocess and wait for response
+     */
+    private subprocessRequest<T>(type: string, data?: any): Promise<T> {
+        return new Promise((resolve, reject) => {
+            if (!this.childProcess || !this.processReady) {
+                reject(new Error('Subprocess not available'));
+                return;
+            }
+
+            const id = `req_${++this.requestCounter}`;
+            const request = JSON.stringify({ type, id, data }) + '\n';
+
+            this.pendingRequests.set(id, { resolve, reject });
+
+            // Set timeout for request
+            const timeout = setTimeout(() => {
+                if (this.pendingRequests.has(id)) {
+                    this.pendingRequests.delete(id);
+                    reject(new Error('Subprocess request timeout'));
+                }
+            }, 120000); // 2 minute timeout for proof generation
+
+            this.pendingRequests.set(id, {
+                resolve: (value) => {
+                    clearTimeout(timeout);
+                    resolve(value);
+                },
+                reject: (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                }
+            });
+
+            this.childProcess.stdin?.write(request);
+        });
+    }
+
+    /**
+     * Terminate subprocess
+     */
+    async terminate(): Promise<void> {
+        if (this.childProcess) {
+            this.childProcess.kill();
+            this.childProcess = null;
+            this.processReady = false;
+            log.info('[L2PSBatchProver] Subprocess terminated');
+        }
     }
 
     /**
@@ -212,6 +403,7 @@ export class L2PSBatchProver {
 
     /**
      * Generate a PLONK proof for a batch of transactions
+     * Uses subprocess to avoid blocking the main event loop
      */
     async generateProof(input: BatchProofInput): Promise<BatchProof> {
         if (!this.initialized) {
@@ -223,9 +415,64 @@ export class L2PSBatchProver {
             throw new Error('Cannot generate proof for empty batch');
         }
 
+        const startTime = Date.now();
+
+        // Try subprocess first (non-blocking)
+        if (this.useSubprocess && this.processReady) {
+            try {
+                log.debug(`[L2PSBatchProver] Generating proof in subprocess (${txCount} transactions)...`);
+
+                // Serialize BigInts to strings for IPC
+                const processInput = {
+                    transactions: input.transactions.map(tx => ({
+                        senderBefore: tx.senderBefore.toString(),
+                        senderAfter: tx.senderAfter.toString(),
+                        receiverBefore: tx.receiverBefore.toString(),
+                        receiverAfter: tx.receiverAfter.toString(),
+                        amount: tx.amount.toString()
+                    })),
+                    initialStateRoot: input.initialStateRoot.toString()
+                };
+
+                const result = await this.subprocessRequest<{
+                    proof: any;
+                    publicSignals: string[];
+                    batchSize: number;
+                    txCount: number;
+                    finalStateRoot: string;
+                    totalVolume: string;
+                }>('generateProof', processInput);
+
+                const duration = Date.now() - startTime;
+                log.info(`[L2PSBatchProver] Proof generated in ${duration}ms (subprocess)`);
+
+                return {
+                    proof: result.proof,
+                    publicSignals: result.publicSignals,
+                    batchSize: result.batchSize as BatchSize,
+                    txCount: result.txCount,
+                    finalStateRoot: BigInt(result.finalStateRoot),
+                    totalVolume: BigInt(result.totalVolume)
+                };
+            } catch (error) {
+                log.warning(`[L2PSBatchProver] Subprocess failed, falling back to main thread: ${error instanceof Error ? error.message : error}`);
+                // Fall through to main thread execution
+            }
+        }
+
+        // Fallback to main thread (blocking)
+        return this.generateProofMainThread(input, startTime);
+    }
+
+    /**
+     * Generate proof on main thread (blocking - fallback)
+     */
+    private async generateProofMainThread(input: BatchProofInput, startTime: number): Promise<BatchProof> {
+        const txCount = input.transactions.length;
+
         // Select appropriate batch size
         const batchSize = this.selectBatchSize(txCount);
-        log.debug(`[L2PSBatchProver] Using batch_${batchSize} for ${txCount} transactions`);
+        log.debug(`[L2PSBatchProver] Using batch_${batchSize} for ${txCount} transactions (main thread)`);
 
         // Load keys
         const { zkey, wasm } = await this.loadKeys(batchSize);
@@ -252,9 +499,8 @@ export class L2PSBatchProver {
         };
 
         // Generate PLONK proof (with singleThread for Bun compatibility)
-        log.debug(`[L2PSBatchProver] Generating proof...`);
-        const startTime = Date.now();
-        
+        log.debug(`[L2PSBatchProver] Generating proof on main thread...`);
+
         // Use fullProve with singleThread option to avoid Web Workers
         const { proof, publicSignals } = await (snarkjs as any).plonk.fullProve(
             circuitInput,
@@ -266,7 +512,7 @@ export class L2PSBatchProver {
         );
 
         const duration = Date.now() - startTime;
-        log.info(`[L2PSBatchProver] Proof generated in ${duration}ms`);
+        log.info(`[L2PSBatchProver] Proof generated in ${duration}ms (main thread - blocking)`);
 
         return {
             proof,

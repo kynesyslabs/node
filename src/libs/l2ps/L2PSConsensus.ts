@@ -46,8 +46,8 @@ export interface L2PSConsensusResult {
     proofsFailed: number
     /** Total GCR edits applied to L1 */
     totalEditsApplied: number
-    /** All affected accounts */
-    affectedAccounts: string[]
+    /** Total affected accounts count (privacy-preserving - not actual addresses) */
+    affectedAccountsCount: number
     /** L1 batch transaction hashes created */
     l1BatchTxHashes: string[]
     /** Details of each proof application */
@@ -120,7 +120,7 @@ export default class L2PSConsensus {
             proofsApplied: 0,
             proofsFailed: 0,
             totalEditsApplied: 0,
-            affectedAccounts: [],
+            affectedAccountsCount: 0,
             l1BatchTxHashes: [],
             proofResults: []
         }
@@ -143,14 +143,12 @@ export default class L2PSConsensus {
                 if (proofResult.success) {
                     result.proofsApplied++
                     result.totalEditsApplied += proofResult.editsApplied
-                    result.affectedAccounts.push(...proof.affected_accounts)
+                    result.affectedAccountsCount += proof.affected_accounts_count
                 } else {
                     result.proofsFailed++
                     result.success = false
                 }
             }
-
-            result.affectedAccounts = [...new Set(result.affectedAccounts)]
 
             // Process successfully applied proofs
             if (!simulate && result.proofsApplied > 0) {
@@ -214,9 +212,10 @@ export default class L2PSConsensus {
         proofResult: ProofResult
     ): Promise<boolean> {
         const editResults: GCRResult[] = []
-        
+
         for (const edit of proof.gcr_edits) {
-            const editAccount = 'account' in edit ? edit.account as string : proof.affected_accounts[0] || ''
+            // Get account from the GCR edit itself (balance edits have account field)
+            const editAccount = 'account' in edit ? edit.account as string : ''
             const mockTx = this.createMockTx(proof, editAccount)
 
             const editResult = await HandleGCR.apply(edit, mockTx as any, false, simulate)
@@ -304,7 +303,7 @@ export default class L2PSConsensus {
             // Group proofs by L2PS UID for the summary
             const l2psNetworks = [...new Set(proofs.map(p => p.l2ps_uid))]
             const totalTransactions = proofs.reduce((sum, p) => sum + p.transaction_count, 0)
-            const allAffectedAccounts = [...new Set(proofs.flatMap(p => p.affected_accounts))]
+            const totalAffectedAccountsCount = proofs.reduce((sum, p) => sum + p.affected_accounts_count, 0)
 
             // Create unified batch payload (only hashes and metadata, not actual content)
             const batchPayload = {
@@ -313,7 +312,7 @@ export default class L2PSConsensus {
                 proof_count: proofs.length,
                 proof_hashes: proofs.map(p => p.transactions_hash).sort((a, b) => a.localeCompare(b)),
                 transaction_count: totalTransactions,
-                affected_accounts_count: allAffectedAccounts.length,
+                affected_accounts_count: totalAffectedAccountsCount,
                 timestamp: Date.now()
             }
 
@@ -346,7 +345,7 @@ export default class L2PSConsensus {
                         l2ps_networks: l2psNetworks,
                         proof_count: proofs.length,
                         transaction_count: totalTransactions,
-                        affected_accounts_count: allAffectedAccounts.length,
+                        affected_accounts_count: totalAffectedAccountsCount,
                         // Encrypted batch hash - no actual transaction content visible
                         batch_hash: batchHash,
                         encrypted_summary: Hashing.sha256(JSON.stringify(batchPayload))
@@ -399,10 +398,10 @@ export default class L2PSConsensus {
                 for (let i = proof.gcr_edits.length - 1; i >= 0; i--) {
                     const edit = proof.gcr_edits[i]
                     const rollbackEdit = { ...edit, isRollback: true }
-                    
-                    // Get account from edit (for balance/nonce edits)
-                    const editAccount = 'account' in edit ? edit.account as string : proof.affected_accounts[0] || ''
-                    
+
+                    // Get account from the GCR edit itself (balance edits have account field)
+                    const editAccount = 'account' in edit ? edit.account as string : ''
+
                     const mockTx = {
                         hash: proof.transactions_hash,
                         content: {
@@ -444,7 +443,7 @@ export default class L2PSConsensus {
     static async getBlockStats(blockNumber: number): Promise<{
         proofsApplied: number
         totalEdits: number
-        affectedAccounts: number
+        affectedAccountsCount: number
     }> {
         const appliedProofs = await L2PSProofManager.getProofs("", "applied", 10000)
         const blockProofs = appliedProofs.filter(p => p.applied_block_number === blockNumber)
@@ -452,7 +451,7 @@ export default class L2PSConsensus {
         return {
             proofsApplied: blockProofs.length,
             totalEdits: blockProofs.reduce((sum, p) => sum + p.gcr_edits.length, 0),
-            affectedAccounts: new Set(blockProofs.flatMap(p => p.affected_accounts)).size
+            affectedAccountsCount: blockProofs.reduce((sum, p) => sum + p.affected_accounts_count, 0)
         }
     }
 }

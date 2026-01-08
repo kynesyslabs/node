@@ -23,6 +23,7 @@ interface CliOptions {
     data?: string
     count: number
     waitStatus: boolean
+    type: string
 }
 
 interface TxPayload {
@@ -48,6 +49,7 @@ Optional:
   --to <address>           Recipient address (defaults to sender)
   --value <amount>         Transaction amount (defaults to 0)
   --data <string>          Attach arbitrary payload string
+  --type <string>          Native operation type (default: send)
   --count <n>              Number of transactions to send (default: 5)
   --wait                   Poll transaction status after submission
   --mnemonic-file <path>   Read mnemonic from a file
@@ -70,12 +72,13 @@ function parseArgs(argv: string[]): CliOptions {
         data: undefined,
         count: 5,
         waitStatus: false,
+        type: "send",
     }
 
     const argsWithValues = new Set([
         "--node", "--uid", "--config", "--key", "--iv",
         "--mnemonic", "--mnemonic-file", "--from", "--to",
-        "--value", "--data", "--count"
+        "--value", "--data", "--count", "--type"
     ])
 
     const flagHandlers: Record<string, (value?: string) => void> = {
@@ -96,6 +99,10 @@ function parseArgs(argv: string[]): CliOptions {
         "--to": (value) => { options.to = value },
         "--value": (value) => { options.value = value },
         "--data": (value) => { options.data = value },
+        "--type": (value) => {
+            if (!value) throw new Error("--type requires a value")
+            options.type = value
+        },
         "--count": (value) => {
             if (!value) throw new Error("--count requires a value")
             const count = Number.parseInt(value, 10)
@@ -138,11 +145,23 @@ function parseArgs(argv: string[]): CliOptions {
     return options
 }
 
-function normalizeHex(address: string): string {
+function normalizeHex(address: string, label: string = "Address"): string {
     if (!address) {
-        throw new Error("Address is required")
+        throw new Error(`${label} is required`)
     }
-    return address.startsWith("0x") ? address : `0x${address}`
+
+    const cleaned = address.trim()
+    const hex = cleaned.startsWith("0x") ? cleaned : `0x${cleaned}`
+
+    if (hex.length !== 66) {
+        throw new Error(`${label} invalid: Expected 64 hex characters (32 bytes) with 0x prefix, but got ${hex.length - 2} characters.`)
+    }
+
+    if (!/^0x[0-9a-fA-F]{64}$/.test(hex)) {
+        throw new Error(`${label} contains invalid hex characters.`)
+    }
+
+    return hex.toLowerCase()
 }
 
 function readRequiredFile(filePath: string, label: string): string {
@@ -233,6 +252,7 @@ async function buildInnerTransaction(
     to: string,
     amount: number,
     payload: TxPayload,
+    operation = "send",
 ): Promise<Transaction> {
     const tx = await demos.tx.prepare()
     tx.content.type = "native" as Transaction["content"]["type"]
@@ -240,7 +260,7 @@ async function buildInnerTransaction(
     tx.content.amount = amount
     // Format as native payload with send operation for L2PSTransactionExecutor
     tx.content.data = ["native", {
-        nativeOperation: "send",
+        nativeOperation: operation,
         args: [normalizeHex(to), amount],
         ...payload  // Include l2ps_uid and other metadata
     }] as unknown as Transaction["content"]["data"]
@@ -284,11 +304,11 @@ try {
     console.log("🔑 Connecting wallet...")
     await demos.connectWallet(mnemonic)
 
-    const signerAddress = normalizeHex(await demos.getAddress())
-    const ed25519Address = normalizeHex(await demos.getEd25519Address())
-    const fromAddress = normalizeHex(options.from || signerAddress)
+    const signerAddress = normalizeHex(await demos.getAddress(), "Wallet address")
+    const ed25519Address = normalizeHex(await demos.getEd25519Address(), "Ed25519 address")
+    const fromAddress = normalizeHex(options.from || signerAddress, "From address")
     const nonceAccount = options.from ? fromAddress : ed25519Address
-    const toAddress = normalizeHex(options.to || fromAddress)
+    const toAddress = normalizeHex(options.to || fromAddress, "To address")
 
     console.log(`\n📦 Preparing to send ${options.count} L2 transactions...`)
     console.log(`   From: ${fromAddress}`)
@@ -325,6 +345,7 @@ try {
             toAddress,
             amount,
             payload,
+            options.type,
         )
 
         console.log("  🔐 Encrypting with L2PS key material...")
@@ -366,9 +387,10 @@ try {
         console.log(`  ✅ Outer hash: ${subnetTx.hash}`)
         console.log(`  ✅ Inner hash: ${innerTx.hash}`)
 
-        // Small delay between transactions to avoid nonce conflicts
+        // Large delay between transactions to reduce I/O pressure on WSL/Node
         if (i < options.count - 1) {
-            await new Promise(resolve => setTimeout(resolve, 500))
+            console.log("  ⏳ Waiting 2s before next transaction...")
+            // await new Promise(resolve => setTimeout(resolve, 2000))
         }
     }
 

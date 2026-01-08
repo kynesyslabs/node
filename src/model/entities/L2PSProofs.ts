@@ -104,10 +104,11 @@ export class L2PSProof {
     gcr_edits: GCREdit[]
 
     /**
-     * Accounts affected by this proof's GCR edits
+     * Number of accounts affected by this proof's GCR edits
+     * Only stores count to preserve L2PS privacy (not actual addresses)
      */
-    @Column("simple-array")
-    affected_accounts: string[]
+    @Column("integer", { default: 0 })
+    affected_accounts_count: number
 
     /**
      * Block number when this proof should be applied

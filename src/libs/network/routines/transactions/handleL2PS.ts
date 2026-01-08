@@ -141,12 +141,21 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, `L2PS transaction execution failed: ${executionResult.message}`)
     }
 
+    // Store GCR edits in mempool for batch aggregation
+    if (executionResult.gcr_edits && executionResult.gcr_edits.length > 0) {
+        await L2PSMempool.updateGCREdits(
+            l2psTx.hash,
+            executionResult.gcr_edits,
+            executionResult.affected_accounts_count || 0
+        )
+    }
+
     // Update status and return success
     await L2PSMempool.updateStatus(l2psTx.hash, "executed")
 
     response.result = 200
     response.response = {
-        message: "L2PS transaction validated - proof created for consensus",
+        message: "L2PS transaction executed - awaiting batch aggregation",
         encrypted_hash: l2psTx.hash,
         original_hash: originalHash,
         l2ps_uid: l2psUid,
@@ -154,8 +163,8 @@ export default async function handleL2PS(
         execution: {
             success: executionResult.success,
             message: executionResult.message,
-            affected_accounts: executionResult.affected_accounts,
-            proof_id: executionResult.proof_id
+            affected_accounts_count: executionResult.affected_accounts_count,
+            gcr_edits_count: executionResult.gcr_edits?.length || 0
         }
     }
     return response

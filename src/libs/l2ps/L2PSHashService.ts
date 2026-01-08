@@ -38,7 +38,7 @@ export class L2PSHashService {
     private isRunning = false
     
     /** Hash generation interval in milliseconds */
-    private readonly GENERATION_INTERVAL = 5000 // 5 seconds
+    private readonly GENERATION_INTERVAL = parseInt(process.env.L2PS_HASH_INTERVAL_MS || "5000", 10)
     
     /** Statistics tracking */
     private stats = {

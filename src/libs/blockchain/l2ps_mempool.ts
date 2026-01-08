@@ -1,7 +1,7 @@
 import { FindManyOptions, In, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
-import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -163,10 +163,14 @@ export default class L2PSMempool {
                 }
             }
 
+            // Get next sequence number for this L2PS network
+            const sequenceNumber = await this.getNextSequenceNumber(l2psUid)
+
             // Save to L2PS mempool
             await this.repo.save({
                 hash: encryptedTx.hash,
                 l2ps_uid: l2psUid,
+                sequence_number: sequenceNumber.toString(),
                 original_hash: originalHash,
                 encrypted_tx: encryptedTx,
                 status: status,
@@ -183,6 +187,33 @@ export default class L2PSMempool {
                 success: false,
                 error: error.message || "Unknown error",
             }
+        }
+    }
+
+    /**
+     * Get next sequence number for a specific L2PS network
+     * Auto-increments based on the highest existing sequence number
+     *
+     * @param l2psUid - L2PS network identifier
+     * @returns Promise resolving to the next sequence number
+     */
+    private static async getNextSequenceNumber(l2psUid: string): Promise<number> {
+        try {
+            await this.ensureInitialized()
+
+            const result = await this.repo
+                .createQueryBuilder("tx")
+                .select("MAX(CAST(tx.sequence_number AS INTEGER))", "max_seq")
+                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+                .getRawOne()
+
+            const maxSeq = result?.max_seq ?? -1
+            return maxSeq + 1
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Mempool] Error getting next sequence number: ${errorMsg}`)
+            // Fallback to timestamp-based sequence
+            return Date.now()
         }
     }
 
@@ -329,13 +360,52 @@ export default class L2PSMempool {
     }
 
     /**
+     * Update GCR edits and affected accounts count for a transaction
+     * Called after transaction execution to store edits for batch aggregation
+     *
+     * @param hash - Transaction hash to update
+     * @param gcrEdits - GCR edits generated during execution
+     * @param affectedAccountsCount - Number of accounts affected (privacy-preserving)
+     * @returns Promise resolving to true if updated, false otherwise
+     */
+    public static async updateGCREdits(
+        hash: string,
+        gcrEdits: GCREdit[],
+        affectedAccountsCount: number
+    ): Promise<boolean> {
+        try {
+            await this.ensureInitialized()
+
+            const result = await this.repo.update(
+                { hash },
+                {
+                    gcr_edits: gcrEdits,
+                    affected_accounts_count: affectedAccountsCount,
+                    timestamp: Date.now().toString()
+                },
+            )
+
+            const updated = (result.affected ?? 0) > 0
+            if (updated) {
+                log.debug(`[L2PS Mempool] Updated GCR edits for ${hash} (${gcrEdits.length} edits, ${affectedAccountsCount} accounts)`)
+            }
+            return updated
+
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Mempool] Error updating GCR edits for ${hash}: ${errorMsg}`)
+            return false
+        }
+    }
+
+    /**
      * Batch update status for multiple transactions
      * Efficient for bulk operations like marking transactions as batched
-     * 
+     *
      * @param hashes - Array of transaction hashes to update
      * @param status - New status to set
      * @returns Promise resolving to number of updated records
-     * 
+     *
      * @example
      * ```typescript
      * const updatedCount = await L2PSMempool.updateStatusBatch(

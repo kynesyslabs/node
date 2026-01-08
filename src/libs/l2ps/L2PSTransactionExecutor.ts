@@ -1,17 +1,18 @@
 /**
  * L2PS Transaction Executor (Unified State Architecture)
- * 
+ *
  * Executes L2PS transactions using the UNIFIED STATE approach:
  * - L2PS does NOT have its own separate state (no l2ps_gcr_main)
  * - Transactions are validated against L1 state (gcr_main)
- * - GCR edits are generated and stored as proofs
+ * - GCR edits are generated and stored in mempool for batch aggregation
+ * - Batch aggregator creates a single proof per batch (not per transaction)
  * - Proofs are applied to L1 state at consensus time
- * 
+ *
  * This implements the "private layer on L1" architecture:
  * - L2PS provides privacy through encryption
  * - State changes are applied to L1 via ZK proofs
  * - Validators participate in consensus without seeing tx content
- * 
+ *
  * @module L2PSTransactionExecutor
  */
 
@@ -33,8 +34,8 @@ export interface L2PSExecutionResult {
     message: string
     /** GCR edits generated (will be applied to L1 at consensus) */
     gcr_edits?: GCREdit[]
-    /** Accounts affected by this transaction */
-    affected_accounts?: string[]
+    /** Number of accounts affected (privacy-preserving - not actual addresses) */
+    affected_accounts_count?: number
     /** Proof ID if proof was created */
     proof_id?: number
     /** Transaction ID in l2ps_transactions table */
@@ -99,17 +100,16 @@ export default class L2PSTransactionExecutor {
 
     /**
      * Execute a decrypted L2PS transaction
-     * 
+     *
      * UNIFIED STATE APPROACH:
      * 1. Validate transaction against L1 state (gcr_main)
      * 2. Generate GCR edits (same as L1 transactions)
-     * 3. Create proof with GCR edits (NOT applied yet)
-     * 4. Return success - edits will be applied at consensus
-     * 
+     * 3. Return GCR edits - proof creation happens at batch aggregation time
+     *
      * @param l2psUid - L2PS network identifier (for tracking/privacy scope)
      * @param tx - Decrypted L2PS transaction
-     * @param l1BatchHash - L1 batch transaction hash (for proof linking)
-     * @param simulate - If true, only validate without creating proof
+     * @param l1BatchHash - L1 batch transaction hash (for tracking)
+     * @param simulate - If true, only validate without storing edits
      */
     static async execute(
         l2psUid: string,
@@ -127,20 +127,17 @@ export default class L2PSTransactionExecutor {
             }
 
             const gcrEdits = editsResult.gcr_edits || []
-            const affectedAccounts = editsResult.affected_accounts || []
+            const affectedAccountsCount = editsResult.affected_accounts_count || 0
 
-            // Create proof with GCR edits (if not simulating)
-            if (!simulate && gcrEdits.length > 0) {
-                return this.createProofAndRecord(l2psUid, tx, l1BatchHash, gcrEdits, affectedAccounts)
-            }
-
+            // Return GCR edits - proof creation is handled at batch time
+            // This allows multiple transactions to be aggregated into a single proof
             return {
                 success: true,
-                message: simulate 
+                message: simulate
                     ? `Validated: ${gcrEdits.length} GCR edits would be generated`
-                    : `Proof created with ${gcrEdits.length} GCR edits (will apply at consensus)`,
+                    : `Executed: ${gcrEdits.length} GCR edits generated (will be batched)`,
                 gcr_edits: gcrEdits,
-                affected_accounts: [...new Set(affectedAccounts)]
+                affected_accounts_count: affectedAccountsCount
             }
 
         } catch (error) {
@@ -161,7 +158,6 @@ export default class L2PSTransactionExecutor {
         simulate: boolean
     ): Promise<L2PSExecutionResult> {
         const gcrEdits: GCREdit[] = []
-        const affectedAccounts: string[] = []
 
         if (tx.content.type === "native") {
             return this.handleNativeTransaction(tx, simulate)
@@ -176,53 +172,14 @@ export default class L2PSTransactionExecutor {
                 }
                 gcrEdits.push(edit)
             }
-            affectedAccounts.push(tx.content.from as string)
-            return { success: true, message: "GCR edits validated", gcr_edits: gcrEdits, affected_accounts: affectedAccounts }
+            return { success: true, message: "GCR edits validated", gcr_edits: gcrEdits, affected_accounts_count: 1 }
         }
 
         // No GCR edits - just record
-        const message = tx.content.type === "demoswork" 
+        const message = tx.content.type === "demoswork"
             ? "DemosWork transaction recorded (no GCR edits)"
             : `Transaction type '${tx.content.type}' recorded`
-        return { success: true, message, affected_accounts: [tx.content.from as string] }
-    }
-
-    /**
-     * Create proof and record transaction
-     */
-    private static async createProofAndRecord(
-        l2psUid: string,
-        tx: Transaction,
-        l1BatchHash: string,
-        gcrEdits: GCREdit[],
-        affectedAccounts: string[]
-    ): Promise<L2PSExecutionResult> {
-        const transactionHashes = [l1BatchHash]
-        const proofResult = await L2PSProofManager.createProof(
-            l2psUid,
-            l1BatchHash,
-            gcrEdits,
-            [...new Set(affectedAccounts)],
-            transactionHashes.length,
-            transactionHashes
-        )
-
-        if (!proofResult.success) {
-            return { success: false, message: `Failed to create proof: ${proofResult.message}` }
-        }
-
-        const transactionId = await this.recordTransaction(l2psUid, tx, l1BatchHash)
-
-        log.info(`[L2PS Executor] Created proof ${proofResult.proof_id} for tx ${tx.hash} with ${gcrEdits.length} GCR edits`)
-
-        return {
-            success: true,
-            message: `Proof created with ${gcrEdits.length} GCR edits (will apply at consensus)`,
-            gcr_edits: gcrEdits,
-            affected_accounts: [...new Set(affectedAccounts)],
-            proof_id: proofResult.proof_id,
-            transaction_id: transactionId
-        }
+        return { success: true, message, affected_accounts_count: 1 }
     }
 
     /**
@@ -235,7 +192,7 @@ export default class L2PSTransactionExecutor {
         const nativePayloadData = tx.content.data as ["native", INativePayload]
         const nativePayload = nativePayloadData[1]
         const gcrEdits: GCREdit[] = []
-        const affectedAccounts: string[] = []
+        let affectedAccountsCount = 0
 
         if (nativePayload.nativeOperation === "send") {
             const [to, amount] = nativePayload.args as [string, number]
@@ -279,13 +236,14 @@ export default class L2PSTransactionExecutor {
                 }
             )
 
-            affectedAccounts.push(sender, to)
+            // Count unique accounts (sender and receiver)
+            affectedAccountsCount = sender === to ? 1 : 2
         } else {
             log.debug(`[L2PS Executor] Unknown native operation: ${nativePayload.nativeOperation}`)
             return {
                 success: true,
                 message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
-                affected_accounts: [tx.content.from as string]
+                affected_accounts_count: 1
             }
         }
 
@@ -293,7 +251,7 @@ export default class L2PSTransactionExecutor {
             success: true,
             message: "Native transaction validated",
             gcr_edits: gcrEdits,
-            affected_accounts: affectedAccounts
+            affected_accounts_count: affectedAccountsCount
         }
     }
 

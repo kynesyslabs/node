@@ -8,6 +8,8 @@ import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encrypti
 import { getNetworkTimestamp } from "@/libs/utils/calibrateTime"
 import crypto from "crypto"
 import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
+import L2PSProofManager from "./L2PSProofManager"
+import type { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /**
  * L2PS Batch Payload Interface
@@ -74,19 +76,22 @@ export class L2PSBatchAggregator {
     private zkProver: L2PSBatchProver | null = null
     
     /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
-    private zkEnabled = true
-    
-    /** Batch aggregation interval in milliseconds (default: 10 seconds) */
-    private readonly AGGREGATION_INTERVAL = 10000
-    
+    private zkEnabled = process.env.L2PS_ZK_ENABLED !== "false"
+
+    /** Batch aggregation interval in milliseconds */
+    private readonly AGGREGATION_INTERVAL = parseInt(process.env.L2PS_AGGREGATION_INTERVAL_MS || "10000", 10)
+
     /** Minimum number of transactions to trigger a batch (can be lower if timeout reached) */
-    private readonly MIN_BATCH_SIZE = 1
-    
-    /** Maximum number of transactions per batch (limited by ZK circuit size) */
-    private readonly MAX_BATCH_SIZE = 10
-    
-    /** Cleanup interval - remove batched transactions older than this (1 hour) */
-    private readonly CLEANUP_AGE_MS = 5 * 60 * 1000 // 5 minutes - confirmed txs can be cleaned up quickly
+    private readonly MIN_BATCH_SIZE = parseInt(process.env.L2PS_MIN_BATCH_SIZE || "1", 10)
+
+    /** Maximum number of transactions per batch (limited by ZK circuit size: max 10) */
+    private readonly MAX_BATCH_SIZE = Math.min(
+        parseInt(process.env.L2PS_MAX_BATCH_SIZE || "10", 10),
+        10 // ZK circuit constraint - cannot exceed 10
+    )
+
+    /** Cleanup age - remove batched transactions older than this (ms) */
+    private readonly CLEANUP_AGE_MS = parseInt(process.env.L2PS_CLEANUP_AGE_MS || "300000", 10) // 5 minutes default
 
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
@@ -319,7 +324,7 @@ export class L2PSBatchAggregator {
 
     /**
      * Process a batch of transactions for a specific L2PS UID
-     * 
+     *
      * @param l2psUid - L2PS network identifier
      * @param transactions - Array of transactions to batch
      */
@@ -338,14 +343,36 @@ export class L2PSBatchAggregator {
             // Create batch payload
             const batchPayload = await this.createBatchPayload(l2psUid, batchTransactions)
 
+            // Aggregate GCR edits from all transactions in this batch
+            const { aggregatedEdits, totalAffectedAccountsCount } = this.aggregateGCREdits(batchTransactions)
+
             // Create and submit batch transaction to main mempool
             const success = await this.submitBatchToMempool(batchPayload)
 
             if (success) {
+                // Create a SINGLE aggregated proof for the entire batch
+                if (aggregatedEdits.length > 0) {
+                    const transactionHashes = batchTransactions.map(tx => tx.hash)
+                    const proofResult = await L2PSProofManager.createProof(
+                        l2psUid,
+                        batchPayload.batch_hash,
+                        aggregatedEdits,
+                        totalAffectedAccountsCount,
+                        batchTransactions.length,
+                        transactionHashes
+                    )
+
+                    if (proofResult.success) {
+                        log.info(`[L2PS Batch Aggregator] Created aggregated proof ${proofResult.proof_id} for ${batchTransactions.length} transactions with ${aggregatedEdits.length} GCR edits`)
+                    } else {
+                        log.error(`[L2PS Batch Aggregator] Failed to create aggregated proof: ${proofResult.message}`)
+                    }
+                }
+
                 // Update transaction statuses to 'batched'
                 const hashes = batchTransactions.map(tx => tx.hash)
                 const updated = await L2PSMempool.updateStatusBatch(hashes, L2PS_STATUS.BATCHED)
-                
+
                 this.stats.totalBatchesCreated++
                 this.stats.totalTransactionsBatched += batchTransactions.length
                 this.stats.successfulSubmissions++
@@ -360,6 +387,39 @@ export class L2PSBatchAggregator {
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error processing batch for ${l2psUid}: ${message}`)
             this.stats.failedSubmissions++
+        }
+    }
+
+    /**
+     * Aggregate GCR edits from all transactions in a batch
+     *
+     * @param transactions - Array of transactions to aggregate edits from
+     * @returns Object containing aggregated edits and all affected accounts
+     */
+    private aggregateGCREdits(transactions: L2PSMempoolTx[]): {
+        aggregatedEdits: GCREdit[]
+        totalAffectedAccountsCount: number
+    } {
+        const aggregatedEdits: GCREdit[] = []
+        let totalAffectedAccountsCount = 0
+
+        for (const tx of transactions) {
+            // Get GCR edits from transaction (stored during execution)
+            if (tx.gcr_edits && Array.isArray(tx.gcr_edits)) {
+                aggregatedEdits.push(...tx.gcr_edits)
+            }
+
+            // Sum affected accounts counts (privacy-preserving)
+            if (tx.affected_accounts_count && typeof tx.affected_accounts_count === 'number') {
+                totalAffectedAccountsCount += tx.affected_accounts_count
+            }
+        }
+
+        log.debug(`[L2PS Batch Aggregator] Aggregated ${aggregatedEdits.length} GCR edits from ${transactions.length} transactions`)
+
+        return {
+            aggregatedEdits,
+            totalAffectedAccountsCount
         }
     }
 

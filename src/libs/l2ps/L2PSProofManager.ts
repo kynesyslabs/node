@@ -61,7 +61,7 @@ export interface ProofApplicationResult {
     success: boolean
     message: string
     edits_applied: number
-    affected_accounts: string[]
+    affected_accounts_count: number
 }
 
 /**
@@ -100,11 +100,11 @@ export default class L2PSProofManager {
 
     /**
      * Create a proof from L2PS transaction GCR edits
-     * 
+     *
      * @param l2psUid - L2PS network identifier
      * @param l1BatchHash - Hash of the L1 batch transaction
      * @param gcrEdits - GCR edits that should be applied to L1
-     * @param affectedAccounts - Accounts affected by these edits
+     * @param affectedAccountsCount - Number of accounts affected (privacy-preserving)
      * @param transactionCount - Number of L2PS transactions in this proof
      * @param transactionHashes - Individual transaction hashes from L2PS mempool
      * @returns Proof creation result
@@ -113,7 +113,7 @@ export default class L2PSProofManager {
         l2psUid: string,
         l1BatchHash: string,
         gcrEdits: GCREdit[],
-        affectedAccounts: string[],
+        affectedAccountsCount: number,
         transactionCount: number = 1,
         transactionHashes: string[] = []
     ): Promise<ProofCreationResult> {
@@ -130,7 +130,7 @@ export default class L2PSProofManager {
                 l2psUid,
                 l1BatchHash,
                 gcrEdits,
-                affectedAccounts,
+                affectedAccountsCount,
                 transactionsHash
             }))
 
@@ -145,7 +145,7 @@ export default class L2PSProofManager {
                 l1_batch_hash: l1BatchHash,
                 proof,
                 gcr_edits: gcrEdits,
-                affected_accounts: affectedAccounts,
+                affected_accounts_count: affectedAccountsCount,
                 status: "pending" as L2PSProofStatus,
                 transaction_count: transactionCount,
                 transactions_hash: transactionsHash,
@@ -239,7 +239,7 @@ export default class L2PSProofManager {
                 l2psUid: proof.l2ps_uid,
                 l1BatchHash: proof.l1_batch_hash,
                 gcrEdits: proof.gcr_edits,
-                affectedAccounts: proof.affected_accounts,
+                affectedAccountsCount: proof.affected_accounts_count,
                 transactionsHash: proof.transactions_hash
             }))
 
