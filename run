@@ -832,6 +832,8 @@ mkdir -p logs
 # IPFS management with proper folder based on the port (like PostgreSQL)
 # Calculate IPFS API port as PORT + 1000 offset
 export IPFS_API_PORT=$((PORT + 1000))
+# Gateway port (default 58080 to avoid conflict with port 8080)
+export IPFS_GATEWAY_PORT=${IPFS_GATEWAY_PORT:-58080}
 
 # Create a unique ipfs folder for this instance based on the port number
 IPFS_FOLDER="ipfs_${PORT}"
@@ -861,8 +863,8 @@ fi
 
 # Start IPFS node
 echo "📦 Starting IPFS node..."
-log_verbose "Running docker compose up -d in $IPFS_FOLDER with IPFS_API_PORT=$IPFS_API_PORT"
-if ! PORT=$PORT IPFS_API_PORT=$IPFS_API_PORT docker compose up -d; then
+log_verbose "Running docker compose up -d in $IPFS_FOLDER with IPFS_API_PORT=$IPFS_API_PORT IPFS_GATEWAY_PORT=$IPFS_GATEWAY_PORT"
+if ! PORT=$PORT IPFS_API_PORT=$IPFS_API_PORT IPFS_GATEWAY_PORT=$IPFS_GATEWAY_PORT docker compose up -d; then
     echo "❌ Failed to start IPFS node"
     echo "💡 Check Docker Desktop is running and try again"
     exit 1
