@@ -432,7 +432,7 @@ export default class PeerManager {
 
         log.debug("[Hello Peer] Response: " + JSON.stringify(response))
 
-        const newPeersUnfiltered = PeerManager.helloPeerCallback(response, peer)
+        const newPeersUnfiltered = await PeerManager.helloPeerCallback(response, peer)
         if (!recursive) {
             return
         }

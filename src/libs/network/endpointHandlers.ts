@@ -152,19 +152,20 @@ export default class ServerHandlers {
                 }
 
                 // Attach actual cost breakdown to validityData for client review
+                // REVIEW: ValidityDataCustomCharges is a flat structure (type, actual_cost_dem, max_cost_dem, breakdown)
                 validationData.data.custom_charges = {
-                    ipfs: {
-                        actual_cost_dem: actualCostDemNum,
-                        max_cost_dem: maxCostNum,
+                    type: "ipfs",
+                    actual_cost_dem: String(actualCostDemNum),
+                    max_cost_dem: String(maxCostNum),
+                    breakdown: {
+                        total_cost: actualCostDemNum,
+                        free_tier_bytes: actualCostResult.freeBytes,
+                        chargeable_bytes: actualCostResult.chargeableBytes,
+                        used_free_tier: actualCostResult.usedFreeTier,
+                        // REVIEW: Additional IPFS-specific info
                         file_size_bytes: fileSizeBytes,
                         operation: ipfsOperation,
                         is_genesis_rate: isGenesis,
-                        breakdown: {
-                            total_cost: actualCostDemNum,
-                            free_tier_bytes: actualCostResult.freeBytes,
-                            chargeable_bytes: actualCostResult.chargeableBytes,
-                            used_free_tier: actualCostResult.usedFreeTier,
-                        },
                     },
                 }
 
