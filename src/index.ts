@@ -715,49 +715,66 @@ async function main() {
             // INFO: Wait for hello peer if we are the anchor node
             // useful when anchor node is re-joining the network
 
-            // Set up Enter key listener to skip the wait
-            const wasRawMode = process.stdin.isRaw
-            if (!wasRawMode) {
-                process.stdin.setRawMode(true)
-            }
-            process.stdin.resume()
+            // REVIEW: Only set up stdin handlers when TUI is NOT enabled
+            // TUI mode uses terminal-kit which manages stdin independently.
+            // Calling process.stdin.pause() would break TUI keyboard input!
+            if (!indexState.TUI_ENABLED) {
+                // Set up Enter key listener to skip the wait
+                const wasRawMode = process.stdin.isRaw
+                if (!wasRawMode) {
+                    process.stdin.setRawMode(true)
+                }
+                process.stdin.resume()
 
-            const enterKeyHandler = (chunk: Buffer) => {
-                const key = chunk.toString()
-                if (key === "\r" || key === "\n" || key === "\u0003") {
-                    // Enter key or Ctrl+C
-                    if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
-                        Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
-                        log.info(
-                            "[MAIN] Wait skipped by user, starting sync loop",
-                        )
+                const enterKeyHandler = (chunk: Buffer) => {
+                    const key = chunk.toString()
+                    if (key === "\r" || key === "\n" || key === "\u0003") {
+                        // Enter key or Ctrl+C
+                        if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+                            Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
+                            log.info(
+                                "[MAIN] Wait skipped by user, starting sync loop",
+                            )
+                        }
+                        // Clean up
+                        process.stdin.removeListener("data", enterKeyHandler)
+                        if (!wasRawMode) {
+                            process.stdin.setRawMode(false)
+                        }
+                        process.stdin.pause()
                     }
-                    // Clean up
+                }
+
+                process.stdin.on("data", enterKeyHandler)
+
+                try {
+                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
+                } catch (error) {
+                    if (error instanceof TimeoutError) {
+                        log.info("[MAIN] No wild peers found, starting sync loop")
+                    } else if (error instanceof AbortError) {
+                        // Already logged above
+                    }
+                } finally {
+                    // Clean up listener if still attached
                     process.stdin.removeListener("data", enterKeyHandler)
                     if (!wasRawMode) {
                         process.stdin.setRawMode(false)
                     }
                     process.stdin.pause()
                 }
-            }
-
-            process.stdin.on("data", enterKeyHandler)
-
-            try {
-                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
-            } catch (error) {
-                if (error instanceof TimeoutError) {
-                    log.info("[MAIN] No wild peers found, starting sync loop")
-                } else if (error instanceof AbortError) {
-                    // Already logged above
+            } else {
+                // TUI mode: just wait for hello_peer without stdin handlers
+                // TUI already handles keyboard input via terminal-kit
+                try {
+                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
+                } catch (error) {
+                    if (error instanceof TimeoutError) {
+                        log.info("[MAIN] No wild peers found, starting sync loop")
+                    } else if (error instanceof AbortError) {
+                        log.info("[MAIN] Wait aborted, starting sync loop")
+                    }
                 }
-            } finally {
-                // Clean up listener if still attached
-                process.stdin.removeListener("data", enterKeyHandler)
-                if (!wasRawMode) {
-                    process.stdin.setRawMode(false)
-                }
-                process.stdin.pause()
             }
         }
 
