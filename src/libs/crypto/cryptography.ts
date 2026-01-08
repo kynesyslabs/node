@@ -110,7 +110,6 @@ export default class Cryptography {
             log.debug("[HexToForge] Deriving a buffer from privateKey...")
             // privateKey = HexToForge(privateKey)
             privateKey = forge.util.binary.hex.decode(privateKey)
-            process.exit(0)
         }
 
         return forge.pki.ed25519.sign({

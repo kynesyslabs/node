@@ -150,6 +150,8 @@ async function processPayload(
         sender = splits[1]
     }
 
+    PeerManager.getInstance().updatePeerLastSeen(sender)
+
     if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
             return {
@@ -198,7 +200,7 @@ async function processPayload(
             log.info(
                 "[RPC Call] Received mempool merge request from: " + sender,
             )
-            var res = await ServerHandlers.handleMempool(payload.params[0])
+            var res = await ServerHandlers.handleMempool(payload.params)
             log.info("[RPC Call] Merged mempool from: " + sender)
             log.info(JSON.stringify(res))
             return res
@@ -211,7 +213,7 @@ async function processPayload(
         // NOTE Communications not requiring authentication
         case "nodeCall": {
             try {
-                return await manageNodeCall(payload.params[0] as NodeCall)
+                return await manageNodeCall(payload.params[0] as NodeCall, sender)
             } catch (error) {
                 log.error("[RPC Call] Error in nodeCall: " + error)
                 return {
@@ -338,10 +340,12 @@ export async function serverRpcBun() {
     // eslint-disable-next-line quotes
     server.get("/", req => {
         const clientIP = rateLimiter.getClientIP(req, server.server)
-        return new Response(JSON.stringify({
-            message: "Hello, World!",
-            yourIP: clientIP,
-        }))
+        return new Response(
+            JSON.stringify({
+                message: "Hello, World!",
+                yourIP: clientIP,
+            }),
+        )
     })
 
     server.get("/info", async () => {
@@ -414,24 +418,23 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format" }, 400)
+                return jsonResponse({ error: "Invalid request format. Not an RPCRequest" }, 400)
             }
 
             log.info(
-                "[RPC Call] Received request: " +
-                    JSON.stringify(payload),
+                "[RPC Call] Received request: " + JSON.stringify(payload),
                 false,
             )
 
             let sender = ""
             if (!noAuthMethods.includes(payload.method)) {
                 const headers = req.headers
-                log.info(
-                    "[RPC Call] Headers: " + JSON.stringify(headers),
-                    true,
-                )
+                log.info("[RPC Call] Headers: " + JSON.stringify(headers), true)
                 const headerValidation = await validateHeaders(headers)
-                log.debug("[RPC Call] Header validation: " + JSON.stringify(headerValidation))
+                log.debug(
+                    "[RPC Call] Header validation: " +
+                        JSON.stringify(headerValidation),
+                )
                 if (!headerValidation[0]) {
                     return jsonResponse(
                         { error: "Invalid headers:" + headerValidation[1] },
@@ -444,6 +447,7 @@ export async function serverRpcBun() {
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
+            console.error("Error in serverRpcBun: " + e)
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })

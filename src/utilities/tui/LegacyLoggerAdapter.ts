@@ -278,7 +278,7 @@ export default class LegacyLoggerAdapter {
         }
 
         // Also emit to TUI
-        this.logger.info("CORE", stringifiedMessage)
+        // this.logger.info("CORE", stringifiedMessage)
     }
 
     static disableOnlyMode(): void {

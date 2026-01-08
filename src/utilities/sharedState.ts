@@ -8,7 +8,7 @@ import { Identity } from "src/libs/identity"
 // eslint-disable-next-line no-unused-vars
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { SigningAlgorithm, ValidityData } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
 import type { MigrationMode } from "src/libs/omniprotocol/types/config"
@@ -36,21 +36,24 @@ export default class SharedState {
     referenceBlockRoom = 1
     shardSize = parseInt(process.env.SHARD_SIZE) || 4
     mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
- 
+
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
     // SECTION shared state variables
     // Modes
+    isInitialized = false
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false
     inPeerRecheckLoop = false
+    lastPeerRecheck = 0 
+    peerRecheckSleepTime = 10_000 // 10 seconds
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false
     isMCPServerStarted = false
-    isOmniProtocolEnabled = false
+    isOmniProtocolEnabled = true
 
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
@@ -76,6 +79,11 @@ export default class SharedState {
     // Mempool
     inGetMempool = false
     inCleanMempool = false
+    // REVIEW Mempool caching
+
+    // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
+    // Stores ValidityData for transactions that need to be relayed to validators
+    validityDataCache = new Map<string, ValidityData>() // txHash -> ValidityData
 
     // States
     runMainLoop = true
@@ -293,10 +301,13 @@ export default class SharedState {
             log.debug("[SharedState] OmniProtocol adapter already initialized")
             return
         }
+
         this._omniAdapter = new PeerOmniAdapter()
         this._omniAdapter.migrationMode = mode
         this.isOmniProtocolEnabled = true
-        log.info(`[SharedState] OmniProtocol adapter initialized with mode: ${mode}`)
+        log.info(
+            `[SharedState] ✅ OmniProtocol adapter initialized with mode: ${mode}`,
+        )
     }
 
     /**

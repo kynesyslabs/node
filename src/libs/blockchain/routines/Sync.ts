@@ -25,8 +25,8 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
-import GCR from "../gcr/gcr"
 import HandleGCR from "../gcr/handleGCR"
+import { BroadcastManager } from "@/libs/communications/broadcastManager"
 
 const term = terminalkit.terminal
 
@@ -138,8 +138,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
     log.custom(
         "fastsync_blocknumbers",
-        "Request block numbers: " +
-            JSON.stringify(requestBlockNumbers),
+        "Request block numbers: " + JSON.stringify(requestBlockNumbers),
     )
 
     // REVIEW Choose the peer with the highest last block number
@@ -249,6 +248,61 @@ async function verifyLastBlockIntegrity(
     return lastSyncedBlock.hash === ourLastBlockHash
 }
 
+/**
+ * Given a block and a peer, saves the block into the database, downloads the transactions
+ * from the peer and updates the GCR and transaction tables.
+ *
+ * @param block The block to sync
+ * @param peer The peer that sent the block
+ * @returns True if the block was synced successfully, false otherwise
+ */
+export async function syncBlock(block: Block, peer: Peer) {
+    log.info("[downloadBlock] Block received: " + block.hash)
+    await Chain.insertBlock(block, [], null, false)
+    log.debug("Block inserted successfully")
+    log.debug(
+        "Last block number: " +
+            getSharedState.lastBlockNumber +
+            " Last block hash: " +
+            getSharedState.lastBlockHash,
+    )
+    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+
+    // REVIEW Merge the peerlist
+    log.info("[fastSync] Merging peers from block: " + block.hash)
+    const mergedPeerlist = await mergePeerlist(block)
+    log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
+    // REVIEW Parse the txs hashes in the block
+    log.info("[fastSync] Asking for transactions in the block", true)
+    const txs = await askTxsForBlock(block, peer)
+    log.info("[fastSync] Transactions received: " + txs.length, true)
+
+    // ! Sync the native tables
+    await syncGCRTables(txs)
+
+    // REVIEW Insert the txs into the transactions database table
+    if (txs.length > 0) {
+        log.info("[fastSync] Inserting transactions into the database", true)
+        const success = await Chain.insertTransactionsFromSync(txs)
+        if (success) {
+            log.info("[fastSync] Transactions inserted successfully")
+            return true
+        }
+
+        log.error("[fastSync] Transactions insertion failed")
+        return false
+    }
+
+    log.info("[fastSync] No transactions in the block")
+    return true
+}
+
+/**
+ *
+ * @param peer The peer to download the block from
+ * @param blockToAsk The block number to download
+ * @returns The block if downloaded successfully, false otherwise
+ */
 async function downloadBlock(peer: Peer, blockToAsk: number) {
     log.debug("Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
@@ -275,12 +329,17 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     }
 
     if (blockResponse.result === 404) {
-        log.info("[fastSync] Block not found")
+        log.error("[fastSync] Block not found")
+        log.error("BLOCK TO ASK: " + blockToAsk)
+        log.error("PEER: " + peer.connection.string)
+
         throw new BlockNotFoundError("Block not found")
     }
 
     if (blockResponse.result === 200) {
-        log.debug(`[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`)
+        log.debug(
+            `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
+        )
         const block = blockResponse.response as Block
 
         if (!block) {
@@ -288,46 +347,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
-        log.info("[downloadBlock] Block received: " + block.hash)
-        await Chain.insertBlock(block, [], null, false)
-        log.debug("Block inserted successfully")
-        log.debug("Last block number: " + getSharedState.lastBlockNumber + " Last block hash: " + getSharedState.lastBlockHash)
-        log.info(
-            "[fastSync] Block inserted successfully at the head of the chain!",
-        )
-
-        // REVIEW Merge the peerlist
-        log.info("[fastSync] Merging peers from block: " + block.hash)
-        const mergedPeerlist = await mergePeerlist(block)
-        log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
-        // REVIEW Parse the txs hashes in the block
-        log.info("[fastSync] Asking for transactions in the block", true)
-        const txs = await askTxsForBlock(block, peer)
-        log.info("[fastSync] Transactions received: " + txs.length, true)
-
-        // ! Sync the native tables
-        await syncGCRTables(txs)
-
-        // REVIEW Insert the txs into the transactions database table
-        if (txs.length > 0) {
-            log.info(
-                "[fastSync] Inserting transactions into the database",
-                true,
-            )
-            const success = await Chain.insertTransactions(txs)
-            if (success) {
-                log.info("[fastSync] Transactions inserted successfully")
-                return true
-            }
-
-            log.error("[fastSync] Transactions insertion failed")
-            return false
-        }
-
-        log.info("[fastSync] No transactions in the block")
-        return true
-
-        // ? We might want a rollback function here if something goes wrong
+        return await syncBlock(block, peer)
     }
 
     return false
@@ -340,17 +360,13 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
  * @returns True if the block was downloaded successfully, false otherwise
  */
 async function waitForNextBlock() {
-    log.debug("[waitForNextBlock] Waiting for next block")
+    const entryBlock = getSharedState.lastBlockNumber
 
-    while (getSharedState.lastBlockNumber >= latestBlock()) {
+    while (entryBlock >= latestBlock()) {
         await sleep(250)
     }
 
-    log.debug("[waitForNextBlock] NEXT BLOCK GENERATED. DOWNLOADING...")
-    return await downloadBlock(
-        highestBlockPeer(),
-        getSharedState.lastBlockNumber + 1,
-    )
+    return await downloadBlock(highestBlockPeer(), entryBlock + 1)
 }
 
 /**
@@ -377,7 +393,7 @@ async function requestBlocks() {
     while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
         // log.debug("[fastSync] Sleeping for 1 second")
-        // await sleep(250)
+        await sleep(250)
         try {
             await downloadBlock(peer, blockToAsk)
         } catch (error) {
@@ -423,7 +439,7 @@ async function requestBlocks() {
         }
     }
 
-    return true
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 // REVIEW Applying GCREdits to the tables
@@ -433,14 +449,22 @@ export async function syncGCRTables(
     // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
     for (const tx of txs) {
-        const result = await HandleGCR.applyToTx(tx)
-        if (!result.success) {
+        try {
+            const result = await HandleGCR.applyToTx(tx)
+            if (!result.success) {
+                log.error(
+                    "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                )
+            }
+        } catch (error) {
             log.error(
-                "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
             )
-            return [tx.hash, false]
+            console.error("[SYNC] [ ERROR ]")
+            console.error(error)
         }
     }
+
     return [null, true]
 }
 
@@ -451,24 +475,27 @@ export async function askTxsForBlock(
 ): Promise<Transaction[]> {
     const txsHashes = block.content.ordered_transactions
     const txs = []
-    for (const txHash of txsHashes) {
-        const txRequest: RPCRequest = {
+
+    const res = await peer.longCall(
+        {
             method: "nodeCall",
             params: [
                 {
-                    message: "getTxByHash",
-                    data: { hash: txHash },
-                    muid: null,
+                    message: "getBlockTransactions",
+                    data: { blockHash: block.hash },
                 },
             ],
-        }
-        const txResponse = await peer.call(txRequest, false)
-        if (txResponse.result === 200) {
-            const tx = txResponse.response as Transaction
-            txs.push(tx)
-        }
+        },
+        false,
+        250,
+        3,
+    )
+
+    if (res.result === 200) {
+        return res.response as Transaction[]
     }
-    return txs
+
+    return []
 }
 
 // Helper function to merge the peerlist from the last block
@@ -515,21 +542,25 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         }
     }
 
-    const synced = await requestBlocks()
+    while (!(await requestBlocks())) {
+        await sleep(500)
+    }
 
-    if (synced && getSharedState.fastSyncCount === 0) {
+    if (getSharedState.fastSyncCount === 0) {
         await waitForNextBlock()
     }
 
-    return synced
+    return latestBlock() === getSharedState.lastBlockNumber
 }
 
 export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<boolean> {
+    getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
     getSharedState.syncStatus = synced
+    await BroadcastManager.broadcastOurSyncData()
 
     const lastBlockNumber = await Chain.getLastBlockNumber()
     log.info(
@@ -538,5 +569,7 @@ export async function fastSync(
             " from: " +
             from,
     )
+
+    getSharedState.inSyncLoop = false
     return true
 }

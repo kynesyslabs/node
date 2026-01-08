@@ -69,6 +69,7 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
+        log.debug("\n\n\n")
         log.debug("INITIALIZED SHARD:")
         log.debug(
             "SHARD: " +
@@ -816,7 +817,7 @@ export default class SecretaryManager {
                 // process.exit(0)
                 // INFO: Logs parts used to create the current CVSA
                 await getCommonValidatorSeed(null, (message: string) => {
-                    log.only(message)
+                    log.debug(message)
                 })
                 return null
             }
@@ -908,7 +909,7 @@ export default class SecretaryManager {
             .forEach(key => Waiter.preHeld.delete(key))
 
         log.debug(
-            "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
+            "HANGING GREENLIGHTS RESOLVED",
         )
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 

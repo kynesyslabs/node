@@ -109,6 +109,15 @@ export default class Chain {
         return transaction.map(tx => Transaction.fromRawTransaction(tx))
     }
 
+    static async getBlockTransactions(
+        blockHash: string,
+    ): Promise<Transaction[]> {
+        const block = await this.getBlockByHash(blockHash)
+        return await this.getTransactionsFromHashes(
+            block.content.ordered_transactions,
+        )
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         if (!getSharedState.lastBlockNumber) {
@@ -317,25 +326,10 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
     ): Promise<Blocks> {
-        log.info(
-            "[insertBlock] Attempting to insert a block with hash: " +
-                block.hash,
-        )
-        // Convert the transactions strings back to Transaction objects
-        log.info("[insertBlock] Extracting transactions from block")
-        // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
-        log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        const transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
-        )
 
         const newBlock = new Blocks()
-        log.info("[CHAIN] reading hash")
-        log.info(JSON.stringify(transactionEntities))
-        log.info("[CHAIN] bork")
-
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
@@ -344,9 +338,7 @@ export default class Chain {
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
         newBlock.status = "confirmed"
-        newBlock.content.ordered_transactions = transactionEntities.map(
-            tx => tx.hash,
-        )
+        newBlock.content.ordered_transactions = orderedTransactionsHashes
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
@@ -388,8 +380,11 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
             const result = await this.blocks.save(newBlock)
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
+
+            if (block.number > getSharedState.lastBlockNumber) {
+                getSharedState.lastBlockNumber = block.number
+                getSharedState.lastBlockHash = block.hash
+            }
 
             log.debug(
                 "[insertBlock] lastBlockNumber: " +
@@ -399,10 +394,15 @@ export default class Chain {
                 "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
             )
             // REVIEW We then add the transactions to the Transactions repository
+            const transactionEntities = await Mempool.getTransactionsByHashes(
+                orderedTransactionsHashes,
+            )
+
             for (let i = 0; i < transactionEntities.length; i++) {
                 const tx = transactionEntities[i]
                 await this.insertTransaction(tx)
             }
+
             // REVIEW And we clean the mempool
             if (cleanMempool) {
                 await Mempool.removeTransactionsByHashes(
@@ -588,17 +588,18 @@ export default class Chain {
     }
 
     // Wrapper for inserting multiple transactions
-    static async insertTransactions(
+    static async insertTransactionsFromSync(
         transactions: Transaction[],
     ): Promise<boolean> {
-        let success = true
         for (const tx of transactions) {
-            success = await this.insertTransaction(tx)
-            if (!success) {
-                return false
+            try {
+                await this.insertTransaction(tx)
+            } catch (error) {
+                console.error("[ChainDB] [ ERROR ]")
             }
         }
-        return success
+
+        return true
     }
     // !SECTION Setters
 

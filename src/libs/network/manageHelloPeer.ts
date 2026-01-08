@@ -1,11 +1,12 @@
-import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import _ from "lodash"
+import log from "src/utilities/logger"
+import { SyncData } from "../peer/Peer"
+import { Waiter } from "@/utilities/waiter"
+import { PeerManager, Peer } from "../peer"
 import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
-import { PeerManager, Peer } from "../peer"
-import log from "src/utilities/logger"
-import _ from "lodash"
-import { SyncData } from "../peer/Peer"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 // REVIEW: Phase 9 - IPFS peer discovery via hello_peer
 /**
@@ -46,7 +47,6 @@ export async function manageHelloPeer(
     content: HelloPeerRequest,
     sender: string,
 ): Promise<RPCResponse> {
-    log.debug("[manageHelloPeer] Content: " + JSON.stringify(content))
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
@@ -160,6 +160,18 @@ export async function manageHelloPeer(
         msg: "Peer connected",
         syncData: peerManager.ourSyncData,
         capabilities: ourCapabilities, // REVIEW: Phase 9 - Include our capabilities in response
+        // INFO: Return a list of all our connected peers (from custom_protocol)
+        peerlist: peerManager
+            .getPeers()
+            .map(peer => ({
+                url: peer.connection.string,
+                publicKey: peer.identity,
+            }))
+            .filter(
+                peer =>
+                    peer.publicKey !== getSharedState.publicKeyHex &&
+                    peer.publicKey !== content.publicKey,
+            ),
     }
 
     log.info(`[DEBUG CAPABILITIES] Sending response with our capabilities: ${JSON.stringify(ourCapabilities)}`)
@@ -171,6 +183,11 @@ export async function manageHelloPeer(
             log.critical(`[Hello Peer] FATAL: IPFS peer connection failed: ${err}`)
             process.exit(1)
         })
+    }
+
+    // INFO: Resolve waiter if waiting for hello_peer (from custom_protocol)
+    if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+        Waiter.resolve(Waiter.keys.STARTUP_HELLO_PEER, response)
     }
 
     return response

@@ -7,7 +7,11 @@ export class OmniProtocolError extends Error {
 
         // REVIEW: OMNI_FATAL mode for testing - exit on any OmniProtocol error
         if (process.env.OMNI_FATAL === "true") {
-            log.error(`[OmniProtocol] OMNI_FATAL: ${this.name} (code: 0x${code.toString(16)}): ${message}`)
+            log.error(
+                `[OmniProtocol] OMNI_FATAL: ${
+                    this.name
+                } (code: 0x${code.toString(16)}): ${message}`,
+            )
             process.exit(1)
         }
     }
@@ -55,3 +59,9 @@ export class PoolCapacityError extends OmniProtocolError {
     }
 }
 
+export class InvalidAuthBlockFormatError extends OmniProtocolError {
+    constructor(message: string) {
+        super(message, 0xf006)
+        this.name = "InvalidAuthBlockFormatError"
+    }
+}

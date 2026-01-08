@@ -94,6 +94,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
+            console.error(error)
             // Check for fatal mode - will exit if OMNI_FATAL=true
             this.handleFatalError(error, `OmniProtocol failed for peer ${peer.identity}`)
 

@@ -2,10 +2,15 @@
 import log from "src/utilities/logger"
 import { Buffer } from "buffer"
 import { crc32 } from "crc"
-import type { OmniMessage, OmniMessageHeader, ParsedOmniMessage } from "../types/message"
+import type {
+    OmniMessage,
+    OmniMessageHeader,
+    ParsedOmniMessage,
+} from "../types/message"
 import { PrimitiveDecoder, PrimitiveEncoder } from "../serialization/primitives"
 import { AuthBlockParser } from "../auth/parser"
 import type { AuthBlock } from "../auth/types"
+import { InvalidAuthBlockFormatError } from "../types/errors"
 
 /**
  * MessageFramer handles parsing of TCP byte streams into complete OmniProtocol messages
@@ -75,13 +80,21 @@ export class MessageFramer {
                 auth = authResult.auth
                 offset += authResult.bytesRead
             } catch (error) {
+                console.error(error)
+                log.error("================================================")
+                log.error("BUFFER: " + JSON.stringify(this.buffer, null, 2))
+                log.error("OFFSET: " + offset)
+                log.error("HEADER: " + JSON.stringify(header, null, 2))
                 log.error("Failed to parse auth block: " + error)
-                throw new Error("Invalid auth block format")
+                throw new InvalidAuthBlockFormatError(
+                    "Failed to parse auth block",
+                )
             }
         }
 
         // Calculate total message size including auth block
-        const totalSize = offset + header.payloadLength + MessageFramer.CHECKSUM_SIZE
+        const totalSize =
+            offset + header.payloadLength + MessageFramer.CHECKSUM_SIZE
 
         // Check if we have the complete message
         if (this.buffer.length < totalSize) {
@@ -93,7 +106,10 @@ export class MessageFramer {
         this.buffer = this.buffer.subarray(totalSize)
 
         // Parse payload and checksum
-        const payload = messageBuffer.subarray(offset, offset + header.payloadLength)
+        const payload = messageBuffer.subarray(
+            offset,
+            offset + header.payloadLength,
+        )
         const checksumOffset = offset + header.payloadLength
         const checksum = messageBuffer.readUInt32BE(checksumOffset)
 
@@ -145,10 +161,7 @@ export class MessageFramer {
         const payloadOffset = MessageFramer.HEADER_SIZE
         const checksumOffset = payloadOffset + header.payloadLength
 
-        const payload = messageBuffer.subarray(
-            payloadOffset,
-            checksumOffset,
-        )
+        const payload = messageBuffer.subarray(payloadOffset, checksumOffset)
         const checksum = messageBuffer.readUInt32BE(checksumOffset)
 
         // Validate checksum
@@ -287,7 +300,7 @@ export class MessageFramer {
         }
 
         // Determine flags
-        const flagsByte = flags !== undefined ? flags : (auth ? 0x01 : 0x00)
+        const flagsByte = flags !== undefined ? flags : auth ? 0x01 : 0x00
 
         // Encode header (12 bytes)
         const versionBuf = PrimitiveEncoder.encodeUInt16(header.version)

@@ -53,7 +53,6 @@ export default async function manageProposeBlockHash(
         log.error(
             "[manageProposeBlockHash] Candidate block not formed: refusing the block hash",
         )
-        // process.exit(0)
 
         response.result = 401
         response.response = getSharedState.publicKeyHex

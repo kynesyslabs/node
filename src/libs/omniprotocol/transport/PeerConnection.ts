@@ -19,7 +19,9 @@ import {
     ConnectionTimeoutError,
     AuthenticationError,
     SigningError,
+    InvalidAuthBlockFormatError,
 } from "../types/errors"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * PeerConnection manages a single TCP connection to a peer node
@@ -223,7 +225,9 @@ export class PeerConnection {
             signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${privateKey.length} bytes): ${error instanceof Error ? error.message : error}`,
+                `Ed25519 signing failed (privateKey length: ${
+                    privateKey.length
+                } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )
         }
@@ -263,7 +267,11 @@ export class PeerConnection {
                 payloadLength: payload.length,
             }
 
-            const messageBuffer = MessageFramer.encodeMessage(header, payload, auth)
+            const messageBuffer = MessageFramer.encodeMessage(
+                header,
+                payload,
+                auth,
+            )
             this.socket!.write(messageBuffer)
 
             this.lastActivity = Date.now()
@@ -333,7 +341,7 @@ export class PeerConnection {
         }
 
         // Close socket
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             if (this.socket) {
                 this.socket.once("close", () => {
                     this.setState("CLOSED")
@@ -386,11 +394,18 @@ export class PeerConnection {
         // Add data to framer
         this.framer.addData(chunk)
 
-        // Extract all complete messages
-        let message = this.framer.extractMessage()
-        while (message) {
-            this.handleMessage(message.header, message.payload as Buffer)
-            message = this.framer.extractMessage()
+        try {
+            // Extract all complete messages
+            let message = this.framer.extractMessage()
+            while (message) {
+                this.handleMessage(message.header, message.payload as Buffer)
+                message = this.framer.extractMessage()
+            }
+        } catch (error) {
+            console.error(error)
+            if (error instanceof InvalidAuthBlockFormatError) {
+                return
+            }
         }
     }
 
@@ -411,7 +426,9 @@ export class PeerConnection {
             // This is an unsolicited message (e.g., broadcast, push notification)
             // Wave 8.1: Log for now, will handle in Wave 8.4 (push message support)
             log.warning(
-                `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(16)}, sequence=${header.sequence}`,
+                `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(
+                    16,
+                )}, sequence=${header.sequence}`,
             )
         }
     }

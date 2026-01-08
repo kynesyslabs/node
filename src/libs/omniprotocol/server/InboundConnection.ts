@@ -5,13 +5,14 @@ import { MessageFramer } from "../transport/MessageFramer"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import { RateLimiter } from "../ratelimit"
+import { ConnectionError, InvalidAuthBlockFormatError } from "../types/errors"
 
 export type ConnectionState =
-    | "PENDING_AUTH"      // Waiting for hello_peer
-    | "AUTHENTICATED"     // hello_peer succeeded
-    | "IDLE"              // No activity
-    | "CLOSING"           // Graceful shutdown
-    | "CLOSED"            // Fully closed
+    | "PENDING_AUTH" // Waiting for hello_peer
+    | "AUTHENTICATED" // hello_peer succeeded
+    | "IDLE" // No activity
+    | "CLOSING" // Graceful shutdown
+    | "CLOSED" // Fully closed
 
 export interface InboundConnectionConfig {
     authTimeout: number
@@ -61,7 +62,9 @@ export class InboundConnection extends EventEmitter {
         })
 
         this.socket.on("error", (error: Error) => {
-            log.error(`[InboundConnection] ${this.connectionId} error: ` + error)
+            log.error(
+                `[InboundConnection] ${this.connectionId} error: ` + error,
+            )
             this.emit("error", error)
             this.close()
         })
@@ -92,11 +95,18 @@ export class InboundConnection extends EventEmitter {
         // Add to framer
         this.framer.addData(chunk)
 
-        // Extract all complete messages
-        let message = this.framer.extractMessage()
-        while (message) {
-            await this.handleMessage(message)
-            message = this.framer.extractMessage()
+        try {
+            // Extract all complete messages
+            let message = this.framer.extractMessage()
+            while (message) {
+                await this.handleMessage(message)
+                message = this.framer.extractMessage()
+            }
+        } catch (error) {
+            console.error(error)
+            if (error instanceof InvalidAuthBlockFormatError) {
+                return
+            }
         }
     }
 
@@ -106,14 +116,22 @@ export class InboundConnection extends EventEmitter {
     private async handleMessage(message: ParsedOmniMessage): Promise<void> {
         // REVIEW: Debug logging for peer identity tracking
         log.debug(
-            `[InboundConnection] ${this.connectionId} received opcode 0x${message.header.opcode.toString(16)}`,
+            `[InboundConnection] ${
+                this.connectionId
+            } received opcode 0x${message.header.opcode.toString(16)}`,
         )
         log.debug(
-            `[InboundConnection] state=${this.state}, peerIdentity=${this.peerIdentity || "null"}`,
+            `[InboundConnection] state=${this.state}, peerIdentity=${
+                this.peerIdentity || "null"
+            }`,
         )
         if (message.auth) {
             log.debug(
-                `[InboundConnection] auth.identity=${message.auth.identity ? "0x" + message.auth.identity.toString("hex") : "null"}`,
+                `[InboundConnection] auth.identity=${
+                    message.auth.identity
+                        ? "0x" + message.auth.identity.toString("hex")
+                        : "null"
+                }`,
             )
         }
 
@@ -157,7 +175,9 @@ export class InboundConnection extends EventEmitter {
 
             // Check identity-based rate limit (if authenticated)
             if (this.peerIdentity) {
-                const identityResult = this.rateLimiter.checkIdentityRequest(this.peerIdentity)
+                const identityResult = this.rateLimiter.checkIdentityRequest(
+                    this.peerIdentity,
+                )
                 if (!identityResult.allowed) {
                     log.warning(
                         `[InboundConnection] ${this.connectionId} identity rate limit exceeded: ${identityResult.reason}`,
@@ -184,7 +204,9 @@ export class InboundConnection extends EventEmitter {
                     isAuthenticated: this.state === "AUTHENTICATED",
                 },
                 fallbackToHttp: async () => {
-                    throw new Error("HTTP fallback not available on server side")
+                    throw new Error(
+                        "HTTP fallback not available on server side",
+                    )
                 },
             })
 
@@ -194,6 +216,17 @@ export class InboundConnection extends EventEmitter {
             // Note: Authentication is now handled at the top of this method
             // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
+            console.error(error)
+
+            if (error instanceof ConnectionError) {
+                log.error(
+                    `[InboundConnection] ${this.connectionId} handler error: ` +
+                        error,
+                )
+                this.emit("error", error)
+                return
+            }
+
             log.error(
                 `[InboundConnection] ${this.connectionId} handler error: ` +
                     error,
@@ -212,7 +245,10 @@ export class InboundConnection extends EventEmitter {
     /**
      * Send response message back to client
      */
-    private async sendResponse(sequence: number, payload: Buffer): Promise<void> {
+    private async sendResponse(
+        sequence: number,
+        payload: Buffer,
+    ): Promise<void> {
         const header: OmniMessageHeader = {
             version: 1,
             opcode: 0xff, // Generic response opcode
@@ -222,8 +258,14 @@ export class InboundConnection extends EventEmitter {
 
         const messageBuffer = MessageFramer.encodeMessage(header, payload)
 
+        if (!this.socket.writable) {
+            throw new ConnectionError(
+                "Inbound connection socket is not writable",
+            )
+        }
+
         return new Promise((resolve, reject) => {
-            this.socket.write(messageBuffer, (error) => {
+            this.socket.write(messageBuffer, error => {
                 if (error) {
                     log.error(
                         `[InboundConnection] ${this.connectionId} write error: ` +
@@ -269,7 +311,7 @@ export class InboundConnection extends EventEmitter {
             this.authTimer = null
         }
 
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             this.socket.once("close", () => {
                 this.state = "CLOSED"
                 resolve()

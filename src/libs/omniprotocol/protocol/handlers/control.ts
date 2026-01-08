@@ -9,6 +9,7 @@ import {
     encodeStringResponse,
     PeerlistEntry,
 } from "../../serialization/control"
+import { HelloPeerRequest } from "src/libs/network/manageHelloPeer"
 
 async function loadPeerlistEntries(): Promise<{
     entries: PeerlistEntry[]
@@ -60,14 +61,21 @@ export const handlePeerlistSync: OmniHandler<Buffer> = async () => {
     })
 }
 
-export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-    return encodeNodeCallResponse({
-        status: 400,
-        value: null,
-        requireReply: false,
-        extra: null,
-    })
+export const handleNodeCall: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeNodeCallResponse({
+            status: 400,
+            value: null,
+            requireReply: false,
+            extra: null,
+        })
     }
 
     const request = decodeNodeCallRequest(message.payload as Buffer)
@@ -76,14 +84,16 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
     // These are routed to ServerHandlers directly, not manageNodeCall
     // Format: { method: "mempool", params: [{ data: [...] }] }
     if (request.method === "mempool") {
-        const { default: serverHandlers } = await import("src/libs/network/endpointHandlers")
+        const { default: serverHandlers } = await import(
+            "src/libs/network/endpointHandlers"
+        )
         const log = await import("src/utilities/logger").then(m => m.default)
-
-        log.info(`[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`)
+        log.info(
+            `[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`,
+        )
 
         // ServerHandlers.handleMempool expects content with .data property
-        const mempoolParams = Array.isArray(request.params) ? request.params : []
-        const content = mempoolParams[0] ?? { data: [] }
+        const content = request.params ?? []
         const response = await serverHandlers.handleMempool(content)
 
         return encodeNodeCallResponse({
@@ -148,8 +158,12 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         }
 
         // REVIEW: Debug logging for peer identity lookup
-        log.debug(`[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`)
-        log.debug(`[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`)
+        log.debug(
+            `[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`,
+        )
+        log.debug(
+            `[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`,
+        )
 
         // Call manageConsensusRoutines with sender identity and payload
         const response = await manageConsensusRoutines(
@@ -165,16 +179,54 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({ message, context }) 
         })
     }
 
+    if (request.method === "hello_peer") {
+        const { manageHelloPeer } = await import(
+            "src/libs/network/manageHelloPeer"
+        )
+        const response = await manageHelloPeer(
+            request.params[0] as HelloPeerRequest,
+            context.peerIdentity ?? "",
+        )
+
+        return encodeNodeCallResponse({
+            status: response.result,
+            value: response.response,
+            requireReply: response.require_reply ?? false,
+            extra: response.extra ?? null,
+        })
+    }
+
+    if (request.method === "gcr_routine") {
+        const { default: manageGCRRoutines } = await import(
+            "src/libs/network/manageGCRRoutines"
+        )
+
+        const response = await manageGCRRoutines(
+            context.peerIdentity ?? "",
+            request.params[0],
+        )
+
+        return encodeNodeCallResponse({
+            status: response.result,
+            value: response.response,
+            requireReply: response.require_reply ?? false,
+            extra: response.extra ?? null,
+        })
+    }
+
     const { manageNodeCall } = await import("src/libs/network/manageNodeCall")
 
     // REVIEW: The HTTP API uses "nodeCall" as method with actual RPC in params[0]
     // Format: { method: "nodeCall", params: [{ message: "getPeerlist", data: ..., muid: ... }] }
     const params = request.params
-    const innerCall = params.length > 0 && typeof params[0] === "object" ? params[0] : null
+    const innerCall =
+        params.length > 0 && typeof params[0] === "object" ? params[0] : null
 
     // If this is a nodeCall envelope, unwrap it
     const actualMessage = innerCall?.message ?? request.method
-    const actualData = innerCall?.data ?? (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
+    const actualData =
+        innerCall?.data ??
+        (params.length === 0 ? {} : params.length === 1 ? params[0] : params)
     const actualMuid = innerCall?.muid ?? ""
 
     const response = await manageNodeCall({

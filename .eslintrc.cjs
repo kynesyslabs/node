@@ -23,7 +23,7 @@ module.exports = {
         semi: ["error", "never"],
         // no-console: warn for all src/ files to encourage CategorizedLogger usage
         // Excluded files are defined in overrides below
-        "no-console": "warn",
+        "no-console": ["warn", { allow: ["error"] }],
         // no-unused-vars is disabled
         "no-unused-vars": ["off"],
         "no-var": ["off"],
