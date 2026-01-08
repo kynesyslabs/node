@@ -383,7 +383,8 @@ export default class PeerManager {
     // REVIEW This method should be tested and finalized with the new peer structure
     static async sayHelloToPeer(peer: Peer, recursive = false) {
         // TODO test and finalize this method
-        log.info(`[DEBUG HELLO PEER] Starting hello_peer handshake with peer ${peer.identity.slice(0, 16)}...`, false)
+        // REVIEW: Null safety - handle undefined identity
+        log.info(`[DEBUG HELLO PEER] Starting hello_peer handshake with peer ${peer.identity?.slice(0, 16) ?? "unknown"}...`, false)
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
         const signedConnectionString = await ucrypto.sign(

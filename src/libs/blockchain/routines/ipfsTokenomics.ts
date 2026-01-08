@@ -61,6 +61,73 @@ export const IPFS_PRICING_CONFIG = {
  */
 let genesisAddressesCache: Set<string> | null = null
 
+// REVIEW: Promise-based lock to prevent race condition during cache population
+let genesisLoadPromise: Promise<Set<string>> | null = null
+
+/**
+ * Load and cache genesis addresses (internal helper)
+ * Uses promise singleton pattern to prevent duplicate fetches
+ */
+async function loadGenesisAddresses(): Promise<Set<string>> {
+    // Return cached result if available
+    if (genesisAddressesCache !== null) {
+        return genesisAddressesCache
+    }
+
+    // Return existing promise if load is in progress
+    if (genesisLoadPromise !== null) {
+        return genesisLoadPromise
+    }
+
+    // Start loading and store the promise
+    genesisLoadPromise = (async () => {
+        try {
+            // Load genesis addresses from genesis block
+            const genesisBlock = await Chain.getGenesisBlock()
+            if (!genesisBlock) {
+                log.warning("[IPFSTokenomics] Genesis block not found, treating all accounts as regular")
+                genesisAddressesCache = new Set()
+                return genesisAddressesCache
+            }
+
+            // Get genesis data from block content
+            // Genesis data is stored as JSON string in content.extra.genesisData
+            let genesisData = genesisBlock.content?.extra?.genesisData
+            if (!genesisData) {
+                log.warning("[IPFSTokenomics] Genesis data not found in block")
+                genesisAddressesCache = new Set()
+                return genesisAddressesCache
+            }
+
+            // Parse if it's a JSON string
+            if (typeof genesisData === "string") {
+                genesisData = JSON.parse(genesisData)
+            }
+
+            // Extract balances from genesis data
+            // Genesis data has format: { balances: [[address, amount], ...], ... }
+            const balances = genesisData?.balances || []
+
+            // Build cache of genesis addresses (lowercase for case-insensitive matching)
+            genesisAddressesCache = new Set(
+                balances.map((entry: [string, unknown]) => entry[0].toLowerCase()),
+            )
+
+            log.debug(`[IPFSTokenomics] Loaded ${genesisAddressesCache.size} genesis addresses`)
+            return genesisAddressesCache
+        } catch (error) {
+            log.error(`[IPFSTokenomics] Error loading genesis addresses: ${error}`)
+            // Return empty set on error, but don't cache to allow retry
+            return new Set<string>()
+        } finally {
+            // Clear the loading promise (cache is now populated or we failed)
+            genesisLoadPromise = null
+        }
+    })()
+
+    return genesisLoadPromise
+}
+
 /**
  * Check if an address is a genesis account
  *
@@ -71,49 +138,8 @@ let genesisAddressesCache: Set<string> | null = null
  * @returns Promise<boolean> - True if the address is a genesis account
  */
 export async function isGenesisAccount(address: string): Promise<boolean> {
-    // Use cached result if available
-    if (genesisAddressesCache !== null) {
-        return genesisAddressesCache.has(address.toLowerCase())
-    }
-
-    try {
-        // Load genesis addresses from genesis block
-        const genesisBlock = await Chain.getGenesisBlock()
-        if (!genesisBlock) {
-            log.warning("[IPFSTokenomics] Genesis block not found, treating all accounts as regular")
-            genesisAddressesCache = new Set()
-            return false
-        }
-
-        // Get genesis data from block content
-        // Genesis data is stored as JSON string in content.extra.genesisData
-        let genesisData = genesisBlock.content?.extra?.genesisData
-        if (!genesisData) {
-            log.warning("[IPFSTokenomics] Genesis data not found in block")
-            genesisAddressesCache = new Set()
-            return false
-        }
-
-        // Parse if it's a JSON string
-        if (typeof genesisData === "string") {
-            genesisData = JSON.parse(genesisData)
-        }
-
-        // Extract balances from genesis data
-        // Genesis data has format: { balances: [[address, amount], ...], ... }
-        const balances = genesisData?.balances || []
-
-        // Build cache of genesis addresses (lowercase for case-insensitive matching)
-        genesisAddressesCache = new Set(
-            balances.map((entry: [string, unknown]) => entry[0].toLowerCase()),
-        )
-
-        log.debug(`[IPFSTokenomics] Loaded ${genesisAddressesCache.size} genesis addresses`)
-        return genesisAddressesCache.has(address.toLowerCase())
-    } catch (error) {
-        log.error(`[IPFSTokenomics] Error checking genesis account: ${error}`)
-        return false
-    }
+    const cache = await loadGenesisAddresses()
+    return cache.has(address.toLowerCase())
 }
 
 /**
@@ -122,6 +148,7 @@ export async function isGenesisAccount(address: string): Promise<boolean> {
  */
 export function clearGenesisCache(): void {
     genesisAddressesCache = null
+    genesisLoadPromise = null
 }
 
 // ============================================================================
@@ -276,8 +303,8 @@ export function calculateFeeDistribution(totalFee: bigint): FeeDistribution {
         (totalFee * BigInt(IPFS_PRICING_CONFIG.HOST_SHARE_PERCENT)) / 100n
     const treasuryShare =
         (totalFee * BigInt(IPFS_PRICING_CONFIG.TREASURY_SHARE_PERCENT)) / 100n
-    const consensusShare =
-        (totalFee * BigInt(IPFS_PRICING_CONFIG.CONSENSUS_SHARE_PERCENT)) / 100n
+    // REVIEW: Consensus gets the remainder to prevent token loss from integer division
+    const consensusShare = totalFee - hostShare - treasuryShare
 
     return {
         hostShare,

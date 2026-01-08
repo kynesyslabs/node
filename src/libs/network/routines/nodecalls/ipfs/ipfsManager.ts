@@ -55,6 +55,8 @@ export async function ensureIpfsManager(): Promise<IPFSManager> {
         } catch (error) {
             log.error(`[IPFS] Failed to initialize IPFS manager: ${error}`)
             ipfsManager = null
+            // REVIEW: Phase 9 - Clear promise on failure to allow retry
+            initializationPromise = null
             throw error
         }
     })()

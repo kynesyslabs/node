@@ -42,9 +42,11 @@ export default async function ipfsPins(data: IpfsPinsData): Promise<RPCResponse>
     try {
         // Get IPFS state from account record
         const ipfsState = await gcrRoutines.ipfs.getIPFSState(data.address)
+        // REVIEW: Null safety - ensure pins array exists
+        const pins = ipfsState?.pins ?? []
 
         log.debug(
-            `[IPFS] Found ${ipfsState.pins.length} pins for address: ${data.address}`,
+            `[IPFS] Found ${pins.length} pins for address: ${data.address}`,
         )
 
         return {
@@ -52,11 +54,11 @@ export default async function ipfsPins(data: IpfsPinsData): Promise<RPCResponse>
             response: {
                 success: true,
                 address: data.address,
-                pins: ipfsState.pins,
-                count: ipfsState.pins.length,
-                totalPinnedBytes: ipfsState.totalPinnedBytes,
-                earnedRewards: ipfsState.earnedRewards,
-                paidCosts: ipfsState.paidCosts,
+                pins: pins,
+                count: pins.length,
+                totalPinnedBytes: ipfsState?.totalPinnedBytes ?? 0,
+                earnedRewards: ipfsState?.earnedRewards ?? "0",
+                paidCosts: ipfsState?.paidCosts ?? "0",
             },
             require_reply: false,
             extra: null,

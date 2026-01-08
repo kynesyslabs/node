@@ -212,10 +212,6 @@ devnet/identities/
 devnet/.env
 devnet/postgres-data/
 ipfs_53550/data_53550/ipfs
-<<<<<<< HEAD
-=======
 .tlsnotary-key
 src/features/tlsnotary/SDK_INTEGRATION.md
-src/features/tlsnotary/SDK_INTEGRATION.md
->>>>>>> custom_protocol
 src/features/tlsnotary/PROXY_MANAGER_PLAN.md

@@ -196,8 +196,9 @@ const COMMANDS: Command[] = [
                     // Show capabilities
                     if (peer.capabilities?.ipfs) {
                         const ipfs = peer.capabilities.ipfs
-                        tui.addCmdOutput(`║     IPFS: ${ipfs.peerId.slice(0, 20)}...`)
-                        tui.addCmdOutput(`║       Addrs: ${ipfs.addresses.length} multiaddr(s)`)
+                        // REVIEW: Null safety - handle undefined peerId/addresses
+                        tui.addCmdOutput(`║     IPFS: ${ipfs.peerId?.slice(0, 20) ?? "N/A"}...`)
+                        tui.addCmdOutput(`║       Addrs: ${ipfs.addresses?.length ?? 0} multiaddr(s)`)
                     } else {
                         tui.addCmdOutput("║     IPFS: Not available")
                     }

@@ -720,8 +720,10 @@ async function main() {
             // Calling process.stdin.pause() would break TUI keyboard input!
             if (!indexState.TUI_ENABLED) {
                 // Set up Enter key listener to skip the wait
-                const wasRawMode = process.stdin.isRaw
-                if (!wasRawMode) {
+                // REVIEW: Phase 9 - Check isTTY before setRawMode to avoid crash in Docker/CI
+                const isTTY = process.stdin.isTTY
+                const wasRawMode = isTTY ? process.stdin.isRaw : false
+                if (isTTY && !wasRawMode) {
                     process.stdin.setRawMode(true)
                 }
                 process.stdin.resume()
@@ -738,7 +740,7 @@ async function main() {
                         }
                         // Clean up
                         process.stdin.removeListener("data", enterKeyHandler)
-                        if (!wasRawMode) {
+                        if (isTTY && !wasRawMode) {
                             process.stdin.setRawMode(false)
                         }
                         process.stdin.pause()
@@ -758,7 +760,7 @@ async function main() {
                 } finally {
                     // Clean up listener if still attached
                     process.stdin.removeListener("data", enterKeyHandler)
-                    if (!wasRawMode) {
+                    if (isTTY && !wasRawMode) {
                         process.stdin.setRawMode(false)
                     }
                     process.stdin.pause()

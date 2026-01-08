@@ -17,6 +17,37 @@ import {
 import Datasource from "@/model/datasource"
 import log from "@/utilities/logger"
 
+// REVIEW: Per-pubkey locks to prevent race conditions in concurrent pin operations
+const pendingOperations = new Map<string, Promise<unknown>>()
+
+/**
+ * Execute an operation with per-pubkey locking to prevent race conditions.
+ * Ensures only one operation per pubkey runs at a time.
+ */
+async function withPubkeyLock<T>(
+    pubkey: string,
+    operation: () => Promise<T>,
+): Promise<T> {
+    // Wait for any pending operation on this pubkey
+    const pending = pendingOperations.get(pubkey)
+    if (pending) {
+        await pending.catch(() => {}) // Ignore errors from previous operation
+    }
+
+    // Create and track this operation
+    const currentOp = operation()
+    pendingOperations.set(pubkey, currentOp)
+
+    try {
+        return await currentOp
+    } finally {
+        // Clean up if this is still the tracked operation
+        if (pendingOperations.get(pubkey) === currentOp) {
+            pendingOperations.delete(pubkey)
+        }
+    }
+}
+
 /**
  * Result type for IPFS operations
  */
@@ -75,54 +106,57 @@ export default class GCRIPFSRoutines {
         pin: PinnedContent,
         repository?: Repository<GCRMain>,
     ): Promise<OperationResult> {
-        const repo = repository ?? (await GCRIPFSRoutines.getRepository())
+        // REVIEW: Use per-pubkey lock to prevent race conditions
+        return withPubkeyLock(pubkey, async () => {
+            const repo = repository ?? (await GCRIPFSRoutines.getRepository())
 
-        try {
-            const account = await repo.findOneBy({ pubkey })
-            if (!account) {
-                return { success: false, message: "Account not found" }
+            try {
+                const account = await repo.findOneBy({ pubkey })
+                if (!account) {
+                    return { success: false, message: "Account not found" }
+                }
+
+                // Initialize IPFS state if needed
+                const ipfsState = account.ipfs ?? { ...DEFAULT_IPFS_STATE }
+
+                // Check if pin already exists
+                const existingIndex = ipfsState.pins?.findIndex(
+                    (p) => p.cid === pin.cid,
+                )
+                if (existingIndex !== undefined && existingIndex >= 0) {
+                    return { success: false, message: "Pin already exists" }
+                }
+
+                // Add the pin
+                if (!ipfsState.pins) {
+                    ipfsState.pins = []
+                }
+                ipfsState.pins.push(pin)
+
+                // Update totals
+                ipfsState.totalPinnedBytes =
+                    (ipfsState.totalPinnedBytes ?? 0) + pin.size
+                ipfsState.lastUpdated = Date.now()
+
+                // Save
+                account.ipfs = ipfsState
+                await repo.save(account)
+
+                log.debug(`[GCRIPFSRoutines] Added pin ${pin.cid} for ${pubkey}`)
+
+                return {
+                    success: true,
+                    message: "Pin added",
+                    data: { cid: pin.cid, size: pin.size },
+                }
+            } catch (error) {
+                log.error(`[GCRIPFSRoutines] Failed to add pin: ${error}`)
+                return {
+                    success: false,
+                    message: error instanceof Error ? error.message : "Unknown error",
+                }
             }
-
-            // Initialize IPFS state if needed
-            const ipfsState = account.ipfs ?? { ...DEFAULT_IPFS_STATE }
-
-            // Check if pin already exists
-            const existingIndex = ipfsState.pins?.findIndex(
-                (p) => p.cid === pin.cid,
-            )
-            if (existingIndex !== undefined && existingIndex >= 0) {
-                return { success: false, message: "Pin already exists" }
-            }
-
-            // Add the pin
-            if (!ipfsState.pins) {
-                ipfsState.pins = []
-            }
-            ipfsState.pins.push(pin)
-
-            // Update totals
-            ipfsState.totalPinnedBytes =
-                (ipfsState.totalPinnedBytes ?? 0) + pin.size
-            ipfsState.lastUpdated = Date.now()
-
-            // Save
-            account.ipfs = ipfsState
-            await repo.save(account)
-
-            log.debug(`[GCRIPFSRoutines] Added pin ${pin.cid} for ${pubkey}`)
-
-            return {
-                success: true,
-                message: "Pin added",
-                data: { cid: pin.cid, size: pin.size },
-            }
-        } catch (error) {
-            log.error(`[GCRIPFSRoutines] Failed to add pin: ${error}`)
-            return {
-                success: false,
-                message: error instanceof Error ? error.message : "Unknown error",
-            }
-        }
+        })
     }
 
     /**
@@ -138,51 +172,54 @@ export default class GCRIPFSRoutines {
         cid: string,
         repository?: Repository<GCRMain>,
     ): Promise<OperationResult> {
-        const repo = repository ?? (await GCRIPFSRoutines.getRepository())
+        // REVIEW: Use per-pubkey lock to prevent race conditions
+        return withPubkeyLock(pubkey, async () => {
+            const repo = repository ?? (await GCRIPFSRoutines.getRepository())
 
-        try {
-            const account = await repo.findOneBy({ pubkey })
-            if (!account) {
-                return { success: false, message: "Account not found" }
+            try {
+                const account = await repo.findOneBy({ pubkey })
+                if (!account) {
+                    return { success: false, message: "Account not found" }
+                }
+
+                const ipfsState = account.ipfs
+                if (!ipfsState?.pins?.length) {
+                    return { success: false, message: "No pins found" }
+                }
+
+                // Find the pin
+                const pinIndex = ipfsState.pins.findIndex((p) => p.cid === cid)
+                if (pinIndex === -1) {
+                    return { success: false, message: "Pin not found" }
+                }
+
+                // Remove and update totals
+                const [removedPin] = ipfsState.pins.splice(pinIndex, 1)
+                ipfsState.totalPinnedBytes = Math.max(
+                    0,
+                    (ipfsState.totalPinnedBytes ?? 0) - removedPin.size,
+                )
+                ipfsState.lastUpdated = Date.now()
+
+                // Save
+                account.ipfs = ipfsState
+                await repo.save(account)
+
+                log.debug(`[GCRIPFSRoutines] Removed pin ${cid} for ${pubkey}`)
+
+                return {
+                    success: true,
+                    message: "Pin removed",
+                    data: removedPin,
+                }
+            } catch (error) {
+                log.error(`[GCRIPFSRoutines] Failed to remove pin: ${error}`)
+                return {
+                    success: false,
+                    message: error instanceof Error ? error.message : "Unknown error",
+                }
             }
-
-            const ipfsState = account.ipfs
-            if (!ipfsState?.pins?.length) {
-                return { success: false, message: "No pins found" }
-            }
-
-            // Find the pin
-            const pinIndex = ipfsState.pins.findIndex((p) => p.cid === cid)
-            if (pinIndex === -1) {
-                return { success: false, message: "Pin not found" }
-            }
-
-            // Remove and update totals
-            const [removedPin] = ipfsState.pins.splice(pinIndex, 1)
-            ipfsState.totalPinnedBytes = Math.max(
-                0,
-                (ipfsState.totalPinnedBytes ?? 0) - removedPin.size,
-            )
-            ipfsState.lastUpdated = Date.now()
-
-            // Save
-            account.ipfs = ipfsState
-            await repo.save(account)
-
-            log.debug(`[GCRIPFSRoutines] Removed pin ${cid} for ${pubkey}`)
-
-            return {
-                success: true,
-                message: "Pin removed",
-                data: removedPin,
-            }
-        } catch (error) {
-            log.error(`[GCRIPFSRoutines] Failed to remove pin: ${error}`)
-            return {
-                success: false,
-                message: error instanceof Error ? error.message : "Unknown error",
-            }
-        }
+        })
     }
 
     /**

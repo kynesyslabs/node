@@ -52,15 +52,22 @@ const downloadSessions = new Map<
     {
         content: Buffer
         createdAt: number
+        // REVIEW: Sliding window timestamp - updated on each chunk access
+        lastAccessedAt: number
     }
 >()
 
-// Clean up stale download sessions (older than 10 minutes)
+// REVIEW: Pending downloads to prevent race condition (M4 fix)
+// Multiple concurrent requests for same CID will await the same promise
+const pendingDownloads = new Map<string, Promise<Buffer>>()
+
+// Clean up stale download sessions (older than 10 minutes since LAST ACCESS)
 const DOWNLOAD_SESSION_TIMEOUT_MS = 10 * 60 * 1000
 setInterval(() => {
     const now = Date.now()
     for (const [sessionKey, session] of downloadSessions.entries()) {
-        if (now - session.createdAt > DOWNLOAD_SESSION_TIMEOUT_MS) {
+        // REVIEW: Use lastAccessedAt instead of createdAt for sliding window (M5 fix)
+        if (now - session.lastAccessedAt > DOWNLOAD_SESSION_TIMEOUT_MS) {
             downloadSessions.delete(sessionKey)
             log.debug(`[IPFS] Cleaned up stale download session: ${sessionKey}`)
         }
@@ -124,17 +131,42 @@ export default async function ipfsGetStream(data: IpfsGetStreamData): Promise<RP
         let session = downloadSessions.get(sessionKey)
 
         if (!session) {
-            // Fetch the full content (it will be cached for chunk retrieval)
-            // For truly large files, we could use getStream() and chunk from the stream
-            // but for simplicity in RPC, we cache the full content temporarily
-            const content = await ipfs.get(data.cid)
-            session = {
-                content,
-                createdAt: Date.now(),
+            // REVIEW: Check for pending download to prevent race condition (M4 fix)
+            let content: Buffer
+            const pendingDownload = pendingDownloads.get(sessionKey)
+
+            if (pendingDownload) {
+                // Another request is already fetching this CID, wait for it
+                log.debug(`[IPFS] Waiting for pending download for CID ${data.cid}`)
+                content = await pendingDownload
+            } else {
+                // Start new download and track it
+                const downloadPromise = ipfs.get(data.cid)
+                pendingDownloads.set(sessionKey, downloadPromise)
+
+                try {
+                    content = await downloadPromise
+                } finally {
+                    pendingDownloads.delete(sessionKey)
+                }
             }
-            downloadSessions.set(sessionKey, session)
-            log.debug(`[IPFS] Created download session for CID ${data.cid} (${content.length} bytes)`)
+
+            // Check again in case another request created the session while we waited
+            session = downloadSessions.get(sessionKey)
+            if (!session) {
+                const now = Date.now()
+                session = {
+                    content,
+                    createdAt: now,
+                    lastAccessedAt: now,
+                }
+                downloadSessions.set(sessionKey, session)
+                log.debug(`[IPFS] Created download session for CID ${data.cid} (${content.length} bytes)`)
+            }
         }
+
+        // REVIEW: Update lastAccessedAt on each chunk access (M5 sliding window fix)
+        session.lastAccessedAt = Date.now()
 
         // Calculate chunk boundaries
         const totalChunks = Math.ceil(session.content.length / chunkSize)

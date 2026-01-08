@@ -56,8 +56,8 @@ export async function manageHelloPeer(
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
-    // FIXME: Remove this debug bypass once capabilities exchange is verified working
-    const DEBUG_SKIP_SELF_CHECK = true
+    // REVIEW: Self-peer detection - can be bypassed via env var for debugging
+    const DEBUG_SKIP_SELF_CHECK = process.env.DEBUG_SKIP_SELF_CHECK === "true"
     if (!DEBUG_SKIP_SELF_CHECK && peerObject.identity == getSharedState.publicKeyHex) {
         log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
@@ -177,11 +177,10 @@ export async function manageHelloPeer(
     log.info(`[DEBUG CAPABILITIES] Sending response with our capabilities: ${JSON.stringify(ourCapabilities)}`)
 
     // REVIEW: Phase 9 - Connect IPFS peers dynamically
-    // DEBUG: Making errors fatal - removed .catch() for debugging
+    // REVIEW: Non-fatal error handling - IPFS peer connection failure should not crash the node
     if (content.capabilities?.ipfs) {
         handleIpfsCapabilities(content.capabilities.ipfs, peerObject.identity).catch((err) => {
-            log.critical(`[Hello Peer] FATAL: IPFS peer connection failed: ${err}`)
-            process.exit(1)
+            log.error(`[Hello Peer] IPFS peer connection failed (non-fatal): ${err}`)
         })
     }
 

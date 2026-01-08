@@ -152,13 +152,29 @@ async function executeSequence(
                 error = "unknown operator"
                 break
         }
+        // REVIEW: Phase 9 - Properly propagate operation results
+        // Check if the operation returned a failure and propagate it
+        if (!result.success) {
+            valid = false
+            error = result.message || "Operation failed"
+        }
         operations[i].status = valid
-        results.operations.set(operations[i], {
-            success: valid,
-            message: valid
-                ? "Transaction executed"
-                : "Transaction failed due to: " + error,
-        })
+        // Only set generic result for operations that didn't set their own result
+        // (genesis, transfer_native, and default case)
+        if (!results.operations.has(operations[i])) {
+            results.operations.set(operations[i], {
+                success: valid,
+                message: valid
+                    ? "Transaction executed"
+                    : "Transaction failed due to: " + error,
+            })
+        } else if (!valid) {
+            // Update existing result if operation failed
+            results.operations.set(operations[i], {
+                success: false,
+                message: result.message || "Transaction failed due to: " + error,
+            })
+        }
     }
     // Returns the success and message for each operation
     return results
