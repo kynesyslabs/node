@@ -32,6 +32,11 @@ After restart, IPFS now announces:
 - `/home/tcsenpai/kynesys/node/ipfs/docker-compose.yml`
 - `/home/tcsenpai/kynesys/node/ipfs/init-ipfs.sh`
 
+## Phase 10 Addition
+- Swarm key now written automatically by init-ipfs.sh
+- LIBP2P_FORCE_PNET=1 added to docker-compose.yml
+- All nodes form private IPFS network automatically
+
 ## Port Architecture
 | Port | Purpose |
 |------|---------|

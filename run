@@ -22,7 +22,8 @@ case $PLATFORM in
 esac
 
 # trap ctrl-c and call ctrl_c()
-trap ctrl_c INT
+# REVIEW: Handle both INT (Ctrl+C) and TERM (kill/systemd) signals for graceful shutdown
+trap ctrl_c INT TERM
 
 HAS_BEEN_INTERRUPTED=false
 
@@ -154,6 +155,40 @@ check_git_origin() {
         echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
         GIT_PULL=false
         return 0
+    fi
+}
+
+# Cleanup orphaned Docker containers from previous runs
+cleanup_orphan_containers() {
+    log_verbose "Checking for orphaned Docker containers..."
+
+    # Find and stop any orphaned postgres containers for this port
+    local pg_container="postgres_${PG_PORT}"
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${pg_container}$"; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${pg_container}$"; then
+            log_verbose "Found running orphan container: $pg_container"
+            echo "🧹 Stopping orphaned PostgreSQL container..."
+            docker stop "$pg_container" 2>/dev/null || true
+        fi
+        docker rm "$pg_container" 2>/dev/null || true
+    fi
+
+    # Find and stop any orphaned IPFS containers for this port
+    local ipfs_container="ipfs_${PORT}"
+    if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${ipfs_container}$"; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${ipfs_container}$"; then
+            log_verbose "Found running orphan container: $ipfs_container"
+            echo "🧹 Stopping orphaned IPFS container..."
+            docker stop "$ipfs_container" 2>/dev/null || true
+        fi
+        docker rm "$ipfs_container" 2>/dev/null || true
+    fi
+
+    # Clean up any dangling containers with demos-related names
+    local orphans=$(docker ps -a --filter "status=exited" --format '{{.Names}}' 2>/dev/null | grep -E "^(postgres_|ipfs_)" || true)
+    if [ -n "$orphans" ]; then
+        log_verbose "Found exited containers to clean: $orphans"
+        echo "$orphans" | xargs -r docker rm 2>/dev/null || true
     fi
 }
 
@@ -325,7 +360,7 @@ check_system_requirements() {
         # Check IPFS API port (PORT + 1000)
         local IPFS_CHECK_PORT=$((PORT + 1000))
         if is_port_in_use $IPFS_CHECK_PORT; then
-            echo "⚠️  IPFS port $IPFS_CHECK_PORT is in use, attempting to stop leftover containers..."
+            echo "⚠️  IPFS API port $IPFS_CHECK_PORT is in use, attempting to stop leftover containers..."
             log_verbose "Trying to stop ipfs_${PORT} container"
 
             # Try to stop any existing IPFS container for this port
@@ -342,13 +377,41 @@ check_system_requirements() {
             # Re-check after cleanup
             sleep 1
             if is_port_in_use $IPFS_CHECK_PORT; then
-                echo "⚠️  IPFS port $IPFS_CHECK_PORT is still in use (continuing anyway)"
+                echo "⚠️  IPFS API port $IPFS_CHECK_PORT is still in use (continuing anyway)"
                 warnings=$((warnings + 1))
             else
-                echo "✅ IPFS port $IPFS_CHECK_PORT is now available (stopped leftover container)"
+                echo "✅ IPFS API port $IPFS_CHECK_PORT is now available (stopped leftover container)"
             fi
         else
-            echo "✅ IPFS port $IPFS_CHECK_PORT is available"
+            echo "✅ IPFS API port $IPFS_CHECK_PORT is available"
+        fi
+
+        # REVIEW: Check IPFS Swarm port 4001 (critical for peer discovery)
+        # This port is fixed and shared across all IPFS instances (host networking)
+        if is_port_in_use 4001; then
+            echo "⚠️  IPFS Swarm port 4001 is in use, attempting cleanup..."
+            log_verbose "Port 4001 is required for IPFS peer discovery"
+
+            # Try to stop any IPFS containers that might be using it
+            for ipfs_dir in ipfs_*/; do
+                if [ -d "$ipfs_dir" ]; then
+                    (cd "$ipfs_dir" && docker compose down 2>/dev/null) || true
+                fi
+            done
+            if [ -d "ipfs" ]; then
+                (cd "ipfs" && docker compose down 2>/dev/null) || true
+            fi
+
+            sleep 1
+            if is_port_in_use 4001; then
+                echo "⚠️  IPFS Swarm port 4001 is still in use"
+                echo "   This may prevent IPFS peer discovery. Check: lsof -i :4001"
+                warnings=$((warnings + 1))
+            else
+                echo "✅ IPFS Swarm port 4001 is now available"
+            fi
+        else
+            echo "✅ IPFS Swarm port 4001 is available"
         fi
     fi
 
@@ -375,17 +438,32 @@ check_system_requirements() {
 
 function ctrl_c() {
     HAS_BEEN_INTERRUPTED=true
+    echo ""
+    echo "🛑 Shutting down gracefully..."
+
+    # Stop IPFS first (always started regardless of external DB mode)
+    if [ -d "ipfs_${PORT}" ]; then
+        echo "   Stopping IPFS..."
+        (cd "ipfs_${PORT}" && docker compose down --timeout 10 2>/dev/null) || true
+    fi
+
+    # Stop PostgreSQL if using local database
     if [ "$EXTERNAL_DB" = false ]; then
+        echo "   Stopping PostgreSQL..."
         cd postgres
         docker compose down
         cd ..
     fi
+
     # Stop TLSNotary container if running (enabled by default)
     if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
+        echo "   Stopping TLSNotary..."
         (cd tlsnotary && docker compose down --timeout 5 2>/dev/null) || true
         # Force kill if still running
         docker rm -f "tlsn-notary-${TLSNOTARY_PORT:-7047}" 2>/dev/null || true
     fi
+
+    echo "✅ Cleanup complete"
 }
 
 # Function to check if we are on the first run with the .RUN file
@@ -492,6 +570,40 @@ shift $((OPTIND -1))
 # if RESTORE is true, make clean false
 if [ "$RESTORE" == "true" ]; then
     CLEAN="false"
+fi
+
+# REVIEW: Validate DATABASE_URL when using external database mode
+if [ "$EXTERNAL_DB" = true ]; then
+    if [ -z "$DATABASE_URL" ]; then
+        echo "❌ Error: DATABASE_URL environment variable is required when using --external-db"
+        echo ""
+        echo "   Please set DATABASE_URL before running with external database mode:"
+        echo "   export DATABASE_URL=\"postgresql://user:password@host:port/database\""
+        echo ""
+        echo "   Or inline:"
+        echo "   DATABASE_URL=\"postgresql://...\" ./run --external-db"
+        exit 1
+    fi
+
+    # Validate DATABASE_URL format (basic check for postgresql:// prefix)
+    if [[ ! "$DATABASE_URL" =~ ^postgres(ql)?:// ]]; then
+        echo "⚠️  Warning: DATABASE_URL doesn't appear to be a valid PostgreSQL connection string"
+        echo "   Expected format: postgresql://user:password@host:port/database"
+        echo "   Current value starts with: ${DATABASE_URL:0:20}..."
+        echo ""
+        read -p "   Continue anyway? (y/N) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+
+    log_verbose "External database mode: DATABASE_URL is set"
+fi
+
+# Clean up any orphaned containers from previous runs
+if [ "$EXTERNAL_DB" = false ]; then
+    cleanup_orphan_containers
 fi
 
 # Run system requirements check
@@ -906,8 +1018,36 @@ function wait_for_ipfs() {
     return 0
 }
 
+# REVIEW: Verify IPFS swarm.key exists for private network (Phase 10)
+function verify_ipfs_swarm_key() {
+    local ipfs_folder=$1
+    local swarm_key_path="${ipfs_folder}/data_${PORT}/ipfs/swarm.key"
+
+    # Give IPFS a moment to initialize and write the swarm.key
+    sleep 2
+
+    if [ -f "$swarm_key_path" ]; then
+        log_verbose "Swarm key found at $swarm_key_path"
+        # Verify it contains the Demos network key
+        if grep -q "1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4" "$swarm_key_path" 2>/dev/null; then
+            echo "✅ IPFS private network configured (Demos swarm key)"
+            return 0
+        else
+            echo "⚠️  IPFS swarm.key exists but may not be Demos network key"
+            return 1
+        fi
+    else
+        # Swarm key might not exist yet if IPFS is still initializing
+        log_verbose "Swarm key not found at $swarm_key_path (may still be initializing)"
+        return 1
+    fi
+}
+
 # Wait for IPFS to be ready (non-blocking - don't fail if IPFS doesn't start)
 wait_for_ipfs $IPFS_API_PORT 15 || true
+
+# Verify IPFS private network configuration (Phase 10)
+verify_ipfs_swarm_key "ipfs_${PORT}" || log_verbose "Swarm key verification skipped or pending"
 
 echo ""
 echo "🎉 All systems ready! Starting your Demos Network node..."
@@ -956,9 +1096,9 @@ else
     exit_code=0
 fi
 
-# Stop IPFS first (always started in normal mode)
-if [ "$EXTERNAL_DB" = false ]; then
-    echo "🛑 Stopping IPFS node..."
+# Stop IPFS first (always started regardless of external DB mode)
+echo "🛑 Stopping IPFS node..."
+if [ -d "ipfs_${PORT}" ]; then
     cd ipfs_${PORT}
     if docker compose down; then
         echo "✅ IPFS stopped successfully"
@@ -966,8 +1106,12 @@ if [ "$EXTERNAL_DB" = false ]; then
         echo "⚠️  Warning: Failed to stop IPFS gracefully"
     fi
     cd ..
+else
+    log_verbose "IPFS folder ipfs_${PORT} not found, skipping"
+fi
 
-    # Then stopping the database
+# Stop PostgreSQL only if not using external database
+if [ "$EXTERNAL_DB" = false ]; then
     echo "🛑 Stopping PostgreSQL database..."
     cd postgres_${PG_PORT}
     if docker compose down; then
