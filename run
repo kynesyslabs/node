@@ -842,6 +842,17 @@ IPFS_FOLDER="ipfs_${PORT}"
 # This allows multiple instances to run simultaneously with different ports
 if [ ! -d "$IPFS_FOLDER" ]; then
     cp -r ipfs $IPFS_FOLDER
+else
+    # REVIEW: Sync config files if base ipfs folder has newer versions
+    # This ensures init-ipfs.sh and docker-compose.yml updates are propagated
+    if [ "ipfs/init-ipfs.sh" -nt "$IPFS_FOLDER/init-ipfs.sh" ]; then
+        log_verbose "Syncing newer init-ipfs.sh to $IPFS_FOLDER"
+        cp ipfs/init-ipfs.sh "$IPFS_FOLDER/init-ipfs.sh"
+    fi
+    if [ "ipfs/docker-compose.yml" -nt "$IPFS_FOLDER/docker-compose.yml" ]; then
+        log_verbose "Syncing newer docker-compose.yml to $IPFS_FOLDER"
+        cp ipfs/docker-compose.yml "$IPFS_FOLDER/docker-compose.yml"
+    fi
 fi
 cd $IPFS_FOLDER
 
