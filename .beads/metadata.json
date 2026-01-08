@@ -1,4 +1,4 @@
 {
   "database": "beads.db",
-  "jsonl_export": "beads.left.jsonl"
+  "jsonl_export": "issues.jsonl"
 }
