@@ -231,6 +231,10 @@ export class CategorizedLogger extends EventEmitter {
     private terminalBuffer: string[] = []
     private terminalFlushScheduled = false
 
+    // REVIEW: Cache for getAllEntries to prevent repeated sorting
+    private allEntriesCache: LogEntry[] | null = null
+    private allEntriesCacheValid = false
+
     private constructor(config: LoggerConfig = {}) {
         super()
         this.config = {
@@ -364,6 +368,9 @@ export class CategorizedLogger extends EventEmitter {
         if (categoryBuffer) {
             categoryBuffer.push(entry)
         }
+
+        // REVIEW: Invalidate allEntries cache since we added a new entry
+        this.allEntriesCacheValid = false
 
         // Emit event for TUI
         this.emit("log", entry)
@@ -835,14 +842,28 @@ export class CategorizedLogger extends EventEmitter {
 
     /**
      * Get all log entries (merged from all categories, sorted by timestamp)
+     * REVIEW: Uses caching to prevent repeated sorting which was causing
+     * event loop saturation and keyboard input unresponsiveness
      */
     getAllEntries(): LogEntry[] {
+        // Return cached version if still valid
+        if (this.allEntriesCacheValid && this.allEntriesCache) {
+            return this.allEntriesCache
+        }
+
+        // Rebuild cache
         const allEntries: LogEntry[] = []
         for (const buffer of this.categoryBuffers.values()) {
             allEntries.push(...buffer.getAll())
         }
         // Sort by entry ID to maintain chronological order
-        return allEntries.sort((a, b) => a.id - b.id)
+        allEntries.sort((a, b) => a.id - b.id)
+
+        // Cache the result
+        this.allEntriesCache = allEntries
+        this.allEntriesCacheValid = true
+
+        return allEntries
     }
 
     /**
@@ -888,6 +909,9 @@ export class CategorizedLogger extends EventEmitter {
         for (const buffer of this.categoryBuffers.values()) {
             buffer.clear()
         }
+        // Invalidate cache
+        this.allEntriesCacheValid = false
+        this.allEntriesCache = null
         this.emit("clear")
     }
 

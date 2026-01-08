@@ -243,6 +243,8 @@ export class TUIManager extends EventEmitter {
     private filteredLogs: LogEntry[] = []
     // Frozen logs snapshot (when autoscroll is disabled)
     private frozenLogs: LogEntry[] | null = null
+    // REVIEW: Debounce flag for updateFilteredLogs to prevent event loop saturation
+    private updateFilteredLogsScheduled = false
 
     // CMD tab state
     private cmdInput = ""
@@ -980,17 +982,26 @@ export class TUIManager extends EventEmitter {
 
     /**
      * Handle new log entry
+     * REVIEW: Debounced to prevent event loop saturation from rapid log entries
+     * which was causing keyboard input to become unresponsive
      */
     private handleLogEntry(_entry: LogEntry): void {
-        // Always update the live filtered logs
-        this.updateFilteredLogs()
+        // Schedule debounced update instead of immediate update
+        // This prevents event loop saturation when logs come in rapidly
+        if (!this.updateFilteredLogsScheduled) {
+            this.updateFilteredLogsScheduled = true
+            setImmediate(() => {
+                this.updateFilteredLogsScheduled = false
+                // Update filtered logs
+                this.updateFilteredLogs()
 
-        // Only auto-scroll when enabled (frozen logs handles manual mode)
-        if (this.autoScroll) {
-            const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
-            this.setScrollOffset(maxScroll)
+                // Only auto-scroll when enabled (frozen logs handles manual mode)
+                if (this.autoScroll) {
+                    const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+                    this.setScrollOffset(maxScroll)
+                }
+            })
         }
-        // When autoScroll is off, frozenLogs is used for rendering so no action needed
     }
 
     /**
