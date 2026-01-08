@@ -57,6 +57,11 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+// REVIEW: Phase 9 - IPFS custom_charges validation
+import {
+    calculatePinCost,
+    isGenesisAccount,
+} from "@/libs/blockchain/routines/ipfsTokenomics"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -95,6 +100,74 @@ export default class ServerHandlers {
              */
             //console.log(fname + "Validating transaction...")
             validationData = await confirmTransaction(tx, sender)
+
+            // REVIEW: Phase 9 - IPFS custom_charges validation
+            // If transaction includes custom_charges for IPFS, validate and attach actual cost
+            if (validationData.data.valid && tx.content.custom_charges?.ipfs) {
+                const ipfsCharges = tx.content.custom_charges.ipfs
+                const maxCostDem = ipfsCharges.max_cost_dem
+                const fileSizeBytes = ipfsCharges.file_size_bytes
+                const ipfsOperation = ipfsCharges.operation
+
+                // Check if sender is a genesis account for preferential pricing
+                const isGenesis = await isGenesisAccount(tx.content.from)
+
+                // REVIEW: Phase 9 - For now, we don't track per-account free tier usage
+                // Future enhancement: query account's used free bytes from GCR or storage
+                const usedFreeBytes = 0
+
+                // Calculate actual cost using tokenomics module
+                const actualCostResult = calculatePinCost(
+                    fileSizeBytes,
+                    isGenesis,
+                    usedFreeBytes,
+                )
+
+                const actualCostDemNum = Number(actualCostResult.totalCost)
+                const maxCostNum = parseFloat(maxCostDem)
+
+                // Validate: actual cost must not exceed signed max_cost_dem
+                if (actualCostDemNum > maxCostNum) {
+                    log.warning(
+                        `[handleValidateTransaction] IPFS cost exceeds max: actual=${actualCostDemNum} > max=${maxCostNum}`,
+                    )
+                    validationData.data.valid = false
+                    validationData.data.message =
+                        `[IPFS Validation] Actual cost ${actualCostDemNum} DEM exceeds signed max_cost_dem ${maxCostNum} DEM`
+                    // Re-sign the updated validity data
+                    const hash = Hashing.sha256(JSON.stringify(validationData.data))
+                    const signature = await ucrypto.sign(
+                        getSharedState.signingAlgorithm,
+                        new TextEncoder().encode(hash),
+                    )
+                    validationData.signature = {
+                        type: getSharedState.signingAlgorithm,
+                        data: uint8ArrayToHex(signature.signature),
+                    }
+                    return validationData
+                }
+
+                // Attach actual cost breakdown to validityData for client review
+                validationData.data.custom_charges = {
+                    ipfs: {
+                        actual_cost_dem: actualCostDemNum,
+                        max_cost_dem: maxCostNum,
+                        file_size_bytes: fileSizeBytes,
+                        operation: ipfsOperation,
+                        is_genesis_rate: isGenesis,
+                        breakdown: {
+                            total_cost: actualCostDemNum,
+                            free_tier_bytes: actualCostResult.freeBytes,
+                            chargeable_bytes: actualCostResult.chargeableBytes,
+                            used_free_tier: actualCostResult.usedFreeTier,
+                        },
+                    },
+                }
+
+                log.debug(
+                    `[handleValidateTransaction] IPFS custom_charges validated: actual=${actualCostDemNum} <= max=${maxCostNum} (genesis: ${isGenesis})`,
+                )
+            }
 
             // NOTE Gas operation is created at this point (and balance is checked)
             // NOTE Nonce assignment is done in the GCR too
