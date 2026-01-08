@@ -1,6 +1,7 @@
 import { Blocks } from "@/model/entities/Blocks"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
 
 export default async function getBlockByNumber(
     data: any,
@@ -8,7 +9,7 @@ export default async function getBlockByNumber(
     const blockNumber: number = data.blockNumber
 
     if (!blockNumber) {
-        console.log("[SERVER ERROR] Missing blockNumber 💀")
+        log.error("[SERVER ERROR] Missing blockNumber 💀")
         return {
             result: 400,
             response: "error",
@@ -16,11 +17,11 @@ export default async function getBlockByNumber(
             require_reply: false,
         }
     } else {
-        console.log("[SERVER] Received getBlockByNumber: " + blockNumber)
+        log.debug("[SERVER] Received getBlockByNumber: " + blockNumber)
 
         let block: Blocks
         if (blockNumber === 0) {
-            // @ts-ignore
+            // @ts-expect-error Block is not typed
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),

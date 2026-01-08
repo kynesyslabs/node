@@ -1,5 +1,6 @@
 import { getSharedState } from "@/utilities/sharedState"
 import fs from "fs"
+import log from "src/utilities/logger"
 
 const MIN_BALANCE = "1000000000000"
 
@@ -13,6 +14,6 @@ export default async function loadGenesisIdentities() {
         }
     }
 
-    console.log("Genesis identities loaded: " + identities.size)
+    log.info("Genesis identities loaded: " + identities.size)
     getSharedState.genesisIdentities = identities
 }

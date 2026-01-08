@@ -16,18 +16,25 @@ import "reflect-metadata"
 import * as dotenv from "dotenv"
 import { Peer } from "./libs/peer"
 import { PeerManager } from "./libs/peer"
-import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
+import { Waiter } from "./utilities/waiter"
+import { TimeoutError } from "./exceptions"
+import {
+    startOmniProtocolServer,
+    stopOmniProtocolServer,
+} from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import { fastSync } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
-import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 
 dotenv.config()
 
@@ -49,6 +56,13 @@ const indexState: {
     MCP_ENABLED: boolean
     mcpServer: any
     tuiManager: TUIManager | null
+    OMNI_ENABLED: boolean
+    OMNI_PORT: number
+    omniServer: any
+    // REVIEW: TLSNotary configuration - new HTTPS attestation feature
+    TLSNOTARY_ENABLED: boolean
+    TLSNOTARY_PORT: number
+    tlsnotaryService: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -66,6 +80,13 @@ const indexState: {
     MCP_ENABLED: true,
     mcpServer: null,
     tuiManager: null,
+    OMNI_ENABLED: false,
+    OMNI_PORT: 0,
+    omniServer: null,
+    // REVIEW: TLSNotary defaults - disabled by default, requires signing key
+    TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
+    TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    tlsnotaryService: null,
 }
 
 // SECTION Preparation methods
@@ -73,7 +94,9 @@ const indexState: {
 // ANCHOR Calibrating the time
 async function calibrateTime() {
     await getTimestampCorrection()
-    log.info("[SYNC] Timestamp correction: " + getSharedState.timestampCorrection)
+    log.info(
+        "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
+    )
     log.info("[SYNC] Network timestamp: " + getNetworkTimestamp())
 }
 // ANCHOR Routine to handle parameters in advanced mode
@@ -112,6 +135,33 @@ async function digestArguments() {
                     log.info("[MAIN] TUI disabled, using scrolling log output")
                     indexState.TUI_ENABLED = false
                     break
+                case "log-level": {
+                    const level = param[1]?.toLowerCase()
+                    if (
+                        [
+                            "debug",
+                            "info",
+                            "warning",
+                            "error",
+                            "critical",
+                        ].includes(level)
+                    ) {
+                        CategorizedLogger.getInstance().setMinLevel(
+                            level as
+                                | "debug"
+                                | "info"
+                                | "warning"
+                                | "error"
+                                | "critical",
+                        )
+                        log.info(`[MAIN] Log level set to: ${level}`)
+                    } else {
+                        log.warning(
+                            `[MAIN] Invalid log level: ${param[1]}. Valid: debug, info, warning, error, critical`,
+                        )
+                    }
+                    break
+                }
                 default:
                     log.warning("[MAIN] Invalid parameter: " + param)
             }
@@ -196,6 +246,14 @@ async function warmup() {
             parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
     }
     indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
+
+    // OmniProtocol TCP Server configuration
+    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED
+        ? process.env.OMNI_ENABLED.toLowerCase() === "true"
+        : true
+    indexState.OMNI_PORT =
+        parseInt(process.env.OMNI_PORT ?? "", 10) || indexState.SERVER_PORT + 1
+
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
@@ -207,7 +265,9 @@ async function warmup() {
     log.info("[MAIN] PG_PORT: " + indexState.PG_PORT)
     log.info("[MAIN] RPC_FEE: " + indexState.RPC_FEE)
     log.info("[MAIN] SERVER_PORT: " + indexState.SERVER_PORT)
-    log.info("[MAIN] SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT)
+    log.info(
+        "[MAIN] SIGNALING_SERVER_PORT: " + indexState.SIGNALING_SERVER_PORT,
+    )
     log.info("[MAIN] MCP_SERVER_PORT: " + indexState.MCP_SERVER_PORT)
     log.info("[MAIN] MCP_ENABLED: " + indexState.MCP_ENABLED)
     log.info("[MAIN] = End of Configuration =")
@@ -284,7 +344,10 @@ async function preMainLoop() {
 
     // ANCHOR Bootstrapping the peers
     log.info("[PEER] 🌐 Bootstrapping peers...")
-    log.debug("[PEER] Peer list: " + JSON.stringify(indexState.PeerList.map(p => p.identity)))
+    log.debug(
+        "[PEER] Peer list: " +
+            JSON.stringify(indexState.PeerList.map(p => p.identity)),
+    )
     await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
@@ -302,7 +365,16 @@ async function preMainLoop() {
     getSharedState.lastBlockHash = lastBlock.hash
 }
 
-// ANCHOR Entry point
+/**
+ * Bootstraps the node and starts its network services and background managers.
+ *
+ * Performs chain setup, warmup, time calibration, and pre-main-loop initialization; then ensures peer availability, starts the signaling server, optionally starts the MCP server, and initializes the DTR relay retry service when running in production.
+ *
+ * Side effects:
+ * - May call process.exit(1) if the signaling server fails to start.
+ * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
+ * - Starts background services (MCP server and DTRManager) when configured.
+ */
 async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
@@ -334,7 +406,9 @@ async function main() {
 
                 // Set a timeout fallback for forced termination
                 const forceExitTimeout = setTimeout(() => {
-                    log.warning("[MAIN] Graceful shutdown timeout, forcing exit...")
+                    log.warning(
+                        "[MAIN] Graceful shutdown timeout, forcing exit...",
+                    )
                     process.exit(1)
                 }, 5000)
 
@@ -363,7 +437,10 @@ async function main() {
                     })
             })
         } catch (error) {
-            console.error("Failed to start TUI, falling back to standard output:", error)
+            console.error(
+                "Failed to start TUI, falling back to standard output:",
+                error,
+            )
             indexState.TUI_ENABLED = false
         }
     }
@@ -381,6 +458,79 @@ async function main() {
 
     // INFO Calibrating the time at the start of the node
     await calibrateTime()
+
+    // Start OmniProtocol TCP server (optional)
+    if (indexState.OMNI_ENABLED) {
+        try {
+            const omniServer = await startOmniProtocolServer({
+                enabled: true,
+                port: indexState.OMNI_PORT,
+                maxConnections: 1000,
+                authTimeout: 5000,
+                connectionTimeout: 600000, // 10 minutes
+                // TLS configuration
+                tls: {
+                    enabled: process.env.OMNI_TLS_ENABLED === "true",
+                    mode:
+                        (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
+                        "self-signed",
+                    certPath:
+                        process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
+                    keyPath:
+                        process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
+                    caPath: process.env.OMNI_CA_PATH,
+                    minVersion:
+                        (process.env.OMNI_TLS_MIN_VERSION as
+                            | "TLSv1.2"
+                            | "TLSv1.3") || "TLSv1.3",
+                },
+                // Rate limiting configuration
+                rateLimit: {
+                    enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+                    maxConnectionsPerIP: parseInt(
+                        process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
+                        10,
+                    ),
+                    maxRequestsPerSecondPerIP: parseInt(
+                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
+                            "100",
+                        10,
+                    ),
+                    maxRequestsPerSecondPerIdentity: parseInt(
+                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
+                            "200",
+                        10,
+                    ),
+                },
+            })
+            indexState.omniServer = omniServer
+            console.log(
+                `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
+            )
+
+            // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
+            // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
+            const omniMode =
+                (process.env.OMNI_MODE as
+                    | "HTTP_ONLY"
+                    | "OMNI_PREFERRED"
+                    | "OMNI_ONLY") || "OMNI_ONLY"
+            getSharedState.initOmniProtocol(omniMode)
+            console.log(
+                `[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`,
+            )
+        } catch (error) {
+            console.log(
+                "[MAIN] ⚠️  Failed to start OmniProtocol server:",
+                error,
+            )
+            // Continue without OmniProtocol (failsafe - falls back to HTTP)
+        }
+    } else {
+        console.log(
+            "[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
+        )
+    }
     // INFO Preparing the main loop
     await preMainLoop()
 
@@ -458,6 +608,90 @@ async function main() {
                 // Continue without MCP (failsafe)
             }
         }
+
+        // REVIEW: Start TLSNotary service (failsafe - optional HTTPS attestation feature)
+        // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
+        if (indexState.TLSNOTARY_ENABLED) {
+            try {
+                const {
+                    initializeTLSNotary,
+                    getTLSNotaryService,
+                    isTLSNotaryFatal,
+                    isTLSNotaryDebug,
+                } = await import("./features/tlsnotary")
+                const fatal = isTLSNotaryFatal()
+                const debug = isTLSNotaryDebug()
+
+                // REVIEW: Check for port collision with OmniProtocol
+                // OmniProtocol derives peer ports as HTTP_PORT + 1, which could collide with TLSNotary
+                if (indexState.OMNI_ENABLED) {
+                    // Check if TLSNotary port could be hit by OmniProtocol peer connections
+                    // This happens when a peer runs on HTTP port (TLSNotary port - 1)
+                    const potentialCollisionPort = indexState.TLSNOTARY_PORT - 1
+                    log.warning(
+                        `[TLSNotary] ⚠️ OmniProtocol is enabled. If any peer runs on HTTP port ${potentialCollisionPort}, OmniProtocol will try to connect to port ${indexState.TLSNOTARY_PORT} (TLSNotary)`,
+                    )
+                    log.warning(
+                        "[TLSNotary] This can cause 'WebSocket upgrade failed: Unsupported HTTP method' errors",
+                    )
+                    log.warning(
+                        "[TLSNotary] Consider using a different TLSNOTARY_PORT to avoid collisions",
+                    )
+                }
+
+                if (debug) {
+                    log.info("[TLSNotary] Debug mode: TLSNOTARY_DEBUG=true")
+                    log.info(`[TLSNotary] Fatal mode: TLSNOTARY_FATAL=${fatal}`)
+                    log.info(`[TLSNotary] Port: ${indexState.TLSNOTARY_PORT}`)
+                }
+
+                // Initialize without passing BunServer - routes are registered separately in server_rpc.ts
+                const initialized = await initializeTLSNotary()
+                if (initialized) {
+                    indexState.tlsnotaryService = getTLSNotaryService()
+                    log.info(
+                        `[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`,
+                    )
+                    // Update TUI with TLSNotary info
+                    if (indexState.TUI_ENABLED && indexState.tuiManager) {
+                        indexState.tuiManager.updateNodeInfo({
+                            tlsnotary: {
+                                enabled: true,
+                                port: indexState.TLSNOTARY_PORT,
+                                running: true,
+                            },
+                        })
+                    }
+                } else {
+                    const msg =
+                        "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
+                    if (fatal) {
+                        log.error("[TLSNotary] FATAL: " + msg)
+                        process.exit(1)
+                    }
+                    log.warning(msg)
+                }
+            } catch (error) {
+                log.error(
+                    "[TLSNotary] Failed to start TLSNotary service: " + error,
+                )
+                const { isTLSNotaryFatal } = await import(
+                    "./features/tlsnotary"
+                )
+                if (isTLSNotaryFatal()) {
+                    log.error(
+                        "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
+                    )
+                    process.exit(1)
+                }
+                // Continue without TLSNotary (failsafe)
+            }
+        } else {
+            log.info(
+                "[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)",
+            )
+        }
+
         log.info("[MAIN] ✅ Starting the background loop")
 
         // Update TUI status to running
@@ -468,10 +702,103 @@ async function main() {
             })
         }
 
+        const peers = indexState.peerManager.getPeers()
+
+        if (
+            peers.length === 1 &&
+            peers[0].identity === getSharedState.publicKeyHex
+        ) {
+            log.info(
+                "[MAIN] We are the anchor node, listening for peers ... (15s)",
+            )
+            // INFO: Wait for hello peer if we are the anchor node
+            // useful when anchor node is re-joining the network
+            try {
+                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 10 seconds
+            } catch (error) {
+                if (error instanceof TimeoutError) {
+                    log.info("[MAIN] No wild peers found, starting sync loop")
+                }
+            }
+        }
+
+        await fastSync([], "index.ts")
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
+
+        // Start DTR relay retry service after background loop initialization
+        // The service will wait for syncStatus to be true before actually processing
+        if (getSharedState.PROD) {
+            console.log(
+                "[DTR] Initializing relay retry service (will start after sync)",
+            )
+            // Service will check syncStatus internally before processing
+            // DTRManager.getInstance().start()
+        }
     }
 }
 
+// Graceful shutdown handling for DTR service
+process.on("SIGINT", () => {
+    console.log("[DTR] Received SIGINT, shutting down gracefully...")
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
+    process.exit(0)
+})
+
+process.on("SIGTERM", () => {
+    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
+    // if (getSharedState.PROD) {
+    //     DTRManager.getInstance().stop()
+    // }
+    process.exit(0)
+})
+
 // INFO Starting the main routine
 main()
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+    console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
+
+    try {
+        // Stop OmniProtocol server if running
+        if (indexState.omniServer) {
+            console.log("[SHUTDOWN] Stopping OmniProtocol server...")
+            await stopOmniProtocolServer()
+        }
+
+        // Stop MCP server if running
+        if (indexState.mcpServer) {
+            console.log("[SHUTDOWN] Stopping MCP server...")
+            try {
+                await indexState.mcpServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping MCP server:", error)
+            }
+        }
+
+        // REVIEW: Stop TLSNotary service if running
+        if (indexState.tlsnotaryService) {
+            console.log("[SHUTDOWN] Stopping TLSNotary service...")
+            try {
+                const { shutdownTLSNotary } = await import(
+                    "./features/tlsnotary"
+                )
+                await shutdownTLSNotary()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
+            }
+        }
+
+        console.log("[SHUTDOWN] Cleanup complete, exiting...")
+        process.exit(0)
+    } catch (error) {
+        console.error("[SHUTDOWN] Error during shutdown:", error)
+        process.exit(1)
+    }
+}
+
+// Register shutdown handlers
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
+process.on("SIGINT", () => gracefulShutdown("SIGINT"))

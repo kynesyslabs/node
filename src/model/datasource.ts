@@ -21,15 +21,16 @@ import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
-    host: "localhost",
+    host: process.env.PG_HOST || "localhost",
     port: parseInt(process.env.PG_PORT) || 5332,
-    username: "demosuser",
-    password: "demospassword",
-    database: "demos",
+    username: process.env.PG_USER || "demosuser",
+    password: process.env.PG_PASSWORD || "demospassword",
+    database: process.env.PG_DATABASE || "demos",
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,
@@ -43,6 +44,7 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        GCRTLSNotary,
     ],
     synchronize: true,
     logging: false,

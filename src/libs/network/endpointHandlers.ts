@@ -20,7 +20,7 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
+import _, { result } from "lodash"
 import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
@@ -35,6 +35,9 @@ import {
 import PeerManager from "src/libs/peer/PeerManager"
 import log from "src/utilities/logger"
 import { emptyResponse } from "./server_rpc"
+import isValidatorForNextBlock from "src/libs/consensus/v2/routines/isValidator"
+import getShard from "src/libs/consensus/v2/routines/getShard"
+import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
 // SECTION Handlers for different types of transactions
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Rename to handleXMRequest
@@ -44,7 +47,7 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
-import { SubnetPayload } from "@kynesyslabs/demosdk/l2ps"
+import { SubnetPayload, EncryptedTransaction } from "@/libs/l2ps/types"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
@@ -57,6 +60,7 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+import { DTRManager } from "./dtr/dtrmanager"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -109,15 +113,23 @@ export default class ServerHandlers {
             })
             // Hashing both the gcredits
             const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
-            console.log("gcrEditsHash: " + gcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
+            )
             const txGcrEditsHash = Hashing.sha256(
                 JSON.stringify(tx.content.gcr_edits),
             )
-            console.log("txGcrEditsHash: " + txGcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
+            )
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
-                log.error("[handleValidateTransaction] GCREdit mismatch")
-                console.log(txGcrEditsHash + " <> " + gcrEditsHash)
+                log.error(
+                    "[handleValidateTransaction] GCREdit mismatch: " +
+                        txGcrEditsHash +
+                        " <> " +
+                        gcrEditsHash,
+                )
             }
             if (comparison) {
                 log.info("[handleValidateTransaction] GCREdit hash match")
@@ -171,7 +183,10 @@ export default class ServerHandlers {
         sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
-        console.log("[handleExecuteTransaction] Validated Data:", validatedData)
+        log.debug(
+            "[handleExecuteTransaction] Validated Data: " +
+                JSON.stringify(validatedData),
+        )
 
         const fname = "[handleExecuteTransaction] "
         const result: ExecutionResult = {
@@ -203,7 +218,7 @@ export default class ServerHandlers {
                     queriedTx.blockNumber,
             )
         }
-        console.log(
+        log.debug(
             "[handleExecuteTransaction] Queried tx processing in block: " +
                 queriedTx.blockNumber,
         )
@@ -286,8 +301,10 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
-                console.log("[Included XM Chainscript]")
-                console.log(payload[1])
+                log.debug(
+                    "[handleExecuteTransaction] Included XM Chainscript: " +
+                        JSON.stringify(payload[1]),
+                )
                 // TODO Better types on answers
                 var xmResult = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
@@ -302,11 +319,12 @@ export default class ServerHandlers {
 
             case "subnet":
                 payload = tx.content.data
-                console.log(
-                    "[handleExecuteTransaction] Subnet payload: " + payload[1],
+                log.debug(
+                    "[handleExecuteTransaction] Subnet payload: " +
+                        JSON.stringify(payload[1]),
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
-                    payload[1] as SubnetPayload,
+                    payload[1] as any, // TODO Add proper type when l2ps is implemented correctly
                 )
                 result.response = subnetResult
                 break
@@ -363,7 +381,6 @@ export default class ServerHandlers {
                             identityResult.message + `. Transaction ${status}.`,
                     }
                 } catch (e) {
-                    console.error(e)
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false
                     result.response = {
@@ -413,8 +430,90 @@ export default class ServerHandlers {
                 return result
             }
 
-            // We add the transaction to the mempool
-            console.log(
+            // REVIEW We add the transaction to the mempool
+            // DTR: Check if we should relay instead of storing locally (Production only)
+            log.debug("PROD: " + getSharedState.PROD)
+            const { isValidator, validators } = await isValidatorForNextBlock()
+
+            if (!isValidator) {
+                log.debug(
+                    "[DTR] Non-validator node: attempting relay to all validators",
+                )
+                const availableValidators = validators.sort(
+                    () => Math.random() - 0.5,
+                ) // Random order for load balancing
+
+                log.debug(
+                    `[DTR] Found ${availableValidators.length} available validators, trying all`,
+                )
+
+                // Try ALL validators in random order
+                const results = await Promise.allSettled(
+                    availableValidators.map(validator =>
+                        DTRManager.relayTransactions(validator, [
+                            validatedData,
+                        ]),
+                    ),
+                )
+
+                for (const result of results) {
+                    if (result.status === "fulfilled") {
+                        const response = result.value
+                        if (response.result == 200) {
+                            continue
+                        }
+
+                        // TODO: Handle response codes individually
+                        DTRManager.validityDataCache.set(
+                            response.extra.peer,
+                            validatedData,
+                        )
+                    }
+                }
+
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                    },
+                    require_reply: false,
+                }
+            }
+
+            if (getSharedState.inConsensusLoop) {
+                log.debug(
+                    "in consensus loop, setting tx in cache: " + queriedTx.hash,
+                )
+                DTRManager.validityDataCache.set(queriedTx.hash, validatedData)
+
+                // INFO: Start the relay waiter
+                if (!DTRManager.isWaitingForBlock) {
+                    log.debug("not waiting for block, starting relay")
+                    DTRManager.waitForBlockThenRelay()
+                }
+
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                    },
+                    require_reply: false,
+                }
+            }
+
+            log.debug(
+                "👀 not in consensus loop, adding tx to mempool: " +
+                    queriedTx.hash,
+            )
+
+            // Proceeding with the mempool addition (either we are a validator or this is a fallback)
+            log.debug(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +
                     " to the mempool",
@@ -426,7 +525,7 @@ export default class ServerHandlers {
                         reference_block: validatedData.data.reference_block,
                     })
 
-                console.log(
+                log.debug(
                     "[handleExecuteTransaction] Transaction added to mempool",
                 )
 
@@ -482,7 +581,7 @@ export default class ServerHandlers {
          * An operation for the gas is also pushed it pn the GCR.
          * The tx is pushed in the mempool if applicable.
          */
-        console.log("[XMChain] Handling XM Chain Operation...")
+        log.debug("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
@@ -502,13 +601,16 @@ export default class ServerHandlers {
     }
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
-    static async handleSubnetTx(content: SubnetPayload) {
+    static async handleSubnetTx(content: any) {
+        // TODO Add proper type when l2ps is implemented correctly
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         const payload: L2PSRegisterTxMessage = {
             type: "registerTx",
             data: {
                 uid: content.uid,
-                encryptedTransaction: content.data,
+                encryptedTransaction: JSON.parse(
+                    content.data,
+                ) as EncryptedTransaction,
             },
             extra: "register",
         }
@@ -626,20 +728,18 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 
-    static async handleMempool(content: any): Promise<any> {
+    static async handleMempool(txs: Transaction[]): Promise<any> {
         // Basic message handling logic
         // ...
-        log.info("[handleMempool] Received a message")
-        log.info(content)
         let response = {
             success: false,
             mempool: [],
         }
 
         try {
-            response = await Mempool.receive(content.data as Transaction[])
+            response = await Mempool.receive(txs)
         } catch (error) {
-            console.error(error)
+            log.error("[handleMempool] Error receiving mempool: " + error)
         }
 
         const ourId = getSharedState.publicKeyHex

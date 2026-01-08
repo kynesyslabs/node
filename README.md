@@ -116,6 +116,36 @@ Once your node is running, it will:
 4. Process cross-chain transactions and computations
 5. Contribute to network security and decentralization
 
+## Local Development Network (Devnet)
+
+For local development and testing, you can run a 4-node network using Docker Compose instead of requiring 4 separate VPSes.
+
+### Quick Start
+
+```bash
+cd devnet
+./scripts/setup.sh           # One-time setup (generates identities + peerlist)
+docker-compose up -d         # Start the 4-node network
+docker-compose logs -f       # View logs from all nodes
+docker-compose down          # Stop the network
+```
+
+### Requirements
+
+- Docker and Docker Compose
+- BuildKit enabled (recommended): `export DOCKER_BUILDKIT=1`
+
+### Node Ports
+
+| Node   | RPC Port | Omni Port |
+|--------|----------|-----------|
+| node-1 | 53551    | 53561     |
+| node-2 | 53552    | 53562     |
+| node-3 | 53553    | 53563     |
+| node-4 | 53554    | 53564     |
+
+For detailed devnet documentation, see [devnet/README.md](devnet/README.md).
+
 ## Development
 
 This is the official implementation maintained by KyneSys Labs. The codebase follows TypeScript best practices with comprehensive error handling and type safety.

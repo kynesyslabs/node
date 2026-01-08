@@ -1,4 +1,5 @@
 import required from "./required"
+import log from "@/utilities/logger"
 
 // INFO Each non-read task has to be checked here
 export default function checkSignedPayloads(
@@ -15,6 +16,6 @@ export default function checkSignedPayloads(
         return false
     }
 
-    console.log("[XMScript Parser] Signed payload seems ok.")
+    log.debug("[XMScript Parser] Signed payload seems ok.")
     return true
 }

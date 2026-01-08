@@ -2,6 +2,7 @@ import express from "express"
 import helmet from "helmet"
 
 import { ActivityPubStorage } from "./fedistore"
+import log from "@/utilities/logger"
 
 const app = express()
 app.use(helmet())
@@ -21,9 +22,9 @@ app.get(
     "/:collection/:id",
     (req: { params: { collection: any; id: any } }, res: any) => {
         const { collection, id } = req.params
-        console.log("Reading: " + collection + "/" + id)
+        log.debug("Reading: " + collection + "/" + id)
         if (!database) {
-            console.log("Database not initialized")
+            log.error("Database not initialized")
             res.status(500).json({ error: "Database not initialized" })
             return
         }
@@ -42,9 +43,9 @@ app.put(
     "/:collection/:id",
     (req: { params: { collection: any; id: any }; body: any }, res: any) => {
         const { collection, id } = req.params
-        console.log("Updating: " + collection + "/" + id)
+        log.debug("Updating: " + collection + "/" + id)
         if (!database) {
-            console.log("Database not initialized")
+            log.error("Database not initialized")
             res.status(500).json({ error: "Database not initialized" })
             return
         }
@@ -65,20 +66,20 @@ async function main() {
         await sleep(1000)
         counter++
         if (counter > 10) {
-            console.log("Timeout: server never came alive")
+            log.error("Timeout: server never came alive")
             process.exit(1)
         }
     }
 
     // Creating or opening a database connection
     database = new ActivityPubStorage("./db.sqlite3")
-    console.log("Connected to database")
+    log.info("Connected to database")
 }
 main()
 
 // Start the server
 const port = process.env.PORT || 3000
 app.listen(port, () => {
-    console.log(`ActivityPub server listening on port ${port}`)
+    log.info(`ActivityPub server listening on port ${port}`)
     connected = true
 })

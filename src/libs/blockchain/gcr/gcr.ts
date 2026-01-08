@@ -209,7 +209,7 @@ export default class GCR {
                 ? gcrExtendedData.tokens[tokenAddress]
                 : 0
         } catch (e) {
-            console.error(e)
+            log.error("[GCR] Error fetching GCR token balance: " + e)
         }
     }
 
@@ -228,7 +228,7 @@ export default class GCR {
                 ? gcrExtendedData.nfts[nftAddress]
                 : 0
         } catch (e) {
-            console.error(e)
+            log.error("[GCR] Error fetching GCR NFT balance: " + e)
         }
     }
 
@@ -256,7 +256,7 @@ export default class GCR {
             return gcrExtendedData && gcrExtendedData.other
         } catch (e) {
             // Handle the error appropriately
-            console.error("Error fetching GCR chain properties:", e)
+            log.error("Error fetching GCR chain properties: " + e)
         }
     }
 
@@ -287,7 +287,7 @@ export default class GCR {
 
             return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
         } catch (e) {
-            console.error("Error fetching GCR hashed stakes:", e)
+            log.error("Error fetching GCR hashed stakes: " + e)
         }
     }
 
@@ -301,10 +301,10 @@ export default class GCR {
             .getRepository(Validators)
 
         if (!blockNumber) {
-            console.log("No block number provided, getting the last one")
+            log.debug("No block number provided, getting the last one")
             blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
         }
-        console.log("blockNumber: " + blockNumber)
+        log.debug("blockNumber: " + blockNumber)
 
         try {
             const blockNodes = await validatorsRepository.find({
@@ -317,7 +317,7 @@ export default class GCR {
 
             return blockNodes || []
         } catch (e) {
-            console.error("Error fetching GCR validators at block:", e)
+            log.error("Error fetching GCR validators at block: " + e)
             return [] // or handle the error as needed
         }
     }
@@ -347,7 +347,7 @@ export default class GCR {
 
             return info || null
         } catch (e) {
-            console.error("Error fetching validator status:", e)
+            log.error("Error fetching validator status: " + e)
             return null // or handle the error as needed
         }
     }
@@ -487,7 +487,7 @@ export default class GCR {
             })
 
             if (!nativeStatus) {
-                console.log("Creating new native status")
+                log.debug("Creating new native status")
                 nativeStatus = gcrRepository.create({
                     publicKey: address,
                     details: {
@@ -529,9 +529,7 @@ export default class GCR {
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
             return true // Adjust the return value as needed based on your requirements.
         } catch (e) {
-            console.error("Error setting GCR native balance:", e)
-            console.log("[GCR ERROR: NATIVE] ")
-            console.log(e)
+            log.error("[GCR ERROR: NATIVE] Error setting GCR native balance: " + e)
             return false
         }
     }
@@ -789,7 +787,7 @@ export default class GCR {
         for (const account of accounts) {
             // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
             if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
-                console.log(
+                log.debug(
                     `Skipping account ${account.pubkey} - Twitter already connected to another account`,
                 )
                 continue
@@ -875,7 +873,7 @@ export default class GCR {
             data: uint8ArrayToHex(signature.signature),
         }
 
-        console.log("tx", JSON.stringify(tx, null, 2))
+        log.debug("tx: " + JSON.stringify(tx))
         return tx
     }
 
@@ -971,7 +969,7 @@ export default class GCR {
         confirmationBlock: number
     }> {
         if (!twitterUsernames || twitterUsernames.length === 0) {
-            console.log("No Twitter usernames provided")
+            log.warning("No Twitter usernames provided")
             return {
                 success: false,
                 message: "No Twitter usernames provided",
@@ -1001,7 +999,7 @@ export default class GCR {
         )
 
         if (!editResults.success) {
-            console.log("Failed to apply GCREdit")
+            log.error("Failed to apply GCREdit")
             return {
                 success: false,
                 message: "Failed to apply transaction",
@@ -1015,7 +1013,7 @@ export default class GCR {
         })
 
         if (error) {
-            console.log("Failed to add transaction to mempool")
+            log.error("Failed to add transaction to mempool")
             return {
                 success: false,
                 message: "Failed to add transaction to mempool",

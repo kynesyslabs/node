@@ -108,6 +108,13 @@ export const TAG_TO_CATEGORY: Record<string, LogCategory> = {
     "DEMOS FOLLOW": "DAHR",
     "PAYLOAD FOR WEB2": "DAHR",
     "REQUEST FOR WEB2": "DAHR",
+
+    // TLSN - TLSNotary HTTPS attestation operations
+    TLSNOTARY: "TLSN",
+    TLSNotary: "TLSN",
+    TLSN: "TLSN",
+    NOTARY: "TLSN",
+    ATTESTATION: "TLSN",
 }
 
 // Re-export LogCategory for convenience

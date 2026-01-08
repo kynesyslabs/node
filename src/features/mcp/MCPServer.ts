@@ -146,7 +146,7 @@ export class MCPServerManager {
                     content: [
                         {
                             type: "text",
-                            text: JSON.stringify(result, null, 2),
+                            text: JSON.stringify(result),
                         },
                     ],
                 }
@@ -293,7 +293,7 @@ export class MCPServerManager {
             // Handle client disconnect
             req.on("close", () => {
                 log.info("[MCP] SSE client disconnected")
-                sseTransport.close().catch(console.error)
+                sseTransport.close().catch((err) => log.error("[MCP] SSE transport close error:", err))
             })
         })
 
@@ -445,4 +445,3 @@ export function createDemosMCPServer(options?: {
     return new MCPServerManager(config)
 }
 
-export default MCPServerManager
