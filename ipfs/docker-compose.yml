@@ -18,6 +18,8 @@ services:
             - IPFS_PROFILE=server
             # Disable public gateway (we proxy through Demos RPC)
             - IPFS_GATEWAY_WRITABLE=false
+            # REVIEW: Phase 10 - Force private network mode (requires swarm.key)
+            - LIBP2P_FORCE_PNET=1
             # REVIEW: Phase 9 - Pass API port for host networking configuration
             - IPFS_API_PORT=${IPFS_API_PORT:-54550}
             # REVIEW: Gateway port (default 58080 to avoid conflict with port 8080)
@@ -26,9 +28,8 @@ services:
             # Persistent storage for IPFS data (port-based isolation like postgres)
             - ./data_${PORT:-53550}/ipfs:/data/ipfs
             # REVIEW: Phase 9 - Mount init script for port configuration
+            # Note: swarm.key is written by init-ipfs.sh (Phase 10)
             - ./init-ipfs.sh:/container-init.d/init-ipfs.sh:ro
-            # Optional: mount swarm key for private network (Phase 4)
-            # - ./swarm.key:/data/ipfs/swarm.key:ro
         # REVIEW: Phase 9 - Use custom entrypoint to configure fixed port 4001
         entrypoint: ["/bin/sh", "/container-init.d/init-ipfs.sh"]
         # Note: ports section removed - host networking exposes ports directly

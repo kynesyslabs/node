@@ -14,6 +14,16 @@ if [ ! -f /data/ipfs/config ]; then
     ipfs init --profile=server
 fi
 
+# REVIEW: Phase 10 - Write Demos Network swarm key for private network isolation
+# This creates a private IPFS network separate from the public IPFS network
+# All Demos nodes use the same key to form an isolated swarm for performance
+echo "[init-ipfs] Writing Demos Network swarm key..."
+cat > /data/ipfs/swarm.key << 'EOF'
+/key/swarm/psk/1.0.0/
+/base16/
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+EOF
+
 # Configure swarm addresses to use fixed port 4001
 echo "[init-ipfs] Configuring swarm addresses to use port 4001..."
 ipfs config Addresses.Swarm --json '[
@@ -29,6 +39,11 @@ ipfs config Addresses.Swarm --json '[
 # Host networking means we bind directly to host ports
 echo "[init-ipfs] Configuring API on port ${API_PORT}..."
 ipfs config Addresses.API "/ip4/127.0.0.1/tcp/${API_PORT}"
+
+# REVIEW: Configure Gateway to use a different port (8080 often conflicts with other services)
+GATEWAY_PORT="${IPFS_GATEWAY_PORT:-58080}"
+echo "[init-ipfs] Configuring Gateway on port ${GATEWAY_PORT}..."
+ipfs config Addresses.Gateway "/ip4/127.0.0.1/tcp/${GATEWAY_PORT}"
 
 # REVIEW: Phase 9 - Configure address announcement to include LAN IPs
 # The server profile blocks private IP ranges (192.168.x.x, 10.x.x.x, 172.16.x.x) by default

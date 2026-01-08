@@ -64,11 +64,12 @@ Full blockchain integration of IPFS (Kubo) into Demos Network for decentralized 
 - Docker swarm port exposed (4001 TCP/UDP)
 - PeerCapabilities interface with ipfs.peerId and ipfs.addresses
 
-### Phase 10: Cluster Sync 🔲
-- Private IPFS network configuration
-- Swarm key management
-- Cluster-wide pinning
-- **Beads**: `node-zmh` (open, P2)
+### Phase 10: Cluster Sync ✅
+- Private IPFS network configuration via swarm.key
+- Swarm key written automatically by init-ipfs.sh
+- LIBP2P_FORCE_PNET=1 enforces private network mode
+- All nodes use same DEMOS_IPFS_SWARM_KEY for isolated swarm
+- **Beads**: `node-zmh` (closed)
 
 ### Phase 11: Public Bridge 🔲
 - Optional public IPFS gateway access

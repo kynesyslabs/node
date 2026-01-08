@@ -14,6 +14,16 @@ if [ ! -f /data/ipfs/config ]; then
     ipfs init --profile=server
 fi
 
+# REVIEW: Phase 10 - Write Demos Network swarm key for private network isolation
+# This creates a private IPFS network separate from the public IPFS network
+# All Demos nodes use the same key to form an isolated swarm for performance
+echo "[init-ipfs] Writing Demos Network swarm key..."
+cat > /data/ipfs/swarm.key << 'EOF'
+/key/swarm/psk/1.0.0/
+/base16/
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+EOF
+
 # Configure swarm addresses to use fixed port 4001
 echo "[init-ipfs] Configuring swarm addresses to use port 4001..."
 ipfs config Addresses.Swarm --json '[
