@@ -19,7 +19,7 @@ import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import { Waiter } from "./utilities/waiter"
-import { TimeoutError } from "./exceptions"
+import { TimeoutError, AbortError } from "./exceptions"
 import {
     startOmniProtocolServer,
     stopOmniProtocolServer,
@@ -376,6 +376,7 @@ async function preMainLoop() {
  * - Starts background services (MCP server and DTRManager) when configured.
  */
 async function main() {
+    getSharedState.isInitialized = false
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
@@ -709,20 +710,59 @@ async function main() {
             peers[0].identity === getSharedState.publicKeyHex
         ) {
             log.info(
-                "[MAIN] We are the anchor node, listening for peers ... (15s)",
+                "[MAIN] We are the anchor node, listening for peers ... (15s, press Enter to skip)",
             )
             // INFO: Wait for hello peer if we are the anchor node
             // useful when anchor node is re-joining the network
+
+            // Set up Enter key listener to skip the wait
+            const wasRawMode = process.stdin.isRaw
+            if (!wasRawMode) {
+                process.stdin.setRawMode(true)
+            }
+            process.stdin.resume()
+
+            const enterKeyHandler = (chunk: Buffer) => {
+                const key = chunk.toString()
+                if (key === "\r" || key === "\n" || key === "\u0003") {
+                    // Enter key or Ctrl+C
+                    if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+                        Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
+                        log.info(
+                            "[MAIN] Wait skipped by user, starting sync loop",
+                        )
+                    }
+                    // Clean up
+                    process.stdin.removeListener("data", enterKeyHandler)
+                    if (!wasRawMode) {
+                        process.stdin.setRawMode(false)
+                    }
+                    process.stdin.pause()
+                }
+            }
+
+            process.stdin.on("data", enterKeyHandler)
+
             try {
-                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 10 seconds
+                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
             } catch (error) {
                 if (error instanceof TimeoutError) {
                     log.info("[MAIN] No wild peers found, starting sync loop")
+                } else if (error instanceof AbortError) {
+                    // Already logged above
                 }
+            } finally {
+                // Clean up listener if still attached
+                process.stdin.removeListener("data", enterKeyHandler)
+                if (!wasRawMode) {
+                    process.stdin.setRawMode(false)
+                }
+                process.stdin.pause()
             }
         }
 
         await fastSync([], "index.ts")
+        getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
 

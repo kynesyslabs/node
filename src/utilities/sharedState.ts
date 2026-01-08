@@ -42,6 +42,7 @@ export default class SharedState {
 
     // SECTION shared state variables
     // Modes
+    isInitialized = false
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false

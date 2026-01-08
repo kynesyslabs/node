@@ -62,10 +62,10 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
-        if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+        if (!getSharedState.isInitialized) {
             return {
                 result: 200,
-                message: "Cannot handle new block when waiting for hello peer",
+                message: "Cannot handle new block. Node is not initialized",
                 syncData: PeerManager.getInstance().ourSyncDataString,
             }
         }
