@@ -30,6 +30,11 @@ ipfs config Addresses.Swarm --json '[
 echo "[init-ipfs] Configuring API on port ${API_PORT}..."
 ipfs config Addresses.API "/ip4/127.0.0.1/tcp/${API_PORT}"
 
+# REVIEW: Configure Gateway to use a different port (8080 often conflicts with other services)
+GATEWAY_PORT="${IPFS_GATEWAY_PORT:-58080}"
+echo "[init-ipfs] Configuring Gateway on port ${GATEWAY_PORT}..."
+ipfs config Addresses.Gateway "/ip4/127.0.0.1/tcp/${GATEWAY_PORT}"
+
 # REVIEW: Phase 9 - Configure address announcement to include LAN IPs
 # The server profile blocks private IP ranges (192.168.x.x, 10.x.x.x, 172.16.x.x) by default
 # We WANT to announce these for local peer discovery within the Demos network

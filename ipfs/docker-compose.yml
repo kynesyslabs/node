@@ -20,6 +20,8 @@ services:
             - IPFS_GATEWAY_WRITABLE=false
             # REVIEW: Phase 9 - Pass API port for host networking configuration
             - IPFS_API_PORT=${IPFS_API_PORT:-54550}
+            # REVIEW: Gateway port (default 58080 to avoid conflict with port 8080)
+            - IPFS_GATEWAY_PORT=${IPFS_GATEWAY_PORT:-58080}
         volumes:
             # Persistent storage for IPFS data (port-based isolation like postgres)
             - ./data_${PORT:-53550}/ipfs:/data/ipfs
