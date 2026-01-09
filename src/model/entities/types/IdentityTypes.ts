@@ -1,4 +1,5 @@
 import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
+import { DemosOwnershipProof } from "@kynesyslabs/demosdk/abstraction"
 
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
@@ -53,19 +54,6 @@ export interface SavedUdIdentity {
 }
 
 /**
- * Demos ownership proof for linking EVM address to Demos identity
- * This proves the EVM address owner authorized the agent registration
- */
-export interface DemosOwnershipProof {
-    type: "demos-signature"
-    message: string
-    signature: string | { type: string; data: string }
-    demosPublicKey: string
-    evmAddress: string
-    timestamp: number
-}
-
-/**
  * ERC-8004 Agent Identity saved in the GCR
  *
  * Links an ERC-8004 agent NFT (registered on Base Sepolia) to a Demos identity.
@@ -85,36 +73,6 @@ export interface SavedAgentIdentity {
     proof: DemosOwnershipProof // Ownership proof signed by Demos wallet
     timestamp: number // When the identity was linked
     resolverUrl?: string // Optional resolver URL for the agent
-}
-
-/**
- * Agent identity payload for assigning an ERC-8004 agent to a Demos identity
- * (Local type until SDK is updated)
- */
-export interface AgentIdentityPayload {
-    agentId: string
-    evmAddress: string
-    chain: string
-    txHash: string
-    tokenUri: string
-    proof: DemosOwnershipProof
-    resolverUrl?: string
-}
-
-export interface AgentIdentityAssignPayload {
-    context: "agent"
-    method: "agent_identity_assign"
-    payload: AgentIdentityPayload
-    referralCode?: string
-}
-
-export interface AgentIdentityRemovePayload {
-    context: "agent"
-    method: "agent_identity_remove"
-    payload: {
-        agentId: string
-        chain: string
-    }
 }
 
 export type StoredIdentities = {

@@ -2,11 +2,11 @@ import { ethers, JsonRpcProvider } from "ethers"
 
 import log from "@/utilities/logger"
 import ensureGCRForUser from "./ensureGCRForUser"
+import { SavedAgentIdentity } from "@/model/entities/types/IdentityTypes"
 import {
-    SavedAgentIdentity,
     DemosOwnershipProof,
     AgentIdentityAssignPayload,
-} from "@/model/entities/types/IdentityTypes"
+} from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 
 /**
@@ -25,6 +25,16 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 // ERC-8004 IdentityRegistry contract on Base Sepolia
 const AGENT_REGISTRY_ADDRESS = "0x8004AA63c570c570eBF15376c0dB199918BFe9Fb"
 
+// Canonical chain identifier for agent identities
+const CANONICAL_CHAIN = "base.sepolia"
+
+// Accepted chain aliases that map to the canonical chain
+const CHAIN_ALIASES: Record<string, string> = {
+    "base.sepolia": CANONICAL_CHAIN,
+    "base-sepolia": CANONICAL_CHAIN,
+    "basesepolia": CANONICAL_CHAIN,
+}
+
 // Base Sepolia configuration
 const BASE_SEPOLIA_CONFIG = {
     chainId: 84532,
@@ -40,6 +50,9 @@ const BASE_SEPOLIA_RPC_ENDPOINTS = [
     "https://base-sepolia.blockpi.network/v1/rpc/public",
 ]
 
+// Timeout for RPC requests in milliseconds (5 seconds)
+const RPC_TIMEOUT_MS = 5000
+
 const registryAbi = [
     "function ownerOf(uint256 tokenId) external view returns (address)",
     "function tokenURI(uint256 tokenId) external view returns (string)",
@@ -47,6 +60,26 @@ const registryAbi = [
 
 export class AgentIdentityManager {
     constructor() { }
+
+    /**
+     * Validate and normalize chain identifier to canonical form.
+     * Returns the canonical chain or null if invalid.
+     *
+     * @param chain - The chain identifier to validate
+     * @returns The canonical chain identifier or null if invalid
+     */
+    static validateChain(chain: string): string | null {
+        if (!chain) return null
+        const normalized = chain.toLowerCase().trim()
+        return CHAIN_ALIASES[normalized] || null
+    }
+
+    /**
+     * Get the canonical chain identifier
+     */
+    static getCanonicalChain(): string {
+        return CANONICAL_CHAIN
+    }
 
     /**
      * Verify agent NFT ownership on Base Sepolia
@@ -61,14 +94,24 @@ export class AgentIdentityManager {
     ): Promise<{ success: boolean; message: string; actualOwner?: string }> {
         for (const rpcUrl of BASE_SEPOLIA_RPC_ENDPOINTS) {
             try {
-                const provider = new JsonRpcProvider(rpcUrl)
+                // Create provider with fetch options including timeout
+                const provider = new JsonRpcProvider(rpcUrl, undefined, {
+                    staticNetwork: true,
+                    batchMaxCount: 1,
+                })
+
                 const contract = new ethers.Contract(
                     AGENT_REGISTRY_ADDRESS,
                     registryAbi,
                     provider,
                 )
 
-                const owner = await contract.ownerOf(agentId)
+                // Wrap the call with a timeout to prevent hanging
+                const ownerPromise = contract.ownerOf(agentId)
+                const timeoutPromise = new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error("RPC request timeout")), RPC_TIMEOUT_MS)
+                )
+                const owner = await Promise.race([ownerPromise, timeoutPromise])
 
                 if (owner.toLowerCase() !== expectedOwner.toLowerCase()) {
                     return {
@@ -175,7 +218,7 @@ export class AgentIdentityManager {
                 algorithm: algorithm as "ed25519" | "ml-dsa" | "falcon",
                 message: new TextEncoder().encode(proof.message),
                 signature: hexToUint8Array(signatureHex.replace(/^0x/i, "")),
-                publicKey: hexToUint8Array(sender.replace(/^0x/i, "")),
+                publicKey: hexToUint8Array(proof.demosPublicKey.replace(/^0x/i, "")),
             })
 
             if (!isValid) {
@@ -230,6 +273,15 @@ export class AgentIdentityManager {
                 return {
                     success: false,
                     message: "EVM address is required",
+                }
+            }
+
+            // Validate chain - must be base.sepolia or known alias
+            const canonicalChain = this.validateChain(chain)
+            if (!canonicalChain) {
+                return {
+                    success: false,
+                    message: `Invalid chain: ${chain}. Only base.sepolia is currently supported.`,
                 }
             }
 

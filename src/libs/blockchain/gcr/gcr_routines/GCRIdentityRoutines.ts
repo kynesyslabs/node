@@ -16,10 +16,11 @@ import {
     SavedXmIdentity,
     SavedUdIdentity,
     SavedAgentIdentity,
-    AgentIdentityPayload,
 } from "@/model/entities/types/IdentityTypes"
+import { AgentIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import { AgentIdentityManager } from "./agentIdentityManager"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -718,6 +719,15 @@ export default class GCRIdentityRoutines {
             }
         }
 
+        // Validate chain - only base.sepolia is currently supported
+        const canonicalChain = AgentIdentityManager.validateChain(payload.chain)
+        if (!canonicalChain) {
+            return {
+                success: false,
+                message: `Unsupported agent chain: ${payload.chain}. Only base.sepolia is currently supported.`,
+            }
+        }
+
         // Validate EVM address format
         const evmPattern = /^0x[0-9a-fA-F]{40}$/
         if (!evmPattern.test(payload.evmAddress)) {
@@ -739,11 +749,11 @@ export default class GCRIdentityRoutines {
 
         // Initialize agent identities structure if not exists
         accountGCR.identities.agent = accountGCR.identities.agent || {}
-        accountGCR.identities.agent[payload.chain] =
-            accountGCR.identities.agent[payload.chain] || []
+        accountGCR.identities.agent[canonicalChain] =
+            accountGCR.identities.agent[canonicalChain] || []
 
         // Check if agent already exists for this account
-        const agentExists = accountGCR.identities.agent[payload.chain].some(
+        const agentExists = accountGCR.identities.agent[canonicalChain].some(
             (id: SavedAgentIdentity) => id.agentId === payload.agentId,
         )
 
@@ -758,7 +768,7 @@ export default class GCRIdentityRoutines {
         const savedAgent: SavedAgentIdentity = {
             agentId: payload.agentId,
             evmAddress: payload.evmAddress.toLowerCase(),
-            chain: payload.chain,
+            chain: canonicalChain,
             txHash: payload.txHash,
             tokenUri: payload.tokenUri,
             proof: payload.proof,
@@ -766,7 +776,7 @@ export default class GCRIdentityRoutines {
             resolverUrl: payload.resolverUrl,
         }
 
-        accountGCR.identities.agent[payload.chain].push(savedAgent)
+        accountGCR.identities.agent[canonicalChain].push(savedAgent)
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
@@ -776,7 +786,7 @@ export default class GCRIdentityRoutines {
              */
             const isFirst = await this.isFirstConnection(
                 "agent",
-                { agentId: payload.agentId, chain: payload.chain },
+                { agentId: payload.agentId, chain: canonicalChain },
                 gcrMainRepository,
                 editOperation.account,
             )
@@ -788,7 +798,7 @@ export default class GCRIdentityRoutines {
                 await IncentiveManager.agentLinked(
                     accountGCR.pubkey,
                     payload.agentId,
-                    payload.chain,
+                    canonicalChain,
                     editOperation.referralCode,
                 )
             }

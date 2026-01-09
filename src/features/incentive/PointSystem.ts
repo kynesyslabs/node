@@ -1296,12 +1296,27 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
+            // Validate and normalize chain to canonical form
+            const canonicalChain = AgentIdentityManager.validateChain(chain)
+            if (!canonicalChain) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: 0,
+                        message: `Invalid chain: ${chain}. Only base.sepolia is currently supported.`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             // Create agentKey for point tracking: "chain:agentId"
-            const agentKey = `${chain}:${agentId}`
+            const agentKey = `${canonicalChain}:${agentId}`
 
             // Verify the agent is actually linked to this user
             const account = await ensureGCRForUser(userId)
-            const agentIdentities = account.identities.agent?.[chain] || []
+            const agentIdentities = account.identities.agent?.[canonicalChain] || []
             const hasAgent = agentIdentities.some(
                 (agent: SavedAgentIdentity) => agent.agentId === agentId,
             )
