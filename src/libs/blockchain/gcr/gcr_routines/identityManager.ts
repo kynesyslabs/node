@@ -278,11 +278,10 @@ export default class IdentityManager {
 
         return {
             success: true,
-            message: `Signature proof${
-                payloads.length > 1 ? "s" : ""
-            } verified. ${JSON.stringify(
-                payloads.map(p => p.algorithm),
-            )} identities assigned`,
+            message: `Signature proof${payloads.length > 1 ? "s" : ""
+                } verified. ${JSON.stringify(
+                    payloads.map(p => p.algorithm),
+                )} identities assigned`,
         }
     }
 
@@ -330,7 +329,7 @@ export default class IdentityManager {
      */
     static async getIdentities(
         address: string,
-        key?: "xm" | "web2" | "pqc" | "ud",
+        key?: "xm" | "web2" | "pqc" | "ud" | "agent",
     ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
@@ -342,5 +341,30 @@ export default class IdentityManager {
 
     static async getUDIdentities(address: string) {
         return await this.getIdentities(address, "ud")
+    }
+
+    /**
+     * Get the agent identities related to a demos address
+     * @param address - The address to get the agent identities of
+     * @param chain - Optional chain filter (e.g., "base.sepolia")
+     * @returns The agent identities of the address
+     */
+    static async getAgentIdentities(address: string, chain?: string) {
+        const data = await this.getIdentities(address, "agent")
+        if (!data) {
+            return []
+        }
+
+        if (chain) {
+            return data[chain] || []
+        }
+
+        // Return all agent identities across all chains
+        const allAgents: any[] = []
+        for (const chainKey of Object.keys(data)) {
+            allAgents.push(...(data[chainKey] || []))
+        }
+
+        return allAgents
     }
 }

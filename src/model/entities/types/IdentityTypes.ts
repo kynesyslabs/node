@@ -52,6 +52,71 @@ export interface SavedUdIdentity {
     registryType: "UNS" | "CNS" // Which registry was used
 }
 
+/**
+ * Demos ownership proof for linking EVM address to Demos identity
+ * This proves the EVM address owner authorized the agent registration
+ */
+export interface DemosOwnershipProof {
+    type: "demos-signature"
+    message: string
+    signature: string | { type: string; data: string }
+    demosPublicKey: string
+    evmAddress: string
+    timestamp: number
+}
+
+/**
+ * ERC-8004 Agent Identity saved in the GCR
+ *
+ * Links an ERC-8004 agent NFT (registered on Base Sepolia) to a Demos identity.
+ * The agent NFT represents an AI agent's on-chain identity.
+ *
+ * Requirements:
+ * - User must have an EVM wallet linked to their Demos identity
+ * - The EVM wallet must own the ERC-8004 agent NFT
+ * - User must sign ownership proof with their Demos wallet
+ */
+export interface SavedAgentIdentity {
+    agentId: string // ERC-8004 token ID
+    evmAddress: string // EVM address that owns the agent NFT
+    chain: string // Chain where agent is registered (e.g., "base.sepolia")
+    txHash: string // Transaction hash of agent registration
+    tokenUri: string // Token URI pointing to agent card metadata
+    proof: DemosOwnershipProof // Ownership proof signed by Demos wallet
+    timestamp: number // When the identity was linked
+    resolverUrl?: string // Optional resolver URL for the agent
+}
+
+/**
+ * Agent identity payload for assigning an ERC-8004 agent to a Demos identity
+ * (Local type until SDK is updated)
+ */
+export interface AgentIdentityPayload {
+    agentId: string
+    evmAddress: string
+    chain: string
+    txHash: string
+    tokenUri: string
+    proof: DemosOwnershipProof
+    resolverUrl?: string
+}
+
+export interface AgentIdentityAssignPayload {
+    context: "agent"
+    method: "agent_identity_assign"
+    payload: AgentIdentityPayload
+    referralCode?: string
+}
+
+export interface AgentIdentityRemovePayload {
+    context: "agent"
+    method: "agent_identity_remove"
+    payload: {
+        agentId: string
+        chain: string
+    }
+}
+
 export type StoredIdentities = {
     xm: {
         [chain: string]: {
@@ -67,4 +132,8 @@ export type StoredIdentities = {
         [algorithm: string]: SavedPqcIdentity[]
     }
     ud: SavedUdIdentity[] // Unstoppable Domains identities
+    agent: {
+        // A mapping of chain (e.g., "base.sepolia") to array of agent identities
+        [chain: string]: SavedAgentIdentity[]
+    }
 }

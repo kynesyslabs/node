@@ -2,13 +2,14 @@ import {
     IdentityPayload,
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
-    UDIdentityAssignPayload,
+    AgentIdentityAssignPayload,
 } from "@kynesyslabs/demosdk/abstraction"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
+import { AgentIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/agentIdentityManager"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
@@ -95,10 +96,18 @@ export default async function handleIdentityRequest(
                 payload.payload as Web2CoreTargetIdentityPayload,
                 sender,
             )
+        case "agent_identity_assign":
+            // NOTE: Agent identity follows signature-based verification like UD
+            // Verifies: 1) Ownership proof signature, 2) On-chain NFT ownership
+            return await AgentIdentityManager.verifyPayload(
+                payload as AgentIdentityAssignPayload,
+                sender,
+            )
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
         case "ud_identity_remove":
+        case "agent_identity_remove":
             return {
                 success: true,
                 message: "Identity removed",

@@ -34,6 +34,7 @@ export class GCRMain {
                 telegram: number
             }
             udDomains?: { [domain: string]: number } // Optional for backward compatibility with historical records
+            agents?: { [agentKey: string]: number }
             referrals: number
             demosFollow: number
             weeklyChallenge?: Array<{

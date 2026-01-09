@@ -8,7 +8,8 @@ import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
-import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
+import { AgentIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/agentIdentityManager"
+import { SavedUdIdentity, SavedAgentIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
 
 const pointValues = {
@@ -20,12 +21,13 @@ const pointValues = {
     LINK_DISCORD: 1,
     LINK_UD_DOMAIN_DEMOS: 3,
     LINK_UD_DOMAIN: 1,
+    LINK_AGENT: 2,
 }
 
 export class PointSystem {
     private static instance: PointSystem
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): PointSystem {
         if (!PointSystem.instance) {
@@ -42,6 +44,14 @@ export class PointSystem {
         linkedSocials: { twitter?: string; github?: string; discord?: string }
         linkedUDDomains: {
             [network: string]: string[]
+        }
+        linkedAgents: {
+            [chain: string]: Array<{
+                agentId: string
+                evmAddress: string
+                tokenUri?: string
+                timestamp: number
+            }>
         }
     }> {
         const xmIdentities = await IdentityManager.getIdentities(userId)
@@ -61,6 +71,7 @@ export class PointSystem {
         )
 
         const udIdentities = await IdentityManager.getUDIdentities(userId)
+        const agentIdentities = await AgentIdentityManager.getAgentIdentities(userId)
 
         const linkedWallets: string[] = []
         const linkedUDDomains: {
@@ -119,7 +130,31 @@ export class PointSystem {
             }
         }
 
-        return { linkedWallets, linkedSocials, linkedUDDomains }
+        const linkedAgents: {
+            [chain: string]: Array<{
+                agentId: string
+                evmAddress: string
+                tokenUri?: string
+                timestamp: number
+            }>
+        } = {}
+
+        if (Array.isArray(agentIdentities) && agentIdentities.length > 0) {
+            for (const agent of agentIdentities as SavedAgentIdentity[]) {
+                if (!linkedAgents[agent.chain]) {
+                    linkedAgents[agent.chain] = []
+                }
+
+                linkedAgents[agent.chain].push({
+                    agentId: agent.agentId,
+                    evmAddress: agent.evmAddress,
+                    tokenUri: agent.tokenUri,
+                    timestamp: agent.timestamp,
+                })
+            }
+        }
+
+        return { linkedWallets, linkedSocials, linkedUDDomains, linkedAgents }
     }
 
     /**
@@ -135,7 +170,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials, linkedUDDomains } =
+        const { linkedWallets, linkedSocials, linkedUDDomains, linkedAgents } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -171,12 +206,14 @@ export class PointSystem {
                         account.points.breakdown?.socialAccounts?.discord ?? 0,
                 },
                 udDomains: account.points.breakdown?.udDomains || {},
+                agents: account.points.breakdown?.agents || {},
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
             },
             linkedWallets,
             linkedSocials,
             linkedUDDomains,
+            linkedAgents,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
             flaggedReason: account.flaggedReason || null,
@@ -189,7 +226,7 @@ export class PointSystem {
     private async addPointsToGCR(
         userId: string,
         points: number,
-        type: "web3Wallets" | "socialAccounts" | "udDomains",
+        type: "web3Wallets" | "socialAccounts" | "udDomains" | "agents",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -237,6 +274,14 @@ export class PointSystem {
                 account.points.breakdown.udDomains[platform] || 0
             account.points.breakdown.udDomains[platform] =
                 oldDomainPoints + points
+        } else if (type === "agents") {
+            // Explicitly initialize agents if undefined
+            if (!account.points.breakdown.agents) {
+                account.points.breakdown.agents = {}
+            }
+            const oldAgentPoints =
+                account.points.breakdown.agents[platform] || 0
+            account.points.breakdown.agents[platform] = oldAgentPoints + points
         }
         account.points.lastUpdated = new Date()
 
@@ -376,8 +421,8 @@ export class PointSystem {
                     message: walletIsAlreadyLinked
                         ? walletIsAlreadyLinkedMessage
                         : hasExistingWalletOnChain
-                        ? hasExistingWalletOnChainMessage
-                        : "Points awarded for linking wallet",
+                            ? hasExistingWalletOnChainMessage
+                            : "Points awarded for linking wallet",
                 },
                 require_reply: false,
                 extra: {},
@@ -1135,9 +1180,8 @@ export class PointSystem {
                 response: {
                     pointsAwarded: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points awarded for linking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points awarded for linking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
@@ -1218,9 +1262,8 @@ export class PointSystem {
                 response: {
                     pointsDeducted: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points deducted for unlinking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points deducted for unlinking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
@@ -1229,6 +1272,168 @@ export class PointSystem {
             return {
                 result: 500,
                 response: "Error deducting UD domain points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking an ERC-8004 agent
+     * @param userId The user's Demos address
+     * @param agentId The ERC-8004 agent token ID
+     * @param chain The chain where agent is registered (e.g., "base.sepolia")
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardAgentPoints(
+        userId: string,
+        agentId: string,
+        chain: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Create agentKey for point tracking: "chain:agentId"
+            const agentKey = `${chain}:${agentId}`
+
+            // Verify the agent is actually linked to this user
+            const account = await ensureGCRForUser(userId)
+            const agentIdentities = account.identities.agent?.[chain] || []
+            const hasAgent = agentIdentities.some(
+                (agent: SavedAgentIdentity) => agent.agentId === agentId,
+            )
+
+            if (!hasAgent) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Error: Agent not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Check if agent points already awarded
+            const agents = account.points.breakdown?.agents || {}
+            const agentAlreadyAwarded = agentKey in agents
+
+            if (agentAlreadyAwarded) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Agent points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Award points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_AGENT,
+                "agents",
+                agentKey,
+                referralCode,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_AGENT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking ERC-8004 agent",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding agent points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking an ERC-8004 agent
+     * @param userId The user's Demos address
+     * @param agentId The ERC-8004 agent token ID
+     * @param chain The chain where agent was registered
+     * @returns RPCResponse
+     */
+    async deductAgentPoints(
+        userId: string,
+        agentId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Create agentKey for point tracking: "chain:agentId"
+            const agentKey = `${chain}:${agentId}`
+
+            // Check if user has points for this agent to deduct
+            const account = await ensureGCRForUser(userId)
+            const agents = account.points.breakdown?.agents || {}
+            const hasAgentPoints = agentKey in agents && agents[agentKey] > 0
+
+            if (!hasAgentPoints) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No agent points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            // Deduct points by updating the GCR
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_AGENT,
+                "agents",
+                agentKey,
+            )
+
+            // Get updated points
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_AGENT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking ERC-8004 agent",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting agent points",
                 require_reply: false,
                 extra: {
                     error:
