@@ -40,6 +40,25 @@ export default async function ipfsAdd(data: IpfsAddData): Promise<RPCResponse> {
         }
     }
 
+    // REVIEW: DoS prevention - limit content size before buffer allocation
+    // Max 16MB matches MessageFramer.MAX_PAYLOAD_SIZE for consistency
+    const MAX_CONTENT_SIZE = 16 * 1024 * 1024
+    const contentLength = data.content.length
+    // Base64 encoded content is ~33% larger than raw, so decoded size is ~75% of encoded
+    const estimatedDecodedSize = data.base64 ? Math.ceil(contentLength * 0.75) : contentLength
+
+    if (estimatedDecodedSize > MAX_CONTENT_SIZE) {
+        return {
+            result: 413,
+            response: {
+                success: false,
+                error: `Content too large: estimated ${estimatedDecodedSize} bytes exceeds maximum ${MAX_CONTENT_SIZE} bytes`,
+            },
+            require_reply: false,
+            extra: null,
+        }
+    }
+
     try {
         const ipfs = await ensureIpfsManager()
 
@@ -49,6 +68,19 @@ export default async function ipfsAdd(data: IpfsAddData): Promise<RPCResponse> {
             contentBuffer = Buffer.from(data.content, "base64")
         } else {
             contentBuffer = Buffer.from(data.content)
+        }
+
+        // REVIEW: Final size check after decoding (in case estimate was off)
+        if (contentBuffer.length > MAX_CONTENT_SIZE) {
+            return {
+                result: 413,
+                response: {
+                    success: false,
+                    error: `Content too large: ${contentBuffer.length} bytes exceeds maximum ${MAX_CONTENT_SIZE} bytes`,
+                },
+                require_reply: false,
+                extra: null,
+            }
         }
 
         const cid = await ipfs.add(contentBuffer, data.filename)

@@ -78,8 +78,8 @@ export default async function ipfsQuote(
     log.debug(`[IPFS] Received ipfsQuote request from ${sender?.slice(0, 16)}...`)
 
     try {
-        // Validate request
-        if (!data || typeof data.file_size_bytes !== "number") {
+        // Validate request - REVIEW: Added NaN check since typeof NaN === "number"
+        if (!data || typeof data.file_size_bytes !== "number" || Number.isNaN(data.file_size_bytes)) {
             return {
                 result: 400,
                 response: {
