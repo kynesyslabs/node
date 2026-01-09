@@ -111,7 +111,7 @@ export class NomisIdentityProvider {
 
     private static flattenIdentities(account: GCRMain): NomisIdentitySummary[] {
         const summaries: NomisIdentitySummary[] = []
-        const nomisIdentities = account.identities.nomis || {}
+        const nomisIdentities = account.identities?.nomis || {}
 
         Object.entries(nomisIdentities).forEach(([chain, subchains]) => {
             Object.entries(subchains).forEach(([subchain, identities]) => {
@@ -146,7 +146,7 @@ export class NomisIdentityProvider {
         subchain: string,
         walletAddress: string,
     ): SavedNomisIdentity | undefined {
-        const nomisIdentities = account.identities.nomis || {}
+        const nomisIdentities = account.identities?.nomis || {}
         const normalizedWallet = this.normalizeAddress(walletAddress, chain)
         return nomisIdentities?.[chain]?.[subchain]?.find(identity => {
             const storedAddress = this.normalizeAddress(identity.address, chain)
