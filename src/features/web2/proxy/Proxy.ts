@@ -14,6 +14,7 @@ import {
 import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
+import log from "@/utilities/logger"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -67,7 +68,7 @@ export class Proxy {
                 this._isInitialized = true
                 this._currentTargetUrl = targetUrl
             } catch (error) {
-                console.error("[Web2API] Error starting proxy server:", error)
+                log.error("[Web2API] Error starting proxy server:", error)
                 throw error
             }
         }
@@ -310,7 +311,7 @@ export class Proxy {
                         }),
                     )
                 } else if (res instanceof net.Socket) {
-                    console.error("[Web2API] Socket error:", err)
+                    log.error("[Web2API] Socket error:", err)
                     res.end(
                         "HTTP/1.1 500 Internal Server Error\r\n\r\n" +
                             JSON.stringify({
@@ -373,7 +374,7 @@ export class Proxy {
 
             // Error handling for the main HTTP server
             this._server.on("error", error => {
-                console.error("[Web2API] HTTP Server error:", error)
+                log.error("[Web2API] HTTP Server error:", error)
                 reject(error)
             })
         })

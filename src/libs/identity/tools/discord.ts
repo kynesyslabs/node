@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios"
 import { URL } from "url"
+import log from "@/utilities/logger"
 
 export type DiscordMessage = {
     id: string
@@ -103,7 +104,7 @@ export class Discord {
 
             return { guildId, channelId, messageId }
         } catch (err) {
-            console.warn("Failed to extract details from Discord URL")
+            log.warning("Failed to extract details from Discord URL")
             throw new Error(
                 `Invalid Discord message URL: ${
                     err instanceof Error ? err.message : "Unknown error"

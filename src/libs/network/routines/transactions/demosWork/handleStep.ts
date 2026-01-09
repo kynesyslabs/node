@@ -8,7 +8,7 @@ import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/na
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { handleWeb2ProxyRequest } from "../handleWeb2ProxyRequest"
 import handleL2PS from "../handleL2PS"
-import { L2PSMessage } from "@/libs/l2ps/parallelNetworks_deprecated"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import handleNativeRequest from "../handleNativeRequest"
 // ? Remove this proxy if possible
@@ -42,8 +42,8 @@ export default async function handleStep(step: WorkStep): Promise<StepResult> {
         const web2Request = task as IWeb2Request
         result = await handleWeb2ProxyRequest({ web2Request })
     } else if (context === "l2ps") {
-        const l2psScript = task as unknown as L2PSMessage // ! Add typing in the SDK
-        result = await handleL2PS(l2psScript) // TODO: Follow and implement the logic
+        const l2psScript = task as unknown as L2PSTransaction
+        result = await handleL2PS(l2psScript)
     }
     // ? // TODO: Add the other contexts
     else if (context === "activitypub") {

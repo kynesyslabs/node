@@ -4,6 +4,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { getSharedState } from "@/utilities/sharedState"
+import log from "src/utilities/logger"
 
 export default class GCRBalanceRoutines {
     static async apply(
@@ -25,12 +26,15 @@ export default class GCRBalanceRoutines {
             return { success: false, message: "Invalid amount" }
         }
 
-        console.log(
-            "Applying GCREdit balance: ",
-            editOperation.operation,
-            editOperation.amount,
-            editOperationAccount,
-            editOperation.isRollback ? "ROLLBACK" : "NORMAL",
+        log.debug(
+            "Applying GCREdit balance: " +
+                editOperation.operation +
+                " " +
+                editOperation.amount +
+                " " +
+                editOperationAccount +
+                " " +
+                (editOperation.isRollback ? "ROLLBACK" : "NORMAL"),
         )
         // Reversing the operation if it is a rollback
         if (editOperation.isRollback) {

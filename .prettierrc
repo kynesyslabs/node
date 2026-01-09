@@ -8,6 +8,5 @@
     "tabWidth": 4,
     "semi": false,
     "trailingComma": "all",
-    "useTabs": false,
-    "SwitchCase": 1
+    "useTabs": false
 }

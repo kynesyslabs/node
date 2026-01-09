@@ -13,6 +13,8 @@ import { NodeCall } from "src/libs/network/manageNodeCall"
 import { uint8ArrayToHex, hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import crypto from "node:crypto"
 import Peer from "../Peer"
+import { getSharedState } from "src/utilities/sharedState"
+import log from "src/utilities/logger"
 
 type BufferPayload = {
     type: "Buffer"
@@ -181,9 +183,7 @@ export default async function getPeerIdentity(
     const challenge = generateChallenge()
     
     // Getting our identity
-    console.warn("[PEER AUTHENTICATION] Getting peer identity with challenge")
-    console.log(peer)
-    console.log(expectedKey)
+    log.debug(`[PEER AUTH] Getting peer identity for ${expectedKey}`)
 
     // Include challenge in the request for cryptographic verification
     const nodeCall: NodeCall = {
@@ -196,14 +196,10 @@ export default async function getPeerIdentity(
         method: "nodeCall",
         params: [nodeCall],
     })
-    console.log(
-        "[PEER AUTHENTICATION] Response Received: " +
-            JSON.stringify(response, null, 2),
-    )
+    log.debug("[PEER AUTH] Response Received: " + JSON.stringify(response))
     // Response management
     if (response.result === 200) {
-        console.log("[PEER AUTHENTICATION] Received response")
-        console.log(response.response)
+        log.debug("[PEER AUTH] Received response")
 
         // Extract identity and challenge signature from response
         const responseData = response.response
@@ -214,16 +210,12 @@ export default async function getPeerIdentity(
         const expectedIdentity = normalizeExpectedIdentity(expectedKey)
 
         if (!receivedIdentity) {
-            console.log(
-                "[PEER AUTHENTICATION] Unable to normalize identity payload",
-            )
+            log.warning("[PEER AUTH] Unable to normalize identity payload")
             return null
         }
 
         if (!expectedIdentity) {
-            console.log(
-                "[PEER AUTHENTICATION] Unable to normalize expected identity",
-            )
+            log.warning("[PEER AUTH] Unable to normalize expected identity")
             return null
         }
 
@@ -236,30 +228,22 @@ export default async function getPeerIdentity(
                 receivedIdentity,
             )
             if (!isValidChallenge) {
-                console.log(
-                    "[PEER AUTHENTICATION] Challenge-response verification failed - possible spoofing attempt",
-                )
+                log.warning("[PEER AUTH] Challenge-response verification failed - possible spoofing attempt")
                 return null
             }
-            console.log("[PEER AUTHENTICATION] Challenge-response verified successfully")
+            log.debug("[PEER AUTH] Challenge-response verified successfully")
         } else {
             // Log warning but allow connection for backward compatibility
-            console.warn(
-                "[PEER AUTHENTICATION] WARNING: Peer did not provide challenge signature - " +
+            log.warning(
+                "[PEER AUTH] WARNING: Peer did not provide challenge signature - " +
                 "authentication is weaker without challenge-response verification",
             )
         }
 
         if (receivedIdentity === expectedIdentity) {
-            console.log("[PEER AUTHENTICATION] Identity is the expected one")
+            log.debug("[PEER AUTH] Identity is the expected one")
         } else {
-            console.log(
-                "[PEER AUTHENTICATION] Identity is not the expected one",
-            )
-            console.log("Expected: ")
-            console.log(expectedIdentity)
-            console.log("Received: ")
-            console.log(receivedIdentity)
+            log.warning(`[PEER AUTH] Identity mismatch - Expected: ${expectedIdentity}, Received: ${receivedIdentity}`)
             return null
         }
         // Adding the property to the peer
@@ -271,12 +255,7 @@ export default async function getPeerIdentity(
         peer.verification.message = `getPeerIdentity routine verified with challenge-response (challenge: ${challenge.slice(0, 16)}...)`
         peer.verification.timestamp = new Date().getTime()
     } else {
-        console.log(
-            "[PEER AUTHENTICATION] [FAILED] Response " +
-                response.result +
-                " received: " +
-                response.response,
-        )
+        log.warning(`[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`)
         return null
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?

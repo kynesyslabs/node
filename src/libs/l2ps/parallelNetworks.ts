@@ -1,4 +1,5 @@
 import { ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import type { EncryptedTransaction } from "./types"
 import * as forge from "node-forge"
 import fs from "fs"
 import path from "path"

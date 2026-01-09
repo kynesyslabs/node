@@ -1,4 +1,4 @@
-import { ethers } from "ethers"
+import { ethers, namehash, JsonRpcProvider, verifyMessage } from "ethers"
 
 import log from "@/utilities/logger"
 import IdentityManager from "./identityManager"
@@ -208,7 +208,7 @@ export class UDIdentityManager {
         registryType: "UNS" | "CNS",
     ): Promise<UnifiedDomainResolution | null> {
         try {
-            const provider = new ethers.providers.JsonRpcBatchProvider(rpcUrl)
+            const provider = new JsonRpcProvider(rpcUrl)
             const registry = new ethers.Contract(
                 registryAddress,
                 registryAbi,
@@ -281,7 +281,7 @@ export class UDIdentityManager {
         domain: string,
     ): Promise<UnifiedDomainResolution> {
         // Convert domain to tokenId using namehash algorithm
-        const tokenId = ethers.utils.namehash(domain)
+        const tokenId = namehash(domain)
 
         // REFACTORED: Try EVM networks in priority order
         // Network priority: Polygon → Base → Sonic → Ethereum UNS → Ethereum CNS
@@ -345,7 +345,7 @@ export class UDIdentityManager {
             domain,
             UD_RECORD_KEYS,
         )
-        console.log("solanaResult: ", solanaResult)
+        log.debug("solanaResult: " + JSON.stringify(solanaResult))
 
         if (solanaResult.exists) {
             log.debug(
@@ -554,7 +554,7 @@ export class UDIdentityManager {
         try {
             if (authorizedAddress.signatureType === "evm") {
                 // EVM signature verification using ethers
-                const recoveredAddress = ethers.utils.verifyMessage(
+                const recoveredAddress = verifyMessage(
                     signedData,
                     signature,
                 )

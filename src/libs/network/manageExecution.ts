@@ -7,6 +7,7 @@ import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
 import terminalkit from "terminal-kit"
+import log from "src/utilities/logger"
 
 const term = terminalkit.terminal
 
@@ -16,8 +17,8 @@ export async function manageExecution(
 ): Promise<RPCResponse> {
     const returnValue = _.cloneDeep(emptyResponse)
 
-    console.log("[serverListeners] content.type: " + content.type)
-    console.log("[serverListeners] content.extra: " + content.extra)
+    log.debug("[serverListeners] content.type: " + content.type)
+    log.debug("[serverListeners] content.extra: " + content.extra)
 
     // TODO Better to modularize this
     // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
@@ -62,7 +63,7 @@ export async function manageExecution(
                     validityDataPayload,
                     sender,
                 )
-                console.log(
+                log.debug(
                     "[SERVER] Transaction executed. Sending back the result",
                 )
                 // Destructuring the result to get the extra, require_reply and response
@@ -74,7 +75,7 @@ export async function manageExecution(
             } catch (error) {
                 const errorMessage =
                     "[SERVER] Error while handling broadcastTx: " + error
-                console.log(errorMessage)
+                log.error(errorMessage)
                 returnValue.result = 400
                 returnValue.response = "Bad Request"
                 returnValue.extra = errorMessage
@@ -103,7 +104,7 @@ export async function manageExecution(
     }
 
     // Sending back the response
-    console.log("[SERVER] Sending back a response")
+    log.debug("[SERVER] Sending back a response")
     //console.log(return_value)
     return returnValue
 }

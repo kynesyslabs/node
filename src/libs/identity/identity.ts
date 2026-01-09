@@ -24,7 +24,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { wordlist } from "@scure/bip39/wordlists/english"
+import { wordlist } from "@scure/bip39/wordlists/english.js"
 
 const term = terminalkit.terminal
 
@@ -108,6 +108,12 @@ export default class Identity {
      * Converts a mnemonic to a seed.
      * @param mnemonic - The mnemonic of the wallet
      * @returns A 128 bytes seed
+     *
+     * NOTE: This intentionally uses the raw mnemonic string instead of
+     * bip39.mnemonicToSeedSync() to maintain compatibility with the wallet
+     * extension and SDK (demosclass.ts). The SDK's connectWallet function
+     * uses the raw mnemonic string when the mnemonic is valid. This ensures
+     * the node generates the same public key as the wallet for the same mnemonic.
      */
     async mnemonicToSeed(mnemonic: string) {
         mnemonic = mnemonic.trim()
@@ -117,7 +123,8 @@ export default class Identity {
             process.exit(1)
         }
 
-        const hashable = bip39.mnemonicToSeedSync(mnemonic)
+        // Use raw mnemonic string to match wallet/SDK derivation
+        const hashable = mnemonic
         const seedHash = Hashing.sha3_512(hashable)
 
         // remove the 0x prefix

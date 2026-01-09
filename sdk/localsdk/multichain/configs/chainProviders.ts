@@ -13,7 +13,7 @@ export const chainProviders = {
         testnet: "https://testnet-api.multiversx.com",
     },
     solana: {
-        mainnet: "https://api.mainnet-beta.solana.com/",
+        mainnet: "https://britta-qyzo1g-fast-mainnet.helius-rpc.com",
         testnet: "https://api.testnet.solana.com",
         devnet: "https://api.devnet.solana.com",
     },
@@ -33,9 +33,13 @@ export const chainProviders = {
         mainnet: "https://stargaze-rpc.publicnode.com:443",
         testnet: "https://rpc.elgafar-1.stargaze-apis.com",
     },
+    atom: {
+        mainnet: "https://cosmos-rpc.publicnode.com:443",
+        testnet: "https://rpc.provider-sentry-01.ics-testnet.polypore.xyz",
+    },
     near: {
-        mainnet: "https://rpc.near.org",
-        testnet: "https://rpc.testnet.near.org",
+        mainnet: "https://rpc.fastnear.com",
+        testnet: "https://test.rpc.fastnear.com",
     },
     btc: {
         mainnet: "https://blockstream.info/api",
@@ -43,7 +47,7 @@ export const chainProviders = {
     },
     aptos: {
         mainnet: "https://fullnode.mainnet.aptoslabs.com/v1",
-        testnet: "https://fullnode.testnet.aptoslabs.com/v1", 
+        testnet: "https://fullnode.testnet.aptoslabs.com/v1",
         devnet: "https://fullnode.devnet.aptoslabs.com/v1",
     },
 }

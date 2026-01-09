@@ -1,9 +1,17 @@
-import { randomUUID } from "crypto"
-import { Peer } from "@/libs/peer/Peer"
+import Peer from "@/libs/peer/Peer"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { getErrorMessage } from "@/utilities/errorMessage"
+
+// Helper to get peer ID for logging (first 8 chars of identity)
+const getPeerId = (peer: Peer): string => peer.identity?.substring(0, 8) || "unknown"
+
+// Helper to create properly formatted RPC request for nodeCall
+const createNodeCall = (message: string, data: any) => ({
+    method: "nodeCall",
+    params: [{ message, data, muid: null }],
+})
 
 /**
  * Discover which peers participate in specific L2PS UIDs
@@ -44,23 +52,21 @@ export async function discoverL2PSParticipants(
             const promise = (async () => {
                 try {
                     // Query peer for L2PS participation
-                    const response: RPCResponse = await peer.call({
-                        message: "getL2PSParticipationById",
-                        data: { l2psUid },
-                        muid: `discovery_${l2psUid}_${randomUUID()}`,
-                    })
+                    const response: RPCResponse = await peer.call(
+                        createNodeCall("getL2PSParticipationById", { l2psUid })
+                    )
 
                     // If peer participates, add to map
                     if (response.result === 200 && response.response?.participating === true) {
                         const participants = participantMap.get(l2psUid)
                         if (participants) {
                             participants.push(peer)
-                            log.debug(`[L2PS Sync] Peer ${peer.muid} participates in L2PS ${l2psUid}`)
+                            log.debug(`[L2PS Sync] Peer ${getPeerId(peer)} participates in L2PS ${l2psUid}`)
                         }
                     }
                 } catch (error) {
                     // Gracefully handle peer failures (don't break discovery)
-                    log.debug(`[L2PS Sync] Failed to query peer ${peer.muid} for ${l2psUid}: ${getErrorMessage(error)}`)
+                    log.debug(`[L2PS Sync] Failed to query peer ${getPeerId(peer)} for ${l2psUid}: ${getErrorMessage(error)}`)
                 }
             })()
 
@@ -83,14 +89,12 @@ export async function discoverL2PSParticipants(
 }
 
 async function getPeerMempoolInfo(peer: Peer, l2psUid: string): Promise<number> {
-    const infoResponse: RPCResponse = await peer.call({
-        message: "getL2PSMempoolInfo",
-        data: { l2psUid },
-        muid: `sync_info_${l2psUid}_${randomUUID()}`,
-    })
+    const infoResponse: RPCResponse = await peer.call(
+        createNodeCall("getL2PSMempoolInfo", { l2psUid })
+    )
 
     if (infoResponse.result !== 200 || !infoResponse.response) {
-        log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid mempool info for ${l2psUid}`)
+        log.warning(`[L2PS Sync] Peer ${getPeerId(peer)} returned invalid mempool info for ${l2psUid}`)
         return 0
     }
 
@@ -107,17 +111,15 @@ async function getLocalMempoolInfo(l2psUid: string): Promise<{ count: number, la
 }
 
 async function fetchPeerTransactions(peer: Peer, l2psUid: string, sinceTimestamp: any): Promise<any[]> {
-    const txResponse: RPCResponse = await peer.call({
-        message: "getL2PSTransactions",
-        data: {
+    const txResponse: RPCResponse = await peer.call(
+        createNodeCall("getL2PSTransactions", {
             l2psUid,
             since_timestamp: sinceTimestamp,
-        },
-        muid: `sync_txs_${l2psUid}_${randomUUID()}`,
-    })
+        })
+    )
 
     if (txResponse.result !== 200 || !txResponse.response?.transactions) {
-        log.warning(`[L2PS Sync] Peer ${peer.muid} returned invalid transactions for ${l2psUid}`)
+        log.warning(`[L2PS Sync] Peer ${getPeerId(peer)} returned invalid transactions for ${l2psUid}`)
         return []
     }
 
@@ -205,11 +207,11 @@ export async function syncL2PSWithPeer(
     l2psUid: string,
 ): Promise<void> {
     try {
-        log.debug(`[L2PS Sync] Starting sync with peer ${peer.muid} for L2PS ${l2psUid}`)
+        log.debug(`[L2PS Sync] Starting sync with peer ${getPeerId(peer)} for L2PS ${l2psUid}`)
 
         const peerTxCount = await getPeerMempoolInfo(peer, l2psUid)
         if (peerTxCount === 0) {
-            log.debug(`[L2PS Sync] Peer ${peer.muid} has no transactions for ${l2psUid}`)
+            log.debug(`[L2PS Sync] Peer ${getPeerId(peer)} has no transactions for ${l2psUid}`)
             return
         }
 
@@ -217,7 +219,7 @@ export async function syncL2PSWithPeer(
         log.debug(`[L2PS Sync] Local: ${localTxCount} txs, Peer: ${peerTxCount} txs for ${l2psUid}`)
 
         const transactions = await fetchPeerTransactions(peer, l2psUid, localLastTimestamp)
-        log.debug(`[L2PS Sync] Received ${transactions.length} transactions from peer ${peer.muid}`)
+        log.debug(`[L2PS Sync] Received ${transactions.length} transactions from peer ${getPeerId(peer)}`)
 
         if (transactions.length === 0) {
             log.debug("[L2PS Sync] No transactions to process")
@@ -228,7 +230,7 @@ export async function syncL2PSWithPeer(
         log.info(`[L2PS Sync] Sync complete for ${l2psUid}: ${inserted} new, ${duplicates} duplicates`)
 
     } catch (error) {
-        log.error(`[L2PS Sync] Failed to sync with peer ${peer.muid} for ${l2psUid}: ${getErrorMessage(error)}`)
+        log.error(`[L2PS Sync] Failed to sync with peer ${getPeerId(peer)} for ${l2psUid}: ${getErrorMessage(error)}`)
         throw error
     }
 }
@@ -268,16 +270,14 @@ export async function exchangeL2PSParticipation(
         try {
             // Send participation info for each L2PS UID
             for (const l2psUid of l2psUids) {
-                await peer.call({
-                    message: "announceL2PSParticipation",
-                    data: { l2psUid },
-                    muid: `exchange_${l2psUid}_${randomUUID()}`,
-                })
+                await peer.call(
+                    createNodeCall("announceL2PSParticipation", { l2psUid })
+                )
             }
-            log.debug(`[L2PS Sync] Exchanged participation info with peer ${peer.muid}`)
+            log.debug(`[L2PS Sync] Exchanged participation info with peer ${getPeerId(peer)}`)
         } catch (error) {
             // Gracefully handle failures (don't break exchange process)
-            log.debug(`[L2PS Sync] Failed to exchange with peer ${peer.muid}: ${getErrorMessage(error)}`)
+            log.debug(`[L2PS Sync] Failed to exchange with peer ${getPeerId(peer)}: ${getErrorMessage(error)}`)
         }
     })
 

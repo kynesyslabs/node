@@ -87,8 +87,8 @@ export default class L2PSHashes {
                 l2ps_uid: l2psUid,
                 hash: hash,
                 transaction_count: txCount,
-                block_number: blockNumber,
-                timestamp: BigInt(Date.now()),
+                block_number: blockNumber.toString(),
+                timestamp: Date.now().toString(),
             }
 
             // TypeORM's save() performs atomic upsert when entity with primary key exists
@@ -209,8 +209,8 @@ export default class L2PSHashes {
                 0,
             )
 
-            // Find most recent and oldest updates
-            const timestamps = allEntries.map(e => e.timestamp)
+            // Find most recent and oldest updates (timestamps are stored as strings)
+            const timestamps = allEntries.map(e => BigInt(e.timestamp))
             const lastUpdateTime = timestamps.reduce(
                 (max, ts) => ts > max ? ts : max,
                 BigInt(0),
