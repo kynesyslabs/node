@@ -1223,14 +1223,27 @@ export class TUIManager extends EventEmitter {
         term.bgMagenta.white(" ◆ IPFS ")
 
         // Line 5: IPFS status
+        // REVIEW: Enhanced status display with connecting/retrying states (node-jh4)
         term.moveTo(ipfsColumnX, 5)
         if (ipfsStatus) {
             switch (ipfsStatus.status) {
                 case "active":
                     term.bgGreen.black(" ✓ ACTIVE ")
                     break
+                case "connecting":
+                    term.bgYellow.black(" ⋯ CONNECT ")
+                    break
+                case "retrying": {
+                    // Show retry attempt count if available
+                    const retryInfo = ipfsStatus.retryAttempt
+                        ? ` ${ipfsStatus.retryAttempt}/${ipfsStatus.maxRetries ?? "?"}`
+                        : ""
+                    term.bgYellow.black(` ↻ RETRY${retryInfo} `)
+                    break
+                }
                 case "error":
-                    term.bgRed.white(" ✗ ERROR ")
+                    // Only show red ERROR for permanent failures (after retries exhausted)
+                    term.bgRed.white(" ✗ FAILED ")
                     break
                 case "disabled":
                     term.bgGray.white(" - OFF ")

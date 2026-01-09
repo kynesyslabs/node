@@ -87,6 +87,16 @@ export class IPFSManager {
         lastResetTime: Date.now(),
     }
 
+    // REVIEW: Retry configuration for connection resilience (node-jh4)
+    private static readonly RETRY_CONFIG = {
+        maxRetries: 5,
+        initialDelayMs: 1000,
+        maxDelayMs: 30000,
+        backoffMultiplier: 2,
+    }
+    // REVIEW: Verbose logging controlled by environment variable (node-jh4)
+    private readonly verboseLogging: boolean
+
     /**
      * Create a new IPFSManager instance
      *
@@ -103,16 +113,20 @@ export class IPFSManager {
         // REVIEW: Initialize public bridge configuration from environment (Phase 5)
         this.publicBridgeConfig = getPublicBridgeConfigFromEnv()
 
+        // REVIEW: Verbose logging for debugging connection issues (node-jh4)
+        this.verboseLogging = process.env.IPFS_VERBOSE_LOGGING === "true"
+
         this.logDebug(`IPFSManager created with API URL: ${this.apiUrl}`)
     }
 
     /**
-     * Initialize the IPFS manager
+     * Initialize the IPFS manager with retry logic
      *
      * Verifies connection to the Kubo node and caches node information.
+     * Uses exponential backoff for connection retries to handle temporary failures.
      * Should be called once during Demos node startup.
      *
-     * @throws {IPFSConnectionError} If unable to connect to IPFS node
+     * @throws {IPFSConnectionError} If unable to connect after all retries exhausted
      */
     async initialize(): Promise<void> {
         if (this.initialized) {
@@ -122,44 +136,115 @@ export class IPFSManager {
 
         this.logDebug("Initializing IPFSManager...")
 
-        try {
-            // Verify connection by fetching node identity
-            this.cachedNodeInfo = await this.fetchNodeInfo()
-            this.initialized = true
-            this.logDebug(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
+        const { maxRetries, initialDelayMs, maxDelayMs, backoffMultiplier } =
+            IPFSManager.RETRY_CONFIG
 
-            // REVIEW: Phase 9 - Update shared state with IPFS status
-            const { default: SharedState } = await import("@/utilities/sharedState")
-            const peerCount = await this.fetchPeerCount()
-            SharedState.getInstance().ipfsStatus = {
-                status: "active",
-                peerId: this.cachedNodeInfo.peerId,
-                peerCount: peerCount,
-            }
+        // REVIEW: Update status to "connecting" at start (node-jh4)
+        await this.updateSharedStatus("connecting")
 
-            // REVIEW: Log swarm key status (Phase 4)
-            logSwarmKeyStatus()
+        let lastError: Error | null = null
 
-            // If private network is enabled, configure bootstrap nodes
-            if (isPrivateNetworkEnabled()) {
-                log.info("[IPFS] Private network mode enabled")
-                await this.configureBootstrapNodes()
-            }
-        } catch (error) {
-            // REVIEW: Phase 9 - Update shared state with error status
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
-                const { default: SharedState } = await import("@/utilities/sharedState")
-                SharedState.getInstance().ipfsStatus = {
-                    status: "error",
+                // Verify connection by fetching node identity
+                this.cachedNodeInfo = await this.fetchNodeInfo()
+                this.initialized = true
+                this.logDebug(`IPFSManager initialized. Node ID: ${this.cachedNodeInfo.peerId}`)
+
+                // REVIEW: Phase 9 - Update shared state with IPFS status
+                const peerCount = await this.fetchPeerCount()
+                await this.updateSharedStatus("active", {
+                    peerId: this.cachedNodeInfo.peerId,
+                    peerCount: peerCount,
+                })
+
+                // REVIEW: Log swarm key status (Phase 4)
+                logSwarmKeyStatus()
+
+                // If private network is enabled, configure bootstrap nodes
+                if (isPrivateNetworkEnabled()) {
+                    log.info("[IPFS] Private network mode enabled")
+                    await this.configureBootstrapNodes()
                 }
-            } catch {
-                // Ignore errors updating shared state
+
+                // Success - exit retry loop
+                return
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error))
+
+                // REVIEW: Update status to "retrying" with attempt info (node-jh4)
+                await this.updateSharedStatus("retrying", {
+                    retryAttempt: attempt,
+                    maxRetries: maxRetries,
+                    lastError: this.verboseLogging ? lastError.message : undefined,
+                })
+
+                // Log based on verbosity setting
+                if (this.verboseLogging) {
+                    log.warning(
+                        `[IPFS] Connection attempt ${attempt}/${maxRetries} failed: ${lastError.message}`,
+                    )
+                } else if (attempt === 1) {
+                    // Only log once on first failure to avoid log spam
+                    log.info("[IPFS] Connecting to IPFS node (retrying if needed)...")
+                }
+
+                // Don't sleep after last attempt
+                if (attempt < maxRetries) {
+                    const delay = Math.min(
+                        initialDelayMs * Math.pow(backoffMultiplier, attempt - 1),
+                        maxDelayMs,
+                    )
+                    await this.sleep(delay)
+                }
             }
-            throw new IPFSConnectionError(
-                `Failed to initialize IPFS connection to ${this.apiUrl}`,
-                error instanceof Error ? error : undefined,
-            )
         }
+
+        // All retries exhausted - update status to error and throw
+        await this.updateSharedStatus("error", {
+            lastError: this.verboseLogging ? lastError?.message : undefined,
+        })
+
+        // Log final failure
+        log.warning(`[IPFS] Failed to connect after ${maxRetries} attempts`)
+
+        throw new IPFSConnectionError(
+            `Failed to initialize IPFS connection to ${this.apiUrl} after ${maxRetries} attempts`,
+            lastError ?? undefined,
+        )
+    }
+
+    /**
+     * Helper to update shared IPFS status
+     * @internal
+     */
+    private async updateSharedStatus(
+        status: "active" | "connecting" | "retrying" | "error" | "disabled",
+        extra?: {
+            peerId?: string
+            peerCount?: number
+            retryAttempt?: number
+            maxRetries?: number
+            lastError?: string
+        },
+    ): Promise<void> {
+        try {
+            const { getSharedState } = await import("@/utilities/sharedState")
+            getSharedState.ipfsStatus = {
+                status,
+                ...extra,
+            }
+        } catch {
+            // Ignore errors updating shared state
+        }
+    }
+
+    /**
+     * Sleep helper for retry delays
+     * @internal
+     */
+    private sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms))
     }
 
     /**
@@ -188,17 +273,11 @@ export class IPFSManager {
                 timestamp,
             }
 
-            // REVIEW: Phase 9 - Update shared state with IPFS status
-            try {
-                const { default: SharedState } = await import("@/utilities/sharedState")
-                SharedState.getInstance().ipfsStatus = {
-                    status: "active",
-                    peerId: nodeInfo.peerId,
-                    peerCount: peerCount,
-                }
-            } catch {
-                // Ignore errors updating shared state
-            }
+            // REVIEW: Phase 9 - Update shared state with IPFS status (node-jh4)
+            await this.updateSharedStatus("active", {
+                peerId: nodeInfo.peerId,
+                peerCount: peerCount,
+            })
 
             this.lastHealthCheck = status
             return status
@@ -209,15 +288,10 @@ export class IPFSManager {
                 timestamp,
             }
 
-            // REVIEW: Phase 9 - Update shared state with error status
-            try {
-                const { default: SharedState } = await import("@/utilities/sharedState")
-                SharedState.getInstance().ipfsStatus = {
-                    status: "error",
-                }
-            } catch {
-                // Ignore errors updating shared state
-            }
+            // REVIEW: Phase 9 - Update shared state with error status (node-jh4)
+            await this.updateSharedStatus("error", {
+                lastError: status.error,
+            })
 
             this.lastHealthCheck = status
             return status

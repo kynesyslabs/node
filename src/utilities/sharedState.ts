@@ -67,10 +67,17 @@ export default class SharedState {
     tlsnTokenStore: TokenStoreState | null = null
 
     // REVIEW: Phase 9 - IPFS status for TUI display
+    // REVIEW: Enhanced with connecting/retrying states for better UX (node-jh4)
     ipfsStatus: {
-        status: "active" | "error" | "disabled"
+        status: "active" | "connecting" | "retrying" | "error" | "disabled"
         peerId?: string
         peerCount?: number
+        /** Retry attempt count (only set when status is "retrying") */
+        retryAttempt?: number
+        /** Max retry attempts before giving up */
+        maxRetries?: number
+        /** Error message for debugging (only shown if IPFS_VERBOSE_LOGGING is set) */
+        lastError?: string
     } | null = null
 
     // Running as a node (is false when running specific modules like the signaling server)
