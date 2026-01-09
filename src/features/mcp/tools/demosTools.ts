@@ -266,4 +266,3 @@ function createPeerTools(): MCPTool[] {
     ]
 }
 
-export default createDemosNetworkTools

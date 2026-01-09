@@ -1,5 +1,6 @@
 import Datasource from "src/model/datasource"
 import { Transactions } from "src/model/entities/Transactions"
+import log from "src/utilities/logger"
 
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
@@ -32,7 +33,7 @@ export default class SubOperations {
         }
         // NOTE Insert blindly stuff into the GCR if no genesis is present
         // Using the genesis schema it is easy to follow the structure of the genesis file
-        console.log(operation.params)
+        log.debug("Genesis operation params: " + JSON.stringify(operation.params))
         const genesisContent: Genesis = operation.params
         // Let's extract the genesis transaction from the genesis block
         const genesisTx = await Chain.getTransactionFromHash(

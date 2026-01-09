@@ -557,7 +557,7 @@ export class SolanaDomainResolver {
         log.debug("domainProperties: " + JSON.stringify(domainProperties))
 
       } catch (error) {
-        console.error("domainProperties fetch error: ", error)
+        log.error("domainProperties fetch error: " + error)
         return {
           domain,
           exists: false,

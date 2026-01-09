@@ -1,4 +1,5 @@
-import type { BlockContent, EncryptedTransaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent } from "@kynesyslabs/demosdk/types"
+import type { EncryptedTransaction } from "src/libs/l2ps/types"
 import Chain from "src/libs/blockchain/chain"
 import Hashing from "src/libs/crypto/hashing"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"

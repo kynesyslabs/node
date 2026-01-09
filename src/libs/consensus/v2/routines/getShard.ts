@@ -5,17 +5,25 @@ import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 
+/**
+ * Retrieve the current list of online peers.
+ *
+ * @param seed - Seed intended for deterministic shard selection; currently not used and has no effect
+ * @returns An array of peers that are currently considered online
+ */
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
-    const peers = allPeers.filter(peer => peer.sync.status)
+    const peers = allPeers.filter(
+        peer => peer.status.online && peer.sync.status,
+    )
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = getSharedState.shardSize
     if (peers.length < maxShardSize) {
         maxShardSize = peers.length
     }
-    console.log("[getShard] maxShardSize: ", maxShardSize)
+    log.debug("[getShard] maxShardSize: " + maxShardSize)
     const shard: Peer[] = []
     log.custom("last_shard", "Shard seed is: " + seed)
     // getSharedState.lastShardSeed = seed

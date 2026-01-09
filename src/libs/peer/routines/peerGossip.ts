@@ -26,6 +26,7 @@ const maxGossipPeers = 10
  * This function ensures that only one gossip process runs at a time.
  */
 export async function peerGossip() {
+    process.exit(0)
     if (getSharedState.inPeerGossip) return
     getSharedState.inPeerGossip = true
 
@@ -107,7 +108,7 @@ async function peersGossipProcess(
         .filter(response => response.result === 200)
         .map(response => {
             log.debug(
-                "[peerGossip] response: " + JSON.stringify(response, null, 2),
+                "[peerGossip] response: " + JSON.stringify(response),
             )
             return response.response.map((peer: Peer) => {
                 const peerInstance = new Peer()
@@ -225,7 +226,7 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
             log.warning(`[peerGossip] Peer has no identity: ${peer}`)
             continue
         }
-        console.log(`Sending peerlist hash request to ${peer.identity}`)
+        log.debug(`[peerGossip] Sending peerlist hash request to ${peer.identity}`)
         promises.push(peer.call(peerlistHashRequest))
     }
     const responses = await Promise.all(promises)

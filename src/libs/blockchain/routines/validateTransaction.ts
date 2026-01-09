@@ -18,6 +18,7 @@ import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
+import log from "src/utilities/logger"
 import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
@@ -35,11 +36,8 @@ export async function confirmTransaction(
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
     // REVIEW This should work just fine
-    console.log("Signature: ")
-    console.log(tx.signature)
-
-    console.log("[Tx Validation] Examining it\n")
-    console.log(tx)
+    log.debug(`[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`)
+    log.debug(`[TX] confirmTransaction - Examining tx: ${JSON.stringify(tx)}`)
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
         data: {
@@ -101,9 +99,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    console.log(
-        "[Tx Validation] Transaction validity verified, compiling ValidityData\n",
-    )
+    log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
@@ -147,9 +143,7 @@ async function defineGas(
         } else {
             from = forgeToHex(tx.content.from)
         }
-        console.log(
-            "[Native Tx Validation] Calculating gas for: " + from + "\n",
-        )
+        log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
         term.red.bold(
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n",
@@ -244,7 +238,7 @@ async function defineGas(
             additional_fee: 0,
         }, // This is the gas operation so it doesn't have additional fees
     }
-    console.log("[Native Tx Validation] Gas Operation derived\n")
+    log.debug("[TX] defineGas - Gas Operation derived")
     //console.log(gas_operation)
     return [true, gasOperation]
 }

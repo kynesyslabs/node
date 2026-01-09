@@ -3,32 +3,33 @@
 
 import XMParser from "./routines/XMParser"
 import { XMScript } from "@kynesyslabs/demosdk/types"
+import log from "@/utilities/logger"
 
 export default class MultichainDispatcher {
     // INFO Digesting the request from the server
     static async digest(data: XMScript) {
-        console.log("\n\n")
-        console.log("[XM Script full digest]")
-        console.log(data)
-        console.log("Stringed to:")
-        console.log(JSON.stringify(data))
-        console.log("\n\n")
-        console.log("[XMChain Digestion] Processing multichain operation")
-        console.log(data.operations)
-        console.log("\n[XMChain Digestion] Having:")
-        console.log(Object.keys(data.operations).length)
-        console.log("operations")
+        log.debug("\n\n")
+        log.debug("[XM Script full digest]")
+        log.debug(data)
+        log.debug("Stringed to:")
+        log.debug(JSON.stringify(data))
+        log.debug("\n\n")
+        log.debug("[XMChain Digestion] Processing multichain operation")
+        log.debug(data.operations)
+        log.debug("\n[XMChain Digestion] Having:")
+        log.debug(Object.keys(data.operations).length)
+        log.debug("operations")
 
-        console.log("\n===== ANALYSIS ===== \n")
-        console.log("\n===== FUNCTIONS ===== \n")
+        log.debug("\n===== ANALYSIS ===== \n")
+        log.debug("\n===== FUNCTIONS ===== \n")
         for (let i = 0; i < Object.keys(data.operations).length; i++) {
             // Named function
-            console.log(
+            log.debug(
                 "[XMChain Digestion] Found: " + Object.keys(data.operations)[i],
             )
         }
-        console.log("\n===== END OF ANALYSIS ===== \n")
-        console.log("[XMChain Digestion] Proceeding: execution phase")
+        log.debug("\n===== END OF ANALYSIS ===== \n")
+        log.debug("[XMChain Digestion] Proceeding: execution phase")
         // REVIEW Execute
         return await MultichainDispatcher.execute(data)
     }
@@ -41,11 +42,11 @@ export default class MultichainDispatcher {
 
     // INFO Executes a xM Script
     static async execute(script: XMScript) {
-        console.log("[XM EXECUTE]: Script")
-        console.log(JSON.stringify(script))
+        log.debug("[XM EXECUTE]: Script")
+        log.debug(JSON.stringify(script))
         const results = await XMParser.execute(script)
-        console.log("[XM EXECUTE] Successfully executed")
-        console.log(results)
+        log.debug("[XM EXECUTE] Successfully executed")
+        log.debug(results)
 
         const totalOperations = Object.values(results).length
         const failedOperations = Object.values(results).filter(

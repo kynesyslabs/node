@@ -5,6 +5,7 @@ import { ImMessage } from "@/features/InstantMessagingProtocol/old/types/IMSessi
 import Cryptography from "src/libs/crypto/cryptography"
 import { forgeToHex, hexToForge } from "src/libs/crypto/forgeUtils"
 import Hashing from "src/libs/crypto/hashing"
+import log from "src/utilities/logger"
 
 export default async function registerIMPData(
     bundle: ImMessage[],
@@ -25,7 +26,7 @@ export default async function registerIMPData(
             signature,
             message.message.from,
         )
-        console.log(
+        log.warning(
             "[IMPRegistering] Invalid signature for message: " +
                 JSON.stringify(message),
         )

@@ -45,6 +45,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     ton: TON,
     xrpl: XRPL,
     ibc: IBC,
+    atom: IBC,
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
@@ -208,6 +209,7 @@ export default class IdentityManager {
                 chainId === "xrpl" ||
                 chainId === "ton" ||
                 chainId === "ibc" ||
+                chainId === "atom" ||
                 chainId === "near"
             ) {
                 messageVerified = await sdk.verifyMessage(
