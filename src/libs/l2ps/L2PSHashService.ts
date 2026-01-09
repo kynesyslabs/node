@@ -6,6 +6,11 @@ import { getSharedState } from "@/utilities/sharedState"
 import getShard from "@/libs/consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
 import { getErrorMessage } from "@/utilities/errorMessage"
+import { OmniOpcode } from "@/libs/omniprotocol/protocol/opcodes"
+import { ConnectionPool } from "@/libs/omniprotocol/transport/ConnectionPool"
+import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelope"
+import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
+import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
 
 /**
  * L2PS Hash Generation Service
@@ -55,6 +60,12 @@ export class L2PSHashService {
     /** Shared Demos SDK instance for creating transactions */
     private demos: Demos | null = null
 
+    /** OmniProtocol connection pool for efficient TCP communication */
+    private connectionPool: ConnectionPool | null = null
+
+    /** OmniProtocol enabled flag */
+    private omniEnabled: boolean = process.env.OMNI_ENABLED === "true"
+
     /**
      * Get singleton instance of L2PS Hash Service
      * @returns L2PSHashService instance
@@ -98,6 +109,18 @@ export class L2PSHashService {
 
         // Initialize Demos instance once for reuse
         this.demos = new Demos()
+
+        // Initialize OmniProtocol connection pool if enabled
+        if (this.omniEnabled) {
+            this.connectionPool = new ConnectionPool({
+                maxTotalConnections: 50,
+                maxConnectionsPerPeer: 3,
+                idleTimeout: 5 * 60 * 1000, // 5 minutes
+                connectTimeout: 5000,
+                authTimeout: 5000,
+            })
+            log.info("[L2PS Hash Service] OmniProtocol enabled for hash relay")
+        }
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -269,12 +292,12 @@ export class L2PSHashService {
     }
 
     /**
-     * Relay hash update transaction to validators via DTR
-     * 
-     * Uses the same DTR infrastructure as regular transactions but with direct
-     * validator calls instead of mempool dependency. This ensures L2PS hash
-     * updates reach validators without requiring ValidityData caching.
-     * 
+     * Relay hash update transaction to validators via DTR or OmniProtocol
+     *
+     * Uses OmniProtocol when enabled for efficient binary communication,
+     * falls back to HTTP DTR infrastructure if OmniProtocol is disabled
+     * or fails.
+     *
      * @param hashUpdateTx - Signed L2PS hash update transaction
      */
     private async relayToValidators(hashUpdateTx: any): Promise<void> {
@@ -301,6 +324,18 @@ export class L2PSHashService {
             // Try all validators in random order (same pattern as DTR)
             for (const validator of availableValidators) {
                 try {
+                    // Try OmniProtocol first if enabled
+                    if (this.omniEnabled && this.connectionPool) {
+                        const omniSuccess = await this.relayViaOmniProtocol(validator, hashUpdateTx)
+                        if (omniSuccess) {
+                            log.info(`[L2PS Hash Service] Successfully relayed via OmniProtocol to validator ${validator.identity.substring(0, 8)}...`)
+                            return
+                        }
+                        // Fall through to HTTP if OmniProtocol fails
+                        log.debug(`[L2PS Hash Service] OmniProtocol failed for ${validator.identity.substring(0, 8)}..., trying HTTP`)
+                    }
+
+                    // HTTP fallback
                     const result = await validator.call({
                         method: "nodeCall",
                         params: [{
@@ -310,7 +345,7 @@ export class L2PSHashService {
                     }, true)
 
                     if (result.result === 200) {
-                        log.info(`[L2PS Hash Service] Successfully relayed hash update to validator ${validator.identity.substring(0, 8)}...`)
+                        log.info(`[L2PS Hash Service] Successfully relayed hash update via HTTP to validator ${validator.identity.substring(0, 8)}...`)
                         return // Success - one validator accepted is enough
                     }
 
@@ -325,11 +360,89 @@ export class L2PSHashService {
 
             // If we reach here, all validators failed
             throw new Error(`All ${availableValidators.length} validators failed to accept L2PS hash update`)
-            
+
         } catch (error) {
             const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Failed to relay hash update to validators: ${message}`)
             throw error
+        }
+    }
+
+    /**
+     * Relay hash update via OmniProtocol
+     *
+     * Uses the L2PS_HASH_UPDATE opcode (0x77) for efficient binary communication.
+     *
+     * @param validator - Validator peer to relay to
+     * @param hashUpdateTx - Hash update transaction data
+     * @returns true if relay succeeded, false if failed
+     */
+    private async relayViaOmniProtocol(validator: any, hashUpdateTx: any): Promise<boolean> {
+        if (!this.connectionPool) {
+            return false
+        }
+
+        try {
+            // Get node keys for authentication
+            const privateKey = getNodePrivateKey()
+            const publicKey = getNodePublicKey()
+
+            if (!privateKey || !publicKey) {
+                log.warning("[L2PS Hash Service] Node keys not available for OmniProtocol")
+                return false
+            }
+
+            // Convert HTTP URL to TCP connection string
+            const httpUrl = validator.connection?.string || validator.url
+            if (!httpUrl) {
+                return false
+            }
+
+            const url = new URL(httpUrl)
+            const tcpProtocol = process.env.OMNI_TLS_ENABLED === "true" ? "tls" : "tcp"
+            const peerHttpPort = parseInt(url.port) || 80
+            const omniPort = peerHttpPort + 1
+            const tcpConnectionString = `${tcpProtocol}://${url.hostname}:${omniPort}`
+
+            // Prepare L2PS hash update request payload
+            const l2psUid = hashUpdateTx.content?.data?.[0] || hashUpdateTx.l2ps_uid
+            const consolidatedHash = hashUpdateTx.content?.data?.[1] || hashUpdateTx.hash
+            const transactionCount = hashUpdateTx.content?.data?.[2] || 0
+
+            const hashUpdateRequest: L2PSHashUpdateRequest = {
+                l2psUid,
+                consolidatedHash,
+                transactionCount,
+                blockNumber: 0, // Will be filled by validators
+                timestamp: Date.now(),
+            }
+
+            // Encode request as JSON (handlers use JSON envelope)
+            const payload = encodeJsonRequest(hashUpdateRequest)
+
+            // Send authenticated request via OmniProtocol
+            const responseBuffer = await this.connectionPool.sendAuthenticated(
+                validator.identity,
+                tcpConnectionString,
+                OmniOpcode.L2PS_HASH_UPDATE,
+                payload,
+                privateKey,
+                publicKey,
+                { timeout: 10000 }, // 10 second timeout
+            )
+
+            // Check response status (first 2 bytes)
+            if (responseBuffer.length >= 2) {
+                const status = responseBuffer.readUInt16BE(0)
+                return status === 200
+            }
+
+            return false
+
+        } catch (error) {
+            const message = getErrorMessage(error)
+            log.debug(`[L2PS Hash Service] OmniProtocol relay error: ${message}`)
+            return false
         }
     }
 

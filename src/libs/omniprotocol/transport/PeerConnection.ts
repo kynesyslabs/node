@@ -2,7 +2,7 @@
 import log from "src/utilities/logger"
 import { Socket } from "net"
 import forge from "node-forge"
-import { keccak_256 } from "@noble/hashes/sha3.js"
+import { keccak_256 } from "@noble/hashes/sha3"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
 import type { AuthBlock } from "../auth/types"

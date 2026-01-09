@@ -12,7 +12,7 @@
 
 import * as fs from "fs"
 import * as bip39 from "bip39"
-import { wordlist } from "@scure/bip39/wordlists/english.js"
+import { wordlist } from "@scure/bip39/wordlists/english"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import * as dotenv from "dotenv"

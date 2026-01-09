@@ -24,7 +24,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { wordlist } from "@scure/bip39/wordlists/english.js"
+import { wordlist } from "@scure/bip39/wordlists/english"
 
 const term = terminalkit.terminal
 
