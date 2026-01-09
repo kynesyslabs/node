@@ -116,7 +116,6 @@ export default async function manageGCRRoutines(
                         scoreType: options.scoreType,
                         nonce: options.nonce,
                         deadline: options.deadline,
-                        forceRefresh: options.forceRefresh,
                     },
                 )
             } catch (error) {

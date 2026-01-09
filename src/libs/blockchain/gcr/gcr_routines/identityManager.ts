@@ -366,24 +366,4 @@ export default class IdentityManager {
     static async getUDIdentities(address: string) {
         return await this.getIdentities(address, "ud")
     }
-
-    /**
-     * Get the Nomis identities related to a demos address
-     * @param address - The address to get the identities of
-     * @param chain - "evm" | "solana"
-     * @param subchain - "mainnet" | "testnet"
-     * @returns Nomis identities list
-     */
-    static async getNomisIdentities(
-        address: string,
-        chain: string,
-        subchain: string,
-    ) {
-        if (!chain && !subchain) {
-            return null
-        }
-
-        const data = await this.getIdentities(address, "nomis")
-        return (data[chain] || {})[subchain] || []
-    }
 }

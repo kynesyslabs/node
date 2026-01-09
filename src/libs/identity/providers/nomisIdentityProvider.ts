@@ -16,7 +16,6 @@ export type NomisIdentitySummary = NomisWalletIdentity
 export interface NomisImportOptions extends NomisScoreRequestOptions {
     chain?: string
     subchain?: string
-    forceRefresh?: boolean
     signature?: string
     timestamp?: number
 }
@@ -43,12 +42,6 @@ export class NomisIdentityProvider {
         )
 
         if (existing) {
-            if (options.forceRefresh) {
-                log.info(
-                    `[NomisIdentityProvider] Skipping refresh for ${normalizedWallet} (chain=${chain}/${subchain}) until identity removal`,
-                )
-            }
-
             return existing
         }
 
