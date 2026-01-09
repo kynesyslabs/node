@@ -465,7 +465,7 @@ export default class ServerHandlers {
 
                         // TODO: Handle response codes individually
                         DTRManager.validityDataCache.set(
-                            response.extra.peer,
+                            validatedData.data.transaction.hash,
                             validatedData,
                         )
                     }
@@ -477,34 +477,14 @@ export default class ServerHandlers {
                         message: "Transaction relayed to validators",
                     },
                     extra: {
-                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                        confirmationBlock: getSharedState.lastBlockNumber + 1,
                     },
                     require_reply: false,
                 }
             }
 
             if (getSharedState.inConsensusLoop) {
-                log.debug(
-                    "in consensus loop, setting tx in cache: " + queriedTx.hash,
-                )
-                DTRManager.validityDataCache.set(queriedTx.hash, validatedData)
-
-                // INFO: Start the relay waiter
-                if (!DTRManager.isWaitingForBlock) {
-                    log.debug("not waiting for block, starting relay")
-                    DTRManager.waitForBlockThenRelay()
-                }
-
-                return {
-                    success: true,
-                    response: {
-                        message: "Transaction relayed to validators",
-                    },
-                    extra: {
-                        confirmationBlock: getSharedState.lastBlockNumber + 2,
-                    },
-                    require_reply: false,
-                }
+                return await DTRManager.inConsensusHandler(validatedData)
             }
 
             log.debug(
