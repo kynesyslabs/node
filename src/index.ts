@@ -63,6 +63,10 @@ const indexState: {
     TLSNOTARY_ENABLED: boolean
     TLSNOTARY_PORT: number
     tlsnotaryService: any
+    // REVIEW: Prometheus Metrics configuration
+    METRICS_ENABLED: boolean
+    METRICS_PORT: number
+    metricsServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -87,6 +91,10 @@ const indexState: {
     TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
     TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
     tlsnotaryService: null,
+    // REVIEW: Prometheus Metrics defaults - enabled by default
+    METRICS_ENABLED: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
+    METRICS_PORT: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    metricsServer: null,
 }
 
 // SECTION Preparation methods
@@ -548,6 +556,36 @@ async function main() {
         })
     }
 
+    // REVIEW: Start Prometheus Metrics server (enabled by default)
+    if (indexState.METRICS_ENABLED) {
+        try {
+            const { getMetricsServer } = await import("./features/metrics")
+
+            indexState.METRICS_PORT = await getNextAvailablePort(
+                indexState.METRICS_PORT,
+            )
+
+            const metricsServer = getMetricsServer({
+                port: indexState.METRICS_PORT,
+                enabled: true,
+            })
+
+            await metricsServer.start()
+
+            indexState.metricsServer = metricsServer
+            log.info(
+                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+            )
+        } catch (error) {
+            log.error("[METRICS] Failed to start metrics server: " + error)
+            // Continue without metrics (failsafe)
+        }
+    } else {
+        log.info(
+            "[METRICS] Metrics server disabled (set METRICS_ENABLED=true to enable)",
+        )
+    }
+
     // ANCHOR Based on the above methods, we can now start the main loop
     // Checking for listening mode
     if (indexState.peerManager.getPeers().length < 1) {
@@ -828,6 +866,16 @@ async function gracefulShutdown(signal: string) {
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
+            }
+        }
+
+        // REVIEW: Stop Metrics server if running
+        if (indexState.metricsServer) {
+            console.log("[SHUTDOWN] Stopping Metrics server...")
+            try {
+                indexState.metricsServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping Metrics server:", error)
             }
         }
 
