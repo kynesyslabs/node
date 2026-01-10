@@ -51,7 +51,6 @@ import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
-import terminalkit from "terminal-kit"
 import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import {
@@ -72,8 +71,6 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool_v2"
-
-const term = terminalkit.terminal
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -189,7 +186,7 @@ export default class GCR {
             })
             return response ? response.details.content.balance : 0
         } catch (e) {
-            term.yellow("[GET BALANCE] No balance for: " + address + "\n")
+            log.debug("[GET BALANCE] No balance for: " + address)
             return 0
         }
     }
