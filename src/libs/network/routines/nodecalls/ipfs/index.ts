@@ -31,6 +31,8 @@ export { default as ipfsPublicCheck } from "./ipfsPublicCheck"
 export { default as ipfsRateLimitStatus } from "./ipfsRateLimitStatus"
 // REVIEW: Phase 9 - Cost estimation endpoint
 export { default as ipfsQuote } from "./ipfsQuote"
+// REVIEW: DEM-480 - Storage quota check endpoint
+export { default as ipfsQuota } from "./ipfsQuota"
 
 export {
     getIpfsManager,

@@ -254,6 +254,75 @@ export default class GCRIPFSRoutines {
         return pins.some((p) => p.cid === cid)
     }
 
+    // REVIEW: DEM-481 - Update pin for expiration extension
+    /**
+     * Update an existing pin's properties (e.g., extend expiration)
+     *
+     * @param pubkey - Account public key
+     * @param cid - CID of the pin to update
+     * @param updatedPin - Updated pin data (only changed fields need to be provided)
+     * @param repository - Optional repository
+     * @returns Operation result with updated pin data
+     */
+    static async updatePin(
+        pubkey: string,
+        cid: string,
+        updatedPin: Partial<PinnedContent>,
+        repository?: Repository<GCRMain>,
+    ): Promise<OperationResult> {
+        // Use per-pubkey lock to prevent race conditions
+        return withPubkeyLock(pubkey, async () => {
+            const repo = repository ?? (await GCRIPFSRoutines.getRepository())
+
+            try {
+                const account = await repo.findOneBy({ pubkey })
+                if (!account) {
+                    return { success: false, message: "Account not found" }
+                }
+
+                const ipfsState = account.ipfs
+                if (!ipfsState?.pins?.length) {
+                    return { success: false, message: "No pins found" }
+                }
+
+                // Find the pin
+                const pinIndex = ipfsState.pins.findIndex((p) => p.cid === cid)
+                if (pinIndex === -1) {
+                    return { success: false, message: "Pin not found" }
+                }
+
+                // Update the pin with new properties
+                const existingPin = ipfsState.pins[pinIndex]
+                ipfsState.pins[pinIndex] = {
+                    ...existingPin,
+                    ...updatedPin,
+                    cid: existingPin.cid, // CID cannot be changed
+                    size: existingPin.size, // Size cannot be changed
+                }
+
+                ipfsState.lastUpdated = Date.now()
+
+                // Save
+                account.ipfs = ipfsState
+                await repo.save(account)
+
+                log.debug(`[GCRIPFSRoutines] Updated pin ${cid} for ${pubkey}`)
+
+                return {
+                    success: true,
+                    message: "Pin updated",
+                    data: ipfsState.pins[pinIndex],
+                }
+            } catch (error) {
+                log.error(`[GCRIPFSRoutines] Failed to update pin: ${error}`)
+                return {
+                    success: false,
+                    message: error instanceof Error ? error.message : "Unknown error",
+                }
+            }
+        })
+    }
+
     /**
      * Update rewards for an account
      *

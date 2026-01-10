@@ -146,6 +146,11 @@ async function executeSequence(
                 result = await IPFSOperations.ipfsUnpin(operations[i])
                 results.operations.set(operations[i], result)
                 break
+            // REVIEW: DEM-481 - Pin expiration extension
+            case "ipfs_extend_pin":
+                result = await IPFSOperations.ipfsExtendPin(operations[i])
+                results.operations.set(operations[i], result)
+                break
 
             default:
                 valid = false

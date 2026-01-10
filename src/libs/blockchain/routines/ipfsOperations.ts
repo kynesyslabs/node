@@ -21,9 +21,11 @@ import {
     IPFSAddPayload,
     IPFSPinPayload,
     IPFSUnpinPayload,
+    IPFSExtendPinPayload,
     isIPFSAddPayload,
     isIPFSPinPayload,
     isIPFSUnpinPayload,
+    isIPFSExtendPinPayload,
 } from "@kynesyslabs/demosdk/types"
 
 /**
@@ -35,9 +37,18 @@ interface OperationResult extends SDKOperationResult {
         cid?: string
         size?: number
         cost?: string
+        // REVIEW: DEM-481 - Pin expiration fields
+        expiresAt?: number
+        duration?: number
     }
 }
-import { PinnedContent } from "@/model/entities/types/IPFSTypes"
+import {
+    PinnedContent,
+    checkQuota,
+    QuotaTier,
+    validatePinDuration,
+    PinDuration,
+} from "@/model/entities/types/IPFSTypes"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
 import GCRIPFSRoutines from "../gcr/gcr_routines/GCRIPFSRoutines"
@@ -120,6 +131,17 @@ export default class IPFSOperations {
             const isGenesis = await isGenesisAccount(from)
             const ipfsState = await GCRIPFSRoutines.getIPFSState(from)
 
+            // REVIEW: DEM-480 - Consensus-level quota enforcement
+            // This check prevents malicious nodes from bypassing storage limits
+            const tier: QuotaTier = isGenesis ? "genesis" : "regular"
+            const quotaCheck = checkQuota(ipfsState, size, tier)
+            if (!quotaCheck.allowed) {
+                return {
+                    success: false,
+                    message: quotaCheck.errorMessage,
+                }
+            }
+
             const costResult = calculatePinCost(
                 size,
                 isGenesis,
@@ -173,12 +195,29 @@ export default class IPFSOperations {
                 }
             }
 
+            // REVIEW: DEM-481 - Validate pin duration if specified
+            const duration = (addPayload as { duration?: PinDuration }).duration ?? "permanent"
+            const currentTimestamp = Date.now()
+            const durationResult = validatePinDuration(duration, currentTimestamp)
+            if (!durationResult.valid) {
+                return {
+                    success: false,
+                    message: durationResult.errorMessage || "Invalid pin duration",
+                }
+            }
+
+            // REVIEW: DEM-481 - Apply duration pricing multiplier to cost
+            // Shorter durations = lower cost (incentivizes temporary storage)
+            const adjustedCost =
+                (costResult.totalCost * BigInt(Math.round(durationResult.pricingMultiplier * 1000))) /
+                1000n
+
             // REVIEW: Process fee payment (only if cost > 0)
             // Fair pricing: charge actual cost, not the signed maximum
-            if (costResult.totalCost > 0n) {
+            if (adjustedCost > 0n) {
                 const feeResult = await IPFSOperations.processFeePayment(
                     from,
-                    costResult.totalCost,
+                    adjustedCost,
                     operation.hash,
                 )
                 if (!feeResult.success) {
@@ -189,15 +228,18 @@ export default class IPFSOperations {
             // Add content to IPFS
             const cid = await ipfs.add(contentBuffer, addPayload.filename)
 
-            // Create pin record with tokenomics tracking
+            // Create pin record with tokenomics tracking and expiration
             const pin: PinnedContent = {
                 cid,
                 size,
-                timestamp: Date.now(),
+                timestamp: currentTimestamp,
                 metadata: addPayload.metadata,
+                // REVIEW: DEM-481 - Add duration and expiration
+                duration: durationResult.durationSeconds,
+                expiresAt: durationResult.expiresAt,
                 wasFree: costResult.usedFreeTier,
                 freeBytes: costResult.freeBytes,
-                costPaid: costResult.totalCost.toString(),
+                costPaid: adjustedCost.toString(),
             }
 
             // Update account IPFS state
@@ -216,13 +258,19 @@ export default class IPFSOperations {
             }
 
             log.debug(
-                `[IPFSOperations] IPFS_ADD successful: CID=${cid}, size=${size}, cost=${costResult.totalCost}, from=${from}`,
+                `[IPFSOperations] IPFS_ADD successful: CID=${cid}, size=${size}, cost=${adjustedCost}, expiresAt=${durationResult.expiresAt ?? "permanent"}, from=${from}`,
             )
 
             return {
                 success: true,
                 message: "Content added and pinned successfully",
-                data: { cid, size, cost: costResult.totalCost.toString() },
+                data: {
+                    cid,
+                    size,
+                    cost: adjustedCost.toString(),
+                    expiresAt: durationResult.expiresAt,
+                    duration: durationResult.durationSeconds,
+                },
             }
         } catch (error) {
             log.error(`[IPFSOperations] IPFS_ADD failed: ${error}`)
@@ -309,6 +357,17 @@ export default class IPFSOperations {
             const isGenesis = await isGenesisAccount(from)
             const ipfsState = await GCRIPFSRoutines.getIPFSState(from)
 
+            // REVIEW: DEM-480 - Consensus-level quota enforcement
+            // This check prevents malicious nodes from bypassing storage limits
+            const tier: QuotaTier = isGenesis ? "genesis" : "regular"
+            const quotaCheck = checkQuota(ipfsState, size, tier)
+            if (!quotaCheck.allowed) {
+                return {
+                    success: false,
+                    message: quotaCheck.errorMessage,
+                }
+            }
+
             const costResult = calculatePinCost(
                 size,
                 isGenesis,
@@ -353,12 +412,29 @@ export default class IPFSOperations {
                 }
             }
 
+            // REVIEW: DEM-481 - Validate pin duration if specified
+            const duration = (pinPayload.duration as PinDuration) ?? "permanent"
+            const currentTimestamp = Date.now()
+            const durationResult = validatePinDuration(duration, currentTimestamp)
+            if (!durationResult.valid) {
+                return {
+                    success: false,
+                    message: durationResult.errorMessage || "Invalid pin duration",
+                }
+            }
+
+            // REVIEW: DEM-481 - Apply duration pricing multiplier to cost
+            // Shorter durations = lower cost (incentivizes temporary storage)
+            const adjustedCost =
+                (costResult.totalCost * BigInt(Math.round(durationResult.pricingMultiplier * 1000))) /
+                1000n
+
             // REVIEW: Process fee payment (only if cost > 0)
             // Fair pricing: charge actual cost, not the signed maximum
-            if (costResult.totalCost > 0n) {
+            if (adjustedCost > 0n) {
                 const feeResult = await IPFSOperations.processFeePayment(
                     from,
-                    costResult.totalCost,
+                    adjustedCost,
                     operation.hash,
                 )
                 if (!feeResult.success) {
@@ -369,24 +445,18 @@ export default class IPFSOperations {
             // Pin content locally
             await ipfs.pin(pinPayload.cid)
 
-            // Calculate expiration if duration specified
-            let expiresAt: number | undefined
-            if (pinPayload.duration && pinPayload.duration > 0) {
-                // REVIEW: Duration is in blocks for now, convert to timestamp later with block time
-                // For MVP, treat duration as milliseconds from now
-                expiresAt = Date.now() + pinPayload.duration
-            }
-
-            // Create pin record with tokenomics tracking
+            // Create pin record with tokenomics tracking and expiration
             const pin: PinnedContent = {
                 cid: pinPayload.cid,
                 size,
-                timestamp: Date.now(),
+                timestamp: currentTimestamp,
                 metadata: pinPayload.metadata,
-                expiresAt,
+                // REVIEW: DEM-481 - Add duration and expiration
+                duration: durationResult.durationSeconds,
+                expiresAt: durationResult.expiresAt,
                 wasFree: costResult.usedFreeTier,
                 freeBytes: costResult.freeBytes,
-                costPaid: costResult.totalCost.toString(),
+                costPaid: adjustedCost.toString(),
             }
 
             // Update account IPFS state
@@ -403,13 +473,19 @@ export default class IPFSOperations {
             }
 
             log.debug(
-                `[IPFSOperations] IPFS_PIN successful: CID=${pinPayload.cid}, size=${size}, cost=${costResult.totalCost}, from=${from}`,
+                `[IPFSOperations] IPFS_PIN successful: CID=${pinPayload.cid}, size=${size}, cost=${adjustedCost}, expiresAt=${durationResult.expiresAt ?? "permanent"}, from=${from}`,
             )
 
             return {
                 success: true,
                 message: "Content pinned successfully",
-                data: { cid: pinPayload.cid, size, cost: costResult.totalCost.toString() },
+                data: {
+                    cid: pinPayload.cid,
+                    size,
+                    cost: adjustedCost.toString(),
+                    expiresAt: durationResult.expiresAt,
+                    duration: durationResult.durationSeconds,
+                },
             }
         } catch (error) {
             log.error(`[IPFSOperations] IPFS_PIN failed: ${error}`)
@@ -505,6 +581,188 @@ export default class IPFSOperations {
             return {
                 success: false,
                 message: error instanceof Error ? error.message : "IPFS_UNPIN operation failed",
+            }
+        }
+    }
+
+    // REVIEW: DEM-481 - Pin expiration extension
+    /**
+     * Handle IPFS_EXTEND_PIN operation
+     *
+     * Extends the expiration time of an existing pin.
+     * User pays additional cost based on the extension duration and content size.
+     *
+     * Flow:
+     * 1. Validate payload (CID and additionalDuration required)
+     * 2. Verify pin exists in account state
+     * 3. Validate and calculate extension duration
+     * 4. Calculate extension cost (size * duration pricing)
+     * 5. Process payment
+     * 6. Update pin with new expiration
+     *
+     * @param operation - Operation containing IPFS_EXTEND_PIN payload
+     * @returns Operation result with new expiration time
+     */
+    static async ipfsExtendPin(operation: Operation): Promise<OperationResult> {
+        const from = operation.actor
+        const payload = operation.params?.payload as IPFSPayload
+        const transactionAmount = operation.params?.amount ?? 0
+        const customCharges = operation.params?.custom_charges?.ipfs
+
+        // Validate payload structure
+        if (!payload || !isIPFSExtendPinPayload(payload)) {
+            return {
+                success: false,
+                message: "Invalid IPFS_EXTEND_PIN payload: missing or invalid payload structure",
+            }
+        }
+
+        const extendPayload = payload as IPFSExtendPinPayload
+
+        // Validate CID exists
+        if (!extendPayload.cid || extendPayload.cid.length === 0) {
+            return {
+                success: false,
+                message: "Invalid IPFS_EXTEND_PIN payload: CID is required",
+            }
+        }
+
+        // Validate additionalDuration exists
+        if (extendPayload.additionalDuration === undefined) {
+            return {
+                success: false,
+                message: "Invalid IPFS_EXTEND_PIN payload: additionalDuration is required",
+            }
+        }
+
+        try {
+            // Get account's IPFS state and find the pin
+            const ipfsState = await GCRIPFSRoutines.getIPFSState(from)
+            const existingPin = ipfsState.pins.find((p) => p.cid === extendPayload.cid)
+
+            if (!existingPin) {
+                return {
+                    success: false,
+                    message: "Content is not pinned by this account",
+                }
+            }
+
+            // Validate the extension duration
+            const currentTimestamp = Date.now()
+            const durationResult = validatePinDuration(
+                extendPayload.additionalDuration as PinDuration,
+                currentTimestamp,
+            )
+            if (!durationResult.valid) {
+                return {
+                    success: false,
+                    message: durationResult.errorMessage || "Invalid extension duration",
+                }
+            }
+
+            // Calculate the new expiration time
+            let newExpiresAt: number | undefined
+            if (extendPayload.additionalDuration === "permanent") {
+                // Converting to permanent - no expiration
+                newExpiresAt = undefined
+            } else if (existingPin.expiresAt) {
+                // Extend from current expiration (or now if already expired)
+                const baseTime = Math.max(existingPin.expiresAt, currentTimestamp)
+                newExpiresAt = baseTime + durationResult.durationSeconds * 1000
+            } else {
+                // Pin was permanent, now adding expiration (shouldn't normally happen)
+                newExpiresAt = currentTimestamp + durationResult.durationSeconds * 1000
+            }
+
+            // Calculate extension cost based on content size and duration
+            const isGenesis = await isGenesisAccount(from)
+            const costResult = calculatePinCost(
+                existingPin.size,
+                isGenesis,
+                0, // No free tier for extensions
+                0,
+            )
+
+            // Apply duration pricing multiplier
+            const adjustedCost =
+                (costResult.totalCost * BigInt(Math.round(durationResult.pricingMultiplier * 1000))) /
+                1000n
+
+            // Validate payment
+            if (customCharges?.max_cost_dem !== undefined) {
+                const maxCostDem = BigInt(
+                    Math.floor(parseFloat(String(customCharges.max_cost_dem)) * 1e8),
+                )
+                if (adjustedCost > maxCostDem) {
+                    return {
+                        success: false,
+                        message: `Actual cost ${adjustedCost} exceeds signed maximum ${maxCostDem} DEM`,
+                    }
+                }
+            } else {
+                if (!isTransactionAmountSufficient(transactionAmount, adjustedCost)) {
+                    return {
+                        success: false,
+                        message: `Insufficient payment: required ${adjustedCost} DEM, provided ${transactionAmount} DEM`,
+                    }
+                }
+            }
+
+            // Check balance
+            const senderBalance = await GCR.getGCRNativeBalance(from)
+            if (hasInsufficientBalance(BigInt(senderBalance), adjustedCost)) {
+                return {
+                    success: false,
+                    message: `Insufficient balance: required ${adjustedCost} DEM, have ${senderBalance} DEM`,
+                }
+            }
+
+            // Process payment
+            if (adjustedCost > 0n) {
+                const feeResult = await IPFSOperations.processFeePayment(
+                    from,
+                    adjustedCost,
+                    operation.hash,
+                )
+                if (!feeResult.success) {
+                    return feeResult
+                }
+            }
+
+            // Update the pin with new expiration
+            const updatedPin: PinnedContent = {
+                ...existingPin,
+                expiresAt: newExpiresAt,
+                duration: newExpiresAt ? durationResult.durationSeconds : 0,
+            }
+
+            // Update the account state
+            const updateResult = await GCRIPFSRoutines.updatePin(from, extendPayload.cid, updatedPin)
+            if (!updateResult.success) {
+                log.warning(
+                    `[IPFSOperations] IPFS_EXTEND_PIN: Payment processed but state update failed: ${updateResult.message}`,
+                )
+            }
+
+            log.debug(
+                `[IPFSOperations] IPFS_EXTEND_PIN successful: CID=${extendPayload.cid}, newExpiresAt=${newExpiresAt ?? "permanent"}, cost=${adjustedCost}, from=${from}`,
+            )
+
+            return {
+                success: true,
+                message: "Pin expiration extended successfully",
+                data: {
+                    cid: extendPayload.cid,
+                    cost: adjustedCost.toString(),
+                    expiresAt: newExpiresAt,
+                    duration: durationResult.durationSeconds,
+                },
+            }
+        } catch (error) {
+            log.error(`[IPFSOperations] IPFS_EXTEND_PIN failed: ${error}`)
+            return {
+                success: false,
+                message: error instanceof Error ? error.message : "IPFS_EXTEND_PIN operation failed",
             }
         }
     }

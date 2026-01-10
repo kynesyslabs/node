@@ -88,6 +88,15 @@ export {
     IPFS_ERROR_CODES,
 } from "./errors"
 
+// REVIEW: DEM-481 - Pin Expiration Worker
+export {
+    ExpirationWorker,
+    getExpirationWorker,
+    startExpirationWorker,
+    stopExpirationWorker,
+} from "./ExpirationWorker"
+export type { ExpirationWorkerConfig, ExpirationStats } from "./ExpirationWorker"
+
 // =========================================================================
 // Factory Functions
 // =========================================================================

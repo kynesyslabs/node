@@ -53,6 +53,8 @@ import {
     ipfsRateLimitStatus,
     // REVIEW: Phase 9 - Cost estimation
     ipfsQuote,
+    // REVIEW: DEM-480 - Storage quota check
+    ipfsQuota,
 } from "./routines/nodecalls/ipfs"
 import {
     hexToUint8Array,
@@ -575,6 +577,10 @@ export async function manageNodeCall(content: NodeCall, sender?: string): Promis
         // REVIEW: Phase 9 - Cost estimation endpoint
         case "ipfsQuote":
             return await ipfsQuote(data, sender)
+
+        // REVIEW: DEM-480 - Storage quota check endpoint
+        case "ipfsQuota":
+            return await ipfsQuota(data)
 
         // =========================================================================
         // REVIEW: TLSNotary Operations
