@@ -18,3 +18,9 @@ export {
     getMetricsServer,
     type MetricsServerConfig,
 } from "./MetricsServer"
+
+export {
+    MetricsCollector,
+    getMetricsCollector,
+    type MetricsCollectorConfig,
+} from "./MetricsCollector"

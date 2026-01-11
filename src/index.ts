@@ -559,7 +559,9 @@ async function main() {
     // REVIEW: Start Prometheus Metrics server (enabled by default)
     if (indexState.METRICS_ENABLED) {
         try {
-            const { getMetricsServer } = await import("./features/metrics")
+            const { getMetricsServer, getMetricsCollector } = await import(
+                "./features/metrics"
+            )
 
             indexState.METRICS_PORT = await getNextAvailablePort(
                 indexState.METRICS_PORT,
@@ -576,6 +578,16 @@ async function main() {
             log.info(
                 `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
             )
+
+            // REVIEW: Start metrics collector for live data gathering
+            const metricsCollector = getMetricsCollector({
+                enabled: true,
+                collectionIntervalMs: 5000, // 5 seconds
+                dockerHealthEnabled: true,
+                portHealthEnabled: true,
+            })
+            await metricsCollector.start()
+            log.info("[METRICS] Metrics collector started")
         } catch (error) {
             log.error("[METRICS] Failed to start metrics server: " + error)
             // Continue without metrics (failsafe)

@@ -89,7 +89,7 @@ export class PointSystem {
             }
         }
 
-        let linkedNomis: NomisWalletIdentity[] = []
+        const linkedNomis: NomisWalletIdentity[] = []
 
         if (identities?.nomis) {
             const nomisChains = Object.keys(identities.nomis)
