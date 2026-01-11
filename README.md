@@ -151,6 +151,37 @@ After installation, configure your node by editing:
 - `.env`: Core node settings including network endpoints
 - `demos_peerlist.json`: Known peer connections for network participation
 
+## Network Ports
+
+The following ports must be open for the node to function properly.
+
+> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+
+### Required Ports
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 53550 | TCP | Node RPC API |
+| 53551 | TCP/UDP | OmniProtocol P2P communication |
+| 7047 | TCP | TLSNotary server |
+| 55000-60000 | TCP/UDP | WebSocket proxy for TLSNotary |
+
+### Optional Ports
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 9090 | TCP | Metrics endpoint (monitoring) |
+| 9091 | TCP | Prometheus server (monitoring stack) |
+| 3000 | TCP | Grafana dashboard (monitoring stack) |
+| 5332 | TCP | PostgreSQL (local only, do not expose externally) |
+
+**Firewall example (ufw):**
+```bash
+# Required
+sudo ufw allow 53550/tcp        # Node RPC
+sudo ufw allow 53551            # OmniProtocol (TCP+UDP)
+sudo ufw allow 7047/tcp         # TLSNotary
+sudo ufw allow 55000:60000      # TLSNotary WS proxy (TCP+UDP)
+```
+
 ## Security
 
 The Demos Network node implements multiple layers of security:

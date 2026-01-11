@@ -416,19 +416,23 @@ bun install
 
 ## 🌐 Network Information
 
-### Core Ports
+> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+
+### Required Ports
 | Port | Service | Description |
 |------|---------|-------------|
 | 53550 | Node RPC | Main node API endpoint |
-| 53551 | OmniProtocol | P2P communication |
-| 5332 | PostgreSQL | Database (local only) |
+| 53551 | OmniProtocol | P2P communication (TCP+UDP) |
+| 7047 | TLSNotary | TLSNotary server |
+| 55000-60000 | WS Proxy | WebSocket proxy for TLSNotary (TCP+UDP) |
 
-### Monitoring Ports (optional)
+### Optional Ports
 | Port | Service | Description |
 |------|---------|-------------|
 | 9090 | Metrics | Node Prometheus metrics endpoint |
 | 9091 | Prometheus | Prometheus server (monitoring stack) |
 | 3000 | Grafana | Dashboard UI (monitoring stack) |
+| 5332 | PostgreSQL | Database (local only, do not expose) |
 
 -   Logs directory: `logs_53550_demos_identity/`
 -   Configuration: `.env` and `demos_peerlist.json`
