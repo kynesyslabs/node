@@ -107,7 +107,7 @@ export class MetricsService {
 
         this.initialized = true
         log.info(
-            `[METRICS] MetricsService initialized on port ${this.config.port}`,
+            `[METRICS] MetricsService initialized (configured port: ${this.config.port})`,
         )
     }
 

@@ -789,7 +789,7 @@ if [ "$TLSNOTARY_DISABLED" != "true" ]; then
             log_verbose "Waiting for TLSNotary to be healthy..."
             TLSN_TIMEOUT=15
             TLSN_COUNT=0
-            while ! curl -sf "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
+            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
                 TLSN_COUNT=$((TLSN_COUNT+1))
                 if [ $TLSN_COUNT -gt $TLSN_TIMEOUT ]; then
                     echo "⚠️  Warning: TLSNotary health check timeout"
@@ -836,7 +836,7 @@ if [ "$MONITORING_DISABLED" != "true" ]; then
             GRAFANA_TIMEOUT=30
             GRAFANA_COUNT=0
             GRAFANA_PORT="${GRAFANA_PORT:-3000}"
-            while ! curl -sf "http://localhost:$GRAFANA_PORT/api/health" > /dev/null 2>&1; do
+            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$GRAFANA_PORT/api/health" > /dev/null 2>&1; do
                 GRAFANA_COUNT=$((GRAFANA_COUNT+1))
                 if [ $GRAFANA_COUNT -gt $GRAFANA_TIMEOUT ]; then
                     echo "⚠️  Warning: Grafana health check timeout"
