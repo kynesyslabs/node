@@ -1,0 +1,375 @@
+---
+title: "Error Handling"
+description: "IPFS error types, codes, and handling"
+---
+
+# Error Handling
+
+Comprehensive guide to IPFS error handling.
+
+## Error Hierarchy
+
+```
+IPFSError (base)
+├── IPFSConnectionError
+├── IPFSTimeoutError
+├── IPFSNotFoundError
+├── IPFSInvalidCIDError
+└── IPFSAPIError
+```
+
+## Error Classes
+
+### IPFSError
+
+Base class for all IPFS errors.
+
+```typescript
+class IPFSError extends Error {
+  code: string
+  cause?: Error
+
+  constructor(message: string, code: string, cause?: Error)
+}
+```
+
+### IPFSConnectionError
+
+Thrown when the IPFS daemon is unreachable.
+
+```typescript
+class IPFSConnectionError extends IPFSError {
+  // code: "IPFS_CONNECTION_ERROR"
+}
+
+// Example
+throw new IPFSConnectionError(
+  "Cannot connect to IPFS daemon at localhost:54550"
+)
+```
+
+**Common Causes:**
+- IPFS container not running
+- Wrong port configuration
+- Network issues
+- Container startup delay
+
+### IPFSTimeoutError
+
+Thrown when an operation exceeds timeout.
+
+```typescript
+class IPFSTimeoutError extends IPFSError {
+  timeoutMs: number
+  // code: "IPFS_TIMEOUT_ERROR"
+}
+
+// Example
+throw new IPFSTimeoutError("get", 30000)
+// "IPFS operation 'get' timed out after 30000ms"
+```
+
+**Common Causes:**
+- Large file operations
+- Network congestion
+- Content not available
+- Slow peers
+
+### IPFSNotFoundError
+
+Thrown when content is not found.
+
+```typescript
+class IPFSNotFoundError extends IPFSError {
+  cid: string
+  // code: "IPFS_NOT_FOUND"
+}
+
+// Example
+throw new IPFSNotFoundError("QmInvalidOrMissing...")
+// "Content not found for CID: QmInvalidOrMissing..."
+```
+
+**Common Causes:**
+- Content never existed
+- Content unpinned everywhere
+- Garbage collected
+- CID typo
+
+### IPFSInvalidCIDError
+
+Thrown when CID format is invalid.
+
+```typescript
+class IPFSInvalidCIDError extends IPFSError {
+  cid: string
+  // code: "IPFS_INVALID_CID"
+}
+
+// Example
+throw new IPFSInvalidCIDError("not-a-valid-cid")
+// "Invalid CID format: not-a-valid-cid"
+```
+
+**Valid CID Formats:**
+- CIDv0: `Qm[base58]{44}` (46 chars total)
+- CIDv1: `bafy[base32]{50+}`
+
+### IPFSAPIError
+
+Thrown when Kubo API returns an error.
+
+```typescript
+class IPFSAPIError extends IPFSError {
+  statusCode?: number
+  apiMessage?: string
+  // code: "IPFS_API_ERROR"
+}
+
+// Example
+throw new IPFSAPIError("pin failed", 500, "already pinned")
+```
+
+## Error Codes
+
+| Code | Description | Recoverable |
+|------|-------------|-------------|
+| `IPFS_CONNECTION_ERROR` | Daemon unreachable | Retry with backoff |
+| `IPFS_TIMEOUT_ERROR` | Operation timeout | Retry, increase timeout |
+| `IPFS_NOT_FOUND` | Content not found | No |
+| `IPFS_INVALID_CID` | Bad CID format | No (fix input) |
+| `IPFS_API_ERROR` | Kubo error | Depends on cause |
+| `IPFS_QUOTA_EXCEEDED` | Account limit | No (unpin or upgrade) |
+| `IPFS_ALREADY_PINNED` | Duplicate pin | No (already done) |
+| `IPFS_PIN_NOT_FOUND` | Pin doesn't exist | No |
+| `IPFS_INVALID_DURATION` | Bad duration | No (fix input) |
+| `INSUFFICIENT_BALANCE` | No funds | No (add funds) |
+
+## CID Validation
+
+### Valid Formats
+
+```typescript
+// CIDv0 - starts with Qm, 46 characters
+const cidv0Pattern = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/
+
+// CIDv1 - starts with bafy/bafk/bafz/bafb
+const cidv1Pattern = /^(bafy|bafk|bafz|bafb)[a-z2-7]{50,}$/
+```
+
+### Validation Function
+
+```typescript
+function isValidCID(cid: string): boolean {
+  if (!cid || typeof cid !== "string") {
+    return false
+  }
+
+  // CIDv0: Qm + 44 base58 characters
+  if (cid.startsWith("Qm") && cid.length === 46) {
+    return /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/.test(cid)
+  }
+
+  // CIDv1: bafy/bafk/bafz/bafb prefix
+  if (/^(bafy|bafk|bafz|bafb)/.test(cid)) {
+    return /^(bafy|bafk|bafz|bafb)[a-z2-7]{50,}$/.test(cid)
+  }
+
+  return false
+}
+```
+
+## Input Validation
+
+### Numeric Validation
+
+All numeric inputs are checked for:
+
+```typescript
+function validateNumericInput(value: number, field: string): void {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    throw new Error(`${field} must be a valid number`)
+  }
+
+  if (value < 0) {
+    throw new Error(`${field} cannot be negative`)
+  }
+
+  if (!Number.isFinite(value)) {
+    throw new Error(`${field} must be finite`)
+  }
+}
+```
+
+### Duration Validation
+
+```typescript
+function validateDuration(duration: PinDuration): void {
+  if (duration === "permanent") return
+
+  const presets = ["week", "month", "quarter", "year"]
+  if (typeof duration === "string" && presets.includes(duration)) {
+    return
+  }
+
+  if (typeof duration === "number") {
+    if (duration < 86400) {
+      throw new Error("Duration must be at least 1 day (86400 seconds)")
+    }
+    if (duration > 315360000) {
+      throw new Error("Duration cannot exceed 10 years")
+    }
+    return
+  }
+
+  throw new Error("Invalid duration format")
+}
+```
+
+## Error Handling Examples
+
+### Basic Try-Catch
+
+```typescript
+try {
+  const result = await client.ipfsAdd({
+    content: data,
+    duration: "month"
+  })
+} catch (error) {
+  if (error instanceof IPFSQuotaExceededError) {
+    console.error("Storage limit reached. Unpin some content.")
+  } else if (error instanceof IPFSConnectionError) {
+    console.error("IPFS service unavailable. Retrying...")
+    await retry(() => client.ipfsAdd({ content: data }))
+  } else {
+    throw error
+  }
+}
+```
+
+### Retry with Backoff
+
+```typescript
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  maxRetries: number = 5
+): Promise<T> {
+  let lastError: Error
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error
+
+      // Only retry connection/timeout errors
+      if (error instanceof IPFSConnectionError ||
+          error instanceof IPFSTimeoutError) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 30000)
+        await sleep(delay)
+        continue
+      }
+
+      // Don't retry other errors
+      throw error
+    }
+  }
+
+  throw lastError
+}
+```
+
+### Error Response Handling
+
+```typescript
+const response = await client.ipfsAdd(params)
+
+if (response.error) {
+  switch (response.error.code) {
+    case "IPFS_QUOTA_EXCEEDED":
+      const { current, limit } = response.error.details
+      console.log(`Quota: ${current}/${limit} bytes`)
+      break
+
+    case "INSUFFICIENT_BALANCE":
+      const { required, available } = response.error.details
+      console.log(`Need ${required} DEM, have ${available}`)
+      break
+
+    default:
+      console.error(response.error.message)
+  }
+}
+```
+
+## Best Practices
+
+### Validate Before Sending
+
+```typescript
+function prepareIPFSAdd(content: string, duration?: PinDuration) {
+  // Validate content
+  if (!content || content.length === 0) {
+    throw new Error("Content cannot be empty")
+  }
+
+  // Validate size (16 MB limit for NodeCalls)
+  const size = Buffer.from(content, "base64").length
+  if (size > 16 * 1024 * 1024) {
+    throw new Error("Content exceeds 16 MB limit. Use streaming.")
+  }
+
+  // Validate duration
+  if (duration) {
+    validateDuration(duration)
+  }
+
+  return { content, duration }
+}
+```
+
+### Check Quota Before Large Operations
+
+```typescript
+async function safeAdd(address: string, content: string) {
+  const size = Buffer.from(content, "base64").length
+
+  // Check quota first
+  const quota = await client.ipfsQuota({ address })
+  if (quota.availableBytes < size) {
+    throw new Error(`Insufficient quota: need ${size}, have ${quota.availableBytes}`)
+  }
+
+  // Check balance
+  const quote = await client.ipfsQuote({ size, address })
+  const balance = await client.getBalance(address)
+  if (BigInt(balance) < BigInt(quote.cost)) {
+    throw new Error(`Insufficient balance: need ${quote.cost} DEM`)
+  }
+
+  // Proceed with add
+  return client.ipfsAdd({ content })
+}
+```
+
+### Log Errors Appropriately
+
+```typescript
+function handleIPFSError(error: Error, context: object) {
+  if (error instanceof IPFSError) {
+    logger.error({
+      code: error.code,
+      message: error.message,
+      ...context,
+      cause: error.cause?.message
+    })
+  } else {
+    logger.error({
+      message: error.message,
+      stack: error.stack,
+      ...context
+    })
+  }
+}
+```

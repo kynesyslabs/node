@@ -1,0 +1,304 @@
+---
+title: "Configuration"
+description: "IPFS environment variables and settings"
+---
+
+# Configuration
+
+Complete reference for IPFS configuration options.
+
+## Environment Variables
+
+### Core Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `IPFS_API_PORT` | `54550` | Kubo HTTP API port |
+| `IPFS_VERBOSE_LOGGING` | `false` | Enable debug logging |
+
+### Private Network
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMOS_IPFS_SWARM_KEY` | Built-in | 64-char hex swarm key |
+| `LIBP2P_FORCE_PNET` | `1` | Force private network mode |
+| `DEMOS_IPFS_PUBLIC_MODE` | `false` | Join public IPFS instead |
+| `DEMOS_IPFS_BOOTSTRAP_NODES` | - | Comma-separated multiaddrs |
+
+### Peer Management
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMOS_IPFS_MAX_PEERS` | `100` | Maximum peer connections |
+| `DEMOS_IPFS_MIN_PEERS` | `4` | Minimum peers to maintain |
+
+### Public Bridge
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMOS_IPFS_PUBLIC_BRIDGE_ENABLED` | `false` | Enable public gateway access |
+| `DEMOS_IPFS_PUBLIC_GATEWAY` | `https://ipfs.io` | Primary gateway URL |
+| `DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH` | `false` | Allow publishing to public |
+| `DEMOS_IPFS_PUBLIC_TIMEOUT` | `30000` | Gateway timeout (ms) |
+| `DEMOS_IPFS_PUBLIC_MAX_REQUESTS` | `30` | Max requests per minute |
+| `DEMOS_IPFS_PUBLIC_MAX_BYTES` | `104857600` | Max bytes per minute (100 MB) |
+
+## Docker Configuration
+
+### docker-compose.yml
+
+```yaml
+services:
+  ipfs:
+    image: ipfs/kubo:v0.26.0
+    container_name: ipfs_${PORT:-53550}
+    environment:
+      IPFS_PROFILE: server
+      IPFS_GATEWAY_WRITABLE: "false"
+      LIBP2P_FORCE_PNET: "1"
+    ports:
+      - "4001:4001"      # Swarm (TCP/UDP)
+      - "54550:5001"     # API
+      - "58080:8080"     # Gateway (optional)
+    volumes:
+      - ./data_${PORT:-53550}/ipfs:/data/ipfs
+      - ./init-ipfs.sh:/container-init.d/init-ipfs.sh:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ipfs", "id"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+### Port Mapping
+
+| Internal | External | Purpose |
+|----------|----------|---------|
+| 4001 | 4001 | Swarm (P2P) |
+| 5001 | 54550 | HTTP API |
+| 8080 | 58080 | Gateway |
+
+### Volume Structure
+
+```
+data_53550/
+└── ipfs/
+    ├── blocks/        # Content storage
+    ├── datastore/     # Internal database
+    ├── keystore/      # Node keys
+    └── swarm.key      # Private network key
+```
+
+## Initialization Script
+
+### init-ipfs.sh
+
+```bash
+#!/bin/bash
+set -e
+
+# Initialize IPFS if needed
+if [ ! -f /data/ipfs/config ]; then
+  ipfs init --profile=server
+fi
+
+# Write swarm key for private network
+cat > /data/ipfs/swarm.key << 'EOF'
+/key/swarm/psk/1.0.0/
+/base16/
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+EOF
+
+# Clear default bootstrap for private network
+ipfs bootstrap rm --all
+
+# Add custom bootstrap if configured
+if [ -n "$DEMOS_IPFS_BOOTSTRAP_NODES" ]; then
+  IFS=',' read -ra NODES <<< "$DEMOS_IPFS_BOOTSTRAP_NODES"
+  for node in "${NODES[@]}"; do
+    ipfs bootstrap add "$node" || true
+  done
+fi
+
+# Configure API access
+ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001
+ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080
+
+# Set connection limits
+ipfs config --json Swarm.ConnMgr.LowWater ${DEMOS_IPFS_MIN_PEERS:-4}
+ipfs config --json Swarm.ConnMgr.HighWater ${DEMOS_IPFS_MAX_PEERS:-100}
+
+echo "IPFS initialized successfully"
+```
+
+## Constants
+
+### Quota Limits
+
+```typescript
+const IPFS_QUOTA_LIMITS = {
+  regular: {
+    maxPinnedBytes: 1_073_741_824,   // 1 GB
+    maxPinCount: 1_000
+  },
+  genesis: {
+    maxPinnedBytes: 10_737_418_240,  // 10 GB
+    maxPinCount: 10_000
+  },
+  premium: {
+    maxPinnedBytes: 107_374_182_400, // 100 GB
+    maxPinCount: 100_000
+  }
+}
+```
+
+### Pricing
+
+```typescript
+// Regular accounts
+const REGULAR_MIN_COST = 1n              // 1 DEM minimum
+const REGULAR_BYTES_PER_UNIT = 104857600 // 100 MB
+
+// Genesis accounts
+const GENESIS_FREE_BYTES = 1073741824    // 1 GB free
+const GENESIS_BYTES_PER_UNIT = 1073741824 // 1 GB per DEM
+
+// Duration multipliers
+const PIN_DURATION_PRICING = {
+  week: 0.10,
+  month: 0.25,
+  quarter: 0.50,
+  year: 0.80,
+  permanent: 1.00
+}
+```
+
+### Durations
+
+```typescript
+const PIN_DURATION_SECONDS = {
+  permanent: 0,
+  week: 604_800,
+  month: 2_592_000,
+  quarter: 7_776_000,
+  year: 31_536_000
+}
+
+const MIN_CUSTOM_DURATION = 86_400       // 1 day
+const MAX_CUSTOM_DURATION = 315_360_000  // 10 years
+```
+
+### Timeouts
+
+```typescript
+const DEFAULT_TIMEOUT = 30_000           // 30 seconds
+const STREAM_TIMEOUT_MULTIPLIER = 10     // 10x for streaming
+const STREAM_CHUNK_SIZE = 262_144        // 256 KB
+```
+
+### Expiration Worker
+
+```typescript
+const EXPIRATION_CHECK_INTERVAL = 3_600_000   // 1 hour
+const EXPIRATION_GRACE_PERIOD = 86_400_000    // 24 hours
+const EXPIRATION_BATCH_SIZE = 100
+```
+
+## Example Configurations
+
+### Development
+
+```bash
+# .env.development
+PORT=53550
+IPFS_API_PORT=54550
+IPFS_VERBOSE_LOGGING=true
+DEMOS_IPFS_PUBLIC_MODE=true  # Use public IPFS for testing
+```
+
+### Production (Private Network)
+
+```bash
+# .env.production
+PORT=53550
+IPFS_API_PORT=54550
+IPFS_VERBOSE_LOGGING=false
+LIBP2P_FORCE_PNET=1
+DEMOS_IPFS_BOOTSTRAP_NODES=/ip4/prod1.demos.network/tcp/4001/p2p/QmPeer1,/ip4/prod2.demos.network/tcp/4001/p2p/QmPeer2
+DEMOS_IPFS_MAX_PEERS=200
+DEMOS_IPFS_MIN_PEERS=10
+```
+
+### With Public Bridge
+
+```bash
+# Enable public gateway access
+DEMOS_IPFS_PUBLIC_BRIDGE_ENABLED=true
+DEMOS_IPFS_PUBLIC_GATEWAY=https://ipfs.io
+DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH=false
+DEMOS_IPFS_PUBLIC_MAX_REQUESTS=60
+DEMOS_IPFS_PUBLIC_MAX_BYTES=209715200  # 200 MB
+```
+
+### Custom Swarm Key (Test Network)
+
+```bash
+# Generate with: openssl rand -hex 32
+DEMOS_IPFS_SWARM_KEY=abc123...your64characterhexkey...
+DEMOS_IPFS_BOOTSTRAP_NODES=/ip4/testnet.local/tcp/4001/p2p/QmTestPeer
+```
+
+## Troubleshooting
+
+### Check IPFS Status
+
+```bash
+# Container status
+docker ps | grep ipfs
+
+# IPFS health
+docker exec ipfs_53550 ipfs id
+
+# Peer count
+docker exec ipfs_53550 ipfs swarm peers | wc -l
+
+# Repo stats
+docker exec ipfs_53550 ipfs repo stat
+```
+
+### View Logs
+
+```bash
+# Docker logs
+docker logs ipfs_53550 --tail 100 -f
+
+# Filter errors
+docker logs ipfs_53550 2>&1 | grep -i error
+```
+
+### Reset IPFS
+
+```bash
+# Stop container
+docker stop ipfs_53550
+
+# Remove data (WARNING: deletes all content)
+rm -rf data_53550/ipfs
+
+# Restart
+docker start ipfs_53550
+```
+
+### Connection Issues
+
+```bash
+# Check firewall
+sudo ufw status | grep 4001
+
+# Test connectivity
+nc -zv node.demos.network 4001
+
+# Check swarm key
+docker exec ipfs_53550 cat /data/ipfs/swarm.key
+```
