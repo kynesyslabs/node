@@ -829,13 +829,13 @@ if [ "$MONITORING_DISABLED" != "true" ]; then
         else
             echo "✅ Monitoring stack started"
             echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
-            echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3001} (admin/demos)"
+            echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
 
             # Wait for Grafana to be healthy (max 30 seconds)
             log_verbose "Waiting for Grafana to be healthy..."
             GRAFANA_TIMEOUT=30
             GRAFANA_COUNT=0
-            GRAFANA_PORT="${GRAFANA_PORT:-3001}"
+            GRAFANA_PORT="${GRAFANA_PORT:-3000}"
             while ! curl -sf "http://localhost:$GRAFANA_PORT/api/health" > /dev/null 2>&1; do
                 GRAFANA_COUNT=$((GRAFANA_COUNT+1))
                 if [ $GRAFANA_COUNT -gt $GRAFANA_TIMEOUT ]; then

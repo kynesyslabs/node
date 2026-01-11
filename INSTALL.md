@@ -416,8 +416,20 @@ bun install
 
 ## 🌐 Network Information
 
--   Default node port: 53550
--   Default database port: 5332
+### Core Ports
+| Port | Service | Description |
+|------|---------|-------------|
+| 53550 | Node RPC | Main node API endpoint |
+| 53551 | OmniProtocol | P2P communication |
+| 5332 | PostgreSQL | Database (local only) |
+
+### Monitoring Ports (optional)
+| Port | Service | Description |
+|------|---------|-------------|
+| 9090 | Metrics | Node Prometheus metrics endpoint |
+| 9091 | Prometheus | Prometheus server (monitoring stack) |
+| 3000 | Grafana | Dashboard UI (monitoring stack) |
+
 -   Logs directory: `logs_53550_demos_identity/`
 -   Configuration: `.env` and `demos_peerlist.json`
 

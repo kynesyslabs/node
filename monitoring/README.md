@@ -52,7 +52,7 @@ Create a `.env` file in the monitoring directory or export these variables:
 | `GRAFANA_PORT` | `3000` | Grafana external port |
 | `GRAFANA_ADMIN_USER` | `admin` | Grafana admin username |
 | `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password |
-| `GRAFANA_ROOT_URL` | `http://localhost:3001` | Public Grafana URL |
+| `GRAFANA_ROOT_URL` | `http://localhost:3000` | Public Grafana URL |
 | `NODE_EXPORTER_PORT` | `9100` | Node Exporter port (full profile) |
 
 ### Example `.env` file
