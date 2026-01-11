@@ -1,0 +1,492 @@
+# OmniProtocol Rate Limiting
+
+## Overview
+
+OmniProtocol includes a comprehensive rate limiting system to protect against denial-of-service (DoS) attacks and resource exhaustion.
+
+## Features
+
+- **Per-IP connection limits**: Maximum concurrent connections per IP
+- **Per-IP request limits**: Maximum requests per second per IP
+- **Per-identity request limits**: Maximum requests per second per authenticated identity
+- **Automatic blocking**: Temporary blocks on limit violations
+- **Sliding window algorithm**: Accurate rate measurement
+- **Automatic cleanup**: Memory-efficient entry management
+
+## Rate Limiter Configuration
+
+```typescript
+interface RateLimitConfig {
+    enabled: boolean                       // Enable rate limiting (default: true)
+    maxConnectionsPerIP: number            // Max connections per IP (default: 10)
+    maxRequestsPerSecondPerIP: number      // Max req/s per IP (default: 100)
+    maxRequestsPerSecondPerIdentity: number // Max req/s per identity (default: 200)
+    windowMs: number                       // Rate window size (default: 1000 ms)
+    entryTTL: number                       // Entry expiry time (default: 60000 ms)
+    cleanupInterval: number                // Cleanup frequency (default: 10000 ms)
+}
+```
+
+### Default Configuration
+
+```typescript
+const DEFAULT_CONFIG: RateLimitConfig = {
+    enabled: true,
+    maxConnectionsPerIP: 10,
+    maxRequestsPerSecondPerIP: 100,
+    maxRequestsPerSecondPerIdentity: 200,
+    windowMs: 1000,
+    entryTTL: 60000,
+    cleanupInterval: 10000
+}
+```
+
+## Usage
+
+### Creating Rate Limiter
+
+```typescript
+import { RateLimiter } from "./ratelimit/RateLimiter"
+
+const rateLimiter = new RateLimiter({
+    enabled: true,
+    maxConnectionsPerIP: 10,
+    maxRequestsPerSecondPerIP: 100,
+    maxRequestsPerSecondPerIdentity: 200
+})
+```
+
+### Checking Connection Limits
+
+```typescript
+const result = rateLimiter.checkConnection(ipAddress)
+
+if (!result.allowed) {
+    console.log(`Connection denied: ${result.reason}`)
+    socket.destroy()
+    return
+}
+
+// Allow connection
+rateLimiter.addConnection(ipAddress)
+```
+
+### Checking Request Limits
+
+```typescript
+// IP-based check (for unauthenticated requests)
+const ipResult = rateLimiter.checkIPRequest(ipAddress)
+if (!ipResult.allowed) {
+    return sendErrorResponse(0xf429, ipResult.reason)
+}
+
+// Identity-based check (for authenticated requests)
+const identityResult = rateLimiter.checkIdentityRequest(peerIdentity)
+if (!identityResult.allowed) {
+    return sendErrorResponse(0xf429, identityResult.reason)
+}
+```
+
+### Managing Connections
+
+```typescript
+// Register new connection
+rateLimiter.addConnection(ipAddress)
+
+// Unregister on disconnect
+rateLimiter.removeConnection(ipAddress)
+```
+
+## Rate Limit Result
+
+```typescript
+interface RateLimitResult {
+    allowed: boolean        // Whether request is allowed
+    reason?: string         // Reason for denial
+    currentCount: number    // Current count
+    limit: number          // Maximum allowed
+    resetIn?: number       // Time until reset (ms)
+}
+```
+
+### Result Examples
+
+```typescript
+// Allowed request
+{
+    allowed: true,
+    currentCount: 45,
+    limit: 100,
+    resetIn: 750
+}
+
+// Denied - rate limit exceeded
+{
+    allowed: false,
+    reason: "Rate limit exceeded for ip (max 100 requests per second)",
+    currentCount: 100,
+    limit: 100,
+    resetIn: 60000
+}
+
+// Denied - temporarily blocked
+{
+    allowed: false,
+    reason: "IP temporarily blocked",
+    currentCount: 10,
+    limit: 10,
+    resetIn: 45000
+}
+```
+
+## Sliding Window Algorithm
+
+The rate limiter uses a sliding window algorithm for accurate rate measurement.
+
+```
+Window: 1 second (1000 ms)
+────────────────────────────────────────────────────────
+                        NOW
+                         │
+    │◄────── Window ────►│
+    │                    │
+────┼────────────────────┼────────────────────────────────
+    │                    │
+Timestamps: [t1, t2, t3, t4, t5, t6, ...]
+                ↑
+           Only count timestamps within window
+```
+
+### Implementation
+
+```typescript
+private checkRequest(key: string, type: RateLimitType, maxRequests: number): RateLimitResult {
+    const entry = this.getOrCreateEntry(key, type)
+    const now = Date.now()
+    const windowStart = now - this.config.windowMs
+
+    // Remove timestamps outside current window (sliding)
+    entry.timestamps = entry.timestamps.filter(ts => ts > windowStart)
+
+    // Check if limit exceeded
+    if (entry.timestamps.length >= maxRequests) {
+        entry.blocked = true
+        entry.blockExpiry = now + 60000  // Block for 1 minute
+        return {
+            allowed: false,
+            reason: `Rate limit exceeded for ${type}`,
+            currentCount: entry.timestamps.length,
+            limit: maxRequests,
+            resetIn: 60000
+        }
+    }
+
+    // Add current timestamp
+    entry.timestamps.push(now)
+
+    return {
+        allowed: true,
+        currentCount: entry.timestamps.length,
+        limit: maxRequests
+    }
+}
+```
+
+## Rate Limit Types
+
+```typescript
+enum RateLimitType {
+    IP = "ip",           // Track by IP address
+    IDENTITY = "identity" // Track by authenticated identity
+}
+```
+
+### IP-Based Limiting
+
+Applied to all connections and requests, regardless of authentication status.
+
+- **Connection limit**: Maximum concurrent connections per IP
+- **Request limit**: Maximum requests per second per IP
+
+### Identity-Based Limiting
+
+Applied to authenticated requests only, using the verified peer identity.
+
+- **Request limit**: Maximum requests per second per authenticated identity
+
+### Why Both?
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Request Flow                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐             │
+│  │  Incoming   │───▶│ IP Rate     │───▶│ Auth Check  │             │
+│  │  Request    │    │ Limit       │    │             │             │
+│  └─────────────┘    └──────┬──────┘    └──────┬──────┘             │
+│                            │                   │                    │
+│                            │                   ▼                    │
+│                            │           ┌─────────────┐             │
+│                            │           │ Identity    │             │
+│                            │           │ Rate Limit  │             │
+│                            │           └──────┬──────┘             │
+│                            │                   │                    │
+│                            ▼                   ▼                    │
+│                     ┌─────────────────────────────┐                 │
+│                     │      Process Request        │                 │
+│                     └─────────────────────────────┘                 │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+Why both limits?
+1. IP limit catches attackers before expensive auth verification
+2. Identity limit prevents authenticated users from overloading system
+3. Separate limits allow trusted identities higher request rates
+```
+
+## Blocking Behavior
+
+### Automatic Blocking
+
+When limits are exceeded, the IP or identity is automatically blocked:
+
+```typescript
+if (entry.timestamps.length >= maxRequests) {
+    entry.blocked = true
+    entry.blockExpiry = now + 60000  // 1 minute block
+}
+```
+
+### Block Expiry
+
+Blocks automatically expire after the configured duration:
+
+```typescript
+// Check if block expired
+if (entry.blocked && entry.blockExpiry && now >= entry.blockExpiry) {
+    entry.blocked = false
+    entry.blockExpiry = undefined
+    entry.timestamps = []  // Reset counters
+}
+```
+
+### Manual Blocking
+
+Administrators can manually block IPs or identities:
+
+```typescript
+// Block for 1 hour
+rateLimiter.blockKey("192.168.1.100", RateLimitType.IP, 3600000)
+
+// Unblock manually
+rateLimiter.unblockKey("192.168.1.100", RateLimitType.IP)
+```
+
+## Entry Management
+
+### Rate Limit Entry
+
+```typescript
+interface RateLimitEntry {
+    timestamps: number[]    // Request timestamps in current window
+    connections: number     // Active connection count
+    lastAccess: number      // Last access time (for cleanup)
+    blocked: boolean        // Currently blocked?
+    blockExpiry?: number    // When block expires
+}
+```
+
+### Automatic Cleanup
+
+Expired entries are periodically removed to prevent memory growth:
+
+```typescript
+private cleanup(): void {
+    const now = Date.now()
+    const expiry = now - this.config.entryTTL
+
+    // Clean IP entries with no connections and old access
+    for (const [ip, entry] of this.ipLimits.entries()) {
+        if (entry.lastAccess < expiry && entry.connections === 0) {
+            this.ipLimits.delete(ip)
+        }
+    }
+
+    // Clean identity entries with old access
+    for (const [identity, entry] of this.identityLimits.entries()) {
+        if (entry.lastAccess < expiry) {
+            this.identityLimits.delete(identity)
+        }
+    }
+}
+```
+
+## Statistics
+
+```typescript
+interface RateLimitStats {
+    ipEntries: number          // Number of tracked IPs
+    identityEntries: number    // Number of tracked identities
+    blockedIPs: number         // Currently blocked IPs
+    blockedIdentities: number  // Currently blocked identities
+}
+
+const stats = rateLimiter.getStats()
+console.log(`Tracked IPs: ${stats.ipEntries}`)
+console.log(`Blocked IPs: ${stats.blockedIPs}`)
+```
+
+## Server Integration
+
+### In OmniProtocolServer
+
+```typescript
+class OmniProtocolServer extends EventEmitter {
+    private rateLimiter: RateLimiter
+
+    constructor(config: Partial<ServerConfig> = {}) {
+        this.rateLimiter = new RateLimiter(config.rateLimit ?? { enabled: true })
+    }
+
+    private handleNewConnection(socket: Socket): void {
+        const ipAddress = socket.remoteAddress || "unknown"
+
+        // Check connection limit
+        const result = this.rateLimiter.checkConnection(ipAddress)
+        if (!result.allowed) {
+            socket.destroy()
+            this.emit("rate_limit_exceeded", ipAddress, result)
+            return
+        }
+
+        // Register connection
+        this.rateLimiter.addConnection(ipAddress)
+
+        // Setup disconnect handler
+        socket.on("close", () => {
+            this.rateLimiter.removeConnection(ipAddress)
+        })
+
+        // Continue with connection handling...
+    }
+}
+```
+
+### In Dispatcher
+
+```typescript
+async function dispatchOmniMessage(options: DispatchOptions): Promise<Buffer> {
+    const ipAddress = options.context.remoteAddress
+
+    // Check IP rate limit
+    const ipResult = rateLimiter.checkIPRequest(ipAddress)
+    if (!ipResult.allowed) {
+        throw new OmniProtocolError(ipResult.reason, 0xf429)
+    }
+
+    // If authenticated, check identity limit
+    if (options.context.isAuthenticated) {
+        const idResult = rateLimiter.checkIdentityRequest(options.context.peerIdentity)
+        if (!idResult.allowed) {
+            throw new OmniProtocolError(idResult.reason, 0xf429)
+        }
+    }
+
+    // Continue with message handling...
+}
+```
+
+## Error Response
+
+When rate limits are exceeded, the server responds with error code `0xf429`:
+
+```typescript
+const RATE_LIMIT_ERROR = 0xf429  // Too Many Requests (HTTP 429 equivalent)
+```
+
+Response format:
+```typescript
+{
+    status: 429,
+    error: "Rate limit exceeded",
+    message: "Rate limit exceeded for ip (max 100 requests per second)",
+    resetIn: 60000
+}
+```
+
+## Environment Variables
+
+```bash
+OMNI_RATE_LIMIT_ENABLED=true
+OMNI_MAX_CONNECTIONS_PER_IP=10
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IP=100
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY=200
+```
+
+## Best Practices
+
+### Tuning Limits
+
+```typescript
+// Development: Relaxed limits
+const devConfig = {
+    maxConnectionsPerIP: 100,
+    maxRequestsPerSecondPerIP: 1000,
+    maxRequestsPerSecondPerIdentity: 2000
+}
+
+// Production: Strict limits
+const prodConfig = {
+    maxConnectionsPerIP: 10,
+    maxRequestsPerSecondPerIP: 100,
+    maxRequestsPerSecondPerIdentity: 200
+}
+```
+
+### Monitoring
+
+```typescript
+// Log rate limit events
+server.on("rate_limit_exceeded", (ip, result) => {
+    logger.warn(`Rate limit: ${ip} - ${result.reason}`)
+    metrics.increment("omni.rate_limit.exceeded", { ip })
+})
+
+// Periodic stats logging
+setInterval(() => {
+    const stats = rateLimiter.getStats()
+    logger.info(`Rate limit stats: ${JSON.stringify(stats)}`)
+}, 60000)
+```
+
+### Graceful Shutdown
+
+```typescript
+// Stop cleanup timer
+rateLimiter.stop()
+```
+
+## Security Considerations
+
+### IP Spoofing
+
+Rate limiting by IP is effective for TCP connections since IP spoofing is difficult for established connections.
+
+### Proxy/NAT Considerations
+
+Users behind shared IPs (NAT, proxies) may hit limits faster. Consider:
+- Higher per-IP limits for known proxy ranges
+- Identity-based limits for authenticated users
+
+### Distributed Attacks
+
+For distributed attacks (DDoS), consider:
+- External rate limiting (load balancer, CDN)
+- IP reputation services
+- Adaptive rate limiting based on traffic patterns
+
+## Related Documentation
+
+- [06_Server_Architecture.mdx](./06_Server_Architecture.mdx) - Server integration
+- [09_Configuration.mdx](./09_Configuration.mdx) - Configuration options
