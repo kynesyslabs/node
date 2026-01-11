@@ -150,10 +150,12 @@ export class MetricsService {
             "Total messages received",
             ["type"],
         )
+        // REVIEW: Peer latency histogram - no peer_id label to avoid cardinality explosion
+        // Use aggregated latency across all peers; individual peer debugging should use logs
         this.createHistogram(
             "peer_latency_seconds",
-            "Peer communication latency",
-            ["peer_id"],
+            "Peer communication latency (aggregated across all peers)",
+            [], // No labels to prevent unbounded cardinality
             [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
         )
 
