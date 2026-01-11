@@ -43,11 +43,17 @@ The node will expose metrics at `http://localhost:9090/metrics`.
 
 ### Environment Variables
 
+**Important Port Distinction:**
+- `METRICS_PORT` (default `9090`): Configured in the **main project `.env`** file - this is the port where your Demos node exposes its metrics
+- `PROMETHEUS_PORT` (default `9091`): Configured in `monitoring/.env` - this is the Prometheus server's external port
+
+If you change `METRICS_PORT` in your main `.env` file, you must also update the scrape target in `prometheus/prometheus.yml` to match.
+
 Create a `.env` file in the monitoring directory or export these variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROMETHEUS_PORT` | `9091` | Prometheus external port |
+| `PROMETHEUS_PORT` | `9091` | Prometheus server external port (not the node metrics port!) |
 | `PROMETHEUS_RETENTION` | `15d` | Data retention period |
 | `GRAFANA_PORT` | `3000` | Grafana external port |
 | `GRAFANA_ADMIN_USER` | `admin` | Grafana admin username |
@@ -187,7 +193,7 @@ scrape_configs:
 
 1. Check if node metrics are enabled:
    ```bash
-   curl http://localhost:3333/metrics
+   curl http://localhost:9090/metrics
    ```
 
 2. Verify Prometheus can reach the node:

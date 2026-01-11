@@ -1,7 +1,11 @@
 # REVIEW: Prometheus configuration for Demos Network node monitoring
 #
+# IMPORTANT: Port Distinction
+# - METRICS_PORT (default 9090): The Demos node's metrics endpoint (configured in main .env)
+# - PROMETHEUS_PORT (default 9091): This Prometheus server's external port (configured in monitoring/.env)
+#
 # Scrape configuration for collecting metrics from:
-# - Demos node metrics endpoint (port 9090)
+# - Demos node metrics endpoint (default port 9090, configurable via METRICS_PORT in main .env)
 # - Node Exporter (optional, port 9100)
 # - Prometheus self-monitoring
 
@@ -30,10 +34,12 @@ scrape_configs:
     metrics_path: /metrics
 
   # Demos Network Node metrics
-  # The node exposes metrics on port 9090 at /metrics endpoint
+  # The node exposes metrics at /metrics endpoint on METRICS_PORT (default 9090)
+  # NOTE: If you changed METRICS_PORT in your main .env file, update the target below to match
+  # For example, if METRICS_PORT=3333, change the target to 'host.docker.internal:3333'
   - job_name: 'demos-node'
     static_configs:
-      - targets: ['host.docker.internal:9090']
+      - targets: ['host.docker.internal:9090']  # Must match METRICS_PORT from main .env
         labels:
           instance: 'local-node'
           environment: 'development'
