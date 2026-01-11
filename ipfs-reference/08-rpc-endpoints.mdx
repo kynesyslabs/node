@@ -1,0 +1,572 @@
+---
+title: "RPC Endpoints"
+description: "Complete IPFS RPC API reference"
+---
+
+# RPC Endpoints
+
+Complete reference for all IPFS-related RPC endpoints.
+
+## Content Operations
+
+### ipfs_add
+
+Add content to IPFS and pin it to your account.
+
+```typescript
+// Request
+{
+  method: "ipfs_add",
+  params: {
+    content: string,        // Base64-encoded content
+    filename?: string,      // Optional filename
+    duration?: PinDuration, // Pin duration (default: "permanent")
+    metadata?: object       // Optional metadata
+  }
+}
+
+// Response
+{
+  cid: string,
+  size: number,
+  cost: string,
+  expiresAt?: number,
+  duration?: number
+}
+```
+
+### ipfs_get
+
+Retrieve content by CID.
+
+```typescript
+// Request
+{
+  method: "ipfs_get",
+  params: {
+    cid: string  // Content Identifier
+  }
+}
+
+// Response
+{
+  content: string,  // Base64-encoded content
+  size: number
+}
+```
+
+### ipfs_pin
+
+Pin existing content to your account.
+
+```typescript
+// Request
+{
+  method: "ipfs_pin",
+  params: {
+    cid: string,
+    duration?: PinDuration,
+    metadata?: object
+  }
+}
+
+// Response
+{
+  cid: string,
+  size: number,
+  cost: string,
+  expiresAt?: number
+}
+```
+
+### ipfs_unpin
+
+Remove a pin from your account.
+
+```typescript
+// Request
+{
+  method: "ipfs_unpin",
+  params: {
+    cid: string
+  }
+}
+
+// Response
+{
+  cid: string,
+  unpinned: true
+}
+```
+
+### ipfs_list_pins
+
+List all CIDs pinned on this node.
+
+```typescript
+// Request
+{
+  method: "ipfs_list_pins",
+  params: {}
+}
+
+// Response
+{
+  pins: string[]  // Array of CIDs
+}
+```
+
+### ipfs_pins
+
+List pins for a specific account.
+
+```typescript
+// Request
+{
+  method: "ipfs_pins",
+  params: {
+    address: string  // Demos address
+  }
+}
+
+// Response
+{
+  pins: PinnedContent[]
+}
+
+// PinnedContent
+{
+  cid: string,
+  size: number,
+  timestamp: number,
+  expiresAt?: number,
+  duration?: number,
+  metadata?: object,
+  costPaid?: string
+}
+```
+
+## Streaming Operations
+
+### ipfs_add_stream
+
+Stream upload for large files.
+
+```typescript
+// Request
+{
+  method: "ipfs_add_stream",
+  params: {
+    chunks: string[],       // Array of base64 chunks
+    filename?: string,
+    duration?: PinDuration,
+    metadata?: object
+  }
+}
+
+// Response
+{
+  cid: string,
+  size: number,
+  cost: string,
+  expiresAt?: number
+}
+```
+
+**Configuration:**
+- Chunk size: 256 KB recommended
+- Timeout: 10x normal (300s default)
+
+### ipfs_get_stream
+
+Stream download for large files.
+
+```typescript
+// Request
+{
+  method: "ipfs_get_stream",
+  params: {
+    cid: string,
+    chunkSize?: number  // Bytes per chunk (default: 262144)
+  }
+}
+
+// Response (streamed)
+{
+  chunk: string,     // Base64-encoded chunk
+  index: number,     // Chunk index
+  total: number,     // Total chunks
+  done: boolean      // Last chunk flag
+}
+```
+
+## Status & Quota
+
+### ipfs_status
+
+Get IPFS node health status.
+
+```typescript
+// Request
+{
+  method: "ipfs_status",
+  params: {}
+}
+
+// Response
+{
+  healthy: boolean,
+  peerId: string,
+  peerCount: number,
+  repoSize: number,
+  version: string,
+  timestamp: number
+}
+```
+
+### ipfs_quota
+
+Get account storage quota.
+
+```typescript
+// Request
+{
+  method: "ipfs_quota",
+  params: {
+    address: string
+  }
+}
+
+// Response
+{
+  tier: "regular" | "genesis" | "premium",
+  usedBytes: number,
+  maxBytes: number,
+  availableBytes: number,
+  usedPins: number,
+  maxPins: number,
+  availablePins: number,
+  freeAllocation: number,
+  usedFreeBytes: number,
+  remainingFreeBytes: number,
+  percentUsed: number
+}
+```
+
+### ipfs_quote
+
+Get cost estimate for an operation.
+
+```typescript
+// Request
+{
+  method: "ipfs_quote",
+  params: {
+    size: number,           // Content size in bytes
+    duration?: PinDuration, // Pin duration
+    address: string         // Account address
+  }
+}
+
+// Response
+{
+  cost: string,
+  durationSeconds: number,
+  multiplier: number,
+  withinFreeTier: boolean,
+  freeBytes: number,
+  chargeableBytes: number
+}
+```
+
+## Swarm Management
+
+### ipfs_swarm_peers
+
+List connected IPFS peers.
+
+```typescript
+// Request
+{
+  method: "ipfs_swarm_peers",
+  params: {}
+}
+
+// Response
+{
+  peers: Peer[]
+}
+
+// Peer
+{
+  peerId: string,
+  multiaddrs: string[],
+  latency?: string,
+  direction: "inbound" | "outbound"
+}
+```
+
+### ipfs_swarm_connect
+
+Connect to a specific peer.
+
+```typescript
+// Request
+{
+  method: "ipfs_swarm_connect",
+  params: {
+    multiaddr: string  // e.g., "/ip4/1.2.3.4/tcp/4001/p2p/QmPeer..."
+  }
+}
+
+// Response
+{
+  connected: true,
+  peerId: string
+}
+```
+
+### ipfs_swarm_disconnect
+
+Disconnect from a peer.
+
+```typescript
+// Request
+{
+  method: "ipfs_swarm_disconnect",
+  params: {
+    peerId: string
+  }
+}
+
+// Response
+{
+  disconnected: true
+}
+```
+
+### ipfs_bootstrap_list
+
+List bootstrap nodes.
+
+```typescript
+// Request
+{
+  method: "ipfs_bootstrap_list",
+  params: {}
+}
+
+// Response
+{
+  nodes: string[]  // Multiaddresses
+}
+```
+
+### ipfs_demos_peers
+
+List Demos network peers with IPFS info.
+
+```typescript
+// Request
+{
+  method: "ipfs_demos_peers",
+  params: {}
+}
+
+// Response
+{
+  peers: DemosPeer[]
+}
+
+// DemosPeer
+{
+  demosAddress: string,
+  ipfsPeerId?: string,
+  ipfsMultiaddrs?: string[],
+  connected: boolean
+}
+```
+
+### ipfs_cluster_pin
+
+Pin content across multiple nodes.
+
+```typescript
+// Request
+{
+  method: "ipfs_cluster_pin",
+  params: {
+    cid: string,
+    replicationFactor?: number  // Target node count
+  }
+}
+
+// Response
+{
+  cid: string,
+  pinnedOn: string[],  // Peer IDs
+  errors: ClusterError[]
+}
+
+// ClusterError
+{
+  peerId: string,
+  error: string
+}
+```
+
+## Public Bridge
+
+### ipfs_public_fetch
+
+Fetch content from public IPFS gateway.
+
+```typescript
+// Request
+{
+  method: "ipfs_public_fetch",
+  params: {
+    cid: string,
+    gateway?: string  // Override gateway URL
+  }
+}
+
+// Response
+{
+  content: string,  // Base64-encoded
+  size: number,
+  gateway: string   // Gateway used
+}
+```
+
+### ipfs_public_publish
+
+Publish content to public IPFS network.
+
+```typescript
+// Request
+{
+  method: "ipfs_public_publish",
+  params: {
+    cid: string
+  }
+}
+
+// Response
+{
+  published: boolean,
+  cid: string,
+  gateways: string[]  // Where published
+}
+```
+
+**Note:** Requires `DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH=true`
+
+### ipfs_public_check
+
+Check if content is available on public IPFS.
+
+```typescript
+// Request
+{
+  method: "ipfs_public_check",
+  params: {
+    cid: string,
+    gateways?: string[]  // Gateways to check
+  }
+}
+
+// Response
+{
+  cid: string,
+  available: boolean,
+  gateways: GatewayStatus[]
+}
+
+// GatewayStatus
+{
+  url: string,
+  available: boolean,
+  latency?: number
+}
+```
+
+### ipfs_rate_limit_status
+
+Get public bridge rate limit status.
+
+```typescript
+// Request
+{
+  method: "ipfs_rate_limit_status",
+  params: {}
+}
+
+// Response
+{
+  requestsUsed: number,
+  requestsLimit: number,
+  bytesUsed: number,
+  bytesLimit: number,
+  resetAt: number,  // Unix timestamp
+  throttled: boolean
+}
+```
+
+## Error Responses
+
+All endpoints may return errors:
+
+```typescript
+{
+  error: {
+    code: string,
+    message: string,
+    details?: object
+  }
+}
+```
+
+### Common Error Codes
+
+| Code | Description |
+|------|-------------|
+| `IPFS_INVALID_CID` | Malformed CID format |
+| `IPFS_NOT_FOUND` | Content not found |
+| `IPFS_QUOTA_EXCEEDED` | Storage limit reached |
+| `IPFS_CONNECTION_ERROR` | Cannot reach IPFS daemon |
+| `IPFS_TIMEOUT_ERROR` | Operation timed out |
+| `IPFS_ALREADY_PINNED` | Already pinned by account |
+| `IPFS_PIN_NOT_FOUND` | Pin doesn't exist |
+| `INSUFFICIENT_BALANCE` | Not enough DEM |
+| `INVALID_DURATION` | Invalid pin duration |
+
+## Type Definitions
+
+### PinDuration
+
+```typescript
+type PinDuration =
+  | "permanent"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | number  // Custom seconds (86400 - 315360000)
+```
+
+### PinnedContent
+
+```typescript
+interface PinnedContent {
+  cid: string
+  size: number
+  timestamp: number
+  expiresAt?: number
+  duration?: number
+  metadata?: object
+  wasFree?: boolean
+  freeBytes?: number
+  costPaid?: string
+}
+```
