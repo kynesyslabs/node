@@ -1,0 +1,431 @@
+# OmniProtocol Serialization
+
+## Overview
+
+OmniProtocol uses binary serialization for efficient data encoding. The serialization layer provides primitives for encoding/decoding basic types and higher-level structures for message payloads.
+
+## Primitive Types
+
+All multi-byte integers use **big-endian** (network) byte order.
+
+### Type Reference
+
+| Type | Size | Range | Encoding |
+|------|------|-------|----------|
+| `uint8` | 1 byte | 0-255 | Direct |
+| `uint16` | 2 bytes | 0-65535 | Big-endian |
+| `uint32` | 4 bytes | 0-4294967295 | Big-endian |
+| `uint64` | 8 bytes | 0-2^64-1 | Big-endian |
+| `boolean` | 1 byte | true/false | 0x00=false, 0x01=true |
+| `string` | 2 + n bytes | UTF-8 | Length-prefixed (uint16) |
+| `bytes` | 2 + n bytes | Raw bytes | Length-prefixed (uint16) |
+| `varBytes` | 4 + n bytes | Raw bytes | Length-prefixed (uint32) |
+
+## PrimitiveEncoder
+
+Encodes values to binary buffers.
+
+```typescript
+class PrimitiveEncoder {
+    static encodeUInt8(value: number): Buffer
+    static encodeUInt16(value: number): Buffer
+    static encodeUInt32(value: number): Buffer
+    static encodeUInt64(value: bigint | number): Buffer
+    static encodeBoolean(value: boolean): Buffer
+    static encodeString(value: string): Buffer
+    static encodeBytes(data: Buffer): Buffer
+    static encodeVarBytes(data: Buffer): Buffer
+}
+```
+
+### Usage Examples
+
+```typescript
+import { PrimitiveEncoder } from "./serialization/primitives"
+
+// Encode integers
+const u8 = PrimitiveEncoder.encodeUInt8(255)        // [0xFF]
+const u16 = PrimitiveEncoder.encodeUInt16(1000)     // [0x03, 0xE8]
+const u32 = PrimitiveEncoder.encodeUInt32(100000)   // [0x00, 0x01, 0x86, 0xA0]
+const u64 = PrimitiveEncoder.encodeUInt64(BigInt("9007199254740993"))
+
+// Encode boolean
+const bool = PrimitiveEncoder.encodeBoolean(true)   // [0x01]
+
+// Encode string (length-prefixed UTF-8)
+const str = PrimitiveEncoder.encodeString("hello")
+// [0x00, 0x05, 0x68, 0x65, 0x6C, 0x6C, 0x6F]
+//  length=5    h     e     l     l     o
+
+// Encode bytes (length-prefixed)
+const bytes = PrimitiveEncoder.encodeBytes(Buffer.from([1, 2, 3]))
+// [0x00, 0x03, 0x01, 0x02, 0x03]
+//  length=3    data...
+```
+
+## PrimitiveDecoder
+
+Decodes values from binary buffers.
+
+```typescript
+interface DecodeResult<T> {
+    value: T
+    bytesRead: number
+}
+
+class PrimitiveDecoder {
+    static decodeUInt8(buffer: Buffer, offset?: number): DecodeResult<number>
+    static decodeUInt16(buffer: Buffer, offset?: number): DecodeResult<number>
+    static decodeUInt32(buffer: Buffer, offset?: number): DecodeResult<number>
+    static decodeUInt64(buffer: Buffer, offset?: number): DecodeResult<bigint>
+    static decodeBoolean(buffer: Buffer, offset?: number): DecodeResult<boolean>
+    static decodeString(buffer: Buffer, offset?: number): DecodeResult<string>
+    static decodeBytes(buffer: Buffer, offset?: number): DecodeResult<Buffer>
+    static decodeVarBytes(buffer: Buffer, offset?: number): DecodeResult<Buffer>
+}
+```
+
+### Usage Examples
+
+```typescript
+import { PrimitiveDecoder } from "./serialization/primitives"
+
+const buffer = Buffer.from([0x00, 0x05, 0x68, 0x65, 0x6C, 0x6C, 0x6F])
+
+// Decode string
+const { value, bytesRead } = PrimitiveDecoder.decodeString(buffer, 0)
+console.log(value)      // "hello"
+console.log(bytesRead)  // 7 (2 for length + 5 for data)
+
+// Decode with offset
+const buffer2 = Buffer.from([0xFF, 0x00, 0x10])
+const { value: u16 } = PrimitiveDecoder.decodeUInt16(buffer2, 1)
+console.log(u16)  // 16
+```
+
+## JSON Envelope
+
+For backward compatibility, many payloads use a JSON envelope wrapper.
+
+### Structure
+
+```typescript
+interface JsonEnvelope<T> {
+    data: T
+}
+```
+
+### Binary Format
+
+```
+[4 bytes: JSON length (uint32)] + [n bytes: JSON UTF-8]
+```
+
+### Encoding
+
+```typescript
+import { encodeJsonPayload } from "./serialization/jsonEnvelope"
+
+interface ExecuteRequest {
+    content: BundleContent
+}
+
+const request: ExecuteRequest = { content: myContent }
+const payload = encodeJsonPayload(request)
+// [length][{"data":{"content":...}}]
+```
+
+### Decoding
+
+```typescript
+import { decodeJsonRequest } from "./serialization/jsonEnvelope"
+
+const request = decodeJsonRequest<ExecuteRequest>(payload)
+console.log(request.content)  // BundleContent
+```
+
+## Category-Specific Serialization
+
+### Control Messages
+
+```typescript
+// serialization/control.ts
+
+interface PeerlistResponse {
+    status: number
+    peers: string[]
+}
+
+function encodePeerlistResponse(response: PeerlistResponse): Buffer {
+    const parts: Buffer[] = []
+
+    // Status (uint16)
+    parts.push(PrimitiveEncoder.encodeUInt16(response.status))
+
+    // Peer count (uint16)
+    parts.push(PrimitiveEncoder.encodeUInt16(response.peers.length))
+
+    // Each peer (string)
+    for (const peer of response.peers) {
+        parts.push(PrimitiveEncoder.encodeString(peer))
+    }
+
+    return Buffer.concat(parts)
+}
+```
+
+### Transaction Messages
+
+```typescript
+// serialization/transaction.ts
+
+// Uses JSON envelope for complex transaction data
+function encodeTransactionRequest(request: ExecuteRequest): Buffer {
+    return encodeJsonPayload(request)
+}
+
+function decodeTransactionRequest(payload: Buffer): ExecuteRequest {
+    return decodeJsonRequest<ExecuteRequest>(payload)
+}
+```
+
+### Consensus Messages
+
+```typescript
+// serialization/consensus.ts
+
+interface ProposeBlockHashRequest {
+    blockHash: string
+    validationData: Record<string, string>
+    proposer: string
+}
+
+interface ProposeBlockHashResponse {
+    status: number
+    voter: string
+    voteAccepted: boolean
+    signatures: Record<string, string>
+    metadata?: unknown
+}
+
+function decodeProposeBlockHashRequest(payload: Buffer): ProposeBlockHashRequest {
+    let offset = 0
+
+    // Block hash (string)
+    const { value: blockHash, bytesRead: hashBytes } =
+        PrimitiveDecoder.decodeString(payload, offset)
+    offset += hashBytes
+
+    // Validation data (JSON)
+    const { value: validationJson, bytesRead: valBytes } =
+        PrimitiveDecoder.decodeString(payload, offset)
+    offset += valBytes
+    const validationData = JSON.parse(validationJson)
+
+    // Proposer (string)
+    const { value: proposer } = PrimitiveDecoder.decodeString(payload, offset)
+
+    return { blockHash, validationData, proposer }
+}
+
+function encodeProposeBlockHashResponse(response: ProposeBlockHashResponse): Buffer {
+    const parts: Buffer[] = []
+
+    // Status (uint16)
+    parts.push(PrimitiveEncoder.encodeUInt16(response.status))
+
+    // Voter (string)
+    parts.push(PrimitiveEncoder.encodeString(response.voter))
+
+    // Vote accepted (boolean)
+    parts.push(PrimitiveEncoder.encodeBoolean(response.voteAccepted))
+
+    // Signatures (JSON)
+    parts.push(PrimitiveEncoder.encodeString(JSON.stringify(response.signatures)))
+
+    // Metadata (optional JSON)
+    if (response.metadata) {
+        parts.push(PrimitiveEncoder.encodeBoolean(true))
+        parts.push(PrimitiveEncoder.encodeString(JSON.stringify(response.metadata)))
+    } else {
+        parts.push(PrimitiveEncoder.encodeBoolean(false))
+    }
+
+    return Buffer.concat(parts)
+}
+```
+
+### Sync Messages
+
+```typescript
+// serialization/sync.ts
+
+interface BlockSyncRequest {
+    fromBlock: bigint
+    toBlock: bigint
+    includeTransactions: boolean
+}
+
+function encodeBlockSyncRequest(request: BlockSyncRequest): Buffer {
+    return Buffer.concat([
+        PrimitiveEncoder.encodeUInt64(request.fromBlock),
+        PrimitiveEncoder.encodeUInt64(request.toBlock),
+        PrimitiveEncoder.encodeBoolean(request.includeTransactions)
+    ])
+}
+
+function decodeBlockSyncRequest(payload: Buffer): BlockSyncRequest {
+    let offset = 0
+
+    const { value: fromBlock, bytesRead: fromBytes } =
+        PrimitiveDecoder.decodeUInt64(payload, offset)
+    offset += fromBytes
+
+    const { value: toBlock, bytesRead: toBytes } =
+        PrimitiveDecoder.decodeUInt64(payload, offset)
+    offset += toBytes
+
+    const { value: includeTransactions } =
+        PrimitiveDecoder.decodeBoolean(payload, offset)
+
+    return { fromBlock, toBlock, includeTransactions }
+}
+```
+
+### GCR Messages
+
+```typescript
+// serialization/gcr.ts
+
+interface GetPointsResponse {
+    status: number
+    points: bigint
+    rank: number
+    totalAccounts: number
+}
+
+function encodeGetPointsResponse(response: GetPointsResponse): Buffer {
+    return Buffer.concat([
+        PrimitiveEncoder.encodeUInt16(response.status),
+        PrimitiveEncoder.encodeUInt64(response.points),
+        PrimitiveEncoder.encodeUInt32(response.rank),
+        PrimitiveEncoder.encodeUInt32(response.totalAccounts)
+    ])
+}
+```
+
+## Handler Response Utilities
+
+Common response encoding utilities for handlers.
+
+```typescript
+// protocol/handlers/utils.ts
+
+interface SuccessResponse<T> {
+    status: 200
+    data: T
+}
+
+interface ErrorResponse {
+    status: number
+    error: string
+    message?: string
+}
+
+function successResponse<T>(data: T): SuccessResponse<T> {
+    return { status: 200, data }
+}
+
+function errorResponse(status: number, error: string, message?: string): ErrorResponse {
+    return { status, error, message }
+}
+
+function encodeResponse(response: SuccessResponse<unknown> | ErrorResponse): Buffer {
+    return encodeJsonPayload(response)
+}
+```
+
+### Usage in Handlers
+
+```typescript
+export const handleGetPoints: OmniHandler<Buffer> = async ({ message }) => {
+    try {
+        const points = await getPointsForAddress(address)
+        return encodeResponse(successResponse(points))
+    } catch (error) {
+        return encodeResponse(errorResponse(500, "Internal error", error.message))
+    }
+}
+```
+
+## Binary vs JSON Trade-offs
+
+### Binary Encoding
+
+**Advantages:**
+- Compact size
+- Fast parsing
+- Type safety
+
+**Use for:**
+- Simple structures
+- Fixed-size data
+- High-frequency messages
+
+### JSON Encoding
+
+**Advantages:**
+- Flexible schema
+- Human-readable (debugging)
+- Complex nested structures
+
+**Use for:**
+- Complex objects
+- Variable structures
+- Backward compatibility
+
+### Hybrid Approach
+
+OmniProtocol uses a hybrid approach:
+- **Header**: Always binary (fixed format)
+- **Auth block**: Always binary (fixed format)
+- **Simple payloads**: Binary encoding
+- **Complex payloads**: JSON with binary length prefix
+
+## Size Comparison
+
+| Data | JSON Size | Binary Size | Savings |
+|------|-----------|-------------|---------|
+| uint32 (1000000) | 7 bytes | 4 bytes | 43% |
+| boolean (true) | 4 bytes | 1 byte | 75% |
+| empty array | 2 bytes | 2 bytes | 0% |
+| 32-byte hash | 66 bytes (hex) | 32 bytes | 52% |
+| 64-byte signature | 130 bytes (hex) | 64 bytes | 51% |
+
+## Best Practices
+
+### Encoding
+
+1. **Use appropriate integer sizes**: Don't use uint64 for small values
+2. **Prefer binary for fixed structures**: Headers, auth blocks
+3. **Use JSON for complex/evolving structures**: Transaction content
+4. **Always include length prefixes**: For variable-length data
+
+### Decoding
+
+1. **Validate lengths before reading**: Prevent buffer overruns
+2. **Handle parse errors gracefully**: Return error responses
+3. **Use offset tracking**: For sequential field parsing
+4. **Check for remaining bytes**: Detect malformed messages
+
+### Schema Evolution
+
+1. **Add fields at end**: For backward compatibility
+2. **Use optional fields**: With presence flag
+3. **Version payloads if needed**: Include version byte
+
+## Related Documentation
+
+- [02_Message_Format.mdx](./02_Message_Format.mdx) - Message structure
+- [03_Authentication.mdx](./03_Authentication.mdx) - Auth block encoding
+- [04_Opcode_Reference.mdx](./04_Opcode_Reference.mdx) - Payload formats per opcode
