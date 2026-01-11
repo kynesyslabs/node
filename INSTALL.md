@@ -62,9 +62,11 @@ cd node
 ### 4. Install Dependencies
 
 ```bash
-# Install all dependencies at once
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying.
 
 ### 5. Run Node and Generate Keys
 
@@ -197,9 +199,15 @@ git branch
 #### 2. Install Dependencies
 
 ```bash
-# Install All dependencies
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:
+> ```bash
+> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+> source ~/.cargo/env
+> ```
 
 ## 🎯 Starting and Configuring the Node
 
