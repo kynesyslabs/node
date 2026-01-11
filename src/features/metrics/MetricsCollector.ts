@@ -214,10 +214,10 @@ export class MetricsCollector {
             ["endpoint"],
         )
 
-        // === Node Info Metric (static labels with node metadata) ===
+        // === Node Metadata Metric (static labels with node metadata) ===
         ms.createGauge(
-            "node_info",
-            "Node information with version and identity labels",
+            "node_metadata",
+            "Node metadata with version and identity labels",
             ["version", "version_name", "identity"],
         )
 
@@ -381,6 +381,25 @@ export class MetricsCollector {
     }
 
     /**
+     * Report basic network interface metrics with zero values
+     * Used as fallback when /proc/net/dev is unavailable (non-Linux or read error)
+     */
+    private reportBasicNetworkInterfaces(
+        interfaces: NodeJS.Dict<os.NetworkInterfaceInfo[]>,
+    ): void {
+        for (const [name] of Object.entries(interfaces)) {
+            if (name !== "lo") {
+                this.metricsService.setGauge("system_network_rx_bytes_total", 0, {
+                    interface: name,
+                })
+                this.metricsService.setGauge("system_network_tx_bytes_total", 0, {
+                    interface: name,
+                })
+            }
+        }
+    }
+
+    /**
      * Collect network I/O metrics
      */
     private async collectNetworkIOMetrics(): Promise<void> {
@@ -440,22 +459,13 @@ export class MetricsCollector {
                         })
                     }
                 } catch {
-                    // Fall back to basic interface listing
-                    for (const [name] of Object.entries(interfaces)) {
-                        if (name !== "lo") {
-                            this.metricsService.setGauge(
-                                "system_network_rx_bytes_total",
-                                0,
-                                { interface: name },
-                            )
-                            this.metricsService.setGauge(
-                                "system_network_tx_bytes_total",
-                                0,
-                                { interface: name },
-                            )
-                        }
-                    }
+                    // Fallback for Linux if /proc/net/dev fails
+                    this.reportBasicNetworkInterfaces(interfaces)
                 }
+            } else {
+                // Fallback for non-Linux platforms (macOS, Windows)
+                // Report interface names with zero values to maintain metric consistency
+                this.reportBasicNetworkInterfaces(interfaces)
             }
 
             this.lastNetworkTime = now
@@ -608,8 +618,8 @@ export class MetricsCollector {
                     identity?: string
                 }
 
-                // Set node_info metric with labels (value is always 1)
-                this.metricsService.setGauge("node_info", 1, {
+                // Set node_metadata metric with labels (value is always 1)
+                this.metricsService.setGauge("node_metadata", 1, {
                     version: info.version || "unknown",
                     version_name: info.version_name || "unknown",
                     identity: info.identity

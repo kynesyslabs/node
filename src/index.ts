@@ -898,13 +898,16 @@ async function gracefulShutdown(signal: string) {
             }
         }
 
-        // REVIEW: Stop Metrics server if running
+        // REVIEW: Stop Metrics collector and server if running
         if (indexState.metricsServer) {
-            console.log("[SHUTDOWN] Stopping Metrics server...")
+            console.log("[SHUTDOWN] Stopping Metrics collector and server...")
             try {
+                // Stop the collector first to clear interval timer and prevent collection during shutdown
+                const { getMetricsCollector } = await import("./features/metrics")
+                getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping Metrics server:", error)
+                console.error("[SHUTDOWN] Error stopping Metrics:", error)
             }
         }
 

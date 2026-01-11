@@ -101,7 +101,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "demos_node_info",
+          "expr": "demos_node_metadata",
           "legendFormat": "v{{version}} · {{version_name}}",
           "refId": "A"
         }

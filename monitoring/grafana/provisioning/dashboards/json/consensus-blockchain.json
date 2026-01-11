@@ -643,7 +643,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(block_height[5m]) * 60",
+          "expr": "deriv(demos_block_height[5m]) * 60",
           "legendFormat": "Blocks/min (5m avg)",
           "refId": "A"
         },
@@ -652,7 +652,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(block_height[1m]) * 60",
+          "expr": "deriv(demos_block_height[1m]) * 60",
           "legendFormat": "Blocks/min (1m avg)",
           "refId": "B"
         }

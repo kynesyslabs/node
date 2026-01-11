@@ -944,10 +944,10 @@ fi
 if [ "$MONITORING_DISABLED" != "true" ] && [ -d "monitoring" ]; then
     echo "🛑 Stopping monitoring stack..."
 
-    # Try graceful shutdown first with short timeout
-    cd monitoring
-    docker compose down --timeout 5 2>/dev/null || true
-    cd ..
+    # Try graceful shutdown first with short timeout (subshell to preserve working directory)
+    (
+        cd monitoring && docker compose down --timeout 5 2>/dev/null
+    ) || echo "⚠️  Warning: Failed to stop monitoring stack cleanly."
 
     echo "✅ Monitoring stack stopped"
 fi

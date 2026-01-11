@@ -427,6 +427,7 @@ bun install
 > **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
 
 ### Required Ports
+
 | Port | Service | Description |
 |------|---------|-------------|
 | 53550 | Node RPC | Main node API endpoint |
@@ -435,6 +436,7 @@ bun install
 | 55000-60000 | WS Proxy | WebSocket proxy for TLSNotary (TCP+UDP) |
 
 ### Optional Ports
+
 | Port | Service | Description |
 |------|---------|-------------|
 | 9090 | Metrics | Node Prometheus metrics endpoint |

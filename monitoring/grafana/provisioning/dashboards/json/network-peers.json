@@ -281,7 +281,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "(peer_online_count / peers_total) * 100",
+          "expr": "(demos_peer_online_count / (demos_peers_total + (demos_peers_total == 0))) * 100",
           "refId": "A"
         }
       ],

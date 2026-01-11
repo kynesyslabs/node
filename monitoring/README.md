@@ -23,7 +23,7 @@ docker compose up -d
 ```
 ┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
 │   Demos Node    │──────│   Prometheus    │──────│    Grafana      │
-│  :3333/metrics  │      │     :9091       │      │     :3000       │
+│  :9090/metrics  │      │     :9091       │      │     :3000       │
 └─────────────────┘      └─────────────────┘      └─────────────────┘
                               (scrapes)            (visualizes)
 ```
@@ -33,11 +33,11 @@ docker compose up -d
 Add to your `.env` file:
 
 ```env
-ENABLE_PROMETHEUS=true
-PROMETHEUS_PORT=3333
+METRICS_ENABLED=true
+METRICS_PORT=9090
 ```
 
-The node will expose metrics at `http://localhost:3333/metrics`.
+The node will expose metrics at `http://localhost:9090/metrics`.
 
 ## Configuration
 
