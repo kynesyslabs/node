@@ -94,7 +94,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_cpu_usage_percent",
+          "expr": "demos_system_cpu_usage_percent",
           "refId": "A"
         }
       ],
@@ -161,7 +161,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_usage_percent",
+          "expr": "demos_system_memory_usage_percent",
           "refId": "A"
         }
       ],
@@ -218,7 +218,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_used_bytes",
+          "expr": "demos_system_memory_used_bytes",
           "refId": "A"
         }
       ],
@@ -275,7 +275,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_total_bytes",
+          "expr": "demos_system_memory_total_bytes",
           "refId": "A"
         }
       ],
@@ -374,7 +374,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_cpu_usage_percent",
+          "expr": "demos_system_cpu_usage_percent",
           "legendFormat": "CPU %",
           "refId": "A"
         },
@@ -383,7 +383,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_usage_percent",
+          "expr": "demos_system_memory_usage_percent",
           "legendFormat": "Memory %",
           "refId": "B"
         }
@@ -473,7 +473,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_load_average_1m",
+          "expr": "demos_system_load_average_1m",
           "legendFormat": "1 min",
           "refId": "A"
         },
@@ -482,7 +482,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_load_average_5m",
+          "expr": "demos_system_load_average_5m",
           "legendFormat": "5 min",
           "refId": "B"
         },
@@ -491,7 +491,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_load_average_15m",
+          "expr": "demos_system_load_average_15m",
           "legendFormat": "15 min",
           "refId": "C"
         }
@@ -582,7 +582,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_docker_container_up{container=\"postgres\"}",
+          "expr": "demos_service_docker_container_up{container=\"postgres\"}",
           "refId": "A"
         }
       ],
@@ -659,7 +659,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_docker_container_up{container=\"tlsn-server\"}",
+          "expr": "demos_service_docker_container_up{container=\"tlsn\"}",
           "refId": "A"
         }
       ],
@@ -736,7 +736,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_docker_container_up{container=\"ipfs\"}",
+          "expr": "demos_service_docker_container_up{container=\"ipfs\"}",
           "refId": "A"
         }
       ],
@@ -813,7 +813,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_port_open{service=\"postgres\"}",
+          "expr": "demos_service_port_open{service=\"postgres\"}",
           "refId": "A"
         }
       ],
@@ -890,7 +890,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_port_open{service=\"omniprotocol\"}",
+          "expr": "demos_service_port_open{service=\"omniprotocol\"}",
           "refId": "A"
         }
       ],
@@ -967,7 +967,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_port_open{service=\"tlsn\"}",
+          "expr": "demos_service_port_open{service=\"tlsn\"}",
           "refId": "A"
         }
       ],
@@ -1058,7 +1058,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_docker_container_up",
+          "expr": "demos_service_docker_container_up",
           "legendFormat": "{{ container }}",
           "refId": "A"
         }
@@ -1150,7 +1150,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "service_port_open",
+          "expr": "demos_service_port_open",
           "legendFormat": "{{ service }} ({{ port }})",
           "refId": "A"
         }
@@ -1284,7 +1284,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_used_bytes",
+          "expr": "demos_system_memory_used_bytes",
           "legendFormat": "Used",
           "refId": "A"
         },
@@ -1293,7 +1293,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "system_memory_total_bytes - system_memory_used_bytes",
+          "expr": "demos_system_memory_total_bytes - demos_system_memory_used_bytes",
           "legendFormat": "Free",
           "refId": "B"
         }
