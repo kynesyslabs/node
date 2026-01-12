@@ -43,7 +43,7 @@ export default class Block implements BlockType {
             native_tables_hashes: {
                 native_gcr: "placeholder",
                 native_subnets_txs: "placeholder",
-                native_tlsnotary: "placeholder",
+                // native_tlsnotary: "placeholder",
             },
         }
         this.proposer = null
