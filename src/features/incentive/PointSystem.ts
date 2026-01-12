@@ -1353,7 +1353,10 @@ export class PointSystem {
             const existingNomisScoreOnChain =
                 userPointsWithIdentities.breakdown.nomisScores?.[chain]
 
-            if (existingNomisScoreOnChain != null) {
+            if (
+                existingNomisScoreOnChain != null &&
+                existingNomisScoreOnChain > 0
+            ) {
                 const updatedPoints = await this.getUserPointsInternal(userId)
 
                 return {
@@ -1413,7 +1416,6 @@ export class PointSystem {
     async deductNomisScorePoints(
         userId: string,
         chain: string,
-        nomisScore: number,
     ): Promise<RPCResponse> {
         const validChains = ["evm", "solana"]
         const invalidChainMessage =
@@ -1448,7 +1450,7 @@ export class PointSystem {
                 }
             }
 
-            const pointsToDeduct = this.getNomisPointsByScore(nomisScore)
+            const pointsToDeduct = currentNomisForChain
 
             await this.addPointsToGCR(
                 userId,
