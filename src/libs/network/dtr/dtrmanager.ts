@@ -19,6 +19,7 @@ import {
 import TxUtils from "../../blockchain/transaction"
 import { Waiter } from "@/utilities/waiter"
 import Block from "@/libs/blockchain/block"
+import Chain from "@/libs/blockchain/chain"
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -41,6 +42,7 @@ export class DTRManager {
     private retryAttempts = new Map<string, number>() // txHash -> attempt count
     private readonly maxRetryAttempts = 10
     private readonly retryIntervalMs = 10000 // 10 seconds
+    // map of txhash to ValidityData
     public static validityDataCache = new Map<string, ValidityData>()
 
     // Optimization: only recalculate validators when block number changes
@@ -78,14 +80,13 @@ export class DTRManager {
 
     /**
      * @deprecated
-     * 
+     *
      * Starts the background relay retry service
      * Only starts if not already running
      */
     start() {
         if (this.isRunning) return
 
-        console.log("[DTR RetryService] Starting background relay service")
         log.info(
             "[DTR RetryService] Service started - will retry every 10 seconds",
         )
@@ -100,7 +101,7 @@ export class DTRManager {
 
     /**
      * @deprecated
-     * 
+     *
      * Stops the background relay retry service
      * Cleans up interval and resets state
      */
@@ -124,7 +125,7 @@ export class DTRManager {
 
     /**
      * @deprecated
-     * 
+     *
      * Main processing loop - runs every 10 seconds
      * Checks mempool for transactions that need relaying
      */
@@ -403,6 +404,44 @@ export class DTRManager {
     }
 
     /**
+     * Adds the transaction to the validity data cache and starts the relay waiter
+     *
+     * @param validityData - ValidityData of the transaction to receive
+     *
+     * @returns RPCResponse
+     */
+    static async inConsensusHandler(validityData: ValidityData) {
+        log.debug(
+            "[inConsensusHandler] in consensus loop, adding tx in cache: " +
+                validityData.data.transaction.hash,
+        )
+        DTRManager.validityDataCache.set(
+            validityData.data.transaction.hash,
+            validityData,
+        )
+
+        // INFO: Start the relay waiter
+        if (!DTRManager.isWaitingForBlock) {
+            log.debug(
+                "[inConsensusHandler] not waiting for block, starting relay",
+            )
+            DTRManager.waitForBlockThenRelay()
+        }
+
+        log.debug("[inConsensusHandler] returning success")
+        return {
+            success: true,
+            response: {
+                message: "Transaction relayed to validators",
+            },
+            extra: {
+                confirmationBlock: getSharedState.lastBlockNumber + 1,
+            },
+            require_reply: false,
+        }
+    }
+
+    /**
      * Receives a relayed transaction from a validator
      *
      * @param validityData - ValidityData of the transaction to receive
@@ -421,32 +460,7 @@ export class DTRManager {
 
         try {
             if (getSharedState.inConsensusLoop) {
-                log.debug(
-                    "[receiveRelayedTransaction] in consensus loop, adding tx in cache: " +
-                        validityData.data.transaction.hash,
-                )
-                DTRManager.validityDataCache.set(
-                    validityData.data.transaction.hash,
-                    validityData,
-                )
-
-                // INFO: Start the relay waiter
-                if (!DTRManager.isWaitingForBlock) {
-                    log.debug(
-                        "[receiveRelayedTransaction] not waiting for block, starting relay",
-                    )
-                    DTRManager.waitForBlockThenRelay()
-                }
-
-                log.debug("[receiveRelayedTransaction] returning success")
-                return {
-                    success: true,
-                    response: {
-                        message: "Transaction relayed to validators",
-                    },
-                    extra: null,
-                    require_reply: false,
-                }
+                return await this.inConsensusHandler(validityData)
             }
 
             // 1. Verify we are actually a validator for next block
@@ -665,8 +679,13 @@ export class DTRManager {
         }
 
         const validators = await getShard(cvsa)
-
         const txs = Array.from(DTRManager.validityDataCache.values())
+
+        //INFO: Filter transactions applied in last block
+        const lastBlockTxs = await Chain.getLastBlockTransactionSet()
+        const txsToRelay = txs.filter(
+            tx => !lastBlockTxs.has(tx.data.transaction.hash),
+        )
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
@@ -674,7 +693,7 @@ export class DTRManager {
                 "[waitForBlockThenRelay] We're up next, keeping transactions",
             )
             return await Promise.all(
-                txs.map(tx => {
+                txsToRelay.map(tx => {
                     Mempool.addTransaction({
                         ...tx.data.transaction,
                         reference_block: tx.data.reference_block,
@@ -690,7 +709,9 @@ export class DTRManager {
 
         log.debug("[waitForBlockThenRelay] Relaying transactions to validators")
         const nodeResults = await Promise.all(
-            validators.map(validator => this.relayTransactions(validator, txs)),
+            validators.map(validator =>
+                this.relayTransactions(validator, txsToRelay),
+            ),
         )
 
         for (const result of nodeResults) {

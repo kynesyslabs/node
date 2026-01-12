@@ -161,4 +161,36 @@ export class IncentiveManager {
     ): Promise<RPCResponse> {
         return await this.pointSystem.deductUdDomainPoints(userId, domain)
     }
+
+    /**
+     * Hook to be called after Nomis score linking
+     */
+    static async nomisLinked(
+        userId: string,
+        chain: string,
+        nomisScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardNomisScorePoints(
+            userId,
+            chain,
+            nomisScore,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Nomis score unlinking
+     */
+    static async nomisUnlinked(
+        userId: string,
+        chain: string,
+        nomisScore: number,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductNomisScorePoints(
+            userId,
+            chain,
+            nomisScore,
+        )
+    }
 }

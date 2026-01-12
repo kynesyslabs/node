@@ -1,5 +1,23 @@
 import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
 
+export interface NomisWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
+
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
     // The signed message is the ed25519 address (with 0x prefix) of the sender which can
@@ -9,6 +27,21 @@ export interface SavedXmIdentity {
     publicKey: string
     timestamp: number
     signedData: string
+}
+export interface SavedNomisIdentity {
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
 }
 
 /**
@@ -67,4 +100,9 @@ export type StoredIdentities = {
         [algorithm: string]: SavedPqcIdentity[]
     }
     ud: SavedUdIdentity[] // Unstoppable Domains identities
+    nomis?: {
+        [chain: string]: {
+            [subchain: string]: SavedNomisIdentity[]
+        }
+    }
 }

@@ -925,19 +925,17 @@ export class TUIManager extends EventEmitter {
 
     // SECTION Log Management
 
+    // Flag to indicate logs have changed since last render
+    private logsNeedUpdate = true
+
     /**
      * Handle new log entry
+     * PERF: Don't update filtered logs on every entry - just mark as dirty
+     * The render loop will update when needed (every 100ms)
      */
     private handleLogEntry(_entry: LogEntry): void {
-        // Always update the live filtered logs
-        this.updateFilteredLogs()
-
-        // Only auto-scroll when enabled (frozen logs handles manual mode)
-        if (this.autoScroll) {
-            const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
-            this.setScrollOffset(maxScroll)
-        }
-        // When autoScroll is off, frozenLogs is used for rendering so no action needed
+        // Mark that logs need updating - actual update happens in render()
+        this.logsNeedUpdate = true
     }
 
     /**
@@ -1009,6 +1007,17 @@ export class TUIManager extends EventEmitter {
      */
     render(): void {
         if (!this.isRunning) return
+
+        // PERF: Only update filtered logs when needed (debounced from log events)
+        if (this.logsNeedUpdate && !this.isCmdMode) {
+            this.updateFilteredLogs()
+            // Auto-scroll to bottom when enabled
+            if (this.autoScroll) {
+                const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+                this.setScrollOffset(maxScroll)
+            }
+            this.logsNeedUpdate = false
+        }
 
         // Render components (each clears its own area)
         this.renderHeader()

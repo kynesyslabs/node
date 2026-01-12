@@ -227,6 +227,10 @@ export class CategorizedLogger extends EventEmitter {
     private terminalBuffer: string[] = []
     private terminalFlushScheduled = false
 
+    // PERF: Cache for getAllEntries to avoid sorting on every call
+    private allEntriesCache: LogEntry[] | null = null
+    private allEntriesCacheLastCounter = -1
+
     private constructor(config: LoggerConfig = {}) {
         super()
         this.config = {
@@ -831,14 +835,23 @@ export class CategorizedLogger extends EventEmitter {
 
     /**
      * Get all log entries (merged from all categories, sorted by timestamp)
+     * PERF: Uses cache to avoid sorting on every call - only rebuilds when entries change
      */
     getAllEntries(): LogEntry[] {
+        // Return cached result if entry counter hasn't changed
+        if (this.allEntriesCache !== null && this.allEntriesCacheLastCounter === this.entryCounter) {
+            return this.allEntriesCache
+        }
+
+        // Rebuild cache
         const allEntries: LogEntry[] = []
         for (const buffer of this.categoryBuffers.values()) {
             allEntries.push(...buffer.getAll())
         }
         // Sort by entry ID to maintain chronological order
-        return allEntries.sort((a, b) => a.id - b.id)
+        this.allEntriesCache = allEntries.sort((a, b) => a.id - b.id)
+        this.allEntriesCacheLastCounter = this.entryCounter
+        return this.allEntriesCache
     }
 
     /**
@@ -884,6 +897,8 @@ export class CategorizedLogger extends EventEmitter {
         for (const buffer of this.categoryBuffers.values()) {
             buffer.clear()
         }
+        // Invalidate cache
+        this.allEntriesCache = null
         this.emit("clear")
     }
 

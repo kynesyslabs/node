@@ -9,6 +9,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
+import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
@@ -95,9 +96,14 @@ export default async function handleIdentityRequest(
                 payload.payload as Web2CoreTargetIdentityPayload,
                 sender,
             )
+        case "nomis_identity_assign":
+            return await IdentityManager.verifyNomisPayload(
+                payload.payload as NomisWalletIdentity,
+            )
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
+        case "nomis_identity_remove":
         case "ud_identity_remove":
             return {
                 success: true,

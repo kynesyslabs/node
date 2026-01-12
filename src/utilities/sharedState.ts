@@ -23,8 +23,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = process.env.PROD == "true" || false
-    version = "0.9.5"
-    version_name = "Entangled Polymer"
+    version = "0.9.8"
+    version_name = "Oxlong Michael"
     signingAlgorithm = "ed25519" as SigningAlgorithm
 
     block_time = 10 // TODO Get it from the genesis (or see Consensus module)

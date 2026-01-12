@@ -142,6 +142,16 @@ export default class Chain {
         return getSharedState.lastBlockHash
     }
 
+    /**
+     * Returns transaction hashes applied in the last block as a set
+     *
+     * @returns Set of transaction hashes in the last block
+     */
+    static async getLastBlockTransactionSet(): Promise<Set<string>> {
+        const lastBlock = await this.getLastBlock()
+        return new Set(lastBlock.content.ordered_transactions)
+    }
+
     // INFO returns all blocks by the given range, default from end of the table.
     /**
      * Returns <limit> blocks starting from the given block number.
