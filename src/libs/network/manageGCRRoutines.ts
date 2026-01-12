@@ -123,7 +123,8 @@ export default async function manageGCRRoutines(
                 response.result = 400
                 response.response = null
                 response.extra = {
-                    error: error instanceof Error ? error.message : String(error),
+                    error:
+                        error instanceof Error ? error.message : String(error),
                 }
             }
             break
@@ -138,12 +139,13 @@ export default async function manageGCRRoutines(
                 response.result = 400
                 response.response = null
                 response.extra = {
-                    error: error instanceof Error ? error.message : String(error),
+                    error:
+                        error instanceof Error ? error.message : String(error),
                 }
             }
             break
         }
-        
+
         case "syncNewBlock": {
             response.response = await BroadcastManager.handleNewBlock(
                 sender,

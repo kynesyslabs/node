@@ -1,11 +1,13 @@
 #!/bin/bash
 
 PG_PORT=5332
-GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
+
+GIT_PULL=true
+TLSNOTARY_DISABLED=false
 MONITORING_DISABLED=false
 
 # Detect platform for cross-platform compatibility

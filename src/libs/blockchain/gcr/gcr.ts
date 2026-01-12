@@ -526,7 +526,9 @@ export default class GCR {
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
             return true // Adjust the return value as needed based on your requirements.
         } catch (e) {
-            log.error("[GCR ERROR: NATIVE] Error setting GCR native balance: " + e)
+            log.error(
+                "[GCR ERROR: NATIVE] Error setting GCR native balance: " + e,
+            )
             return false
         }
     }
@@ -762,41 +764,70 @@ export default class GCR {
         return campaignData
     }
 
-    static async getAddressesByTwitterUsernames(twitterUsernames: string[]) {
+    static async getAddressesByWeb2Usernames(
+        queries: {
+            platform: "twitter" | "discord" | "telegram" | "github"
+            username: string
+        }[],
+    ): Promise<Record<string, string>> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        if (!twitterUsernames || twitterUsernames.length === 0) {
+        if (!queries || queries.length === 0) {
             return {}
         }
 
-        // Query accounts that have Twitter identities with usernames in the provided array
-        const accounts = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
-                { usernames: twitterUsernames },
-            )
-            .getMany()
+        // Group queries by platform for efficient batch queries
+        const queriesByPlatform: Record<
+            string,
+            { platform: string; username: string }[]
+        > = {}
+        for (const query of queries) {
+            if (!queriesByPlatform[query.platform]) {
+                queriesByPlatform[query.platform] = []
+            }
+            queriesByPlatform[query.platform].push(query)
+        }
 
         const usernameToAddressMap: Record<string, string> = {}
 
-        for (const account of accounts) {
-            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
-            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
-                log.debug(
-                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+        // Process each platform separately
+        for (const [platform, platformQueries] of Object.entries(
+            queriesByPlatform,
+        )) {
+            const usernames = platformQueries.map(q => q.username)
+
+            // Query accounts that have identities with usernames in the provided array for this platform
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:platform, '[]'::jsonb)) as platform_id WHERE platform_id->>'username' = ANY(:usernames))",
+                    { platform, usernames },
                 )
-                continue
-            }
+                .getMany()
 
-            // Find Twitter identities that match the provided usernames
-            const twitterIdentities = account.identities.web2?.twitter || []
+            for (const account of accounts) {
+                // Check if the account has zero points for this platform (means account was already connected elsewhere)
+                const platformPoints =
+                    account.points?.breakdown?.socialAccounts?.[platform]
+                if (platformPoints === 0) {
+                    log.debug(
+                        `Skipping account ${account.pubkey} - ${platform} already connected to another account`,
+                    )
+                    continue
+                }
 
-            for (const twitterIdentity of twitterIdentities) {
-                if (twitterUsernames.includes(twitterIdentity.username)) {
-                    usernameToAddressMap[twitterIdentity.username] =
-                        account.pubkey
+                // Find identities that match the provided usernames for this platform
+                const platformIdentities =
+                    account.identities.web2?.[platform] || []
+
+                for (const identity of platformIdentities) {
+                    if (usernames.includes(identity.username)) {
+                        // Use platform:username as key to avoid collisions between platforms
+                        usernameToAddressMap[
+                            `${platform}:${identity.username}`
+                        ] = account.pubkey
+                    }
                 }
             }
         }
@@ -806,11 +837,11 @@ export default class GCR {
 
     /**
      * Create a transaction to award points to the users
-     * @param twitterUsernames List of twitter usernames to award points to
+     * @param accounts List of accounts to award points to (supports multiple web2 platforms)
      *
      */
     static async createAwardPointsTransaction(
-        twitterUsernames: {
+        accounts: {
             /**
              * The username of the user to award points to
              */
@@ -819,28 +850,36 @@ export default class GCR {
              * The amount of points to award
              */
             points: number
+            /**
+             * The platform to find the account by
+             */
+            platform: "twitter" | "discord" | "telegram" | "github"
         }[],
     ) {
         const awardDate = new Date().toISOString()
-        const addresses = await this.getAddressesByTwitterUsernames(
-            twitterUsernames.map(u => u.username),
+        const addresses = await this.getAddressesByWeb2Usernames(
+            accounts.map(a => ({
+                platform: a.platform,
+                username: a.username,
+            })),
         )
 
         const edits = []
 
-        for (const account of twitterUsernames as any) {
-            if (addresses[account.username]) {
+        for (const account of accounts as any) {
+            const addressKey = `${account.platform}:${account.username}`
+            if (addresses[addressKey]) {
                 edits.push({
                     type: "identity",
                     context: "points",
                     isRollback: false,
                     operation: "add",
-                    account: addresses[account.username],
+                    account: addresses[addressKey],
                     amount: Number(account.points),
                     date: awardDate,
                     txhash: "",
                 })
-                account.address = addresses[account.username]
+                account.address = addresses[addressKey]
                 account.comment = "Account found"
             } else {
                 account.address = null
@@ -858,7 +897,7 @@ export default class GCR {
         tx.content.timestamp = Date.now()
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
-        tx.content.data = ["awardPoints", twitterUsernames]
+        tx.content.data = ["awardPoints", accounts]
         tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
         const signature = await ucrypto.sign(
@@ -950,13 +989,14 @@ export default class GCR {
     }
 
     /**
-     * @param twitterUsernames List of twitter usernames to award points to
-     * @returns Array of usernames that were successfully awarded points
+     * @param accounts List of accounts to award points to (supports multiple web2 platforms)
+     * @returns Result of the award points operation
      */
     static async awardPoints(
-        twitterUsernames: {
+        accounts: {
             username: string
             points: number
+            platform: "twitter" | "discord" | "telegram" | "github"
         }[],
     ): Promise<{
         success: boolean
@@ -965,29 +1005,46 @@ export default class GCR {
         txhash?: string
         confirmationBlock: number
     }> {
-        if (!twitterUsernames || twitterUsernames.length === 0) {
-            log.warning("No Twitter usernames provided")
+        if (!accounts || accounts.length === 0) {
+            log.warning("No accounts provided")
             return {
                 success: false,
-                message: "No Twitter usernames provided",
+                message: "No accounts provided",
                 confirmationBlock: null,
             }
         }
 
-        // INFO: Make sure each twitter username has valid points
-        for (const account of twitterUsernames) {
+        // INFO: Check if all accounts have a platform
+        for (const account of accounts) {
+            if (!account.platform) {
+                return {
+                    success: false,
+                    message:
+                        "Failed: Platform is not specified for account " +
+                        account.username,
+                    confirmationBlock: null,
+                }
+            }
+
+            // INFO: Make sure each account has valid points
             const points = Number(account.points)
             if (isNaN(points) || points <= 0) {
                 return {
                     success: false,
                     message:
-                        "Failed: Invalid input. Point value must be a number greater than 0.",
+                        "Failed: Invalid input. Point value must be a number greater than 0. Account: " +
+                        account.username,
                     confirmationBlock: null,
                 }
             }
+
+            // INFO: remove @ prefix
+            if (account.username.startsWith("@")) {
+                account.username = account.username.slice(1)
+            }
         }
 
-        const tx = await this.createAwardPointsTransaction(twitterUsernames)
+        const tx = await this.createAwardPointsTransaction(accounts)
 
         const editResults = await HandleGCR.applyToTx(
             structuredClone(tx),

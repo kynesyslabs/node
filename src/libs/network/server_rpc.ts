@@ -293,6 +293,7 @@ async function processPayload(
             const awardPointsData = payload.params[0].message as {
                 username: string
                 points: number
+                platform: "twitter" | "discord" | "telegram" | "github"
             }[]
             const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
