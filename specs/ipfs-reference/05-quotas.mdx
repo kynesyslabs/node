@@ -1,0 +1,263 @@
+---
+title: "Storage Quotas"
+description: "Account storage limits and quota enforcement"
+---
+
+# Storage Quotas
+
+Storage quotas prevent abuse and ensure fair resource allocation across the network.
+
+## Quota Tiers
+
+| Tier | Max Storage | Max Pins |
+|------|-------------|----------|
+| Regular | 1 GB | 1,000 |
+| Genesis | 10 GB | 10,000 |
+| Premium | 100 GB | 100,000 |
+
+**Note:** Premium tier is reserved for future implementation.
+
+## Quota Values
+
+```typescript
+const IPFS_QUOTA_LIMITS = {
+  regular: {
+    maxPinnedBytes: 1_073_741_824,   // 1 GB
+    maxPinCount: 1_000
+  },
+  genesis: {
+    maxPinnedBytes: 10_737_418_240,  // 10 GB
+    maxPinCount: 10_000
+  },
+  premium: {
+    maxPinnedBytes: 107_374_182_400, // 100 GB
+    maxPinCount: 100_000
+  }
+}
+```
+
+## Consensus Enforcement
+
+Quotas are enforced at the consensus level:
+
+- All nodes use identical quota values
+- Quota checks are part of transaction validation
+- Transactions exceeding quotas are rejected by consensus
+- Quota values are protocol constants (changes require upgrade)
+
+### Why Consensus-Critical?
+
+Quota enforcement must be deterministic:
+
+```
+Node A validates TX with limit 1GB → VALID
+Node B validates TX with limit 2GB → VALID (different limit!)
+```
+
+This would cause consensus failure. All nodes must agree on limits.
+
+## Quota Check
+
+Before any pin operation:
+
+```typescript
+function checkQuota(
+  state: AccountIPFSState,
+  additionalBytes: number,
+  tier: QuotaTier
+): QuotaCheckResult {
+  const quota = IPFS_QUOTA_LIMITS[tier]
+
+  const newTotalBytes = state.totalPinnedBytes + additionalBytes
+  const newPinCount = state.pins.length + 1
+
+  if (newTotalBytes > quota.maxPinnedBytes) {
+    return {
+      allowed: false,
+      error: "IPFS_QUOTA_EXCEEDED",
+      message: "Storage limit exceeded",
+      current: state.totalPinnedBytes,
+      limit: quota.maxPinnedBytes,
+      requested: additionalBytes
+    }
+  }
+
+  if (newPinCount > quota.maxPinCount) {
+    return {
+      allowed: false,
+      error: "IPFS_QUOTA_EXCEEDED",
+      message: "Pin count limit exceeded",
+      current: state.pins.length,
+      limit: quota.maxPinCount
+    }
+  }
+
+  return { allowed: true }
+}
+```
+
+## Checking Your Quota
+
+Use the `ipfs_quota` RPC endpoint:
+
+```typescript
+const quota = await client.ipfsQuota({
+  address: "your-demos-address"
+})
+
+console.log(quota)
+// {
+//   tier: "genesis",
+//   usedBytes: 524288000,        // 500 MB
+//   maxBytes: 10737418240,       // 10 GB
+//   usedPins: 42,
+//   maxPins: 10000,
+//   freeAllocation: 1073741824,  // 1 GB
+//   usedFreeBytes: 524288000,    // 500 MB
+//   percentUsed: 4.88
+// }
+```
+
+## Quota Response Schema
+
+```typescript
+interface QuotaResponse {
+  tier: "regular" | "genesis" | "premium"
+
+  // Storage quota
+  usedBytes: number
+  maxBytes: number
+  availableBytes: number
+
+  // Pin count quota
+  usedPins: number
+  maxPins: number
+  availablePins: number
+
+  // Free tier (genesis only)
+  freeAllocation: number
+  usedFreeBytes: number
+  remainingFreeBytes: number
+
+  // Computed
+  percentUsed: number
+}
+```
+
+## Tier Determination
+
+Account tier is determined by genesis status:
+
+```typescript
+async function getAccountTier(address: string): Promise<QuotaTier> {
+  const isGenesis = await isGenesisAccount(address)
+
+  if (isGenesis) {
+    return "genesis"
+  }
+
+  // Future: check premium subscription
+  // if (await hasPremiumSubscription(address)) {
+  //   return "premium"
+  // }
+
+  return "regular"
+}
+```
+
+## Quota and Expiration
+
+Expired pins still count against quota until cleaned up:
+
+```
+1. Pin expires at timestamp T
+2. Grace period: T + 24 hours
+3. Cleanup runs (hourly scan)
+4. Pin removed from state → quota freed
+```
+
+To immediately free quota, explicitly unpin expired content.
+
+## Error Handling
+
+When quota is exceeded:
+
+```typescript
+// Transaction response
+{
+  success: false,
+  error: {
+    code: "IPFS_QUOTA_EXCEEDED",
+    message: "Storage limit exceeded",
+    details: {
+      current: 1073741824,
+      limit: 1073741824,
+      requested: 52428800
+    }
+  }
+}
+```
+
+## Best Practices
+
+### Monitor Usage
+
+```typescript
+// Set up alerts at thresholds
+async function checkQuotaHealth(address: string) {
+  const quota = await client.ipfsQuota({ address })
+
+  if (quota.percentUsed > 90) {
+    console.warn("Quota usage above 90%")
+  }
+
+  if (quota.availablePins < 10) {
+    console.warn("Less than 10 pins remaining")
+  }
+}
+```
+
+### Use Time-Limited Pins
+
+Temporary content should use shorter durations:
+
+```typescript
+// Temporary files
+await client.ipfsAdd({
+  content: tempData,
+  duration: "week"  // Auto-cleanup after expiration
+})
+
+// Important files
+await client.ipfsAdd({
+  content: importantData,
+  duration: "permanent"
+})
+```
+
+### Clean Up Unused Pins
+
+Regularly review and unpin unused content:
+
+```typescript
+const pins = await client.ipfsPins({ address })
+
+for (const pin of pins) {
+  if (shouldRemove(pin)) {
+    await client.ipfsUnpin({ cid: pin.cid })
+  }
+}
+```
+
+## Future: Premium Tier
+
+The premium tier is planned for accounts with enhanced storage needs:
+
+| Feature | Premium |
+|---------|---------|
+| Max Storage | 100 GB |
+| Max Pins | 100,000 |
+| Activation | Subscription (TBD) |
+| Cost | TBD |
+
+Premium tier activation mechanism is under development.

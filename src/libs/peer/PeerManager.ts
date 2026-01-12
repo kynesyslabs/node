@@ -76,18 +76,27 @@ export default class PeerManager {
         // Creating a peer object for each peer in the peer list
         for (const peer in peerList) {
             const peerObject = this.createNewPeer(peer)
+            // REVIEW: Handle both old format (string) and new format (object with url property)
             const peerData = peerList[peer]
-
-            // Support both old format (string) and new format (object)
             if (typeof peerData === "string") {
-                // Old format: just URL
+                // Old format: { "pubkey": "http://..." }
                 peerObject.connection.string = peerData
-            } else {
-                // New format: { url, capabilities? }
-                peerObject.connection.string = peerData.url
+            } else if (typeof peerData === "object" && peerData !== null && "url" in peerData) {
+                // New format: { "pubkey": { "url": "http://...", "capabilities": {...} } }
+                // REVIEW: Validate that url is a non-empty string before assignment
+                const url = peerData.url
+                if (typeof url !== "string" || url.trim().length === 0) {
+                    log.warning(`[PEER] Invalid or empty URL for peer ${peer}: ${JSON.stringify(peerData)}`)
+                    continue
+                }
+                peerObject.connection.string = url
+                // REVIEW: Also load capabilities if present
                 if (peerData.capabilities) {
                     peerObject.capabilities = peerData.capabilities
                 }
+            } else {
+                log.warning(`[PEER] Invalid peer data format for ${peer}: ${JSON.stringify(peerData)}`)
+                continue
             }
             this.addPeer(peerObject)
         }

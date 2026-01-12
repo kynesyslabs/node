@@ -63,6 +63,10 @@ const indexState: {
     TLSNOTARY_ENABLED: boolean
     TLSNOTARY_PORT: number
     tlsnotaryService: any
+    // REVIEW: Prometheus Metrics configuration
+    METRICS_ENABLED: boolean
+    METRICS_PORT: number
+    metricsServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -87,6 +91,10 @@ const indexState: {
     TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
     TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
     tlsnotaryService: null,
+    // REVIEW: Prometheus Metrics defaults - enabled by default
+    METRICS_ENABLED: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
+    METRICS_PORT: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    metricsServer: null,
 }
 
 // SECTION Preparation methods
@@ -548,6 +556,48 @@ async function main() {
         })
     }
 
+    // REVIEW: Start Prometheus Metrics server (enabled by default)
+    if (indexState.METRICS_ENABLED) {
+        try {
+            const { getMetricsServer, getMetricsCollector } = await import(
+                "./features/metrics"
+            )
+
+            indexState.METRICS_PORT = await getNextAvailablePort(
+                indexState.METRICS_PORT,
+            )
+
+            const metricsServer = getMetricsServer({
+                port: indexState.METRICS_PORT,
+                enabled: true,
+            })
+
+            await metricsServer.start()
+
+            indexState.metricsServer = metricsServer
+            log.info(
+                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+            )
+
+            // REVIEW: Start metrics collector for live data gathering
+            const metricsCollector = getMetricsCollector({
+                enabled: true,
+                collectionIntervalMs: 2500, // 2.5 seconds for real-time monitoring
+                dockerHealthEnabled: true,
+                portHealthEnabled: true,
+            })
+            await metricsCollector.start()
+            log.info("[METRICS] Metrics collector started")
+        } catch (error) {
+            log.error("[METRICS] Failed to start metrics server: " + error)
+            // Continue without metrics (failsafe)
+        }
+    } else {
+        log.info(
+            "[METRICS] Metrics server disabled (set METRICS_ENABLED=true to enable)",
+        )
+    }
+
     // ANCHOR Based on the above methods, we can now start the main loop
     // Checking for listening mode
     if (indexState.peerManager.getPeers().length < 1) {
@@ -715,15 +765,25 @@ async function main() {
             // INFO: Wait for hello peer if we are the anchor node
             // useful when anchor node is re-joining the network
 
-            // REVIEW: Only set up stdin handlers when TUI is NOT enabled
-            // TUI mode uses terminal-kit which manages stdin independently.
-            // Calling process.stdin.pause() would break TUI keyboard input!
-            if (!indexState.TUI_ENABLED) {
-                // Set up Enter key listener to skip the wait
-                // REVIEW: Phase 9 - Check isTTY before setRawMode to avoid crash in Docker/CI
-                const isTTY = process.stdin.isTTY
-                const wasRawMode = isTTY ? process.stdin.isRaw : false
-                if (isTTY && !wasRawMode) {
+            // REVIEW: When TUI is enabled, don't manipulate stdin directly
+            // terminal-kit already controls stdin via grabInput(), and calling
+            // process.stdin.pause() will break TUI keyboard input.
+            // Instead, just wait the timeout - TUI users can press 'q' to quit if needed.
+            if (indexState.TUI_ENABLED) {
+                // TUI mode: just wait, no stdin manipulation
+                try {
+                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
+                } catch (error) {
+                    if (error instanceof TimeoutError) {
+                        log.info("[MAIN] No wild peers found, starting sync loop")
+                    } else if (error instanceof AbortError) {
+                        log.info("[MAIN] Wait aborted, starting sync loop")
+                    }
+                }
+            } else {
+                // Non-TUI mode: set up Enter key listener to skip the wait
+                const wasRawMode = process.stdin.isRaw
+                if (!wasRawMode) {
                     process.stdin.setRawMode(true)
                 }
                 process.stdin.resume()
@@ -740,7 +800,7 @@ async function main() {
                         }
                         // Clean up
                         process.stdin.removeListener("data", enterKeyHandler)
-                        if (isTTY && !wasRawMode) {
+                        if (!wasRawMode) {
                             process.stdin.setRawMode(false)
                         }
                         process.stdin.pause()
@@ -760,22 +820,10 @@ async function main() {
                 } finally {
                     // Clean up listener if still attached
                     process.stdin.removeListener("data", enterKeyHandler)
-                    if (isTTY && !wasRawMode) {
+                    if (!wasRawMode) {
                         process.stdin.setRawMode(false)
                     }
                     process.stdin.pause()
-                }
-            } else {
-                // TUI mode: just wait for hello_peer without stdin handlers
-                // TUI already handles keyboard input via terminal-kit
-                try {
-                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
-                } catch (error) {
-                    if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
-                    } else if (error instanceof AbortError) {
-                        log.info("[MAIN] Wait aborted, starting sync loop")
-                    }
                 }
             }
         }
@@ -847,6 +895,19 @@ async function gracefulShutdown(signal: string) {
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
+            }
+        }
+
+        // REVIEW: Stop Metrics collector and server if running
+        if (indexState.metricsServer) {
+            console.log("[SHUTDOWN] Stopping Metrics collector and server...")
+            try {
+                // Stop the collector first to clear interval timer and prevent collection during shutdown
+                const { getMetricsCollector } = await import("./features/metrics")
+                getMetricsCollector().stop()
+                indexState.metricsServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping Metrics:", error)
             }
         }
 

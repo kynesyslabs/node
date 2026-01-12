@@ -22,6 +22,7 @@ import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/buil
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -286,6 +287,30 @@ export default class IdentityManager {
         }
     }
 
+    /**
+     * Verify the payload for a Nomis identity assign payload
+     *
+     * @param payload - The payload to verify
+     *
+     * @returns {success: boolean, message: string}
+     */
+    static async verifyNomisPayload(
+        payload: NomisWalletIdentity,
+    ): Promise<{ success: boolean; message: string }> {
+        if (!payload.chain || !payload.subchain || !payload.address) {
+            return {
+                success: false,
+                message:
+                    "Invalid Nomis identity payload: missing chain, subchain or address",
+            }
+        }
+
+        return {
+            success: true,
+            message: "Nomis identity payload verified",
+        }
+    }
+
     // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
@@ -330,7 +355,7 @@ export default class IdentityManager {
      */
     static async getIdentities(
         address: string,
-        key?: "xm" | "web2" | "pqc" | "ud",
+        key?: "xm" | "web2" | "pqc" | "ud" | "nomis",
     ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {

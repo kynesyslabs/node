@@ -1,0 +1,241 @@
+---
+title: "Pricing"
+description: "IPFS storage costs, fee structure, and tokenomics"
+---
+
+# Pricing
+
+IPFS storage costs are determined by content size, account tier, and pin duration.
+
+## Account Tiers
+
+### Regular Accounts
+
+| Metric | Value |
+|--------|-------|
+| Base Rate | 1 DEM per 100 MB |
+| Minimum Cost | 1 DEM per operation |
+| Free Allocation | None |
+
+### Genesis Accounts
+
+Genesis accounts (those with balances in the genesis block) receive preferential pricing:
+
+| Metric | Value |
+|--------|-------|
+| Free Allocation | 1 GB |
+| Post-Free Rate | 1 DEM per 1 GB |
+| Minimum Cost | 0 DEM (within free tier) |
+
+### Genesis Detection
+
+```typescript
+async function isGenesisAccount(address: string): Promise<boolean> {
+  const genesisBlock = await Chain.getGenesisBlock()
+  const balances = genesisBlock.content.extra.genesisData.balances
+  return balances.some(
+    ([addr]) => addr.toLowerCase() === address.toLowerCase()
+  )
+}
+```
+
+## Duration Pricing
+
+Pin duration affects cost through multipliers:
+
+| Duration | Seconds | Multiplier | Discount |
+|----------|---------|------------|----------|
+| `week` | 604,800 | 0.10 | 90% off |
+| `month` | 2,592,000 | 0.25 | 75% off |
+| `quarter` | 7,776,000 | 0.50 | 50% off |
+| `year` | 31,536,000 | 0.80 | 20% off |
+| `permanent` | - | 1.00 | Full price |
+
+### Custom Duration Formula
+
+For durations specified in seconds:
+
+```
+multiplier = 0.1 + (duration / MAX_DURATION) * 0.9
+```
+
+Where `MAX_DURATION = 315,360,000` (10 years).
+
+## Cost Calculation
+
+### Formula
+
+```
+finalCost = baseCost × durationMultiplier
+```
+
+### Regular Account Calculation
+
+```typescript
+function calculateRegularCost(sizeBytes: number): bigint {
+  const BYTES_PER_UNIT = 104_857_600n  // 100 MB
+  const COST_PER_UNIT = 1n             // 1 DEM
+
+  const units = BigInt(Math.ceil(sizeBytes / Number(BYTES_PER_UNIT)))
+  return units > 0n ? units * COST_PER_UNIT : COST_PER_UNIT
+}
+```
+
+### Genesis Account Calculation
+
+```typescript
+function calculateGenesisCost(
+  sizeBytes: number,
+  usedFreeBytes: number
+): bigint {
+  const FREE_BYTES = 1_073_741_824      // 1 GB
+  const BYTES_PER_UNIT = 1_073_741_824n // 1 GB
+
+  const remainingFree = FREE_BYTES - usedFreeBytes
+
+  if (sizeBytes <= remainingFree) {
+    return 0n  // Fully covered by free tier
+  }
+
+  const chargeableBytes = sizeBytes - remainingFree
+  return BigInt(Math.ceil(chargeableBytes / Number(BYTES_PER_UNIT)))
+}
+```
+
+## Examples
+
+### Regular Account
+
+| Size | Duration | Base Cost | Multiplier | Final Cost |
+|------|----------|-----------|------------|------------|
+| 50 MB | permanent | 1 DEM | 1.00 | 1 DEM |
+| 150 MB | permanent | 2 DEM | 1.00 | 2 DEM |
+| 500 MB | month | 5 DEM | 0.25 | 1.25 DEM |
+| 1 GB | week | 10 DEM | 0.10 | 1 DEM |
+
+### Genesis Account
+
+| Size | Used Free | Duration | Base Cost | Final Cost |
+|------|-----------|----------|-----------|------------|
+| 500 MB | 0 | permanent | 0 DEM | 0 DEM |
+| 500 MB | 800 MB | permanent | 0 DEM | 0 DEM |
+| 1 GB | 500 MB | permanent | 0 DEM | 0 DEM |
+| 2 GB | 0 | permanent | 1 DEM | 1 DEM |
+| 2 GB | 500 MB | permanent | 1 DEM | 1 DEM |
+| 5 GB | 1 GB | month | 4 DEM | 1 DEM |
+
+## Free Tier Tracking
+
+Genesis accounts have their free allocation tracked:
+
+```typescript
+interface AccountIPFSState {
+  freeAllocationBytes: number  // 1 GB for genesis
+  usedFreeBytes: number        // Cumulative usage
+  // ...
+}
+```
+
+When pinning:
+
+```typescript
+const freeRemaining = freeAllocation - usedFreeBytes
+const bytesFromFree = Math.min(size, freeRemaining)
+const chargeableBytes = size - bytesFromFree
+
+// Update state
+state.usedFreeBytes += bytesFromFree
+```
+
+**Note:** Free tier is only consumed on initial pins, not extensions.
+
+## Fee Distribution
+
+Current distribution (MVP phase):
+
+| Recipient | Share |
+|-----------|-------|
+| Hosting RPC | 100% |
+| Treasury | 0% |
+| Consensus | 0% |
+
+### Future Distribution
+
+Target distribution after mainnet:
+
+| Recipient | Share |
+|-----------|-------|
+| Hosting RPC | 70% |
+| Treasury | 20% |
+| Consensus | 10% |
+
+## Custom Charges
+
+Clients can cap costs for variable-size operations:
+
+```typescript
+{
+  type: "ipfs_add",
+  content: largeContent,
+  custom_charges: {
+    ipfs: {
+      max_cost_dem: "10.5"
+    }
+  }
+}
+```
+
+### Behavior
+
+- Node calculates actual cost
+- If `actualCost <= max_cost_dem`: Transaction succeeds, charges actual cost
+- If `actualCost > max_cost_dem`: Transaction fails with error
+
+### Use Case
+
+Useful when content size isn't known upfront (e.g., user uploads via UI).
+
+## Cost Estimation
+
+Use the `ipfs_quote` RPC to estimate costs before transacting:
+
+```typescript
+const quote = await client.ipfsQuote({
+  size: 1048576,      // 1 MB
+  duration: "month",
+  address: "your-address"
+})
+
+console.log(quote)
+// {
+//   cost: "1",
+//   durationSeconds: 2592000,
+//   multiplier: 0.25,
+//   withinFreeTier: false
+// }
+```
+
+## Pricing Constants
+
+```typescript
+// Regular accounts
+const REGULAR_MIN_COST = 1n                    // 1 DEM minimum
+const REGULAR_BYTES_PER_UNIT = 104_857_600     // 100 MB
+
+// Genesis accounts
+const GENESIS_FREE_BYTES = 1_073_741_824       // 1 GB free
+const GENESIS_BYTES_PER_UNIT = 1_073_741_824   // 1 GB per DEM
+
+// Duration multipliers
+const DURATION_MULTIPLIERS = {
+  week: 0.10,
+  month: 0.25,
+  quarter: 0.50,
+  year: 0.80,
+  permanent: 1.00
+}
+
+// Duration bounds
+const MIN_CUSTOM_DURATION = 86_400             // 1 day
+const MAX_CUSTOM_DURATION = 315_360_000        // 10 years
+```

@@ -21,7 +21,6 @@ import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
 import _, { result } from "lodash"
-import terminalKit from "terminal-kit"
 import {
     ExecutionResult,
     ValidityData,
@@ -75,8 +74,6 @@ import {
 } from "@kynesyslabs/demosdk/types"
 */
 
-const term = terminalKit.terminal
-
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
         referenceBlock >= lastBlock - getSharedState.referenceBlockRoom &&
@@ -90,9 +87,9 @@ export default class ServerHandlers {
         tx: Transaction,
         sender: string,
     ): Promise<ValidityData> {
-        term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
+        log.info("SERVER", "[handleTransactions] Handling a DEMOS tx...")
         const fname = "[handleTransactions] "
-        term.yellow(fname + "Handling transaction...")
+        log.info("SERVER", fname + "Handling transaction...")
         // Verify and execute the transaction
         let validationData: ValidityData
         try {
@@ -218,8 +215,7 @@ export default class ServerHandlers {
 
             //console.log(fname + "Fetching result...")
         } catch (e) {
-            term.red.bold("[TX VALIDATION ERROR] 💀 : ")
-            term.red(e)
+            log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)
             validationData = {
                 data: {
                     valid: false,
@@ -248,7 +244,7 @@ export default class ServerHandlers {
             }
         }
 
-        term.bold.white(fname + "Transaction handled.")
+        log.info("SERVER", fname + "Transaction handled.")
         return validationData
     }
 
@@ -302,9 +298,7 @@ export default class ServerHandlers {
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
-            term.red.bold(
-                fname + "Invalid validityData signature key (not us) 💀 : ",
-            )
+            log.error("SERVER", fname + "Invalid validityData signature key (not us) 💀")
 
             result.success = false
             result.response = false
@@ -368,7 +362,7 @@ export default class ServerHandlers {
                     We just processed the cryptographic validity of the transaction.
                     We will now try to execute it obtaining valid Operations.
                 */
-        term.green.bold(fname + "Valid validityData! \n")
+        log.info("SERVER", fname + "Valid validityData!")
         // REVIEW Switch case for different types of transactions
         const tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
@@ -542,7 +536,7 @@ export default class ServerHandlers {
 
                         // TODO: Handle response codes individually
                         DTRManager.validityDataCache.set(
-                            response.extra.peer,
+                            validatedData.data.transaction.hash,
                             validatedData,
                         )
                     }
@@ -554,34 +548,14 @@ export default class ServerHandlers {
                         message: "Transaction relayed to validators",
                     },
                     extra: {
-                        confirmationBlock: getSharedState.lastBlockNumber + 2,
+                        confirmationBlock: getSharedState.lastBlockNumber + 1,
                     },
                     require_reply: false,
                 }
             }
 
             if (getSharedState.inConsensusLoop) {
-                log.debug(
-                    "in consensus loop, setting tx in cache: " + queriedTx.hash,
-                )
-                DTRManager.validityDataCache.set(queriedTx.hash, validatedData)
-
-                // INFO: Start the relay waiter
-                if (!DTRManager.isWaitingForBlock) {
-                    log.debug("not waiting for block, starting relay")
-                    DTRManager.waitForBlockThenRelay()
-                }
-
-                return {
-                    success: true,
-                    response: {
-                        message: "Transaction relayed to validators",
-                    },
-                    extra: {
-                        confirmationBlock: getSharedState.lastBlockNumber + 2,
-                    },
-                    require_reply: false,
-                }
+                return await DTRManager.inConsensusHandler(validatedData)
             }
 
             log.debug(

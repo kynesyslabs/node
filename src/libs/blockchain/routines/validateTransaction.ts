@@ -19,12 +19,10 @@ import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
-import terminalkit from "terminal-kit"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -32,7 +30,7 @@ export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
     sender: string,
 ): Promise<ValidityData> {
-    term.yellow("\n[Native Tx Validation] Validating transaction...\n")
+    log.info("TX", "[Native Tx Validation] Validating transaction...")
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
     // REVIEW This should work just fine
@@ -145,9 +143,7 @@ async function defineGas(
         }
         log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
-        term.red.bold(
-            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n",
-        )
+        log.error("TX", "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction")
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
@@ -167,11 +163,7 @@ async function defineGas(
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
-        term.red.bold(
-            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
-                from +
-                "\n",
-        )
+        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " + from)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
@@ -192,14 +184,8 @@ async function defineGas(
     const compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
     if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
-        term.red.bold(
-            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-                compositeFeeAmount +
-                "; available: " +
-                fromBalance +
-                "\n" +
-                "\n",
-        )
+        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+            compositeFeeAmount + "; available: " + fromBalance)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
             compositeFeeAmount +

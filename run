@@ -6,6 +6,7 @@ PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
+MONITORING_DISABLED=false
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -58,8 +59,10 @@ OPTIONS:
     -v                             Verbose logging
     -e                             Use external database (skip local PostgreSQL setup)
     -h                             Show this help message
+    -m                             Disable monitoring stack (Prometheus/Grafana)
     --no-tui                       Disable TUI (same as -t)
     --external-db                  Use external database (same as -e)
+    --no-monitoring                Disable monitoring stack (same as -m)
 
 EXAMPLES:
     ./run                          # Start with default settings
@@ -462,6 +465,10 @@ function ctrl_c() {
         # Force kill if still running
         docker rm -f "tlsn-notary-${TLSNOTARY_PORT:-7047}" 2>/dev/null || true
     fi
+    # Stop monitoring stack if running (enabled by default)
+    if [ "$MONITORING_DISABLED" != "true" ] && [ -d "monitoring" ]; then
+        (cd monitoring && docker compose down --timeout 5 2>/dev/null) || true
+    fi
 
     echo "✅ Cleanup complete"
 }
@@ -543,11 +550,16 @@ for arg in "$@"; do
             # Remove --external-db from arguments so getopts doesn't choke on it
             set -- "${@/--external-db/}"
             ;;
+        --no-monitoring)
+            MONITORING_DISABLED=true
+            # Remove --no-monitoring from arguments so getopts doesn't choke on it
+            set -- "${@/--no-monitoring/}"
+            ;;
     esac
 done
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:tveh" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:tvehm" opt; do
     case $opt in
         p) PORT=$OPTARG;;
         d) PG_PORT=$OPTARG;;
@@ -561,6 +573,7 @@ while getopts "p:d:c:i:n:u:l:r:b:tveh" opt; do
         t) NO_TUI=true;;
         v) VERBOSE=true;;
         e) EXTERNAL_DB=true;;
+        m) MONITORING_DISABLED=true;;
         h) show_help; exit 0;;
         *) echo "Invalid option. Use -h for help."; exit 1;;
     esac
@@ -917,7 +930,7 @@ if [ "$TLSNOTARY_DISABLED" != "true" ]; then
             log_verbose "Waiting for TLSNotary to be healthy..."
             TLSN_TIMEOUT=15
             TLSN_COUNT=0
-            while ! curl -sf "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
+            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
                 TLSN_COUNT=$((TLSN_COUNT+1))
                 if [ $TLSN_COUNT -gt $TLSN_TIMEOUT ]; then
                     echo "⚠️  Warning: TLSNotary health check timeout"
@@ -936,6 +949,53 @@ if [ "$TLSNOTARY_DISABLED" != "true" ]; then
     fi
 else
     log_verbose "TLSNotary disabled (TLSNOTARY_DISABLED=true)"
+fi
+
+# Monitoring stack (Prometheus/Grafana) management (enabled by default)
+# Set MONITORING_DISABLED=true or use -m/--no-monitoring to disable
+if [ "$MONITORING_DISABLED" != "true" ]; then
+    echo "📊 Starting monitoring stack (Prometheus/Grafana)..."
+
+    if [ -d "monitoring" ]; then
+        cd monitoring
+
+        # Stop any existing containers
+        docker compose down > /dev/null 2>&1 || true
+
+        # Start the monitoring stack
+        log_verbose "Starting monitoring containers"
+        if ! docker compose up -d; then
+            echo "⚠️  Warning: Failed to start monitoring stack"
+            echo "💡 Monitoring dashboards will not be available"
+        else
+            echo "✅ Monitoring stack started"
+            echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
+            echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
+
+            # Wait for Grafana to be healthy (max 30 seconds)
+            log_verbose "Waiting for Grafana to be healthy..."
+            GRAFANA_TIMEOUT=30
+            GRAFANA_COUNT=0
+            GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$GRAFANA_PORT/api/health" > /dev/null 2>&1; do
+                GRAFANA_COUNT=$((GRAFANA_COUNT+1))
+                if [ $GRAFANA_COUNT -gt $GRAFANA_TIMEOUT ]; then
+                    echo "⚠️  Warning: Grafana health check timeout"
+                    break
+                fi
+                sleep 1
+            done
+
+            if [ $GRAFANA_COUNT -le $GRAFANA_TIMEOUT ]; then
+                echo "✅ Grafana is ready"
+            fi
+        fi
+        cd ..
+    else
+        echo "⚠️  Warning: monitoring folder not found, skipping monitoring setup"
+    fi
+else
+    log_verbose "Monitoring disabled (MONITORING_DISABLED=true)"
 fi
 
 # Ensuring the logs folder exists
@@ -1140,6 +1200,18 @@ if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
     fi
 
     echo "✅ TLSNotary stopped"
+fi
+
+# Stop monitoring stack if it was started (enabled by default)
+if [ "$MONITORING_DISABLED" != "true" ] && [ -d "monitoring" ]; then
+    echo "🛑 Stopping monitoring stack..."
+
+    # Try graceful shutdown first with short timeout (subshell to preserve working directory)
+    (
+        cd monitoring && docker compose down --timeout 5 2>/dev/null
+    ) || echo "⚠️  Warning: Failed to stop monitoring stack cleanly."
+
+    echo "✅ Monitoring stack stopped"
 fi
 
 echo ""

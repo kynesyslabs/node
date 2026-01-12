@@ -1,6 +1,6 @@
 {
     "name": "demos-node-software",
-    "version": "0.9.5",
+    "version": "0.9.8",
     "description": "Demos Node Software",
     "author": "Kynesys Labs",
     "license": "none",
@@ -96,6 +96,7 @@
         "ntp-client": "^0.5.3",
         "object-sizeof": "^2.6.3",
         "pg": "^8.12.0",
+        "prom-client": "^15.1.3",
         "reflect-metadata": "^0.1.13",
         "rijndael-js": "^2.0.0",
         "rollup-plugin-polyfill-node": "^0.12.0",

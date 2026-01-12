@@ -41,6 +41,7 @@ export class GCRMain {
                 date: string
                 points: number
             }>
+            nomisScores: { [chain: string]: number }
         }
         lastUpdated: Date
     }

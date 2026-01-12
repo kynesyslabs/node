@@ -981,28 +981,17 @@ export class TUIManager extends EventEmitter {
 
     // SECTION Log Management
 
+    // Flag to indicate logs have changed since last render
+    private logsNeedUpdate = true
+
     /**
      * Handle new log entry
-     * REVIEW: Debounced to prevent event loop saturation from rapid log entries
-     * which was causing keyboard input to become unresponsive
+     * PERF: Don't update filtered logs on every entry - just mark as dirty
+     * The render loop will update when needed (every 100ms)
      */
     private handleLogEntry(_entry: LogEntry): void {
-        // Schedule debounced update instead of immediate update
-        // This prevents event loop saturation when logs come in rapidly
-        if (!this.updateFilteredLogsScheduled) {
-            this.updateFilteredLogsScheduled = true
-            setImmediate(() => {
-                this.updateFilteredLogsScheduled = false
-                // Update filtered logs
-                this.updateFilteredLogs()
-
-                // Only auto-scroll when enabled (frozen logs handles manual mode)
-                if (this.autoScroll) {
-                    const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
-                    this.setScrollOffset(maxScroll)
-                }
-            })
-        }
+        // Mark that logs need updating - actual update happens in render()
+        this.logsNeedUpdate = true
     }
 
     /**
@@ -1074,6 +1063,17 @@ export class TUIManager extends EventEmitter {
      */
     render(): void {
         if (!this.isRunning) return
+
+        // PERF: Only update filtered logs when needed (debounced from log events)
+        if (this.logsNeedUpdate && !this.isCmdMode) {
+            this.updateFilteredLogs()
+            // Auto-scroll to bottom when enabled
+            if (this.autoScroll) {
+                const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
+                this.setScrollOffset(maxScroll)
+            }
+            this.logsNeedUpdate = false
+        }
 
         // Render components (each clears its own area)
         this.renderHeader()

@@ -111,6 +111,62 @@ For debugging and development, you can disable the TUI and use traditional scrol
 
 This provides linear console output that can be easily piped, searched with grep, or redirected to files.
 
+## Monitoring with Prometheus & Grafana
+
+The node includes a full monitoring stack with Prometheus metrics and pre-built Grafana dashboards.
+
+### Enabling Metrics
+
+Metrics are enabled by default. To configure, add to your `.env` file:
+
+```env
+METRICS_ENABLED=true
+METRICS_PORT=9090
+```
+
+The node will expose metrics at `http://localhost:9090/metrics`.
+
+### Starting the Monitoring Stack
+
+```bash
+cd monitoring
+docker compose up -d
+```
+
+**Access Grafana**: http://localhost:3000
+**Default credentials**: admin / demos
+
+### Available Metrics
+
+| Metric | Description |
+|--------|-------------|
+| `demos_block_height` | Current block height |
+| `demos_seconds_since_last_block` | Time since last block |
+| `demos_peer_online_count` | Connected peers |
+| `demos_system_cpu_usage_percent` | CPU utilization |
+| `demos_system_memory_usage_percent` | Memory utilization |
+| `demos_service_docker_container_up` | Container health status |
+
+### Configuration
+
+The node and monitoring stack are configurable via environment variables:
+
+**Node metrics (in `.env`):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `METRICS_ENABLED` | `true` | Enable/disable metrics endpoint |
+| `METRICS_PORT` | `9090` | Node metrics endpoint port |
+
+**Monitoring stack (in `monitoring/.env`):**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROMETHEUS_PORT` | `9091` | Prometheus server port |
+| `GRAFANA_PORT` | `3000` | Grafana dashboard port |
+| `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password |
+| `PROMETHEUS_RETENTION` | `15d` | Data retention period |
+
+For detailed monitoring documentation, see [monitoring/README.md](monitoring/README.md).
+
 ## Technology Stack
 
 - **Runtime**: Bun (required due to performances and advanced native features)
@@ -126,6 +182,37 @@ After installation, configure your node by editing:
 
 - `.env`: Core node settings including network endpoints
 - `demos_peerlist.json`: Known peer connections for network participation
+
+## Network Ports
+
+The following ports must be open for the node to function properly.
+
+> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+
+### Required Ports
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 53550 | TCP | Node RPC API |
+| 53551 | TCP/UDP | OmniProtocol P2P communication |
+| 7047 | TCP | TLSNotary server |
+| 55000-60000 | TCP/UDP | WebSocket proxy for TLSNotary |
+
+### Optional Ports
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 9090 | TCP | Metrics endpoint (monitoring) |
+| 9091 | TCP | Prometheus server (monitoring stack) |
+| 3000 | TCP | Grafana dashboard (monitoring stack) |
+| 5332 | TCP | PostgreSQL (local only, do not expose externally) |
+
+**Firewall example (ufw):**
+```bash
+# Required
+sudo ufw allow 53550/tcp        # Node RPC
+sudo ufw allow 53551            # OmniProtocol (TCP+UDP)
+sudo ufw allow 7047/tcp         # TLSNotary
+sudo ufw allow 55000:60000      # TLSNotary WS proxy (TCP+UDP)
+```
 
 ## Security
 

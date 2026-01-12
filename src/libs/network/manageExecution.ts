@@ -6,10 +6,7 @@ import ServerHandlers from "./endpointHandlers"
 import { ISecurityReport } from "@kynesyslabs/demosdk/types"
 import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
-import terminalkit from "terminal-kit"
 import log from "src/utilities/logger"
-
-const term = terminalkit.terminal
 
 export async function manageExecution(
     content: BundleContent,
@@ -23,9 +20,7 @@ export async function manageExecution(
     if (content.type === "l2ps") {
         const response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {
-            term.red.bold(
-                "[SERVER] Error while handling L2PS request, aborting",
-            )
+            log.error("SERVER", "Error while handling L2PS request, aborting")
         }
         return response
     }
@@ -40,7 +35,7 @@ export async function manageExecution(
         // Validating a tx means that we calculate gas and check if the transaction is valid
         // Then we send the validation data to the client that can use it to execute the tx
         case "confirmTx":
-            term.yellow.bold("[SERVER] Received confirmTx\n")
+            log.info("SERVER", "Received confirmTx")
             // eslint-disable-next-line no-var
             var validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
@@ -53,7 +48,7 @@ export async function manageExecution(
         // Executing a tx means that we execute the transaction and send back the result
         // to the client. We first need to check if the tx is actually valid.
         case "broadcastTx":
-            term.yellow.bold("[SERVER] Received broadcastTx\n")
+            log.info("SERVER", "Received broadcastTx")
             // REVIEW This method needs to actually verify if the transaction is valid
 
             var validityDataPayload: ValidityData
