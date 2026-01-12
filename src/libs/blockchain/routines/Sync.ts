@@ -199,7 +199,7 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
         ],
     }
 
-    const blockResponse = await peer.longCall(blockRequest, false, 250, 3)
+    const blockResponse = await peer.httpCall(blockRequest)
 
     if (blockResponse.result === 200) {
         return blockResponse.response as Block
@@ -316,9 +316,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         ],
     }
 
-    const blockResponse = await peer.longCall(blockRequest, false, 250, 3, [
-        404,
-    ])
+    const blockResponse = await peer.httpCall(blockRequest)
     log.debug("Block response: " + blockResponse.result)
 
     // INFO: Handle max retries reached
@@ -473,10 +471,7 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    const txsHashes = block.content.ordered_transactions
-    const txs = []
-
-    const res = await peer.longCall(
+    const res = await peer.httpCall(
         {
             method: "nodeCall",
             params: [
@@ -487,8 +482,6 @@ export async function askTxsForBlock(
             ],
         },
         false,
-        250,
-        3,
     )
 
     if (res.result === 200) {
