@@ -45,12 +45,14 @@ interface Response {
 
 const result = await demos.call("awardPoints", [
     {
-        username: "username1",
+        username: "cwilvxi",
         points: 1,
+        platform: "twitter"
     },
     {
-        username: "username2",
-        points: 2,
+        username: "@Randomblocker",
+        points: 20,
+        platform: "telegram"
     },
 ]) as Response;
 
