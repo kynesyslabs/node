@@ -63,8 +63,9 @@ async function decryptAndValidate(
     }
 
     const verificationResult = await Transaction.confirmTx(decryptedTx, decryptedTx.content.from)
-    if (!verificationResult) {
-        return { decryptedTx: null, error: "Transaction signature verification failed" }
+    if (!verificationResult || !verificationResult.success) {
+        const errorMsg = verificationResult?.message || "Transaction signature verification failed"
+        return { decryptedTx: null, error: errorMsg }
     }
 
     return { decryptedTx: decryptedTx as unknown as Transaction, error: null }

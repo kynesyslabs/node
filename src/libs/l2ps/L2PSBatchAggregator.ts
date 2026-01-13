@@ -96,9 +96,6 @@ export class L2PSBatchAggregator {
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
 
-    /** Persistent nonce counter for batch transactions */
-    private readonly batchNonceCounter: number = 0
-    
     /** Statistics tracking */
     private stats = this.createInitialStats()
 
@@ -509,7 +506,16 @@ export class L2PSBatchAggregator {
             // Convert transactions to ZK-friendly format using the amount from tx content when present.
             // If absent, fallback to 0n to avoid failing the batching loop.
             const zkTransactions = transactions.map((tx) => {
-                const amount = BigInt((tx.encrypted_tx as any)?.content?.amount || 0)
+                // Safely convert amount to BigInt with validation
+                const rawAmount = (tx.encrypted_tx as any)?.content?.amount
+                let amount: bigint
+                try {
+                    amount = rawAmount !== undefined && rawAmount !== null
+                        ? BigInt(Math.floor(Number(rawAmount)))
+                        : 0n
+                } catch {
+                    amount = 0n
+                }
 
                 // Neutral before/after while preserving the invariant:
                 // senderAfter = senderBefore - amount, receiverAfter = receiverBefore + amount.

@@ -313,13 +313,16 @@ export default class L2PSProofManager {
      * @returns Array of proofs
      */
     static async getProofs(
-        l2psUid: string,
+        l2psUid?: string,
         status?: L2PSProofStatus,
         limit: number = 100
     ): Promise<L2PSProof[]> {
         const repo = await this.getRepo()
 
-        const where: any = { l2ps_uid: l2psUid }
+        const where: any = {}
+        if (l2psUid) {
+            where.l2ps_uid = l2psUid
+        }
         if (status) {
             where.status = status
         }
