@@ -203,10 +203,12 @@ export default class Chain {
     }
 
     // ANCHOR Transactions
-    static async getTransactionFromHash(hash: string): Promise<Transaction> {
-        return Transaction.fromRawTransaction(
-            await this.transactions.findOneBy({ hash: ILike(hash) }),
-        )
+    static async getTransactionFromHash(hash: string): Promise<Transaction | null> {
+        const rawTx = await this.transactions.findOneBy({ hash: ILike(hash) })
+        if (!rawTx) {
+            return null
+        }
+        return Transaction.fromRawTransaction(rawTx)
     }
 
     // INFO returns transactions by hashes

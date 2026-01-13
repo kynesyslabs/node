@@ -387,6 +387,9 @@ try {
         console.log(`  ✅ Outer hash: ${subnetTx.hash}`)
         console.log(`  ✅ Inner hash: ${innerTx.hash}`)
 
+        // Increment nonce for next transaction
+        currentNonce++
+
         // Large delay between transactions to reduce I/O pressure on WSL/Node
         if (i < options.count - 1) {
             console.log("  ⏳ Waiting 2s before next transaction...")

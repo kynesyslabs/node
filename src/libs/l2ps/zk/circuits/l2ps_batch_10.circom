@@ -4,8 +4,8 @@ include "poseidon.circom";
 
 /*
  * L2PS Batch Circuit - 10 transactions
- * ~35K constraints → pot16 (64MB)
- * 
+ * ~74K constraints → pot17 (128MB)
+ *
  * For batches with 6-10 transactions.
  * Unused slots filled with zero-amount transfers.
  */
