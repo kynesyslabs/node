@@ -50,6 +50,8 @@ import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRoutines"
+import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
@@ -285,11 +287,17 @@ export default class HandleGCR {
                 log.debug(`Assigning GCREdit ${editOperation.type}`)
                 return { success: true, message: "Not implemented" }
             case "smartContract":
-            case "storageProgram":
             case "escrow":
                 // TODO implementations
                 log.debug(`GCREdit ${editOperation.type} not yet implemented`)
                 return { success: true, message: "Not implemented" }
+            // REVIEW: StorageProgram unified storage operations
+            case "storageProgram":
+                return GCRStorageProgramRoutines.apply(
+                    editOperation,
+                    repositories.storageProgram as Repository<GCRStorageProgram>,
+                    simulate,
+                )
             // REVIEW: TLSNotary attestation proof storage
             case "tlsnotary":
                 return GCRTLSNotaryRoutines.apply(
@@ -549,6 +557,7 @@ export default class HandleGCR {
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCRTracker),
             tlsnotary: dataSource.getRepository(GCRTLSNotary),
+            storageProgram: dataSource.getRepository(GCRStorageProgram),
         }
     }
 
