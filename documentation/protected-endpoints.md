@@ -43,18 +43,38 @@ interface Response {
     confirmationBlock: number
 }
 
-const result = await demos.call("awardPoints", [
+const result = (await demos.call("awardPoints", [
+    // Web2
     {
         username: "cwilvxi",
         points: 1,
-        platform: "twitter"
+        platform: "twitter",
     },
     {
         username: "@Randomblocker",
         points: 20,
-        platform: "telegram"
+        platform: "telegram",
     },
-]) as Response;
+
+    // Web3
+    {
+        address: "2FnDmdaoXBzfx7CM4tLCjt9jexnDwysjHz49QkBYV1E2",
+        points: 100,
+        chain: "solana.mainnet",
+    },
+    {
+        address: "0x21f74bb7dde14b2d5da36df2d57aaa891e3a0039",
+        points: 100,
+        chain: "eth.mainnet",
+    },
+
+    // Native
+    {
+        address:
+            "0x51322c62dcefdcc19a6f2a556a015c23ecb0ffeeb8b13c47e7422974616ff4ab",
+        points: 100,
+    },
+])) as Response
 
 console.log(result)
 ```

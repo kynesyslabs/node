@@ -30,7 +30,7 @@ import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
-import GCR from "../blockchain/gcr/gcr"
+import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 // Reading the port from sharedState
 
 const noAuthMethods = ["nodeCall"]
@@ -290,11 +290,7 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const awardPointsData = payload.params[0].message as {
-                username: string
-                points: number
-                platform: "twitter" | "discord" | "telegram" | "github"
-            }[]
+            const awardPointsData = payload.params[0].message as AccountParams[]
             const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
