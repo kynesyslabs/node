@@ -2,6 +2,7 @@ import { EntityTarget, Repository, FindOptionsOrder } from "typeorm"
 import Datasource from "../../../../model/datasource"
 import Hashing from "src/libs/crypto/hashing"
 import { GCRSubnetsTxs } from "../../../../model/entities/GCRv2/GCRSubnetsTxs"
+import { GCRTLSNotary } from "../../../../model/entities/GCRv2/GCR_TLSNotary"
 import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
 import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
@@ -55,6 +56,38 @@ export async function hashSubnetsTxsTable(): Promise<string> {
     return Hashing.sha256(tableString)
 }
 
+// REVIEW: TLSNotary proofs table hash for integrity verification
+/**
+ * Generates a SHA-256 hash for the GCRTLSNotary table.
+ * Orders by tokenId for deterministic hashing.
+ *
+ * @returns Promise<string> - SHA-256 hash of the TLSNotary proofs table
+ */
+export async function hashTLSNotaryTable(): Promise<string> {
+    const db = await Datasource.getInstance()
+    const repository = db.getDataSource().getRepository(GCRTLSNotary)
+
+    const records = await repository.find({
+        order: {
+            tokenId: "ASC",
+        },
+    })
+
+    // Normalize to plain objects with fixed field order for deterministic hashing
+    const normalized = records.map(r => ({
+        tokenId: r.tokenId,
+        owner: r.owner,
+        domain: r.domain,
+        proof: r.proof,
+        storageType: r.storageType,
+        txhash: r.txhash,
+        proofTimestamp: String(r.proofTimestamp),
+        createdAt: r.createdAt ? r.createdAt.toISOString() : null,
+    }))
+
+    return Hashing.sha256(JSON.stringify(normalized))
+}
+
 /**
  * Creates a combined hash of all GCR-related tables.
  * Process:
@@ -72,9 +105,12 @@ export default async function hashGCRTables(): Promise<NativeTablesHashes> {
     // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
     const gcrHash = await hashPublicKeyTable("gcr_tracker") // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
+    // REVIEW: TLSNotary proofs included in GCR integrity hash
+    const tlsnotaryHash = await hashTLSNotaryTable()
     return {
         native_gcr: gcrHash,
         native_subnets_txs: subnetsTxsHash,
+        native_tlsnotary: tlsnotaryHash,
     }
 }
 

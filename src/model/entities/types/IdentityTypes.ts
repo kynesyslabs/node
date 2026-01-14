@@ -1,4 +1,22 @@
-import { Web2GCRData } from "@kynesyslabs/demosdk/types"
+import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
+
+export interface NomisWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
 
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
@@ -9,6 +27,21 @@ export interface SavedXmIdentity {
     publicKey: string
     timestamp: number
     signedData: string
+}
+export interface SavedNomisIdentity {
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
 }
 
 /**
@@ -27,6 +60,31 @@ export interface PqcIdentityEdit extends SavedPqcIdentity {
     algorithm: string
 }
 
+/**
+ * The Unstoppable Domains identity saved in the GCR
+ *
+ * PHASE 5 UPDATE: Multi-address verification support
+ * - Users can sign with ANY address in their domain records (not just owner)
+ * - Supports both EVM (secp256k1) and Solana (ed25519) signatures
+ * - Multi-chain support: Polygon L2, Base L2, Sonic, Ethereum L1, and Solana
+ *
+ * BREAKING CHANGE from Phase 4:
+ * - resolvedAddress → signingAddress (the address that signed, not the domain owner)
+ * - Added signatureType field to indicate EVM or Solana signature
+ * - Added "solana" to network options
+ */
+export interface SavedUdIdentity {
+    domain: string // e.g., "brad.crypto" or "example.demos"
+    signingAddress: string // The address that signed the challenge (can be any authorized address)
+    signatureType: SignatureType // "evm" or "solana" - indicates signature verification method
+    signature: string // Signature from signingAddress
+    publicKey: string // Public key of signingAddress
+    timestamp: number
+    signedData: string // Challenge message that was signed
+    network: "polygon" | "ethereum" | "base" | "sonic" | "solana" // Network where domain is registered
+    registryType: "UNS" | "CNS" // Which registry was used
+}
+
 export type StoredIdentities = {
     xm: {
         [chain: string]: {
@@ -40,5 +98,11 @@ export type StoredIdentities = {
         // A mapping of the algorithm identifier a list of the signature and address objects
         // eg. falcon: [{address: "pubkey1", signature: "signature1"}, {address: "pubkey2", signature: "signature2"}]
         [algorithm: string]: SavedPqcIdentity[]
+    }
+    ud: SavedUdIdentity[] // Unstoppable Domains identities
+    nomis?: {
+        [chain: string]: {
+            [subchain: string]: SavedNomisIdentity[]
+        }
     }
 }

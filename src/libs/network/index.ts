@@ -9,4 +9,4 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-export { default as server_rpc } from "./server_rpc"
+export { serverRpcBun, emptyResponse } from "./server_rpc"

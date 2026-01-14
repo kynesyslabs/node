@@ -5,7 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
 export default async function getPeerlist(): Promise<Peer[]> {
-    console.log("[SERVER] Executing getPeerlist")
+    log.debug("[SERVER] Executing getPeerlist")
     // Getting our current peerlist
     const socketizedResponse = PeerManager.getInstance().getPeers()
     const response = [] as Peer[]
@@ -20,11 +20,11 @@ export default async function getPeerlist(): Promise<Peer[]> {
             peer.connection.string.startsWith("http://127.0.0.1")
         ) {
             log.debug("Was returning local connection string")
-            log.debug(JSON.stringify(peer, null, 2))
+            log.debug(JSON.stringify(peer))
             log.debug("getSharedState.exposedUrl: " + getSharedState.exposedUrl)
 
             peer.connection.string = getSharedState.exposedUrl
-            log.debug(JSON.stringify(peer, null, 2))
+            log.debug(JSON.stringify(peer))
             // process.exit(0)
         }
     }

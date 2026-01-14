@@ -167,11 +167,13 @@ class Diagnostic {
     }
 
     public static async benchmark(progressBar: SingleBar): Promise<{
-        compliant: boolean
+        meetsMinimum: boolean
+        meetsSuggested: boolean
         details: Record<
             string,
             {
-                compliant: boolean
+                meetsMinimum: boolean
+                meetsSuggested: boolean
                 value: number | { download: number; upload: number }
             }
         >
@@ -182,7 +184,7 @@ class Diagnostic {
         // Load requirements from .requirements file
         dotenv.config({ path: ".requirements" })
 
-        const requirements = {
+        const minRequirements = {
             cpu: Number(process.env.MIN_CPU_SPEED),
             ram: Number(process.env.MIN_RAM),
             disk: Number(process.env.MIN_DISK_SPACE),
@@ -191,23 +193,33 @@ class Diagnostic {
             networkTestFileSize: Number(process.env.NETWORK_TEST_FILE_SIZE),
         }
 
+        const suggestedRequirements = {
+            cpu: Number(process.env.SUGGESTED_CPU_SPEED) || minRequirements.cpu,
+            ram: Number(process.env.SUGGESTED_RAM) || minRequirements.ram,
+            disk: Number(process.env.SUGGESTED_DISK_SPACE) || minRequirements.disk,
+            networkDownload: Number(process.env.SUGGESTED_NETWORK_DOWNLOAD_SPEED) || minRequirements.networkDownload,
+            networkUpload: Number(process.env.SUGGESTED_NETWORK_UPLOAD_SPEED) || minRequirements.networkUpload,
+        }
+
         console.log("Checking CPU...")
         progressBar.update(20)
-        const cpuResult = this.checkCPU(requirements.cpu)
+        const cpuResult = this.checkCPU(minRequirements.cpu, suggestedRequirements.cpu)
 
         console.log("Checking RAM...")
         progressBar.update(40)
-        const ramResult = this.checkRAM(requirements.ram)
+        const ramResult = this.checkRAM(minRequirements.ram, suggestedRequirements.ram)
 
         console.log("Checking Disk...")
         progressBar.update(60)
-        const diskResult = this.checkDisk(requirements.disk)
+        const diskResult = this.checkDisk(minRequirements.disk, suggestedRequirements.disk)
 
         console.log("Checking Network...")
         const networkResult = await this.checkNetwork(
-            requirements.networkDownload,
-            requirements.networkUpload,
-            requirements.networkTestFileSize,
+            minRequirements.networkDownload,
+            minRequirements.networkUpload,
+            suggestedRequirements.networkDownload,
+            suggestedRequirements.networkUpload,
+            minRequirements.networkTestFileSize,
             progressBar,
         )
 
@@ -221,49 +233,52 @@ class Diagnostic {
             network: networkResult,
         }
 
-        const compliant = Object.values(results).every(result =>
-            typeof result.value === "number"
-                ? result.compliant
-                : result.value.download >= requirements.networkDownload &&
-                  result.value.upload >= requirements.networkUpload,
-        )
+        const meetsMinimum = Object.values(results).every(result => result.meetsMinimum)
+        const meetsSuggested = Object.values(results).every(result => result.meetsSuggested)
 
         return {
-            compliant,
+            meetsMinimum,
+            meetsSuggested,
             details: results,
         }
     }
 
-    private static checkCPU(minSpeed: number): {
-        compliant: boolean
+    private static checkCPU(minSpeed: number, suggestedSpeed: number): {
+        meetsMinimum: boolean
+        meetsSuggested: boolean
         value: number
     } {
         const cpuInfo = os.cpus()[0]
         return {
-            compliant: cpuInfo.speed >= minSpeed,
+            meetsMinimum: cpuInfo.speed >= minSpeed,
+            meetsSuggested: cpuInfo.speed >= suggestedSpeed,
             value: cpuInfo.speed,
         }
     }
 
-    private static checkRAM(minRAM: number): {
-        compliant: boolean
+    private static checkRAM(minRAM: number, suggestedRAM: number): {
+        meetsMinimum: boolean
+        meetsSuggested: boolean
         value: number
     } {
         const totalRAM = os.totalmem() / (1024 * 1024 * 1024) // Convert to GB
         return {
-            compliant: totalRAM >= minRAM,
+            meetsMinimum: totalRAM >= minRAM,
+            meetsSuggested: totalRAM >= suggestedRAM,
             value: totalRAM,
         }
     }
 
-    private static checkDisk(minSpace: number): {
-        compliant: boolean
+    private static checkDisk(minSpace: number, suggestedSpace: number): {
+        meetsMinimum: boolean
+        meetsSuggested: boolean
         value: number
     } {
         // Note: This is a placeholder. You'll need to use a library like `diskusage` for accurate results
         const freeSpace = 100 // Placeholder value in GB
         return {
-            compliant: freeSpace >= minSpace,
+            meetsMinimum: freeSpace >= minSpace,
+            meetsSuggested: freeSpace >= suggestedSpace,
             value: freeSpace,
         }
     }
@@ -271,22 +286,26 @@ class Diagnostic {
     private static async checkNetwork(
         minDownloadSpeed: number,
         minUploadSpeed: number,
+        suggestedDownloadSpeed: number,
+        suggestedUploadSpeed: number,
         testFileSizeBytes: number,
         progressBar: SingleBar,
     ): Promise<{
-        compliant: boolean
+        meetsMinimum: boolean
+        meetsSuggested: boolean
         value: { download: number; upload: number }
     }> {
         console.log("Measuring download speed...")
         progressBar.update(70)
         const downloadSpeed = await this.measureDownloadSpeed(testFileSizeBytes)
-        
+
         console.log("Measuring upload speed...")
         progressBar.update(90)
         const uploadSpeed = await this.measureUploadSpeed(testFileSizeBytes)
 
         return {
-            compliant: downloadSpeed >= minDownloadSpeed && uploadSpeed >= minUploadSpeed,
+            meetsMinimum: downloadSpeed >= minDownloadSpeed && uploadSpeed >= minUploadSpeed,
+            meetsSuggested: downloadSpeed >= suggestedDownloadSpeed && uploadSpeed >= suggestedUploadSpeed,
             value: { download: downloadSpeed, upload: uploadSpeed },
         }
     }

@@ -1,4 +1,5 @@
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import log from "@/utilities/logger"
 
 export abstract class Web2ProofParser {
     formats = {
@@ -50,7 +51,7 @@ export abstract class Web2ProofParser {
                 signature: splits[3],
             }
         } catch (error) {
-            console.error(error)
+            log.error(error)
             return null
         }
     }

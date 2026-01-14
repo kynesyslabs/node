@@ -69,6 +69,7 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
+        log.debug("\n\n\n")
         log.debug("INITIALIZED SHARD:")
         log.debug(
             "SHARD: " +
@@ -542,7 +543,7 @@ export default class SecretaryManager {
             waitingMembers = this.getWaitingMembers()
         }
 
-        log.debug("WAITING MEMBERS: " + JSON.stringify(waitingMembers, null, 2))
+        log.debug("WAITING MEMBERS: " + JSON.stringify(waitingMembers))
         const promises = []
 
         for (const pubKey of waitingMembers) {
@@ -570,7 +571,7 @@ export default class SecretaryManager {
 
             log.debug(
                 "Peer to receive greenlight: " +
-                    JSON.stringify(member, null, 2),
+                    JSON.stringify(member),
             )
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
@@ -585,7 +586,7 @@ export default class SecretaryManager {
             const member = this.shard.members.find(m => m.identity === pubKey)
             log.debug(
                 "Peer who received greenlight: " +
-                    JSON.stringify(member, null, 2),
+                    JSON.stringify(member),
             )
 
             if (result.result == 400) {
@@ -600,14 +601,14 @@ export default class SecretaryManager {
 
             if (result.result == 200) {
                 log.debug("[SECRETARY ROUTINE] Greenlight sent to " + pubKey)
-                log.debug("Response: " + JSON.stringify(result, null, 2))
+                log.debug("Response: " + JSON.stringify(result))
                 continue
             }
 
             log.error(
                 "[SECRETARY ROUTINE] Error sending greenlight to " + pubKey,
             )
-            log.error("Response: " + JSON.stringify(result, null, 2))
+            log.error("Response: " + JSON.stringify(result))
             process.exit(1)
         }
 
@@ -668,7 +669,7 @@ export default class SecretaryManager {
             log.debug("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
             log.debug(
                 "Waitlist keys: " +
-                    JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
+                    JSON.stringify(Array.from(Waiter.waitList.keys())),
             )
             Waiter.preHold(waiterKey, secretaryBlockTimestamp)
             return true
@@ -775,7 +776,7 @@ export default class SecretaryManager {
                     ") sent to the secretary!",
             )
             log.debug(
-                "Set validator phase response: " + JSON.stringify(res, null, 2),
+                "Set validator phase response: " + JSON.stringify(res),
             )
 
             if (!Waiter.isWaiting(waiterKey)) {
@@ -791,7 +792,7 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
                 )
-                log.debug("Response: " + JSON.stringify(res, null, 2))
+                log.debug("Response: " + JSON.stringify(res))
 
                 // REVIEW: How should we handle this?
                 // NOTE: A 400 is returned if the block reference is
@@ -802,13 +803,13 @@ export default class SecretaryManager {
 
             if (res.result == 401) {
                 log.debug("received a 401")
-                log.debug(JSON.stringify(res, null, 2))
+                log.debug(JSON.stringify(res))
                 process.exit(1)
             }
 
             log.debug(
                 "[SEND OUR VALIDATOR PHASE] SendStatus callback got response: " +
-                    JSON.stringify(res, null, 2),
+                    JSON.stringify(res),
             )
 
             if (res.extra == 450) {
@@ -816,7 +817,7 @@ export default class SecretaryManager {
                 // process.exit(0)
                 // INFO: Logs parts used to create the current CVSA
                 await getCommonValidatorSeed(null, (message: string) => {
-                    log.only(message)
+                    log.debug(message)
                 })
                 return null
             }
@@ -831,7 +832,7 @@ export default class SecretaryManager {
                     "[SEND OUR VALIDATOR PHASE] SendStatus callback received greenlight",
                 )
                 log.debug(
-                    "Response.extra: " + JSON.stringify(res.extra, null, 2),
+                    "Response.extra: " + JSON.stringify(res.extra),
                 )
 
                 // INFO: Resolve the waiter with the timestamp
@@ -893,13 +894,12 @@ export default class SecretaryManager {
         log.debug(
             "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
         )
-        log.debug("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
+        log.debug("Waiter keys: " + JSON.stringify(waiterKeys))
         try {
             await Promise.all(waiters)
         } catch (error) {
-            console.error(error)
+            log.error("[SECRETARY] Error waiting for hanging greenlights: " + error)
             process.exit(1)
-            log.error("Error waiting for hanging greenlights: " + error)
         }
 
         // INFO: Delete pre-held keys for ended consensus round
@@ -909,7 +909,7 @@ export default class SecretaryManager {
             .forEach(key => Waiter.preHeld.delete(key))
 
         log.debug(
-            "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
+            "HANGING GREENLIGHTS RESOLVED",
         )
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 

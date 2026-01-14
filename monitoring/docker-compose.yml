@@ -1,0 +1,130 @@
+# REVIEW: Demos Network Monitoring Stack
+# Docker Compose configuration for Prometheus + Grafana monitoring
+# Modern glass-morphism design following minting_app aesthetics
+#
+# Usage:
+#   cd monitoring
+#   docker compose up -d
+#
+# Access:
+#   Grafana: http://localhost:3000 (admin credentials via env vars)
+#   Prometheus: http://localhost:9091 (internal, optional exposure)
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: demos-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    networks:
+      - demos-monitoring
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: demos-grafana
+    restart: unless-stopped
+    environment:
+      # Authentication
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-demos}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3000}
+
+      # Plugins for enhanced functionality
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+
+      # Analytics - Disable for privacy
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+
+      # Theme - Dark mode for glass morphism aesthetic
+      - GF_USERS_DEFAULT_THEME=dark
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+
+      # Branding - Demos Network identity
+      - GF_BRANDING_APP_TITLE=Demos Network
+      - GF_BRANDING_LOGIN_TITLE=Demos Network
+      - GF_BRANDING_LOGIN_SUBTITLE=Node Monitoring
+      - GF_BRANDING_LOGIN_LOGO=/public/img/demos-logo.svg
+      - GF_BRANDING_MENU_LOGO=/public/img/demos-logo.svg
+      - GF_BRANDING_FAV_ICON=/public/img/favicon.png
+
+      # Footer - Clean look
+      - GF_BRANDING_FOOTER_LINKS=
+      - GF_BRANDING_HIDE_VERSION=true
+
+      # Default dashboard
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/provisioning/dashboards/json/demos-overview.json
+
+      # Feature toggles for modern UI
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards,topnav,newPanelChromeUI
+
+      # Disable news feed for cleaner look
+      - GF_NEWS_NEWS_FEED_ENABLED=false
+
+      # Security
+      - GF_SECURITY_DISABLE_GRAVATAR=true
+
+      # Date formats - Browser locale
+      - GF_DATE_FORMATS_USE_BROWSER_LOCALE=true
+      - GF_DATE_FORMATS_DEFAULT_TIMEZONE=browser
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./grafana/branding/demos-logo-white.svg:/usr/share/grafana/public/img/demos-logo.svg:ro
+      - ./grafana/branding/demos-icon.svg:/usr/share/grafana/public/img/demos-icon.svg:ro
+      - ./grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - demos-monitoring
+    depends_on:
+      - prometheus
+
+  # Optional: Node Exporter for host-level metrics
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: demos-node-exporter
+    restart: unless-stopped
+    profiles:
+      - full  # Only starts with: docker compose --profile full up
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    networks:
+      - demos-monitoring
+
+networks:
+  demos-monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+    name: demos-prometheus-data
+  grafana_data:
+    name: demos-grafana-data

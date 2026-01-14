@@ -13,6 +13,7 @@ import https from "node:https"
 import { PeerManager } from "src/libs/peer"
 import required, { RequiredOutcome } from "src/utilities/required"
 import { getSharedState } from "src/utilities/sharedState"
+import log from "@/utilities/logger"
 
 export default class GroundControl {
     static host: string
@@ -65,13 +66,13 @@ export default class GroundControl {
             if (errorFlag) {
                 // Instead of failing, we switch to HTTP in case of failure
                 protocol = "http"
-                console.log("[groundControl] [ Failure ] Switching to HTTP")
+                log.warning("[groundControl] [ Failure ] Switching to HTTP")
             } else {
                 // Else we can start da server
                 try {
                     // Validate file paths to prevent path traversal attacks
-                    if (keys.key.includes('..') || keys.cert.includes('..') || keys.ca.includes('..')) {
-                        throw new Error("Invalid file path");
+                    if (keys.key.includes("..") || keys.cert.includes("..") || keys.ca.includes("..")) {
+                        throw new Error("Invalid file path")
                     }
                     GroundControl.options = {
                         key: fs.readFileSync(keys.key),
@@ -84,8 +85,8 @@ export default class GroundControl {
                     )
                 } catch (e) {
                     // Also here, we fallback happily
-                    console.log(e)
-                    console.log(
+                    log.error(e)
+                    log.warning(
                         "[groundControl] [ Failure ] Failed to start HTTPS server. Switching to HTTP",
                     )
                     protocol = "http"
@@ -99,7 +100,7 @@ export default class GroundControl {
             )
         }
         GroundControl.server.listen(port, host, () => {
-            console.log(
+            log.info(
                 "Ground Control Server is running at " +
                     protocol +
                     "://" +
@@ -122,7 +123,7 @@ export default class GroundControl {
             res.end()
             return
         }
-        console.log(url)
+        log.debug(url)
         const args = GroundControl.parse(url)
         //console.log(args)
         const response = await GroundControl.dispatch(args)
