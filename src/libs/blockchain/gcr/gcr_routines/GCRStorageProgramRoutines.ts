@@ -610,6 +610,74 @@ export class GCRStorageProgramRoutines {
             order: { createdAt: "DESC" },
         })
     }
+
+
+    /**
+     * Check if an address has read permission for a storage program
+     * @param program - The storage program to check
+     * @param requesterAddress - The address requesting read access (optional for public data)
+     * @returns true if read is allowed, false otherwise
+     */
+    static checkReadPermission(
+        program: GCRStorageProgram,
+        requesterAddress?: string,
+    ): boolean {
+        const acl = program.acl
+
+        // Public mode - everyone can read
+        if (acl.mode === "public") {
+            // Still check blacklist for public mode
+            if (requesterAddress && acl.blacklisted?.includes(requesterAddress)) {
+                return false
+            }
+            return true
+        }
+
+        // Owner mode - only owner can read
+        if (acl.mode === "owner") {
+            return requesterAddress === program.owner
+        }
+
+        // Restricted mode - check allowed list and groups
+        if (acl.mode === "restricted") {
+            // No requester means anonymous - denied in restricted mode
+            if (!requesterAddress) {
+                return false
+            }
+
+            // Check blacklist first
+            if (acl.blacklisted?.includes(requesterAddress)) {
+                return false
+            }
+
+            // Owner always has access
+            if (requesterAddress === program.owner) {
+                return true
+            }
+
+            // Check allowed list
+            if (acl.allowed?.includes(requesterAddress)) {
+                return true
+            }
+
+            // Check groups for read permission
+            if (acl.groups) {
+                for (const group of Object.values(acl.groups)) {
+                    if (
+                        group.members.includes(requesterAddress) &&
+                        group.permissions.includes("read")
+                    ) {
+                        return true
+                    }
+                }
+            }
+
+            return false
+        }
+
+        // Unknown mode - deny by default
+        return false
+    }
 }
 
 /**

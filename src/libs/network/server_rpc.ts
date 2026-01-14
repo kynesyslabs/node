@@ -463,6 +463,14 @@ export async function serverRpcBun() {
         }
     }
 
+    // REVIEW: Register StorageProgram routes for unified storage access
+    try {
+        const { registerStorageProgramRoutes } = await import("@/features/storageprogram/routes")
+        registerStorageProgramRoutes(server)
+    } catch (error) {
+        log.warning("[RPC] Failed to register StorageProgram routes: " + error)
+    }
+
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()
 }
