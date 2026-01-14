@@ -59,10 +59,10 @@ export function validateStorageProgramPayload(
     const encoding = payload.encoding || "json"
 
     // Validate operation type
+    // Note: READ_STORAGE is not a transaction operation - reads are handled via RPC endpoints
     const validOperations = [
         "CREATE_STORAGE_PROGRAM",
         "WRITE_STORAGE",
-        "READ_STORAGE",
         "UPDATE_ACCESS_CONTROL",
         "DELETE_STORAGE_PROGRAM",
     ]
@@ -454,6 +454,19 @@ export class GCRStorageProgramRoutines {
             }
         }
 
+        // Check write permission (owner or ACL)
+        const sender = edit.context.sender
+        const canWrite =
+            program.owner === sender ||
+            checkWritePermission(program.acl, sender)
+
+        if (!canWrite) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
+        }
+
         if (simulate) {
             log.debug(`[StorageProgram] Simulated write: ${storageAddress}`)
             return { success: true, message: "Simulated write successful" }
@@ -665,14 +678,14 @@ export class GCRStorageProgramRoutines {
                 return false
             }
 
-            // Check blacklist first
-            if (acl.blacklisted?.includes(requesterAddress)) {
-                return false
-            }
-
-            // Owner always has access
+            // Owner always has access (check BEFORE blacklist - owner cannot be blacklisted)
             if (requesterAddress === program.owner) {
                 return true
+            }
+
+            // Check blacklist
+            if (acl.blacklisted?.includes(requesterAddress)) {
+                return false
             }
 
             // Check allowed list
@@ -716,6 +729,35 @@ function checkDeletePermission(
     if (acl.groups) {
         for (const group of Object.values(acl.groups)) {
             if (group.members.includes(address) && group.permissions.includes("delete")) {
+                return true
+            }
+        }
+    }
+
+    return false
+}
+
+/**
+ * Check if address has write permission in ACL
+ */
+function checkWritePermission(
+    acl: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, { members: string[]; permissions: string[] }> },
+    address: string,
+): boolean {
+    // Check blacklist first
+    if (acl.blacklisted?.includes(address)) {
+        return false
+    }
+
+    // Public mode allows anyone to write (if not blacklisted)
+    if (acl.mode === "public") {
+        return true
+    }
+
+    // Check groups for write permission
+    if (acl.groups) {
+        for (const group of Object.values(acl.groups)) {
+            if (group.members.includes(address) && group.permissions.includes("write")) {
                 return true
             }
         }

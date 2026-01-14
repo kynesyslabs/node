@@ -39,7 +39,7 @@ interface StorageProgramResponse {
     createdAt?: string
     updatedAt?: string
     error?: string
-    errorCode?: "NOT_FOUND" | "PERMISSION_DENIED" | "DELETED" | "INTERNAL_ERROR"
+    errorCode?: "NOT_FOUND" | "PERMISSION_DENIED" | "DELETED" | "INTERNAL_ERROR" | "INVALID_REQUEST"
 }
 
 /**
@@ -82,7 +82,7 @@ async function getStorageProgramHandler(req: Request): Promise<Response> {
             const response: StorageProgramResponse = {
                 success: false,
                 error: "Invalid storage address format. Expected: stor-{hash}",
-                errorCode: "NOT_FOUND",
+                errorCode: "INVALID_REQUEST",
             }
             return jsonResponse(response, 400)
         }
