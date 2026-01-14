@@ -135,8 +135,9 @@ export function validateStorageProgramPayload(
     }
 
     // Calculate fee
-    const chunks = Math.ceil(sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
-    const storageCost = BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
+    const rawChunks = Math.ceil(sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+    const chunks = Math.max(1, rawChunks) // Minimum 1 chunk even for empty data
+    const storageCost = BigInt(chunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
     const baseCost = 0n
     const totalFee = baseCost + storageCost
 
@@ -145,11 +146,11 @@ export function validateStorageProgramPayload(
         storageCost,
         sizeBytes,
         encoding,
-        chunks: Math.max(1, chunks),
+        chunks,
     }
 
     log.debug(
-        `[StorageProgram] Validated ${payload.operation}: ${sizeBytes} bytes, ${chunks} chunks, ${totalFee} DEM fee`,
+        `[StorageProgram] Validated ${payload.operation}: ${sizeBytes} bytes, ${chunks} chunk(s), ${totalFee} DEM fee`,
     )
 
     return {
@@ -263,6 +264,13 @@ function validateACLStructure(acl: unknown): { valid: boolean; message: string }
             return { valid: false, message: "ACL groups must be an object" }
         }
         for (const [groupName, group] of Object.entries(aclObj.groups)) {
+            // Guard against null or non-object group entries
+            if (!group || typeof group !== "object") {
+                return {
+                    valid: false,
+                    message: `ACL group ${groupName} must be an object`,
+                }
+            }
             const groupObj = group as Record<string, unknown>
             if (!Array.isArray(groupObj.members)) {
                 return {
