@@ -160,8 +160,10 @@ export default class Chain {
         start: "latest" | number,
         limit: number,
     ): Promise<Blocks[]> {
-        const maxLimit = 50
-        const calculatedLimit = Math.min(limit, maxLimit)
+        const calculatedLimit = Math.min(
+            limit,
+            getSharedState.batchSyncBlockLimit,
+        )
 
         let options: FindManyOptions<Blocks> = {
             order: { number: "DESC" },
