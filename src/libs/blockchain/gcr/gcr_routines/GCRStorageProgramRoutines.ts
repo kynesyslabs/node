@@ -397,8 +397,18 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = sizeBytes
         program.acl = variables.acl || { mode: "owner" }
         program.metadata = (edit.context.data?.metadata as Record<string, unknown>) || variables.metadata || null
-        program.storageLocation = variables.storageLocation || "onchain"
-        program.ipfsCid = null
+        // REVIEW: IPFS storage location handling - stub for future implementation
+        // Currently only supports "onchain" storage. IPFS integration planned for future release.
+        const requestedLocation = variables.storageLocation || "onchain"
+        if (requestedLocation !== "onchain") {
+            log.warning(
+                "[StorageProgram] IPFS storage not yet implemented. " +
+                "Requested \"" + requestedLocation + "\", falling back to \"onchain\". " +
+                "Address: " + storageAddress,
+            )
+        }
+        program.storageLocation = "onchain" // Always onchain for now
+        program.ipfsCid = null // IPFS CID stub - will be populated when IPFS is implemented
         program.salt = variables.salt || null
         program.createdByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
@@ -463,6 +473,16 @@ export class GCRStorageProgramRoutines {
         program.encoding = encoding
         program.lastModifiedByTx = edit.txhash
         program.totalFeesPaid = program.totalFeesPaid + fee
+
+        // REVIEW: IPFS storage location handling - stub for future implementation
+        // Write operations cannot change storageLocation after creation (always stays "onchain" for now)
+        if (variables.storageLocation && variables.storageLocation !== "onchain") {
+            log.warning(
+                "[StorageProgram] IPFS storage not yet implemented. " +
+                "Write operation requested \"" + variables.storageLocation + "\", but storage location " +
+                "cannot be changed after creation. Address: " + storageAddress,
+            )
+        }
 
         if (variables.metadata || edit.context.data?.metadata) {
             const newMetadata = (edit.context.data?.metadata as Record<string, unknown>) || variables.metadata
