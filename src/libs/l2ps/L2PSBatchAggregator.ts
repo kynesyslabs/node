@@ -534,7 +534,12 @@ export class L2PSBatchAggregator {
             })
 
             // Use batch hash as initial state root
-            const initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % BigInt(2n ** 253n)
+            let initialStateRoot: bigint
+            try {
+                initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % (2n ** 253n)
+            } catch {
+                initialStateRoot = 0n
+            }
 
             log.debug(`[L2PS Batch Aggregator] Generating ZK proof for ${transactions.length} transactions...`)
             const startTime = Date.now()
@@ -646,13 +651,23 @@ export class L2PSBatchAggregator {
 
                 const { proof, publicSignals, batchSize, finalStateRoot, totalVolume } = batchPayload.zk_proof
 
+                let finalStateRootBigInt: bigint
+                let totalVolumeBigInt: bigint
+                try {
+                    finalStateRootBigInt = BigInt(finalStateRoot)
+                    totalVolumeBigInt = BigInt(totalVolume)
+                } catch {
+                    log.error(`[L2PS Batch Aggregator] Invalid BigInt values in ZK proof`)
+                    return false
+                }
+
                 const isValid = await this.zkProver.verifyProof({
                     proof,
                     publicSignals,
                     batchSize: batchSize as any,
                     txCount: batchPayload.transaction_count,
-                    finalStateRoot: BigInt(finalStateRoot),
-                    totalVolume: BigInt(totalVolume),
+                    finalStateRoot: finalStateRootBigInt,
+                    totalVolume: totalVolumeBigInt,
                 })
                 if (!isValid) {
                     log.error(`[L2PS Batch Aggregator] Rejecting batch ${batchPayload.batch_hash.substring(0, 16)}...: invalid ZK proof`)
