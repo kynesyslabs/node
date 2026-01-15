@@ -393,17 +393,63 @@ export default class Transaction implements ITransaction {
             return null
         }
     }
+    /**
+     * Validates a storage address format (stor-{40 hex chars})
+     * Used for StorageProgram transaction type where 'to' field is a storage address
+     */
+    private static validateStorageAddress(to: string): {
+        valid: boolean
+        message: string
+    } {
+        log.debug(`[TX] validateStorageAddress - Validating storage address: ${to}`)
+
+        if (!to || typeof to !== "string") {
+            return {
+                valid: false,
+                message: "Missing or invalid storage address",
+            }
+        }
+
+        // Storage address format: stor-{40 hex chars}
+        const storageAddressRegex = /^stor-[0-9a-f]{40}$/i
+        if (!storageAddressRegex.test(to)) {
+            log.debug(`[TX] validateStorageAddress - Invalid storage address format: ${to}`)
+            return {
+                valid: false,
+                message: `Invalid storage address format: ${to}. Expected: stor-{40 hex chars}`,
+            }
+        }
+
+        log.debug("[TX] validateStorageAddress - Storage address is valid")
+        return {
+            valid: true,
+            message: "Storage address is valid",
+        }
+    }
+
     // Modify the structured method to use the new validation
     public static structured(tx: Transaction): {
         valid: boolean
         message: string
     } {
-        // Validate TO field
-        const toValidation = this.validateToField(tx.content.to)
-        if (!toValidation.valid) {
-            return {
-                valid: false,
-                message: toValidation.message,
+        // REVIEW: StorageProgram transactions use stor-{hash} format for 'to' field
+        // instead of Ed25519 public key, so we use different validation
+        if (tx.content.type === "storageProgram") {
+            const storageValidation = this.validateStorageAddress(tx.content.to as string)
+            if (!storageValidation.valid) {
+                return {
+                    valid: false,
+                    message: storageValidation.message,
+                }
+            }
+        } else {
+            // Validate TO field as Ed25519 public key for non-storage transactions
+            const toValidation = this.validateToField(tx.content.to)
+            if (!toValidation.valid) {
+                return {
+                    valid: false,
+                    message: toValidation.message,
+                }
             }
         }
 
