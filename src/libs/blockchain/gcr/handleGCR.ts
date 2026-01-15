@@ -261,52 +261,103 @@ export default class HandleGCR {
             editOperation.isRollback = true
         }
 
+        let result: GCRResult
+
         // Applying the edit operations
         switch (editOperation.type) {
             case "balance":
-                return GCRBalanceRoutines.apply(
+                result = await GCRBalanceRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "nonce":
-                return GCRNonceRoutines.apply(
+                result = await GCRNonceRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "identity":
-                return GCRIdentityRoutines.apply(
+                result = await GCRIdentityRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "assign":
             case "subnetsTx":
                 // TODO implementations
                 log.debug(`Assigning GCREdit ${editOperation.type}`)
-                return { success: true, message: "Not implemented" }
+                result = { success: true, message: "Not implemented" }
+                break
             case "smartContract":
             case "escrow":
                 // TODO implementations
                 log.debug(`GCREdit ${editOperation.type} not yet implemented`)
-                return { success: true, message: "Not implemented" }
+                result = { success: true, message: "Not implemented" }
+                break
             // REVIEW: StorageProgram unified storage operations
             case "storageProgram":
-                return GCRStorageProgramRoutines.apply(
+                result = await GCRStorageProgramRoutines.apply(
                     editOperation,
                     repositories.storageProgram as Repository<GCRStorageProgram>,
                     simulate,
                 )
+                break
             // REVIEW: TLSNotary attestation proof storage
             case "tlsnotary":
-                return GCRTLSNotaryRoutines.apply(
+                result = await GCRTLSNotaryRoutines.apply(
                     editOperation,
                     repositories.tlsnotary as Repository<GCRTLSNotary>,
                     simulate,
                 )
+                break
             default:
                 return { success: false, message: "Invalid GCREdit type" }
+        }
+
+        // REVIEW: Update assignedTxs for the transaction sender on successful operations
+        // This tracks all transactions associated with an account
+        const sender = tx.content?.from
+        if (result.success && !simulate && tx.hash && sender) {
+            try {
+                await this.addAssignedTx(sender, tx.hash, repositories.main)
+            } catch (error) {
+                log.warn(
+                    `[HandleGCR] Failed to update assignedTxs for ${sender}: ${error}`,
+                )
+                // Don't fail the operation if assignedTxs update fails
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Adds a transaction hash to the account's assignedTxs array
+     * @param pubkey The account public key
+     * @param txHash The transaction hash to add
+     * @param repository The GCRMain repository
+     */
+    private static async addAssignedTx(
+        pubkey: string,
+        txHash: string,
+        repository: Repository<GCRMain>,
+    ): Promise<void> {
+        let account = await repository.findOneBy({ pubkey })
+
+        if (!account) {
+            // Create account if it doesn't exist
+            account = await this.createAccount(pubkey)
+        }
+
+        // Avoid duplicates
+        if (!account.assignedTxs.includes(txHash)) {
+            account.assignedTxs.push(txHash)
+            await repository.save(account)
+            log.debug(`[HandleGCR] Added tx ${txHash} to assignedTxs for ${pubkey}`)
         }
     }
 
