@@ -652,6 +652,45 @@ export class GCRStorageProgramRoutines {
         })
     }
 
+    /**
+     * Search storage programs by name (supports partial matching)
+     * @param namePattern - The name or partial name to search for
+     * @param repository - TypeORM repository for GCRStorageProgram
+     * @param options - Search options (limit, offset, exactMatch)
+     * @returns Array of matching storage programs
+     */
+    static async searchStorageProgramsByName(
+        namePattern: string,
+        repository: Repository<GCRStorageProgram>,
+        options?: {
+            limit?: number
+            offset?: number
+            exactMatch?: boolean
+        },
+    ): Promise<GCRStorageProgram[]> {
+        const limit = options?.limit ?? 50
+        const offset = options?.offset ?? 0
+        const exactMatch = options?.exactMatch ?? false
+
+        if (exactMatch) {
+            return repository.find({
+                where: { programName: namePattern, isDeleted: false },
+                order: { createdAt: "DESC" },
+                take: limit,
+                skip: offset,
+            })
+        }
+
+        // Partial match using ILIKE (case-insensitive)
+        return repository
+            .createQueryBuilder("sp")
+            .where("sp.programName ILIKE :pattern", { pattern: `%${namePattern}%` })
+            .andWhere("sp.isDeleted = false")
+            .orderBy("sp.createdAt", "DESC")
+            .take(limit)
+            .skip(offset)
+            .getMany()
+    }
 
     /**
      * Check if an address has read permission for a storage program
@@ -746,7 +785,13 @@ function checkDeletePermission(
 }
 
 /**
- * Check if address has write permission in ACL
+ * Check if address has write permission in ACL (non-owner).
+ * Note: Owner check is done separately in handleWrite before calling this.
+ *
+ * Per spec (04-acl.mdx):
+ * - Owner mode: Only owner can write (this function returns false)
+ * - Public mode: Only owner can write (this function returns false)
+ * - Restricted mode: Owner or group with "write" permission
  */
 function checkWritePermission(
     acl: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, { members: string[]; permissions: string[] }> },
@@ -757,13 +802,18 @@ function checkWritePermission(
         return false
     }
 
-    // Public mode allows anyone to write (if not blacklisted)
-    if (acl.mode === "public") {
-        return true
+    // Owner mode: only owner can write (handled by caller)
+    if (acl.mode === "owner") {
+        return false
     }
 
-    // Check groups for write permission
-    if (acl.groups) {
+    // Public mode: only owner can write (handled by caller)
+    if (acl.mode === "public") {
+        return false
+    }
+
+    // Restricted mode: check groups for write permission
+    if (acl.mode === "restricted" && acl.groups) {
         for (const group of Object.values(acl.groups)) {
             if (group.members.includes(address) && group.permissions.includes("write")) {
                 return true

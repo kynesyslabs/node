@@ -231,6 +231,83 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
     }
 }
 
+/**
+ * Search storage programs by name (supports partial matching)
+ *
+ * Query parameters:
+ * - q: Search query (required)
+ * - exact: If "true", performs exact match instead of partial (optional)
+ * - limit: Max results to return, default 50 (optional)
+ * - offset: Pagination offset, default 0 (optional)
+ */
+async function searchByNameHandler(req: Request): Promise<Response> {
+    try {
+        const url = new URL(req.url)
+        const query = url.searchParams.get("q")
+        const exactMatch = url.searchParams.get("exact") === "true"
+        const limit = parseInt(url.searchParams.get("limit") || "50", 10)
+        const offset = parseInt(url.searchParams.get("offset") || "0", 10)
+
+        if (!query || query.trim() === "") {
+            const response: StorageProgramsListResponse = {
+                success: false,
+                error: "Search query 'q' parameter is required",
+            }
+            return jsonResponse(response, 400)
+        }
+
+        // Get requester identity from header
+        const identity = req.headers.get("identity")
+        let requesterAddress: string | undefined
+
+        if (identity) {
+            const splits = identity.split(":")
+            requesterAddress = splits.length > 1 ? splits[1] : identity
+        }
+
+        // Get repository
+        const db = await Datasource.getInstance()
+        const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+        // Search programs by name
+        const programs = await GCRStorageProgramRoutines.searchStorageProgramsByName(
+            query.trim(),
+            repository,
+            { limit, offset, exactMatch },
+        )
+
+        // Filter to only programs the requester can read
+        const accessiblePrograms = programs.filter(program =>
+            GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+        )
+
+        // Map to response format (without full data for list view)
+        const response: StorageProgramsListResponse = {
+            success: true,
+            programs: accessiblePrograms.map(p => ({
+                storageAddress: p.storageAddress,
+                programName: p.programName,
+                encoding: p.encoding,
+                sizeBytes: p.sizeBytes,
+                storageLocation: p.storageLocation,
+                createdAt: p.createdAt.toISOString(),
+                updatedAt: p.updatedAt.toISOString(),
+            })),
+            count: accessiblePrograms.length,
+        }
+
+        log.debug(`[StorageProgram] Search "${query}" found ${accessiblePrograms.length} programs`)
+        return jsonResponse(response)
+    } catch (error) {
+        log.error(`[StorageProgram] Error searching storage programs: ${error}`)
+        const response: StorageProgramsListResponse = {
+            success: false,
+            error: error instanceof Error ? error.message : "Internal server error",
+        }
+        return jsonResponse(response, 500)
+    }
+}
+
 // ============================================================================
 // Route Registration
 // ============================================================================
@@ -241,14 +318,15 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
  * Routes:
  * - GET /storage-program/:address - Read a storage program by address
  * - GET /storage-program/owner/:owner - List storage programs by owner
+ * - GET /storage-program/search?q=name - Search storage programs by name (partial match)
  *
  * @param server - BunServer instance
  */
 export function registerStorageProgramRoutes(server: BunServer): void {
-    // Read storage program by address
-    // Note: BunServer uses pattern matching, so we register the specific route
+    // Register specific routes first (more specific paths before wildcards)
+    server.get("/storage-program/search", searchByNameHandler)
     server.get("/storage-program/owner/*", listByOwnerHandler)
     server.get("/storage-program/*", getStorageProgramHandler)
 
-    log.info("[StorageProgram] Routes registered: /storage-program/:address, /storage-program/owner/:owner")
+    log.info("[StorageProgram] Routes registered: /storage-program/:address, /storage-program/owner/:owner, /storage-program/search")
 }
