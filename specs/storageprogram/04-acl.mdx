@@ -119,46 +119,58 @@ interface StorageProgramACL {
 
 ## Permission Resolution
 
-Permission checks follow this precedence order:
+Permission checks follow this precedence order (varies slightly by mode):
 
+**Public Mode:**
 ```
-1. Check blacklist (deny if present)
-2. Check if owner (allow if owner)
-3. Check allowed list (read only in restricted mode)
+1. Check blacklist (deny if blacklisted)
+2. Allow read (anyone can read)
+3. Deny write/delete (owner only, checked separately)
+```
+
+**Owner Mode:**
+```
+1. Check if owner (allow all if owner)
+2. Deny all (non-owners have no access)
+```
+
+**Restricted Mode:**
+```
+1. Check if owner (allow all - owner cannot be blacklisted)
+2. Check blacklist (deny if blacklisted)
+3. Check allowed list (read access)
 4. Check group membership and permissions
-5. Check mode default (public allows read, owner denies all)
+5. Deny by default
 ```
 
 ### Flowchart
 
 ```
-Is address blacklisted?
-  │
-  ├─ Yes → DENY
-  │
-  └─ No → Is address the owner?
-           │
-           ├─ Yes → ALLOW
-           │
-           └─ No → Is mode "public"?
-                    │
-                    ├─ Yes → ALLOW READ
-                    │        (DENY WRITE/DELETE)
-                    │
-                    └─ No → Is mode "restricted"?
-                             │
-                             ├─ No (owner mode) → DENY
-                             │
-                             └─ Yes → Is in allowed list?
-                                       │
-                                       ├─ Yes → ALLOW READ
-                                       │
-                                       └─ No → Check groups for permission
-                                                │
-                                                ├─ Has permission → ALLOW
-                                                │
-                                                └─ No permission → DENY
+┌─ What is the ACL mode?
+│
+├─ PUBLIC
+│   └─ Is address blacklisted?
+│       ├─ Yes → DENY
+│       └─ No → ALLOW READ (write/delete: owner only)
+│
+├─ OWNER
+│   └─ Is address the owner?
+│       ├─ Yes → ALLOW ALL
+│       └─ No → DENY ALL
+│
+└─ RESTRICTED
+    └─ Is address the owner?
+        ├─ Yes → ALLOW ALL (owner cannot be blacklisted)
+        └─ No → Is address blacklisted?
+                 ├─ Yes → DENY
+                 └─ No → Is in allowed list?
+                          ├─ Yes → ALLOW READ
+                          └─ No → Check groups for permission
+                                   ├─ Has permission → ALLOW
+                                   └─ No permission → DENY
 ```
+
+> **Note**: In restricted mode, owner is checked before blacklist because the owner cannot be blacklisted from their own storage program.
 
 ## Group Permissions
 

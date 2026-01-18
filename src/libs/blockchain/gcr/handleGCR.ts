@@ -391,6 +391,10 @@ export default class HandleGCR {
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
         for (const edit of tx.content.gcr_edits) {
+            // REVIEW: Ensure txhash is set on each GCR edit from the transaction
+            // This is needed because client-side GCR edits don't have the txhash
+            // (it's cleared during validation for hash comparison)
+            edit.txhash = tx.hash
             log.debug("[applyToTx] Executing GCREdit: " + edit.type)
             try {
                 const result = await HandleGCR.apply(

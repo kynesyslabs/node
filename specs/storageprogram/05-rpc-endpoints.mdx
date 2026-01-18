@@ -87,7 +87,7 @@ GET /storage-program/stor-abc123def456...
 {
   "success": false,
   "error": "Invalid storage address format. Expected: stor-{hash}",
-  "errorCode": "NOT_FOUND"
+  "errorCode": "INVALID_REQUEST"
 }
 ```
 
@@ -113,7 +113,8 @@ GET /storage-program/stor-abc123def456...
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
-| `NOT_FOUND` | 404 | Storage program doesn't exist or invalid address |
+| `NOT_FOUND` | 404 | Storage program doesn't exist |
+| `INVALID_REQUEST` | 400 | Invalid address format or malformed request |
 | `PERMISSION_DENIED` | 403 | Requester lacks read access |
 | `DELETED` | 404 | Storage program was soft deleted |
 | `INTERNAL_ERROR` | 500 | Server error during processing |

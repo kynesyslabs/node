@@ -65,11 +65,48 @@ export function validateStorageProgramPayload(
         "WRITE_STORAGE",
         "UPDATE_ACCESS_CONTROL",
         "DELETE_STORAGE_PROGRAM",
+        // REVIEW: Granular field operations (JSON encoding only)
+        "SET_FIELD",
+        "SET_ITEM",
+        "APPEND_ITEM",
+        "DELETE_FIELD",
+        "DELETE_ITEM",
     ]
     if (!validOperations.includes(payload.operation)) {
         return {
             valid: false,
             message: `Invalid operation: ${payload.operation}`,
+        }
+    }
+
+    // Granular operations require field name and JSON encoding
+    const granularOperations = ["SET_FIELD", "SET_ITEM", "APPEND_ITEM", "DELETE_FIELD", "DELETE_ITEM"]
+    if (granularOperations.includes(payload.operation)) {
+        // Validate field name is present
+        const payloadWithField = payload as StorageProgramPayload & { field?: string; index?: number; value?: unknown }
+        if (!payloadWithField.field || typeof payloadWithField.field !== "string") {
+            return {
+                valid: false,
+                message: `Field name is required for ${payload.operation} operation`,
+            }
+        }
+
+        // SET_ITEM and DELETE_ITEM require index
+        if ((payload.operation === "SET_ITEM" || payload.operation === "DELETE_ITEM") &&
+            (payloadWithField.index === undefined || typeof payloadWithField.index !== "number")) {
+            return {
+                valid: false,
+                message: `Index is required for ${payload.operation} operation`,
+            }
+        }
+
+        // SET_FIELD, SET_ITEM, and APPEND_ITEM require value
+        if ((payload.operation === "SET_FIELD" || payload.operation === "SET_ITEM" || payload.operation === "APPEND_ITEM") &&
+            payloadWithField.value === undefined) {
+            return {
+                valid: false,
+                message: `Value is required for ${payload.operation} operation`,
+            }
         }
     }
 
@@ -344,6 +381,22 @@ export class GCRStorageProgramRoutines {
             case "DELETE_STORAGE_PROGRAM": {
                 return this.handleDelete(spEdit, gcrStorageProgramRepository, simulate)
             }
+            // REVIEW: Granular field operations
+            case "SET_FIELD": {
+                return this.handleSetField(spEdit, gcrStorageProgramRepository, simulate)
+            }
+            case "SET_ITEM": {
+                return this.handleSetItem(spEdit, gcrStorageProgramRepository, simulate)
+            }
+            case "APPEND_ITEM": {
+                return this.handleAppendItem(spEdit, gcrStorageProgramRepository, simulate)
+            }
+            case "DELETE_FIELD": {
+                return this.handleDeleteField(spEdit, gcrStorageProgramRepository, simulate)
+            }
+            case "DELETE_ITEM": {
+                return this.handleDeleteItem(spEdit, gcrStorageProgramRepository, simulate)
+            }
             default: {
                 log.warning(`[StorageProgram] Unknown operation: ${operation}`)
                 return { success: false, message: `Unknown operation: ${operation}` }
@@ -420,6 +473,7 @@ export class GCRStorageProgramRoutines {
         program.salt = variables.salt || null
         program.createdByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [edit.txhash]
         program.totalFeesPaid = fee
         program.isDeleted = false
         program.deletedByTx = null
@@ -493,6 +547,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.encoding = encoding
         program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         // REVIEW: IPFS storage location handling - stub for future implementation
@@ -563,6 +618,7 @@ export class GCRStorageProgramRoutines {
 
         program.acl = variables.acl
         program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
 
         await repository.save(program)
         log.info(`[StorageProgram] ACL updated: ${storageAddress}`)
@@ -618,6 +674,7 @@ export class GCRStorageProgramRoutines {
         program.isDeleted = true
         program.deletedByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
 
         await repository.save(program)
         log.info(`[StorageProgram] Deleted: ${storageAddress}`)
@@ -757,6 +814,350 @@ export class GCRStorageProgramRoutines {
 
         // Unknown mode - deny by default
         return false
+    }
+
+    // =========================================================================
+    // REVIEW: Granular Field Operations
+    // =========================================================================
+
+    /**
+     * Handle SET_FIELD operation - set a single field value
+     */
+    private static async handleSetField(
+        edit: GCREditStorageProgram,
+        repository: Repository<GCRStorageProgram>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const storageAddress = edit.target
+        const sender = edit.context.sender
+        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; value: unknown } | undefined
+
+        if (!variables?.field) {
+            return { success: false, message: "Field name is required for SET_FIELD operation" }
+        }
+
+        const program = await repository.findOneBy({ storageAddress })
+        if (!program) {
+            return { success: false, message: `Storage program not found: ${storageAddress}` }
+        }
+        if (program.isDeleted) {
+            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+        }
+
+        // Granular operations only work with JSON encoding
+        if (program.encoding === "binary") {
+            return { success: false, message: "SET_FIELD operation not supported for binary encoding. Use WRITE_STORAGE instead." }
+        }
+
+        // Check write permission
+        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
+            return { success: false, message: "No permission to write to this storage program" }
+        }
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`)
+            return { success: true, message: "Simulated SET_FIELD successful" }
+        }
+
+        // Get current data or initialize empty object
+        const currentData = (program.data as Record<string, unknown>) || {}
+        const oldSizeBytes = calculateDataSize(currentData, "json")
+
+        // Set the field value
+        currentData[variables.field] = variables.value
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        // Check size limit
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+        }
+
+        // Calculate delta-based fee (only charge if size increased)
+        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
+        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+
+        // Update program
+        program.data = currentData
+        program.sizeBytes = newSizeBytes
+        program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.totalFeesPaid = program.totalFeesPaid + fee
+
+        await repository.save(program)
+        log.info(`[StorageProgram] SET_FIELD: ${storageAddress}.${variables.field} (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+
+        return { success: true, message: `Field ${variables.field} set successfully` }
+    }
+
+    /**
+     * Handle SET_ITEM operation - set an item at a specific array index
+     */
+    private static async handleSetItem(
+        edit: GCREditStorageProgram,
+        repository: Repository<GCRStorageProgram>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const storageAddress = edit.target
+        const sender = edit.context.sender
+        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; index: number; value: unknown } | undefined
+
+        if (!variables?.field || variables.index === undefined) {
+            return { success: false, message: "Field name and index are required for SET_ITEM operation" }
+        }
+
+        const program = await repository.findOneBy({ storageAddress })
+        if (!program) {
+            return { success: false, message: `Storage program not found: ${storageAddress}` }
+        }
+        if (program.isDeleted) {
+            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+        }
+
+        if (program.encoding === "binary") {
+            return { success: false, message: "SET_ITEM operation not supported for binary encoding" }
+        }
+
+        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
+            return { success: false, message: "No permission to write to this storage program" }
+        }
+
+        const currentData = (program.data as Record<string, unknown>) || {}
+        const fieldValue = currentData[variables.field]
+
+        if (!Array.isArray(fieldValue)) {
+            return { success: false, message: `Field ${variables.field} is not an array` }
+        }
+
+        if (variables.index < 0 || variables.index >= fieldValue.length) {
+            return { success: false, message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})` }
+        }
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`)
+            return { success: true, message: "Simulated SET_ITEM successful" }
+        }
+
+        const oldSizeBytes = calculateDataSize(currentData, "json")
+        fieldValue[variables.index] = variables.value
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+        }
+
+        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
+        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+
+        program.data = currentData
+        program.sizeBytes = newSizeBytes
+        program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.totalFeesPaid = program.totalFeesPaid + fee
+
+        await repository.save(program)
+        log.info(`[StorageProgram] SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+
+        return { success: true, message: `Item at ${variables.field}[${variables.index}] set successfully` }
+    }
+
+    /**
+     * Handle APPEND_ITEM operation - append an item to an array field
+     */
+    private static async handleAppendItem(
+        edit: GCREditStorageProgram,
+        repository: Repository<GCRStorageProgram>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const storageAddress = edit.target
+        const sender = edit.context.sender
+        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; value: unknown } | undefined
+
+        if (!variables?.field) {
+            return { success: false, message: "Field name is required for APPEND_ITEM operation" }
+        }
+
+        const program = await repository.findOneBy({ storageAddress })
+        if (!program) {
+            return { success: false, message: `Storage program not found: ${storageAddress}` }
+        }
+        if (program.isDeleted) {
+            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+        }
+
+        if (program.encoding === "binary") {
+            return { success: false, message: "APPEND_ITEM operation not supported for binary encoding" }
+        }
+
+        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
+            return { success: false, message: "No permission to write to this storage program" }
+        }
+
+        const currentData = (program.data as Record<string, unknown>) || {}
+        let fieldValue = currentData[variables.field]
+
+        // If field doesn't exist, create empty array
+        if (fieldValue === undefined) {
+            fieldValue = []
+            currentData[variables.field] = fieldValue
+        }
+
+        if (!Array.isArray(fieldValue)) {
+            return { success: false, message: `Field ${variables.field} is not an array` }
+        }
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated APPEND_ITEM: ${storageAddress}.${variables.field}`)
+            return { success: true, message: "Simulated APPEND_ITEM successful" }
+        }
+
+        const oldSizeBytes = calculateDataSize(currentData, "json")
+        fieldValue.push(variables.value)
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+        }
+
+        const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
+        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+
+        program.data = currentData
+        program.sizeBytes = newSizeBytes
+        program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.totalFeesPaid = program.totalFeesPaid + fee
+
+        await repository.save(program)
+        log.info(`[StorageProgram] APPEND_ITEM: ${storageAddress}.${variables.field} (new length: ${fieldValue.length}, delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+
+        return { success: true, message: `Item appended to ${variables.field} successfully (new length: ${fieldValue.length})` }
+    }
+
+    /**
+     * Handle DELETE_FIELD operation - delete a single field
+     */
+    private static async handleDeleteField(
+        edit: GCREditStorageProgram,
+        repository: Repository<GCRStorageProgram>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const storageAddress = edit.target
+        const sender = edit.context.sender
+        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string } | undefined
+
+        if (!variables?.field) {
+            return { success: false, message: "Field name is required for DELETE_FIELD operation" }
+        }
+
+        const program = await repository.findOneBy({ storageAddress })
+        if (!program) {
+            return { success: false, message: `Storage program not found: ${storageAddress}` }
+        }
+        if (program.isDeleted) {
+            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+        }
+
+        if (program.encoding === "binary") {
+            return { success: false, message: "DELETE_FIELD operation not supported for binary encoding" }
+        }
+
+        // DELETE_FIELD requires write permission (same as write operations)
+        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
+            return { success: false, message: "No permission to write to this storage program" }
+        }
+
+        const currentData = (program.data as Record<string, unknown>) || {}
+
+        if (!(variables.field in currentData)) {
+            return { success: false, message: `Field ${variables.field} does not exist` }
+        }
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated DELETE_FIELD: ${storageAddress}.${variables.field}`)
+            return { success: true, message: "Simulated DELETE_FIELD successful" }
+        }
+
+        // Delete field (no fee for deletions - they reduce storage)
+        delete currentData[variables.field]
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        program.data = currentData
+        program.sizeBytes = newSizeBytes
+        program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        // No fee added for deletions
+
+        await repository.save(program)
+        log.info(`[StorageProgram] DELETE_FIELD: ${storageAddress}.${variables.field} (new size: ${newSizeBytes} bytes)`)
+
+        return { success: true, message: `Field ${variables.field} deleted successfully` }
+    }
+
+    /**
+     * Handle DELETE_ITEM operation - delete an item at a specific array index
+     */
+    private static async handleDeleteItem(
+        edit: GCREditStorageProgram,
+        repository: Repository<GCRStorageProgram>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const storageAddress = edit.target
+        const sender = edit.context.sender
+        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; index: number } | undefined
+
+        if (!variables?.field || variables.index === undefined) {
+            return { success: false, message: "Field name and index are required for DELETE_ITEM operation" }
+        }
+
+        const program = await repository.findOneBy({ storageAddress })
+        if (!program) {
+            return { success: false, message: `Storage program not found: ${storageAddress}` }
+        }
+        if (program.isDeleted) {
+            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+        }
+
+        if (program.encoding === "binary") {
+            return { success: false, message: "DELETE_ITEM operation not supported for binary encoding" }
+        }
+
+        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
+            return { success: false, message: "No permission to write to this storage program" }
+        }
+
+        const currentData = (program.data as Record<string, unknown>) || {}
+        const fieldValue = currentData[variables.field]
+
+        if (!Array.isArray(fieldValue)) {
+            return { success: false, message: `Field ${variables.field} is not an array` }
+        }
+
+        if (variables.index < 0 || variables.index >= fieldValue.length) {
+            return { success: false, message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})` }
+        }
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`)
+            return { success: true, message: "Simulated DELETE_ITEM successful" }
+        }
+
+        // Remove item at index (splice modifies array in place)
+        fieldValue.splice(variables.index, 1)
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        program.data = currentData
+        program.sizeBytes = newSizeBytes
+        program.lastModifiedByTx = edit.txhash
+        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        // No fee added for deletions
+
+        await repository.save(program)
+        log.info(`[StorageProgram] DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (new length: ${fieldValue.length})`)
+
+        return { success: true, message: `Item at ${variables.field}[${variables.index}] deleted successfully (new length: ${fieldValue.length})` }
     }
 }
 

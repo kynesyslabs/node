@@ -33,6 +33,28 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { DTRManager } from "./dtr/dtrmanager"
+// REVIEW: StorageProgram query imports
+import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import Datasource from "@/model/datasource"
+
+/**
+ * Normalizes a storage address to ensure it has the 'stor-' prefix.
+ * Storage addresses can come with or without the prefix from various sources.
+ * @param address - The storage address to normalize
+ * @returns The normalized address with 'stor-' prefix
+ */
+function normalizeStorageAddress(address: string): string {
+    if (!address) return address
+    // Remove any 0x prefix if present (legacy addresses)
+    const normalized = address.startsWith("0x") ? address.slice(2) : address
+    // Remove 0xstor- prefix if present (legacy format)
+    if (normalized.startsWith("stor-")) {
+        return normalized
+    }
+    // Add stor- prefix if missing
+    return `stor-${normalized}`
+}
 
 export interface NodeCall {
     message: string
@@ -696,6 +718,686 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     error: "INTERNAL_ERROR",
                     message: "Failed to get token stats",
                 }
+            }
+            break
+        }
+
+        // REVIEW: StorageProgram query methods (public, no authentication required)
+        case "getStorageProgram": {
+            const rawStorageAddress = data.storageAddress
+            const requesterAddress = data.requesterAddress // Optional identity for ACL check
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            // Normalize address to ensure stor- prefix
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                // Check read permission
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    owner: program.owner,
+                    programName: program.programName,
+                    encoding: program.encoding,
+                    data: program.data,
+                    metadata: program.metadata,
+                    storageLocation: program.storageLocation,
+                    sizeBytes: program.sizeBytes,
+                    createdAt: program.createdAt.toISOString(),
+                    updatedAt: program.updatedAt.toISOString(),
+                    createdByTx: program.createdByTx,
+                    lastModifiedByTx: program.lastModifiedByTx,
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgram error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        case "getStorageProgramsByOwner": {
+            const owner = data.owner
+            const requesterAddress = data.requesterAddress // Optional identity for ACL filtering
+
+            if (!owner) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Owner address is required" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const programs = await GCRStorageProgramRoutines.getStorageProgramsByOwner(
+                    owner,
+                    repository,
+                )
+
+                // Filter to only programs the requester can read
+                const accessiblePrograms = programs.filter(program =>
+                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                )
+
+                // Map to response format (without full data for list view)
+                response.response = accessiblePrograms.map(p => ({
+                    storageAddress: p.storageAddress,
+                    programName: p.programName,
+                    encoding: p.encoding,
+                    sizeBytes: p.sizeBytes,
+                    storageLocation: p.storageLocation,
+                    createdAt: p.createdAt.toISOString(),
+                    updatedAt: p.updatedAt.toISOString(),
+                }))
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramsByOwner error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        case "searchStoragePrograms": {
+            const query = data.query
+            const options = data.options || {} // { limit, offset, exactMatch }
+            const requesterAddress = data.requesterAddress // Optional identity for ACL filtering
+
+            if (!query || (typeof query === "string" && query.trim() === "")) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Search query is required" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const programs = await GCRStorageProgramRoutines.searchStorageProgramsByName(
+                    typeof query === "string" ? query.trim() : String(query),
+                    repository,
+                    {
+                        limit: options.limit || 50,
+                        offset: options.offset || 0,
+                        exactMatch: options.exactMatch || false,
+                    },
+                )
+
+                // Filter to only programs the requester can read
+                const accessiblePrograms = programs.filter(program =>
+                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                )
+
+                // Map to response format (without full data for list view)
+                response.response = accessiblePrograms.map(p => ({
+                    storageAddress: p.storageAddress,
+                    programName: p.programName,
+                    encoding: p.encoding,
+                    sizeBytes: p.sizeBytes,
+                    storageLocation: p.storageLocation,
+                    createdAt: p.createdAt.toISOString(),
+                    updatedAt: p.updatedAt.toISOString(),
+                }))
+            } catch (error) {
+                log.error(`[manageNodeCall] searchStoragePrograms error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        // REVIEW: Storage Program Standard Calls - Granular Read Methods
+        // These methods provide fine-grained access to storage program data fields
+        // All methods enforce ACL permissions and reject binary-encoded data
+
+        /**
+         * getStorageProgramFields - Returns all field names (keys) from the storage program data
+         * @param storageAddress - The storage program address (with or without stor- prefix)
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns Array of field names
+         */
+        case "getStorageProgramFields": {
+            const rawStorageAddress = data.storageAddress
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                // Check read permission
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                // Reject binary encoding - granular access requires JSON
+                if (program.encoding === "binary") {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    break
+                }
+
+                // Return field names
+                const fields = program.data && typeof program.data === "object"
+                    ? Object.keys(program.data)
+                    : []
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    fields,
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramFields error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        /**
+         * getStorageProgramValue - Returns the value of a specific field
+         * @param storageAddress - The storage program address
+         * @param field - The field name to retrieve
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns The field value
+         */
+        case "getStorageProgramValue": {
+            const rawStorageAddress = data.storageAddress
+            const field = data.field
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            if (!field || typeof field !== "string") {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Field name is required and must be a string" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                if (program.encoding === "binary") {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    break
+                }
+
+                // Check if field exists
+                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Field not found: ${field}` }
+                    break
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    field,
+                    value: (program.data as Record<string, unknown>)[field],
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramValue error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        /**
+         * getStorageProgramItem - Returns an item from an array field at a specific index
+         * @param storageAddress - The storage program address
+         * @param field - The field name (must be an array)
+         * @param index - The array index to retrieve
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns The item at the specified index
+         */
+        case "getStorageProgramItem": {
+            const rawStorageAddress = data.storageAddress
+            const field = data.field
+            const index = data.index
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            if (!field || typeof field !== "string") {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Field name is required and must be a string" }
+                break
+            }
+
+            if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Index is required and must be a non-negative integer" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                if (program.encoding === "binary") {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    break
+                }
+
+                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Field not found: ${field}` }
+                    break
+                }
+
+                const fieldValue = (program.data as Record<string, unknown>)[field]
+                if (!Array.isArray(fieldValue)) {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: `Field '${field}' is not an array` }
+                    break
+                }
+
+                if (index >= fieldValue.length) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Index ${index} out of bounds. Array length: ${fieldValue.length}` }
+                    break
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    field,
+                    index,
+                    item: fieldValue[index],
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramItem error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        /**
+         * hasStorageProgramField - Checks if a field exists in the storage program data
+         * @param storageAddress - The storage program address
+         * @param field - The field name to check
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns Boolean indicating if field exists
+         */
+        case "hasStorageProgramField": {
+            const rawStorageAddress = data.storageAddress
+            const field = data.field
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            if (!field || typeof field !== "string") {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Field name is required and must be a string" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                if (program.encoding === "binary") {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    break
+                }
+
+                const hasField = program.data &&
+                    typeof program.data === "object" &&
+                    field in program.data
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    field,
+                    exists: hasField,
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] hasStorageProgramField error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        /**
+         * getStorageProgramFieldType - Returns the type of a specific field
+         * @param storageAddress - The storage program address
+         * @param field - The field name to check
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns The field type (string, number, boolean, array, object, null, undefined)
+         */
+        case "getStorageProgramFieldType": {
+            const rawStorageAddress = data.storageAddress
+            const field = data.field
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            if (!field || typeof field !== "string") {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Field name is required and must be a string" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                if (program.encoding === "binary") {
+                    response.result = 400
+                    response.response = null
+                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    break
+                }
+
+                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Field not found: ${field}` }
+                    break
+                }
+
+                const value = (program.data as Record<string, unknown>)[field]
+                let fieldType: string
+
+                if (value === null) {
+                    fieldType = "null"
+                } else if (Array.isArray(value)) {
+                    fieldType = "array"
+                } else {
+                    fieldType = typeof value
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    field,
+                    type: fieldType,
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramFieldType error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
+            }
+            break
+        }
+
+        /**
+         * getStorageProgramAll - Alias for getStorageProgram, returns all data
+         * This provides consistency with the granular method naming convention
+         * @param storageAddress - The storage program address
+         * @param requesterAddress - Optional requester identity for ACL check
+         * @returns Full storage program data (same as getStorageProgram)
+         */
+        case "getStorageProgramAll": {
+            const rawStorageAddress = data.storageAddress
+            const requesterAddress = data.requesterAddress
+
+            if (!rawStorageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            const storageAddress = normalizeStorageAddress(rawStorageAddress)
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+
+                const program = await GCRStorageProgramRoutines.getStorageProgram(
+                    storageAddress,
+                    repository,
+                )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    break
+                }
+
+                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
+                    program,
+                    requesterAddress,
+                )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    break
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    owner: program.owner,
+                    programName: program.programName,
+                    encoding: program.encoding,
+                    data: program.data,
+                    metadata: program.metadata,
+                    storageLocation: program.storageLocation,
+                    sizeBytes: program.sizeBytes,
+                    createdAt: program.createdAt.toISOString(),
+                    updatedAt: program.updatedAt.toISOString(),
+                    createdByTx: program.createdByTx,
+                    lastModifiedByTx: program.lastModifiedByTx,
+                }
+            } catch (error) {
+                log.error(`[manageNodeCall] getStorageProgramAll error: ${error}`)
+                response.result = 500
+                response.response = null
+                response.extra = { error: error instanceof Error ? error.message : String(error) }
             }
             break
         }

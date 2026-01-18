@@ -145,6 +145,14 @@ export class GCRStorageProgram {
     /**
      * Transaction hash that deleted this program (if deleted)
      */
+
+    /**
+     * Array of all transaction hashes that interacted with this storage program
+     * Provides complete history of modifications
+     */
+    @Column({ type: "simple-array", name: "interactionTxs", default: "" })
+    interactionTxs: string[]
+
     @Column({ type: "text", name: "deletedByTx", nullable: true })
     deletedByTx: string | null
 
