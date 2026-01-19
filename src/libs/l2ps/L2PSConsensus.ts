@@ -60,7 +60,7 @@ export interface L2PSConsensusResult {
  * Called during consensus to apply pending L2PS proofs to L1 state.
  */
 export default class L2PSConsensus {
-    
+
     /**
      * Collect transaction hashes from applied proofs for mempool cleanup
      */
@@ -89,7 +89,7 @@ export default class L2PSConsensus {
         blockNumber: number,
         result: L2PSConsensusResult
     ): Promise<void> {
-        const appliedProofs = pendingProofs.filter(proof => 
+        const appliedProofs = pendingProofs.filter(proof =>
             proofResults.find(r => r.proofId === proof.id)?.success
         )
 
@@ -98,6 +98,22 @@ export default class L2PSConsensus {
         if (confirmedTxHashes.length > 0) {
             const deleted = await L2PSMempool.deleteByHashes(confirmedTxHashes)
             log.info(`[L2PS Consensus] Removed ${deleted} confirmed transactions from mempool`)
+
+            // Update transaction statuses in l2ps_transactions table
+            const L2PSTransactionExecutor = (await import("./L2PSTransactionExecutor")).default
+            for (const txHash of confirmedTxHashes) {
+                try {
+                    await L2PSTransactionExecutor.updateTransactionStatus(
+                        txHash,
+                        "confirmed",
+                        blockNumber,
+                        `Confirmed in block ${blockNumber}`
+                    )
+                } catch (err) {
+                    log.warning(`[L2PS Consensus] Failed to update tx status for ${txHash.slice(0, 16)}...`)
+                }
+            }
+            log.info(`[L2PS Consensus] Updated status to 'confirmed' for ${confirmedTxHashes.length} transactions`)
         }
 
         // Create L1 batch transaction
@@ -353,9 +369,29 @@ export default class L2PSConsensus {
                 }
             }
 
+            // Collect all transaction hashes from these proofs
+            const txHashes = this.collectTransactionHashes(proofs)
+            if (txHashes.length > 0) {
+                const L2PSTransactionExecutor = (await import("./L2PSTransactionExecutor")).default
+                for (const txHash of txHashes) {
+                    try {
+                        await L2PSTransactionExecutor.updateTransactionStatus(
+                            txHash,
+                            "batched",
+                            blockNumber,
+                            `Included in L1 batch 0x${batchHash}`,
+                            `0x${batchHash}`
+                        )
+                    } catch (err) {
+                        log.warning(`[L2PS Consensus] Failed to set status 'batched' for ${txHash.slice(0, 16)}...`)
+                    }
+                }
+                log.info(`[L2PS Consensus] Set status 'batched' for ${txHashes.length} transactions included in batch 0x${batchHash}`)
+            }
+
             // Insert into L1 transactions table
             const success = await Chain.insertTransaction(l1BatchTx as any, "confirmed")
-            
+
             if (success) {
                 log.info(`[L2PS Consensus] Created L1 batch tx ${l1BatchTx.hash} for block ${blockNumber} (${l2psNetworks.length} networks, ${proofs.length} proofs, ${totalTransactions} txs)`)
                 return l1BatchTx.hash
@@ -420,7 +456,7 @@ export default class L2PSConsensus {
                 const repo = await (await import("@/model/datasource")).default.getInstance()
                 const ds = repo.getDataSource()
                 const proofRepo = ds.getRepository((await import("@/model/entities/L2PSProofs")).L2PSProof)
-                
+
                 await proofRepo.update(proof.id, {
                     status: "pending",
                     applied_block_number: null,

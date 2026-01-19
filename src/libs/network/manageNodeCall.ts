@@ -808,6 +808,105 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
+        case "getL2PSAccountTransactions": {
+            // L2PS transaction history for a specific account
+            // REQUIRES AUTHENTICATION: User must sign a message to prove address ownership
+            console.log("[L2PS] Received account transactions request")
+            if (!data.l2psUid || !data.address) {
+                response.result = 400
+                response.response = "L2PS UID and address are required"
+                break
+            }
+
+            // Verify ownership via signature
+            // User must provide: signature of message "getL2PSHistory:{address}:{timestamp}"
+            if (!data.signature || !data.timestamp) {
+                response.result = 401
+                response.response = "Authentication required. Provide signature and timestamp."
+                response.extra = {
+                    message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
+                    example: `getL2PSHistory:${data.address}:${Date.now()}`
+                }
+                break
+            }
+
+            // Validate timestamp (max 5 minutes old to prevent replay attacks)
+            const requestTime = parseInt(data.timestamp)
+            const now = Date.now()
+            if (isNaN(requestTime) || now - requestTime > 5 * 60 * 1000) {
+                response.result = 401
+                response.response = "Request expired. Timestamp must be within 5 minutes."
+                break
+            }
+
+            try {
+                // Verify signature using Cryptography class
+                const expectedMessage = `getL2PSHistory:${data.address}:${data.timestamp}`
+
+                // Import Cryptography for signature verification
+                const Cryptography = (await import("../crypto/cryptography")).default
+
+                // Address should be hex public key, signature should be hex
+                let signature = data.signature
+                let publicKey = data.address
+
+                // Remove 0x prefix if present
+                if (signature.startsWith("0x")) signature = signature.slice(2)
+                if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
+
+                const isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+
+                if (!isValid) {
+                    response.result = 403
+                    response.response = "Invalid signature. Unable to verify address ownership."
+                    break
+                }
+
+                // Signature verified - user owns this address
+                log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
+
+                const limit = data.limit || 100
+                const offset = data.offset || 0
+
+                // Import the executor to get account transactions
+                const { default: L2PSTransactionExecutor } = await import("../l2ps/L2PSTransactionExecutor")
+                const transactions = await L2PSTransactionExecutor.getAccountTransactions(
+                    data.l2psUid,
+                    data.address,
+                    limit,
+                    offset
+                )
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    address: data.address,
+                    authenticated: true,
+                    transactions: transactions.map(tx => ({
+                        hash: tx.hash,
+                        encrypted_hash: tx.encrypted_hash,
+                        l1_batch_hash: tx.l1_batch_hash,
+                        type: tx.type,
+                        from: tx.from_address,
+                        to: tx.to_address,
+                        amount: tx.amount?.toString() || "0",
+                        status: tx.status,
+                        timestamp: tx.timestamp?.toString() || "0",
+                        l1_block_number: tx.l1_block_number,
+                        execution_message: tx.execution_message
+                    })),
+                    count: transactions.length,
+                    hasMore: transactions.length === limit
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get account transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS account transactions"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
         // REVIEW DTR: Handle relayed transactions from non-validator nodes

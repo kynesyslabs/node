@@ -52,9 +52,9 @@ async function decryptAndValidate(
     try {
         decryptedTx = await l2psInstance.decryptTx(l2psTx)
     } catch (error) {
-        return { 
-            decryptedTx: null, 
-            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}` 
+        return {
+            decryptedTx: null,
+            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
         }
     }
 
@@ -120,13 +120,13 @@ export default async function handleL2PS(
         response.extra = "Duplicate L2PS transaction detected"
         return response
     }
-    
+
     // Store in mempool
     const mempoolResult = await L2PSMempool.addTransaction(l2psUid, l2psTx, originalHash, "processed")
     if (!mempoolResult.success) {
         return createErrorResponse(response, 500, `Failed to store in L2PS mempool: ${mempoolResult.error}`)
     }
-    
+
     // Execute transaction
     let executionResult
     try {
@@ -153,6 +153,22 @@ export default async function handleL2PS(
 
     // Update status and return success
     await L2PSMempool.updateStatus(l2psTx.hash, "executed")
+
+    // Record transaction in l2ps_transactions table for persistent history
+    try {
+        await L2PSTransactionExecutor.recordTransaction(
+            l2psUid,
+            decryptedTx,
+            "", // l1BatchHash - empty initially, will be updated during consensus
+            l2psTx.hash, // encrypted_hash
+            0, // batch_index
+            "pending" // Initial status - executed locally, waiting for aggregation
+        )
+        log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
+    } catch (recordError) {
+        log.error(`[handleL2PS] Failed to record transaction history: ${recordError instanceof Error ? recordError.message : "Unknown error"}`)
+        // Don't fail the transaction, just log the error
+    }
 
     response.result = 200
     response.response = {

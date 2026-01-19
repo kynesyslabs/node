@@ -84,7 +84,7 @@ export default class L2PSTransactionExecutor {
      */
     private static async getOrCreateL1Account(pubkey: string): Promise<GCRMain> {
         const repo = await this.getL1Repo()
-        
+
         let account = await repo.findOne({
             where: { pubkey }
         })
@@ -119,7 +119,7 @@ export default class L2PSTransactionExecutor {
     ): Promise<L2PSExecutionResult> {
         try {
             log.info(`[L2PS Executor] Processing tx ${tx.hash} from L2PS ${l2psUid} (type: ${tx.content.type})`)
-            
+
             // Generate GCR edits based on transaction type
             const editsResult = await this.generateGCREdits(tx, simulate)
             if (!editsResult.success) {
@@ -268,7 +268,7 @@ export default class L2PSTransactionExecutor {
         switch (edit.type) {
             case "balance": {
                 const account = await this.getOrCreateL1Account(edit.account as string)
-                
+
                 if (edit.operation === "remove") {
                     const currentBalance = BigInt(account.balance)
                     if (currentBalance < BigInt(edit.amount)) {
@@ -300,13 +300,14 @@ export default class L2PSTransactionExecutor {
         tx: Transaction,
         l1BatchHash: string,
         encryptedHash?: string,
-        batchIndex: number = 0
+        batchIndex: number = 0,
+        initialStatus: "pending" | "batched" | "confirmed" | "failed" = "pending"
     ): Promise<number> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
         const txRepo = ds.getRepository(L2PSTransaction)
-        
+
         const l2psTx = txRepo.create({
             l2ps_uid: l2psUid,
             hash: tx.hash,
@@ -319,13 +320,13 @@ export default class L2PSTransactionExecutor {
             amount: BigInt(tx.content.amount || 0),
             nonce: BigInt(tx.content.nonce || 0),
             timestamp: BigInt(tx.content.timestamp || Date.now()),
-            status: "pending", // Will change to "applied" after consensus
+            status: initialStatus,
             content: tx.content as Record<string, any>,
             execution_message: null
         })
 
         const saved = await txRepo.save(l2psTx)
-        log.info(`[L2PS Executor] Recorded tx ${tx.hash.slice(0, 16)}... in L2PS ${l2psUid} (id: ${saved.id})`)
+        log.info(`[L2PS Executor] Recorded tx ${tx.hash.slice(0, 16)}... in L2PS ${l2psUid} (id: ${saved.id}, status: ${initialStatus})`)
         return saved.id
     }
 
@@ -334,9 +335,10 @@ export default class L2PSTransactionExecutor {
      */
     static async updateTransactionStatus(
         txHash: string,
-        status: "applied" | "rejected",
+        status: "pending" | "batched" | "confirmed" | "failed",
         l1BlockNumber?: number,
-        message?: string
+        message?: string,
+        l1BatchHash?: string
     ): Promise<void> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -346,12 +348,20 @@ export default class L2PSTransactionExecutor {
         const updateData: any = { status }
         if (l1BlockNumber) updateData.l1_block_number = l1BlockNumber
         if (message) updateData.execution_message = message
+        if (l1BatchHash) updateData.l1_batch_hash = l1BatchHash
 
-        const result = await txRepo.update({ hash: txHash }, updateData)
+        // Search by either original hash OR encrypted hash
+        // This is important because consensus uses the encrypted hash from proofs
+        const result = await txRepo.createQueryBuilder()
+            .update(L2PSTransaction)
+            .set(updateData)
+            .where("hash = :hash OR encrypted_hash = :hash", { hash: txHash })
+            .execute()
+
         if (result.affected === 0) {
-            log.warning(`[L2PS Executor] No transaction found with hash ${txHash.slice(0, 16)}...`)
+            log.warning(`[L2PS Executor] No transaction found with hash/encrypted_hash ${txHash.slice(0, 16)}...`)
         } else {
-            log.info(`[L2PS Executor] Updated tx ${txHash.slice(0, 16)}... status to ${status}`)
+            log.info(`[L2PS Executor] Updated ${result.affected} tx(s) matching ${txHash.slice(0, 16)}... status to ${status}`)
         }
     }
 
@@ -369,15 +379,17 @@ export default class L2PSTransactionExecutor {
         const ds = dsInstance.getDataSource()
         const txRepo = ds.getRepository(L2PSTransaction)
 
-        return txRepo.find({
-            where: [
-                { l2ps_uid: l2psUid, from_address: pubkey },
-                { l2ps_uid: l2psUid, to_address: pubkey }
-            ],
-            order: { timestamp: "DESC" },
-            take: limit,
-            skip: offset
-        })
+        // Use query builder to get unique transactions where user is sender or receiver
+        // This prevents duplicates when from_address === to_address (self-transfer)
+        const transactions = await txRepo.createQueryBuilder("tx")
+            .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+            .andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+            .orderBy("tx.timestamp", "DESC")
+            .take(limit)
+            .skip(offset)
+            .getMany()
+
+        return transactions
     }
 
     /**
@@ -432,10 +444,10 @@ export default class L2PSTransactionExecutor {
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
         const txRepo = ds.getRepository(L2PSTransaction)
-        
+
         const txCount = await txRepo.count({ where: { l2ps_uid: l2psUid } })
         const proofStats = await L2PSProofManager.getStats(l2psUid)
-        
+
         return {
             totalTransactions: txCount,
             pendingProofs: proofStats.pending,

@@ -36,6 +36,7 @@ import { SignalingServer } from "./features/InstantMessagingProtocol/signalingSe
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 // DTR and L2PS imports
+import Mempool from "./libs/blockchain/mempool_v2"
 import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
@@ -161,11 +162,11 @@ async function digestArguments() {
                     ) {
                         CategorizedLogger.getInstance().setMinLevel(
                             level as
-                                | "debug"
-                                | "info"
-                                | "warning"
-                                | "error"
-                                | "critical",
+                            | "debug"
+                            | "info"
+                            | "warning"
+                            | "error"
+                            | "critical",
                         )
                         log.info(`[MAIN] Log level set to: ${level}`)
                     } else {
@@ -359,7 +360,7 @@ async function preMainLoop() {
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
         "[PEER] Peer list: " +
-            JSON.stringify(indexState.PeerList.map(p => p.identity)),
+        JSON.stringify(indexState.PeerList.map(p => p.identity)),
     )
     await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
@@ -369,8 +370,8 @@ async function preMainLoop() {
 
     log.info(
         "[PEER] 🌐 Peers loaded (" +
-            indexState.peerManager.getPeers().length +
-            ")",
+        indexState.peerManager.getPeers().length +
+        ")",
     )
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
@@ -460,6 +461,7 @@ async function main() {
     }
 
     await Chain.setup()
+    await Mempool.init()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
 
@@ -507,12 +509,12 @@ async function main() {
                     ),
                     maxRequestsPerSecondPerIP: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                            "100",
+                        "100",
                         10,
                     ),
                     maxRequestsPerSecondPerIdentity: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                            "200",
+                        "200",
                         10,
                     ),
                 },
