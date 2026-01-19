@@ -3,6 +3,7 @@ import http from "http"
 import httpProxy from "http-proxy"
 import { URL } from "url"
 import net from "net"
+import dns from "node:dns/promises"
 import {
     IWeb2Request,
     IWeb2Result,
@@ -13,6 +14,7 @@ import {
 import required from "src/utilities/required"
 import SharedState from "@/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
+import log from "@/utilities/logger"
 
 /**
  * A proxy server class that handles HTTP/HTTPS requests by creating a local proxy server.
@@ -66,7 +68,7 @@ export class Proxy {
                 this._isInitialized = true
                 this._currentTargetUrl = targetUrl
             } catch (error) {
-                console.error("[Web2API] Error starting proxy server:", error)
+                log.error("[Web2API] Error starting proxy server:", error)
                 throw error
             }
         }
@@ -91,6 +93,7 @@ export class Proxy {
             let responseHeaders: http.IncomingHttpHeaders = {}
             let statusCode = 500
             let statusMessage = "Unknown"
+            let requestHash: string | undefined
 
             req.on("response", res => {
                 statusCode = res.statusCode || 500
@@ -102,12 +105,15 @@ export class Proxy {
                 })
 
                 res.on("end", () => {
-                    const data = Buffer.concat(chunks).toString()
+                    const dataBuffer = Buffer.concat(chunks)
+                    const data = dataBuffer.toString()
 
-                    // Create a hash of the data and headers to store in the blockchain.
-                    const dataHash = Hashing.sha256(data)
-                    const headersHash = Hashing.sha256(
-                        JSON.stringify(responseHeaders),
+                    // Create a hash over the exact UTF-8 bytes of the returned string data
+                    const responseHash = Hashing.sha256Bytes(
+                        Buffer.from(data, "utf8"),
+                    )
+                    const responseHeadersHash = Hashing.sha256(
+                        this.canonicalizeHeaders(responseHeaders),
                     )
 
                     resolve({
@@ -115,8 +121,10 @@ export class Proxy {
                         statusText: statusMessage,
                         headers: responseHeaders,
                         data: data,
-                        dataHash: dataHash,
-                        headersHash: headersHash,
+                        responseHash: responseHash,
+                        responseHeadersHash: responseHeadersHash,
+                        // Optional: include requestHash when a body was sent
+                        ...(requestHash ? { requestHash } : {}),
                     })
                 })
             })
@@ -130,6 +138,8 @@ export class Proxy {
                     typeof payload === "string"
                         ? payload
                         : JSON.stringify(payload)
+                // Compute hash over the exact bytes we are about to transmit
+                requestHash = Hashing.sha256Bytes(Buffer.from(body, "utf8"))
                 ;(req as any).setHeader(
                     "Content-Length",
                     Buffer.byteLength(body),
@@ -174,7 +184,80 @@ export class Proxy {
 
     private async createNewServer(targetUrl: string): Promise<void> {
         return new Promise<void>((resolve, reject) => {
-            const { targetProtocol } = this.parseUrl(targetUrl)
+            const { targetProtocol, targetHostname } = this.parseUrl(targetUrl)
+
+            // SSRF hardening: resolve DNS and block private/link-local/loopback destinations
+            const isDisallowedAddress = (addr: string): boolean => {
+                const lower = addr.toLowerCase()
+                const ipVersion = net.isIP(lower)
+
+                // Helper for IPv4 space
+                const isDisallowedV4 = (v4: string): boolean => {
+                    if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
+                    if (/^10\./.test(v4)) return true // private
+                    const m = v4.match(/^172\.(\d{1,3})\./)
+                    if (m) {
+                        const o = Number(m[1])
+                        if (o >= 16 && o <= 31) return true
+                    }
+                    if (/^192\.168\./.test(v4)) return true // private
+                    if (/^169\.254\./.test(v4)) return true // link-local
+                    if (/^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(v4))
+                        return true // CGNAT 100.64/10
+                    if (/^0\./.test(v4)) return true // this network
+                    if (/^(?:22[4-9]|23\d)\./.test(v4)) return true // multicast 224/4
+                    if (/^(?:24\d|25[0-5])\./.test(v4)) return true // reserved 240/4 incl 255.255.255.255
+                    return false
+                }
+
+                if (ipVersion === 6) {
+                    if (lower === "::" || lower === "::1") return true // unspecified/loopback
+                    if (lower.startsWith("ff")) return true // multicast ff00::/8
+                    // ULA fc00::/7
+                    if (lower.startsWith("fc") || lower.startsWith("fd"))
+                        return true
+                    // Link-local fe80::/10 → fe8x, fe9x, feax, febx
+                    if (/^fe[89ab][0-9a-f]*:/i.test(lower)) return true
+                    // IPv4-mapped IPv6 ::ffff:a.b.c.d → re-check mapped v4
+                    const v4map = lower.match(
+                        /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/,
+                    )
+                    if (v4map && isDisallowedV4(v4map[1])) return true
+                    return false
+                }
+
+                if (ipVersion === 4) {
+                    return isDisallowedV4(lower)
+                }
+                return false
+            }
+
+            const preflight = async () => {
+                try {
+                    // If hostname is already an IP, just check it; otherwise resolve all
+                    const ipVersion = net.isIP(targetHostname)
+                    if (ipVersion) {
+                        if (isDisallowedAddress(targetHostname)) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    } else {
+                        const answers = await dns.lookup(targetHostname, {
+                            all: true,
+                        })
+                        if (answers.some(a => isDisallowedAddress(a.address))) {
+                            throw new Error(
+                                "Target resolves to a private/link-local/loopback address",
+                            )
+                        }
+                    }
+                } catch (e) {
+                    reject(e)
+                    return false
+                }
+                return true
+            }
 
             // Create the proxy server (defaults; per-request options are supplied in proxyServer.web)
             const proxyServer = httpProxy.createProxyServer({
@@ -228,7 +311,7 @@ export class Proxy {
                         }),
                     )
                 } else if (res instanceof net.Socket) {
-                    console.error("[Web2API] Socket error:", err)
+                    log.error("[Web2API] Socket error:", err)
                     res.end(
                         "HTTP/1.1 500 Internal Server Error\r\n\r\n" +
                             JSON.stringify({
@@ -246,10 +329,18 @@ export class Proxy {
             })
 
             // Create the main HTTP server
-            this._server = http.createServer((req, res) => {
+            this._server = http.createServer(async (req, res) => {
                 if (!this.isAuthorizedRequest(req)) {
                     res.writeHead(403)
                     res.end("Unauthorized")
+                    return
+                }
+
+                // Ensure target is still safe at request time (DNS may have changed)
+                const ok = await preflight()
+                if (!ok) {
+                    res.writeHead(400)
+                    res.end("Invalid target host")
                     return
                 }
 
@@ -283,7 +374,7 @@ export class Proxy {
 
             // Error handling for the main HTTP server
             this._server.on("error", error => {
-                console.error("[Web2API] HTTP Server error:", error)
+                log.error("[Web2API] HTTP Server error:", error)
                 reject(error)
             })
         })
@@ -362,12 +453,63 @@ export class Proxy {
             headers["Content-Type"] = "application/json"
         }
 
+        // Default to identity encoding for deterministic response bytes if not set by caller
+        const hasAcceptEncoding = Object.keys(headers).some(
+            k => k.toLowerCase() === "accept-encoding",
+        )
+        if (!hasAcceptEncoding) {
+            headers["Accept-Encoding"] = "identity"
+        }
+
         // Add Authorization if required
         if (this.requiresAuthorization(targetUrl, targetMethod)) {
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
         return headers
+    }
+
+    /**
+     * Canonicalize headers for deterministic hashing:
+     * - Lowercase keys
+     * - Omit volatile headers (date, set-cookie)
+     * - Join array values with ", "
+     * - Trim whitespace
+     * - Sort by key
+     */
+    private canonicalizeHeaders(headers: http.IncomingHttpHeaders): string {
+        const volatile = new Set([
+            "date",
+            "set-cookie",
+            "connection",
+            "keep-alive",
+            "transfer-encoding",
+            "upgrade",
+            "proxy-authenticate",
+            "proxy-authorization",
+            "te",
+            "trailer",
+            "via",
+            "warning",
+            "server",
+            // Optional: content-length can vary across intermediaries
+            "content-length",
+        ]) // omit volatile/hop-by-hop headers
+        const entries: Array<{ key: string; value: string }> = []
+        for (const [rawKey, rawVal] of Object.entries(headers)) {
+            const key = rawKey.toLowerCase()
+            if (volatile.has(key)) continue
+            if (rawVal == null) continue
+            let value: string
+            if (Array.isArray(rawVal)) {
+                value = rawVal.join(", ")
+            } else {
+                value = String(rawVal)
+            }
+            entries.push({ key, value: value.trim() })
+        }
+        entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+        return entries.map(e => `${e.key}:${e.value}`).join("\n")
     }
 
     private requiresAuthorization(url: string, method: Web2Method): boolean {

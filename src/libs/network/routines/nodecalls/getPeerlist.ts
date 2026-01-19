@@ -5,7 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import { ContractManager } from "src/features/bridges/native/ContractManager"
 
 export default async function getPeerlist(): Promise<Peer[]> {
-    console.log("[SERVER] Executing getPeerlist")
+    log.debug("[SERVER] Executing getPeerlist")
     // Getting our current peerlist
     const socketizedResponse = PeerManager.getInstance().getPeers()
     const response = [] as Peer[]

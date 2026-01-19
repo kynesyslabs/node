@@ -22,6 +22,7 @@ import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/buil
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -44,6 +45,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     ton: TON,
     xrpl: XRPL,
     ibc: IBC,
+    atom: IBC,
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
@@ -69,16 +71,23 @@ export default class IdentityManager {
     static async filterConnections(
         sender: string,
         payload: InferFromSignaturePayload,
-    ): Promise<{ success: boolean; message: string }> {
+    ): Promise<{
+        success: boolean
+        message: string
+        twitterAccountConnected: boolean
+    }> {
         // INFO: Check if the user has a Twitter account
         const account = await ensureGCRForUser(sender)
         const twitterAccounts = account.identities.web2["twitter"] || []
-        if (twitterAccounts.length === 0) {
-            return {
-                success: false,
-                message:
-                    "Error: No Twitter account found. Please connect a Twitter account first",
-            }
+        let twitterAccountConnected = false
+
+        if (twitterAccounts.length > 0) {
+            twitterAccountConnected = true
+        }
+
+        const response = {
+            success: false,
+            twitterAccountConnected,
         }
 
         // INFO: Check if target address is active
@@ -89,7 +98,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId is provided
         if (isEVM && !chainId) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: EVM chainId not provided",
             }
         }
@@ -97,7 +106,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId matches the subchain
         if (isEVM && chainId === chainIds.eth.sepolia) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Testnet addresses are not supported",
             }
         }
@@ -105,7 +114,7 @@ export default class IdentityManager {
         // INFO: Check if the given chainId and subchain are supported
         if (isEVM && !chainIds.eth[subchain]) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Unsupported chain",
             }
         }
@@ -113,7 +122,7 @@ export default class IdentityManager {
         // INFO: Check if the chainId matches the subchain
         if (isEVM && chainIds.eth[subchain] !== chainId) {
             return {
-                success: false,
+                ...response,
                 message: "Failed: ChainId does not match the given subchain",
             }
         }
@@ -137,27 +146,28 @@ export default class IdentityManager {
         // INFO: Check if the subchain is mainnet
         if (chain === "solana" && subchain !== "mainnet") {
             return {
-                success: false,
+                ...response,
                 message: "Failed: Testnet addresses are not supported",
             }
         }
 
         // INFO: Check if the target address is active
-    //     if (chain === "solana") {
-    //         const txcount =
-    //             await CrossChainTools.countSolanaTransactionsByAddress(
-    //                 targetAddress,
-    //             )
+        //     if (chain === "solana") {
+        //         const txcount =
+        //             await CrossChainTools.countSolanaTransactionsByAddress(
+        //                 targetAddress,
+        //             )
 
-    //         if (txcount === 0) {
-    //             return {
-    //                 success: false,
-    //                 message: "Failed: Target address is not active",
-    //             }
-    //         }
-    //     }
+        //         if (txcount === 0) {
+        //             return {
+        //                 success: false,
+        //                 message: "Failed: Target address is not active",
+        //             }
+        //         }
+        //     }
 
         return {
+            ...response,
             success: true,
             message: "Filter check passed",
         }
@@ -174,10 +184,9 @@ export default class IdentityManager {
         payload: InferFromSignaturePayload,
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        const { success, message } = await this.filterConnections(
-            sender,
-            payload,
-        )
+        const { success, message, twitterAccountConnected } =
+            await this.filterConnections(sender, payload)
+
         if (!success) {
             return {
                 success: false,
@@ -200,6 +209,7 @@ export default class IdentityManager {
                 chainId === "xrpl" ||
                 chainId === "ton" ||
                 chainId === "ibc" ||
+                chainId === "atom" ||
                 chainId === "near"
             ) {
                 messageVerified = await sdk.verifyMessage(
@@ -218,13 +228,17 @@ export default class IdentityManager {
             if (!messageVerified) {
                 return {
                     success: false,
-                    message: "Message could not be verified",
+                    message: `${chainId} payload signature could not be verified`,
                 }
             }
 
             return {
                 success: true,
-                message: "Message verified",
+                message:
+                    `${chainId} payload signature verified` +
+                    (!twitterAccountConnected
+                        ? ". Twitter account not connected, won't award points"
+                        : ""),
             }
         } catch (error) {
             log.error("Error: " + error)
@@ -273,6 +287,30 @@ export default class IdentityManager {
         }
     }
 
+    /**
+     * Verify the payload for a Nomis identity assign payload
+     *
+     * @param payload - The payload to verify
+     *
+     * @returns {success: boolean, message: string}
+     */
+    static async verifyNomisPayload(
+        payload: NomisWalletIdentity,
+    ): Promise<{ success: boolean; message: string }> {
+        if (!payload.chain || !payload.subchain || !payload.address) {
+            return {
+                success: false,
+                message:
+                    "Invalid Nomis identity payload: missing chain, subchain or address",
+            }
+        }
+
+        return {
+            success: true,
+            message: "Nomis identity payload verified",
+        }
+    }
+
     // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
@@ -315,12 +353,19 @@ export default class IdentityManager {
      * @param key - The key to get the identities of
      * @returns The identities of the address
      */
-    static async getIdentities(address: string, key?: string): Promise<any> {
+    static async getIdentities(
+        address: string,
+        key?: "xm" | "web2" | "pqc" | "ud" | "nomis",
+    ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
             return gcr.identities[key]
         }
 
         return gcr.identities
+    }
+
+    static async getUDIdentities(address: string) {
+        return await this.getIdentities(address, "ud")
     }
 }

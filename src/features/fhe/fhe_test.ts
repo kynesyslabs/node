@@ -1,6 +1,7 @@
 import { cipher } from "node-forge"
 
 import FHE from "./FHE"
+import log from "@/utilities/logger"
 
 async function main() {
 
@@ -11,8 +12,8 @@ async function main() {
     await fhe.config.setParameters()
     await fhe.config.createKeysAndEncoders()
 
-    console.log("[+] FHE instance created")
-    console.log("\n\n[ Math Operations ]")
+    log.info("[+] FHE instance created")
+    log.info("\n\n[ Math Operations ]")
     // Create data to be encrypted
     const plainData = 7
     const addStep = 5
@@ -20,55 +21,55 @@ async function main() {
     // Encrypt the PlainText
     const cipheredData = await fhe.encryption.encryptNumber(plainData)
 
-    console.log("\n[Addition]")
+    log.info("\n[Addition]")
     const cipheredAddStep = await fhe.encryption.encryptNumber(addStep)
     // Add the CipherText to itself and store it in the destination parameter (itself)
     const cipheredAdditionResult = await fhe.math.addNumbers(cipheredData, cipheredAddStep)
     // Decrypt the CipherText
     const decryptedAdditionResult = await fhe.encryption.decryptNumber(cipheredAdditionResult)
-    console.log("plainData: ", plainData, "\naddStep: ", addStep, "\ndecryptedAdditionResult: ", decryptedAdditionResult)
+    log.info("plainData: ", plainData, "\naddStep: ", addStep, "\ndecryptedAdditionResult: ", decryptedAdditionResult)
 
     let decryptedData = await fhe.encryption.decryptNumber(cipheredData)
 
     if (decryptedData !== decryptedAdditionResult) {
-        console.log("\n[ERROR] The decryptedData is not equal to decryptedAdditionResult")
+        log.error("\n[ERROR] The decryptedData is not equal to decryptedAdditionResult")
         process.exit(-1)
     }
-    console.log("\n[OK] Now the cipheredData is equal to decryptedAdditionResult: ", decryptedData)
-    console.log("\n[Multiplication]")
+    log.info("\n[OK] Now the cipheredData is equal to decryptedAdditionResult: ", decryptedData)
+    log.info("\n[Multiplication]")
     const cipheredMultiplyStep = await fhe.encryption.encryptNumber(multiplyStep)
     // Multiply the CipherText to itself and store it in the destination parameter (itself)
     const cipheredMultiplicationResult = await fhe.math.multiplyNumbers(cipheredData, cipheredMultiplyStep)
     // Decrypt the CipherText
     const decryptedMultiplicationResult = await fhe.encryption.decryptNumber(cipheredMultiplicationResult)
-    console.log("plainData: ", plainData, "\nmultiplyStep: ", multiplyStep, "\ndecryptedMultiplyResult: ", decryptedMultiplicationResult)
+    log.info("plainData: ", plainData, "\nmultiplyStep: ", multiplyStep, "\ndecryptedMultiplyResult: ", decryptedMultiplicationResult)
 
     decryptedData = await fhe.encryption.decryptNumber(cipheredData)
     if (decryptedData !== decryptedMultiplicationResult) {
-        console.log("\n[ERROR] The decryptedData is not equal to decryptedMultiplicationResult")
+        log.error("\n[ERROR] The decryptedData is not equal to decryptedMultiplicationResult")
         process.exit(-1)
     }
-    console.log("\n[OK] Now the cipheredData is equal to decryptedMultiplicationResult: ", decryptedData)
+    log.info("\n[OK] Now the cipheredData is equal to decryptedMultiplicationResult: ", decryptedData)
 
-    console.log("\n[Negate - Flipping the sign of the number]")
+    log.info("\n[Negate - Flipping the sign of the number]")
     // Boolean operations
     // Negate the CipherText and store it in the destination parameter (itself)
     const cipheredNegateResult = await fhe.math.negate(cipheredData)
     // Decrypt the CipherText
     const decryptedNegateResult = await fhe.encryption.decryptNumber(cipheredNegateResult)
     if (decryptedNegateResult !== -decryptedData) {
-        console.log("\n[ERROR] The decryptedNegateResult is not equal to -plainData")
+        log.error("\n[ERROR] The decryptedNegateResult is not equal to -plainData")
         process.exit(-1)
     }
-    console.log("\ndecryptedNegateResult: ", decryptedNegateResult)
+    log.info("\ndecryptedNegateResult: ", decryptedNegateResult)
 
     decryptedData = await fhe.encryption.decryptNumber(cipheredData)
     if (decryptedData !== decryptedNegateResult) {
-        console.log("\n[ERROR] The decryptedData is not equal to -decryptedNegateResult")
+        log.error("\n[ERROR] The decryptedData is not equal to -decryptedNegateResult")
         process.exit(-1)
     }
 
-    console.log("\n[OK] Now the cipheredData is equal to -decryptedNegateResult: ", decryptedData)
+    log.info("\n[OK] Now the cipheredData is equal to -decryptedNegateResult: ", decryptedData)
 
     
 }

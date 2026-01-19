@@ -17,6 +17,11 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+// Helper function to yield control back to the event loop
+function yieldToEventLoop(): Promise<void> {
+    return new Promise(resolve => setImmediate(resolve))
+}
+
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     // return await consensusRoutine()
@@ -26,7 +31,7 @@ export default async function mainLoop() {
 }
 
 async function mainLoopCycle() {
-    await sleep(500) // Sleep for 500 ms
+    await sleep(getSharedState.mainLoopSleepTime)
     log.info(
         "\n============================================================\n",
         true,
@@ -39,35 +44,43 @@ async function mainLoopCycle() {
     if (getSharedState.mainLoopPaused) {
         return
     }
+
     // If it is not in pause, we set (or force set) the mainLoop flag to be on
     getSharedState.inMainLoop = true
 
     // Diagnostic logging
     log.info("[MAIN LOOP] Logging current diagnostics", false)
-    logCurrentDiagnostics()
+    // logCurrentDiagnostics()
+    // await yieldToEventLoop()
 
     // ANCHOR Execute the peer routine before the consensus loop
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // let currentlyOnlinePeers: Peer[] = await peerRoutine()
-    await checkOfflinePeers()
-    await peerGossip()
-    await fastSync([], "mainloop") // REVIEW Test here
+    checkOfflinePeers()
+    // await yieldToEventLoop()
+
+    // await peerGossip()
+    // await yieldToEventLoop()
+
+    // await fastSync([], "mainloop") // REVIEW Test here
+    // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
-    log.info("[MAIN LOOP] Synced! 🟢", true)
+    // log.info("[MAIN LOOP] Synced! 🟢", true)
 
     // await PeerManager.getInstance().sayHelloToAllPeers()
     // SECTION Todo list for a typical consensus operation
 
     // ANCHOR Check if we have to forge the block now
     const isConsensusTimeReached = await consensusTime.checkConsensusTime()
+    // await yieldToEventLoop()
     log.info("[MAINLOOP]: about to check if its time for consensus")
 
     if (!isConsensusTimeReached) {
-        log.info("[MAINLOOP]: is not consensus time")
+        log.info ("[MAINLOOP]: is not consensus time")
         //await sendNodeOnlineTx()
     }
 
@@ -93,23 +106,26 @@ async function mainLoopCycle() {
     ) {
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
-        log.info("[MAIN LOOP] Consensus time reached and sync status is true")
+        log.debug("[MAIN LOOP] Consensus time reached and sync status is true")
         // Wait for the peer routine to finish if it is still running
-        log.info("[MAIN LOOP] Waiting for the peer routine to finish")
-        let timer = 0
-        while (getSharedState.peerRoutineRunning > 0) {
-            await sleep(100)
-            timer += 1
-            if (timer > 10) {
-                log.error(
-                    "[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus",
-                )
-                getSharedState.peerRoutineRunning = 0 // Force the peer routine to act as if it finished
-                break
-            }
-        }
+        // let timer = 0
+        // while (getSharedState.peerRoutineRunning > 0) {
+        //     await sleep(100)
+        //     await yieldToEventLoop()
+        //     timer += 1
+        //     if (timer > 10) {
+        //         log.error(
+        //             "[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus",
+        //         )
+        //         log.error("[MAIN LOOP] Peer routine running: " + getSharedState.peerRoutineRunning)
+        //         getSharedState.peerRoutineRunning = 0 // Force the peer routine to act as if it finished
+        //         break
+        //     }
+        // }
+        await yieldToEventLoop()
         // ANCHOR Calling the consensus routine if is time for it
         await consensusRoutine()
+        await yieldToEventLoop()
     } else if (!getSharedState.syncStatus) {
         // ? This is a bit redundant, isn't it?
         log.warning(
@@ -217,8 +233,8 @@ async function logCurrentDiagnostics() {
         diagnosticString += "  No network speed data available\n"
     }
 
-    // Print to console
-    console.log(diagnosticString)
+    // Print to debug log
+    log.debug("[MAIN LOOP] " + diagnosticString)
 
     // Log to file using log.custom
     log.custom("diagnostics", diagnosticString, false, true)

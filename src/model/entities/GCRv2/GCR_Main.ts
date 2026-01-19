@@ -31,13 +31,16 @@ export class GCRMain {
                 twitter: number
                 github: number
                 discord: number
+                telegram: number
             }
+            udDomains?: { [domain: string]: number } // Optional for backward compatibility with historical records
             referrals: number
             demosFollow: number
             weeklyChallenge?: Array<{
                 date: string
                 points: number
             }>
+            nomisScores: { [chain: string]: number }
         }
         lastUpdated: Date
     }

@@ -4,6 +4,7 @@ import { NodeCall } from "../network/manageNodeCall"
 import { getSharedState } from "src/utilities/sharedState"
 import { IPeer, RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import PeerManager from "./PeerManager"
 
 export interface SyncData {
     status: boolean
@@ -114,7 +115,7 @@ export default class Peer {
      * @returns True if the peer is online, false otherwise
      */
     async connect(): Promise<boolean> {
-        console.log(
+        log.debug(
             "[PEER] Testing connection to peer: " + this.connection.string,
         )
         const call: NodeCall = {
@@ -126,7 +127,7 @@ export default class Peer {
             method: "nodeCall",
             params: [call],
         })
-        console.log(
+        log.debug(
             "[PEER] [PING] Response: " +
                 response.result +
                 " - " +
@@ -166,7 +167,9 @@ export default class Peer {
                 ? `${request.method}.${request.params[0].method}`
                 : request.method
         log.error(
-            "[PEER] [LONG CALL] Max retries reached for method: " +
+            "[PEER] [LONG CALL] [" +
+                this.connection.string +
+                "] Max retries reached for method: " +
                 methodString +
                 " - " +
                 response,
@@ -216,6 +219,35 @@ export default class Peer {
 
     // New method to make an arbitrary RPC call
     async call(
+        request: RPCRequest,
+        isAuthenticated = true,
+    ): Promise<RPCResponse> {
+        // REVIEW: Check if OmniProtocol should be used for this peer
+        if (
+            getSharedState.isOmniProtocolEnabled &&
+            getSharedState.omniAdapter
+        ) {
+            try {
+                const response = await getSharedState.omniAdapter.adaptCall(
+                    this,
+                    request,
+                    isAuthenticated,
+                )
+                return response
+            } catch (error) {
+                log.error(
+                    `[Peer] OmniProtocol adaptCall failed, falling back to HTTP: ${error}`,
+                )
+                // Fall through to HTTP call below
+            }
+        }
+
+        // HTTP fallback / default path
+        return this.httpCall(request, isAuthenticated)
+    }
+
+    // REVIEW: Extracted HTTP call logic for reuse and fallback
+    async httpCall(
         request: RPCRequest,
         isAuthenticated = true,
     ): Promise<RPCResponse> {
@@ -309,6 +341,34 @@ export default class Peer {
             }
             return response.data
         } catch (error) {
+            // Handle ECONNREFUSED error
+            if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
+                log.warn(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Connection refused to: " +
+                        connectionUrl,
+                )
+
+                PeerManager.getInstance().addOfflinePeer(this)
+                PeerManager.getInstance().removeOnlinePeer(this.identity)
+
+                this.status.online = false
+                this.status.timestamp = Date.now()
+
+                return {
+                    result: 503,
+                    response: "Connection refused",
+                    require_reply: false,
+                    extra: {
+                        code: error.code,
+                        url: connectionUrl,
+                    },
+                }
+            }
+
             log.error(
                 "[RPC Call] [" +
                     method +
@@ -318,7 +378,7 @@ export default class Peer {
                     error,
             )
             log.error("CONNECTION URL: " + connectionUrl)
-            log.error("REQUEST PAYLOAD: " + JSON.stringify(request, null, 2))
+            log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
 
             return {
                 result: 500,

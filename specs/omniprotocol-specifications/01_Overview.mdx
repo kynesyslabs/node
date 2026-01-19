@@ -1,0 +1,217 @@
+# OmniProtocol Specification
+
+## Overview
+
+**OmniProtocol** is a custom binary TCP protocol designed to replace HTTP JSON-RPC for inter-node communication in the Demos Network. It provides significant performance improvements through persistent connections, efficient binary framing, and cryptographic authentication.
+
+## Key Benefits
+
+| Metric | HTTP JSON-RPC | OmniProtocol | Improvement |
+|--------|---------------|--------------|-------------|
+| **Bandwidth** | 300+ bytes minimum | 16-120 bytes | 60-97% reduction |
+| **Latency** | New connection per request | Persistent connections | 70-90% reduction |
+| **Security** | TLS + Basic Auth | TLS + Ed25519 signatures | Enhanced |
+| **Efficiency** | Text-based JSON | Binary encoding | Optimized |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Application Layer                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐ │
+│  │ Transaction │  │  Consensus  │  │     GCR     │  │    Sync     │ │
+│  │  Handlers   │  │  Handlers   │  │  Handlers   │  │  Handlers   │ │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘ │
+│         └─────────────┬──┴──────────────┬─┘                │        │
+│                       ▼                 ▼                  ▼        │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                    Protocol Dispatcher                        │  │
+│  │           (Message routing, Auth middleware)                  │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────┤
+│                       Authentication Layer                          │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │                   SignatureVerifier                            │  │
+│  │        Ed25519 verification, Replay protection                 │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────┤
+│                        Transport Layer                              │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────────┐ │
+│  │ MessageFramer   │  │ ConnectionPool   │  │  PeerConnection    │ │
+│  │ Binary framing  │  │ Pool management  │  │  State machine     │ │
+│  └─────────────────┘  └──────────────────┘  └────────────────────┘ │
+├─────────────────────────────────────────────────────────────────────┤
+│                         Server Layer                                │
+│  ┌───────────────────────────────────────────────────────────────┐  │
+│  │              OmniProtocolServer / TLSServer                    │  │
+│  │         TCP listener, Connection management                    │  │
+│  └───────────────────────────────────────────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────────┤
+│                        Security Layer                               │
+│  ┌──────────────────────────┐  ┌─────────────────────────────────┐ │
+│  │      RateLimiter         │  │      TLS Encryption             │ │
+│  │   DoS protection         │  │   TLSv1.2/1.3 support           │ │
+│  └──────────────────────────┘  └─────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Protocol Version
+
+- **Current Version**: `0x01` (v1.0)
+- **Header Version Field**: 2 bytes (uint16, big-endian)
+
+## Core Components
+
+### 1. Message Format
+Binary message structure with 12-byte header, optional authentication block, variable payload, and CRC32 checksum.
+
+### 2. Authentication System
+Ed25519 digital signatures with timestamp-based replay protection (±5 minute window).
+
+### 3. Transport Layer
+- **MessageFramer**: Parses TCP streams into complete messages
+- **ConnectionPool**: Manages persistent connections to multiple peers
+- **PeerConnection**: Individual connection state machine
+
+### 4. Server Architecture
+- **OmniProtocolServer**: Plain TCP server for incoming connections
+- **TLSServer**: TLS-encrypted server with certificate management
+
+### 5. Rate Limiting
+Sliding window rate limiting with per-IP and per-identity limits for DoS protection.
+
+## Handler Categories
+
+| Range | Category | Examples |
+|-------|----------|----------|
+| `0x00-0x0F` | Control & Infrastructure | PING, HELLO_PEER, GET_PEERLIST |
+| `0x10-0x1F` | Transactions & Execution | EXECUTE, BRIDGE, CONFIRM |
+| `0x20-0x2F` | Data Synchronization | MEMPOOL_SYNC, BLOCK_SYNC |
+| `0x30-0x3F` | Consensus | PROPOSE_BLOCK_HASH, GREENLIGHT |
+| `0x40-0x4F` | GCR Operations | GCR_GET_IDENTITIES, GCR_GET_POINTS |
+| `0x50-0x5F` | Browser/Client | LOGIN_REQUEST, GET_TWEET |
+| `0x60-0x6F` | Admin Operations | ADMIN_RATE_LIMIT_UNBLOCK |
+| `0xF0-0xFF` | Protocol Meta | PROTO_VERSION_NEGOTIATE, PROTO_DISCONNECT |
+
+## Migration Strategy
+
+OmniProtocol supports three migration modes for gradual adoption:
+
+```typescript
+type MigrationMode = "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY"
+```
+
+- **HTTP_ONLY**: Use only HTTP JSON-RPC (default)
+- **OMNI_PREFERRED**: Try OmniProtocol first, fallback to HTTP
+- **OMNI_ONLY**: Require OmniProtocol for all communication
+
+## Source Code Structure
+
+```
+src/libs/omniprotocol/
+├── index.ts                     # Main exports
+├── types/
+│   ├── message.ts               # Message interfaces
+│   ├── config.ts                # Configuration types
+│   └── errors.ts                # Error classes
+├── auth/
+│   ├── types.ts                 # Auth block types
+│   ├── parser.ts                # Auth block encoding/decoding
+│   └── verifier.ts              # Signature verification
+├── protocol/
+│   ├── opcodes.ts               # Opcode enum (50+ opcodes)
+│   ├── dispatcher.ts            # Message routing
+│   ├── registry.ts              # Handler registration
+│   └── handlers/                # Handler implementations
+├── serialization/
+│   ├── primitives.ts            # Primitive type encoding
+│   └── [category].ts            # Category-specific serialization
+├── transport/
+│   ├── MessageFramer.ts         # TCP stream parsing
+│   ├── PeerConnection.ts        # Connection state machine
+│   ├── ConnectionPool.ts        # Pool management
+│   └── TLSConnection.ts         # TLS wrapper
+├── server/
+│   ├── OmniProtocolServer.ts    # TCP server
+│   ├── TLSServer.ts             # TLS server
+│   └── ServerConnectionManager.ts
+├── tls/
+│   ├── types.ts                 # TLS configuration
+│   └── certificates.ts          # Certificate management
+├── ratelimit/
+│   ├── types.ts                 # Rate limit types
+│   └── RateLimiter.ts           # Rate limiting logic
+└── integration/
+    ├── startup.ts               # Server startup
+    └── peerAdapter.ts           # Peer communication adapter
+```
+
+## Security Features
+
+### Implemented
+- Ed25519 signature verification
+- Timestamp-based replay protection (±5 minute window)
+- TLS/SSL encryption (TLSv1.2/1.3)
+- Per-IP connection limits (default: 10)
+- Per-IP request rate limiting (default: 100 req/s)
+- Per-identity request rate limiting (default: 200 req/s)
+- CRC32 checksum validation
+- Maximum payload size enforcement (16MB)
+
+### Reserved for Future
+- Post-quantum cryptography (Falcon, ML-DSA)
+- Nonce-based replay protection
+
+## Environment Variables
+
+```bash
+# Core Settings
+OMNI_ENABLED=true
+OMNI_PORT=3001
+OMNI_HOST=0.0.0.0
+
+# TLS Configuration
+OMNI_TLS_ENABLED=true
+OMNI_TLS_MODE=self-signed
+OMNI_CERT_PATH=./certs/node-cert.pem
+OMNI_KEY_PATH=./certs/node-key.pem
+OMNI_TLS_MIN_VERSION=TLSv1.3
+
+# Rate Limiting
+OMNI_RATE_LIMIT_ENABLED=true
+OMNI_MAX_CONNECTIONS_PER_IP=10
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IP=100
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY=200
+```
+
+## Quick Start
+
+```typescript
+import { startOmniProtocolServer } from "./libs/omniprotocol/integration/startup"
+
+// Start server with TLS
+const server = await startOmniProtocolServer({
+    enabled: true,
+    port: 3001,
+    tls: {
+        enabled: true,
+        mode: "self-signed"
+    }
+})
+
+// Get server statistics
+const stats = server.getStats()
+console.log(`Connections: ${stats.connections.total}`)
+```
+
+## Related Documentation
+
+- [02_Message_Format.mdx](./02_Message_Format.mdx) - Binary message structure
+- [03_Authentication.mdx](./03_Authentication.mdx) - Ed25519 authentication
+- [04_Opcode_Reference.mdx](./04_Opcode_Reference.mdx) - Complete opcode reference
+- [05_Transport_Layer.mdx](./05_Transport_Layer.mdx) - Connection management
+- [06_Server_Architecture.mdx](./06_Server_Architecture.mdx) - Server implementation
+- [07_Rate_Limiting.mdx](./07_Rate_Limiting.mdx) - DoS protection
+- [08_Serialization.mdx](./08_Serialization.mdx) - Binary encoding
+- [09_Configuration.mdx](./09_Configuration.mdx) - Configuration guide
+- [10_Integration.mdx](./10_Integration.mdx) - Node integration

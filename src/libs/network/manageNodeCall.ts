@@ -1,7 +1,6 @@
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
-import GCR from "../blockchain/gcr/gcr"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -16,19 +15,25 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
+import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import TxUtils from "../blockchain/transaction"
+import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
+import { Twitter } from "../identity/tools/twitter"
+import { Tweet } from "@kynesyslabs/demosdk/types"
+import Mempool from "../blockchain/mempool_v2"
+import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { Discord, DiscordMessage } from "../identity/tools/discord"
+import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
 import {
     hexToUint8Array,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { Twitter } from "../identity/tools/twitter"
-import { Tweet } from "@kynesyslabs/demosdk/types"
-import Mempool from "../blockchain/mempool_v2"
-import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { DTRManager } from "./dtr/dtrmanager"
 
 export interface NodeCall {
     message: string
@@ -36,7 +41,12 @@ export interface NodeCall {
     muid: string
 }
 
-// REVIEW Is this module too big?
+/**
+ * Dispatches an incoming NodeCall message to the appropriate handler and produces an RPCResponse.
+ *
+ * @param content - NodeCall containing `message` (the RPC action to perform), `data` (payload for the action), and `muid` (message unique id)
+ * @returns An RPCResponse containing the numeric status, the response payload for the requested action, and optional `extra` diagnostic data
+ */
 export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
@@ -47,8 +57,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
-    //console.log(typeof data)
-    console.log(JSON.stringify(content))
+    log.debug("[manageNodeCall] Content: " + JSON.stringify(content))
     switch (content.message) {
         case "getPeerInfo":
             response.response = await getPeerInfo()
@@ -88,10 +97,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.extra = result.extra
             break
         case "getLastBlockNumber":
-            console.log("[SERVER] Received getLastBlockNumber")
+            log.debug("[SERVER] Received getLastBlockNumber")
             response.response = await Chain.getLastBlockNumber()
-            console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
-            //console.log(response)
+            log.debug("[CHAIN] Received reply from the database")
             break
         case "getLastBlock":
             response.response = await Chain.getLastBlock()
@@ -99,8 +107,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getLastBlockHash":
             response.response = await Chain.getLastBlockHash()
             break
-        case "getBlockByNumber":
+        case "getBlockByNumber": {
             return await getBlockByNumber(data)
+        }
         case "getBlocks":
             return await getBlocks(data)
         case "getTransactions":
@@ -108,9 +117,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
-                console.log(`get block by hash ${data.hash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.hash}`)
             } else if (data.blockHash) {
-                console.log(`get block by hash ${data.blockHash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.blockHash}`)
                 data.hash = data.blockHash
             } else {
                 response.result = 400
@@ -132,7 +141,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No hash specified"
                 break
             }
-            console.log(`getting tx with hash ${data.hash}`)
+            log.debug(`[SERVER] getTxByHash: ${data.hash}`)
             try {
                 response.response = await Chain.getTxByHash(data.hash)
             } catch (e) {
@@ -145,6 +154,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+        case "getTxsByHashes":
+            return await getTxsByHashes(data)
+
+        case "getBlockTransactions": {
+            if (!data.blockHash) {
+                response.result = 400
+                response.response = "No block hash specified"
+                break
+            }
+
+            response.response = await Chain.getBlockTransactions(data.blockHash)
+            break
+        }
+
         case "getMempool":
             response.response = await Mempool.getMempool()
             break
@@ -250,7 +273,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.result = tweet ? 200 : 400
             if (tweet) {
                 const data = {
-                    id: tweet.id,
+                    id: (tweet as any).id,
                     created_at: tweet.created_at,
                     text: tweet.text,
                     username: tweet.author.screen_name,
@@ -264,6 +287,96 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     success: false,
                     error: "Failed to get tweet",
+                }
+            }
+            break
+        }
+
+        case "resolveUdDomain": {
+            try {
+                const res = await UDIdentityManager.resolveUDDomain(data.domain)
+
+                if (res) {
+                    response.response = res
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] Failed to resolve web3 domain: " + error)
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to resolve web3 domain",
+                }
+            }
+            break
+        }
+
+        case "getDiscordMessage": {
+            if (!data.discordUrl) {
+                response.result = 400
+                response.response = "No Discord URL specified"
+                break
+            }
+
+            let discord: Discord
+            try {
+                discord = Discord.getInstance()
+            } catch (e) {
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Discord not configured",
+                }
+                break
+            }
+
+            let message: DiscordMessage | null = null
+
+            try {
+                message = await discord.getMessageByUrl(data.discordUrl)
+            } catch (error) {
+                response.result = 400
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
+                }
+                break
+            }
+
+            response.result = message ? 200 : 400
+            if (message) {
+                let guildIdFromUrl: string | undefined
+                let channelIdFromUrl: string | undefined
+                let messageIdFromUrl: string | undefined
+
+                try {
+                    const details = discord.extractMessageDetails(
+                        data.discordUrl,
+                    )
+                    guildIdFromUrl = details.guildId
+                    channelIdFromUrl = details.channelId
+                    messageIdFromUrl = details.messageId
+                } catch {
+                    // non-fatal, e.g. if URL format was unexpected
+                }
+
+                const payload = {
+                    id: message.id,
+                    timestamp: message.timestamp,
+                    authorUsername: message.author?.username ?? null,
+                    authorId: message.author?.id ?? null,
+                    channelId: message.channel_id ?? channelIdFromUrl ?? null,
+                    guildId:
+                        (message as any).guild_id ?? guildIdFromUrl ?? null,
+                }
+
+                response.response = {
+                    message: payload,
+                    success: true,
+                }
+            } else {
+                response.response = {
+                    success: false,
+                    error: "Failed to get Discord message",
                 }
             }
             break
@@ -370,14 +483,240 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
+        // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
+        case "requestTLSNproxy": {
+            try {
+                const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
+                const { validateToken, consumeRetry } = await import("@/features/tlsnotary/tokenManager")
+
+                // Require tokenId and owner (pubkey) for paid access
+                if (!data.tokenId || !data.owner) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing tokenId or owner parameter",
+                    }
+                    break
+                }
+
+                if (!data.targetUrl) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing targetUrl parameter",
+                    }
+                    break
+                }
+
+                // Validate URL is HTTPS
+                if (!data.targetUrl.startsWith("https://")) {
+                    response.result = 400
+                    response.response = {
+                        error: ProxyError.INVALID_URL,
+                        message: "Only HTTPS URLs are supported for TLS attestation",
+                    }
+                    break
+                }
+
+                // Validate the token
+                const validation = validateToken(data.tokenId, data.owner, data.targetUrl)
+                if (!validation.valid) {
+                    response.result = validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.response = {
+                        error: validation.error,
+                        message: `Token validation failed: ${validation.error}`,
+                        domain: validation.token?.domain, // Show expected domain on mismatch
+                    }
+                    break
+                }
+
+                // Request the proxy (this spawns wstcp if needed)
+                const result = await requestProxy(data.targetUrl, data.requestOrigin)
+
+                if ("error" in result) {
+                    // Map proxy errors to appropriate HTTP status codes
+                    switch (result.error) {
+                        case ProxyError.INVALID_URL:
+                            response.result = 400 // Bad Request - client error
+                            break
+                        case ProxyError.PORT_EXHAUSTED:
+                            response.result = 503 // Service Unavailable - temporary
+                            break
+                        case ProxyError.WSTCP_NOT_AVAILABLE:
+                        case ProxyError.PROXY_SPAWN_FAILED:
+                        default:
+                            response.result = 500 // Internal Server Error
+                            break
+                    }
+                    response.response = result
+                } else {
+                    // Success - consume a retry and link proxyId to token
+                    const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                    if (updatedToken) {
+                        log.info(`[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`)
+                    }
+
+                    // Add token info to response
+                    response.response = {
+                        ...result,
+                        tokenId: data.tokenId,
+                        retriesLeft: updatedToken?.retriesLeft ?? 0,
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] requestTLSNproxy error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to request TLSNotary proxy",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary discovery endpoint for SDK auto-configuration
+        case "tlsnotary.getInfo": {
+            // Dynamic import to avoid circular dependencies and check if enabled
+            try {
+                const { getTLSNotaryService } = await import("@/features/tlsnotary")
+                const service = getTLSNotaryService()
+
+                if (!service || !service.isRunning()) {
+                    response.result = 503
+                    response.response = {
+                        success: false,
+                        error: "TLSNotary service is not enabled or not running",
+                    }
+                    break
+                }
+
+                const publicKey = service.getPublicKeyHex()
+                const port = service.getPort()
+
+                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+
+                // Extract host and determine WebSocket scheme from exposedUrl
+                // The node's host is used - SDK connects to the same host it's already connected to
+                let nodeHost = "localhost"
+                const wsScheme = (() => {
+                    try {
+                        const exposedUrl = getSharedState.exposedUrl
+                        if (exposedUrl) {
+                            const url = new URL(exposedUrl)
+                            nodeHost = url.hostname
+                            return url.protocol === "https:" ? "wss" : "ws"
+                        }
+                    } catch {
+                        // Fall back to localhost and ws if URL parsing fails
+                    }
+                    return "ws"
+                })()
+
+                // Build the notary WebSocket URL - Port is the TLSNotary WebSocket port
+                const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
+
+                // WebSocket proxy URL for TCP tunneling
+                const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+
+                response.response = {
+                    notaryUrl,
+                    proxyUrl,
+                    publicKey,
+                    version: "0.1.0", // TLSNotary integration version
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Failed to get TLSNotary info",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token lookup by transaction hash
+        case "tlsnotary.getToken": {
+            try {
+                const { getTokenByTxHash, getToken } = await import("@/features/tlsnotary/tokenManager")
+
+                // Support lookup by either tokenId or txHash
+                const { tokenId, txHash } = data as { tokenId?: string; txHash?: string }
+
+                let token
+                if (tokenId) {
+                    token = getToken(tokenId)
+                } else if (txHash) {
+                    token = getTokenByTxHash(txHash)
+                } else {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Either tokenId or txHash is required",
+                    }
+                    break
+                }
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: "No token found for the provided identifier",
+                    }
+                } else {
+                    response.response = {
+                        token: {
+                            id: token.id,
+                            owner: token.owner,
+                            domain: token.domain,
+                            status: token.status,
+                            expiresAt: token.expiresAt,
+                            retriesLeft: token.retriesLeft,
+                        },
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getToken error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token stats for monitoring
+        case "tlsnotary.getTokenStats": {
+            try {
+                const { getTokenStats } = await import("@/features/tlsnotary/tokenManager")
+                const stats = getTokenStats()
+                response.response = { stats }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getTokenStats error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token stats",
+                }
+            }
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
+        // REVIEW DTR: Handle relayed transactions from non-validator nodes
+        case "RELAY_TX":
+            return await DTRManager.receiveRelayedTransactions(
+                data as ValidityData[],
+            )
         case "hots":
-            console.log("[SERVER] Received hots")
+            log.debug("[SERVER] Received hots")
             response.response = eggs.hots()
             break
+
         default:
-            console.log("[SERVER] Received unknown message")
+            log.warning("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes
             response.response = '{ error: "Unknown message"}'
             break

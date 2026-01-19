@@ -17,6 +17,7 @@ import Cryptography from "../crypto/cryptography"
 // INFO This module exposes methods designed to have an unified way of communicate in DEMOS
 import Hashing from "../crypto/hashing"
 import { Peer } from "../peer"
+import log from "@/utilities/logger"
 
 export default class Transmission {
     bundle: Bundle
@@ -51,8 +52,8 @@ export default class Transmission {
         this.bundle.content.extra = extra
         this.bundle.content.timestamp = Date.now()
         this.receiver_peer = receiver
-        console.log("[TRANSMISSION] Initialized message")
-        //console.log(this.bundle)
+        log.debug("[TRANSMISSION] Initialized message")
+        //log.debug(this.bundle)
     }
 
     // INFO Hash and sign a message

@@ -41,10 +41,9 @@ export default async function findGenesisBlock() {
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
 
     log.info("[GENESIS] Looking for the genesis block...")
-    const genesisBlock = await Chain.getGenesisBlock()
-
-    if (genesisBlock && genesisBlock.hash) {
-        log.info("[GENESIS] Genesis block found. Hash: " + genesisBlock.hash)
+    const genesisBlockHash = await Chain.getGenesisBlockHash()
+    if (genesisBlockHash) {
+        log.info("[GENESIS] Genesis block found. Hash: " + genesisBlockHash)
         return
     }
 

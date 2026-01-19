@@ -86,9 +86,9 @@ async function dumpUserData(): Promise<void> {
         )
 
         // Write the data to a JSON file
-        fs.writeFileSync(
+        await fs.promises.writeFile(
             outputPath,
-            JSON.stringify(outputData, null, 2),
+            JSON.stringify(outputData),
             "utf8",
         )
 

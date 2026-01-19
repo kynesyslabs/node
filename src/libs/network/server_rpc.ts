@@ -30,7 +30,7 @@ import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
-import GCR from "../blockchain/gcr/gcr"
+import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ISignature } from "@kynesyslabs/demosdk/types"
 // Reading the port from sharedState
 
@@ -151,6 +151,8 @@ async function processPayload(
         sender = splits[1]
     }
 
+    PeerManager.getInstance().updatePeerLastSeen(sender)
+
     if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
             return {
@@ -200,9 +202,9 @@ async function processPayload(
             log.info(
                 "[RPC Call] Received mempool merge request from: " + sender,
             )
-            var res = await ServerHandlers.handleMempool(payload.params[0])
+            var res = await ServerHandlers.handleMempool(payload.params)
             log.info("[RPC Call] Merged mempool from: " + sender)
-            log.info(JSON.stringify(res, null, 2))
+            log.info(JSON.stringify(res))
             return res
         // REVIEW Peerlist merging
         case "peerlist":
@@ -290,8 +292,8 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const twitterUsernames = payload.params[0].message as string[]
-            const awardedAccounts = await GCR.awardPoints(twitterUsernames)
+            const awardPointsData = payload.params[0].message as AccountParams[]
+            const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
                 result: 200,
@@ -335,7 +337,15 @@ export async function serverRpcBun() {
 
     // GET endpoints
     // eslint-disable-next-line quotes
-    server.get("/", () => new Response('{"message": "Hello, World!"}'))
+    server.get("/", req => {
+        const clientIP = rateLimiter.getClientIP(req, server.server)
+        return new Response(
+            JSON.stringify({
+                message: "Hello, World!",
+                yourIP: clientIP,
+            }),
+        )
+    })
 
     server.get("/info", async () => {
         const info = await sharedState.getInstance().getInfo()
@@ -388,16 +398,16 @@ export async function serverRpcBun() {
     // Main RPC endpoint
     server.post("/", async req => {
         try {
-            const ip = server.server?.requestIP(req)
+            const clientIP = rateLimiter.getClientIP(req, server.server)
 
-            if (!ip || !ip.address) {
-                return jsonResponse({ error: "IP address not found" }, 400)
-            }
+            // if (!clientIP || clientIP === "unknown") {
+            //     return jsonResponse({ error: "IP address not found" }, 400)
+            // }
 
             const payload = await req.json()
 
             const rateLimitResponse = handleIdentityTxRateLimit(
-                ip.address,
+                clientIP,
                 payload,
                 rateLimiter,
             )
@@ -407,27 +417,22 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format" }, 400)
+                return jsonResponse({ error: "Invalid request format. Not an RPCRequest" }, 400)
             }
 
             log.info(
-                "[RPC Call] Received request: " +
-                    JSON.stringify(payload, null, 2),
+                "[RPC Call] Received request: " + JSON.stringify(payload),
                 false,
             )
 
             let sender = ""
             if (!noAuthMethods.includes(payload.method)) {
                 const headers = req.headers
-                log.info(
-                    "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
-                    true,
-                )
+                log.info("[RPC Call] Headers: " + JSON.stringify(headers), true)
                 const headerValidation = await validateHeaders(headers)
-                console.log("headerValidation", headerValidation)
-                console.log(
-                    "headerValidation: " +
-                        JSON.stringify(headerValidation, null, 2),
+                log.debug(
+                    "[RPC Call] Header validation: " +
+                        JSON.stringify(headerValidation),
                 )
                 if (!headerValidation[0]) {
                     return jsonResponse(
@@ -441,10 +446,20 @@ export async function serverRpcBun() {
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
-            console.error(e)
+            console.error("Error in serverRpcBun: " + e)
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })
+
+    // REVIEW: Register TLSNotary routes if enabled
+    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+        try {
+            const { registerTLSNotaryRoutes } = await import("@/features/tlsnotary/routes")
+            registerTLSNotaryRoutes(server)
+        } catch (error) {
+            log.warning("[RPC] Failed to register TLSNotary routes: " + error)
+        }
+    }
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()

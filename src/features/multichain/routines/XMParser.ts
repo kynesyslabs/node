@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { IOperation, XMScript } from "@kynesyslabs/demosdk/types"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import log from "@/utilities/logger"
 
 import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
@@ -21,12 +22,24 @@ multichain_operation: {
 }
 */
 
+/**
+ * JSON.stringify data with bigints converted to strings
+ */
+function stringify(data: any) {
+    return JSON.stringify(data, (_, v) =>
+        typeof v === "bigint" ? v.toString() : v,
+    )
+}
+
 class XMParser {
     // INFO Same as below but with file support
     static async loadFile(path: string): Promise<XMScript> {
         if (!fs.existsSync(path)) {
-            console.log("The file does not exist.")
+            log.debug("The file does not exist.")
             return null
+        }
+        if (path.includes("..")) {
+            throw new Error("Invalid file path")
         }
         const script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
@@ -51,7 +64,12 @@ class XMParser {
     }
 
     // INFO This returns the results of the execution of the XMScript
-    static async execute(fullscript: XMScript): Promise<any> {
+    static async execute(fullscript: XMScript): Promise<{
+        [operationId: string]: {
+            result: string
+            error?: string
+        }
+    }> {
         const results = {}
         let name: string, operation: IOperation
         // Iterating over the operations
@@ -59,19 +77,21 @@ class XMParser {
         for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
             try {
                 name = Object.keys(fullscript.operations)[id]
-                console.log("[" + name + "] ")
+                log.debug("[" + name + "] ")
                 operation = fullscript.operations[name]
-                console.log("[XMParser]: full script operation")
-                console.log(fullscript)
-                console.log("[XMParser]: partial operation")
-                console.log(operation)
-                results[name] = await XMParser.executeOperation(operation)
-                console.log("[RESULT]: " + results[name])
+                log.debug("[XMParser]: full script operation")
+                log.debug(fullscript)
+                log.debug("[XMParser]: partial operation")
+                log.debug(operation)
+                const result = await XMParser.executeOperation(operation)
+                results[name] = stringify(result)
+                log.debug("[RESULT]: " + results[name])
             } catch (e) {
-                console.log("[XM EXECUTE] Error: " + e)
+                log.error("[XM EXECUTE] Error: " + e)
                 results[name] = { result: "error", error: e.toString() }
             }
         }
+
         return results // REVIEW Is the type ok?
     }
 

@@ -1,0 +1,241 @@
+---
+title: "Transactions"
+description: "IPFS blockchain transaction types and execution flow"
+---
+
+# Transactions
+
+IPFS operations that modify state are executed as blockchain transactions, ensuring consensus across all nodes.
+
+## Transaction Types
+
+| Type | Description |
+|------|-------------|
+| `IPFS_ADD` | Upload and pin new content |
+| `IPFS_PIN` | Pin existing content by CID |
+| `IPFS_UNPIN` | Remove a pin from account |
+| `IPFS_EXTEND_PIN` | Extend pin expiration time |
+
+## IPFS_ADD
+
+Uploads content to IPFS and automatically pins it to the sender's account.
+
+### Payload
+
+```typescript
+{
+  type: "ipfs_add",
+  content: string,           // Base64-encoded content
+  filename?: string,         // Optional filename hint
+  duration?: PinDuration,    // Pin duration (default: "permanent")
+  metadata?: object          // Optional user metadata
+}
+```
+
+### Execution Flow
+
+1. **Decode** - Base64 content decoded, size calculated
+2. **Tier Detection** - Determine if sender is genesis account
+3. **Quota Validation** - Check byte limit and pin count
+4. **Cost Calculation** - Apply tier pricing and duration multiplier
+5. **Balance Check** - Verify sufficient DEM balance
+6. **Fee Deduction** - Transfer fee to hosting RPC
+7. **IPFS Add** - Store content via Kubo daemon
+8. **State Update** - Record pin in account state
+
+### Response
+
+```typescript
+{
+  cid: string,         // Content Identifier
+  size: number,        // Size in bytes
+  cost: string,        // Cost charged in DEM
+  expiresAt?: number,  // Expiration timestamp (if not permanent)
+  duration?: number    // Duration in seconds
+}
+```
+
+### Example
+
+```typescript
+const tx = {
+  type: "ipfs_add",
+  content: Buffer.from("Hello, World!").toString("base64"),
+  duration: "month",
+  metadata: { name: "greeting.txt" }
+}
+
+// Result:
+// {
+//   cid: "QmWATWQ7fVPP2EFGu71UkfnqhYXDYH566qy47CnJDgvs8u",
+//   size: 13,
+//   cost: "1",
+//   expiresAt: 1706745600000,
+//   duration: 2592000
+// }
+```
+
+## IPFS_PIN
+
+Pins an existing CID to the sender's account. The content must already exist on the IPFS network (pinned by another account or available via the swarm).
+
+### Payload
+
+```typescript
+{
+  type: "ipfs_pin",
+  cid: string,               // Content Identifier to pin
+  duration?: PinDuration,    // Pin duration (default: "permanent")
+  metadata?: object          // Optional metadata
+}
+```
+
+### Execution Flow
+
+1. **CID Validation** - Verify CID format is valid
+2. **Content Check** - Fetch content size from IPFS (must exist)
+3. **Duplicate Check** - Verify not already pinned by account
+4. **Quota Validation** - Check limits not exceeded
+5. **Cost Calculation** - Based on content size and duration
+6. **Payment Processing** - Deduct fee from balance
+7. **Local Pin** - Pin content on this node
+8. **State Update** - Record in account state
+
+### Response
+
+```typescript
+{
+  cid: string,
+  size: number,
+  cost: string,
+  expiresAt?: number
+}
+```
+
+## IPFS_UNPIN
+
+Removes a pin from the sender's account. The content may persist if pinned by other accounts.
+
+### Payload
+
+```typescript
+{
+  type: "ipfs_unpin",
+  cid: string    // Content Identifier to unpin
+}
+```
+
+### Execution Flow
+
+1. **CID Validation** - Verify CID format
+2. **Pin Verification** - Confirm pin exists in account state
+3. **State Update** - Remove pin from account
+4. **Local Unpin** - Unpin from IPFS node
+
+### Important Notes
+
+- **No refunds** - Payment is final, unpinning does not refund fees
+- **Content persistence** - Content remains if pinned by others
+- **Garbage collection** - Unpinned content eventually removed by GC
+
+### Response
+
+```typescript
+{
+  cid: string,
+  unpinned: true
+}
+```
+
+## IPFS_EXTEND_PIN
+
+Extends the expiration time of an existing pin.
+
+### Payload
+
+```typescript
+{
+  type: "ipfs_extend_pin",
+  cid: string,                    // Content Identifier
+  additionalDuration: PinDuration // Duration to add
+}
+```
+
+### Execution Flow
+
+1. **Pin Lookup** - Find existing pin in account state
+2. **Duration Validation** - Verify extension is valid
+3. **Expiration Calculation** - New expiration from current (or now if expired)
+4. **Cost Calculation** - Based on size and additional duration
+5. **Payment Processing** - Deduct extension fee
+6. **State Update** - Update pin with new expiration
+
+### Response
+
+```typescript
+{
+  cid: string,
+  newExpiresAt: number,
+  cost: string,
+  duration: number
+}
+```
+
+### Notes
+
+- **No free tier** - Extensions always cost DEM (free tier only for initial pin)
+- **Expired pins** - Can be extended; new expiration calculated from current time
+- **Permanent upgrade** - Can extend temporary pin to permanent
+
+## Pin Duration
+
+Duration can be specified as preset names or custom seconds:
+
+### Preset Durations
+
+| Name | Seconds | Price Multiplier |
+|------|---------|------------------|
+| `permanent` | - | 1.00 |
+| `week` | 604,800 | 0.10 |
+| `month` | 2,592,000 | 0.25 |
+| `quarter` | 7,776,000 | 0.50 |
+| `year` | 31,536,000 | 0.80 |
+
+### Custom Duration
+
+```typescript
+duration: 172800  // 2 days in seconds
+```
+
+- Minimum: 86,400 seconds (1 day)
+- Maximum: 315,360,000 seconds (10 years)
+
+## Custom Charges
+
+For operations with variable costs, clients can specify a maximum cost:
+
+```typescript
+{
+  type: "ipfs_add",
+  content: "...",
+  custom_charges: {
+    ipfs: {
+      max_cost_dem: "10.5"  // Maximum willing to pay
+    }
+  }
+}
+```
+
+The node charges actual cost up to the specified maximum. Transaction fails if actual cost exceeds `max_cost_dem`.
+
+## Error Conditions
+
+| Error | Description |
+|-------|-------------|
+| `IPFS_QUOTA_EXCEEDED` | Storage or pin count limit reached |
+| `IPFS_INVALID_CID` | Malformed CID format |
+| `IPFS_NOT_FOUND` | Content not found (for pin) |
+| `IPFS_ALREADY_PINNED` | CID already pinned by account |
+| `IPFS_PIN_NOT_FOUND` | Pin doesn't exist (for unpin/extend) |
+| `INSUFFICIENT_BALANCE` | Not enough DEM for operation |
+| `INVALID_DURATION` | Duration out of valid range |

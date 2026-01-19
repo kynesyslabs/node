@@ -1,6 +1,7 @@
 import { Peer, PeerManager } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import { promisify } from "util"
+import log from "src/utilities/logger"
 
 import Transmission from "../../communications/transmission"
  
@@ -27,9 +28,9 @@ export default async function getPeerTime(
         return null
     }
 
-    console.warn("[PEER TIMESYNC] Getting peer time delta")
-    console.log(peer)
-    console.log(id)
+    log.warning("[PEER TIMESYNC] Getting peer time delta")
+    log.debug("[PEER TIMESYNC] Peer: " + JSON.stringify(peer))
+    log.debug("[PEER TIMESYNC] ID: " + id)
 
     const nodeCall: NodeCall = {
         message: "getPeerTime",
@@ -44,11 +45,11 @@ export default async function getPeerTime(
 
     // Response management
     if (response.result === 200) {
-        console.log(
+        log.debug(
             `[PEER TIMESYNC] Received timestamp in response: ${response.response}`,
         )
     } else {
-        console.log("[PEER TIMESYNC] No timestamp received")
+        log.warning("[PEER TIMESYNC] No timestamp received")
     }
     return response.response.timestamp
 }
@@ -73,15 +74,15 @@ export const calculatePeerTimeOffset =
         const roundtrips = results.map(result => result.roundtrip)
         const limit = stat.median(roundtrips) + stat.std(roundtrips)
 
-        console.log(
+        log.debug(
             `[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`,
         )
-        console.log(
+        log.debug(
             `[PEER TIMESYNC] latency standard deviation: ${stat.std(
                 roundtrips,
             )}`,
         )
-        console.log(`[PEER TIMESYNC] latency limit: ${limit}`)
+        log.debug(`[PEER TIMESYNC] latency limit: ${limit}`)
         // filter all results which have a roundtrip smaller than the mean+std
         const filtered = results.filter(result => result.roundtrip < limit)
         const processedOffsets = filtered.map(result => result.offset)

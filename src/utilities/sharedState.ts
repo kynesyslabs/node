@@ -8,8 +8,13 @@ import { Identity } from "src/libs/identity"
 
 import * as ntpClient from "ntp-client"
 import { Peer, PeerManager } from "src/libs/peer"
-import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { SigningAlgorithm, ValidityData } from "@kynesyslabs/demosdk/types"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { PeerOmniAdapter } from "src/libs/omniprotocol/integration/peerAdapter"
+import type { MigrationMode } from "src/libs/omniprotocol/types/config"
+import log from "@/utilities/logger"
+import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
+import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 
 dotenv.config()
 
@@ -18,8 +23,8 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = process.env.PROD == "true" || false
-    version = "0.9.5"
-    version_name = "Entangled Polymer"
+    version = "0.9.8"
+    version_name = "Oxlong Michael"
     signingAlgorithm = "ed25519" as SigningAlgorithm
 
     bridgeOperationExpiry = 300 // 5 minutes
@@ -30,20 +35,37 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
+    shardSize = parseInt(process.env.SHARD_SIZE) || 4
+    mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
 
     // SECTION shared state variables
     // Modes
+    isInitialized = false
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false
     inPeerRecheckLoop = false
+    lastPeerRecheck = 0 
+    peerRecheckSleepTime = 10_000 // 10 seconds
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false
     isMCPServerStarted = false
+    isOmniProtocolEnabled = true
+
+    // OmniProtocol adapter for peer communication
+    private _omniAdapter: PeerOmniAdapter | null = null
+
+    // SECTION TLSNotary Proxy Manager State
+    // Stores wstcp proxy processes and port pool for TLS attestation
+    tlsnotary: TLSNotaryState | null = null
+
+    // SECTION TLSNotary Token Store
+    // In-memory token store for paid attestation access
+    tlsnTokenStore: TokenStoreState | null = null
 
     // Running as a node (is false when running specific modules like the signaling server)
     runningAsNode = true
@@ -51,6 +73,11 @@ export default class SharedState {
     // Mempool
     inGetMempool = false
     inCleanMempool = false
+    // REVIEW Mempool caching
+
+    // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
+    // Stores ValidityData for transactions that need to be relayed to validators
+    validityDataCache = new Map<string, ValidityData>() // txHash -> ValidityData
 
     // States
     runMainLoop = true
@@ -60,6 +87,13 @@ export default class SharedState {
     // Sync
     fastSyncCount = 0
     _syncStatus = false
+
+    // Batch sync configuration
+    batchSyncBlockSize = 100 // Number of blocks to fetch per batch sync request
+    batchSyncTxSize = 100 // Number of transactions to fetch per batch sync request
+    batchSyncTxLimit = 100 // Maximum number of transactions to send back per batch request
+    batchSyncBlockLimit = 100 // Maximum number of blocks to send back per batch request
+
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
@@ -77,8 +111,7 @@ export default class SharedState {
     peerRoutineRunning = 0
     // SECTION shared state variables
     shard: Peer[]
-    lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
-    currentValidatorSeed: string
+    // lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     keypair: {
         publicKey:
@@ -111,6 +144,7 @@ export default class SharedState {
     candidateBlock: Block
     lastBlockNumber = 0
     _lastBlockHash = ""
+    genesisIdentities = new Set<string>()
 
     set lastBlockHash(value: string) {
         this._lastBlockHash = value
@@ -160,7 +194,7 @@ export default class SharedState {
             }
             return true
         } catch (err) {
-            console.error(err)
+            log.error(err)
             this.currentUTCTime = this.getTimestamp(inSeconds)
             return false
         }
@@ -201,8 +235,11 @@ export default class SharedState {
         return Number(process.env.CONSENSUS_CHECK_INTERVAL)
     }
 
+    /**
+     * @returns The block time in seconds
+     */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME)
+        return Number(process.env.CONSENSUS_TIME) || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {
@@ -213,7 +250,7 @@ export default class SharedState {
     // SECTION Rate limiting configuration
     rateLimitConfig = {
         enabled: true,
-        defaultLimit: { maxRequests: 200, windowMs: 60000 },
+        defaultLimit: { maxRequests: 2000, windowMs: 60000 },
         blockDurationMs: undefined,
         // INFO: localhost is always whitelisted
         whitelistedIPs: [
@@ -222,7 +259,8 @@ export default class SharedState {
                 []),
         ],
         methodLimits: {
-            POST: { maxRequests: 200, windowMs: 86400000 },
+            // REVIEW: Do we need this?
+            POST: { maxRequests: 200000, windowMs: 86400000 },
             // INFO: POST method limits per IP address
             // "nodeCall": { maxRequests: 200, windowMs: 60000 },
             // "execute": { maxRequests: 1, windowMs: 86400000 },
@@ -253,6 +291,64 @@ export default class SharedState {
         }
         return info
     }
+
+    // SECTION OmniProtocol Integration
+    /**
+     * Initialize the OmniProtocol adapter with the specified migration mode
+     * @param mode Migration mode: HTTP_ONLY, OMNI_PREFERRED, or OMNI_ONLY
+     */
+    public initOmniProtocol(mode: MigrationMode = "OMNI_PREFERRED"): void {
+        if (this._omniAdapter) {
+            log.debug("[SharedState] OmniProtocol adapter already initialized")
+            return
+        }
+
+        this._omniAdapter = new PeerOmniAdapter()
+        this._omniAdapter.migrationMode = mode
+        this.isOmniProtocolEnabled = true
+        log.info(
+            `[SharedState] ✅ OmniProtocol adapter initialized with mode: ${mode}`,
+        )
+    }
+
+    /**
+     * Get the OmniProtocol adapter instance
+     */
+    public get omniAdapter(): PeerOmniAdapter | null {
+        return this._omniAdapter
+    }
+
+    /**
+     * Check if OmniProtocol should be used for a specific peer
+     * @param peerIdentity The peer's public key identity
+     */
+    public shouldUseOmniProtocol(peerIdentity: string): boolean {
+        if (!this.isOmniProtocolEnabled || !this._omniAdapter) {
+            return false
+        }
+        return this._omniAdapter.shouldUseOmni(peerIdentity)
+    }
+
+    /**
+     * Mark a peer as supporting OmniProtocol
+     * @param peerIdentity The peer's public key identity
+     */
+    public markPeerOmniCapable(peerIdentity: string): void {
+        if (this._omniAdapter) {
+            this._omniAdapter.markOmniPeer(peerIdentity)
+        }
+    }
+
+    /**
+     * Mark a peer as HTTP-only (fallback after OmniProtocol failure)
+     * @param peerIdentity The peer's public key identity
+     */
+    public markPeerHttpOnly(peerIdentity: string): void {
+        if (this._omniAdapter) {
+            this._omniAdapter.markHttpPeer(peerIdentity)
+        }
+    }
+    // !SECTION OmniProtocol Integration
 }
 
 // REVIEW Experimental singleton elegant approach

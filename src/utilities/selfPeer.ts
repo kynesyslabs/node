@@ -12,5 +12,5 @@ export default async function selfPeer() {
     `
     const basicPeerScriptFile = "demos_peerlist.json"
     fs.rmSync(basicPeerScriptFile)
-    fs.writeFileSync(basicPeerScriptFile, basicPeerScript)
+    await fs.promises.writeFile(basicPeerScriptFile, basicPeerScript)
 }

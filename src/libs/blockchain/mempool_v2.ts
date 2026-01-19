@@ -1,4 +1,10 @@
-import { FindManyOptions, In, QueryFailedError, Repository } from "typeorm"
+import {
+    FindManyOptions,
+    In,
+    LessThanOrEqual,
+    QueryFailedError,
+    Repository,
+} from "typeorm"
 import Datasource from "@/model/datasource"
 
 import TxUtils from "./transaction"
@@ -7,6 +13,7 @@ import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction, NativeBridgeTransaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
+import { getSharedState } from "@/utilities/sharedState"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -17,6 +24,7 @@ export default class Mempool {
 
     /**
      * Returns the mempool. If `blockNumber` is not provided, returns all transactions.
+     * When `blockNumber` is transaction past from a previous block number are included.
      *
      * @param blockNumber - The block number to filter by
      */
@@ -31,7 +39,7 @@ export default class Mempool {
 
         if (blockNumber) {
             options.where = {
-                blockNumber: blockNumber,
+                blockNumber: LessThanOrEqual(blockNumber),
             }
         }
 
@@ -41,12 +49,12 @@ export default class Mempool {
     }
 
     /**
-     * Returns a map of mempool hashes to null (for lookup only)
+     * Returns a map of mempool hashes (for lookup only)
      */
     public static async getMempoolHashMap(blockNumber: number) {
         const hashes = await this.repo.find({
             select: ["hash"],
-            where: { blockNumber: blockNumber },
+            where: { blockNumber: LessThanOrEqual(blockNumber) },
         })
 
         return hashes.reduce((acc, tx) => {
@@ -84,6 +92,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
+        blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -101,12 +110,11 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number
-        const manager = SecretaryManager.getInstance()
+        let blockNumber: number = blockRef ?? undefined
 
         // INFO: If we're in consensus, move tx to next block
-        if (manager.shard?.blockRef) {
-            blockNumber = manager.shard.blockRef + 1
+        if (getSharedState.inConsensusLoop && !blockNumber) {
+            blockNumber = SecretaryManager.lastBlockRef + 1
         }
 
         if (!blockNumber) {
@@ -171,15 +179,13 @@ export default class Mempool {
             }
         }
 
-        const manager = SecretaryManager.getInstance()
-        const blockNumber = manager.shard?.blockRef
-
-        if (!blockNumber) {
+        if (!getSharedState.inConsensusLoop) {
             return {
                 success: false,
                 mempool: [],
             }
         }
+        const blockNumber = SecretaryManager.lastBlockRef
 
         const existingHashes = await this.getMempoolHashMap(blockNumber)
         const incomingSet = {}
@@ -215,6 +221,46 @@ export default class Mempool {
         return {
             success: true,
             mempool: final,
+        }
+    }
+
+    /**
+     * Returns the difference between the mempool and the given transaction hashes
+     *
+     * @param txHashes - Array of transaction hashes
+     * @returns Array of transaction hashes that are not in the mempool
+     */
+    public static async getDifference(txHashes: string[]) {
+        const incomingSet = new Set(txHashes)
+        const mempool = await this.getMempool(SecretaryManager.lastBlockRef)
+        return mempool.filter(tx => !incomingSet.has(tx.hash))
+    }
+
+    /**
+     * Removes a specific transaction from the mempool by hash
+     * Used by DTR relay service when transactions are successfully relayed to validators
+     * @param txHash - Hash of the transaction to remove
+     * @returns {Promise<void>}
+     */
+    static async removeTransaction(txHash: string): Promise<void> {
+        try {
+            const result = await this.repo.delete({ hash: txHash })
+
+            if (result.affected > 0) {
+                console.log(
+                    `[Mempool] Removed transaction ${txHash} (DTR relay success)`,
+                )
+            } else {
+                console.log(
+                    `[Mempool] Transaction ${txHash} not found for removal`,
+                )
+            }
+        } catch (error) {
+            console.log(
+                `[Mempool] Error removing transaction ${txHash}:`,
+                error,
+            )
+            throw error
         }
     }
 }

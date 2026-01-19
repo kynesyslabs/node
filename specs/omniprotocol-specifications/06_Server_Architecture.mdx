@@ -1,0 +1,547 @@
+# OmniProtocol Server Architecture
+
+## Overview
+
+The OmniProtocol server accepts incoming TCP/TLS connections from peer nodes, manages connection lifecycle, and routes messages to appropriate handlers.
+
+## Server Components
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                         Server Layer                                   │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │              OmniProtocolServer / TLSServer                     │  │
+│  │                    TCP/TLS Listener                             │  │
+│  └─────────────────────────────┬──────────────────────────────────┘  │
+│                                │                                      │
+│                                ▼                                      │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                 ServerConnectionManager                         │  │
+│  │              Connection lifecycle management                    │  │
+│  └─────────────────────────────┬──────────────────────────────────┘  │
+│                                │                                      │
+│           ┌────────────────────┼────────────────────┐                │
+│           │                    │                    │                │
+│           ▼                    ▼                    ▼                │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐         │
+│  │InboundConn 1 │     │InboundConn 2 │     │InboundConn 3 │   ...   │
+│  └──────────────┘     └──────────────┘     └──────────────┘         │
+│                                                                       │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                       RateLimiter                               │  │
+│  │                    DoS Protection                               │  │
+│  └────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+## OmniProtocolServer
+
+Main TCP server for accepting incoming connections.
+
+### Configuration
+
+```typescript
+interface ServerConfig {
+    host: string                // Listen address (default: "0.0.0.0")
+    port: number                // Listen port (default: HTTP port + 1)
+    maxConnections: number      // Max concurrent (default: 1000)
+    connectionTimeout: number   // Idle timeout (default: 10 min)
+    authTimeout: number         // Auth handshake timeout (default: 5 sec)
+    backlog: number             // TCP backlog queue (default: 511)
+    enableKeepalive: boolean    // TCP keepalive (default: true)
+    keepaliveInitialDelay: number // Keepalive delay (default: 60 sec)
+    rateLimit?: Partial<RateLimitConfig>
+}
+```
+
+### Creating and Starting
+
+```typescript
+import { OmniProtocolServer } from "./server/OmniProtocolServer"
+
+const server = new OmniProtocolServer({
+    host: "0.0.0.0",
+    port: 3001,
+    maxConnections: 1000,
+    connectionTimeout: 10 * 60 * 1000,  // 10 minutes
+    authTimeout: 5000,                   // 5 seconds
+    enableKeepalive: true,
+    rateLimit: {
+        enabled: true,
+        maxConnectionsPerIP: 10,
+        maxRequestsPerSecondPerIP: 100
+    }
+})
+
+await server.start()
+console.log("Server listening on port 3001")
+```
+
+### Event Handling
+
+```typescript
+server.on("listening", (port: number) => {
+    console.log(`Server listening on port ${port}`)
+})
+
+server.on("connection_accepted", (remoteAddress: string) => {
+    console.log(`New connection from ${remoteAddress}`)
+})
+
+server.on("connection_rejected", (remoteAddress: string, reason: string) => {
+    console.log(`Connection rejected: ${reason}`)
+})
+
+server.on("rate_limit_exceeded", (ipAddress: string, result: RateLimitResult) => {
+    console.log(`Rate limit exceeded: ${result.reason}`)
+})
+
+server.on("error", (error: Error) => {
+    console.error("Server error:", error)
+})
+
+server.on("close", () => {
+    console.log("Server closed")
+})
+```
+
+### Stopping
+
+```typescript
+await server.stop()
+```
+
+### Statistics
+
+```typescript
+const stats = server.getStats()
+console.log(`Running: ${stats.isRunning}`)
+console.log(`Port: ${stats.port}`)
+console.log(`Connections: ${stats.connections.total}`)
+console.log(`Rate limit stats: ${JSON.stringify(stats.rateLimit)}`)
+```
+
+## TLSServer
+
+TLS-wrapped server with certificate management.
+
+### Configuration
+
+```typescript
+interface TLSServerConfig extends ServerConfig {
+    tls: TLSConfig
+}
+
+interface TLSConfig {
+    enabled: boolean
+    mode: "self-signed" | "ca"
+    certPath: string
+    keyPath: string
+    caPath?: string
+    rejectUnauthorized: boolean
+    minVersion: "TLSv1.2" | "TLSv1.3"
+    requestCert: boolean
+    ciphers?: string
+    trustedFingerprints?: Map<string, string>
+}
+```
+
+### Creating TLS Server
+
+```typescript
+import { TLSServer } from "./server/TLSServer"
+
+const tlsServer = new TLSServer({
+    host: "0.0.0.0",
+    port: 3001,
+    maxConnections: 1000,
+    tls: {
+        enabled: true,
+        mode: "self-signed",
+        certPath: "./certs/node-cert.pem",
+        keyPath: "./certs/node-key.pem",
+        rejectUnauthorized: false,
+        minVersion: "TLSv1.3",
+        requestCert: true
+    }
+})
+
+await tlsServer.start()
+```
+
+### Cipher Suites
+
+Default cipher suites for strong security:
+
+```typescript
+const DEFAULT_CIPHERS = [
+    "ECDHE-ECDSA-AES256-GCM-SHA384",
+    "ECDHE-RSA-AES256-GCM-SHA384",
+    "ECDHE-ECDSA-CHACHA20-POLY1305",
+    "ECDHE-RSA-CHACHA20-POLY1305",
+    "ECDHE-ECDSA-AES128-GCM-SHA256",
+    "ECDHE-RSA-AES128-GCM-SHA256"
+].join(":")
+```
+
+## ServerConnectionManager
+
+Manages the lifecycle of inbound connections.
+
+### Configuration
+
+```typescript
+interface ConnectionManagerConfig {
+    maxConnections: number
+    connectionTimeout: number
+    authTimeout: number
+    rateLimiter: RateLimiter
+}
+```
+
+### Connection Lifecycle
+
+```
+┌─────────────────┐
+│  New TCP Socket │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│            ServerConnectionManager               │
+│                                                  │
+│  1. Check max connections limit                 │
+│  2. Create InboundConnection                    │
+│  3. Add to active connections map               │
+│  4. Start auth timeout timer                    │
+│                                                  │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│              InboundConnection                   │
+│                                                  │
+│  State: PENDING_AUTH                            │
+│  Awaiting: hello_peer (0x01) with auth block    │
+│  Timeout: 5 seconds                             │
+│                                                  │
+└─────────────────────────────────────────────────┘
+         │
+         │ hello_peer received
+         ▼
+┌─────────────────────────────────────────────────┐
+│           Verify Authentication                  │
+│                                                  │
+│  1. Parse auth block                            │
+│  2. Verify Ed25519 signature                    │
+│  3. Validate timestamp (±5 min)                 │
+│  4. Extract peer identity                       │
+│                                                  │
+└─────────────────────────────────────────────────┘
+         │
+         │ auth successful
+         ▼
+┌─────────────────────────────────────────────────┐
+│              InboundConnection                   │
+│                                                  │
+│  State: AUTHENTICATED                           │
+│  Ready for requests                             │
+│  Idle timeout: 10 minutes                       │
+│                                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Connection Tracking
+
+```typescript
+interface ConnectionStats {
+    total: number
+    authenticated: number
+    pending: number
+    byState: Map<ConnectionState, number>
+}
+
+const stats = connectionManager.getStats()
+```
+
+### Closing Connections
+
+```typescript
+// Close specific connection
+await connectionManager.closeConnection(connectionId)
+
+// Close all connections
+await connectionManager.closeAll()
+```
+
+## InboundConnection
+
+Handles a single inbound connection.
+
+### States
+
+| State | Description |
+|-------|-------------|
+| `PENDING_AUTH` | Awaiting hello_peer handshake |
+| `AUTHENTICATED` | Ready for authenticated requests |
+| `CLOSING` | Graceful shutdown in progress |
+| `CLOSED` | Connection terminated |
+| `ERROR` | Error state |
+
+### Message Handling
+
+```
+┌─────────────────┐
+│ Incoming Data   │
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│              MessageFramer                       │
+│         Parse TCP stream into messages           │
+└────────┬────────────────────────────────────────┘
+         │
+         ▼ For each complete message
+┌─────────────────────────────────────────────────┐
+│              Dispatcher                          │
+│                                                  │
+│  1. Get handler for opcode                      │
+│  2. Check auth requirements                     │
+│  3. Verify signature (if required)              │
+│  4. Execute handler                             │
+│  5. Send response                               │
+│                                                  │
+└─────────────────────────────────────────────────┘
+```
+
+### Idle Timeout
+
+Connections are automatically closed after the idle timeout:
+
+```typescript
+// Default: 10 minutes
+const connectionTimeout = 10 * 60 * 1000
+
+// On each activity
+this.lastActivity = Date.now()
+this.resetIdleTimer()
+
+// Timer callback
+if (Date.now() - this.lastActivity > connectionTimeout) {
+    await this.close()
+}
+```
+
+## New Connection Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        handleNewConnection()                          │
+└──────────────────────────────────────────────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌───────────────────────────┐
+                    │   Rate Limit Check (IP)   │
+                    │   rateLimiter.checkConnection(ip)
+                    └───────────────┬───────────┘
+                                    │
+                      ┌─────────────┴─────────────┐
+                      │                           │
+                      ▼                           ▼
+              ┌──────────────┐           ┌──────────────┐
+              │   Allowed    │           │   Denied     │
+              └──────┬───────┘           └──────┬───────┘
+                     │                          │
+                     │                          ▼
+                     │                   ┌──────────────┐
+                     │                   │ socket.destroy()
+                     │                   │ emit('rate_limit_exceeded')
+                     │                   └──────────────┘
+                     ▼
+         ┌───────────────────────────┐
+         │   Capacity Check          │
+         │   connections < max       │
+         └───────────────┬───────────┘
+                         │
+           ┌─────────────┴─────────────┐
+           │                           │
+           ▼                           ▼
+   ┌──────────────┐           ┌──────────────┐
+   │   Available  │           │   At Capacity │
+   └──────┬───────┘           └──────┬───────┘
+          │                          │
+          │                          ▼
+          │                   ┌──────────────┐
+          │                   │ socket.destroy()
+          │                   │ emit('connection_rejected')
+          │                   └──────────────┘
+          ▼
+┌───────────────────────────┐
+│   Configure Socket        │
+│   - setKeepAlive(true)    │
+│   - setNoDelay(true)      │
+└───────────────┬───────────┘
+                │
+                ▼
+┌───────────────────────────┐
+│   Register Connection     │
+│   - rateLimiter.addConnection(ip)
+│   - connectionManager.handleConnection(socket)
+│   - emit('connection_accepted')
+└───────────────────────────┘
+```
+
+## Server Startup Integration
+
+### Using startOmniProtocolServer()
+
+```typescript
+import { startOmniProtocolServer } from "./integration/startup"
+
+// Start with defaults
+const server = await startOmniProtocolServer({
+    enabled: true
+})
+
+// Start with TLS
+const tlsServer = await startOmniProtocolServer({
+    enabled: true,
+    port: 3001,
+    tls: {
+        enabled: true,
+        mode: "self-signed"
+    }
+})
+```
+
+### Environment Variables
+
+```bash
+# Server configuration
+OMNI_ENABLED=true
+OMNI_PORT=3001
+OMNI_HOST=0.0.0.0
+
+# TLS configuration
+OMNI_TLS_ENABLED=true
+OMNI_TLS_MODE=self-signed
+OMNI_CERT_PATH=./certs/node-cert.pem
+OMNI_KEY_PATH=./certs/node-key.pem
+OMNI_TLS_MIN_VERSION=TLSv1.3
+
+# Connection limits
+OMNI_MAX_CONNECTIONS=1000
+OMNI_CONNECTION_TIMEOUT=600000
+OMNI_AUTH_TIMEOUT=5000
+```
+
+### Integration in Main Node
+
+```typescript
+// src/index.ts
+
+import { startOmniProtocolServer, stopOmniProtocolServer } from "./libs/omniprotocol/integration"
+
+async function main() {
+    // Start HTTP server
+    await startHttpServer()
+
+    // Start OmniProtocol server
+    const omniServer = await startOmniProtocolServer({
+        enabled: process.env.OMNI_ENABLED === "true",
+        port: parseInt(process.env.OMNI_PORT || "3001"),
+        tls: {
+            enabled: process.env.OMNI_TLS_ENABLED === "true"
+        }
+    })
+
+    // Graceful shutdown
+    process.on("SIGTERM", async () => {
+        await stopOmniProtocolServer()
+        await stopHttpServer()
+        process.exit(0)
+    })
+}
+```
+
+## Certificate Management
+
+### Auto-Generated Certificates
+
+```typescript
+import { initializeTLSCertificates } from "./tls/initialize"
+
+// Generate self-signed certificates if not present
+const { certPath, keyPath } = await initializeTLSCertificates()
+```
+
+### Certificate Info
+
+```typescript
+import { getCertificateInfo } from "./tls/certificates"
+
+const info = await getCertificateInfo(certPath)
+console.log(`Subject: ${info.subject.commonName}`)
+console.log(`Valid from: ${info.validFrom}`)
+console.log(`Valid to: ${info.validTo}`)
+console.log(`Fingerprint: ${info.fingerprint256}`)
+```
+
+## Error Handling
+
+### Server Errors
+
+```typescript
+server.on("error", (error: Error) => {
+    if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
+        console.error(`Port ${port} already in use`)
+    } else {
+        console.error("Server error:", error)
+    }
+})
+```
+
+### Connection Errors
+
+```typescript
+// Handled internally by InboundConnection
+// Errors cause connection to transition to ERROR state
+// Connection is then closed and removed from manager
+```
+
+## Performance Considerations
+
+### TCP Options
+
+```typescript
+// Disable Nagle's algorithm for low latency
+socket.setNoDelay(true)
+
+// Enable TCP keepalive for connection health
+socket.setKeepAlive(true, 60000)
+```
+
+### Connection Limits
+
+```typescript
+// Server-wide limit
+server.maxConnections = 1000
+
+// Per-IP limit (via rate limiter)
+maxConnectionsPerIP = 10
+```
+
+### Backlog Queue
+
+```typescript
+// TCP backlog for pending connections
+backlog: 511  // Common default, kernel may cap lower
+```
+
+## Related Documentation
+
+- [05_Transport_Layer.mdx](./05_Transport_Layer.mdx) - Client connections
+- [07_Rate_Limiting.mdx](./07_Rate_Limiting.mdx) - DoS protection
+- [09_Configuration.mdx](./09_Configuration.mdx) - Configuration options

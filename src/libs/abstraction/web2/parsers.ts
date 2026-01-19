@@ -1,4 +1,5 @@
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import log from "@/utilities/logger"
 
 export abstract class Web2ProofParser {
     formats = {
@@ -8,6 +9,12 @@ export abstract class Web2ProofParser {
             "https://gist.githubusercontent.com",
         ],
         twitter: ["https://x.com", "https://twitter.com"],
+        discord: [
+            "https://discord.com/channels",
+            "https://ptb.discord.com/channels",
+            "https://canary.discord.com/channels",
+            "https://discordapp.com/channels",
+        ],
     }
 
     constructor() {}
@@ -44,7 +51,7 @@ export abstract class Web2ProofParser {
                 signature: splits[3],
             }
         } catch (error) {
-            console.error(error)
+            log.error(error)
             return null
         }
     }
