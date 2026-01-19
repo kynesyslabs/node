@@ -13,6 +13,13 @@ This document provides the HTTP API reference for reading StorageProgram data.
 |----------|--------|-------------|
 | `/storage-program/:address` | GET | Read a storage program by address |
 | `/storage-program/owner/:owner` | GET | List storage programs by owner |
+| `/storage-program/:address/fields` | GET | List all field names |
+| `/storage-program/:address/field/:field` | GET | Get a field's value |
+| `/storage-program/:address/field/:field/item/:index` | GET | Get an array item |
+| `/storage-program/:address/has/:field` | GET | Check if field exists |
+| `/storage-program/:address/type/:field` | GET | Get field value type |
+| `/storage-program/:address/all` | GET | Get all data |
+| `/storage-program/search/:name` | GET | Search by program name |
 
 ## Read Storage Program
 
@@ -245,6 +252,247 @@ curl https://rpc.demos.network/storage-program/owner/ed25519:abc123...
 curl https://rpc.demos.network/storage-program/owner/ed25519:abc123... \
   -H "identity: ed25519:your-public-key-hex" \
   -H "signature: your-signature-hex"
+```
+
+## Granular Read Endpoints
+
+These endpoints provide field-level access to storage program data for more efficient querying.
+
+### Get All Fields
+
+Retrieves all top-level field names from a storage program's data.
+
+```http
+GET /storage-program/:address/fields
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "fields": ["theme", "notifications", "settings", "posts"]
+}
+```
+
+### Get Field Value
+
+Retrieves the value of a specific field.
+
+```http
+GET /storage-program/:address/field/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "theme",
+  "value": "dark",
+  "type": "string"
+}
+```
+
+**Field Not Found (404)**
+
+```json
+{
+  "success": false,
+  "error": "Field not found: unknownField",
+  "errorCode": "FIELD_NOT_FOUND"
+}
+```
+
+### Get Array Item
+
+Retrieves a specific item from an array field by index.
+
+```http
+GET /storage-program/:address/field/:field/item/:index
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "posts",
+  "index": 0,
+  "value": {
+    "title": "First Post",
+    "content": "Hello World"
+  }
+}
+```
+
+**Index Out of Bounds (400)**
+
+```json
+{
+  "success": false,
+  "error": "Index out of bounds: 10 (array length: 3)",
+  "errorCode": "INDEX_OUT_OF_BOUNDS"
+}
+```
+
+**Field Not Array (400)**
+
+```json
+{
+  "success": false,
+  "error": "Field is not an array: theme",
+  "errorCode": "INVALID_FIELD_TYPE"
+}
+```
+
+### Check Field Exists
+
+Checks if a field exists in the storage program.
+
+```http
+GET /storage-program/:address/has/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "theme",
+  "exists": true
+}
+```
+
+### Get Field Type
+
+Returns the type of a specific field's value.
+
+```http
+GET /storage-program/:address/type/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "posts",
+  "type": "array"
+}
+```
+
+**Field Types**
+
+| Type | Description |
+|------|-------------|
+| `string` | Text value |
+| `number` | Numeric value (integer or float) |
+| `boolean` | True or false |
+| `array` | Ordered list of values |
+| `object` | Key-value mapping |
+| `null` | Null value |
+| `undefined` | Field exists but value is undefined |
+
+### Get All Data
+
+Retrieves all data from a storage program (equivalent to the base read endpoint).
+
+```http
+GET /storage-program/:address/all
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "data": {
+    "theme": "dark",
+    "notifications": true,
+    "settings": { "language": "en" },
+    "posts": [{ "title": "Post 1" }]
+  }
+}
+```
+
+### Search by Name
+
+Search for storage programs by name with partial matching.
+
+```http
+GET /storage-program/search/:name
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "query": "user",
+  "programs": [
+    {
+      "storageAddress": "stor-abc123...",
+      "programName": "user-preferences",
+      "owner": "ed25519:...",
+      "sizeBytes": 1024
+    },
+    {
+      "storageAddress": "stor-def456...",
+      "programName": "user-settings",
+      "owner": "ed25519:...",
+      "sizeBytes": 512
+    }
+  ],
+  "count": 2
+}
+```
+
+### Granular Endpoints Summary
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/storage-program/:address/fields` | GET | List all field names |
+| `/storage-program/:address/field/:field` | GET | Get a field's value |
+| `/storage-program/:address/field/:field/item/:index` | GET | Get an array item |
+| `/storage-program/:address/has/:field` | GET | Check if field exists |
+| `/storage-program/:address/type/:field` | GET | Get field value type |
+| `/storage-program/:address/all` | GET | Get all data |
+| `/storage-program/search/:name` | GET | Search by program name |
+
+### Example: JavaScript with Granular Endpoints
+
+```javascript
+// Get all field names
+const fields = await fetch('/storage-program/stor-abc.../fields')
+  .then(r => r.json())
+console.log(fields.fields) // ["theme", "posts", "settings"]
+
+// Get specific field value
+const theme = await fetch('/storage-program/stor-abc.../field/theme')
+  .then(r => r.json())
+console.log(theme.value) // "dark"
+
+// Get array item
+const post = await fetch('/storage-program/stor-abc.../field/posts/item/0')
+  .then(r => r.json())
+console.log(post.value) // { title: "First Post", ... }
+
+// Check if field exists
+const hasField = await fetch('/storage-program/stor-abc.../has/theme')
+  .then(r => r.json())
+console.log(hasField.exists) // true
+
+// Get field type
+const fieldType = await fetch('/storage-program/stor-abc.../type/posts')
+  .then(r => r.json())
+console.log(fieldType.type) // "array"
 ```
 
 ## Authentication

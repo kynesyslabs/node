@@ -13,6 +13,7 @@ This document provides detailed reference for all StorageProgram operations.
 |-----------|-------------|---------------------|
 | `CREATE_STORAGE_PROGRAM` | Create a new storage program | None (anyone can create) |
 | `WRITE_STORAGE` | Update data in existing program | Owner or group write permission |
+| `GRANULAR_WRITE` | Field-level data modifications | Owner or group write permission |
 | `UPDATE_ACCESS_CONTROL` | Modify ACL settings | Owner only |
 | `DELETE_STORAGE_PROGRAM` | Soft delete the program | Owner or group delete permission |
 
@@ -220,6 +221,137 @@ const payload = storage.buildStorageProgramPayload({
 | "Storage program not found" | Invalid address |
 | "Storage program already deleted" | Already soft deleted |
 | "No permission to delete" | Sender lacks delete permission |
+
+## Granular Write Operations
+
+In addition to full data replacement via `WRITE_STORAGE`, the StorageProgram supports granular field-level operations for more efficient updates.
+
+### GRANULAR_WRITE
+
+Performs field-level modifications to storage program data without replacing the entire dataset.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "GRANULAR_WRITE" |
+| `storageAddress` | string | Yes | Target storage address |
+| `operations` | array | Yes | Array of granular operations |
+
+### Operation Types
+
+| Operation Type | Description | Required Fields |
+|----------------|-------------|-----------------|
+| `SET_FIELD` | Set a top-level field value | `field`, `value` |
+| `SET_ITEM` | Set an item in an array by index | `field`, `index`, `value` |
+| `APPEND_ITEM` | Append an item to an array field | `field`, `value` |
+| `DELETE_FIELD` | Delete a top-level field | `field` |
+| `DELETE_ITEM` | Delete an item from an array by index | `field`, `index` |
+
+### Operation Structure
+
+```typescript
+interface GranularWriteOperation {
+  type: "SET_FIELD" | "SET_ITEM" | "APPEND_ITEM" | "DELETE_FIELD" | "DELETE_ITEM"
+  field: string           // Target field name
+  value?: any             // Value for SET/APPEND operations
+  index?: number          // Array index for SET_ITEM/DELETE_ITEM
+}
+```
+
+### Examples
+
+#### SET_FIELD - Update a single field
+
+```typescript
+import { storage } from "@kynesyslabs/demosdk"
+
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "SET_FIELD", field: "theme", value: "dark" },
+    { type: "SET_FIELD", field: "lastLogin", value: Date.now() }
+  ]
+})
+```
+
+#### SET_ITEM - Update an array element
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "SET_ITEM", field: "posts", index: 0, value: { title: "Updated Post", content: "..." } }
+  ]
+})
+```
+
+#### APPEND_ITEM - Add to an array
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "APPEND_ITEM", field: "posts", value: { title: "New Post", content: "..." } }
+  ]
+})
+```
+
+#### DELETE_FIELD - Remove a field
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "DELETE_FIELD", field: "temporaryData" }
+  ]
+})
+```
+
+#### DELETE_ITEM - Remove from an array
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "DELETE_ITEM", field: "posts", index: 2 }
+  ]
+})
+```
+
+### Behavior
+
+- Operations are applied **atomically** in order
+- Field names must be top-level keys (nested paths not supported)
+- Array operations validate index bounds
+- Fees are calculated on the resulting data size difference
+- Multiple operations can be batched in a single transaction
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Storage program not found" | Invalid address |
+| "Field does not exist" | DELETE_FIELD/SET_ITEM on non-existent field |
+| "Field is not an array" | Array operation on non-array field |
+| "Index out of bounds" | SET_ITEM/DELETE_ITEM with invalid index |
+| "Invalid operation type" | Unrecognized operation type |
+| "Operations array is required" | Missing or empty operations array |
+
+### Comparison: WRITE_STORAGE vs GRANULAR_WRITE
+
+| Aspect | WRITE_STORAGE | GRANULAR_WRITE |
+|--------|---------------|----------------|
+| Data replacement | Full replacement | Field-level updates |
+| Bandwidth | Entire data sent | Only changes sent |
+| Use case | Complete updates | Incremental changes |
+| Atomicity | Single operation | Multiple operations batched |
+| Fee calculation | Based on total size | Based on size difference |
 
 ## Fee Calculation
 
