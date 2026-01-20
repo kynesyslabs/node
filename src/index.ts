@@ -847,7 +847,7 @@ async function main() {
                 "[DTR] Initializing relay retry service (will start after sync)",
             )
             // Service will check syncStatus internally before processing
-            // DTRManager.getInstance().start()
+            DTRManager.getInstance().start()
         }
 
         // Load L2PS networks configuration

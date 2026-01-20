@@ -882,19 +882,28 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     l2psUid: data.l2psUid,
                     address: data.address,
                     authenticated: true,
-                    transactions: transactions.map(tx => ({
-                        hash: tx.hash,
-                        encrypted_hash: tx.encrypted_hash,
-                        l1_batch_hash: tx.l1_batch_hash,
-                        type: tx.type,
-                        from: tx.from_address,
-                        to: tx.to_address,
-                        amount: tx.amount?.toString() || "0",
-                        status: tx.status,
-                        timestamp: tx.timestamp?.toString() || "0",
-                        l1_block_number: tx.l1_block_number,
-                        execution_message: tx.execution_message
-                    })),
+                    transactions: transactions.map(tx => {
+                        // Extract message from transaction content if execution_message is not set
+                        // Content structure: data[1].message
+                        let txMessage = tx.execution_message
+                        if (!txMessage && tx.content?.data?.[1]?.message) {
+                            txMessage = tx.content.data[1].message
+                        }
+
+                        return {
+                            hash: tx.hash,
+                            encrypted_hash: tx.encrypted_hash,
+                            l1_batch_hash: tx.l1_batch_hash,
+                            type: tx.type,
+                            from: tx.from_address,
+                            to: tx.to_address,
+                            amount: tx.amount?.toString() || "0",
+                            status: tx.status,
+                            timestamp: tx.timestamp?.toString() || "0",
+                            l1_block_number: tx.l1_block_number,
+                            execution_message: txMessage
+                        }
+                    }),
                     count: transactions.length,
                     hasMore: transactions.length === limit
                 }

@@ -254,6 +254,27 @@ export default class L2PSMempool {
     }
 
     /**
+     * Get the latest transaction for a specific L2PS UID
+     * Useful for determining sync checkpoints
+     * 
+     * @param l2psUid - L2PS network identifier
+     * @returns Promise resolving to the latest transaction or null
+     */
+    public static async getLastTransaction(l2psUid: string): Promise<L2PSMempoolTx | null> {
+        try {
+            await this.ensureInitialized()
+
+            return await this.repo.findOne({
+                where: { l2ps_uid: l2psUid },
+                order: { timestamp: "DESC" }
+            })
+        } catch (error: any) {
+            log.error(`[L2PS Mempool] Error getting latest transaction for UID ${l2psUid}:`, error)
+            return null
+        }
+    }
+
+    /**
      * Generate consolidated hash for L2PS UID from specific block or all blocks
      * 
      * This method creates a deterministic hash representing all L2PS transactions
@@ -278,7 +299,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             const options: FindManyOptions<L2PSMempoolTx> = {
-                where: { 
+                where: {
                     l2ps_uid: l2psUid,
                     status: "processed",  // Only include successfully processed transactions
                 },
@@ -294,7 +315,7 @@ export default class L2PSMempool {
             }
 
             const transactions = await this.repo.find(options)
-            
+
             if (transactions.length === 0) {
                 // Return deterministic empty hash
                 const suffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
@@ -309,9 +330,9 @@ export default class L2PSMempool {
             // Create consolidated hash: UID + block info + count + all hashes
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
             const hashInput = `L2PS_${l2psUid}${blockSuffix}:${sortedHashes.length}:${sortedHashes.join(",")}`
-            
+
             const consolidatedHash = Hashing.sha256(hashInput)
-            
+
             log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${sortedHashes.length} txs)`)
             return consolidatedHash
 
@@ -346,7 +367,7 @@ export default class L2PSMempool {
                 { hash },
                 { status, timestamp: Date.now().toString() },
             )
-            
+
             const updated = result.affected > 0
             if (updated) {
                 log.info(`[L2PS Mempool] Updated status of ${hash} to ${status}`)
@@ -426,7 +447,7 @@ export default class L2PSMempool {
                 { hash: In(hashes) },
                 { status, timestamp: Date.now().toString() },
             )
-            
+
             const updated = result.affected || 0
             if (updated > 0) {
                 log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
@@ -526,7 +547,7 @@ export default class L2PSMempool {
 
             const result = await this.repo.delete({ hash: In(hashes) })
             const deleted = result.affected || 0
-            
+
             if (deleted > 0) {
                 log.info(`[L2PS Mempool] Deleted ${deleted} transactions`)
             }
@@ -684,7 +705,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             const totalTransactions = await this.repo.count()
-            
+
             // Get transactions by UID
             const byUID = await this.repo
                 .createQueryBuilder("tx")
@@ -722,7 +743,7 @@ export default class L2PSMempool {
             return {
                 totalTransactions: 0,
                 transactionsByUID: {},
-                transactionsByStatus: {},       
+                transactionsByStatus: {},
             }
         }
     }
