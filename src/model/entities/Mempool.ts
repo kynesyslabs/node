@@ -1,12 +1,7 @@
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
-import {
-    Column,
-    Entity,
-    Index,
-    PrimaryColumn,
-} from "typeorm"
+import { Column, Entity, Index, PrimaryColumn } from "typeorm"
 
 @Entity("mempooltx")
 @Index("idx_mempooltx_hash", ["hash"])

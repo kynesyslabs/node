@@ -31,18 +31,22 @@ export default async function peerBootstrap(
         // If there is a : in the url, we assume it's a address + port
         const currentPeerUrl: string = currentPeer.connection.string
         const currentPublicKey: string = currentPeer.identity
-        log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " with id " + currentPublicKey)
+        log.debug(
+            "[BOOTSTRAP] Testing " +
+                currentPeerUrl +
+                " with id " +
+                currentPublicKey,
+        )
         // ANCHOR Connection test and hello_peer routine
         const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
-            // Adding identity if any
+        // Adding identity if any
         log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
         // After this, the peer object will have an identity and thus will be verified
-        const verifiedPeer = await getPeerIdentity(
-            blankPeer,
-            currentPublicKey,
-        )
+        const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
         if (!verifiedPeer) {
-            log.warning("[BOOTSTRAP] [FAILED] Failed to get peer identity: see above")
+            log.warning(
+                "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
+            )
             peerManager.addOfflinePeer(blankPeer)
             peerManager.removeOnlinePeer(blankPeer.identity)
             continue
@@ -60,7 +64,9 @@ export default async function peerBootstrap(
         }
         log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
 
-        log.debug("[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer))
+        log.debug(
+            "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
+        )
         // This should automatically add the peer to the peer list or the offline list
         // let response = await verifiedPeer.longCall({
         //     method: "hello_peer",
@@ -75,9 +81,13 @@ export default async function peerBootstrap(
     // Dying if there are no valid peers
     if (peerManager.getPeers().length == 0) {
         // Exit if there are no valid peers
-        log.warning("[BOOTSTRAP] No valid peers found, listening for connections...")
+        log.warning(
+            "[BOOTSTRAP] No valid peers found, listening for connections...",
+        )
     } else {
-        log.info("[BOOTSTRAP] Valid peers found: " + peerManager.getPeers().length)
+        log.info(
+            "[BOOTSTRAP] Valid peers found: " + peerManager.getPeers().length,
+        )
     }
     return peerManager.getPeers()
 }

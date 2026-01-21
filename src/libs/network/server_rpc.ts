@@ -419,7 +419,10 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format. Not an RPCRequest" }, 400)
+                return jsonResponse(
+                    { error: "Invalid request format. Not an RPCRequest" },
+                    400,
+                )
             }
 
             log.info(
@@ -456,7 +459,8 @@ export async function serverRpcBun() {
     // REVIEW: Register TLSNotary routes if enabled
     if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
         try {
-            const { registerTLSNotaryRoutes } = await import("@/features/tlsnotary/routes")
+            const { registerTLSNotaryRoutes } =
+                await import("@/features/tlsnotary/routes")
             registerTLSNotaryRoutes(server)
         } catch (error) {
             log.warning("[RPC] Failed to register TLSNotary routes: " + error)
@@ -465,7 +469,8 @@ export async function serverRpcBun() {
 
     // REVIEW: Register StorageProgram routes for unified storage access
     try {
-        const { registerStorageProgramRoutes } = await import("@/features/storageprogram/routes")
+        const { registerStorageProgramRoutes } =
+            await import("@/features/storageprogram/routes")
         registerStorageProgramRoutes(server)
     } catch (error) {
         log.warning("[RPC] Failed to register StorageProgram routes: " + error)

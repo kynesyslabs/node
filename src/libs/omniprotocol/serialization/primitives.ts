@@ -46,29 +46,50 @@ export class PrimitiveEncoder {
 }
 
 export class PrimitiveDecoder {
-    static decodeUInt8(buffer: Buffer, offset = 0): { value: number; bytesRead: number } {
+    static decodeUInt8(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: number; bytesRead: number } {
         return { value: buffer.readUInt8(offset), bytesRead: 1 }
     }
 
-    static decodeBoolean(buffer: Buffer, offset = 0): { value: boolean; bytesRead: number } {
+    static decodeBoolean(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: boolean; bytesRead: number } {
         const { value, bytesRead } = this.decodeUInt8(buffer, offset)
         return { value: value !== 0, bytesRead }
     }
 
-    static decodeUInt16(buffer: Buffer, offset = 0): { value: number; bytesRead: number } {
+    static decodeUInt16(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: number; bytesRead: number } {
         return { value: buffer.readUInt16BE(offset), bytesRead: 2 }
     }
 
-    static decodeUInt32(buffer: Buffer, offset = 0): { value: number; bytesRead: number } {
+    static decodeUInt32(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: number; bytesRead: number } {
         return { value: buffer.readUInt32BE(offset), bytesRead: 4 }
     }
 
-    static decodeUInt64(buffer: Buffer, offset = 0): { value: bigint; bytesRead: number } {
+    static decodeUInt64(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: bigint; bytesRead: number } {
         return { value: buffer.readBigUInt64BE(offset), bytesRead: 8 }
     }
 
-    static decodeString(buffer: Buffer, offset = 0): { value: string; bytesRead: number } {
-        const { value: length, bytesRead: lenBytes } = this.decodeUInt16(buffer, offset)
+    static decodeString(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: string; bytesRead: number } {
+        const { value: length, bytesRead: lenBytes } = this.decodeUInt16(
+            buffer,
+            offset,
+        )
         const start = offset + lenBytes
         const end = start + length
         return {
@@ -77,8 +98,14 @@ export class PrimitiveDecoder {
         }
     }
 
-    static decodeBytes(buffer: Buffer, offset = 0): { value: Buffer; bytesRead: number } {
-        const { value: length, bytesRead: lenBytes } = this.decodeUInt16(buffer, offset)
+    static decodeBytes(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: Buffer; bytesRead: number } {
+        const { value: length, bytesRead: lenBytes } = this.decodeUInt16(
+            buffer,
+            offset,
+        )
         const start = offset + lenBytes
         const end = start + length
         return {
@@ -87,8 +114,14 @@ export class PrimitiveDecoder {
         }
     }
 
-    static decodeVarBytes(buffer: Buffer, offset = 0): { value: Buffer; bytesRead: number } {
-        const { value: length, bytesRead: lenBytes } = this.decodeUInt32(buffer, offset)
+    static decodeVarBytes(
+        buffer: Buffer,
+        offset = 0,
+    ): { value: Buffer; bytesRead: number } {
+        const { value: length, bytesRead: lenBytes } = this.decodeUInt32(
+            buffer,
+            offset,
+        )
         const start = offset + lenBytes
         const end = start + length
         return {

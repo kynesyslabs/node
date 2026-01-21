@@ -357,7 +357,9 @@ export default class HandleGCR {
         if (!account.assignedTxs.includes(txHash)) {
             account.assignedTxs.push(txHash)
             await repository.save(account)
-            log.debug(`[HandleGCR] Added tx ${txHash} to assignedTxs for ${pubkey}`)
+            log.debug(
+                `[HandleGCR] Added tx ${txHash} to assignedTxs for ${pubkey}`,
+            )
         }
     }
 
@@ -458,7 +460,9 @@ export default class HandleGCR {
             try {
                 await this.processNativeSideEffects(tx, simulate)
             } catch (sideEffectError) {
-                log.error(`[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`)
+                log.error(
+                    `[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`,
+                )
                 // Side-effect errors are logged but don't fail the transaction
                 // The GCR edits (fee burning) have already been applied
             }
@@ -484,7 +488,9 @@ export default class HandleGCR {
 
         // Validate args exists before any destructuring
         if (!nativePayload.args || !Array.isArray(nativePayload.args)) {
-            log.error(`[TLSNotary] Invalid nativePayload.args: ${JSON.stringify(nativePayload.args)}`)
+            log.error(
+                `[TLSNotary] Invalid nativePayload.args: ${JSON.stringify(nativePayload.args)}`,
+            )
             return
         }
 
@@ -495,11 +501,15 @@ export default class HandleGCR {
                 // Only create token once - during simulation (mempool entry)
                 // Skip if called again during block finalization
                 if (!simulate) {
-                    log.debug(`[TLSNotary] Skipping token creation for finalized tx ${tx.hash} (already created at mempool entry)`)
+                    log.debug(
+                        `[TLSNotary] Skipping token creation for finalized tx ${tx.hash} (already created at mempool entry)`,
+                    )
                     break
                 }
 
-                log.info(`[TLSNotary] Processing tlsn_request side-effect for ${targetUrl}`)
+                log.info(
+                    `[TLSNotary] Processing tlsn_request side-effect for ${targetUrl}`,
+                )
 
                 // Validate URL and extract domain
                 const domain = extractDomain(targetUrl)
@@ -511,7 +521,9 @@ export default class HandleGCR {
                     targetUrl,
                     tx.hash,
                 )
-                log.info(`[TLSNotary] Created token ${token.id} for tx ${tx.hash}`)
+                log.info(
+                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
+                )
                 break
             }
             // tlsn_store side-effects are handled in GCRTLSNotaryRoutines.apply()

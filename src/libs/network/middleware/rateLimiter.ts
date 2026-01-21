@@ -41,10 +41,13 @@ export class RateLimiter {
         this.config = config
 
         // Clean up expired entries every 15 minutes
-        this.cleanupInterval = setInterval(() => {
-            this.cleanup()
-            this.dumpIPs()
-        }, 15 * 60 * 1000)
+        this.cleanupInterval = setInterval(
+            () => {
+                this.cleanup()
+                this.dumpIPs()
+            },
+            15 * 60 * 1000,
+        )
 
         this.loadIPs()
     }
@@ -89,10 +92,7 @@ export class RateLimiter {
             allIPs[ip] = data
         }
         try {
-            await fs.promises.writeFile(
-                filePath,
-                JSON.stringify(allIPs),
-            )
+            await fs.promises.writeFile(filePath, JSON.stringify(allIPs))
         } catch (error) {
             log.error(`[Rate Limiter] Failed to dump IPs: ${error}`)
         }

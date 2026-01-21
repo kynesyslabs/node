@@ -554,10 +554,7 @@ export class UDIdentityManager {
         try {
             if (authorizedAddress.signatureType === "evm") {
                 // EVM signature verification using ethers
-                const recoveredAddress = verifyMessage(
-                    signedData,
-                    signature,
-                )
+                const recoveredAddress = verifyMessage(signedData, signature)
 
                 if (
                     recoveredAddress.toLowerCase() !==

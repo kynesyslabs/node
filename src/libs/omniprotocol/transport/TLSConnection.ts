@@ -32,7 +32,10 @@ export class TLSConnection extends PeerConnection {
      * Overrides parent connect() method
      */
     async connect(options: ConnectionOptions = {}): Promise<void> {
-        if (this.getState() !== "UNINITIALIZED" && this.getState() !== "CLOSED") {
+        if (
+            this.getState() !== "UNINITIALIZED" &&
+            this.getState() !== "CLOSED"
+        ) {
             throw new Error(
                 `Cannot connect from state ${this.getState()}, must be UNINITIALIZED or CLOSED`,
             )
@@ -141,7 +144,9 @@ export class TLSConnection extends PeerConnection {
             const fingerprint = cert.fingerprint256
 
             // If we have a trusted fingerprint for this peer, verify it
-            const trustedFingerprint = this.trustedFingerprints.get(this.peerIdentity)
+            const trustedFingerprint = this.trustedFingerprints.get(
+                this.peerIdentity,
+            )
             if (trustedFingerprint) {
                 if (trustedFingerprint !== fingerprint) {
                     log.error(
@@ -162,7 +167,9 @@ export class TLSConnection extends PeerConnection {
                     `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`,
                 )
                 log.warning(`  Server certificate fingerprint: ${fingerprint}`)
-                log.warning("  Add to trustedFingerprints to pin this certificate")
+                log.warning(
+                    "  Add to trustedFingerprints to pin this certificate",
+                )
 
                 // In strict mode, reject unknown certificates
                 if (this.tlsConfig.rejectUnauthorized) {
@@ -214,5 +221,4 @@ export class TLSConnection extends PeerConnection {
         }
         return this.parsedConnection
     }
-
 }

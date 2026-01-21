@@ -7,6 +7,7 @@
 ### Why Pre-Review Matters
 
 Running a local AI review before submitting your PR helps:
+
 - **Catch bugs early** - Find logical errors, code smells, and potential issues
 - **Improve code quality** - Get senior-engineer level feedback instantly
 - **Save review time** - Address issues before human reviewers see them
@@ -46,8 +47,8 @@ Before submitting your PR, ensure you have:
 
 1. ✅ **Run CodeRabbit CLI** and addressed critical feedback
 2. ✅ **Run linting** with `bun run lint:fix`
-5. ✅ **Updated documentation** if you've added new features
-6. ✅ **Saved AI session memories** with `/sc:save` (if using Claude Code)
+3. ✅ **Updated documentation** if you've added new features
+4. ✅ **Saved AI session memories** with `/sc:save` (if using Claude Code)
 
 ## 🤖 What CodeRabbit Checks
 
@@ -85,6 +86,7 @@ After submitting your PR:
 3. **Human reviewers** will provide final feedback
 
 Having run the CLI review first means:
+
 - Fewer issues in the automated PR review
 - Faster approval from human reviewers
 - Higher quality code merged to main

@@ -31,11 +31,13 @@ Please refer to [INSTALL.md](INSTALL.md) for all the necessary informations on h
 ### 1. Create a Feature Branch
 
 Always create a feature branch for your work:
+
 ```bash
 git checkout -b feature/your-feature-name
 ```
 
 Branch naming conventions:
+
 - `feature/` - New features
 - `fix/` - Bug fixes
 - `refactor/` - Code refactoring
@@ -62,11 +64,13 @@ bun run lint:fix  # Auto-fix issues
 ### 4. Commit Guidelines
 
 Write clear, descriptive commit messages:
+
 - Use present tense ("Add feature" not "Added feature")
 - Keep the first line under 50 characters
 - Reference issues when applicable (`Fixes #123`)
 
 Example:
+
 ```
 Add multichain transaction validation
 
@@ -92,14 +96,15 @@ Fixes #456
 ### Pull Request Template
 
 When opening a PR, please include:
+
 - **Description** - What does this PR do?
 - **Motivation** - Why is this change needed?
 - **Testing** - How has this been tested?
 - **Breaking changes** - Does this break existing functionality?
 - **Issues** - Link to related issues
 
-
 ### Key Principles
+
 - **Modularity** - Keep features isolated and reusable
 - **Type Safety** - Leverage TypeScript for full type coverage
 - **Error Handling** - Comprehensive error handling and validation
@@ -108,7 +113,9 @@ When opening a PR, please include:
 ## 🐛 Reporting Issues
 
 ### Bug Reports
+
 Include:
+
 - Clear description of the bug
 - Steps to reproduce
 - Expected vs actual behavior
@@ -116,7 +123,9 @@ Include:
 - Relevant logs or error messages
 
 ### Feature Requests
+
 Include:
+
 - Use case and motivation
 - Proposed solution
 - Alternative solutions considered
@@ -125,11 +134,13 @@ Include:
 ## 💡 Development Tips
 
 ### Using Bun Effectively
+
 - **Always use Bun** for package management (`bun add`, not `npm install`)
 - Run TypeScript directly with Bun (`bun src/index.ts`)
 - Leverage Bun's built-in test runner (`bun test`)
 
 ### Code Style
+
 - Use double quotes for strings
 - No semicolons at statement ends
 - camelCase for variables and functions
@@ -137,6 +148,7 @@ Include:
 - See [GUIDELINES/CODING.md](GUIDELINES/CODING.md) for complete style guide
 
 ### Performance Considerations
+
 - Optimize for readability first, then performance
 - Use async/await for asynchronous operations
 - Implement proper caching strategies
@@ -145,12 +157,14 @@ Include:
 ## 🤝 Community
 
 ### Code of Conduct
+
 - Be respectful and inclusive
 - Welcome newcomers and help them get started
 - Focus on constructive feedback
 - Report unacceptable behavior to maintainers
 
 ### Getting Help
+
 - Review existing documentation
 - Search through existing issues
 - Ask questions in discussions

@@ -1,6 +1,9 @@
 import { Repository } from "typeorm"
 
-import { GCREdit, GCREditTLSNotary } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
+import {
+    GCREdit,
+    GCREditTLSNotary,
+} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 import log from "@/utilities/logger"
@@ -42,10 +45,15 @@ export class GCRTLSNotaryRoutines {
                     await gcrTLSNotaryRepository.delete({
                         tokenId: tlsnEdit.data.tokenId,
                     })
-                    log.info(`[TLSNotary] Rolled back proof for token ${tlsnEdit.data.tokenId}`)
+                    log.info(
+                        `[TLSNotary] Rolled back proof for token ${tlsnEdit.data.tokenId}`,
+                    )
                 } catch (error) {
                     log.error(`[TLSNotary] Failed to rollback proof: ${error}`)
-                    return { success: false, message: "Failed to rollback TLSNotary proof" }
+                    return {
+                        success: false,
+                        message: "Failed to rollback TLSNotary proof",
+                    }
                 }
             }
             return { success: true, message: "TLSNotary proof rolled back" }
@@ -59,8 +67,13 @@ export class GCRTLSNotaryRoutines {
             })
 
             if (existing) {
-                log.warning(`[TLSNotary] Proof already exists for token ${tlsnEdit.data.tokenId}`)
-                return { success: false, message: "Proof already stored for this token" }
+                log.warning(
+                    `[TLSNotary] Proof already exists for token ${tlsnEdit.data.tokenId}`,
+                )
+                return {
+                    success: false,
+                    message: "Proof already stored for this token",
+                }
             }
 
             // Create new proof entry
@@ -82,14 +95,20 @@ export class GCRTLSNotaryRoutines {
                     )
                 } catch (error) {
                     log.error(`[TLSNotary] Failed to store proof: ${error}`)
-                    return { success: false, message: "Failed to store TLSNotary proof" }
+                    return {
+                        success: false,
+                        message: "Failed to store TLSNotary proof",
+                    }
                 }
             }
 
             return { success: true, message: "TLSNotary proof stored" }
         }
 
-        return { success: false, message: `Unknown TLSNotary operation: ${tlsnEdit.operation}` }
+        return {
+            success: false,
+            message: `Unknown TLSNotary operation: ${tlsnEdit.operation}`,
+        }
     }
 
     /**

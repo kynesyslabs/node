@@ -9,9 +9,7 @@ export default async function getBlockHeaderByHash(data: any) {
         extra = "Block hash is not valid"
     }
     response = await Chain.getBlockByHash(data.blockHash)
-    log.debug(
-        "[CHAIN.ts] Received reply from the database: extracting header",
-    )
+    log.debug("[CHAIN.ts] Received reply from the database: extracting header")
     // FIXME Implement the extraction of the header
     // response = response.getHeader()
     //console.log(response)

@@ -15,7 +15,11 @@ export type SigningAlgorithm = string
 export interface IPeer {
     connection: { string: string }
     identity: string
-    verification: { status: boolean; message: string | null; timestamp: number | null }
+    verification: {
+        status: boolean
+        message: string | null
+        timestamp: number | null
+    }
     sync: { status: boolean; block: number; block_hash: string }
     status: { online: boolean; timestamp: number | null; ready: boolean }
 }

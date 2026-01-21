@@ -49,7 +49,9 @@ export default async function getPeerIdentity(
         if (response.response === expectedKey) {
             log.debug("[PEER AUTH] Identity is the expected one")
         } else {
-            log.warning(`[PEER AUTH] Identity mismatch - Expected: ${expectedKey}, Received: ${response.response}`)
+            log.warning(
+                `[PEER AUTH] Identity mismatch - Expected: ${expectedKey}, Received: ${response.response}`,
+            )
             return null
         }
         // Adding the property to the peer
@@ -61,7 +63,9 @@ export default async function getPeerIdentity(
         peer.verification.message = "getPeerIdentity routine verified"
         peer.verification.timestamp = new Date().getTime()
     } else {
-        log.warning(`[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`)
+        log.warning(
+            `[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`,
+        )
         return null
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?

@@ -15,6 +15,7 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 ## System Requirements
 
 ### Minimum Requirements
+
 - 4GB RAM
 - 4 CPU cores (2GHz or higher)
 - Modern SSD storage
@@ -22,6 +23,7 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 - Ubuntu 22.04 LTS or compatible Linux distribution
 
 ### Recommended Specifications
+
 - 8GB RAM or higher
 - 6 CPU cores (2GHz or higher)
 - High-performance SSD storage
@@ -57,16 +59,16 @@ By default, the node runs with an interactive TUI that provides:
 
 ### TUI Controls
 
-| Key | Action |
-|-----|--------|
-| `0-9`, `-`, `=` | Switch to tab |
-| `↑/↓` or `j/k` | Scroll logs |
-| `PgUp/PgDn` | Page scroll |
-| `Home/End` | Jump to top/bottom |
-| `A` | Toggle auto-scroll |
-| `C` | Clear current tab logs |
-| `H` or `?` | Show help |
-| `Q` | Quit node |
+| Key             | Action                 |
+| --------------- | ---------------------- |
+| `0-9`, `-`, `=` | Switch to tab          |
+| `↑/↓` or `j/k`  | Scroll logs            |
+| `PgUp/PgDn`     | Page scroll            |
+| `Home/End`      | Jump to top/bottom     |
+| `A`             | Toggle auto-scroll     |
+| `C`             | Clear current tab logs |
+| `H` or `?`      | Show help              |
+| `Q`             | Quit node              |
 
 ### Legacy Mode (for developers)
 
@@ -106,13 +108,13 @@ docker compose up -d
 
 ### Available Metrics
 
-| Metric | Description |
-|--------|-------------|
-| `demos_block_height` | Current block height |
-| `demos_seconds_since_last_block` | Time since last block |
-| `demos_peer_online_count` | Connected peers |
-| `demos_system_cpu_usage_percent` | CPU utilization |
-| `demos_system_memory_usage_percent` | Memory utilization |
+| Metric                              | Description             |
+| ----------------------------------- | ----------------------- |
+| `demos_block_height`                | Current block height    |
+| `demos_seconds_since_last_block`    | Time since last block   |
+| `demos_peer_online_count`           | Connected peers         |
+| `demos_system_cpu_usage_percent`    | CPU utilization         |
+| `demos_system_memory_usage_percent` | Memory utilization      |
 | `demos_service_docker_container_up` | Container health status |
 
 ### Configuration
@@ -158,22 +160,25 @@ The following ports must be open for the node to function properly.
 > **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
 
 ### Required Ports
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 53550 | TCP | Node RPC API |
-| 53551 | TCP/UDP | OmniProtocol P2P communication |
-| 7047 | TCP | TLSNotary server |
-| 55000-60000 | TCP/UDP | WebSocket proxy for TLSNotary |
+
+| Port        | Protocol | Description                    |
+| ----------- | -------- | ------------------------------ |
+| 53550       | TCP      | Node RPC API                   |
+| 53551       | TCP/UDP  | OmniProtocol P2P communication |
+| 7047        | TCP      | TLSNotary server               |
+| 55000-60000 | TCP/UDP  | WebSocket proxy for TLSNotary  |
 
 ### Optional Ports
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 9090 | TCP | Metrics endpoint (monitoring) |
-| 9091 | TCP | Prometheus server (monitoring stack) |
-| 3000 | TCP | Grafana dashboard (monitoring stack) |
-| 5332 | TCP | PostgreSQL (local only, do not expose externally) |
+
+| Port | Protocol | Description                                       |
+| ---- | -------- | ------------------------------------------------- |
+| 9090 | TCP      | Metrics endpoint (monitoring)                     |
+| 9091 | TCP      | Prometheus server (monitoring stack)              |
+| 3000 | TCP      | Grafana dashboard (monitoring stack)              |
+| 5332 | TCP      | PostgreSQL (local only, do not expose externally) |
 
 **Firewall example (ufw):**
+
 ```bash
 # Required
 sudo ufw allow 53550/tcp        # Node RPC
@@ -225,7 +230,7 @@ docker-compose down          # Stop the network
 ### Node Ports
 
 | Node   | RPC Port | Omni Port |
-|--------|----------|-----------|
+| ------ | -------- | --------- |
 | node-1 | 53551    | 53561     |
 | node-2 | 53552    | 53562     |
 | node-3 | 53553    | 53563     |
@@ -250,12 +255,13 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 We welcome contributions to the Demos Network node implementation! Before contributing, please read our comprehensive [Contributing Guide](CONTRIBUTING.md) which covers:
 
 - Code style and naming conventions
-- Development workflow and best practices  
+- Development workflow and best practices
 - AI-assisted development guidelines
 - Pull request process and review requirements
 - Testing and quality standards
 
 For quick reference, also see:
+
 - [Coding Guidelines](GUIDELINES/CODING.md) - Detailed code style guide
 - [AI Development Guidelines](GUIDELINES/VIBES.md) - Essential for AI-assisted development
 

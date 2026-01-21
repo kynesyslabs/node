@@ -229,7 +229,10 @@ async function handleXRPLPay(
 
     try {
         // Validate signedPayloads exists and has at least one element
-        if (!operation.task.signedPayloads || operation.task.signedPayloads.length === 0) {
+        if (
+            !operation.task.signedPayloads ||
+            operation.task.signedPayloads.length === 0
+        ) {
             return {
                 result: "error",
                 error: `Missing signed payloads for XRPL operation (${operation.chain}.${operation.subchain})`,
@@ -242,7 +245,11 @@ async function handleXRPLPay(
         let txBlob: string
         if (typeof signedTx === "string") {
             txBlob = signedTx
-        } else if (signedTx && typeof signedTx === "object" && "tx_blob" in signedTx) {
+        } else if (
+            signedTx &&
+            typeof signedTx === "object" &&
+            "tx_blob" in signedTx
+        ) {
             txBlob = (signedTx as { tx_blob: string }).tx_blob
         } else {
             return {
@@ -263,11 +270,16 @@ async function handleXRPLPay(
 
         // Extract transaction result - handle different response formats
         const meta = res.result.meta
-        const txResult = (typeof meta === "object" && meta !== null && "TransactionResult" in meta
-            ? (meta as { TransactionResult: string }).TransactionResult
-            : (res.result as any).engine_result) as string | undefined
+        const txResult = (
+            typeof meta === "object" &&
+            meta !== null &&
+            "TransactionResult" in meta
+                ? (meta as { TransactionResult: string }).TransactionResult
+                : (res.result as any).engine_result
+        ) as string | undefined
         const txHash = res.result.hash
-        const resultMessage = ((res.result as any).engine_result_message || "") as string
+        const resultMessage = ((res.result as any).engine_result_message ||
+            "") as string
 
         // Only tesSUCCESS indicates actual success
         if (txResult === "tesSUCCESS") {
@@ -279,10 +291,10 @@ async function handleXRPLPay(
 
         // XRPL transaction result code prefixes and their meanings
         const xrplErrorMessages: Record<string, string> = {
-            tec: "Transaction failed (fee charged)",  // tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
-            tem: "Malformed transaction",              // temREDUNDANT, temBAD_FEE, temINVALID
-            ter: "Transaction provisional/queued",     // terQUEUED
-            tef: "Transaction rejected",               // tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
+            tec: "Transaction failed (fee charged)", // tecUNFUNDED_PAYMENT, tecINSUF_FEE, tecPATH_DRY
+            tem: "Malformed transaction", // temREDUNDANT, temBAD_FEE, temINVALID
+            ter: "Transaction provisional/queued", // terQUEUED
+            tef: "Transaction rejected", // tefPAST_SEQ, tefMAX_LEDGER, tefFAILURE
         }
 
         const errorPrefix = txResult?.substring(0, 3)

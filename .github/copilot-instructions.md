@@ -5,6 +5,7 @@
 This project is the Demos Network node/RPC implementation. We use **bd (beads)** for all task tracking.
 
 **Key Features:**
+
 - Dependency-aware issue tracking
 - Auto-sync with Git via JSONL
 - AI-optimized CLI with JSON output

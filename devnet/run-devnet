@@ -8,7 +8,7 @@ NO_TUI=true  # Always no-tui in containers for cleaner logs
 
 # Detect platform
 PLATFORM=$(uname -s)
-case $PLATFORM in
+case ${PLATFORM} in
     "Darwin") PLATFORM_NAME="macOS" ;;
     "Linux") PLATFORM_NAME="Linux" ;;
     *) PLATFORM_NAME="Unknown" ;;
@@ -19,7 +19,7 @@ trap ctrl_c INT
 HAS_BEEN_INTERRUPTED=false
 
 log_verbose() {
-    if [ "$VERBOSE" = true ]; then
+    if [[ "${VERBOSE}" = true ]]; then
         echo "[VERBOSE] $1"
     fi
 }
@@ -34,13 +34,13 @@ check_system_requirements() {
     local warnings=0
 
     # Check RAM
-    if [ "$PLATFORM_NAME" = "Linux" ]; then
+    if [[ "${PLATFORM_NAME}" = "Linux" ]]; then
         ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
         ram_gb=$((ram_kb / 1024 / 1024))
-        if [ $ram_gb -lt 4 ]; then
+        if [[ "${ram_gb}" -lt 4 ]]; then
             echo "⚠️  RAM below minimum: ${ram_gb}GB (minimum: 4GB)"
             warnings=$((warnings + 1))
-        elif [ $ram_gb -lt 8 ]; then
+        elif [[ "${ram_gb}" -lt 8 ]]; then
             echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: 8GB)"
             warnings=$((warnings + 1))
         else
@@ -49,9 +49,9 @@ check_system_requirements() {
     fi
 
     # Check CPU
-    if [ "$PLATFORM_NAME" = "Linux" ]; then
+    if [[ "${PLATFORM_NAME}" = "Linux" ]]; then
         cpu_cores=$(nproc)
-        if [ $cpu_cores -lt 4 ]; then
+        if [[ "${cpu_cores}" -lt 4 ]]; then
             echo "⚠️  CPU cores below minimum: ${cpu_cores} (minimum: 4)"
             warnings=$((warnings + 1))
         else
@@ -59,9 +59,9 @@ check_system_requirements() {
         fi
     fi
 
-    if [ $warnings -gt 0 ]; then
+    if [[ "${warnings}" -gt 0 ]]; then
         echo ""
-        echo "⚠️  System check passed with $warnings warning(s)"
+        echo "⚠️  System check passed w$${th $}warn}ings warning(s)"
         echo "   The node will run but performance may be limited."
         echo ""
     else
@@ -76,7 +76,7 @@ CLEAN="false"
 
 # Handle long options
 for arg in "$@"; do
-    case $arg in
+    case ${arg} in
         --external-db) ;; # Ignored, always external in devnet
         --no-tui) NO_TUI=true ;;
     esac
@@ -84,13 +84,13 @@ done
 
 # Parse arguments
 while getopts "p:c:i:u:l:b:tvh" opt; do
-    case $opt in
-        p) PORT=$OPTARG;;
-        c) CLEAN=$OPTARG;;
-        i) IDENTITY_FILE=$OPTARG;;
-        l) PEER_LIST_FILE=$OPTARG;;
-        u) EXPOSED_URL=$OPTARG;;
-        b) RESTORE=$OPTARG;;
+    case ${opt} in
+        p) PORT=${OPTARG};;
+        c) CLEAN=${OPTARG};;
+        i) IDENTITY_FILE=${OPTARG};;
+        l) PEER_LIST_FILE=${OPTARG};;
+        u) EXPOSED_URL=${OPTARG};;
+        b) RESTORE=${OPTARG};;
         t) NO_TUI=true;;
         v) VERBOSE=true;;
         h) echo "Devnet runner - use docker-compose for configuration"; exit 0;;
@@ -104,15 +104,15 @@ check_system_requirements
 echo ""
 echo "🚀 Welcome to Demos Network (Devnet Mode)!"
 echo "⚙️  Node Configuration:"
-echo "   🌐 Node Port: $PORT"
+echo "   🌐 Node Por$${${${${}} $P}ORT"
 echo "   🔗 Mode: External database (DATABASE_URL)"
-if [ ! -z "$IDENTITY_FILE" ]; then
-    echo "   🔑 Identity File: $IDENTITY_FILE"
+if [[ ! -z "${IDENTITY_FILE}" ]]; then
+    echo "   🔑 Identity Fil$$$$${:} $I}DEN}TIT}Y_F}ILE"
 fi
-if [ ! -z "$EXPOSED_URL" ]; then
-    echo "   📡 Exposed URL: $EXPOSED_URL"
+if [[ ! -z "${EXPOSED_URL}" ]]; then
+    echo "   📡 Exposed UR$$$${${ }}$EX}POS}ED_}URL"
 fi
-echo "   👥 Peer List: $PEER_LIST_FILE"
+echo "   👥 Peer Lis$$$$${: }$PE}ER_}LIS}T_F}ILE"
 echo "   📜 Display: Legacy logs (TUI disabled)"
 echo ""
 
@@ -125,14 +125,14 @@ fi
 START_COMMAND="bun start:bun"
 
 echo "🚀 Starting your Demos Network node..."
-log_verbose "Using command: $START_COMMAND"
+log_verbose "Using command: ${START_COMMAND}"
 sleep 1
 
 # Export environment variables
-export IDENTITY_FILE=$IDENTITY_FILE
-export EXPOSED_URL=$EXPOSED_URL
-export PEER_LIST_FILE=$PEER_LIST_FILE
-export RESTORE=$RESTORE
+export IDENTITY_FILE=${IDENTITY_FILE}
+export EXPOSED_URL=${EXPOSED_URL}
+export PEER_LIST_FILE=${PEER_LIST_FILE}
+export RESTORE=${RESTORE}
 
 # Ensure logs folder exists
 mkdir -p logs
@@ -140,21 +140,21 @@ mkdir -p logs
 echo ""
 echo "🎉 All systems ready! Starting Demos Network node..."
 echo "📝 Logs will be saved to: logs/"
-echo "🌐 Your node will be available on port: $PORT"
+echo "🌐 Your node will be available on por$${${${${}} $P}ORT"
 echo ""
 echo "💡 Press Ctrl+C to stop the node safely"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
 # Build command with --no-tui
-FINAL_COMMAND="$START_COMMAND -- --no-tui"
+FINAL_COMMAND="${START_COMMAND} -- --no-tui"
 
 # Start the node
-log_verbose "Starting node with: RPC_PORT=$PORT"
-log_verbose "Command: $FINAL_COMMAND"
+log_verbose "Starting node with: RPC_PORT=${PORT}"
+log_verbose "Command: ${FINAL_COMMAND}"
 
-if ! RPC_PORT=$PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
-    if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
+if ! RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
+    if [[ "${HAS_BEEN_INTERRUPTED}" == "true" ]]; then
         echo ""
         echo "✅ Demos Network node stopped successfully"
     else

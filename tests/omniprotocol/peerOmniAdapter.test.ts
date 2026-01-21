@@ -1,4 +1,11 @@
-import { beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals"
+import {
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    it,
+    jest,
+} from "@jest/globals"
 
 jest.mock("@kynesyslabs/demosdk/encryption", () => ({
     __esModule: true,
@@ -34,7 +41,8 @@ let PeerOmniAdapterClass: typeof import("src/libs/omniprotocol/integration/peerA
 
 beforeAll(async () => {
     const configModule = await import("src/libs/omniprotocol/types/config")
-    const adapterModule = await import("src/libs/omniprotocol/integration/peerAdapter")
+    const adapterModule =
+        await import("src/libs/omniprotocol/integration/peerAdapter")
     DEFAULT_OMNIPROTOCOL_CONFIG = configModule.DEFAULT_OMNIPROTOCOL_CONFIG
     PeerOmniAdapterClass = adapterModule.PeerOmniAdapter
 })
@@ -70,10 +78,7 @@ describe("PeerOmniAdapter", () => {
         const peer = createMockPeer()
         const request = { method: "ping", params: [] }
 
-        const response = await adapter.adaptCall(
-            peer as any,
-            request as any,
-        )
+        const response = await adapter.adaptCall(peer as any, request as any)
 
         expect(response.result).toBe(200)
         expect(peer.call).toHaveBeenCalledTimes(1)
@@ -94,7 +99,6 @@ describe("PeerOmniAdapter", () => {
 
     it("treats OMNI_ONLY mode as always-on", () => {
         adapter.migrationMode = "OMNI_ONLY"
-        expect(adapter.shouldUseOmni("any-peer"))
-            .toBe(true)
+        expect(adapter.shouldUseOmni("any-peer")).toBe(true)
     })
 })

@@ -1,4 +1,5 @@
 # AI Agent Instructions for Demos Network
+
 # Demos Network Agent Instructions
 
 ## Issue Tracking with bd (beads)
@@ -15,11 +16,13 @@
 ### Quick Start
 
 **Check for ready work:**
+
 ```bash
 bd ready --json
 ```
 
 **Create new issues:**
+
 ```bash
 bd create "Issue title" -t bug|feature|task -p 0-4 --json
 bd create "Issue title" -p 1 --deps discovered-from:bd-123 --json
@@ -27,12 +30,14 @@ bd create "Subtask" --parent <epic-id> --json  # Hierarchical subtask (gets ID l
 ```
 
 **Claim and update:**
+
 ```bash
 bd update bd-42 --status in_progress --json
 bd update bd-42 --priority 1 --json
 ```
 
 **Complete work:**
+
 ```bash
 bd close bd-42 --reason "Completed" --json
 ```
@@ -59,13 +64,14 @@ bd close bd-42 --reason "Completed" --json
 2. **Claim your task**: `bd update <id> --status in_progress`
 3. **Work on it**: Implement, test, document
 4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" -p 1 --deps discovered-from:<parent-id>`
+    - `bd create "Found bug" -p 1 --deps discovered-from:<parent-id>`
 5. **Complete**: `bd close <id> --reason "Done"`
 6. **Commit together**: Always commit the `.beads/issues.jsonl` file together with the code changes so issue state stays in sync with code state
 
 ### Auto-Sync
 
 bd automatically syncs with git:
+
 - Exports to `.beads/issues.jsonl` after changes (5s debounce)
 - Imports from JSONL when newer (e.g., after `git pull`)
 - No manual export/import needed!
@@ -84,12 +90,13 @@ pip install beads-mcp
 ```
 
 Add to MCP config (e.g., `~/.config/claude/config.json`):
+
 ```json
 {
-  "beads": {
-    "command": "beads-mcp",
-    "args": []
-  }
+    "beads": {
+        "command": "beads-mcp",
+        "args": []
+    }
 }
 ```
 
@@ -98,6 +105,7 @@ Then use `mcp__beads__*` functions instead of CLI commands.
 ### Managing AI-Generated Planning Documents
 
 AI assistants often create planning and design documents during development:
+
 - PLAN.md, IMPLEMENTATION.md, ARCHITECTURE.md
 - DESIGN.md, CODEBASE_SUMMARY.md, INTEGRATION_PLAN.md
 - TESTING_GUIDE.md, TECHNICAL_DESIGN.md, and similar files
@@ -105,18 +113,21 @@ AI assistants often create planning and design documents during development:
 **Best Practice: Use a dedicated directory for these ephemeral files**
 
 **Recommended approach:**
+
 - Create a `history/` directory in the project root
 - Store ALL AI-generated planning/design docs in `history/`
 - Keep the repository root clean and focused on permanent project files
 - Only access `history/` when explicitly asked to review past planning
 
 **Example .gitignore entry (optional):**
+
 ```
 # AI planning documents (ephemeral)
 history/
 ```
 
 **Benefits:**
+
 - Clean repository root
 - Clear separation between ephemeral and permanent documentation
 - Easy to exclude from version control if desired
@@ -153,17 +164,18 @@ For more details, see README.md and QUICKSTART.md.
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
+    ```bash
+    git pull --rebase
+    bd sync
+    git push
+    git status  # MUST show "up to date with origin"
+    ```
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
+
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push

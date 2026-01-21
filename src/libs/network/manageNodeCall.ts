@@ -319,7 +319,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = res
                 }
             } catch (error) {
-                log.error("[manageNodeCall] Failed to resolve web3 domain: " + error)
+                log.error(
+                    "[manageNodeCall] Failed to resolve web3 domain: " + error,
+                )
                 response.result = 400
                 response.response = {
                     success: false,
@@ -505,8 +507,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
         case "requestTLSNproxy": {
             try {
-                const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
-                const { validateToken, consumeRetry } = await import("@/features/tlsnotary/tokenManager")
+                const { requestProxy, ProxyError } =
+                    await import("@/features/tlsnotary/proxyManager")
+                const { validateToken, consumeRetry } =
+                    await import("@/features/tlsnotary/tokenManager")
 
                 // Require tokenId and owner (pubkey) for paid access
                 if (!data.tokenId || !data.owner) {
@@ -532,15 +536,21 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.result = 400
                     response.response = {
                         error: ProxyError.INVALID_URL,
-                        message: "Only HTTPS URLs are supported for TLS attestation",
+                        message:
+                            "Only HTTPS URLs are supported for TLS attestation",
                     }
                     break
                 }
 
                 // Validate the token
-                const validation = validateToken(data.tokenId, data.owner, data.targetUrl)
+                const validation = validateToken(
+                    data.tokenId,
+                    data.owner,
+                    data.targetUrl,
+                )
                 if (!validation.valid) {
-                    response.result = validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.result =
+                        validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
                     response.response = {
                         error: validation.error,
                         message: `Token validation failed: ${validation.error}`,
@@ -550,7 +560,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 }
 
                 // Request the proxy (this spawns wstcp if needed)
-                const result = await requestProxy(data.targetUrl, data.requestOrigin)
+                const result = await requestProxy(
+                    data.targetUrl,
+                    data.requestOrigin,
+                )
 
                 if ("error" in result) {
                     // Map proxy errors to appropriate HTTP status codes
@@ -570,9 +583,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = result
                 } else {
                     // Success - consume a retry and link proxyId to token
-                    const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                    const updatedToken = consumeRetry(
+                        data.tokenId,
+                        result.proxyId,
+                    )
                     if (updatedToken) {
-                        log.info(`[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`)
+                        log.info(
+                            `[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`,
+                        )
                     }
 
                     // Add token info to response
@@ -597,7 +615,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "tlsnotary.getInfo": {
             // Dynamic import to avoid circular dependencies and check if enabled
             try {
-                const { getTLSNotaryService } = await import("@/features/tlsnotary")
+                const { getTLSNotaryService } =
+                    await import("@/features/tlsnotary")
                 const service = getTLSNotaryService()
 
                 if (!service || !service.isRunning()) {
@@ -657,10 +676,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token lookup by transaction hash
         case "tlsnotary.getToken": {
             try {
-                const { getTokenByTxHash, getToken } = await import("@/features/tlsnotary/tokenManager")
+                const { getTokenByTxHash, getToken } =
+                    await import("@/features/tlsnotary/tokenManager")
 
                 // Support lookup by either tokenId or txHash
-                const { tokenId, txHash } = data as { tokenId?: string; txHash?: string }
+                const { tokenId, txHash } = data as {
+                    tokenId?: string
+                    txHash?: string
+                }
 
                 let token
                 if (tokenId) {
@@ -708,11 +731,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token stats for monitoring
         case "tlsnotary.getTokenStats": {
             try {
-                const { getTokenStats } = await import("@/features/tlsnotary/tokenManager")
+                const { getTokenStats } =
+                    await import("@/features/tlsnotary/tokenManager")
                 const stats = getTokenStats()
                 response.response = { stats }
             } catch (error) {
-                log.error("[manageNodeCall] tlsnotary.getTokenStats error: " + error)
+                log.error(
+                    "[manageNodeCall] tlsnotary.getTokenStats error: " + error,
+                )
                 response.result = 500
                 response.response = {
                     error: "INTERNAL_ERROR",
@@ -739,30 +765,38 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
                 // Check read permission
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
@@ -784,7 +818,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 log.error(`[manageNodeCall] getStorageProgram error: ${error}`)
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -802,16 +839,22 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const programs = await GCRStorageProgramRoutines.getStorageProgramsByOwner(
-                    owner,
-                    repository,
-                )
+                const programs =
+                    await GCRStorageProgramRoutines.getStorageProgramsByOwner(
+                        owner,
+                        repository,
+                    )
 
                 // Filter to only programs the requester can read
                 const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
                 )
 
                 // Map to response format (without full data for list view)
@@ -825,10 +868,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     updatedAt: p.updatedAt.toISOString(),
                 }))
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramsByOwner error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramsByOwner error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -847,21 +895,29 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const programs = await GCRStorageProgramRoutines.searchStorageProgramsByName(
-                    typeof query === "string" ? query.trim() : String(query),
-                    repository,
-                    {
-                        limit: options.limit || 50,
-                        offset: options.offset || 0,
-                        exactMatch: options.exactMatch || false,
-                    },
-                )
+                const programs =
+                    await GCRStorageProgramRoutines.searchStorageProgramsByName(
+                        typeof query === "string"
+                            ? query.trim()
+                            : String(query),
+                        repository,
+                        {
+                            limit: options.limit || 50,
+                            offset: options.offset || 0,
+                            exactMatch: options.exactMatch || false,
+                        },
+                    )
 
                 // Filter to only programs the requester can read
                 const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
                 )
 
                 // Map to response format (without full data for list view)
@@ -875,10 +931,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     updatedAt: p.updatedAt.toISOString(),
                 }))
             } catch (error) {
-                log.error(`[manageNodeCall] searchStoragePrograms error: ${error}`)
+                log.error(
+                    `[manageNodeCall] searchStoragePrograms error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -908,30 +969,38 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
                 // Check read permission
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
@@ -939,24 +1008,32 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 if (program.encoding === "binary") {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    response.extra = {
+                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
+                    }
                     break
                 }
 
                 // Return field names
-                const fields = program.data && typeof program.data === "object"
-                    ? Object.keys(program.data)
-                    : []
+                const fields =
+                    program.data && typeof program.data === "object"
+                        ? Object.keys(program.data)
+                        : []
 
                 response.response = {
                     storageAddress: program.storageAddress,
                     fields,
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramFields error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramFields error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -983,7 +1060,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             if (!field || typeof field !== "string") {
                 response.result = 400
                 response.response = null
-                response.extra = { error: "Field name is required and must be a string" }
+                response.extra = {
+                    error: "Field name is required and must be a string",
+                }
                 break
             }
 
@@ -991,41 +1070,55 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
                 if (program.encoding === "binary") {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    response.extra = {
+                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
+                    }
                     break
                 }
 
                 // Check if field exists
-                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                if (
+                    !program.data ||
+                    typeof program.data !== "object" ||
+                    !(field in program.data)
+                ) {
                     response.result = 404
                     response.response = null
                     response.extra = { error: `Field not found: ${field}` }
@@ -1038,10 +1131,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     value: (program.data as Record<string, unknown>)[field],
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramValue error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramValue error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -1070,14 +1168,22 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             if (!field || typeof field !== "string") {
                 response.result = 400
                 response.response = null
-                response.extra = { error: "Field name is required and must be a string" }
+                response.extra = {
+                    error: "Field name is required and must be a string",
+                }
                 break
             }
 
-            if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+            if (
+                typeof index !== "number" ||
+                !Number.isInteger(index) ||
+                index < 0
+            ) {
                 response.result = 400
                 response.response = null
-                response.extra = { error: "Index is required and must be a non-negative integer" }
+                response.extra = {
+                    error: "Index is required and must be a non-negative integer",
+                }
                 break
             }
 
@@ -1085,58 +1191,78 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
                 if (program.encoding === "binary") {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    response.extra = {
+                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
+                    }
                     break
                 }
 
-                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                if (
+                    !program.data ||
+                    typeof program.data !== "object" ||
+                    !(field in program.data)
+                ) {
                     response.result = 404
                     response.response = null
                     response.extra = { error: `Field not found: ${field}` }
                     break
                 }
 
-                const fieldValue = (program.data as Record<string, unknown>)[field]
+                const fieldValue = (program.data as Record<string, unknown>)[
+                    field
+                ]
                 if (!Array.isArray(fieldValue)) {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: `Field '${field}' is not an array` }
+                    response.extra = {
+                        error: `Field '${field}' is not an array`,
+                    }
                     break
                 }
 
                 if (index >= fieldValue.length) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Index ${index} out of bounds. Array length: ${fieldValue.length}` }
+                    response.extra = {
+                        error: `Index ${index} out of bounds. Array length: ${fieldValue.length}`,
+                    }
                     break
                 }
 
@@ -1147,10 +1273,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     item: fieldValue[index],
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramItem error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramItem error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -1177,7 +1308,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             if (!field || typeof field !== "string") {
                 response.result = 400
                 response.response = null
-                response.extra = { error: "Field name is required and must be a string" }
+                response.extra = {
+                    error: "Field name is required and must be a string",
+                }
                 break
             }
 
@@ -1185,40 +1318,51 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
                 if (program.encoding === "binary") {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    response.extra = {
+                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
+                    }
                     break
                 }
 
-                const hasField = program.data &&
+                const hasField =
+                    program.data &&
                     typeof program.data === "object" &&
                     field in program.data
 
@@ -1228,10 +1372,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     exists: hasField,
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] hasStorageProgramField error: ${error}`)
+                log.error(
+                    `[manageNodeCall] hasStorageProgramField error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -1258,7 +1407,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             if (!field || typeof field !== "string") {
                 response.result = 400
                 response.response = null
-                response.extra = { error: "Field name is required and must be a string" }
+                response.extra = {
+                    error: "Field name is required and must be a string",
+                }
                 break
             }
 
@@ -1266,40 +1417,54 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
                 if (program.encoding === "binary") {
                     response.result = 400
                     response.response = null
-                    response.extra = { error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access." }
+                    response.extra = {
+                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
+                    }
                     break
                 }
 
-                if (!program.data || typeof program.data !== "object" || !(field in program.data)) {
+                if (
+                    !program.data ||
+                    typeof program.data !== "object" ||
+                    !(field in program.data)
+                ) {
                     response.result = 404
                     response.response = null
                     response.extra = { error: `Field not found: ${field}` }
@@ -1323,10 +1488,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     type: fieldType,
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramFieldType error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramFieldType error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -1353,29 +1523,37 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
@@ -1394,10 +1572,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     lastModifiedByTx: program.lastModifiedByTx,
                 }
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgramAll error: ${error}`)
+                log.error(
+                    `[manageNodeCall] getStorageProgramAll error: ${error}`,
+                )
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }

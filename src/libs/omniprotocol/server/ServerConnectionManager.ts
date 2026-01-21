@@ -65,7 +65,9 @@ export class ServerConnectionManager extends EventEmitter {
      * Close all connections
      */
     async closeAll(): Promise<void> {
-        log.info(`[ServerConnectionManager] Closing ${this.connections.size} connections...`)
+        log.info(
+            `[ServerConnectionManager] Closing ${this.connections.size} connections...`,
+        )
 
         const closePromises = Array.from(this.connections.values()).map(conn =>
             conn.close(),
@@ -151,7 +153,10 @@ export class ServerConnectionManager extends EventEmitter {
                 }
 
                 // Remove idle connections
-                if (state === "IDLE" && now - lastActivity > this.config.connectionTimeout) {
+                if (
+                    state === "IDLE" &&
+                    now - lastActivity > this.config.connectionTimeout
+                ) {
                     toRemove.push(id)
                     conn.close()
                     continue

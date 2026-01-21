@@ -40,7 +40,7 @@ export enum OmniOpcode {
     GET_VALIDATOR_PHASE = 0x37,
     GREENLIGHT = 0x38,
     GET_BLOCK_TIMESTAMP = 0x39,
-    VALIDATOR_STATUS_SYNC = 0x3A,
+    VALIDATOR_STATUS_SYNC = 0x3a,
 
     // 0x4X GCR Operations
     GCR_GENERIC = 0x40,
@@ -53,8 +53,8 @@ export enum OmniOpcode {
     GCR_GET_REFERRAL_INFO = 0x47,
     GCR_VALIDATE_REFERRAL = 0x48,
     GCR_GET_ACCOUNT_BY_IDENTITY = 0x49,
-    GCR_GET_ADDRESS_INFO = 0x4A,
-    GCR_GET_ADDRESS_NONCE = 0x4B,
+    GCR_GET_ADDRESS_INFO = 0x4a,
+    GCR_GET_ADDRESS_NONCE = 0x4b,
 
     // 0x5X Browser / Client
     LOGIN_REQUEST = 0x50,
@@ -69,18 +69,17 @@ export enum OmniOpcode {
     ADMIN_AWARD_POINTS = 0x62,
 
     // 0xFX Protocol Meta
-    PROTO_VERSION_NEGOTIATE = 0xF0,
-    PROTO_CAPABILITY_EXCHANGE = 0xF1,
-    PROTO_ERROR = 0xF2,
-    PROTO_PING = 0xF3,
-    PROTO_DISCONNECT = 0xF4
+    PROTO_VERSION_NEGOTIATE = 0xf0,
+    PROTO_CAPABILITY_EXCHANGE = 0xf1,
+    PROTO_ERROR = 0xf2,
+    PROTO_PING = 0xf3,
+    PROTO_DISCONNECT = 0xf4,
 }
 
-export const ALL_REGISTERED_OPCODES: OmniOpcode[] = Object.values(OmniOpcode).filter(
-    (value) => typeof value === "number",
-) as OmniOpcode[]
+export const ALL_REGISTERED_OPCODES: OmniOpcode[] = Object.values(
+    OmniOpcode,
+).filter(value => typeof value === "number") as OmniOpcode[]
 
 export function opcodeToString(opcode: OmniOpcode): string {
     return OmniOpcode[opcode] ?? `UNKNOWN_${opcode}`
 }
-

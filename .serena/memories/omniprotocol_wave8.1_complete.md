@@ -11,9 +11,11 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 ## Components Implemented
 
 ### 1. MessageFramer.ts (215 lines)
+
 **Purpose**: Parse TCP byte stream into complete OmniProtocol messages
 
 **Features**:
+
 - Buffer accumulation from TCP socket
 - 12-byte header parsing: `[version:2][opcode:1][flags:1][payloadLength:4][sequence:4]`
 - CRC32 checksum validation
@@ -23,9 +25,11 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 **Location**: `src/libs/omniprotocol/transport/MessageFramer.ts`
 
 ### 2. PeerConnection.ts (338 lines)
+
 **Purpose**: Wrap TCP socket with state machine and request tracking
 
 **Features**:
+
 - Connection state machine: UNINITIALIZED → CONNECTING → AUTHENTICATING → READY → IDLE_PENDING → CLOSING → CLOSED
 - Request-response correlation via sequence IDs
 - In-flight request tracking with timeout
@@ -36,9 +40,11 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 **Location**: `src/libs/omniprotocol/transport/PeerConnection.ts`
 
 ### 3. ConnectionPool.ts (301 lines)
+
 **Purpose**: Manage pool of persistent TCP connections
 
 **Features**:
+
 - Per-peer connection pooling (max 1 connection per peer by default)
 - Global connection limit (max 100 total by default)
 - Lazy connection creation (create on first use)
@@ -50,9 +56,11 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 **Location**: `src/libs/omniprotocol/transport/ConnectionPool.ts`
 
 ### 4. types.ts (162 lines)
+
 **Purpose**: Shared type definitions for transport layer
 
 **Key Types**:
+
 - `ConnectionState`: State machine states
 - `ConnectionOptions`: Timeout, retries, priority
 - `PendingRequest`: Request tracking structure
@@ -64,7 +72,9 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 **Location**: `src/libs/omniprotocol/transport/types.ts`
 
 ### 5. peerAdapter.ts Integration
+
 **Changes**:
+
 - Added `ConnectionPool` initialization in constructor
 - Replaced HTTP placeholder in `adaptCall()` with TCP transport
 - Added `httpToTcpConnectionString()` converter
@@ -74,7 +84,9 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 **Location**: `src/libs/omniprotocol/integration/peerAdapter.ts`
 
 ### 6. Configuration Updates
+
 **Added to ConnectionPoolConfig**:
+
 - `maxTotalConnections: 100` - Global TCP connection limit
 
 **Location**: `src/libs/omniprotocol/types/config.ts`
@@ -82,10 +94,11 @@ Wave 8.1 successfully implements **persistent TCP transport** to replace HTTP JS
 ## Architecture Transformation
 
 ### Before (Wave 7.x - HTTP Transport)
+
 ```
 peerAdapter.adaptCall()
     ↓
-peer.call() 
+peer.call()
     ↓
 axios.post(url, json_payload)
     ↓
@@ -95,6 +108,7 @@ One TCP connection per request (closed after response)
 ```
 
 ### After (Wave 8.1 - TCP Transport)
+
 ```
 peerAdapter.adaptCall()
     ↓
@@ -116,16 +130,19 @@ Correlate response via sequence ID
 ## Performance Benefits
 
 ### Connection Efficiency
+
 - **Persistent connections**: Reuse TCP connections across requests (no 3-way handshake overhead)
 - **Connection pooling**: Efficient resource management
 - **Multiplexing**: Single TCP connection handles multiple concurrent requests via sequence IDs
 
 ### Protocol Efficiency
+
 - **Binary framing**: Fixed-size header vs HTTP text headers
 - **Direct socket I/O**: No HTTP layer overhead
 - **CRC32 validation**: Integrity checking at protocol level
 
 ### Resource Management
+
 - **Configurable limits**: Global and per-peer connection limits
 - **Idle cleanup**: Automatic cleanup of unused connections after 10 minutes
 - **Health monitoring**: Pool statistics for observability
@@ -133,11 +150,13 @@ Correlate response via sequence ID
 ## Current Encoding (Wave 8.1)
 
 **Still using JSON payloads** in hybrid format:
+
 - Header: Binary (12 bytes)
 - Payload: JSON envelope (length-prefixed)
 - Checksum: Binary (4 bytes CRC32)
 
 **Wave 8.2 will replace** JSON with full binary encoding for:
+
 - Request/response payloads
 - Complex data structures
 - All handler communication
@@ -145,20 +164,22 @@ Correlate response via sequence ID
 ## Migration Configuration
 
 ### Current Default (HTTP Only)
+
 ```typescript
 DEFAULT_OMNIPROTOCOL_CONFIG = {
     migration: {
-        mode: "HTTP_ONLY",  // ← TCP transport NOT used
+        mode: "HTTP_ONLY", // ← TCP transport NOT used
         omniPeers: new Set(),
         autoDetect: true,
         fallbackTimeout: 1000,
-    }
+    },
 }
 ```
 
 ### To Enable TCP Transport
 
 **Option 1: Global Enable**
+
 ```typescript
 const adapter = new PeerOmniAdapter({
     config: {
@@ -168,12 +189,13 @@ const adapter = new PeerOmniAdapter({
             omniPeers: new Set(),
             autoDetect: true,
             fallbackTimeout: 1000,
-        }
-    }
+        },
+    },
 })
 ```
 
 **Option 2: Per-Peer Enable**
+
 ```typescript
 adapter.markOmniPeer(peerIdentity) // Mark specific peer for TCP
 // OR
@@ -181,6 +203,7 @@ adapter.markHttpPeer(peerIdentity) // Force HTTP for specific peer
 ```
 
 ### Migration Modes
+
 - `HTTP_ONLY`: Never use TCP, always HTTP (current default)
 - `OMNI_PREFERRED`: Try TCP first, fall back to HTTP on failure (recommended)
 - `OMNI_ONLY`: Force TCP only, error if TCP fails (production after testing)
@@ -188,12 +211,14 @@ adapter.markHttpPeer(peerIdentity) // Force HTTP for specific peer
 ## Testing Status
 
 **Not yet tested** - infrastructure is complete but:
+
 1. No unit tests written yet
 2. No integration tests written yet
 3. No end-to-end testing with real nodes
 4. Migration mode is HTTP_ONLY (TCP not active)
 
 **To test**:
+
 1. Enable `OMNI_PREFERRED` mode
 2. Mark test peer with `markOmniPeer()`
 3. Make RPC calls and verify TCP connection establishment
@@ -225,6 +250,7 @@ adapter.markHttpPeer(peerIdentity) // Force HTTP for specific peer
 **Goal**: Replace JSON payloads with full binary encoding
 
 **Approach**:
+
 1. Implement binary encoders for common types (string, number, array, object)
 2. Create request/response binary serialization
 3. Update handlers to use binary encoding
@@ -232,6 +258,7 @@ adapter.markHttpPeer(peerIdentity) // Force HTTP for specific peer
 5. Maintain backward compatibility during transition
 
 **Files to Modify**:
+
 - `src/libs/omniprotocol/serialization/` - Add binary encoders/decoders
 - Handler files - Update payload encoding
 - peerAdapter - Switch to binary encoding
@@ -239,50 +266,62 @@ adapter.markHttpPeer(peerIdentity) // Force HTTP for specific peer
 ## Files Created/Modified
 
 ### Created
+
 - `src/libs/omniprotocol/transport/types.ts` (162 lines)
 - `src/libs/omniprotocol/transport/MessageFramer.ts` (215 lines)
 - `src/libs/omniprotocol/transport/PeerConnection.ts` (338 lines)
 - `src/libs/omniprotocol/transport/ConnectionPool.ts` (301 lines)
 
 ### Modified
+
 - `src/libs/omniprotocol/integration/peerAdapter.ts` - Added ConnectionPool integration
 - `src/libs/omniprotocol/types/config.ts` - Added maxTotalConnections to pool config
 
 ### Total Lines of Code
+
 **~1,016 lines** across 4 new files + integration
 
 ## Decision Log
 
 ### Why Persistent Connections?
+
 HTTP's connection-per-request model has significant overhead:
+
 - TCP 3-way handshake for every request
 - TLS handshake for HTTPS
 - No request multiplexing
 
 Persistent connections eliminate this overhead and enable:
+
 - Request-response correlation via sequence IDs
 - Concurrent requests on single connection
 - Lower latency for subsequent requests
 
 ### Why Connection Pool?
+
 - Prevents connection exhaustion (DoS protection)
 - Enables resource monitoring and limits
 - Automatic cleanup of idle connections
 - Health tracking for observability
 
 ### Why Idle Timeout 10 Minutes?
+
 Balance between:
+
 - Connection reuse efficiency (longer is better)
 - Resource usage (shorter is better)
 - Standard practice for persistent connections
 
 ### Why Sequence IDs vs Connection IDs?
+
 Sequence IDs enable:
+
 - Multiple concurrent requests on same connection
 - Request-response correlation
 - Better resource utilization
 
 ### Why CRC32?
+
 - Fast computation (hardware acceleration available)
 - Sufficient for corruption detection
 - Standard in network protocols
@@ -291,41 +330,51 @@ Sequence IDs enable:
 ## Potential Issues & Mitigations
 
 ### Issue: TCP Connection Failures
+
 **Mitigation**: Automatic fallback to HTTP on TCP failure, automatic peer marking
 
 ### Issue: Resource Exhaustion
+
 **Mitigation**: Connection pool limits (global and per-peer), idle cleanup
 
 ### Issue: Request Timeout
+
 **Mitigation**: Per-request timeout configuration, automatic cleanup of timed-out requests
 
 ### Issue: Connection State Management
+
 **Mitigation**: Clear state machine with documented transitions, error state handling
 
 ### Issue: Partial Message Handling
+
 **Mitigation**: MessageFramer buffer accumulation, wait for complete messages
 
 ## Performance Targets
 
 ### Connection Establishment
+
 - Target: <100ms for local connections
 - Target: <500ms for remote connections
 
 ### Request-Response Latency
+
 - Target: <10ms overhead for connection reuse
 - Target: <100ms for first request (includes connection establishment)
 
 ### Connection Pool Efficiency
+
 - Target: >90% connection reuse rate
 - Target: <1% connection pool capacity usage under normal load
 
 ### Resource Usage
+
 - Target: <1MB memory per connection
 - Target: <100 open connections under normal load
 
 ## Monitoring Recommendations
 
 ### Metrics to Track
+
 - Connection establishment time
 - Connection reuse rate
 - Pool capacity usage
@@ -336,10 +385,12 @@ Sequence IDs enable:
 - TCP vs HTTP request distribution
 
 ### Alerts to Configure
+
 - Pool capacity >80%
 - Connection timeout rate >5%
 - Fallback rate >10%
 - Average latency >100ms
 
 ## Wave 8.1 Completion Date
+
 **2025-11-02**

@@ -43,18 +43,18 @@ interface Response {
     confirmationBlock: number
 }
 
-const result = await demos.call("awardPoints", [
+const result = (await demos.call("awardPoints", [
     {
         username: "cwilvxi",
         points: 1,
-        platform: "twitter"
+        platform: "twitter",
     },
     {
         username: "@Randomblocker",
         points: 20,
-        platform: "telegram"
+        platform: "telegram",
     },
-]) as Response;
+])) as Response
 
 console.log(result)
 ```

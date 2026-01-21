@@ -418,10 +418,10 @@ export class Proxy {
             targetPort: parsedUrl.port
                 ? Number(parsedUrl.port)
                 : parsedUrl.protocol === "https:"
-                ? 443
-                : parsedUrl.protocol === "http:"
-                ? 80
-                : undefined,
+                  ? 443
+                  : parsedUrl.protocol === "http:"
+                    ? 80
+                    : undefined,
         }
     }
 

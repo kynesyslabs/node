@@ -19,15 +19,15 @@ npm start
 ### Required
 
 - **OMNI_ENABLED** - Enable/disable OmniProtocol server
-  - Values: `true` or `false`
-  - Default: `false` (disabled)
-  - Example: `OMNI_ENABLED=true`
+    - Values: `true` or `false`
+    - Default: `false` (disabled)
+    - Example: `OMNI_ENABLED=true`
 
 ### Optional
 
 - **OMNI_PORT** - TCP port for OmniProtocol server
-  - Default: `HTTP_PORT + 1` (e.g., if HTTP is 3000, OMNI will be 3001)
-  - Example: `OMNI_PORT=3001`
+    - Default: `HTTP_PORT + 1` (e.g., if HTTP is 3000, OMNI will be 3001)
+    - Example: `OMNI_PORT=3001`
 
 ## Configuration Examples
 
@@ -107,6 +107,7 @@ kill -TERM <node_pid>
 ```
 
 Output:
+
 ```
 [SHUTDOWN] Received SIGINT, shutting down gracefully...
 [SHUTDOWN] Stopping OmniProtocol server...
@@ -123,10 +124,12 @@ Output:
 **Error**: `Error: listen EADDRINUSE: address already in use :::3001`
 
 **Solution**: Port is already in use. Either:
+
 1. Change OMNI_PORT to a different port
 2. Stop the process using port 3001
 
 **Check what's using the port**:
+
 ```bash
 lsof -i :3001
 ```
@@ -134,6 +137,7 @@ lsof -i :3001
 ### No connections accepted
 
 **Check firewall**:
+
 ```bash
 # Ubuntu/Debian
 sudo ufw allow 3001/tcp
@@ -152,11 +156,13 @@ If you see authentication errors in logs:
 ```
 
 **Possible causes**:
+
 - Client using wrong private key
 - Timestamp skew >5 minutes (check system time)
 - Corrupted message in transit
 
 **Fix**:
+
 1. Verify client keys match peer identity
 2. Sync system time with NTP
 3. Check network for packet corruption
@@ -180,6 +186,7 @@ const omniServer = await startOmniProtocolServer({
 ### Timeouts
 
 Default settings:
+
 - Auth timeout: 5 seconds
 - Idle timeout: 10 minutes (600,000ms)
 
@@ -189,7 +196,7 @@ To adjust:
 const omniServer = await startOmniProtocolServer({
     enabled: true,
     port: indexState.OMNI_PORT,
-    authTimeout: 10000,      // 10 seconds
+    authTimeout: 10000, // 10 seconds
     connectionTimeout: 300000, // 5 minutes
 })
 ```
@@ -245,9 +252,9 @@ const adapter = new PeerOmniAdapter({
     config: {
         migration: {
             mode: "OMNI_PREFERRED", // Use OmniProtocol when available
-            omniPeers: new Set(["peer-identity-1", "peer-identity-2"])
-        }
-    }
+            omniPeers: new Set(["peer-identity-1", "peer-identity-2"]),
+        },
+    },
 })
 ```
 
@@ -261,6 +268,7 @@ const adapter = new PeerOmniAdapter({
 ✅ Per-handler auth requirements
 
 ⚠️ **Missing** (not production-ready yet):
+
 - ❌ Rate limiting (DoS vulnerable)
 - ❌ TLS/SSL (plain TCP)
 - ❌ Per-IP connection limits
@@ -268,11 +276,13 @@ const adapter = new PeerOmniAdapter({
 ### Recommendations
 
 **For testing/development**:
+
 - Enable on localhost only
 - Use behind firewall/VPN
 - Monitor connection counts
 
 **For production** (once rate limiting is added):
+
 - Enable rate limiting
 - Use behind reverse proxy
 - Monitor for abuse patterns
@@ -289,6 +299,7 @@ const adapter = new PeerOmniAdapter({
 ## Support
 
 For issues or questions:
+
 - Check implementation status: `src/libs/omniprotocol/IMPLEMENTATION_STATUS.md`
 - View specifications: `OmniProtocol/08_TCP_SERVER_IMPLEMENTATION.md`
 - Authentication details: `OmniProtocol/09_AUTHENTICATION_IMPLEMENTATION.md`

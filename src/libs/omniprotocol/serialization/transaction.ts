@@ -24,7 +24,9 @@ function encodeStringArray(values: string[] = []): Buffer {
     return Buffer.concat(parts)
 }
 
-function encodeGcrEdits(edits: Array<{ key?: string; value?: string }> = []): Buffer {
+function encodeGcrEdits(
+    edits: Array<{ key?: string; value?: string }> = [],
+): Buffer {
     const parts: Buffer[] = [PrimitiveEncoder.encodeUInt16(edits.length)]
     for (const edit of edits) {
         parts.push(PrimitiveEncoder.encodeString(edit?.key ?? ""))
@@ -72,7 +74,9 @@ export function encodeTransaction(transaction: any): Buffer {
         PrimitiveEncoder.encodeUInt64(toBigInt(content?.amount)),
         encodeStringArray(orderedData),
         encodeGcrEdits(edits),
-        PrimitiveEncoder.encodeUInt64(toBigInt(content?.nonce ?? transaction?.nonce)),
+        PrimitiveEncoder.encodeUInt64(
+            toBigInt(content?.nonce ?? transaction?.nonce),
+        ),
         PrimitiveEncoder.encodeUInt64(
             toBigInt(content?.timestamp ?? transaction?.timestamp),
         ),
@@ -157,7 +161,10 @@ export function decodeTransaction(buffer: Buffer): DecodedTransaction {
 
     let raw: Record<string, unknown> = {}
     try {
-        raw = JSON.parse(rawBytes.value.toString("utf8")) as Record<string, unknown>
+        raw = JSON.parse(rawBytes.value.toString("utf8")) as Record<
+            string,
+            unknown
+        >
     } catch {
         raw = {}
     }
@@ -191,7 +198,9 @@ export interface TransactionEnvelopePayload {
     transaction: Buffer
 }
 
-export function encodeTransactionEnvelope(payload: TransactionEnvelopePayload): Buffer {
+export function encodeTransactionEnvelope(
+    payload: TransactionEnvelopePayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeVarBytes(payload.transaction),

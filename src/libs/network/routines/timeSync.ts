@@ -74,9 +74,7 @@ export const calculatePeerTimeOffset =
         const roundtrips = results.map(result => result.roundtrip)
         const limit = stat.median(roundtrips) + stat.std(roundtrips)
 
-        log.debug(
-            `[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`,
-        )
+        log.debug(`[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`)
         log.debug(
             `[PEER TIMESYNC] latency standard deviation: ${stat.std(
                 roundtrips,

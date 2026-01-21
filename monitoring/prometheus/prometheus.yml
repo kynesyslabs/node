@@ -10,10 +10,10 @@
 # - Prometheus self-monitoring
 
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-  external_labels:
-    monitor: 'demos-network'
+    scrape_interval: 15s
+    evaluation_interval: 15s
+    external_labels:
+        monitor: "demos-network"
 
 # Alerting configuration (optional, for future use)
 # alerting:
@@ -27,35 +27,35 @@ global:
 #   - "alerts/*.yml"
 
 scrape_configs:
-  # Prometheus self-monitoring
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['localhost:9090']
-    metrics_path: /metrics
+    # Prometheus self-monitoring
+    - job_name: "prometheus"
+      static_configs:
+          - targets: ["localhost:9090"]
+      metrics_path: /metrics
 
-  # Demos Network Node metrics
-  # The node exposes metrics at /metrics endpoint on METRICS_PORT (default 9090)
-  # NOTE: If you changed METRICS_PORT in your main .env file, update the target below to match
-  # For example, if METRICS_PORT=3333, change the target to 'host.docker.internal:3333'
-  - job_name: 'demos-node'
-    static_configs:
-      - targets: ['host.docker.internal:9090']  # Must match METRICS_PORT from main .env
-        labels:
-          instance: 'local-node'
-          environment: 'development'
-    metrics_path: /metrics
-    scrape_interval: 5s  # More frequent for real-time monitoring
-    scrape_timeout: 5s
+    # Demos Network Node metrics
+    # The node exposes metrics at /metrics endpoint on METRICS_PORT (default 9090)
+    # NOTE: If you changed METRICS_PORT in your main .env file, update the target below to match
+    # For example, if METRICS_PORT=3333, change the target to 'host.docker.internal:3333'
+    - job_name: "demos-node"
+      static_configs:
+          - targets: ["host.docker.internal:9090"] # Must match METRICS_PORT from main .env
+            labels:
+                instance: "local-node"
+                environment: "development"
+      metrics_path: /metrics
+      scrape_interval: 5s # More frequent for real-time monitoring
+      scrape_timeout: 5s
 
-  # Node Exporter for host-level metrics (optional)
-  # Only scraped if node-exporter is running (--profile full)
-  - job_name: 'node-exporter'
-    static_configs:
-      - targets: ['node-exporter:9100']
-        labels:
-          instance: 'host'
-    metrics_path: /metrics
-    scrape_interval: 15s
+    # Node Exporter for host-level metrics (optional)
+    # Only scraped if node-exporter is running (--profile full)
+    - job_name: "node-exporter"
+      static_configs:
+          - targets: ["node-exporter:9100"]
+            labels:
+                instance: "host"
+      metrics_path: /metrics
+      scrape_interval: 15s
 
 # Additional scrape configs for multi-node setups
 # Uncomment and customize for your deployment

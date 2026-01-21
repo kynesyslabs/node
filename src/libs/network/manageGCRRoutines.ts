@@ -135,9 +135,8 @@ export default async function manageGCRRoutines(
 
         case "getNomisIdentities": {
             try {
-                response.response = await NomisIdentityProvider.listIdentities(
-                    sender,
-                )
+                response.response =
+                    await NomisIdentityProvider.listIdentities(sender)
             } catch (error) {
                 response.result = 400
                 response.response = null
@@ -196,30 +195,38 @@ export default async function manageGCRRoutines(
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const program = await GCRStorageProgramRoutines.getStorageProgram(
-                    storageAddress,
-                    repository,
-                )
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
 
                 if (!program) {
                     response.result = 404
                     response.response = null
-                    response.extra = { error: `Storage program not found: ${storageAddress}` }
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
                     break
                 }
 
                 // Check read permission
-                const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
-                    program,
-                    requesterAddress,
-                )
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
 
                 if (!hasReadAccess) {
                     response.result = 403
                     response.response = null
-                    response.extra = { error: "Permission denied: You do not have read access to this storage program" }
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
                     break
                 }
 
@@ -238,7 +245,10 @@ export default async function manageGCRRoutines(
             } catch (error) {
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -257,16 +267,22 @@ export default async function manageGCRRoutines(
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const programs = await GCRStorageProgramRoutines.getStorageProgramsByOwner(
-                    owner,
-                    repository,
-                )
+                const programs =
+                    await GCRStorageProgramRoutines.getStorageProgramsByOwner(
+                        owner,
+                        repository,
+                    )
 
                 // Filter to only programs the requester can read
                 const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
                 )
 
                 // Map to response format (without full data for list view)
@@ -282,7 +298,10 @@ export default async function manageGCRRoutines(
             } catch (error) {
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }
@@ -302,21 +321,29 @@ export default async function manageGCRRoutines(
 
             try {
                 const db = await Datasource.getInstance()
-                const repository = db.getDataSource().getRepository(GCRStorageProgram)
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
 
-                const programs = await GCRStorageProgramRoutines.searchStorageProgramsByName(
-                    typeof query === "string" ? query.trim() : String(query),
-                    repository,
-                    {
-                        limit: options.limit || 50,
-                        offset: options.offset || 0,
-                        exactMatch: options.exactMatch || false,
-                    },
-                )
+                const programs =
+                    await GCRStorageProgramRoutines.searchStorageProgramsByName(
+                        typeof query === "string"
+                            ? query.trim()
+                            : String(query),
+                        repository,
+                        {
+                            limit: options.limit || 50,
+                            offset: options.offset || 0,
+                            exactMatch: options.exactMatch || false,
+                        },
+                    )
 
                 // Filter to only programs the requester can read
                 const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
                 )
 
                 // Map to response format (without full data for list view)
@@ -332,7 +359,10 @@ export default async function manageGCRRoutines(
             } catch (error) {
                 response.result = 500
                 response.response = null
-                response.extra = { error: error instanceof Error ? error.message : String(error) }
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
             }
             break
         }

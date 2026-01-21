@@ -42,7 +42,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
-   
+
     // Setting the last shard
     // getSharedState.lastShard = shard.map(peer => peer.identity)
     if (shard.length < 3) {

@@ -39,7 +39,10 @@ async function main() {
     await fs.promises.writeFile("public.key", publicKey)
     await fs.promises.writeFile(".demos_identity", "0x" + privateKey)
     // Logging
-    log.info("KEYMAKER", "Identity saved (or kept) to .demos_identity and public.key")
+    log.info(
+        "KEYMAKER",
+        "Identity saved (or kept) to .demos_identity and public.key",
+    )
 }
 
 main()

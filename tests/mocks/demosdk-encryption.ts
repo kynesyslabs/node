@@ -4,14 +4,19 @@ const DEFAULT_PUBLIC_KEY = new Uint8Array(32).fill(1)
 const DEFAULT_SIGNATURE = new Uint8Array([1, 2, 3, 4])
 
 export const ucrypto = {
-    async getIdentity(algorithm: string): Promise<{ publicKey: Uint8Array; algorithm: string }> {
+    async getIdentity(
+        algorithm: string,
+    ): Promise<{ publicKey: Uint8Array; algorithm: string }> {
         return {
             publicKey: DEFAULT_PUBLIC_KEY,
             algorithm,
         }
     },
 
-    async sign(algorithm: string, message: Uint8Array | ArrayBuffer): Promise<{ signature: Uint8Array }> {
+    async sign(
+        algorithm: string,
+        message: Uint8Array | ArrayBuffer,
+    ): Promise<{ signature: Uint8Array }> {
         void algorithm
         void message
         return { signature: DEFAULT_SIGNATURE }

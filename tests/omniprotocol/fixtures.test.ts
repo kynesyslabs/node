@@ -56,9 +56,7 @@ describe("Captured HTTP fixtures", () => {
         const payload = loadFixture<{
             result: number
             response: { number: number; hash: string }
-        }>(
-            "block_header",
-        )
+        }>("block_header")
 
         expect(payload.result).toBe(200)
         expect(typeof payload.response.number).toBe("number")

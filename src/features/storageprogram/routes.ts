@@ -39,7 +39,12 @@ interface StorageProgramResponse {
     createdAt?: string
     updatedAt?: string
     error?: string
-    errorCode?: "NOT_FOUND" | "PERMISSION_DENIED" | "DELETED" | "INTERNAL_ERROR" | "INVALID_REQUEST"
+    errorCode?:
+        | "NOT_FOUND"
+        | "PERMISSION_DENIED"
+        | "DELETED"
+        | "INTERNAL_ERROR"
+        | "INVALID_REQUEST"
 }
 
 /**
@@ -146,13 +151,18 @@ async function getStorageProgramHandler(req: Request): Promise<Response> {
             updatedAt: program.updatedAt.toISOString(),
         }
 
-        log.debug(`[StorageProgram] Read: ${storageAddress} by ${requesterAddress || "anonymous"}`)
+        log.debug(
+            `[StorageProgram] Read: ${storageAddress} by ${requesterAddress || "anonymous"}`,
+        )
         return jsonResponse(response)
     } catch (error) {
         log.error(`[StorageProgram] Error reading storage program: ${error}`)
         const response: StorageProgramResponse = {
             success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
+            error:
+                error instanceof Error
+                    ? error.message
+                    : "Internal server error",
             errorCode: "INTERNAL_ERROR",
         }
         return jsonResponse(response, 500)
@@ -194,14 +204,18 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
         // Fetch all programs by owner
-        const programs = await GCRStorageProgramRoutines.getStorageProgramsByOwner(
-            owner,
-            repository,
-        )
+        const programs =
+            await GCRStorageProgramRoutines.getStorageProgramsByOwner(
+                owner,
+                repository,
+            )
 
         // Filter to only programs the requester can read
         const accessiblePrograms = programs.filter(program =>
-            GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+            GCRStorageProgramRoutines.checkReadPermission(
+                program,
+                requesterAddress,
+            ),
         )
 
         // Map to response format (without full data for list view)
@@ -219,13 +233,18 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
             count: accessiblePrograms.length,
         }
 
-        log.debug(`[StorageProgram] Listed ${accessiblePrograms.length} programs for owner ${owner}`)
+        log.debug(
+            `[StorageProgram] Listed ${accessiblePrograms.length} programs for owner ${owner}`,
+        )
         return jsonResponse(response)
     } catch (error) {
         log.error(`[StorageProgram] Error listing storage programs: ${error}`)
         const response: StorageProgramsListResponse = {
             success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
+            error:
+                error instanceof Error
+                    ? error.message
+                    : "Internal server error",
         }
         return jsonResponse(response, 500)
     }
@@ -270,15 +289,19 @@ async function searchByNameHandler(req: Request): Promise<Response> {
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
         // Search programs by name
-        const programs = await GCRStorageProgramRoutines.searchStorageProgramsByName(
-            query.trim(),
-            repository,
-            { limit, offset, exactMatch },
-        )
+        const programs =
+            await GCRStorageProgramRoutines.searchStorageProgramsByName(
+                query.trim(),
+                repository,
+                { limit, offset, exactMatch },
+            )
 
         // Filter to only programs the requester can read
         const accessiblePrograms = programs.filter(program =>
-            GCRStorageProgramRoutines.checkReadPermission(program, requesterAddress),
+            GCRStorageProgramRoutines.checkReadPermission(
+                program,
+                requesterAddress,
+            ),
         )
 
         // Map to response format (without full data for list view)
@@ -296,13 +319,18 @@ async function searchByNameHandler(req: Request): Promise<Response> {
             count: accessiblePrograms.length,
         }
 
-        log.debug(`[StorageProgram] Search "${query}" found ${accessiblePrograms.length} programs`)
+        log.debug(
+            `[StorageProgram] Search "${query}" found ${accessiblePrograms.length} programs`,
+        )
         return jsonResponse(response)
     } catch (error) {
         log.error(`[StorageProgram] Error searching storage programs: ${error}`)
         const response: StorageProgramsListResponse = {
             success: false,
-            error: error instanceof Error ? error.message : "Internal server error",
+            error:
+                error instanceof Error
+                    ? error.message
+                    : "Internal server error",
         }
         return jsonResponse(response, 500)
     }
@@ -328,5 +356,7 @@ export function registerStorageProgramRoutes(server: BunServer): void {
     server.get("/storage-program/owner/*", listByOwnerHandler)
     server.get("/storage-program/*", getStorageProgramHandler)
 
-    log.info("[StorageProgram] Routes registered: /storage-program/:address, /storage-program/owner/:owner, /storage-program/search")
+    log.info(
+        "[StorageProgram] Routes registered: /storage-program/:address, /storage-program/owner/:owner, /storage-program/search",
+    )
 }

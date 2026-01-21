@@ -22,7 +22,10 @@ import {
     GreenlightResponsePayload,
     ProposeBlockHashResponsePayload,
 } from "../serialization/consensus"
-import { encodeNodeCallRequest, decodeNodeCallResponse } from "../serialization/control"
+import {
+    encodeNodeCallRequest,
+    decodeNodeCallResponse,
+} from "../serialization/control"
 
 export type ConsensusAdapterOptions = BaseAdapterOptions
 
@@ -79,7 +82,9 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
         }
 
         try {
-            const tcpConnectionString = this.httpToTcpConnectionString(peer.connection.string)
+            const tcpConnectionString = this.httpToTcpConnectionString(
+                peer.connection.string,
+            )
             const privateKey = this.getPrivateKey()
             const publicKey = this.getPublicKey()
 
@@ -97,7 +102,10 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
             }
 
             // Route to appropriate encoder/decoder based on method
-            const { payload, decoder } = this.getEncoderDecoder(innerMethod, innerParams)
+            const { payload, decoder } = this.getEncoderDecoder(
+                innerMethod,
+                innerParams,
+            )
 
             // Send authenticated request via dedicated opcode
             const responseBuffer = await this.connectionPool.sendAuthenticated(
@@ -122,7 +130,10 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
                 extra: "metadata" in decoded ? decoded.metadata : decoded,
             }
         } catch (error) {
-            this.handleFatalError(error, `OmniProtocol consensus failed for ${peer.identity}`)
+            this.handleFatalError(
+                error,
+                `OmniProtocol consensus failed for ${peer.identity}`,
+            )
 
             log.warning(
                 `[ConsensusOmniAdapter] OmniProtocol failed for ${peer.identity}, falling back to HTTP: ` +
@@ -151,7 +162,9 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
         innerParams: unknown[],
     ): Promise<RPCResponse> {
         try {
-            const tcpConnectionString = this.httpToTcpConnectionString(peer.connection.string)
+            const tcpConnectionString = this.httpToTcpConnectionString(
+                peer.connection.string,
+            )
             const privateKey = this.getPrivateKey()
             const publicKey = this.getPublicKey()
 
@@ -192,7 +205,10 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
-            this.handleFatalError(error, `OmniProtocol NODE_CALL failed for ${peer.identity}`)
+            this.handleFatalError(
+                error,
+                `OmniProtocol NODE_CALL failed for ${peer.identity}`,
+            )
 
             log.warning(
                 `[ConsensusOmniAdapter] NODE_CALL failed for ${peer.identity}, falling back to HTTP: ` +
@@ -220,7 +236,11 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
     ): { payload: Buffer; decoder: (buf: Buffer) => ConsensusDecodedResponse } {
         switch (method) {
             case "setValidatorPhase": {
-                const [phase, seed, blockRef] = params as [number, string, number]
+                const [phase, seed, blockRef] = params as [
+                    number,
+                    string,
+                    number,
+                ]
                 return {
                     payload: encodeSetValidatorPhaseRequest({
                         phase,
@@ -231,7 +251,11 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
                 }
             }
             case "greenlight": {
-                const [blockRef, timestamp, phase] = params as [number, number, number]
+                const [blockRef, timestamp, phase] = params as [
+                    number,
+                    number,
+                    number,
+                ]
                 return {
                     payload: encodeGreenlightRequest({
                         blockRef: BigInt(blockRef ?? 0),
@@ -265,14 +289,22 @@ export class ConsensusOmniAdapter extends BaseOmniAdapter {
     /**
      * Extract the main response value from decoded consensus response
      */
-    private extractResponseValue(method: string, decoded: ConsensusDecodedResponse): unknown {
+    private extractResponseValue(
+        method: string,
+        decoded: ConsensusDecodedResponse,
+    ): unknown {
         switch (method) {
             case "setValidatorPhase":
-                return (decoded as SetValidatorPhaseResponsePayload).greenlight ?? null
+                return (
+                    (decoded as SetValidatorPhaseResponsePayload).greenlight ??
+                    null
+                )
             case "greenlight":
                 return (decoded as GreenlightResponsePayload).accepted ?? null
             case "proposeBlockHash":
-                return (decoded as ProposeBlockHashResponsePayload).voter ?? null
+                return (
+                    (decoded as ProposeBlockHashResponsePayload).voter ?? null
+                )
             default:
                 return decoded
         }

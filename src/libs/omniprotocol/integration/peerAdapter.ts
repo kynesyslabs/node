@@ -10,7 +10,10 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Peer from "src/libs/peer/Peer"
 
 import { BaseOmniAdapter, BaseAdapterOptions } from "./BaseAdapter"
-import { encodeNodeCallRequest, decodeNodeCallResponse } from "../serialization/control"
+import {
+    encodeNodeCallRequest,
+    decodeNodeCallResponse,
+} from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
 
 export type AdapterOptions = BaseAdapterOptions
@@ -37,7 +40,9 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         // REVIEW Wave 8.1: TCP transport implementation with ConnectionPool
         try {
             // Convert HTTP URL to TCP connection string
-            const tcpConnectionString = this.httpToTcpConnectionString(peer.connection.string)
+            const tcpConnectionString = this.httpToTcpConnectionString(
+                peer.connection.string,
+            )
 
             // Encode RPC request as binary NodeCall format
             const payload = encodeNodeCallRequest({
@@ -96,7 +101,10 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         } catch (error) {
             console.error(error)
             // Check for fatal mode - will exit if OMNI_FATAL=true
-            this.handleFatalError(error, `OmniProtocol failed for peer ${peer.identity}`)
+            this.handleFatalError(
+                error,
+                `OmniProtocol failed for peer ${peer.identity}`,
+            )
 
             // On OmniProtocol failure, fall back to HTTP
             log.warning(
@@ -145,4 +153,3 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         )
     }
 }
-

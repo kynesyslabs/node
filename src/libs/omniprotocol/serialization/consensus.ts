@@ -17,7 +17,10 @@ function encodeHexBytes(hex: string): Buffer {
     return PrimitiveEncoder.encodeBytes(Buffer.from(normalized, "hex"))
 }
 
-function decodeHexBytes(buffer: Buffer, offset: number): {
+function decodeHexBytes(
+    buffer: Buffer,
+    offset: number,
+): {
     value: string
     bytesRead: number
 } {

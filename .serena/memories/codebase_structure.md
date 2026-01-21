@@ -1,6 +1,7 @@
 # Demos Network Node Software - Codebase Structure
 
 ## Root Directory Structure
+
 ```
 /
 ├── src/                    # Main source code
@@ -16,6 +17,7 @@
 ```
 
 ## Source Code Structure (`src/`)
+
 ```
 src/
 ├── index.ts               # Main application entry point
@@ -52,22 +54,26 @@ src/
 ## Key Architecture Patterns
 
 ### Feature-Based Organization
+
 - Each major feature has its own directory under `src/features/`
 - Features are self-contained with their own models, services, and utilities
 - Cross-feature communication through well-defined interfaces
 
 ### Core Library Structure
+
 - `libs/network/`: RPC server, API endpoints, networking protocols
 - `libs/blockchain/`: Genesis block management, chain operations
 - `libs/peer/`: P2P networking, peer discovery, connection management
 - `libs/utils/`: Shared utilities like time calibration, cryptographic operations
 
 ### Database Layer
+
 - TypeORM-based models in `src/model/`
 - Migration files in `src/migrations/`
 - Connection configuration in `src/model/datasource.ts`
 
 ### Configuration Files
+
 - `package.json`: Dependencies and scripts
 - `tsconfig.json`: TypeScript configuration
 - `.eslintrc.cjs`: ESLint rules and naming conventions
@@ -76,11 +82,13 @@ src/
 - `.env.example`: Environment variable template
 
 ## Entry Points
+
 - **Main Application**: `src/index.ts`
 - **Key Generation**: `src/libs/utils/keyMaker.ts`
 - **Backup/Restore**: `src/utilities/backupAndRestore.ts`
 
 ## Important Directories
+
 - **Runtime Data**: `data/` (chain.db, logs)
 - **Identity Files**: `.demos_identity`, `public.key`
 - **Peer Configuration**: `demos_peerlist.json`

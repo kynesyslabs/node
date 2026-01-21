@@ -5,7 +5,11 @@ import Hashing from "src/libs/crypto/hashing"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
-import { L2PSMessage, L2PSRetrieveAllTxMessage, L2PSRegisterTxMessage } from "src/libs/l2ps/parallelNetworks"
+import {
+    L2PSMessage,
+    L2PSRetrieveAllTxMessage,
+    L2PSRegisterTxMessage,
+} from "src/libs/l2ps/parallelNetworks"
 import { Subnet } from "src/libs/l2ps/parallelNetworks"
 /* NOTE
 - Each l2ps is a list of nodes that are part of the l2ps
@@ -17,7 +21,6 @@ import { Subnet } from "src/libs/l2ps/parallelNetworks"
 - // ! TODO The non partecipating nodes will have a encrypted transactions hash property
 
 */
-
 
 export default async function handleL2PS(
     content: L2PSMessage,
@@ -36,7 +39,9 @@ export default async function handleL2PS(
         // This will retrieve all the transactions from the L2PS on a given block
         case "retrieveAll":
             payloadContent = content as L2PSRetrieveAllTxMessage
-            response = await subnet.getTransactions(payloadContent.data.blockNumber)
+            response = await subnet.getTransactions(
+                payloadContent.data.blockNumber,
+            )
             return response
         // This will register a transaction in the L2PS
         case "registerTx":

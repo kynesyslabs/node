@@ -37,4 +37,3 @@ export function decodeAddressInfoResponse(buffer: Buffer): AddressInfoPayload {
         additionalData: additional.value,
     }
 }
-

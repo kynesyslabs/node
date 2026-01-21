@@ -559,9 +559,8 @@ async function main() {
     // REVIEW: Start Prometheus Metrics server (enabled by default)
     if (indexState.METRICS_ENABLED) {
         try {
-            const { getMetricsServer, getMetricsCollector } = await import(
-                "./features/metrics"
-            )
+            const { getMetricsServer, getMetricsCollector } =
+                await import("./features/metrics")
 
             indexState.METRICS_PORT = await getNextAvailablePort(
                 indexState.METRICS_PORT,
@@ -726,9 +725,8 @@ async function main() {
                 log.error(
                     "[TLSNotary] Failed to start TLSNotary service: " + error,
                 )
-                const { isTLSNotaryFatal } = await import(
-                    "./features/tlsnotary"
-                )
+                const { isTLSNotaryFatal } =
+                    await import("./features/tlsnotary")
                 if (isTLSNotaryFatal()) {
                     log.error(
                         "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
@@ -775,7 +773,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         log.info("[MAIN] Wait aborted, starting sync loop")
                     }
@@ -813,7 +813,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         // Already logged above
                     }
@@ -889,9 +891,8 @@ async function gracefulShutdown(signal: string) {
         if (indexState.tlsnotaryService) {
             console.log("[SHUTDOWN] Stopping TLSNotary service...")
             try {
-                const { shutdownTLSNotary } = await import(
-                    "./features/tlsnotary"
-                )
+                const { shutdownTLSNotary } =
+                    await import("./features/tlsnotary")
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
@@ -903,7 +904,8 @@ async function gracefulShutdown(signal: string) {
             console.log("[SHUTDOWN] Stopping Metrics collector and server...")
             try {
                 // Stop the collector first to clear interval timer and prevent collection during shutdown
-                const { getMetricsCollector } = await import("./features/metrics")
+                const { getMetricsCollector } =
+                    await import("./features/metrics")
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {

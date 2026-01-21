@@ -46,9 +46,7 @@ export abstract class BaseOmniAdapter {
     protected readonly connectionPool: ConnectionPool
 
     constructor(options: BaseAdapterOptions = {}) {
-        this.config = cloneConfig(
-            options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG,
-        )
+        this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
 
         // Initialize ConnectionPool with configuration
         this.connectionPool = new ConnectionPool({
@@ -149,7 +147,9 @@ export abstract class BaseOmniAdapter {
             return process.env.OMNI_PORT
         }
         // Match server's detectDefaultPort() logic: HTTP port + 1
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
+        const httpPort = parseInt(
+            process.env.NODE_PORT || process.env.PORT || "3000",
+        )
         return String(httpPort + 1)
     }
 
@@ -230,7 +230,8 @@ export abstract class BaseOmniAdapter {
         }
 
         // Format error message
-        const errorMessage = error instanceof Error ? error.message : String(error)
+        const errorMessage =
+            error instanceof Error ? error.message : String(error)
         const errorStack = error instanceof Error ? error.stack : undefined
 
         log.error(`[OmniProtocol] OMNI_FATAL: ${context}`)
@@ -242,11 +243,12 @@ export abstract class BaseOmniAdapter {
         // If it's already an OmniProtocolError, it should have already exited
         // This handles non-OmniProtocolError cases (like plain Error("Connection closed"))
         if (!(error instanceof OmniProtocolError)) {
-            log.error("[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError")
+            log.error(
+                "[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError",
+            )
             process.exit(1)
         }
 
         return true
     }
 }
-

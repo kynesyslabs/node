@@ -1,27 +1,27 @@
 {
-  "request": {
-    "method": "consensus_routine",
-    "params": [
-      {
-        "method": "setValidatorPhase",
+    "request": {
+        "method": "consensus_routine",
         "params": [
-          6,
-          "f6fcf6e9b350a3edcb44d784659b81a88a1c78925e89151d45c0c9846b8ee3c1",
-          18
+            {
+                "method": "setValidatorPhase",
+                "params": [
+                    6,
+                    "f6fcf6e9b350a3edcb44d784659b81a88a1c78925e89151d45c0c9846b8ee3c1",
+                    18
+                ]
+            }
         ]
-      }
-    ]
-  },
-  "response": {
-    "result": 200,
-    "response": "Validator phase set to 6",
-    "require_reply": false,
-    "extra": {
-      "greenlight": true,
-      "timestamp": 1762006280,
-      "blockRef": 18
-    }
-  },
-  "frame_request": "103",
-  "frame_response": "105"
+    },
+    "response": {
+        "result": 200,
+        "response": "Validator phase set to 6",
+        "require_reply": false,
+        "extra": {
+            "greenlight": true,
+            "timestamp": 1762006280,
+            "blockRef": 18
+        }
+    },
+    "frame_request": "103",
+    "frame_response": "105"
 }

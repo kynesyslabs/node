@@ -187,17 +187,28 @@ export class Subnet {
             return null
         }
         // ! TODO Clean the typing of Cryptography.rsa.decrypt
-        const decryptedTransactionResponse = Cryptography.rsa.decrypt(encryptedTransaction.encryptedTransaction, this.keypair.privateKey)
+        const decryptedTransactionResponse = Cryptography.rsa.decrypt(
+            encryptedTransaction.encryptedTransaction,
+            this.keypair.privateKey,
+        )
         if (!decryptedTransactionResponse[0]) {
-            log.error("[L2PS] Error decrypting transaction " + encryptedTransaction.hash + " on subnet " + this.uid)
+            log.error(
+                "[L2PS] Error decrypting transaction " +
+                    encryptedTransaction.hash +
+                    " on subnet " +
+                    this.uid,
+            )
             return decryptedTransactionResponse[1]
         }
-        const decryptedTransaction: Transaction = decryptedTransactionResponse[1]
+        const decryptedTransaction: Transaction =
+            decryptedTransactionResponse[1]
         return decryptedTransaction
     }
 
     // REVIEW Implement a public key encryption method for the L2PS
-    public async encryptTransaction(transaction: Transaction): Promise<EncryptedTransaction> {
+    public async encryptTransaction(
+        transaction: Transaction,
+    ): Promise<EncryptedTransaction> {
         if (!this.keypair || !this.keypair.publicKey) {
             log.warning(
                 "[L2PS] Subnet " +
@@ -207,12 +218,21 @@ export class Subnet {
             return null
         }
         // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        const encryptedTransactionResponse = Cryptography.rsa.encrypt(JSON.stringify(transaction), this.keypair.publicKey)
+        const encryptedTransactionResponse = Cryptography.rsa.encrypt(
+            JSON.stringify(transaction),
+            this.keypair.publicKey,
+        )
         if (!encryptedTransactionResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction " + transaction.hash + " on subnet " + this.uid)
+            log.error(
+                "[L2PS] Error encrypting transaction " +
+                    transaction.hash +
+                    " on subnet " +
+                    this.uid,
+            )
             return encryptedTransactionResponse[1]
         }
-        const encryptedTransaction: EncryptedTransaction = encryptedTransactionResponse[1]
+        const encryptedTransaction: EncryptedTransaction =
+            encryptedTransactionResponse[1]
         return encryptedTransaction
     }
 
@@ -234,12 +254,24 @@ export class Subnet {
             return null
         }
         const publicKeyPEM = peer.L2PSpublicKeys.get(this.uid)
-        const publicKey: forge.pki.rsa.PublicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
+        const publicKey: forge.pki.rsa.PublicKey =
+            forge.pki.publicKeyFromPem(publicKeyPEM)
         const jsonTransaction = JSON.stringify(transaction)
         // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        const encryptedBaseTxResponse = Cryptography.rsa.encrypt(jsonTransaction, publicKey)
+        const encryptedBaseTxResponse = Cryptography.rsa.encrypt(
+            jsonTransaction,
+            publicKey,
+        )
         if (!encryptedBaseTxResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
+            log.error(
+                "[L2PS] Error encrypting transaction for peer " +
+                    peer.connection.string +
+                    "(" +
+                    peer.identity +
+                    ")" +
+                    " on subnet " +
+                    this.uid,
+            )
             return encryptedBaseTxResponse[1]
         }
         const encryptedBaseTx = encryptedBaseTxResponse[1]
@@ -252,9 +284,20 @@ export class Subnet {
             L2PS: this.keypair.publicKey,
         }
         // REVIEW Double pass encryption with the subnet public key
-        const encryptedTransactionDoublePassResponse = Cryptography.rsa.encrypt(JSON.stringify(encryptedTransaction), this.keypair.publicKey)
+        const encryptedTransactionDoublePassResponse = Cryptography.rsa.encrypt(
+            JSON.stringify(encryptedTransaction),
+            this.keypair.publicKey,
+        )
         if (!encryptedTransactionDoublePassResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
+            log.error(
+                "[L2PS] Error encrypting transaction for peer " +
+                    peer.connection.string +
+                    "(" +
+                    peer.identity +
+                    ")" +
+                    " on subnet " +
+                    this.uid,
+            )
             return encryptedTransactionDoublePassResponse[1]
         }
         encryptedTransaction = encryptedTransactionDoublePassResponse[1]

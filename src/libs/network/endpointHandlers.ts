@@ -221,7 +221,10 @@ export default class ServerHandlers {
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
-            log.error("SERVER", fname + "Invalid validityData signature key (not us) 💀")
+            log.error(
+                "SERVER",
+                fname + "Invalid validityData signature key (not us) 💀",
+            )
 
             result.success = false
             result.response = false
@@ -325,9 +328,8 @@ export default class ServerHandlers {
 
             case "web2Request": {
                 payload = tx.content.data[1] as IWeb2Payload
-                const web2Result = await ServerHandlers.handleWeb2Request(
-                    payload,
-                )
+                const web2Result =
+                    await ServerHandlers.handleWeb2Request(payload)
                 result.response = web2Result
                 break
             }
@@ -337,9 +339,8 @@ export default class ServerHandlers {
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
                 try {
-                    const demosWorkResult = await handleDemosWorkRequest(
-                        demosWorkScript,
-                    )
+                    const demosWorkResult =
+                        await handleDemosWorkRequest(demosWorkScript)
                     result.response = demosWorkResult
                 } catch (e) {
                     log.error(
