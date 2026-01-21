@@ -56,7 +56,6 @@ scrape_configs:
                 instance: "host"
       metrics_path: /metrics
       scrape_interval: 15s
-
 # Additional scrape configs for multi-node setups
 # Uncomment and customize for your deployment
 #

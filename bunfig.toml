@@ -1,0 +1,14 @@
+# Bun configuration for Demos Network Node
+# Docs: https://bun.sh/docs/runtime/bunfig
+
+[install]
+# Faster installs, consistent lockfile
+exact = true
+
+[install.lockfile]
+# Minimal output for CI/distributed work
+print = "short"
+
+[run]
+# Silent bun's own output, let scripts speak
+silent = true

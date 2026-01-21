@@ -238,9 +238,81 @@ docker-compose down          # Stop the network
 
 For detailed devnet documentation, see [devnet/README.md](devnet/README.md).
 
-## Development
+## Developer's Guide
 
 This is the official implementation maintained by KyneSys Labs. The codebase follows TypeScript best practices with comprehensive error handling and type safety.
+
+### Tooling Overview
+
+| Tool | Purpose | Command |
+|------|---------|---------|
+| **Bun** | Runtime & package manager | `bun install`, `bun run <script>` |
+| **Trunk** | Linting & formatting (owns ESLint + Prettier) | `bun check`, `bun fmt` |
+| **TypeScript** | Type checking | `bun type-check` |
+| **Jest** | Testing | `bun test:chains` |
+
+### Quick Commands
+
+```bash
+# Install dependencies
+bun install
+
+# Linting & formatting (Trunk-managed)
+bun check                    # Run all linters
+bun fmt                      # Auto-format code
+bun lint                     # ESLint only
+bun lint:fix                 # ESLint with auto-fix
+
+# Type checking
+bun type-check               # Fast check via Bun
+bun type-check-ts            # Full tsc --noEmit
+
+# Development
+bun start:bun                # Start node with Bun runtime
+bun dev                      # Start with hot reload
+
+# Dependency management
+bun upgrade_sdk              # Update @kynesyslabs/demosdk
+bun upgrade_deps             # Interactive dependency update
+```
+
+### Code Style
+
+- **Trunk owns linting**: ESLint and Prettier are managed by Trunk, not npm packages
+- **Run `bun check` before committing**: Catches style issues early
+- **Double quotes, no semicolons**: Per `.prettierrc` and `.eslintrc.cjs`
+- **camelCase** for variables/functions, **PascalCase** for types/classes
+
+### Project Structure Tips
+
+```
+src/
+├── features/          # Feature modules (MCP, metrics, multichain, etc.)
+├── libs/              # Core libraries (blockchain, consensus, crypto, network)
+├── model/             # TypeORM entities and database
+├── utilities/         # CLI tools, TUI, helpers
+└── index.ts           # Entry point
+```
+
+### Common Patterns
+
+- **Logging**: Use `CategorizedLogger` instead of `console.log` in `src/` (ESLint warns)
+- **Imports**: Prefer `@/` path aliases over deep relative imports
+- **SDK**: Import from `@kynesyslabs/demosdk`, check `demosdk-refs` MCP for docs
+- **Database**: TypeORM with `synchronize: true` is intentional for dev
+
+### Issue Tracking
+
+This project uses **bd (beads)** for issue tracking, not markdown TODOs:
+
+```bash
+bd ready                     # Show unblocked work
+bd create "title" -t task    # Create issue
+bd update <id> --status in_progress
+bd close <id>
+```
+
+See [AGENTS.md](AGENTS.md) for full workflow.
 
 ## Support
 
