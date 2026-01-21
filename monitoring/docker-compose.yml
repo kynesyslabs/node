@@ -16,12 +16,12 @@ services:
         container_name: demos-prometheus
         restart: unless-stopped
         command:
-            - "--config.file=/etc/prometheus/prometheus.yml"
-            - "--storage.tsdb.path=/prometheus"
-            - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}"
-            - "--web.console.libraries=/etc/prometheus/console_libraries"
-            - "--web.console.templates=/etc/prometheus/consoles"
-            - "--web.enable-lifecycle"
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+            - --web.console.libraries=/etc/prometheus/console_libraries
+            - --web.console.templates=/etc/prometheus/consoles
+            - --web.enable-lifecycle
         volumes:
             - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
             - prometheus_data:/prometheus
@@ -30,7 +30,7 @@ services:
         networks:
             - demos-monitoring
         extra_hosts:
-            - "host.docker.internal:host-gateway"
+            - host.docker.internal:host-gateway
 
     grafana:
         image: grafana/grafana:10.2.2
@@ -106,10 +106,10 @@ services:
         profiles:
             - full # Only starts with: docker compose --profile full up
         command:
-            - "--path.procfs=/host/proc"
-            - "--path.sysfs=/host/sys"
-            - "--path.rootfs=/rootfs"
-            - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/rootfs
+            - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
         volumes:
             - /proc:/host/proc:ro
             - /sys:/host/sys:ro

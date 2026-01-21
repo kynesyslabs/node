@@ -15,7 +15,7 @@ services:
         healthcheck:
             test:
                 [
-                    "CMD-SHELL",
+                    CMD-SHELL,
                     "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres",
                 ]
             interval: 5s

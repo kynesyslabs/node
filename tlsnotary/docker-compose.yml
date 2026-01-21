@@ -20,7 +20,7 @@ services:
             - "${TLSNOTARY_PORT:-7047}:7047"
         restart: unless-stopped
         healthcheck:
-            test: ["CMD", "curl", "-f", "http://localhost:7047/info"]
+            test: [CMD, curl, -f, http://localhost:7047/info]
             interval: 10s
             timeout: 5s
             retries: 3

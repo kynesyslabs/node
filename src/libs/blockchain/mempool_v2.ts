@@ -228,18 +228,17 @@ export default class Mempool {
             const result = await this.repo.delete({ hash: txHash })
 
             if (result.affected > 0) {
-                console.log(
+                log.debug(
                     `[Mempool] Removed transaction ${txHash} (DTR relay success)`,
                 )
             } else {
-                console.log(
+                log.debug(
                     `[Mempool] Transaction ${txHash} not found for removal`,
                 )
             }
         } catch (error) {
-            console.log(
-                `[Mempool] Error removing transaction ${txHash}:`,
-                error,
+            log.error(
+                `[Mempool] Error removing transaction ${txHash}: ${error}`,
             )
             throw error
         }

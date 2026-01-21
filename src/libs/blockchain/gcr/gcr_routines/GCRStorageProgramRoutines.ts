@@ -80,11 +80,24 @@ export function validateStorageProgramPayload(
     }
 
     // Granular operations require field name and JSON encoding
-    const granularOperations = ["SET_FIELD", "SET_ITEM", "APPEND_ITEM", "DELETE_FIELD", "DELETE_ITEM"]
+    const granularOperations = [
+        "SET_FIELD",
+        "SET_ITEM",
+        "APPEND_ITEM",
+        "DELETE_FIELD",
+        "DELETE_ITEM",
+    ]
     if (granularOperations.includes(payload.operation)) {
         // Validate field name is present
-        const payloadWithField = payload as StorageProgramPayload & { field?: string; index?: number; value?: unknown }
-        if (!payloadWithField.field || typeof payloadWithField.field !== "string") {
+        const payloadWithField = payload as StorageProgramPayload & {
+            field?: string
+            index?: number
+            value?: unknown
+        }
+        if (
+            !payloadWithField.field ||
+            typeof payloadWithField.field !== "string"
+        ) {
             return {
                 valid: false,
                 message: `Field name is required for ${payload.operation} operation`,
@@ -92,8 +105,12 @@ export function validateStorageProgramPayload(
         }
 
         // SET_ITEM and DELETE_ITEM require index
-        if ((payload.operation === "SET_ITEM" || payload.operation === "DELETE_ITEM") &&
-            (payloadWithField.index === undefined || typeof payloadWithField.index !== "number")) {
+        if (
+            (payload.operation === "SET_ITEM" ||
+                payload.operation === "DELETE_ITEM") &&
+            (payloadWithField.index === undefined ||
+                typeof payloadWithField.index !== "number")
+        ) {
             return {
                 valid: false,
                 message: `Index is required for ${payload.operation} operation`,
@@ -101,8 +118,12 @@ export function validateStorageProgramPayload(
         }
 
         // SET_FIELD, SET_ITEM, and APPEND_ITEM require value
-        if ((payload.operation === "SET_FIELD" || payload.operation === "SET_ITEM" || payload.operation === "APPEND_ITEM") &&
-            payloadWithField.value === undefined) {
+        if (
+            (payload.operation === "SET_FIELD" ||
+                payload.operation === "SET_ITEM" ||
+                payload.operation === "APPEND_ITEM") &&
+            payloadWithField.value === undefined
+        ) {
             return {
                 valid: false,
                 message: `Value is required for ${payload.operation} operation`,
@@ -111,7 +132,10 @@ export function validateStorageProgramPayload(
     }
 
     // Validate storage address format
-    if (!payload.storageAddress || !payload.storageAddress.startsWith("stor-")) {
+    if (
+        !payload.storageAddress ||
+        !payload.storageAddress.startsWith("stor-")
+    ) {
         return {
             valid: false,
             message: "Invalid storage address format. Expected: stor-{hash}",
@@ -232,11 +256,17 @@ function calculateJsonNestingDepth(obj: unknown, currentDepth = 0): number {
 
     if (Array.isArray(obj)) {
         for (const item of obj) {
-            maxDepth = Math.max(maxDepth, calculateJsonNestingDepth(item, currentDepth + 1))
+            maxDepth = Math.max(
+                maxDepth,
+                calculateJsonNestingDepth(item, currentDepth + 1),
+            )
         }
     } else {
         for (const value of Object.values(obj)) {
-            maxDepth = Math.max(maxDepth, calculateJsonNestingDepth(value, currentDepth + 1))
+            maxDepth = Math.max(
+                maxDepth,
+                calculateJsonNestingDepth(value, currentDepth + 1),
+            )
         }
     }
 
@@ -255,7 +285,10 @@ function isValidBase64(str: string): boolean {
 /**
  * Validate ACL structure
  */
-function validateACLStructure(acl: unknown): { valid: boolean; message: string } {
+function validateACLStructure(acl: unknown): {
+    valid: boolean
+    message: string
+} {
     if (!acl || typeof acl !== "object") {
         return { valid: false, message: "ACL must be an object" }
     }
@@ -274,11 +307,17 @@ function validateACLStructure(acl: unknown): { valid: boolean; message: string }
     // Validate allowed addresses if present
     if (aclObj.allowed !== undefined) {
         if (!Array.isArray(aclObj.allowed)) {
-            return { valid: false, message: "ACL allowed must be an array of addresses" }
+            return {
+                valid: false,
+                message: "ACL allowed must be an array of addresses",
+            }
         }
         for (const addr of aclObj.allowed) {
             if (typeof addr !== "string") {
-                return { valid: false, message: "ACL allowed must contain string addresses" }
+                return {
+                    valid: false,
+                    message: "ACL allowed must contain string addresses",
+                }
             }
         }
     }
@@ -286,11 +325,17 @@ function validateACLStructure(acl: unknown): { valid: boolean; message: string }
     // Validate blacklisted addresses if present
     if (aclObj.blacklisted !== undefined) {
         if (!Array.isArray(aclObj.blacklisted)) {
-            return { valid: false, message: "ACL blacklisted must be an array of addresses" }
+            return {
+                valid: false,
+                message: "ACL blacklisted must be an array of addresses",
+            }
         }
         for (const addr of aclObj.blacklisted) {
             if (typeof addr !== "string") {
-                return { valid: false, message: "ACL blacklisted must contain string addresses" }
+                return {
+                    valid: false,
+                    message: "ACL blacklisted must contain string addresses",
+                }
             }
         }
     }
@@ -355,7 +400,10 @@ export class GCRStorageProgramRoutines {
         const spEdit = editOperation as GCREditStorageProgram
 
         if (spEdit.type !== "storageProgram") {
-            return { success: false, message: "Invalid edit type for StorageProgram" }
+            return {
+                success: false,
+                message: "Invalid edit type for StorageProgram",
+            }
         }
 
         // SDK GCREditStorageProgram structure:
@@ -366,40 +414,81 @@ export class GCRStorageProgramRoutines {
         const operation = spEdit.context.operation
         const storageAddress = spEdit.target
 
-        log.info(`[StorageProgram] Processing ${operation} for ${storageAddress}`)
+        log.info(
+            `[StorageProgram] Processing ${operation} for ${storageAddress}`,
+        )
 
         switch (operation) {
             case "CREATE_STORAGE_PROGRAM": {
-                return this.handleCreate(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleCreate(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "WRITE_STORAGE": {
-                return this.handleWrite(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleWrite(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "UPDATE_ACCESS_CONTROL": {
-                return this.handleUpdateAcl(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleUpdateAcl(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "DELETE_STORAGE_PROGRAM": {
-                return this.handleDelete(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleDelete(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             // REVIEW: Granular field operations
             case "SET_FIELD": {
-                return this.handleSetField(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleSetField(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "SET_ITEM": {
-                return this.handleSetItem(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleSetItem(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "APPEND_ITEM": {
-                return this.handleAppendItem(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleAppendItem(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "DELETE_FIELD": {
-                return this.handleDeleteField(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleDeleteField(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             case "DELETE_ITEM": {
-                return this.handleDeleteItem(spEdit, gcrStorageProgramRepository, simulate)
+                return this.handleDeleteItem(
+                    spEdit,
+                    gcrStorageProgramRepository,
+                    simulate,
+                )
             }
             default: {
                 log.warning(`[StorageProgram] Unknown operation: ${operation}`)
-                return { success: false, message: `Unknown operation: ${operation}` }
+                return {
+                    success: false,
+                    message: `Unknown operation: ${operation}`,
+                }
             }
         }
     }
@@ -420,10 +509,15 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload | undefined
+        const variables = edit.context.data?.variables as
+            | StorageProgramPayload
+            | undefined
 
         if (!variables) {
-            return { success: false, message: "Missing data.variables for create operation" }
+            return {
+                success: false,
+                message: "Missing data.variables for create operation",
+            }
         }
 
         // Check if storage program already exists
@@ -445,7 +539,9 @@ export class GCRStorageProgramRoutines {
         const sizeBytes = variables.data
             ? calculateDataSize(variables.data, encoding)
             : 0
-        const chunks = Math.ceil(sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+        const chunks = Math.ceil(
+            sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        )
         const fee = BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
 
         // Create new storage program
@@ -457,15 +553,21 @@ export class GCRStorageProgramRoutines {
         program.data = variables.data || null
         program.sizeBytes = sizeBytes
         program.acl = variables.acl || { mode: "owner" }
-        program.metadata = (edit.context.data?.metadata as Record<string, unknown>) || variables.metadata || null
+        program.metadata =
+            (edit.context.data?.metadata as Record<string, unknown>) ||
+            variables.metadata ||
+            null
         // REVIEW: IPFS storage location handling - stub for future implementation
         // Currently only supports "onchain" storage. IPFS integration planned for future release.
         const requestedLocation = variables.storageLocation || "onchain"
         if (requestedLocation !== "onchain") {
             log.warning(
                 "[StorageProgram] IPFS storage not yet implemented. " +
-                "Requested \"" + requestedLocation + "\", falling back to \"onchain\". " +
-                "Address: " + storageAddress,
+                    "Requested \"" +
+                    requestedLocation +
+                    "\", falling back to \"onchain\". " +
+                    "Address: " +
+                    storageAddress,
             )
         }
         program.storageLocation = "onchain" // Always onchain for now
@@ -481,7 +583,10 @@ export class GCRStorageProgramRoutines {
         await repository.save(program)
         log.info(`[StorageProgram] Created: ${storageAddress}`)
 
-        return { success: true, message: `Storage program created: ${storageAddress}` }
+        return {
+            success: true,
+            message: `Storage program created: ${storageAddress}`,
+        }
     }
 
     /**
@@ -493,10 +598,15 @@ export class GCRStorageProgramRoutines {
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
-        const variables = edit.context.data?.variables as StorageProgramPayload | undefined
+        const variables = edit.context.data?.variables as
+            | StorageProgramPayload
+            | undefined
 
         if (!variables) {
-            return { success: false, message: "Missing data.variables for write operation" }
+            return {
+                success: false,
+                message: "Missing data.variables for write operation",
+            }
         }
 
         // Find existing storage program
@@ -539,7 +649,9 @@ export class GCRStorageProgramRoutines {
         const newSizeBytes = variables.data
             ? calculateDataSize(variables.data, encoding)
             : program.sizeBytes
-        const chunks = Math.ceil(newSizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
+        const chunks = Math.ceil(
+            newSizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        )
         const fee = BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
 
         // Update data
@@ -547,28 +659,42 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.encoding = encoding
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         // REVIEW: IPFS storage location handling - stub for future implementation
         // Write operations cannot change storageLocation after creation (always stays "onchain" for now)
-        if (variables.storageLocation && variables.storageLocation !== "onchain") {
+        if (
+            variables.storageLocation &&
+            variables.storageLocation !== "onchain"
+        ) {
             log.warning(
                 "[StorageProgram] IPFS storage not yet implemented. " +
-                "Write operation requested \"" + variables.storageLocation + "\", but storage location " +
-                "cannot be changed after creation. Address: " + storageAddress,
+                    "Write operation requested \"" +
+                    variables.storageLocation +
+                    "\", but storage location " +
+                    "cannot be changed after creation. Address: " +
+                    storageAddress,
             )
         }
 
         if (variables.metadata || edit.context.data?.metadata) {
-            const newMetadata = (edit.context.data?.metadata as Record<string, unknown>) || variables.metadata
+            const newMetadata =
+                (edit.context.data?.metadata as Record<string, unknown>) ||
+                variables.metadata
             program.metadata = { ...program.metadata, ...newMetadata }
         }
 
         await repository.save(program)
         log.info(`[StorageProgram] Updated: ${storageAddress}`)
 
-        return { success: true, message: `Storage program updated: ${storageAddress}` }
+        return {
+            success: true,
+            message: `Storage program updated: ${storageAddress}`,
+        }
     }
 
     /**
@@ -581,10 +707,16 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload | undefined
+        const variables = edit.context.data?.variables as
+            | StorageProgramPayload
+            | undefined
 
         if (!variables?.acl) {
-            return { success: false, message: "Missing acl in data.variables for updateAcl operation" }
+            return {
+                success: false,
+                message:
+                    "Missing acl in data.variables for updateAcl operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
@@ -612,13 +744,18 @@ export class GCRStorageProgramRoutines {
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated ACL update: ${storageAddress}`)
+            log.debug(
+                `[StorageProgram] Simulated ACL update: ${storageAddress}`,
+            )
             return { success: true, message: "Simulated ACL update successful" }
         }
 
         program.acl = variables.acl
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
 
         await repository.save(program)
         log.info(`[StorageProgram] ACL updated: ${storageAddress}`)
@@ -674,12 +811,18 @@ export class GCRStorageProgramRoutines {
         program.isDeleted = true
         program.deletedByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
 
         await repository.save(program)
         log.info(`[StorageProgram] Deleted: ${storageAddress}`)
 
-        return { success: true, message: `Storage program deleted: ${storageAddress}` }
+        return {
+            success: true,
+            message: `Storage program deleted: ${storageAddress}`,
+        }
     }
 
     /**
@@ -741,7 +884,9 @@ export class GCRStorageProgramRoutines {
         // Partial match using ILIKE (case-insensitive)
         return repository
             .createQueryBuilder("sp")
-            .where("sp.programName ILIKE :pattern", { pattern: `%${namePattern}%` })
+            .where("sp.programName ILIKE :pattern", {
+                pattern: `%${namePattern}%`,
+            })
             .andWhere("sp.isDeleted = false")
             .orderBy("sp.createdAt", "DESC")
             .take(limit)
@@ -764,7 +909,10 @@ export class GCRStorageProgramRoutines {
         // Public mode - everyone can read
         if (acl.mode === "public") {
             // Still check blacklist for public mode
-            if (requesterAddress && acl.blacklisted?.includes(requesterAddress)) {
+            if (
+                requesterAddress &&
+                acl.blacklisted?.includes(requesterAddress)
+            ) {
                 return false
             }
             return true
@@ -830,32 +978,55 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; value: unknown } | undefined
+        const variables = edit.context.data?.variables as
+            | (StorageProgramPayload & { field: string; value: unknown })
+            | undefined
 
         if (!variables?.field) {
-            return { success: false, message: "Field name is required for SET_FIELD operation" }
+            return {
+                success: false,
+                message: "Field name is required for SET_FIELD operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
         if (!program) {
-            return { success: false, message: `Storage program not found: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program not found: ${storageAddress}`,
+            }
         }
         if (program.isDeleted) {
-            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program has been deleted: ${storageAddress}`,
+            }
         }
 
         // Granular operations only work with JSON encoding
         if (program.encoding === "binary") {
-            return { success: false, message: "SET_FIELD operation not supported for binary encoding. Use WRITE_STORAGE instead." }
+            return {
+                success: false,
+                message:
+                    "SET_FIELD operation not supported for binary encoding. Use WRITE_STORAGE instead.",
+            }
         }
 
         // Check write permission
-        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
-            return { success: false, message: "No permission to write to this storage program" }
+        if (
+            program.owner !== sender &&
+            !checkWritePermission(program.acl, sender)
+        ) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`)
+            log.debug(
+                `[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`,
+            )
             return { success: true, message: "Simulated SET_FIELD successful" }
         }
 
@@ -869,25 +1040,41 @@ export class GCRStorageProgramRoutines {
 
         // Check size limit
         if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
         }
 
         // Calculate delta-based fee (only charge if size increased)
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
-        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+        const deltaChunks = Math.ceil(
+            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        )
+        const fee =
+            deltaChunks > 0
+                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
+                : 0n
 
         // Update program
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         await repository.save(program)
-        log.info(`[StorageProgram] SET_FIELD: ${storageAddress}.${variables.field} (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+        log.info(
+            `[StorageProgram] SET_FIELD: ${storageAddress}.${variables.field} (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
+        )
 
-        return { success: true, message: `Field ${variables.field} set successfully` }
+        return {
+            success: true,
+            message: `Field ${variables.field} set successfully`,
+        }
     }
 
     /**
@@ -900,41 +1087,74 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; index: number; value: unknown } | undefined
+        const variables = edit.context.data?.variables as
+            | (StorageProgramPayload & {
+                  field: string
+                  index: number
+                  value: unknown
+              })
+            | undefined
 
         if (!variables?.field || variables.index === undefined) {
-            return { success: false, message: "Field name and index are required for SET_ITEM operation" }
+            return {
+                success: false,
+                message:
+                    "Field name and index are required for SET_ITEM operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
         if (!program) {
-            return { success: false, message: `Storage program not found: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program not found: ${storageAddress}`,
+            }
         }
         if (program.isDeleted) {
-            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program has been deleted: ${storageAddress}`,
+            }
         }
 
         if (program.encoding === "binary") {
-            return { success: false, message: "SET_ITEM operation not supported for binary encoding" }
+            return {
+                success: false,
+                message: "SET_ITEM operation not supported for binary encoding",
+            }
         }
 
-        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
-            return { success: false, message: "No permission to write to this storage program" }
+        if (
+            program.owner !== sender &&
+            !checkWritePermission(program.acl, sender)
+        ) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
         }
 
         const currentData = (program.data as Record<string, unknown>) || {}
         const fieldValue = currentData[variables.field]
 
         if (!Array.isArray(fieldValue)) {
-            return { success: false, message: `Field ${variables.field} is not an array` }
+            return {
+                success: false,
+                message: `Field ${variables.field} is not an array`,
+            }
         }
 
         if (variables.index < 0 || variables.index >= fieldValue.length) {
-            return { success: false, message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})` }
+            return {
+                success: false,
+                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})`,
+            }
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`)
+            log.debug(
+                `[StorageProgram] Simulated SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`,
+            )
             return { success: true, message: "Simulated SET_ITEM successful" }
         }
 
@@ -943,23 +1163,39 @@ export class GCRStorageProgramRoutines {
         const newSizeBytes = calculateDataSize(currentData, "json")
 
         if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
         }
 
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
-        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+        const deltaChunks = Math.ceil(
+            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        )
+        const fee =
+            deltaChunks > 0
+                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
+                : 0n
 
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         await repository.save(program)
-        log.info(`[StorageProgram] SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+        log.info(
+            `[StorageProgram] SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
+        )
 
-        return { success: true, message: `Item at ${variables.field}[${variables.index}] set successfully` }
+        return {
+            success: true,
+            message: `Item at ${variables.field}[${variables.index}] set successfully`,
+        }
     }
 
     /**
@@ -972,26 +1208,47 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; value: unknown } | undefined
+        const variables = edit.context.data?.variables as
+            | (StorageProgramPayload & { field: string; value: unknown })
+            | undefined
 
         if (!variables?.field) {
-            return { success: false, message: "Field name is required for APPEND_ITEM operation" }
+            return {
+                success: false,
+                message: "Field name is required for APPEND_ITEM operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
         if (!program) {
-            return { success: false, message: `Storage program not found: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program not found: ${storageAddress}`,
+            }
         }
         if (program.isDeleted) {
-            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program has been deleted: ${storageAddress}`,
+            }
         }
 
         if (program.encoding === "binary") {
-            return { success: false, message: "APPEND_ITEM operation not supported for binary encoding" }
+            return {
+                success: false,
+                message:
+                    "APPEND_ITEM operation not supported for binary encoding",
+            }
         }
 
-        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
-            return { success: false, message: "No permission to write to this storage program" }
+        if (
+            program.owner !== sender &&
+            !checkWritePermission(program.acl, sender)
+        ) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
         }
 
         const currentData = (program.data as Record<string, unknown>) || {}
@@ -1004,12 +1261,20 @@ export class GCRStorageProgramRoutines {
         }
 
         if (!Array.isArray(fieldValue)) {
-            return { success: false, message: `Field ${variables.field} is not an array` }
+            return {
+                success: false,
+                message: `Field ${variables.field} is not an array`,
+            }
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated APPEND_ITEM: ${storageAddress}.${variables.field}`)
-            return { success: true, message: "Simulated APPEND_ITEM successful" }
+            log.debug(
+                `[StorageProgram] Simulated APPEND_ITEM: ${storageAddress}.${variables.field}`,
+            )
+            return {
+                success: true,
+                message: "Simulated APPEND_ITEM successful",
+            }
         }
 
         const oldSizeBytes = calculateDataSize(currentData, "json")
@@ -1017,23 +1282,39 @@ export class GCRStorageProgramRoutines {
         const newSizeBytes = calculateDataSize(currentData, "json")
 
         if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            return { success: false, message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)` }
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
         }
 
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
-        const deltaChunks = Math.ceil(deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES)
-        const fee = deltaChunks > 0 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK : 0n
+        const deltaChunks = Math.ceil(
+            deltaBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
+        )
+        const fee =
+            deltaChunks > 0
+                ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
+                : 0n
 
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
         await repository.save(program)
-        log.info(`[StorageProgram] APPEND_ITEM: ${storageAddress}.${variables.field} (new length: ${fieldValue.length}, delta: +${deltaBytes} bytes, fee: ${fee} DEM)`)
+        log.info(
+            `[StorageProgram] APPEND_ITEM: ${storageAddress}.${variables.field} (new length: ${fieldValue.length}, delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
+        )
 
-        return { success: true, message: `Item appended to ${variables.field} successfully (new length: ${fieldValue.length})` }
+        return {
+            success: true,
+            message: `Item appended to ${variables.field} successfully (new length: ${fieldValue.length})`,
+        }
     }
 
     /**
@@ -1046,38 +1327,67 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string } | undefined
+        const variables = edit.context.data?.variables as
+            | (StorageProgramPayload & { field: string })
+            | undefined
 
         if (!variables?.field) {
-            return { success: false, message: "Field name is required for DELETE_FIELD operation" }
+            return {
+                success: false,
+                message: "Field name is required for DELETE_FIELD operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
         if (!program) {
-            return { success: false, message: `Storage program not found: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program not found: ${storageAddress}`,
+            }
         }
         if (program.isDeleted) {
-            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program has been deleted: ${storageAddress}`,
+            }
         }
 
         if (program.encoding === "binary") {
-            return { success: false, message: "DELETE_FIELD operation not supported for binary encoding" }
+            return {
+                success: false,
+                message:
+                    "DELETE_FIELD operation not supported for binary encoding",
+            }
         }
 
         // DELETE_FIELD requires write permission (same as write operations)
-        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
-            return { success: false, message: "No permission to write to this storage program" }
+        if (
+            program.owner !== sender &&
+            !checkWritePermission(program.acl, sender)
+        ) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
         }
 
         const currentData = (program.data as Record<string, unknown>) || {}
 
         if (!(variables.field in currentData)) {
-            return { success: false, message: `Field ${variables.field} does not exist` }
+            return {
+                success: false,
+                message: `Field ${variables.field} does not exist`,
+            }
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated DELETE_FIELD: ${storageAddress}.${variables.field}`)
-            return { success: true, message: "Simulated DELETE_FIELD successful" }
+            log.debug(
+                `[StorageProgram] Simulated DELETE_FIELD: ${storageAddress}.${variables.field}`,
+            )
+            return {
+                success: true,
+                message: "Simulated DELETE_FIELD successful",
+            }
         }
 
         // Delete field (no fee for deletions - they reduce storage)
@@ -1087,13 +1397,21 @@ export class GCRStorageProgramRoutines {
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         // No fee added for deletions
 
         await repository.save(program)
-        log.info(`[StorageProgram] DELETE_FIELD: ${storageAddress}.${variables.field} (new size: ${newSizeBytes} bytes)`)
+        log.info(
+            `[StorageProgram] DELETE_FIELD: ${storageAddress}.${variables.field} (new size: ${newSizeBytes} bytes)`,
+        )
 
-        return { success: true, message: `Field ${variables.field} deleted successfully` }
+        return {
+            success: true,
+            message: `Field ${variables.field} deleted successfully`,
+        }
     }
 
     /**
@@ -1106,42 +1424,75 @@ export class GCRStorageProgramRoutines {
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-        const variables = edit.context.data?.variables as StorageProgramPayload & { field: string; index: number } | undefined
+        const variables = edit.context.data?.variables as
+            | (StorageProgramPayload & { field: string; index: number })
+            | undefined
 
         if (!variables?.field || variables.index === undefined) {
-            return { success: false, message: "Field name and index are required for DELETE_ITEM operation" }
+            return {
+                success: false,
+                message:
+                    "Field name and index are required for DELETE_ITEM operation",
+            }
         }
 
         const program = await repository.findOneBy({ storageAddress })
         if (!program) {
-            return { success: false, message: `Storage program not found: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program not found: ${storageAddress}`,
+            }
         }
         if (program.isDeleted) {
-            return { success: false, message: `Storage program has been deleted: ${storageAddress}` }
+            return {
+                success: false,
+                message: `Storage program has been deleted: ${storageAddress}`,
+            }
         }
 
         if (program.encoding === "binary") {
-            return { success: false, message: "DELETE_ITEM operation not supported for binary encoding" }
+            return {
+                success: false,
+                message:
+                    "DELETE_ITEM operation not supported for binary encoding",
+            }
         }
 
-        if (program.owner !== sender && !checkWritePermission(program.acl, sender)) {
-            return { success: false, message: "No permission to write to this storage program" }
+        if (
+            program.owner !== sender &&
+            !checkWritePermission(program.acl, sender)
+        ) {
+            return {
+                success: false,
+                message: "No permission to write to this storage program",
+            }
         }
 
         const currentData = (program.data as Record<string, unknown>) || {}
         const fieldValue = currentData[variables.field]
 
         if (!Array.isArray(fieldValue)) {
-            return { success: false, message: `Field ${variables.field} is not an array` }
+            return {
+                success: false,
+                message: `Field ${variables.field} is not an array`,
+            }
         }
 
         if (variables.index < 0 || variables.index >= fieldValue.length) {
-            return { success: false, message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})` }
+            return {
+                success: false,
+                message: `Index ${variables.index} out of bounds for array ${variables.field} (length: ${fieldValue.length})`,
+            }
         }
 
         if (simulate) {
-            log.debug(`[StorageProgram] Simulated DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`)
-            return { success: true, message: "Simulated DELETE_ITEM successful" }
+            log.debug(
+                `[StorageProgram] Simulated DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`,
+            )
+            return {
+                success: true,
+                message: "Simulated DELETE_ITEM successful",
+            }
         }
 
         // Remove item at index (splice modifies array in place)
@@ -1151,13 +1502,21 @@ export class GCRStorageProgramRoutines {
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
-        program.interactionTxs = [...(program.interactionTxs || []), edit.txhash]
+        program.interactionTxs = [
+            ...(program.interactionTxs || []),
+            edit.txhash,
+        ]
         // No fee added for deletions
 
         await repository.save(program)
-        log.info(`[StorageProgram] DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (new length: ${fieldValue.length})`)
+        log.info(
+            `[StorageProgram] DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (new length: ${fieldValue.length})`,
+        )
 
-        return { success: true, message: `Item at ${variables.field}[${variables.index}] deleted successfully (new length: ${fieldValue.length})` }
+        return {
+            success: true,
+            message: `Item at ${variables.field}[${variables.index}] deleted successfully (new length: ${fieldValue.length})`,
+        }
     }
 }
 
@@ -1165,7 +1524,12 @@ export class GCRStorageProgramRoutines {
  * Check if address has delete permission in ACL
  */
 function checkDeletePermission(
-    acl: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, { members: string[]; permissions: string[] }> },
+    acl: {
+        mode: string
+        allowed?: string[]
+        blacklisted?: string[]
+        groups?: Record<string, { members: string[]; permissions: string[] }>
+    },
     address: string,
 ): boolean {
     // Check blacklist first
@@ -1176,7 +1540,10 @@ function checkDeletePermission(
     // Check groups
     if (acl.groups) {
         for (const group of Object.values(acl.groups)) {
-            if (group.members.includes(address) && group.permissions.includes("delete")) {
+            if (
+                group.members.includes(address) &&
+                group.permissions.includes("delete")
+            ) {
                 return true
             }
         }
@@ -1195,7 +1562,12 @@ function checkDeletePermission(
  * - Restricted mode: Owner or group with "write" permission
  */
 function checkWritePermission(
-    acl: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, { members: string[]; permissions: string[] }> },
+    acl: {
+        mode: string
+        allowed?: string[]
+        blacklisted?: string[]
+        groups?: Record<string, { members: string[]; permissions: string[] }>
+    },
     address: string,
 ): boolean {
     // Check blacklist first
@@ -1216,7 +1588,10 @@ function checkWritePermission(
     // Restricted mode: check groups for write permission
     if (acl.mode === "restricted" && acl.groups) {
         for (const group of Object.values(acl.groups)) {
-            if (group.members.includes(address) && group.permissions.includes("write")) {
+            if (
+                group.members.includes(address) &&
+                group.permissions.includes("write")
+            ) {
                 return true
             }
         }
