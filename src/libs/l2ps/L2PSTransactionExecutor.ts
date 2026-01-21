@@ -27,6 +27,12 @@ import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
+ * L2PS Transaction Fee (in DEM)
+ * This fee is burned (removed from sender, not added anywhere)
+ */
+const L2PS_TX_FEE = 1
+
+/**
  * Result of executing an L2PS transaction
  */
 export interface L2PSExecutionResult {
@@ -203,12 +209,13 @@ export default class L2PSTransactionExecutor {
                 return { success: false, message: "Invalid amount: must be a positive number" }
             }
 
-            // Check sender balance in L1 state
+            // Check sender balance in L1 state (amount + fee)
             const senderAccount = await this.getOrCreateL1Account(sender)
-            if (BigInt(senderAccount.balance) < BigInt(amount)) {
+            const totalRequired = BigInt(amount) + BigInt(L2PS_TX_FEE)
+            if (BigInt(senderAccount.balance) < totalRequired) {
                 return {
                     success: false,
-                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${amount}`
+                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee)`
                 }
             }
 
@@ -217,6 +224,18 @@ export default class L2PSTransactionExecutor {
 
             // Generate GCR edits for L1 state change
             // These will be applied at consensus time
+
+            // 1. Burn the fee (remove from sender, no add anywhere)
+            gcrEdits.push({
+                type: "balance",
+                operation: "remove",
+                account: sender,
+                amount: L2PS_TX_FEE,
+                txhash: tx.hash,
+                isRollback: false
+            })
+
+            // 2. Transfer amount from sender to receiver
             gcrEdits.push(
                 {
                     type: "balance",

@@ -854,7 +854,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 if (signature.startsWith("0x")) signature = signature.slice(2)
                 if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
 
-                const isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+                // Verify signature - wrap in try-catch as invalid format throws
+                let isValid = false
+                try {
+                    isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+                } catch (verifyError: any) {
+                    log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
+                    // Invalid signature format - treat as auth failure
+                    isValid = false
+                }
 
                 if (!isValid) {
                     response.result = 403
