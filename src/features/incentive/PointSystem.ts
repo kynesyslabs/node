@@ -62,6 +62,11 @@ export class PointSystem {
             "discord",
         )
 
+        const telegramIdentities = await IdentityManager.getWeb2Identities(
+            userId,
+            "telegram",
+        )
+
         const udIdentities = await IdentityManager.getUDIdentities(userId)
 
         const linkedWallets: string[] = []
@@ -118,6 +123,7 @@ export class PointSystem {
             twitter?: string
             github?: string
             discord?: string
+            telegram?: string
         } = {}
 
         if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
@@ -130,6 +136,13 @@ export class PointSystem {
 
         if (Array.isArray(discordIdentities) && discordIdentities.length > 0) {
             linkedSocials.discord = discordIdentities[0].username
+        }
+
+        if (
+            Array.isArray(telegramIdentities) &&
+            telegramIdentities.length > 0
+        ) {
+            linkedSocials.telegram = telegramIdentities[0].username
         }
 
         if (Array.isArray(udIdentities) && udIdentities.length > 0) {
@@ -218,7 +231,12 @@ export class PointSystem {
     private async addPointsToGCR(
         userId: string,
         points: number,
-        type: "web3Wallets" | "socialAccounts" | "udDomains" | "nomisScores",
+        type:
+            | "web3Wallets"
+            | "socialAccounts"
+            | "udDomains"
+            | "nomisScores"
+            | "demosFollow",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -238,7 +256,7 @@ export class PointSystem {
         }
 
         const oldTotal = account.points.totalPoints || 0
-        account.points.totalPoints = oldTotal + points
+        let appliedDelta = 0
 
         if (
             type === "socialAccounts" &&
@@ -249,32 +267,56 @@ export class PointSystem {
         ) {
             const oldPlatformPoints =
                 account.points.breakdown.socialAccounts[platform] || 0
+            const newPlatformPoints = Math.max(0, oldPlatformPoints + points)
+            appliedDelta = newPlatformPoints - oldPlatformPoints
             account.points.breakdown.socialAccounts[platform] =
-                oldPlatformPoints + points
+                newPlatformPoints
         } else if (type === "web3Wallets") {
             account.points.breakdown.web3Wallets =
                 account.points.breakdown.web3Wallets || {}
             const oldChainPoints =
                 account.points.breakdown.web3Wallets[platform] || 0
-            account.points.breakdown.web3Wallets[platform] =
-                oldChainPoints + points
+            const newChainPoints = Math.max(0, oldChainPoints + points)
+            appliedDelta = newChainPoints - oldChainPoints
+            account.points.breakdown.web3Wallets[platform] = newChainPoints
         } else if (type === "udDomains") {
-            // Explicitly initialize udDomains if undefined
-            if (!account.points.breakdown.udDomains) {
-                account.points.breakdown.udDomains = {}
-            }
+            account.points.breakdown.udDomains =
+                account.points.breakdown.udDomains || {}
             const oldDomainPoints =
                 account.points.breakdown.udDomains[platform] || 0
-            account.points.breakdown.udDomains[platform] =
-                oldDomainPoints + points
+
+            const newDomainPoints = Math.max(0, oldDomainPoints + points)
+            appliedDelta = newDomainPoints - oldDomainPoints
+
+            if (newDomainPoints <= 0) {
+                delete account.points.breakdown.udDomains[platform]
+            } else {
+                account.points.breakdown.udDomains[platform] = newDomainPoints
+            }
         } else if (type === "nomisScores") {
             account.points.breakdown.nomisScores =
                 account.points.breakdown.nomisScores || {}
             const oldChainPoints =
                 account.points.breakdown.nomisScores[platform] || 0
-            account.points.breakdown.nomisScores[platform] =
-                oldChainPoints + points
+
+            const newChainPoints = Math.max(0, oldChainPoints + points)
+            appliedDelta = newChainPoints - oldChainPoints
+            account.points.breakdown.nomisScores[platform] = newChainPoints
+        } else if (type === "demosFollow") {
+            const oldDemosFollowPoints =
+                account.points.breakdown.demosFollow || 0
+            const newDemosFollowPoints = Math.max(
+                0,
+                oldDemosFollowPoints + points,
+            )
+            appliedDelta = newDemosFollowPoints - oldDemosFollowPoints
+            account.points.breakdown.demosFollow = newDemosFollowPoints
         }
+
+        if (appliedDelta !== 0) {
+            account.points.totalPoints = oldTotal + appliedDelta
+        }
+
         account.points.lastUpdated = new Date()
 
         // Process referral for existing account if eligible
@@ -286,20 +328,31 @@ export class PointSystem {
             )
         }
 
-        const twitter = Twitter.getInstance()
-        const twitterUser = (account.identities.web2["twitter"] || []).find(
-            (twitterIdentity: Web2GCRData["data"]) =>
-                twitterIdentity.userId === twitterUserId,
-        )
+        const shouldCheckFollow =
+            type === "socialAccounts" &&
+            platform === "twitter" &&
+            points > 0 &&
+            twitterUserId
 
-        if (twitterUser && twitterUser.username) {
-            const isFollowingDemos = await twitter.checkFollow(
-                twitterUser.username,
+        if (shouldCheckFollow) {
+            const twitter = Twitter.getInstance()
+            const twitterUser = (account.identities.web2["twitter"] || []).find(
+                (twitterIdentity: Web2GCRData["data"]) =>
+                    twitterIdentity.userId === twitterUserId,
             )
 
-            if (isFollowingDemos) {
-                account.points.breakdown.demosFollow = pointValues.FOLLOW_DEMOS
-                account.points.totalPoints += pointValues.FOLLOW_DEMOS
+            if (twitterUser && twitterUser.username) {
+                const isFollowingDemos = await twitter.checkFollow(
+                    twitterUser.username,
+                )
+                if (
+                    isFollowingDemos &&
+                    (account.points.breakdown.demosFollow || 0) <= 0
+                ) {
+                    account.points.breakdown.demosFollow =
+                        pointValues.FOLLOW_DEMOS
+                    account.points.totalPoints += pointValues.FOLLOW_DEMOS
+                }
             }
         }
 
@@ -665,6 +718,18 @@ export class PointSystem {
                 "socialAccounts",
                 "twitter",
             )
+
+            const currentFollow =
+                userPointsWithIdentities.breakdown?.demosFollow ?? 0
+
+            if (currentFollow > 0) {
+                await this.addPointsToGCR(
+                    userId,
+                    -pointValues.FOLLOW_DEMOS,
+                    "demosFollow",
+                    "demos",
+                )
+            }
 
             const updatedPoints = await this.getUserPointsInternal(userId)
 
@@ -1353,7 +1418,10 @@ export class PointSystem {
             const existingNomisScoreOnChain =
                 userPointsWithIdentities.breakdown.nomisScores?.[chain]
 
-            if (existingNomisScoreOnChain != null) {
+            if (
+                existingNomisScoreOnChain != null &&
+                existingNomisScoreOnChain > 0
+            ) {
                 const updatedPoints = await this.getUserPointsInternal(userId)
 
                 return {
@@ -1413,7 +1481,6 @@ export class PointSystem {
     async deductNomisScorePoints(
         userId: string,
         chain: string,
-        nomisScore: number,
     ): Promise<RPCResponse> {
         const validChains = ["evm", "solana"]
         const invalidChainMessage =
@@ -1448,7 +1515,7 @@ export class PointSystem {
                 }
             }
 
-            const pointsToDeduct = this.getNomisPointsByScore(nomisScore)
+            const pointsToDeduct = currentNomisForChain
 
             await this.addPointsToGCR(
                 userId,

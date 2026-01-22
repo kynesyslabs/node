@@ -1075,10 +1075,16 @@ export default class GCRIdentityRoutines {
             identity.address,
         )
 
-        const accountGCR = await ensureGCRForUser(editOperation.account)
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
 
         const chainBucket =
-            accountGCR.identities.nomis?.[identity.chain]?.[identity.subchain]
+            accountGCR.identities?.nomis?.[identity.chain]?.[identity.subchain]
 
         if (!Array.isArray(chainBucket)) {
             return { success: false, message: "Nomis identity not found" }
@@ -1111,7 +1117,6 @@ export default class GCRIdentityRoutines {
             await IncentiveManager.nomisUnlinked(
                 accountGCR.pubkey,
                 identity.chain,
-                identity.score,
             )
         }
 
