@@ -1,6 +1,16 @@
 # L2PS Quick Start Guide
 
-How to set up and test L2PS (Layer 2 Private System) with ZK proofs.
+Complete guide to set up and test L2PS (Layer 2 Privacy Subnets) with ZK proofs.
+
+---
+
+## Overview
+
+L2PS provides private transactions on top of the Demos blockchain. Key features:
+- **Client-side encryption** - Transactions encrypted before leaving wallet
+- **Batch aggregation** - Multiple L2PS tx → single L1 tx
+- **ZK proofs** - Cryptographic validity verification
+- **1 DEM transaction fee** - Burned per L2PS transaction
 
 ---
 
@@ -15,10 +25,10 @@ mkdir -p data/l2ps/testnet_l2ps_001
 ### Generate Encryption Keys
 
 ```bash
-# Generate AES-256 key (32 bytes)
+# Generate AES-256 key (32 bytes = 64 hex chars)
 openssl rand -hex 32 > data/l2ps/testnet_l2ps_001/private_key.txt
 
-# Generate IV (16 bytes)
+# Generate IV (16 bytes = 32 hex chars)
 openssl rand -hex 16 > data/l2ps/testnet_l2ps_001/iv.txt
 ```
 
@@ -84,7 +94,7 @@ Create `mnemonic.txt` with a funded wallet:
 echo "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about" > mnemonic.txt
 ```
 
-Or for stress testing, generate test wallets:
+Or generate test wallets with pre-funded balances:
 
 ```bash
 npx tsx scripts/generate-test-wallets.ts --count 10
@@ -99,9 +109,60 @@ npx tsx scripts/generate-test-wallets.ts --count 10
 ./run
 ```
 
+Watch for L2PS initialization logs:
+```
+[L2PS] Loaded network: testnet_l2ps_001
+[L2PS Batch Aggregator] Started
+```
+
 ---
 
-## 5. Running Tests
+## 5. POC Application Setup
+
+The POC app provides a visual interface to test L2PS transactions.
+
+### Install and Run
+
+```bash
+cd docs/poc-app
+npm install
+npm run dev
+# Open http://localhost:5173
+```
+
+### Configure Keys
+
+Create `docs/poc-app/.env`:
+
+```bash
+VITE_NODE_URL="http://127.0.0.1:53550"
+VITE_L2PS_UID="testnet_l2ps_001"
+
+# MUST match the node keys!
+VITE_L2PS_AES_KEY="<contents of data/l2ps/testnet_l2ps_001/private_key.txt>"
+VITE_L2PS_IV="<contents of data/l2ps/testnet_l2ps_001/iv.txt>"
+```
+
+**Quick copy:**
+```bash
+echo "VITE_NODE_URL=\"http://127.0.0.1:53550\"" > docs/poc-app/.env
+echo "VITE_L2PS_UID=\"testnet_l2ps_001\"" >> docs/poc-app/.env
+echo "VITE_L2PS_AES_KEY=\"$(cat data/l2ps/testnet_l2ps_001/private_key.txt)\"" >> docs/poc-app/.env
+echo "VITE_L2PS_IV=\"$(cat data/l2ps/testnet_l2ps_001/iv.txt)\"" >> docs/poc-app/.env
+```
+
+### POC Features
+
+| Feature | Description |
+|---------|-------------|
+| **Send L1/L2PS** | Toggle between public and private transactions |
+| **Transaction History** | View L1, L2PS, or All transactions |
+| **Learn Tab** | Interactive demos explaining L2PS |
+| **Privacy Demo** | Try authenticated vs unauthenticated access |
+
+---
+
+## 6. Running Tests
 
 ### Quick Test (5 transactions)
 
@@ -132,7 +193,35 @@ npx tsx scripts/l2ps-stress-test.ts --uid testnet_l2ps_001 --count 100
 
 ---
 
-## 6. Verify Results
+## 7. Transaction Flow
+
+```
+User Transactions          Batch Aggregator           L1 Chain
+      │                         │                        │
+TX 1 ─┤  (encrypted)            │                        │
+TX 2 ─┤  (1 DEM fee each)       │                        │
+TX 3 ─┼────────────────────────→│                        │
+TX 4 ─┤       in mempool        │   (every 10 sec)       │
+TX 5 ─┤                         │                        │
+      │                         │  Aggregate GCR edits   │
+      │                         │  Generate ZK proof     │
+      │                         │  Create 1 batch tx ───→│
+      │                         │                        │
+      │                         │                        │ Consensus applies
+      │                         │                        │ GCR edits to L1
+```
+
+### Transaction Status Flow
+
+| Status | Meaning |
+|--------|---------|
+| ⚡ **Executed** | Local node validated and decrypted |
+| 📦 **Batched** | Included in L1 batch transaction |
+| ✓ **Confirmed** | L1 block confirmed |
+
+---
+
+## 8. Verify Results
 
 Wait ~15 seconds for batch aggregation, then check:
 
@@ -150,6 +239,13 @@ docker exec -it postgres_5332 psql -U demosuser -d demos -c \
   "SELECT status, COUNT(*) FROM l2ps_mempool GROUP BY status;"
 ```
 
+### Check L2PS Transactions
+
+```bash
+docker exec -it postgres_5332 psql -U demosuser -d demos -c \
+  "SELECT hash, from_address, amount, status FROM l2ps_transactions ORDER BY id DESC LIMIT 10;"
+```
+
 ### Expected Results
 
 For 50 transactions (with default `MAX_BATCH_SIZE=10`):
@@ -159,30 +255,11 @@ For 50 transactions (with default `MAX_BATCH_SIZE=10`):
 | Proofs in DB | ~5 (1 per batch) |
 | L1 batch transactions | ~5 |
 | Mempool status | batched/confirmed |
+| Total fees burned | 50 DEM |
 
 ---
 
-## 7. Transaction Flow
-
-```
-User Transactions          Batch Aggregator           L1 Chain
-      │                         │                        │
-TX 1 ─┤                         │                        │
-TX 2 ─┤  (GCR edits stored)     │                        │
-TX 3 ─┼────────────────────────→│                        │
-TX 4 ─┤       in mempool        │   (every 10 sec)       │
-TX 5 ─┤                         │                        │
-      │                         │  Aggregate GCR edits   │
-      │                         │  Generate ZK proof     │
-      │                         │  Create 1 batch tx ───→│
-      │                         │  Create 1 proof        │
-      │                         │                        │  Consensus applies
-      │                         │                        │  GCR edits to L1
-```
-
----
-
-## 8. Environment Configuration
+## 9. Environment Configuration
 
 L2PS settings can be configured via environment variables in `.env`:
 
@@ -200,11 +277,9 @@ L2PS_AGGREGATION_INTERVAL_MS=5000   # Faster batching (5s)
 L2PS_MAX_BATCH_SIZE=5               # Smaller batches
 ```
 
-See `.env.example` for all options.
-
 ---
 
-## 9. ZK Proof Performance
+## 10. ZK Proof Performance
 
 | Batch Size | Constraints | Proof Time | Verify Time |
 |------------|-------------|------------|-------------|
@@ -213,7 +288,7 @@ See `.env.example` for all options.
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 ### "L2PS config not found"
 - Check `data/l2ps/<uid>/config.json` exists
@@ -222,7 +297,12 @@ See `.env.example` for all options.
 - Ensure `private_key.txt` and `iv.txt` exist with valid hex values
 
 ### "Insufficient L1 balance"
+- Remember: amount + 1 DEM fee required
 - Use a genesis wallet or fund the account first
+
+### "Client keys don't match node"
+- POC `.env` keys must exactly match node keys
+- Use the quick copy command in section 5
 
 ### "ZK Prover not available"
 - Run `src/libs/l2ps/zk/scripts/setup_all_batches.sh`
@@ -243,18 +323,21 @@ grep "ZK proof generated" logs/*.log
 
 ---
 
-## 11. File Structure
+## 12. File Structure
 
 ```
 node/
 ├── data/l2ps/testnet_l2ps_001/
 │   ├── config.json       # L2PS network config
-│   ├── private_key.txt   # AES-256 key
-│   └── iv.txt            # Initialization vector
-├── src/libs/l2ps/zk/
-│   ├── scripts/setup_all_batches.sh  # ZK setup script
-│   ├── keys/             # Generated ZK keys (gitignored)
-│   └── ptau/             # Powers of tau (gitignored)
+│   ├── private_key.txt   # AES-256 key (64 hex chars)
+│   └── iv.txt            # Initialization vector (32 hex chars)
+├── docs/poc-app/
+│   ├── src/App.tsx       # POC application
+│   └── .env              # Client configuration
+├── src/libs/l2ps/
+│   ├── L2PSTransactionExecutor.ts  # Transaction processing
+│   ├── L2PSBatchAggregator.ts      # Batch creation
+│   └── zk/               # ZK proof system
 ├── scripts/
 │   ├── send-l2-batch.ts        # Quick test
 │   ├── l2ps-load-test.ts       # Load test
@@ -264,8 +347,39 @@ node/
 
 ---
 
+## 13. Summary: Complete Setup Checklist
+
+```bash
+# 1. Create L2PS network
+mkdir -p data/l2ps/testnet_l2ps_001
+openssl rand -hex 32 > data/l2ps/testnet_l2ps_001/private_key.txt
+openssl rand -hex 16 > data/l2ps/testnet_l2ps_001/iv.txt
+
+# 2. Create config.json (see section 1)
+
+# 3. Optional: Setup ZK proofs
+cd src/libs/l2ps/zk/scripts && ./setup_all_batches.sh && cd -
+
+# 4. Start node
+./run
+
+# 5. Setup POC app
+cd docs/poc-app && npm install
+
+# 6. Copy keys to POC
+echo "VITE_NODE_URL=\"http://127.0.0.1:53550\"" > .env
+echo "VITE_L2PS_UID=\"testnet_l2ps_001\"" >> .env
+echo "VITE_L2PS_AES_KEY=\"$(cat ../../data/l2ps/testnet_l2ps_001/private_key.txt)\"" >> .env
+echo "VITE_L2PS_IV=\"$(cat ../../data/l2ps/testnet_l2ps_001/iv.txt)\"" >> .env
+
+# 7. Run POC
+npm run dev
+```
+
+---
+
 ## Related Documentation
 
-- [L2PS_TESTING.md](../L2PS_TESTING.md) - Comprehensive validation checklist
-- [ZK README](../src/libs/l2ps/zk/README.md) - ZK proof system details
-- [L2PS_DTR_IMPLEMENTATION.md](../src/libs/l2ps/L2PS_DTR_IMPLEMENTATION.md) - Architecture
+- [POC App README](../../docs/poc-app/README.md) - POC application details
+- [L2PS Architecture](L2PS_DTR_IMPLEMENTATION.md) - Technical architecture
+- [ZK README](zk/README.md) - ZK proof system details

@@ -64,17 +64,17 @@ export class L2PSBatchAggregator {
     private intervalId: NodeJS.Timeout | null = null
 
     /** Private constructor enforces singleton pattern */
-    private constructor() {}
-    
+    private constructor() { }
+
     /** Reentrancy protection flag - prevents overlapping operations */
     private isAggregating = false
-    
+
     /** Service running state */
     private isRunning = false
-    
+
     /** ZK Batch Prover for generating PLONK proofs */
     private zkProver: L2PSBatchProver | null = null
-    
+
     /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
     private zkEnabled = process.env.L2PS_ZK_ENABLED !== "false"
 
@@ -181,7 +181,7 @@ export class L2PSBatchAggregator {
             log.warning("[L2PS Batch Aggregator] Run 'src/libs/l2ps/zk/scripts/setup_all_batches.sh' to enable ZK proofs")
         }
     }
-    
+
 
     /**
      * Stop the L2PS batch aggregation service
@@ -196,7 +196,7 @@ export class L2PSBatchAggregator {
         }
 
         log.info("[L2PS Batch Aggregator] Stopping batch aggregation service")
-        
+
         this.isRunning = false
 
         // Clear the interval
@@ -240,22 +240,22 @@ export class L2PSBatchAggregator {
 
         this.stats.totalCycles++
         const cycleStartTime = Date.now()
-        
+
         try {
             this.isAggregating = true
             await this.aggregateAndSubmitBatches()
-            
+
             // Run cleanup after successful aggregation
             await this.cleanupOldBatchedTransactions()
-            
+
             this.stats.successfulCycles++
             this.updateCycleTime(Date.now() - cycleStartTime)
-            
+
         } catch (error) {
             this.stats.failedCycles++
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
-            
+
         } finally {
             this.isAggregating = false
         }
@@ -366,9 +366,24 @@ export class L2PSBatchAggregator {
                     }
                 }
 
-                // Update transaction statuses to 'batched'
+                // Update transaction statuses in l2ps_mempool
                 const hashes = batchTransactions.map(tx => tx.hash)
                 const updated = await L2PSMempool.updateStatusBatch(hashes, L2PS_STATUS.BATCHED)
+
+                // Update transaction statuses in l2ps_transactions table (history)
+                const L2PSTransactionExecutor = (await import("./L2PSTransactionExecutor")).default
+                for (const txHash of hashes) {
+                    try {
+                        await L2PSTransactionExecutor.updateTransactionStatus(
+                            txHash,
+                            "batched",
+                            undefined,
+                            `Included in unconfirmed L1 batch`
+                        )
+                    } catch (err) {
+                        log.warning(`[L2PS Batch Aggregator] Failed to update tx status for ${txHash.slice(0, 16)}...`)
+                    }
+                }
 
                 this.stats.totalBatchesCreated++
                 this.stats.totalTransactionsBatched += batchTransactions.length
@@ -435,7 +450,7 @@ export class L2PSBatchAggregator {
         transactions: L2PSMempoolTx[],
     ): Promise<L2PSBatchPayload> {
         const sharedState = getSharedState
-        
+
         // Collect transaction hashes and encrypted data
         const transactionHashes = transactions.map(tx => tx.hash)
         const transactionData = transactions.map(tx => ({
@@ -460,7 +475,7 @@ export class L2PSBatchAggregator {
         if (!sharedState.keypair?.privateKey) {
             throw new Error("[L2PS Batch Aggregator] Node keypair not available for HMAC generation")
         }
-        
+
         const hmacKey = Buffer.from(sharedState.keypair.privateKey as Uint8Array)
             .toString("hex")
             .slice(0, 64)
@@ -587,13 +602,13 @@ export class L2PSBatchAggregator {
         const lastNonce = await this.getLastNonceFromStorage()
         const timestamp = Date.now()
         const timestampNonce = timestamp * 1000
-        
+
         // Ensure new nonce is always greater than last used
         const newNonce = Math.max(timestampNonce, lastNonce + 1)
-        
+
         // Persist the new nonce for recovery after restart
         await this.saveNonceToStorage(newNonce)
-        
+
         return newNonce
     }
 
@@ -786,7 +801,7 @@ export class L2PSBatchAggregator {
      */
     private updateCycleTime(cycleTime: number): void {
         this.stats.lastCycleTime = cycleTime
-        
+
         // Calculate running average
         const totalTime = (this.stats.averageCycleTime * (this.stats.successfulCycles - 1)) + cycleTime
         this.stats.averageCycleTime = Math.round(totalTime / this.stats.successfulCycles)

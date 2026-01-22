@@ -93,13 +93,19 @@ export default class L2PSConsensus {
             proofResults.find(r => r.proofId === proof.id)?.success
         )
 
-        // Remove confirmed transactions from mempool
+        // Create L1 batch transaction FIRST
+        const batchTxHash = await this.createL1BatchTransaction(appliedProofs, blockNumber)
+        if (batchTxHash) {
+            result.l1BatchTxHashes.push(batchTxHash)
+        }
+
+        // Update transaction statuses in l2ps_transactions table to 'confirmed'
+        // This MUST happen after createL1BatchTransaction because that method sets them to 'batched'
         const confirmedTxHashes = this.collectTransactionHashes(appliedProofs)
         if (confirmedTxHashes.length > 0) {
             const deleted = await L2PSMempool.deleteByHashes(confirmedTxHashes)
             log.info(`[L2PS Consensus] Removed ${deleted} confirmed transactions from mempool`)
 
-            // Update transaction statuses in l2ps_transactions table
             const L2PSTransactionExecutor = (await import("./L2PSTransactionExecutor")).default
             for (const txHash of confirmedTxHashes) {
                 try {
@@ -107,19 +113,14 @@ export default class L2PSConsensus {
                         txHash,
                         "confirmed",
                         blockNumber,
-                        `Confirmed in block ${blockNumber}`
+                        `Confirmed in block ${blockNumber}`,
+                        batchTxHash || undefined
                     )
                 } catch (err) {
                     log.warning(`[L2PS Consensus] Failed to update tx status for ${txHash.slice(0, 16)}...`)
                 }
             }
             log.info(`[L2PS Consensus] Updated status to 'confirmed' for ${confirmedTxHashes.length} transactions`)
-        }
-
-        // Create L1 batch transaction
-        const batchTxHash = await this.createL1BatchTransaction(appliedProofs, blockNumber)
-        if (batchTxHash) {
-            result.l1BatchTxHashes.push(batchTxHash)
         }
     }
 
