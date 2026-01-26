@@ -305,7 +305,7 @@ export async function syncBlock(block: Block, peer: Peer) {
  * @returns The block if downloaded successfully, false otherwise
  */
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.debug("Downloading block: " + blockToAsk)
+    log.only("[downloadBlock] Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -346,6 +346,8 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
+        log.only("[downloadBlock] Block received: " + block.number)
+        log.only("[downloadBlock] Syncing block: " + block.number)
         return await syncBlock(block, peer)
     }
 
@@ -739,11 +741,16 @@ export async function fastSync(
 ): Promise<boolean> {
     getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
+    log.only("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.only("[fastSync] Sync status: " + synced)
     getSharedState.syncStatus = synced
+    log.only("[fastSync] Broadcasting our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     await BroadcastManager.broadcastOurSyncData()
 
+    log.only("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.info(
+    log.only("[fastSync] Last block number: " + lastBlockNumber)
+    log.only(
         "[fastSync] DB Last block number after sync: " +
             lastBlockNumber +
             " from: " +
@@ -751,5 +758,6 @@ export async function fastSync(
     )
 
     getSharedState.inSyncLoop = false
+    log.only("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     return true
 }
