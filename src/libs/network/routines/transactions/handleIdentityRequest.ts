@@ -13,6 +13,19 @@ import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { verifyGithubTLSNProof, TLSNotaryPresentation } from "@/libs/tlsnotary"
+
+/**
+ * TLSN GitHub identity payload (local definition until SDK is updated)
+ * This matches the InferFromTLSNGithubPayload structure in the SDK
+ */
+interface InferFromTLSNGithubPayload {
+    context: "github"
+    proof: TLSNotaryPresentation
+    username: string
+    userId: string
+    referralCode?: string
+}
 
 interface IdentityResponse {
     success: boolean
@@ -100,11 +113,31 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
+        case "tlsn_identity_assign": {
+            // TLSNotary identity verification - cryptographically verify the proof
+            const tlsnPayload = payload.payload as InferFromTLSNGithubPayload
+
+            // The verifyGithubTLSNProof function:
+            // 1. Verifies the TLSNotary proof cryptographically using WASM
+            // 2. Extracts the server name and response from the proof
+            // 3. Compares extracted data with claimed username/userId
+            const result = await verifyGithubTLSNProof(
+                tlsnPayload.proof,
+                tlsnPayload.username,
+                tlsnPayload.userId,
+            )
+
+            return {
+                success: result.success,
+                message: result.message,
+            }
+        }
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
         case "nomis_identity_remove":
         case "ud_identity_remove":
+        case "tlsn_identity_remove":
             return {
                 success: true,
                 message: "Identity removed",
