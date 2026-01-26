@@ -418,7 +418,7 @@ async function batchDownloadBlocks(
     const totalBlocks = endBlock - startBlock + 1
     const limit = Math.min(totalBlocks, batchSize)
 
-    log.info(
+    log.only(
         `[batchDownloadBlocks] Fetching ${limit} blocks from ${startBlock} to ${
             startBlock + limit - 1
         }`,
@@ -471,12 +471,12 @@ async function batchDownloadBlocks(
         return false
     }
 
-    log.info(`[batchDownloadBlocks] Received ${blocks.length} blocks`)
+    log.only(`[batchDownloadBlocks] Received ${blocks.length} blocks`)
 
     // Fetch all transactions for all blocks in batch
-    log.info("[batchDownloadBlocks] Fetching transactions for batch")
+    log.only("[batchDownloadBlocks] Fetching transactions for batch")
     const txMap = await askTxsForBlocksBatch(blocks, peer)
-    log.info(
+    log.only(
         `[batchDownloadBlocks] Fetched ${
             Object.keys(txMap).length
         } unique transactions`,
@@ -484,29 +484,31 @@ async function batchDownloadBlocks(
 
     // Process each block in order
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
-        log.debug(`[batchDownloadBlocks] Processing block ${block.number}`)
+        log.only(`[batchDownloadBlocks] Processing block ${block.number}`)
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
         // Insert block
         await Chain.insertBlock(block, [], null, false)
-        log.debug(
+        log.only(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
 
         // Merge peerlist
         const mergedPeerlist = await mergePeerlist(block)
-        log.debug(
+        log.only(
             `[batchDownloadBlocks] Merged ${mergedPeerlist.length} peers from block ${block.number}`,
         )
 
-        log.debug(
+        log.only(
             `[batchDownloadBlocks] Processing ${blockTxs.length} transactions for block ${block.number}`,
         )
 
         // Sync GCR tables
         await syncGCRTables(blockTxs)
+
+        log.only(`[batchDownloadBlocks] Synced GCR tables for block ${block.number}`)
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -520,7 +522,7 @@ async function batchDownloadBlocks(
         }
     }
 
-    log.info(
+    log.only(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
     )
     return true
@@ -536,6 +538,7 @@ async function waitForNextBlock() {
     const entryBlock = getSharedState.lastBlockNumber
 
     while (entryBlock >= latestBlock()) {
+        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳" )
         await sleep(250)
     }
 
@@ -552,11 +555,12 @@ async function requestBlocks(): Promise<boolean> {
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
+        log.only("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄" )
         const startBlock = getSharedState.lastBlockNumber + 1
         const endBlock = latestBlock()
         const blocksToSync = endBlock - startBlock + 1
 
-        log.info(
+        log.only(
             `[requestBlocks] Need to sync ${blocksToSync} blocks (${startBlock} to ${endBlock})`,
         )
 
@@ -564,10 +568,11 @@ async function requestBlocks(): Promise<boolean> {
             // Download batch of blocks
             await batchDownloadBlocks(peer, startBlock, endBlock)
             await BroadcastManager.broadcastOurSyncData()
-            log.info(
+            log.only(
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
+            console.error(error)
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
                 log.info(
@@ -717,6 +722,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
+        log.only("[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️" )
         await sleep(500)
     }
 

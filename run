@@ -7,8 +7,8 @@ NO_TUI=false
 EXTERNAL_DB=false
 
 GIT_PULL=true
-TLSNOTARY_DISABLED=false
-MONITORING_DISABLED=false
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -247,18 +247,18 @@ check_system_requirements() {
             ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
         fi
 
-        if [ -z "$ping_result" ]; then
-            echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
-            failed_requirements=$((failed_requirements + 1))
-        elif [ "$ping_result" -gt 200 ]; then
-            echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
-            failed_requirements=$((failed_requirements + 1))
-        elif [ "$ping_result" -gt 100 ]; then
-            echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
-            warnings=$((warnings + 1))
-        else
-            echo "✅ Network latency: ${ping_result}ms"
-        fi
+        # if [ -z "$ping_result" ]; then
+        #     echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
+        #     failed_requirements=$((failed_requirements + 1))
+        # elif [ "$ping_result" -gt 200 ]; then
+        #     echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
+        #     failed_requirements=$((failed_requirements + 1))
+        # elif [ "$ping_result" -gt 100 ]; then
+        #     echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
+        #     warnings=$((warnings + 1))
+        # else
+        #     echo "✅ Network latency: ${ping_result}ms"
+        # fi
     else
         echo "⚠️  Cannot test network - ping command not available"
         warnings=$((warnings + 1))
@@ -484,64 +484,64 @@ fi
 check_system_requirements
 
 # Check git origin configuration (may disable GIT_PULL if fork detected)
-if [ "$GIT_PULL" = true ]; then
-    check_git_origin
-fi
+# if [ "$GIT_PULL" = true ]; then
+#     check_git_origin
+# fi
 
-# Perform git pull if GIT_PULL is true
-if [ "$GIT_PULL" = true ]; then
-    echo "🔄 Updating repository..."
-    log_verbose "Running git pull to get latest changes"
+# # Perform git pull if GIT_PULL is true
+# if [ "$GIT_PULL" = true ]; then
+#     echo "🔄 Updating repository..."
+#     log_verbose "Running git pull to get latest changes"
 
-    # Attempt git pull, handle conflicts
-    PULL_OUTPUT=$(git pull 2>&1)
-    PULL_EXIT_CODE=$?
+#     # Attempt git pull, handle conflicts
+#     PULL_OUTPUT=$(git pull 2>&1)
+#     PULL_EXIT_CODE=$?
 
-    if [ $PULL_EXIT_CODE -ne 0 ]; then
-        # Check if the conflict is ONLY about package.json (stash issue)
-        if echo "$PULL_OUTPUT" | grep -qE "package\.json" && ! echo "$PULL_OUTPUT" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
-            echo "⚠️  package.json conflict detected, stashing and retrying..."
-            log_verbose "Stashing local changes to package.json"
-            git stash
-            if ! git pull; then
-                echo "❌ Git pull failed even after stashing"
-                exit 1
-            fi
-            echo "✅ Repository updated after stashing package.json"
-        else
-            # Hard exit on any other git pull failure
-            echo "❌ Git pull failed:"
-            echo "$PULL_OUTPUT"
-            echo ""
+#     if [ $PULL_EXIT_CODE -ne 0 ]; then
+#         # Check if the conflict is ONLY about package.json (stash issue)
+#         if echo "$PULL_OUTPUT" | grep -qE "package\.json" && ! echo "$PULL_OUTPUT" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
+#             echo "⚠️  package.json conflict detected, stashing and retrying..."
+#             log_verbose "Stashing local changes to package.json"
+#             git stash
+#             if ! git pull; then
+#                 echo "❌ Git pull failed even after stashing"
+#                 exit 1
+#             fi
+#             echo "✅ Repository updated after stashing package.json"
+#         else
+#             # Hard exit on any other git pull failure
+#             echo "❌ Git pull failed:"
+#             echo "$PULL_OUTPUT"
+#             echo ""
 
-            # Check for specific "no such ref" error (common with forks)
-            if echo "$PULL_OUTPUT" | grep -q "no such ref was fetched"; then
-                echo "💡 This error typically occurs when:"
-                echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
-                echo "   - Run 'git remote -v' to check your remotes"
-                echo ""
-                echo "   Quick fixes:"
-                echo "   1. Skip git pull: ./run -n true"
-                echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
-                echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
-            else
-                echo "💡 Please resolve git conflicts manually and try again"
-            fi
-            exit 1
-        fi
-    else
-        echo "✅ Repository updated successfully"
-    fi
+#             # Check for specific "no such ref" error (common with forks)
+#             if echo "$PULL_OUTPUT" | grep -q "no such ref was fetched"; then
+#                 echo "💡 This error typically occurs when:"
+#                 echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
+#                 echo "   - Run 'git remote -v' to check your remotes"
+#                 echo ""
+#                 echo "   Quick fixes:"
+#                 echo "   1. Skip git pull: ./run -n true"
+#                 echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
+#                 echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
+#             else
+#                 echo "💡 Please resolve git conflicts manually and try again"
+#             fi
+#             exit 1
+#         fi
+#     else
+#         echo "✅ Repository updated successfully"
+#     fi
 
-    # Always run bun install after successful git pull
-    echo "📦 Installing dependencies..."
-    log_verbose "Running bun install after git pull"
-    if ! bun install; then
-        echo "❌ Failed to install dependencies"
-        exit 1
-    fi
-    echo "✅ Dependencies installed successfully"
-fi
+#     # Always run bun install after successful git pull
+#     echo "📦 Installing dependencies..."
+#     log_verbose "Running bun install after git pull"
+#     if ! bun install; then
+#         echo "❌ Failed to install dependencies"
+#         exit 1
+#     fi
+#     echo "✅ Dependencies installed successfully"
+# fi
 
 
 echo ""
