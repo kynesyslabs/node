@@ -63,8 +63,25 @@ export class BroadcastManager {
      */
     static async handleNewBlock(sender: string, block: Block) {
         log.only("[handleNewBlock] Handling new block: " + block.number)
-        log.only("[handleNewBlock] isInitialized: " + getSharedState.isInitialized)
+        log.only(
+            "[handleNewBlock] isInitialized: " + getSharedState.isInitialized,
+        )
         log.only("[handleNewBlock] inSyncLoop: " + getSharedState.inSyncLoop)
+
+        const peerman = PeerManager.getInstance()
+
+        if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {
+            Waiter.resolve(Waiter.keys.SYNC_WAIT_FOR_BLOCK, [
+                block,
+                peerman.getPeer(sender),
+            ])
+
+            return {
+                result: 200,
+                message: "Block received while waiting for next block",
+                syncData: PeerManager.getInstance().ourSyncDataString,
+            }
+        }
 
         if (!getSharedState.isInitialized) {
             return {
@@ -75,7 +92,6 @@ export class BroadcastManager {
         }
 
         // TODO: HANDLE RECEIVING THIS WHEN IN SYNC LOOP
-        const peerman = PeerManager.getInstance()
 
         if (getSharedState.inSyncLoop) {
             return {

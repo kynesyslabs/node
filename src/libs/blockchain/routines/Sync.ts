@@ -24,9 +24,14 @@ import {
     RPCResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
+import {
+    BlockNotFoundError,
+    PeerUnreachableError,
+    TimeoutError,
+} from "src/exceptions"
 import HandleGCR from "../gcr/handleGCR"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
+import { Waiter } from "@/utilities/waiter"
 
 const term = terminalkit.terminal
 
@@ -258,7 +263,7 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    log.info("[downloadBlock] Block received: " + block.hash)
+    log.only("[syncBlock] Block received: " + block.hash)
     await Chain.insertBlock(block, [], null, false)
     log.debug("Block inserted successfully")
     log.debug(
@@ -510,7 +515,9 @@ async function batchDownloadBlocks(
         // Sync GCR tables
         await syncGCRTables(blockTxs)
 
-        log.only(`[batchDownloadBlocks] Synced GCR tables for block ${block.number}`)
+        log.only(
+            `[batchDownloadBlocks] Synced GCR tables for block ${block.number}`,
+        )
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -537,10 +544,29 @@ async function batchDownloadBlocks(
  * @returns True if the block was downloaded successfully, false otherwise
  */
 async function waitForNextBlock() {
+    try {
+        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
+        const [newBlock, peer] = await Waiter.wait(
+            Waiter.keys.SYNC_WAIT_FOR_BLOCK,
+            120_000,
+        )
+        log.only("[waitForNextBlock] Block received: " + newBlock.number)
+
+        return await syncBlock(newBlock as Block, peer)
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            log.error("[waitForNextBlock] Timeout waiting for next block")
+            return false
+        }
+
+        console.error(error)
+        return false
+    }
+
     const entryBlock = getSharedState.lastBlockNumber
 
     while (entryBlock >= latestBlock()) {
-        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳" )
+        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
         await sleep(250)
     }
 
@@ -557,7 +583,7 @@ async function requestBlocks(): Promise<boolean> {
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
-        log.only("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄" )
+        log.only("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
         const startBlock = getSharedState.lastBlockNumber + 1
         const endBlock = latestBlock()
         const blocksToSync = endBlock - startBlock + 1
@@ -659,7 +685,7 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    const res = await peer.httpCall(
+    let res = await peer.httpCall(
         {
             method: "nodeCall",
             params: [
@@ -676,6 +702,22 @@ export async function askTxsForBlock(
         return res.response as Transaction[]
     }
 
+    // fetch all transactions by hashes
+    res = await peer.httpCall({
+        method: "nodeCall",
+        params: [
+            {
+                message: "getTxsByHashes",
+                data: { hashes: block.content.ordered_transactions },
+            },
+        ],
+    })
+
+    if (res.result === 200) {
+        return res.response as Transaction[]
+    }
+
+    log.error("[askTxsForBlock] Failed to fetch transactions")
     return []
 }
 
@@ -724,12 +766,21 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        log.only("[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️" )
+        log.only(
+            "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
+        )
         await sleep(500)
     }
 
     if (getSharedState.fastSyncCount === 0) {
-        await waitForNextBlock()
+        // await waitForNextBlock()
+        while (!(await waitForNextBlock())) {
+            log.only(
+                "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
+            )
+        }
+
+        log.only("[fastSync] Wait for next block complete! 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
     }
 
     return latestBlock() === getSharedState.lastBlockNumber
