@@ -444,6 +444,7 @@ async function batchDownloadBlocks(
     }
 
     const blocksResponse = await peer.httpCall(blocksRequest)
+    log.only("[batchDownloadBlocks] Blocks response: " + JSON.stringify(blocksResponse, null, 2))
 
     // Handle errors
     if (blocksResponse.result === 400) {
