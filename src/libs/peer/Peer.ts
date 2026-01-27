@@ -45,6 +45,16 @@ export default class Peer {
         )
     }
 
+    /**
+     * Marks this peer as offline in PeerManager and updates local status
+     */
+    private markPeerOffline(): void {
+        PeerManager.getInstance().addOfflinePeer(this)
+        PeerManager.getInstance().removeOnlinePeer(this.identity)
+        this.status.online = false
+        this.status.timestamp = Date.now()
+    }
+
     // Creating an empty peer
     constructor(url = "", publicKey = "") {
         this.connection = {
@@ -302,8 +312,16 @@ export default class Peer {
                     connectionUrl,
             )
             // Make the request
+            let timeoutId: NodeJS.Timeout | undefined
             try {
                 log.only("REQUEST: " + JSON.stringify(request, null, 2))
+
+                // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
+                const abortController = new AbortController()
+                timeoutId = setTimeout(() => {
+                    abortController.abort()
+                }, 3000)
+
                 const response = await axios.post<RPCResponse>(
                     connectionUrl,
                     request,
@@ -314,8 +332,11 @@ export default class Peer {
                             signature: signature,
                         },
                         timeout: 3000,
+                        signal: abortController.signal,
                     },
                 )
+
+                clearTimeout(timeoutId)
                 log.only("RESPONSE: " + JSON.stringify(response.data, null, 2))
                 log.only(
                     "[RPC Call] [" +
@@ -357,8 +378,50 @@ export default class Peer {
                 }
             } catch (error) {
                 console.error(error)
+
+                // Clear timeout if request completed (error or success)
+                if (timeoutId) {
+                    clearTimeout(timeoutId)
+                }
+
+                // Handle abort/timeout errors
+                if (
+                    axios.isAxiosError(error) &&
+                    (error.code === "ECONNABORTED" ||
+                        error.message === "canceled" ||
+                        error.name === "AbortError" ||
+                        error.code === "ETIMEDOUT")
+                ) {
+                    log.warn(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Request timeout/aborted to: " +
+                            connectionUrl,
+                    )
+
+                    this.markPeerOffline()
+
+                    lastResponse = {
+                        result: 504,
+                        response: "Request timeout",
+                        require_reply: false,
+                        extra: {
+                            code: error.code || "ETIMEDOUT",
+                            url: connectionUrl,
+                        },
+                    }
+
+                    if (allowedErrors.includes(504)) {
+                        return lastResponse
+                    }
+                }
                 // Handle ECONNREFUSED error
-                if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
+                else if (
+                    axios.isAxiosError(error) &&
+                    error.code === "ECONNREFUSED"
+                ) {
                     log.warn(
                         "[RPC Call] [" +
                             method +
@@ -368,11 +431,7 @@ export default class Peer {
                             connectionUrl,
                     )
 
-                    PeerManager.getInstance().addOfflinePeer(this)
-                    PeerManager.getInstance().removeOnlinePeer(this.identity)
-
-                    this.status.online = false
-                    this.status.timestamp = Date.now()
+                    this.markPeerOffline()
 
                     lastResponse = {
                         result: 503,
