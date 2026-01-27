@@ -88,10 +88,10 @@ export default class SharedState {
     _syncStatus = false
 
     // Batch sync configuration
-    batchSyncBlockSize = 50 // Number of blocks to fetch per batch sync request
-    batchSyncTxSize = 50 // Number of transactions to fetch per batch sync request
-    batchSyncTxLimit = 50 // Maximum number of transactions to send back per batch request
-    batchSyncBlockLimit = 50 // Maximum number of blocks to send back per batch request
+    batchSyncBlockSize = 100 // Number of blocks to fetch per batch sync request
+    batchSyncTxSize = 100 // Number of transactions to fetch per batch sync request
+    batchSyncTxLimit = 100 // Maximum number of transactions to send back per batch request
+    batchSyncBlockLimit = 100 // Maximum number of blocks to send back per batch request
 
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
