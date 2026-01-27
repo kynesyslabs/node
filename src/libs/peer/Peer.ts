@@ -254,7 +254,7 @@ export default class Peer {
         let lastResponse: RPCResponse | null = null
 
         while (tries < retries) {
-            log.info(
+            log.only(
                 "[RPC Call] [" +
                     request.method +
                     "] [" +
@@ -263,6 +263,7 @@ export default class Peer {
                     this.connection.string +
                     (tries > 0 ? ` (attempt ${tries + 1}/${retries})` : ""),
             )
+
             // Get some informations
             const method = request.method
             const currentTimestampReadable = new Date(Date.now()).toISOString()
@@ -292,7 +293,7 @@ export default class Peer {
                 connectionUrl = getSharedState.connectionString
             }
 
-            log.info(
+            log.only(
                 "[RPC Call] [" +
                     method +
                     "] [" +
@@ -314,7 +315,7 @@ export default class Peer {
                         timeout: 3000,
                     },
                 )
-                log.info(
+                log.only(
                     "[RPC Call] [" +
                         method +
                         "] [" +
@@ -323,7 +324,7 @@ export default class Peer {
                 )
                 // log.info(JSON.stringify(response.data, null, 2))
                 if (response.data.result !== 200) {
-                    log.warning(
+                    log.only(
                         "[RPC Call] [" +
                             method +
                             "] [" +
@@ -334,7 +335,7 @@ export default class Peer {
                             response.data.result,
                     )
                 } else {
-                    log.info(
+                    log.only(
                         "[RPC Call] [" +
                             method +
                             "] [" +
