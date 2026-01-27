@@ -685,6 +685,14 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
+    if (
+        Array.isArray(block.content.ordered_transactions) &&
+        block.content.ordered_transactions.length === 0
+    ) {
+        log.only("[askTxsForBlock] No transactions in block")
+        return []
+    }
+
     let res = await peer.httpCall(
         {
             method: "nodeCall",
