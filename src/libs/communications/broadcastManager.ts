@@ -186,7 +186,8 @@ export class BroadcastManager {
 
         const peer = new Peer(ePeer.connection.string, sender)
 
-        const splits = syncData.trim().split(":")
+        const splits = syncData ? syncData.trim().split(":") : []
+
         if (splits.length !== 3) {
             return {
                 result: 400,

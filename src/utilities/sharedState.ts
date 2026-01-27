@@ -47,7 +47,7 @@ export default class SharedState {
     inConsensusLoop = false
     inSyncLoop = false
     inPeerRecheckLoop = false
-    lastPeerRecheck = 0 
+    lastPeerRecheck = 0
     peerRecheckSleepTime = 10_000 // 10 seconds
     inPeerGossip = false
     startingConsensus = false
@@ -282,12 +282,22 @@ export default class SharedState {
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
     public async getInfo(): Promise<any> {
+        const peerlist = PeerManager.getInstance().getPeers()
+
+        // change our connection string to the exposed url
+        for (const peer of peerlist) {
+            if (peer.identity === this.publicKeyHex) {
+                peer.connection.string = await this.getConnectionString()
+            }
+        }
+
         const info = {
             version: this.version,
             identity: this.publicKeyHex,
             connectionString: await this.getConnectionString(),
-            peerlist: PeerManager.getInstance().getPeers(),
+            peerlist: peerlist,
         }
+
         return info
     }
 

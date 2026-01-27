@@ -78,17 +78,29 @@ export default class PeerManager {
             if (typeof peerData === "string") {
                 // Old format: { "pubkey": "http://..." }
                 peerObject.connection.string = peerData
-            } else if (typeof peerData === "object" && peerData !== null && "url" in peerData) {
+            } else if (
+                typeof peerData === "object" &&
+                peerData !== null &&
+                "url" in peerData
+            ) {
                 // New format: { "pubkey": { "url": "http://...", "capabilities": {...} } }
                 // REVIEW: Validate that url is a non-empty string before assignment
                 const url = peerData.url
                 if (typeof url !== "string" || url.trim().length === 0) {
-                    log.warning(`[PEER] Invalid or empty URL for peer ${peer}: ${JSON.stringify(peerData)}`)
+                    log.warning(
+                        `[PEER] Invalid or empty URL for peer ${peer}: ${JSON.stringify(
+                            peerData,
+                        )}`,
+                    )
                     continue
                 }
                 peerObject.connection.string = url
             } else {
-                log.warning(`[PEER] Invalid peer data format for ${peer}: ${JSON.stringify(peerData)}`)
+                log.warning(
+                    `[PEER] Invalid peer data format for ${peer}: ${JSON.stringify(
+                        peerData,
+                    )}`,
+                )
                 continue
             }
             this.addPeer(peerObject)
@@ -215,6 +227,21 @@ export default class PeerManager {
                 true,
             )
             log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer), false)
+            return false
+        }
+
+        if (
+            getSharedState.PROD &&
+            peer.identity !== getSharedState.publicKeyHex &&
+            ["127.0.0.1", "localhost", "0.0.0.0"].includes(
+                new URL(peer.connection.string).hostname,
+            )
+        ) {
+            log.warning(
+                "[PEERMANAGER] Invalid connection string: " +
+                    peer.connection.string,
+            )
+            log.error("[PEERMANAGER] Peer not added: " + peer.identity)
             return false
         }
 
