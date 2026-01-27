@@ -303,6 +303,7 @@ export default class Peer {
             )
             // Make the request
             try {
+                log.only("REQUEST: " + JSON.stringify(request, null, 2))
                 const response = await axios.post<RPCResponse>(
                     connectionUrl,
                     request,
@@ -315,6 +316,7 @@ export default class Peer {
                         timeout: 3000,
                     },
                 )
+                log.only("RESPONSE: " + JSON.stringify(response.data, null, 2))
                 log.only(
                     "[RPC Call] [" +
                         method +
@@ -354,6 +356,7 @@ export default class Peer {
                     return response.data
                 }
             } catch (error) {
+                console.error(error)
                 // Handle ECONNREFUSED error
                 if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
                     log.warn(
