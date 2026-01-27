@@ -880,6 +880,11 @@ if [ "$NO_TUI" = true ]; then
     FINAL_COMMAND="$START_COMMAND -- --no-tui"
 fi
 
+# Append any remaining arguments after getopts processing
+if [ $# -gt 0 ]; then
+    FINAL_COMMAND="$FINAL_COMMAND $*"
+fi
+
 # Starting the node managing errors
 log_verbose "Starting node with environment: RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE"
 log_verbose "Command: $FINAL_COMMAND"
