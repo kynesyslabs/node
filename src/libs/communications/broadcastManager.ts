@@ -62,12 +62,6 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
-        log.only("[handleNewBlock] Handling new block: " + block.number)
-        log.only(
-            "[handleNewBlock] isInitialized: " + getSharedState.isInitialized,
-        )
-        log.only("[handleNewBlock] inSyncLoop: " + getSharedState.inSyncLoop)
-
         const peerman = PeerManager.getInstance()
 
         if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {

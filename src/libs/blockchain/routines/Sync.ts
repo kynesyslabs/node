@@ -263,7 +263,6 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    log.only("[syncBlock] Block received: " + block.hash)
     await Chain.insertBlock(block, [], null, false)
     log.debug("Block inserted successfully")
     log.debug(
@@ -310,7 +309,6 @@ export async function syncBlock(block: Block, peer: Peer) {
  * @returns The block if downloaded successfully, false otherwise
  */
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.only("[downloadBlock] Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -351,8 +349,6 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
             return false
         }
 
-        log.only("[downloadBlock] Block received: " + block.number)
-        log.only("[downloadBlock] Syncing block: " + block.number)
         return await syncBlock(block, peer)
     }
 
@@ -425,7 +421,7 @@ async function batchDownloadBlocks(
     const totalBlocks = endBlock - startBlock + 1
     const limit = Math.min(totalBlocks, batchSize)
 
-    log.only(
+    log.debug(
         `[batchDownloadBlocks] Fetching ${limit} blocks from ${startBlock} to ${
             startBlock + limit - 1
         }`,
@@ -444,7 +440,6 @@ async function batchDownloadBlocks(
     }
 
     const blocksResponse = await peer.httpCall(blocksRequest)
-    log.only("[batchDownloadBlocks] Blocks response: " + JSON.stringify(blocksResponse, null, 2))
 
     // Handle errors
     if (blocksResponse.result === 400) {
@@ -479,12 +474,9 @@ async function batchDownloadBlocks(
         return false
     }
 
-    log.only(`[batchDownloadBlocks] Received ${blocks.length} blocks`)
-
     // Fetch all transactions for all blocks in batch
-    log.only("[batchDownloadBlocks] Fetching transactions for batch")
     const txMap = await askTxsForBlocksBatch(blocks, peer)
-    log.only(
+    log.info(
         `[batchDownloadBlocks] Fetched ${
             Object.keys(txMap).length
         } unique transactions`,
@@ -492,33 +484,21 @@ async function batchDownloadBlocks(
 
     // Process each block in order
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
-        log.only(`[batchDownloadBlocks] Processing block ${block.number}`)
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
         // Insert block
         await Chain.insertBlock(block, [], null, false)
-        log.only(
+        log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
 
         // Merge peerlist
-        const mergedPeerlist = await mergePeerlist(block)
-        log.only(
-            `[batchDownloadBlocks] Merged ${mergedPeerlist.length} peers from block ${block.number}`,
-        )
-
-        log.only(
-            `[batchDownloadBlocks] Processing ${blockTxs.length} transactions for block ${block.number}`,
-        )
+        await mergePeerlist(block)
 
         // Sync GCR tables
         await syncGCRTables(blockTxs)
-
-        log.only(
-            `[batchDownloadBlocks] Synced GCR tables for block ${block.number}`,
-        )
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -532,7 +512,7 @@ async function batchDownloadBlocks(
         }
     }
 
-    log.only(
+    log.debug(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
     )
     return true
@@ -546,12 +526,12 @@ async function batchDownloadBlocks(
  */
 async function waitForNextBlock() {
     try {
-        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
+        log.debug("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
         const [newBlock, peer] = await Waiter.wait(
             Waiter.keys.SYNC_WAIT_FOR_BLOCK,
             120_000,
         )
-        log.only("[waitForNextBlock] Block received: " + newBlock.number)
+        log.debug("[waitForNextBlock] Block received: " + newBlock.number)
 
         return await syncBlock(newBlock as Block, peer)
     } catch (error) {
@@ -563,15 +543,6 @@ async function waitForNextBlock() {
         console.error(error)
         return false
     }
-
-    const entryBlock = getSharedState.lastBlockNumber
-
-    while (entryBlock >= latestBlock()) {
-        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
-        await sleep(250)
-    }
-
-    return await downloadBlock(highestBlockPeer(), entryBlock + 1)
 }
 
 /**
@@ -584,12 +555,12 @@ async function requestBlocks(): Promise<boolean> {
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
-        log.only("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
+        log.debug("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
         const startBlock = getSharedState.lastBlockNumber + 1
         const endBlock = latestBlock()
         const blocksToSync = endBlock - startBlock + 1
 
-        log.only(
+        log.debug(
             `[requestBlocks] Need to sync ${blocksToSync} blocks (${startBlock} to ${endBlock})`,
         )
 
@@ -597,7 +568,7 @@ async function requestBlocks(): Promise<boolean> {
             // Download batch of blocks
             await batchDownloadBlocks(peer, startBlock, endBlock)
             await BroadcastManager.broadcastOurSyncData()
-            log.only(
+            log.debug(
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
@@ -690,7 +661,6 @@ export async function askTxsForBlock(
         Array.isArray(block.content.ordered_transactions) &&
         block.content.ordered_transactions.length === 0
     ) {
-        log.only("[askTxsForBlock] No transactions in block")
         return []
     }
 
@@ -775,7 +745,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        log.only(
+        log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
         await sleep(500)
@@ -784,12 +754,12 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     if (getSharedState.fastSyncCount === 0) {
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
-            log.only(
+            log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )
         }
 
-        log.only("[fastSync] Wait for next block complete! 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
+        log.debug("[fastSync] Wait for next block complete! 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
     }
 
     return latestBlock() === getSharedState.lastBlockNumber
@@ -801,16 +771,14 @@ export async function fastSync(
 ): Promise<boolean> {
     getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
-    log.only("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    log.only("[fastSync] Sync status: " + synced)
+    log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("[fastSync] Sync status: " + synced)
     getSharedState.syncStatus = synced
-    log.only("[fastSync] Broadcasting our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     await BroadcastManager.broadcastOurSyncData()
 
-    log.only("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.only("[fastSync] Last block number: " + lastBlockNumber)
-    log.only(
+    log.debug(
         "[fastSync] DB Last block number after sync: " +
             lastBlockNumber +
             " from: " +
@@ -818,6 +786,6 @@ export async function fastSync(
     )
 
     getSharedState.inSyncLoop = false
-    log.only("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     return true
 }

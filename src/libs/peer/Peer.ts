@@ -264,7 +264,7 @@ export default class Peer {
         let lastResponse: RPCResponse | null = null
 
         while (tries < retries) {
-            log.only(
+            log.info(
                 "[RPC Call] [" +
                     request.method +
                     "] [" +
@@ -303,19 +303,9 @@ export default class Peer {
                 connectionUrl = getSharedState.connectionString
             }
 
-            log.only(
-                "[RPC Call] [" +
-                    method +
-                    "] [" +
-                    currentTimestampReadable +
-                    "] Making RPC call to: " +
-                    connectionUrl,
-            )
             // Make the request
             let timeoutId: NodeJS.Timeout | undefined
             try {
-                log.only("REQUEST: " + JSON.stringify(request, null, 2))
-
                 // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
                 const abortController = new AbortController()
                 timeoutId = setTimeout(() => {
@@ -337,8 +327,7 @@ export default class Peer {
                 )
 
                 clearTimeout(timeoutId)
-                log.only("RESPONSE: " + JSON.stringify(response.data, null, 2))
-                log.only(
+                log.info(
                     "[RPC Call] [" +
                         method +
                         "] [" +
@@ -347,7 +336,7 @@ export default class Peer {
                 )
                 // log.info(JSON.stringify(response.data, null, 2))
                 if (response.data.result !== 200) {
-                    log.only(
+                    log.warning(
                         "[RPC Call] [" +
                             method +
                             "] [" +
@@ -358,7 +347,7 @@ export default class Peer {
                             response.data.result,
                     )
                 } else {
-                    log.only(
+                    log.info(
                         "[RPC Call] [" +
                             method +
                             "] [" +
@@ -377,8 +366,6 @@ export default class Peer {
                     return response.data
                 }
             } catch (error) {
-                console.error(error)
-
                 // Clear timeout if request completed (error or success)
                 if (timeoutId) {
                     clearTimeout(timeoutId)
