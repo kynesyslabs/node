@@ -215,3 +215,5 @@ ipfs_53550/data_53550/ipfs
 src/features/tlsnotary/SDK_INTEGRATION.md
 src/features/tlsnotary/SDK_INTEGRATION.md
 ipfs/data_53550/ipfs
+nohup.out
+\*.db
