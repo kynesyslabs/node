@@ -23,6 +23,7 @@
         "upgrade_deps": "bun update-interactive --latest",
         "upgrade_deps:force": "ncu -u && yarn",
         "keygen": "tsx -r tsconfig-paths/register src/libs/utils/keyMaker.ts",
+        "l2ps:zk:setup": "cd src/libs/l2ps/zk/scripts && bash setup_all_batches.sh",
         "show:pubkey": "tsx -r tsconfig-paths/register src/libs/utils/showPubkey.ts",
         "ceremony:contribute": "bash scripts/ceremony_contribute.sh",
         "test:chains": "jest --testMatch '**/tests/**/*.ts' --testPathIgnorePatterns src/* tests/utils/* tests/**/_template*  --verbose",

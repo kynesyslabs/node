@@ -205,3 +205,22 @@ ZK_CEREMONY_GIT_WORKFLOW.md
 ZK_CEREMONY_GUIDE.md
 attestation_20251204_125424.txt
 prop_agent
+
+# ZK Artifacts (L2PS)
+src/libs/l2ps/zk/keys/**/*.zkey
+src/libs/l2ps/zk/keys/**/*.ptau
+src/libs/l2ps/zk/keys/**/*.r1cs
+src/libs/l2ps/zk/keys/**/*.sym
+src/libs/l2ps/zk/keys/**/*.wasm
+src/libs/l2ps/zk/keys/**/*_js/
+src/libs/l2ps/zk/ptau/
+# Allow verification keys
+!src/libs/l2ps/zk/keys/**/verification_key.json
+
+# Security & Secrets
+mnemonic.txt
+certs/
+*.pem
+
+# Ops junk
+src/libs/network/routines/transactions/*.html
