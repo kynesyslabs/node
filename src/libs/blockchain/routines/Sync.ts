@@ -13,7 +13,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Conflict handling between peers (longest chain)
 
 import { getSharedState } from "src/utilities/sharedState"
-import terminalkit from "terminal-kit"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
@@ -33,7 +32,6 @@ import HandleGCR from "../gcr/handleGCR"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 
-const term = terminalkit.terminal
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -49,6 +47,7 @@ const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
 /**
+ * @deprecated
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
  *
@@ -204,7 +203,7 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest)
+    const blockResponse = await peer.httpCall(blockRequest, true)
 
     if (blockResponse.result === 200) {
         return blockResponse.response as Block
@@ -320,7 +319,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest)
+    const blockResponse = await peer.httpCall(blockRequest, true)
     log.debug("Block response: " + blockResponse.result)
 
     // INFO: Handle max retries reached
@@ -439,7 +438,7 @@ async function batchDownloadBlocks(
         ],
     }
 
-    const blocksResponse = await peer.httpCall(blocksRequest)
+    const blocksResponse = await peer.httpCall(blocksRequest, true)
 
     // Handle errors
     if (blocksResponse.result === 400) {
@@ -460,15 +459,6 @@ async function batchDownloadBlocks(
     }
 
     const blocks = blocksResponse.response as Block[]
-    log.debug(
-        "[batchDownloadBlocks] Blocks: " +
-            JSON.stringify(
-                blocks.map(block => block.number),
-                null,
-                2,
-            ),
-    )
-
     if (!blocks || blocks.length === 0) {
         log.error("[batchDownloadBlocks] No blocks received")
         return false
@@ -674,7 +664,7 @@ export async function askTxsForBlock(
                 },
             ],
         },
-        false,
+        true,
     )
 
     if (res.result === 200) {
@@ -690,7 +680,7 @@ export async function askTxsForBlock(
                 data: { hashes: block.content.ordered_transactions },
             },
         ],
-    })
+    }, true)
 
     if (res.result === 200) {
         return res.response as Transaction[]

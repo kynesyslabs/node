@@ -323,6 +323,10 @@ export default class PeerManager {
     }
 
     updatePeerLastSeen(pubkey: string) {
+        if (pubkey && !pubkey.startsWith("0x")) {
+            pubkey = "0x" + pubkey
+        }
+
         let peer = this.peerList[pubkey]
 
         offlineCheck: if (!peer) {

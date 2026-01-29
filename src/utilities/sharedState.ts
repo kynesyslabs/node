@@ -257,6 +257,11 @@ export default class SharedState {
             ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
                 []),
         ],
+        // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
+        whitelistedKeys: [
+            ...(process.env.WHITELISTED_KEYS?.split(",").map(key => key.trim()).filter(key => key.length > 0) ||
+                []),
+        ],
         methodLimits: {
             // REVIEW: Do we need this?
             POST: { maxRequests: 200000, windowMs: 86400000 },
