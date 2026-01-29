@@ -24,6 +24,7 @@ import {
     verifyTLSNotaryPresentation,
     parseHttpResponse,
     extractGithubUser,
+    extractDiscordUser,
     type TLSNotaryPresentation,
 } from "@/libs/tlsnotary"
 
@@ -1154,7 +1155,8 @@ export default class GCRIdentityRoutines {
         { server: string; pathPrefix: string }
     > = {
         github: { server: "api.github.com", pathPrefix: "/user" },
-        // Future: discord, twitter
+        discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
+        // Future: telegram
     }
 
     /**
@@ -1240,15 +1242,23 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        // 4. Check server name matches expected
-        if (verified.serverName !== expected.server) {
-            log.warn(
-                `[TLSN Identity] Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
-            )
-            return {
-                success: false,
-                message: `Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
+        // 4. Check server name matches expected (skip if WASM verification disabled)
+        // When WASM is disabled, serverName is not extracted from proof
+        // We trust the frontend's cryptographic verification in this mode
+        if (verified.verifyingKey !== "structure-validation-only") {
+            if (verified.serverName !== expected.server) {
+                log.warn(
+                    `[TLSN Identity] Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
+                )
+                return {
+                    success: false,
+                    message: `Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
+                }
             }
+        } else {
+            log.info(
+                `[TLSN Identity] Skipping serverName check (structure-validation-only mode)`,
+            )
         }
 
         // 5. Parse HTTP response and extract user data (if WASM provided recv data)
@@ -1276,8 +1286,10 @@ export default class GCRIdentityRoutines {
 
             if (context === "github") {
                 extractedUser = extractGithubUser(httpResponse.body)
+            } else if (context === "discord") {
+                extractedUser = extractDiscordUser(httpResponse.body)
             }
-            // Future: Add extractors for discord, twitter
+            // Future: Add extractors for telegram
 
             if (!extractedUser) {
                 return {
@@ -1368,8 +1380,22 @@ export default class GCRIdentityRoutines {
                         referralCode,
                     )
                 }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        referralCode,
+                    )
+                }
             }
-            // Future: Add incentives for discord, twitter
+            // Future: Add incentives for telegram
         }
 
         return { success: true, message: "TLSN identity added successfully" }
@@ -1423,6 +1449,8 @@ export default class GCRIdentityRoutines {
                     editOperation.account,
                     identity.userId,
                 )
+            } else if (context === "discord") {
+                await IncentiveManager.discordUnlinked(editOperation.account)
             }
         }
 

@@ -10,9 +10,12 @@ export {
     verifyTLSNotaryPresentation,
     parseHttpResponse,
     extractGithubUser,
+    extractDiscordUser,
     verifyGithubTLSNProof,
+    verifyDiscordTLSNProof,
     type TLSNotaryPresentation,
     type TLSNotaryVerificationResult,
     type ParsedHttpResponse,
     type ExtractedGithubUser,
+    type ExtractedDiscordUser,
 } from "./verifier"
