@@ -68,7 +68,7 @@ curl -Ls https://scrypt.io/scripts/setup-circom.sh | sh
 ```bash
 cd src/libs/l2ps/zk/scripts
 ./setup_all_batches.sh
-cd -
+cd ../../../..  # Return to project root
 ```
 
 This downloads ptau files (~200MB) and generates proving keys (~350MB).
@@ -358,7 +358,7 @@ openssl rand -hex 16 > data/l2ps/testnet_l2ps_001/iv.txt
 # 2. Create config.json (see section 1)
 
 # 3. Optional: Setup ZK proofs
-cd src/libs/l2ps/zk/scripts && ./setup_all_batches.sh && cd -
+cd src/libs/l2ps/zk/scripts && ./setup_all_batches.sh && cd ../../../..
 
 # 4. Start node
 ./run
