@@ -38,13 +38,6 @@ export interface VerificationResult {
 
 const SUPPORTED_ALGORITHMS = ["ed25519", "falcon", "ml-dsa"]
 
-/**
- * Normalize a public key by removing 0x prefix if present
- * Does NOT change case - crypto operations need original case preserved
- */
-function normalizePublicKey(key: string): string {
-    return key.replace(/^0x/i, "")
-}
 
 /**
  * Verify a signature from request headers
@@ -76,13 +69,11 @@ export async function verifySignature(
         let signatureObj: signedObject
         let algorithm: string
         let publicKeyHex: string // The raw hex for crypto operations (no normalization)
-        let publicKeyForWhitelist: string // Normalized for whitelist comparison
 
         if (splits.length > 1 && SUPPORTED_ALGORITHMS.includes(splits[0])) {
             // Format: "algorithm:publicKeyHex"
             algorithm = splits[0]
             publicKeyHex = splits[1] // Use raw value for crypto
-            publicKeyForWhitelist = normalizePublicKey(splits[1]) // Normalize for whitelist
 
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
@@ -98,7 +89,6 @@ export async function verifySignature(
             // Plain identity format (just public key hex)
             algorithm = "ed25519"
             publicKeyHex = identity // Use raw value for crypto
-            publicKeyForWhitelist = normalizePublicKey(identity) // Normalize for whitelist
 
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
@@ -119,7 +109,7 @@ export async function verifySignature(
             return {
                 valid: true,
                 identity,
-                publicKey: publicKeyForWhitelist, // Return normalized for whitelist comparison
+                publicKey: publicKeyHex,
                 algorithm,
             }
         }
@@ -128,7 +118,7 @@ export async function verifySignature(
         return {
             valid: false,
             identity,
-            publicKey: publicKeyForWhitelist,
+            publicKey: publicKeyHex,
             algorithm,
             error: "Invalid signature",
         }
