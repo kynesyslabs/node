@@ -65,7 +65,9 @@ export class ServerConnectionManager extends EventEmitter {
      * Close all connections
      */
     async closeAll(): Promise<void> {
-        log.info(`[ServerConnectionManager] Closing ${this.connections.size} connections...`)
+        log.info(
+            `[ServerConnectionManager] Closing ${this.connections.size} connections...`,
+        )
 
         const closePromises = Array.from(this.connections.values()).map(conn =>
             conn.close(),
@@ -115,14 +117,17 @@ export class ServerConnectionManager extends EventEmitter {
      * Remove connection from tracking
      */
     private removeConnection(connectionId: string, socket?: Socket): void {
-        const removed = this.connections.delete(connectionId)
-        if (removed) {
-            // Notify rate limiter to decrement connection count
-            if (socket && socket.remoteAddress && this.rateLimiter) {
-                this.rateLimiter.removeConnection(socket.remoteAddress)
-            }
-            this.emit("connection_removed", connectionId)
+        if (!socket) {
+            socket = this.connections.get(connectionId)?.socket
         }
+
+        // Notify rate limiter to decrement connection count
+        if (this.rateLimiter && socket && socket.remoteAddress) {
+            this.rateLimiter.removeConnection(socket.remoteAddress)
+        }
+
+        this.connections.delete(connectionId)
+        this.emit("connection_removed", connectionId)
     }
 
     /**
@@ -151,7 +156,10 @@ export class ServerConnectionManager extends EventEmitter {
                 }
 
                 // Remove idle connections
-                if (state === "IDLE" && now - lastActivity > this.config.connectionTimeout) {
+                if (
+                    state === "IDLE" &&
+                    now - lastActivity > this.config.connectionTimeout
+                ) {
                     toRemove.push(id)
                     conn.close()
                     continue
