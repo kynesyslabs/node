@@ -64,7 +64,7 @@ async function mainLoopCycle() {
     // await peerGossip()
     // await yieldToEventLoop()
 
-    // await fastSync([], "mainloop") // REVIEW Test here
+    await fastSync([], "mainloop") // REVIEW Test here
     // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
 
