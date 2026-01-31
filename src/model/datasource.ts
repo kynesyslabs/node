@@ -21,16 +21,21 @@ import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 import { OfflineMessage } from "./entities/OfflineMessages"
+import { L2PSHash } from "./entities/L2PSHashes.js"
+import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
+import { L2PSTransaction } from "./entities/L2PSTransactions.js"
+import { L2PSProof } from "./entities/L2PSProofs.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
-    host: "localhost",
+    host: process.env.PG_HOST || "localhost",
     port: parseInt(process.env.PG_PORT) || 5332,
-    username: "demosuser",
-    password: "demospassword",
-    database: "demos",
+    username: process.env.PG_USER || "demosuser",
+    password: process.env.PG_PASSWORD || "demospassword",
+    database: process.env.PG_DATABASE || "demos",
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,
@@ -44,6 +49,12 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        GCRTLSNotary,
+        OfflineMessage,
+        L2PSHash,
+        L2PSMempoolTx,
+        L2PSTransaction,
+        L2PSProof,
     ],
     synchronize: true,
     logging: false,
@@ -55,31 +66,7 @@ class Datasource {
     private dataSource: DataSource
 
     private constructor() {
-        this.dataSource = new DataSource({
-            type: "postgres",
-            host: "localhost",
-            port: parseInt(process.env.PG_PORT) || 5332,
-            username: "demosuser",
-            password: "demospassword",
-            database: "demos",
-            entities: [
-                Blocks,
-                Transactions,
-                MempoolTx,
-                Consensus,
-                PgpKeyServer,
-                GCRHashes,
-                GCRSubnetsTxs,
-                Validators,
-                //Identities,
-                GlobalChangeRegistry,
-                GCRTracker,
-                GCRMain,
-                OfflineMessage,
-            ],
-            synchronize: true, // set this to false in production
-            logging: false,
-        })
+        this.dataSource = dataSource
     }
 
     public static async getInstance(): Promise<Datasource> {

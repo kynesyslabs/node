@@ -3,6 +3,7 @@ import * as fs from "fs"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { IOperation, XMScript } from "@kynesyslabs/demosdk/types"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
+import log from "@/utilities/logger"
 
 import handlePayOperation from "./executors/pay"
 import handleContractRead from "./executors/contract_read"
@@ -34,8 +35,11 @@ class XMParser {
     // INFO Same as below but with file support
     static async loadFile(path: string): Promise<XMScript> {
         if (!fs.existsSync(path)) {
-            console.log("The file does not exist.")
+            log.debug("The file does not exist.")
             return null
+        }
+        if (path.includes("..")) {
+            throw new Error("Invalid file path")
         }
         const script = fs.readFileSync(path, "utf8")
         return await XMParser.load(script)
@@ -73,17 +77,17 @@ class XMParser {
         for (let id = 0; id < Object.keys(fullscript.operations).length; id++) {
             try {
                 name = Object.keys(fullscript.operations)[id]
-                console.log("[" + name + "] ")
+                log.debug("[" + name + "] ")
                 operation = fullscript.operations[name]
-                console.log("[XMParser]: full script operation")
-                console.log(fullscript)
-                console.log("[XMParser]: partial operation")
-                console.log(operation)
+                log.debug("[XMParser]: full script operation")
+                log.debug(fullscript)
+                log.debug("[XMParser]: partial operation")
+                log.debug(operation)
                 const result = await XMParser.executeOperation(operation)
                 results[name] = stringify(result)
-                console.log("[RESULT]: " + results[name])
+                log.debug("[RESULT]: " + results[name])
             } catch (e) {
-                console.log("[XM EXECUTE] Error: " + e)
+                log.error("[XM EXECUTE] Error: " + e)
                 results[name] = { result: "error", error: e.toString() }
             }
         }

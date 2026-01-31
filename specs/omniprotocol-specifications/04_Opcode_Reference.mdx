@@ -1,0 +1,805 @@
+# OmniProtocol Opcode Reference
+
+## Overview
+
+Opcodes are single-byte identifiers that specify the message type. They are organized into ranges by functional category.
+
+## Opcode Ranges
+
+| Range | Category | Description |
+|-------|----------|-------------|
+| `0x00-0x0F` | Control & Infrastructure | Connection management, status |
+| `0x10-0x1F` | Transactions & Execution | Transaction processing |
+| `0x20-0x2F` | Data Synchronization | State synchronization |
+| `0x30-0x3F` | Consensus | Block consensus operations |
+| `0x40-0x4F` | GCR Operations | Global Credit Registry |
+| `0x50-0x5F` | Browser/Client | Web client operations |
+| `0x60-0x6F` | Admin Operations | Administrative functions |
+| `0xF0-0xFF` | Protocol Meta | Protocol-level operations |
+
+## Opcode Enumeration
+
+```typescript
+enum OmniOpcode {
+    // 0x0X Control & Infrastructure
+    PING = 0x00,
+    HELLO_PEER = 0x01,
+    AUTH = 0x02,
+    NODE_CALL = 0x03,
+    GET_PEERLIST = 0x04,
+    GET_PEER_INFO = 0x05,
+    GET_NODE_VERSION = 0x06,
+    GET_NODE_STATUS = 0x07,
+
+    // 0x1X Transactions & Execution
+    EXECUTE = 0x10,
+    NATIVE_BRIDGE = 0x11,
+    BRIDGE = 0x12,
+    BRIDGE_GET_TRADE = 0x13,
+    BRIDGE_EXECUTE_TRADE = 0x14,
+    CONFIRM = 0x15,
+    BROADCAST = 0x16,
+
+    // 0x2X Data Synchronization
+    MEMPOOL_SYNC = 0x20,
+    MEMPOOL_MERGE = 0x21,
+    PEERLIST_SYNC = 0x22,
+    BLOCK_SYNC = 0x23,
+    GET_BLOCKS = 0x24,
+    GET_BLOCK_BY_NUMBER = 0x25,
+    GET_BLOCK_BY_HASH = 0x26,
+    GET_TX_BY_HASH = 0x27,
+    GET_MEMPOOL = 0x28,
+
+    // 0x3X Consensus
+    CONSENSUS_GENERIC = 0x30,
+    PROPOSE_BLOCK_HASH = 0x31,
+    VOTE_BLOCK_HASH = 0x32,
+    BROADCAST_BLOCK = 0x33,
+    GET_COMMON_VALIDATOR_SEED = 0x34,
+    GET_VALIDATOR_TIMESTAMP = 0x35,
+    SET_VALIDATOR_PHASE = 0x36,
+    GET_VALIDATOR_PHASE = 0x37,
+    GREENLIGHT = 0x38,
+    GET_BLOCK_TIMESTAMP = 0x39,
+    VALIDATOR_STATUS_SYNC = 0x3A,
+
+    // 0x4X GCR Operations
+    GCR_GENERIC = 0x40,
+    GCR_IDENTITY_ASSIGN = 0x41,
+    GCR_GET_IDENTITIES = 0x42,
+    GCR_GET_WEB2_IDENTITIES = 0x43,
+    GCR_GET_XM_IDENTITIES = 0x44,
+    GCR_GET_POINTS = 0x45,
+    GCR_GET_TOP_ACCOUNTS = 0x46,
+    GCR_GET_REFERRAL_INFO = 0x47,
+    GCR_VALIDATE_REFERRAL = 0x48,
+    GCR_GET_ACCOUNT_BY_IDENTITY = 0x49,
+    GCR_GET_ADDRESS_INFO = 0x4A,
+    GCR_GET_ADDRESS_NONCE = 0x4B,
+
+    // 0x5X Browser/Client
+    LOGIN_REQUEST = 0x50,
+    LOGIN_RESPONSE = 0x51,
+    WEB2_PROXY_REQUEST = 0x52,
+    GET_TWEET = 0x53,
+    GET_DISCORD_MESSAGE = 0x54,
+
+    // 0x6X Admin Operations
+    ADMIN_RATE_LIMIT_UNBLOCK = 0x60,
+    ADMIN_GET_CAMPAIGN_DATA = 0x61,
+    ADMIN_AWARD_POINTS = 0x62,
+
+    // 0xFX Protocol Meta
+    PROTO_VERSION_NEGOTIATE = 0xF0,
+    PROTO_CAPABILITY_EXCHANGE = 0xF1,
+    PROTO_ERROR = 0xF2,
+    PROTO_PING = 0xF3,
+    PROTO_DISCONNECT = 0xF4
+}
+```
+
+---
+
+## Control & Infrastructure (0x00-0x0F)
+
+### PING (0x00)
+Basic connectivity check / heartbeat.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x00` |
+| Auth Required | No |
+| Request Payload | Empty |
+| Response Payload | Empty or timestamp |
+
+### HELLO_PEER (0x01)
+Initial peer handshake with authentication.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x01` |
+| Auth Required | **Yes** |
+| Request Payload | Peer information |
+| Response Payload | Acknowledgment |
+
+**Purpose**: Establishes authenticated connection between peers.
+
+### AUTH (0x02)
+Authentication flow.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x02` |
+| Auth Required | **Yes** |
+| Request Payload | Auth credentials |
+| Response Payload | Auth result |
+
+### NODE_CALL (0x03)
+Generic HTTP-compatible wrapper for legacy calls.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x03` |
+| Auth Required | No |
+| Request Payload | JSON-RPC payload |
+| Response Payload | JSON-RPC response |
+
+### GET_PEERLIST (0x04)
+Retrieve list of known peers.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x04` |
+| Auth Required | No |
+| Request Payload | Empty |
+| Response Payload | Array of peer addresses |
+
+### GET_PEER_INFO (0x05)
+Get information about a specific peer.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x05` |
+| Auth Required | No |
+| Request Payload | Peer identity |
+| Response Payload | Peer details |
+
+### GET_NODE_VERSION (0x06)
+Get node software version.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x06` |
+| Auth Required | No |
+| Request Payload | Empty |
+| Response Payload | Version string |
+
+### GET_NODE_STATUS (0x07)
+Get node operational status.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x07` |
+| Auth Required | No |
+| Request Payload | Empty |
+| Response Payload | Status object |
+
+---
+
+## Transactions & Execution (0x10-0x1F)
+
+### EXECUTE (0x10)
+Execute transaction bundle.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x10` |
+| Auth Required | **Yes** |
+| Request Payload | `{ content: BundleContent }` |
+| Response Payload | Execution result |
+
+**Request Example**:
+```typescript
+interface ExecuteRequest {
+    content: BundleContent  // Transaction bundle
+}
+```
+
+### NATIVE_BRIDGE (0x11)
+Native bridge operations for cross-chain transactions.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x11` |
+| Auth Required | **Yes** |
+| Request Payload | `{ operation: NativeBridgeOperation }` |
+| Response Payload | Bridge result |
+
+### BRIDGE (0x12)
+Cross-chain bridge operations via Rubic.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x12` |
+| Auth Required | **Yes** |
+| Request Payload | `{ method, chain, params }` |
+| Response Payload | Bridge result |
+
+**Request Example**:
+```typescript
+interface BridgeRequest {
+    method: string    // "get_trade", "execute_trade"
+    chain: string     // Target chain
+    params: unknown[] // Method parameters
+}
+```
+
+### BRIDGE_GET_TRADE (0x13)
+Get bridge trade quote.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x13` |
+| Auth Required | **Yes** |
+| Request Payload | Trade parameters |
+| Response Payload | Trade quote |
+
+### BRIDGE_EXECUTE_TRADE (0x14)
+Execute bridge trade.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x14` |
+| Auth Required | **Yes** |
+| Request Payload | Trade execution params |
+| Response Payload | Trade result |
+
+### CONFIRM (0x15)
+Confirm/validate transaction.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x15` |
+| Auth Required | **Yes** |
+| Request Payload | `{ transaction: Transaction }` |
+| Response Payload | ValidityData |
+
+**Purpose**: Validates transaction and calculates gas without broadcasting.
+
+### BROADCAST (0x16)
+Broadcast transaction to mempool.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x16` |
+| Auth Required | **Yes** |
+| Request Payload | `{ content: BundleContent }` |
+| Response Payload | Broadcast result |
+
+---
+
+## Data Synchronization (0x20-0x2F)
+
+### MEMPOOL_SYNC (0x20)
+Synchronize mempool state.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x20` |
+| Auth Required | **Yes** |
+| Request Payload | Sync request |
+| Response Payload | Mempool data |
+
+### MEMPOOL_MERGE (0x21)
+Merge mempool entries from peer.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x21` |
+| Auth Required | **Yes** |
+| Request Payload | Entries to merge |
+| Response Payload | Merge result |
+
+### PEERLIST_SYNC (0x22)
+Synchronize peer list.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x22` |
+| Auth Required | **Yes** |
+| Request Payload | Current peer list |
+| Response Payload | Updated peer list |
+
+### BLOCK_SYNC (0x23)
+Synchronize block data.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x23` |
+| Auth Required | **Yes** |
+| Request Payload | Block range |
+| Response Payload | Block data |
+
+### GET_BLOCKS (0x24)
+Get multiple blocks.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x24` |
+| Auth Required | No |
+| Request Payload | Block numbers/range |
+| Response Payload | Array of blocks |
+
+### GET_BLOCK_BY_NUMBER (0x25)
+Get block by number.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x25` |
+| Auth Required | No |
+| Request Payload | Block number |
+| Response Payload | Block data |
+
+### GET_BLOCK_BY_HASH (0x26)
+Get block by hash.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x26` |
+| Auth Required | No |
+| Request Payload | Block hash |
+| Response Payload | Block data |
+
+### GET_TX_BY_HASH (0x27)
+Get transaction by hash.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x27` |
+| Auth Required | No |
+| Request Payload | Transaction hash |
+| Response Payload | Transaction data |
+
+### GET_MEMPOOL (0x28)
+Get current mempool contents.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x28` |
+| Auth Required | No |
+| Request Payload | Optional filters |
+| Response Payload | Mempool entries |
+
+---
+
+## Consensus (0x30-0x3F)
+
+### CONSENSUS_GENERIC (0x30)
+Generic consensus message wrapper.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x30` |
+| Auth Required | **Yes** |
+| Request Payload | Consensus payload |
+| Response Payload | Consensus result |
+
+### PROPOSE_BLOCK_HASH (0x31)
+Propose block hash for voting.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x31` |
+| Auth Required | **Yes** |
+| Request Payload | `{ blockHash, validationData, proposer }` |
+| Response Payload | `{ status, voter, voteAccepted, signatures }` |
+
+**Purpose**: Secretary proposes block hash to shard members for voting.
+
+### VOTE_BLOCK_HASH (0x32)
+Vote on proposed block hash.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x32` |
+| Auth Required | **Yes** |
+| Request Payload | Vote data |
+| Response Payload | Vote result |
+
+### BROADCAST_BLOCK (0x33)
+Broadcast finalized block.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x33` |
+| Auth Required | **Yes** |
+| Request Payload | Block data |
+| Response Payload | Acknowledgment |
+
+### GET_COMMON_VALIDATOR_SEED (0x34)
+Get common validator seed for shard selection.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x34` |
+| Auth Required | **Yes** |
+| Request Payload | Empty |
+| Response Payload | `{ status, seed }` |
+
+### GET_VALIDATOR_TIMESTAMP (0x35)
+Get validator timestamp for block time averaging.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x35` |
+| Auth Required | **Yes** |
+| Request Payload | Empty |
+| Response Payload | `{ status, timestamp }` |
+
+### SET_VALIDATOR_PHASE (0x36)
+Set validator consensus phase.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x36` |
+| Auth Required | **Yes** |
+| Request Payload | `{ phase, seed, blockRef }` |
+| Response Payload | `{ status, greenlight, timestamp, blockRef }` |
+
+### GET_VALIDATOR_PHASE (0x37)
+Get current validator phase.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x37` |
+| Auth Required | **Yes** |
+| Request Payload | Empty |
+| Response Payload | `{ status, hasPhase, phase }` |
+
+### GREENLIGHT (0x38)
+Secretary signals validators to proceed.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x38` |
+| Auth Required | **Yes** |
+| Request Payload | `{ blockRef, timestamp, phase }` |
+| Response Payload | `{ status, accepted }` |
+
+### GET_BLOCK_TIMESTAMP (0x39)
+Get block timestamp from secretary.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x39` |
+| Auth Required | **Yes** |
+| Request Payload | Empty |
+| Response Payload | `{ status, timestamp }` |
+
+### VALIDATOR_STATUS_SYNC (0x3A)
+Synchronize validator status.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x3A` |
+| Auth Required | **Yes** |
+| Request Payload | Status data |
+| Response Payload | Sync result |
+
+---
+
+## GCR Operations (0x40-0x4F)
+
+### GCR_GENERIC (0x40)
+Generic GCR operation wrapper.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x40` |
+| Auth Required | **Yes** |
+| Request Payload | GCR payload |
+| Response Payload | GCR result |
+
+### GCR_IDENTITY_ASSIGN (0x41)
+Assign identity to account.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x41` |
+| Auth Required | **Yes** |
+| Request Payload | Identity data |
+| Response Payload | Assignment result |
+
+### GCR_GET_IDENTITIES (0x42)
+Get account identities.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x42` |
+| Auth Required | No |
+| Request Payload | Account address |
+| Response Payload | Identity list |
+
+### GCR_GET_WEB2_IDENTITIES (0x43)
+Get Web2 identities (social accounts).
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x43` |
+| Auth Required | No |
+| Request Payload | Account address |
+| Response Payload | Web2 identity list |
+
+### GCR_GET_XM_IDENTITIES (0x44)
+Get XM identities.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x44` |
+| Auth Required | No |
+| Request Payload | Account address |
+| Response Payload | XM identity list |
+
+### GCR_GET_POINTS (0x45)
+Get reward points.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x45` |
+| Auth Required | No |
+| Request Payload | Account address |
+| Response Payload | Points data |
+
+### GCR_GET_TOP_ACCOUNTS (0x46)
+Get top accounts by points.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x46` |
+| Auth Required | No |
+| Request Payload | Limit, offset |
+| Response Payload | Account list |
+
+### GCR_GET_REFERRAL_INFO (0x47)
+Get referral information.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x47` |
+| Auth Required | No |
+| Request Payload | Account address |
+| Response Payload | Referral data |
+
+### GCR_VALIDATE_REFERRAL (0x48)
+Validate referral code.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x48` |
+| Auth Required | **Yes** |
+| Request Payload | Referral code |
+| Response Payload | Validation result |
+
+### GCR_GET_ACCOUNT_BY_IDENTITY (0x49)
+Get account by identity.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x49` |
+| Auth Required | No |
+| Request Payload | Identity |
+| Response Payload | Account data |
+
+### GCR_GET_ADDRESS_INFO (0x4A)
+Get address information.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x4A` |
+| Auth Required | No |
+| Request Payload | Address |
+| Response Payload | Address info |
+
+### GCR_GET_ADDRESS_NONCE (0x4B)
+Get address nonce.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x4B` |
+| Auth Required | No |
+| Request Payload | Address |
+| Response Payload | Nonce value |
+
+---
+
+## Browser/Client (0x50-0x5F)
+
+### LOGIN_REQUEST (0x50)
+Browser login request.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x50` |
+| Auth Required | **Yes** |
+| Request Payload | Login credentials |
+| Response Payload | Session token |
+
+### LOGIN_RESPONSE (0x51)
+Login response.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x51` |
+| Auth Required | **Yes** |
+| Request Payload | N/A |
+| Response Payload | Login result |
+
+### WEB2_PROXY_REQUEST (0x52)
+Proxy request to Web2 services.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x52` |
+| Auth Required | **Yes** |
+| Request Payload | Proxy request |
+| Response Payload | Proxy response |
+
+### GET_TWEET (0x53)
+Get tweet data.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x53` |
+| Auth Required | No |
+| Request Payload | Tweet ID |
+| Response Payload | Tweet data |
+
+### GET_DISCORD_MESSAGE (0x54)
+Get Discord message.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x54` |
+| Auth Required | No |
+| Request Payload | Message ID |
+| Response Payload | Message data |
+
+---
+
+## Admin Operations (0x60-0x6F)
+
+### ADMIN_RATE_LIMIT_UNBLOCK (0x60)
+Unblock rate-limited IP/identity.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x60` |
+| Auth Required | **Yes** |
+| Request Payload | IP or identity |
+| Response Payload | Unblock result |
+
+### ADMIN_GET_CAMPAIGN_DATA (0x61)
+Get campaign data.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x61` |
+| Auth Required | **Yes** |
+| Request Payload | Campaign ID |
+| Response Payload | Campaign data |
+
+### ADMIN_AWARD_POINTS (0x62)
+Award points to account.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0x62` |
+| Auth Required | **Yes** |
+| Request Payload | Award data |
+| Response Payload | Award result |
+
+---
+
+## Protocol Meta (0xF0-0xFF)
+
+### PROTO_VERSION_NEGOTIATE (0xF0)
+Negotiate protocol version.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0xF0` |
+| Auth Required | No |
+| Request Payload | Supported versions |
+| Response Payload | Agreed version |
+
+### PROTO_CAPABILITY_EXCHANGE (0xF1)
+Exchange capability information.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0xF1` |
+| Auth Required | No |
+| Request Payload | Capabilities list |
+| Response Payload | Peer capabilities |
+
+### PROTO_ERROR (0xF2)
+Protocol error notification.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0xF2` |
+| Auth Required | No |
+| Request Payload | N/A |
+| Response Payload | Error details |
+
+### PROTO_PING (0xF3)
+Protocol-level ping.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0xF3` |
+| Auth Required | No |
+| Request Payload | Optional timestamp |
+| Response Payload | Pong with timestamp |
+
+### PROTO_DISCONNECT (0xF4)
+Graceful disconnect notification.
+
+| Property | Value |
+|----------|-------|
+| Opcode | `0xF4` |
+| Auth Required | No |
+| Request Payload | Optional reason |
+| Response Payload | N/A (connection closes) |
+
+---
+
+## Handler Registration Summary
+
+```typescript
+// Handlers with native implementations
+const NATIVE_HANDLERS = [
+    0x04, // GET_PEERLIST
+    0x05, // GET_PEER_INFO
+    0x06, // GET_NODE_VERSION
+    0x07, // GET_NODE_STATUS
+    0x10, // EXECUTE
+    0x11, // NATIVE_BRIDGE
+    0x12, // BRIDGE
+    0x15, // CONFIRM
+    0x16, // BROADCAST
+    0x20, // MEMPOOL_SYNC
+    0x21, // MEMPOOL_MERGE
+    0x22, // PEERLIST_SYNC
+    0x23, // BLOCK_SYNC
+    0x24, // GET_BLOCKS
+    0x25, // GET_BLOCK_BY_NUMBER
+    0x26, // GET_BLOCK_BY_HASH
+    0x27, // GET_TX_BY_HASH
+    0x28, // GET_MEMPOOL
+    0x31, // PROPOSE_BLOCK_HASH
+    0x34, // GET_COMMON_VALIDATOR_SEED
+    0x35, // GET_VALIDATOR_TIMESTAMP
+    0x36, // SET_VALIDATOR_PHASE
+    0x37, // GET_VALIDATOR_PHASE
+    0x38, // GREENLIGHT
+    0x39, // GET_BLOCK_TIMESTAMP
+    // GCR handlers...
+]
+
+// Handlers using HTTP fallback
+const FALLBACK_HANDLERS = [
+    0x00, // PING
+    0x01, // HELLO_PEER
+    0x02, // AUTH
+    0x03, // NODE_CALL
+    // etc.
+]
+```
+
+## Related Documentation
+
+- [02_Message_Format.mdx](./02_Message_Format.mdx) - Message structure
+- [03_Authentication.mdx](./03_Authentication.mdx) - Auth requirements
+- [08_Serialization.mdx](./08_Serialization.mdx) - Payload formats

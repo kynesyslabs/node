@@ -2,14 +2,21 @@
 
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
-import { GCREdit, Web2GCRData } from "@kynesyslabs/demosdk/types"
+import {
+    GCREdit,
+    UDIdentityAssignPayload,
+    Web2GCRData,
+} from "@kynesyslabs/demosdk/types"
 import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
 import {
+    NomisWalletIdentity,
     PqcIdentityEdit,
+    SavedNomisIdentity,
     SavedXmIdentity,
+    SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
@@ -29,6 +36,7 @@ export default class GCRIdentityRoutines {
             signature,
             timestamp,
             signedData,
+            displayAddress,
         } = editOperation.data
 
         // REVIEW: Is there a better way to check this?
@@ -44,9 +52,10 @@ export default class GCRIdentityRoutines {
             return { success: false, message: "Invalid edit operation data" }
         }
 
+        const addressToStore = displayAddress || targetAddress
         const normalizedAddress = isEVM
-            ? targetAddress.toLowerCase()
-            : targetAddress
+            ? addressToStore.toLowerCase()
+            : addressToStore
 
         const accountGCR = await ensureGCRForUser(editOperation.account)
 
@@ -252,9 +261,9 @@ export default class GCRIdentityRoutines {
                     context === "telegram"
                         ? "Telegram attestation validation failed"
                         : "Sha256 proof mismatch: Expected " +
-                          data.proofHash +
-                          " but got " +
-                          Hashing.sha256(data.proof),
+                        data.proofHash +
+                        " but got " +
+                        Hashing.sha256(data.proof),
             }
         }
 
@@ -533,6 +542,161 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "PQC identities removed" }
     }
 
+    // SECTION UD Identity Routines
+    static async applyUdIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as UDIdentityAssignPayload["payload"]
+
+        // REVIEW: Validate required fields presence
+        if (
+            !payload.domain ||
+            !payload.signingAddress ||
+            !payload.signatureType ||
+            !payload.signature ||
+            !payload.publicKey ||
+            !payload.timestamp ||
+            !payload.signedData ||
+            !payload.network ||
+            !payload.registryType
+        ) {
+            return {
+                success: false,
+                message: "Invalid edit operation data: missing required fields",
+            }
+        }
+
+        // Validate enum fields have allowed values
+        const validNetworks = ["polygon", "base", "sonic", "ethereum", "solana"]
+        const validRegistryTypes = ["UNS", "CNS"]
+
+        if (!validNetworks.includes(payload.network)) {
+            return {
+                success: false,
+                message: `Invalid network: ${payload.network
+                    }. Must be one of: ${validNetworks.join(", ")}`,
+            }
+        }
+        if (!validRegistryTypes.includes(payload.registryType)) {
+            return {
+                success: false,
+                message: `Invalid registryType: ${payload.registryType}. Must be "UNS" or "CNS"`,
+            }
+        }
+
+        // Validate timestamp is a valid positive number
+        if (
+            typeof payload.timestamp !== "number" ||
+            isNaN(payload.timestamp) ||
+            payload.timestamp <= 0
+        ) {
+            return {
+                success: false,
+                message: `Invalid timestamp: ${payload.timestamp}. Must be a positive number (epoch milliseconds)`,
+            }
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+        accountGCR.identities.ud = accountGCR.identities.ud || []
+
+        // Check if domain already exists for this account
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() === payload.domain.toLowerCase(),
+        )
+
+        if (domainExists) {
+            return {
+                success: false,
+                message: "Domain already linked to this account",
+            }
+        }
+
+        accountGCR.identities.ud.push(payload)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Check if this is the first connection for this domain
+             */
+            const isFirst = await this.isFirstConnection(
+                "ud",
+                { domain: payload.domain },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            /**
+             * Award incentive points for UD domain linking
+             */
+            if (isFirst) {
+                await IncentiveManager.udDomainLinked(
+                    accountGCR.pubkey,
+                    payload.domain,
+                    payload.signingAddress,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "UD identity added" }
+    }
+
+    static async applyUdIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { domain } = editOperation.data
+
+        if (!domain) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities || !accountGCR.identities.ud) {
+            return {
+                success: false,
+                message: "No UD identities found",
+            }
+        }
+
+        const domainExists = accountGCR.identities.ud.some(
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() === domain.toLowerCase(),
+        )
+
+        if (!domainExists) {
+            return { success: false, message: "Domain not found" }
+        }
+
+        accountGCR.identities.ud = accountGCR.identities.ud.filter(
+            (id: SavedUdIdentity) =>
+                id.domain.toLowerCase() !== domain.toLowerCase(),
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for UD domain unlinking
+             */
+            await IncentiveManager.udDomainUnlinked(accountGCR.pubkey, domain)
+        }
+
+        return { success: true, message: "UD identity removed" }
+    }
+
     static async applyAwardPoints(
         editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
@@ -663,6 +827,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "udadd":
+                result = await this.applyUdIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "udremove":
+                result = await this.applyUdIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "pointsadd":
                 result = await this.applyAwardPoints(
                     identityEdit,
@@ -672,6 +850,20 @@ export default class GCRIdentityRoutines {
                 break
             case "pointsremove":
                 result = await this.applyAwardPointsRollback(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "nomisadd":
+                result = await this.applyNomisIdentityUpsert(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "nomisremove":
+                result = await this.applyNomisIdentityRemove(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
@@ -688,17 +880,26 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type: "twitter" | "github" | "web3" | "telegram" | "discord",
+        type:
+            | "twitter"
+            | "github"
+            | "web3"
+            | "telegram"
+            | "discord"
+            | "ud"
+            | "nomis",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3
+            domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3") {
+        if (type !== "web3" && type !== "ud" && type !== "nomis") {
+            // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
         `
@@ -709,88 +910,211 @@ export default class GCRIdentityRoutines {
                 .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
                 .getOne()
 
+            /**
+             * Return true if no account has this userId
+             */
+            return !result
+        } else if (type === "ud") {
+            /**
+             * Check if this UD domain exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'ud', '[]'::jsonb)) AS ud_id WHERE LOWER(ud_id->>'domain') = LOWER(:domain))",
+                    { domain: data.domain },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this domain
+             */
+            return !result
+        } else {
+            /**
+             * For web3 wallets, check if this address exists in any account for this chain/subchain
+             */
+            const addressToCheck =
+                data.chain === "evm" ? data.address.toLowerCase() : data.address
+
+            const rootKey = type === "web3" ? "xm" : "nomis"
+
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    `
+                EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(
+                        COALESCE(gcr.identities->:rootKey->:chain->:subchain, '[]'::jsonb)
+                    ) AS item
+                    WHERE item->>'address' = :address
+                )
+                `,
+                    {
+                        rootKey,
+                        chain: data.chain,
+                        subchain: data.subchain,
+                        address: addressToCheck,
+                    },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if this is the first connection
+             */
             return !result
         }
+    }
 
-        // if (type === "twitter") {
-        //     /**
-        //      * Check if this Twitter userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'userId' = :userId)",
-        //             {
-        //                 userId: data.userId,
-        //             },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
+    private static normalizeNomisAddress(
+        chain: string,
+        address: string,
+    ): string {
+        if (chain === "evm") {
+            return address.trim().toLowerCase()
+        }
 
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else if (type === "github") {
-        //     /**
-        //      * Check if this GitHub userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'github') as github_id WHERE github_id->>'userId' = :userId)",
-        //             {
-        //                 userId: data.userId,
-        //             },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
+        return address.trim()
+    }
 
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else if (type === "discord") {
-        //     /**
-        //      * Check if this Discord userId exists anywhere
-        //      */
-        //     const result = await gcrMainRepository
-        //         .createQueryBuilder("gcr")
-        //         .where(
-        //             "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'discord', '[]'::jsonb)) AS discord_id WHERE discord_id->>'userId' = :userId)",
-        //             { userId: data.userId },
-        //         )
-        //         .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-        //         .getOne()
+    static async applyNomisIdentityUpsert(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            chain,
+            subchain,
+            address,
+            score,
+            scoreType,
+            mintedScore,
+            metadata,
+            lastSyncedAt,
+        } = editOperation.data
 
-        //     /**
-        //      * Return true if no account has this userId
-        //      */
-        //     return !result
-        // } else {
-        /**
-         * For web3 wallets, check if this address exists in any account for this chain/subchain
-         */
-        const addressToCheck =
-            data.chain === "evm" ? data.address.toLowerCase() : data.address
+        if (!chain || !subchain || !address || !score) {
+            return { success: false, message: "Invalid Nomis identity payload" }
+        }
 
-        const result = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'xm'->:chain->:subchain) as xm_id WHERE xm_id->>'address' = :address)",
-                {
-                    chain: data.chain,
-                    subchain: data.subchain,
-                    address: addressToCheck,
-                },
+        const normalizedAddress = this.normalizeNomisAddress(chain, address)
+
+        const isFirst = await this.isFirstConnection(
+            "nomis",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            gcrMainRepository,
+            editOperation.account,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.nomis = accountGCR.identities.nomis || {}
+        accountGCR.identities.nomis[chain] =
+            accountGCR.identities.nomis[chain] || {}
+        accountGCR.identities.nomis[chain][subchain] =
+            accountGCR.identities.nomis[chain][subchain] || []
+
+        const chainBucket = accountGCR.identities.nomis[chain][subchain]
+
+        const filtered = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeNomisAddress(
+                chain,
+                existing.address,
             )
-            .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
-            .getOne()
+            return existingAddress !== normalizedAddress
+        })
 
-        /**
-         * Return true if this is the first connection
-         */
-        return !result
-        // }
+        const record: SavedNomisIdentity = {
+            address: normalizedAddress,
+            score,
+            scoreType,
+            mintedScore: mintedScore ?? null,
+            lastSyncedAt: lastSyncedAt || new Date().toISOString(),
+            metadata,
+        }
+
+        filtered.push(record)
+        accountGCR.identities.nomis[chain][subchain] = filtered
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            if (isFirst) {
+                await IncentiveManager.nomisLinked(
+                    accountGCR.pubkey,
+                    chain,
+                    score,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Nomis identity upserted" }
+    }
+
+    static async applyNomisIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identity = editOperation.data as NomisWalletIdentity
+
+        if (!identity?.chain || !identity?.subchain || !identity?.address) {
+            return { success: false, message: "Invalid Nomis identity payload" }
+        }
+
+        const normalizedAddress = this.normalizeNomisAddress(
+            identity.chain,
+            identity.address,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        const chainBucket =
+            accountGCR.identities.nomis?.[identity.chain]?.[identity.subchain]
+
+        if (!Array.isArray(chainBucket)) {
+            return { success: false, message: "Nomis identity not found" }
+        }
+
+        const exists = chainBucket.some(existing => {
+            const existingAddress = this.normalizeNomisAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress === normalizedAddress
+        })
+
+        if (!exists) {
+            return { success: false, message: "Nomis identity not found" }
+        }
+
+        accountGCR.identities.nomis[identity.chain][identity.subchain] =
+            chainBucket.filter(existing => {
+                const existingAddress = this.normalizeNomisAddress(
+                    identity.chain,
+                    existing.address,
+                )
+                return existingAddress !== normalizedAddress
+            })
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.nomisUnlinked(
+                accountGCR.pubkey,
+                identity.chain,
+                identity.score,
+            )
+        }
+
+        return { success: true, message: "Nomis identity removed" }
     }
 }

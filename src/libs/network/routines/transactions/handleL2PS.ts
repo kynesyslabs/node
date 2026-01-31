@@ -1,113 +1,117 @@
-import type { BlockContent, L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, L2PSTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "../../server_rpc"
 import _ from "lodash"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
-/* NOTE
-- Each l2ps is a list of nodes that are part of the l2ps
-- Each l2ps partecipant has the private key of the l2ps (or equivalent)
-- Each l2ps partecipant can register a transaction in the l2ps
-- Each l2ps partecipant can retrieve a transaction from the l2ps
-- // ! TODO For each l2ps message, it can be specified another key shared between the session partecipants only
-- // ! TODO Only nodes that partecipate to the l2ps will maintain a copy of the l2ps transactions
-- // ! TODO The non partecipating nodes will have a encrypted transactions hash property
+import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import log from "@/utilities/logger"
 
-*/
+/**
+ * Create an error response with the given status code and message
+ */
+function createErrorResponse(response: RPCResponse, code: number, message: string): RPCResponse {
+    response.result = code
+    response.response = false
+    response.extra = message
+    return response
+}
+
+/**
+ * Validate L2PS transaction structure
+ */
+function validateL2PSStructure(l2psTx: L2PSTransaction): string | null {
+    if (!l2psTx.content?.data?.[1]?.l2ps_uid) {
+        return "Invalid L2PS transaction structure: missing l2ps_uid in data payload"
+    }
+    return null
+}
+
+/**
+ * Get or load L2PS instance
+ */
+async function getL2PSInstance(l2psUid: string): Promise<L2PS | null> {
+    const parallelNetworks = ParallelNetworks.getInstance()
+    let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+    if (!l2psInstance) {
+        l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
+    }
+    return l2psInstance
+}
+
+/**
+ * Decrypt and validate L2PS transaction
+ */
+async function decryptAndValidate(
+    l2psInstance: L2PS,
+    l2psTx: L2PSTransaction
+): Promise<{ decryptedTx: Transaction | null; error: string | null }> {
+    let decryptedTx
+    try {
+        decryptedTx = await l2psInstance.decryptTx(l2psTx)
+    } catch (error) {
+        return {
+            decryptedTx: null,
+            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        }
+    }
+
+    if (!decryptedTx?.content?.from) {
+        return { decryptedTx: null, error: "Invalid decrypted transaction structure" }
+    }
+
+    const verificationResult = await Transaction.confirmTx(decryptedTx, decryptedTx.content.from)
+    if (!verificationResult || !verificationResult.success) {
+        const errorMsg = verificationResult?.message || "Transaction signature verification failed"
+        return { decryptedTx: null, error: errorMsg }
+    }
+
+    return { decryptedTx: decryptedTx as unknown as Transaction, error: null }
+}
 
 
 export default async function handleL2PS(
     l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
-    // ! TODO Finalize the below TODOs
     const response = _.cloneDeep(emptyResponse)
 
-    // REVIEW: PR Fix #10 - Validate nested data access before use
-    if (!l2psTx.content || !l2psTx.content.data || !l2psTx.content.data[1] || !l2psTx.content.data[1].l2ps_uid) {
-        response.result = 400
-        response.response = false
-        response.extra = "Invalid L2PS transaction structure: missing l2ps_uid in data payload"
-        return response
+    // Validate transaction structure
+    const structureError = validateL2PSStructure(l2psTx)
+    if (structureError) {
+        return createErrorResponse(response, 400, structureError)
     }
 
-    // REVIEW: PR Fix #Medium4 - Extract payload data once after validation
-    // L2PS transaction data structure: data[0] = metadata, data[1] = L2PS payload
     const payloadData = l2psTx.content.data[1]
-
-    // Defining a subnet from the uid: checking if we have the config or if its loaded already
-    const parallelNetworks = ParallelNetworks.getInstance()
     const l2psUid = payloadData.l2ps_uid
-    // REVIEW: PR Fix #Low1 - Use let instead of var for better scoping
-    let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+
+    // Get L2PS instance
+    const l2psInstance = await getL2PSInstance(l2psUid)
     if (!l2psInstance) {
-        // Try to load the l2ps from the local storage (if the node is part of the l2ps)
-        l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
-        if (!l2psInstance) {
-            response.result = 400
-            response.response = false
-            response.extra = "L2PS network not found and not joined (missing config)"
-            return response
-        }
-    }
-    // Now we should have the l2ps instance, we can decrypt the transaction
-    // REVIEW: PR Fix #6 - Add error handling for decryption and null safety checks
-    let decryptedTx
-    try {
-        decryptedTx = await l2psInstance.decryptTx(l2psTx)
-    } catch (error) {
-        response.result = 400
-        response.response = false
-        response.extra = `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
-        return response
+        return createErrorResponse(response, 400, "L2PS network not found and not joined (missing config)")
     }
 
-    if (!decryptedTx || !decryptedTx.content || !decryptedTx.content.from) {
-        response.result = 400
-        response.response = false
-        response.extra = "Invalid decrypted transaction structure"
-        return response
+    // Decrypt and validate transaction
+    const { decryptedTx, error: decryptError } = await decryptAndValidate(l2psInstance, l2psTx)
+    if (decryptError || !decryptedTx) {
+        return createErrorResponse(response, 400, decryptError || "Decryption failed")
     }
 
-    // NOTE Hash is already verified in the decryptTx function (sdk)
-
-    // NOTE Re-verify the decrypted transaction signature using the same method as other transactions
-    // This is necessary because the L2PS transaction was encrypted and bypassed initial verification.
-    // The encrypted L2PSTransaction was verified, but we need to verify the underlying Transaction
-    // after decryption to ensure integrity of the actual transaction content.
-    const verificationResult = await Transaction.confirmTx(decryptedTx, decryptedTx.content.from)
-    if (!verificationResult) {
-        response.result = 400
-        response.response = false
-        response.extra = "Transaction signature verification failed"
-        return response
-    }
-
-    // REVIEW: PR Fix #11 - Validate encrypted payload structure before type assertion
-    // Reuse payloadData extracted earlier (line 38)
+    // Validate payload structure
     if (!payloadData || typeof payloadData !== "object" || !("original_hash" in payloadData)) {
-        response.result = 400
-        response.response = false
-        response.extra = "Invalid L2PS payload: missing original_hash field"
-        return response
+        return createErrorResponse(response, 400, "Invalid L2PS payload: missing original_hash field")
     }
 
-    // Extract original hash from encrypted payload for duplicate detection
     const encryptedPayload = payloadData as L2PSEncryptedPayload
     const originalHash = encryptedPayload.original_hash
 
-    // Check for duplicates (prevent reprocessing)
-    // REVIEW: PR Fix #7 - Add error handling for mempool operations
+    // Check for duplicates
     let alreadyProcessed
     try {
         alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
     } catch (error) {
-        response.result = 500
-        response.response = false
-        response.extra = `Mempool check failed: ${error instanceof Error ? error.message : "Unknown error"}`
-        return response
+        return createErrorResponse(response, 500, `Mempool check failed: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
 
     if (alreadyProcessed) {
@@ -116,32 +120,69 @@ export default async function handleL2PS(
         response.extra = "Duplicate L2PS transaction detected"
         return response
     }
-    
-    // Store encrypted transaction (NOT decrypted) in L2PS-specific mempool
-    // This preserves privacy while enabling DTR hash generation
-    const mempoolResult = await L2PSMempool.addTransaction(
-        l2psUid, 
-        l2psTx, 
-        originalHash, 
-        "processed",
-    )
-    
+
+    // Store in mempool
+    const mempoolResult = await L2PSMempool.addTransaction(l2psUid, l2psTx, originalHash, "processed")
     if (!mempoolResult.success) {
-        response.result = 500
-        response.response = false
-        response.extra = `Failed to store in L2PS mempool: ${mempoolResult.error}`
-        return response
+        return createErrorResponse(response, 500, `Failed to store in L2PS mempool: ${mempoolResult.error}`)
     }
-    
-    // TODO Is the execution to be delegated to the l2ps nodes? As it cannot be done by the consensus as it will be in the future for the other txs
+
+    // Execute transaction
+    let executionResult
+    try {
+        executionResult = await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
+    } catch (error) {
+        log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return createErrorResponse(response, 500, `L2PS transaction execution failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+
+    if (!executionResult.success) {
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return createErrorResponse(response, 400, `L2PS transaction execution failed: ${executionResult.message}`)
+    }
+
+    // Store GCR edits in mempool for batch aggregation
+    if (executionResult.gcr_edits && executionResult.gcr_edits.length > 0) {
+        await L2PSMempool.updateGCREdits(
+            l2psTx.hash,
+            executionResult.gcr_edits,
+            executionResult.affected_accounts_count || 0
+        )
+    }
+
+    // Update status and return success
+    await L2PSMempool.updateStatus(l2psTx.hash, "executed")
+
+    // Record transaction in l2ps_transactions table for persistent history
+    try {
+        await L2PSTransactionExecutor.recordTransaction(
+            l2psUid,
+            decryptedTx,
+            "", // l1BatchHash - empty initially, will be updated during consensus
+            l2psTx.hash, // encrypted_hash
+            0, // batch_index
+            "pending" // Initial status - executed locally, waiting for aggregation
+        )
+        log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
+    } catch (recordError) {
+        log.error(`[handleL2PS] Failed to record transaction history: ${recordError instanceof Error ? recordError.message : "Unknown error"}`)
+        // Don't fail the transaction, just log the error
+    }
+
     response.result = 200
     response.response = {
-        message: "L2PS transaction processed and stored",
+        message: "L2PS transaction executed - awaiting batch aggregation",
         encrypted_hash: l2psTx.hash,
         original_hash: originalHash,
         l2ps_uid: l2psUid,
-        // REVIEW: PR Fix #4 - Return only hash for verification, not full plaintext (preserves L2PS privacy)
-        decrypted_tx_hash: decryptedTx.hash, // Hash only for verification, not full plaintext
+        decrypted_tx_hash: decryptedTx.hash,
+        execution: {
+            success: executionResult.success,
+            message: executionResult.message,
+            affected_accounts_count: executionResult.affected_accounts_count,
+            gcr_edits_count: executionResult.gcr_edits?.length || 0
+        }
     }
     return response
 }

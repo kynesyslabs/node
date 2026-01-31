@@ -1,11 +1,34 @@
-import { FindManyOptions, Repository } from "typeorm"
+import { FindManyOptions, In, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
-import { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
+
+/**
+ * L2PS Transaction Status Constants
+ * 
+ * Lifecycle: pending → processed → executed → batched → confirmed → (deleted)
+ *            pending → processed → failed (on execution error)
+ */
+export const L2PS_STATUS = {
+    /** Transaction received but not yet validated/decrypted */
+    PENDING: "pending",
+    /** Transaction decrypted and validated, ready for execution */
+    PROCESSED: "processed",
+    /** Transaction successfully executed within L2PS network */
+    EXECUTED: "executed",
+    /** Transaction execution failed (invalid nonce, insufficient balance, etc.) */
+    FAILED: "failed",
+    /** Transaction included in a batch, awaiting block confirmation */
+    BATCHED: "batched",
+    /** Batch containing this transaction has been included in a block */
+    CONFIRMED: "confirmed",
+} as const
+
+export type L2PSStatus = typeof L2PS_STATUS[keyof typeof L2PS_STATUS]
 
 /**
  * L2PS Mempool Manager
@@ -24,10 +47,9 @@ import log from "@/utilities/logger"
  */
 export default class L2PSMempool {
     /** TypeORM repository for L2PS mempool transactions */
-    // REVIEW: PR Fix - Added | null to type annotation for type safety
     public static repo: Repository<L2PSMempoolTx> | null = null
 
-    /** REVIEW: PR Fix - Promise lock for lazy initialization to prevent race conditions */
+    /** Promise lock for lazy initialization to prevent race conditions */
     private static initPromise: Promise<void> | null = null
 
     /**
@@ -49,14 +71,12 @@ export default class L2PSMempool {
 
     /**
      * Ensure repository is initialized before use (lazy initialization with locking)
-     * REVIEW: PR Fix - Async lazy initialization to prevent race conditions
      * @throws {Error} If initialization fails
      */
     private static async ensureInitialized(): Promise<void> {
         if (this.repo) return
 
         if (!this.initPromise) {
-            // REVIEW: PR Fix #1 - Clear initPromise on failure to allow retry
             this.initPromise = this.init().catch((error) => {
                 this.initPromise = null  // Clear promise on failure
                 throw error
@@ -98,7 +118,6 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             // Check if original transaction already processed (duplicate detection)
-            // REVIEW: PR Fix #8 - Consistent error handling for duplicate checks
             const alreadyExists = await this.existsByOriginalHash(originalHash)
             if (alreadyExists) {
                 return {
@@ -118,12 +137,12 @@ export default class L2PSMempool {
             }
 
             // Determine block number (following main mempool pattern)
-            // REVIEW: PR Fix #7 - Add validation for block number edge cases
             let blockNumber: number
             const manager = SecretaryManager.getInstance()
+            const shardBlockRef = manager?.shard?.blockRef
 
-            if (manager.shard?.blockRef && manager.shard.blockRef >= 0) {
-                blockNumber = manager.shard.blockRef + 1
+            if (typeof shardBlockRef === "number" && shardBlockRef >= 0) {
+                blockNumber = shardBlockRef + 1
             } else {
                 const lastBlockNumber = await Chain.getLastBlockNumber()
                 // Validate lastBlockNumber is a valid positive number
@@ -144,15 +163,18 @@ export default class L2PSMempool {
                 }
             }
 
+            // Get next sequence number for this L2PS network
+            const sequenceNumber = await this.getNextSequenceNumber(l2psUid)
+
             // Save to L2PS mempool
-            // REVIEW: PR Fix #2 - Store timestamp as numeric for correct comparison
             await this.repo.save({
                 hash: encryptedTx.hash,
                 l2ps_uid: l2psUid,
+                sequence_number: sequenceNumber.toString(),
                 original_hash: originalHash,
                 encrypted_tx: encryptedTx,
                 status: status,
-                timestamp: Date.now(),
+                timestamp: Date.now().toString(),
                 block_number: blockNumber,
             })
 
@@ -165,6 +187,33 @@ export default class L2PSMempool {
                 success: false,
                 error: error.message || "Unknown error",
             }
+        }
+    }
+
+    /**
+     * Get next sequence number for a specific L2PS network
+     * Auto-increments based on the highest existing sequence number
+     *
+     * @param l2psUid - L2PS network identifier
+     * @returns Promise resolving to the next sequence number
+     */
+    private static async getNextSequenceNumber(l2psUid: string): Promise<number> {
+        try {
+            await this.ensureInitialized()
+
+            const result = await this.repo
+                .createQueryBuilder("tx")
+                .select("MAX(CAST(tx.sequence_number AS INTEGER))", "max_seq")
+                .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+                .getRawOne()
+
+            const maxSeq = result?.max_seq ?? -1
+            return maxSeq + 1
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Mempool] Error getting next sequence number: ${errorMsg}`)
+            // Fallback to timestamp-based sequence
+            return Date.now()
         }
     }
 
@@ -205,6 +254,27 @@ export default class L2PSMempool {
     }
 
     /**
+     * Get the latest transaction for a specific L2PS UID
+     * Useful for determining sync checkpoints
+     * 
+     * @param l2psUid - L2PS network identifier
+     * @returns Promise resolving to the latest transaction or null
+     */
+    public static async getLastTransaction(l2psUid: string): Promise<L2PSMempoolTx | null> {
+        try {
+            await this.ensureInitialized()
+
+            return await this.repo.findOne({
+                where: { l2ps_uid: l2psUid },
+                order: { timestamp: "DESC" }
+            })
+        } catch (error: any) {
+            log.error(`[L2PS Mempool] Error getting latest transaction for UID ${l2psUid}:`, error)
+            return null
+        }
+    }
+
+    /**
      * Generate consolidated hash for L2PS UID from specific block or all blocks
      * 
      * This method creates a deterministic hash representing all L2PS transactions
@@ -229,7 +299,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             const options: FindManyOptions<L2PSMempoolTx> = {
-                where: { 
+                where: {
                     l2ps_uid: l2psUid,
                     status: "processed",  // Only include successfully processed transactions
                 },
@@ -245,7 +315,7 @@ export default class L2PSMempool {
             }
 
             const transactions = await this.repo.find(options)
-            
+
             if (transactions.length === 0) {
                 // Return deterministic empty hash
                 const suffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
@@ -260,17 +330,15 @@ export default class L2PSMempool {
             // Create consolidated hash: UID + block info + count + all hashes
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
             const hashInput = `L2PS_${l2psUid}${blockSuffix}:${sortedHashes.length}:${sortedHashes.join(",")}`
-            
+
             const consolidatedHash = Hashing.sha256(hashInput)
-            
+
             log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${sortedHashes.length} txs)`)
             return consolidatedHash
 
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
-            // REVIEW: PR Fix #5 - Return truly deterministic error hash (removed Date.now() for reproducibility)
-            // Algorithm: SHA256("L2PS_ERROR_" + l2psUid + blockSuffix)
-            // This ensures the same error conditions always produce the same hash
+            // Return deterministic error hash
             const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
             return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
         }
@@ -288,19 +356,18 @@ export default class L2PSMempool {
      * Update transaction status and timestamp
      * 
      * @param hash - Transaction hash to update
-     * @param status - New status ("pending", "processed", "failed")
+     * @param status - New status ("pending", "processed", "batched", "confirmed")
      * @returns Promise resolving to true if updated, false otherwise
      */
-    public static async updateStatus(hash: string, status: string): Promise<boolean> {
+    public static async updateStatus(hash: string, status: L2PSStatus): Promise<boolean> {
         try {
             await this.ensureInitialized()
 
-            // REVIEW: PR Fix #2 - Store timestamp as numeric for correct comparison
             const result = await this.repo.update(
                 { hash },
-                { status, timestamp: Date.now() },
+                { status, timestamp: Date.now().toString() },
             )
-            
+
             const updated = result.affected > 0
             if (updated) {
                 log.info(`[L2PS Mempool] Updated status of ${hash} to ${status}`)
@@ -310,6 +377,218 @@ export default class L2PSMempool {
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error updating status for ${hash}:`, error)
             return false
+        }
+    }
+
+    /**
+     * Update GCR edits and affected accounts count for a transaction
+     * Called after transaction execution to store edits for batch aggregation
+     *
+     * @param hash - Transaction hash to update
+     * @param gcrEdits - GCR edits generated during execution
+     * @param affectedAccountsCount - Number of accounts affected (privacy-preserving)
+     * @returns Promise resolving to true if updated, false otherwise
+     */
+    public static async updateGCREdits(
+        hash: string,
+        gcrEdits: GCREdit[],
+        affectedAccountsCount: number
+    ): Promise<boolean> {
+        try {
+            await this.ensureInitialized()
+
+            const result = await this.repo.update(
+                { hash },
+                {
+                    gcr_edits: gcrEdits,
+                    affected_accounts_count: affectedAccountsCount,
+                    timestamp: Date.now().toString()
+                },
+            )
+
+            const updated = (result.affected ?? 0) > 0
+            if (updated) {
+                log.debug(`[L2PS Mempool] Updated GCR edits for ${hash} (${gcrEdits.length} edits, ${affectedAccountsCount} accounts)`)
+            }
+            return updated
+
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[L2PS Mempool] Error updating GCR edits for ${hash}: ${errorMsg}`)
+            return false
+        }
+    }
+
+    /**
+     * Batch update status for multiple transactions
+     * Efficient for bulk operations like marking transactions as batched
+     *
+     * @param hashes - Array of transaction hashes to update
+     * @param status - New status to set
+     * @returns Promise resolving to number of updated records
+     *
+     * @example
+     * ```typescript
+     * const updatedCount = await L2PSMempool.updateStatusBatch(
+     *     ["0xabc...", "0xdef..."],
+     *     L2PS_STATUS.BATCHED
+     * )
+     * ```
+     */
+    public static async updateStatusBatch(hashes: string[], status: L2PSStatus): Promise<number> {
+        try {
+            if (hashes.length === 0) {
+                return 0
+            }
+
+            await this.ensureInitialized()
+
+            const result = await this.repo.update(
+                { hash: In(hashes) },
+                { status, timestamp: Date.now().toString() },
+            )
+
+            const updated = result.affected || 0
+            if (updated > 0) {
+                log.info(`[L2PS Mempool] Batch updated ${updated} transactions to status ${status}`)
+            }
+            return updated
+
+        } catch (error: any) {
+            log.error("[L2PS Mempool] Error batch updating status:", error)
+            return 0
+        }
+    }
+
+    /**
+     * Get all transactions with a specific status
+     * 
+     * @param status - Status to filter by
+     * @param limit - Optional limit on number of results
+     * @returns Promise resolving to array of matching transactions
+     * 
+     * @example
+     * ```typescript
+     * // Get all processed transactions ready for batching
+     * const readyToBatch = await L2PSMempool.getByStatus(L2PS_STATUS.PROCESSED, 100)
+     * ```
+     */
+    public static async getByStatus(status: L2PSStatus, limit?: number): Promise<L2PSMempoolTx[]> {
+        try {
+            await this.ensureInitialized()
+
+            const options: FindManyOptions<L2PSMempoolTx> = {
+                where: { status },
+                order: {
+                    timestamp: "ASC",
+                    hash: "ASC",
+                },
+            }
+
+            if (limit) {
+                options.take = limit
+            }
+
+            return await this.repo.find(options)
+        } catch (error: any) {
+            log.error(`[L2PS Mempool] Error getting transactions by status ${status}:`, error)
+            return []
+        }
+    }
+
+    /**
+     * Get all transactions with a specific status for a given L2PS UID
+     * 
+     * @param l2psUid - L2PS network identifier
+     * @param status - Status to filter by
+     * @param limit - Optional limit on number of results
+     * @returns Promise resolving to array of matching transactions
+     */
+    public static async getByUIDAndStatus(
+        l2psUid: string,
+        status: L2PSStatus,
+        limit?: number,
+    ): Promise<L2PSMempoolTx[]> {
+        try {
+            await this.ensureInitialized()
+
+            const options: FindManyOptions<L2PSMempoolTx> = {
+                where: { l2ps_uid: l2psUid, status },
+                order: {
+                    timestamp: "ASC",
+                    hash: "ASC",
+                },
+            }
+
+            if (limit) {
+                options.take = limit
+            }
+
+            return await this.repo.find(options)
+        } catch (error: any) {
+            log.error(`[L2PS Mempool] Error getting transactions for UID ${l2psUid} with status ${status}:`, error)
+            return []
+        }
+    }
+
+    /**
+     * Delete transactions by their hashes (for cleanup after confirmation)
+     * 
+     * @param hashes - Array of transaction hashes to delete
+     * @returns Promise resolving to number of deleted records
+     */
+    public static async deleteByHashes(hashes: string[]): Promise<number> {
+        try {
+            if (hashes.length === 0) {
+                return 0
+            }
+
+            await this.ensureInitialized()
+
+            const result = await this.repo.delete({ hash: In(hashes) })
+            const deleted = result.affected || 0
+
+            if (deleted > 0) {
+                log.info(`[L2PS Mempool] Deleted ${deleted} transactions`)
+            }
+            return deleted
+
+        } catch (error: any) {
+            log.error("[L2PS Mempool] Error deleting transactions:", error)
+            return 0
+        }
+    }
+
+    /**
+     * Delete old batched/confirmed transactions for cleanup
+     * 
+     * @param status - Status of transactions to clean up (typically 'batched' or 'confirmed')
+     * @param olderThanMs - Remove transactions older than this many milliseconds
+     * @returns Promise resolving to number of deleted records
+     */
+    public static async cleanupByStatus(status: L2PSStatus, olderThanMs: number): Promise<number> {
+        try {
+            await this.ensureInitialized()
+
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
+
+            const result = await this.repo
+                .createQueryBuilder()
+                .delete()
+                .from(L2PSMempoolTx)
+                .where("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("status = :status", { status })
+                .execute()
+
+            const deletedCount = result.affected || 0
+            if (deletedCount > 0) {
+                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old ${status} transactions`)
+            }
+            return deletedCount
+
+        } catch (error: any) {
+            log.error(`[L2PS Mempool] Error during cleanup by status ${status}:`, error)
+            return 0
         }
     }
 
@@ -327,7 +606,6 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { original_hash: originalHash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking original hash ${originalHash}:`, error)
-            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
             throw error
         }
     }
@@ -345,7 +623,6 @@ export default class L2PSMempool {
             return await this.repo.exists({ where: { hash } })
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error checking hash ${hash}:`, error)
-            // REVIEW: PR Fix #3 - Throw error instead of returning false to prevent duplicates on DB errors
             throw error
         }
     }
@@ -384,20 +661,19 @@ export default class L2PSMempool {
         try {
             await this.ensureInitialized()
 
-            // REVIEW: PR Fix #2 - Use numeric timestamp for correct comparison
-            const cutoffTimestamp = Date.now() - olderThanMs
+            const cutoffTimestamp = (Date.now() - olderThanMs).toString()
 
             const result = await this.repo
                 .createQueryBuilder()
                 .delete()
                 .from(L2PSMempoolTx)
-                .where("timestamp < :cutoff", { cutoff: cutoffTimestamp })
-                .andWhere("status = :status", { status: "processed" })
+                .where("CAST(timestamp AS BIGINT) < CAST(:cutoff AS BIGINT)", { cutoff: cutoffTimestamp })
+                .andWhere("status = :status", { status: L2PS_STATUS.CONFIRMED })
                 .execute()
 
             const deletedCount = result.affected || 0
             if (deletedCount > 0) {
-                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old transactions`)
+                log.info(`[L2PS Mempool] Cleaned up ${deletedCount} old confirmed transactions`)
             }
             return deletedCount
 
@@ -429,7 +705,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             const totalTransactions = await this.repo.count()
-            
+
             // Get transactions by UID
             const byUID = await this.repo
                 .createQueryBuilder("tx")
@@ -467,11 +743,8 @@ export default class L2PSMempool {
             return {
                 totalTransactions: 0,
                 transactionsByUID: {},
-                transactionsByStatus: {},       
+                transactionsByStatus: {},
             }
         }
     }
 }
-
-// REVIEW: PR Fix - Removed auto-init to prevent race conditions
-// Initialization now happens lazily on first use via ensureInitialized()

@@ -16,13 +16,12 @@ import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool_v2"
 import L2PSHashes from "@/libs/blockchain/l2ps_hashes"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
-import { L2PSTransaction, Transaction } from "@kynesyslabs/demosdk/types"
+import type { Transaction, L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
-import terminalKit from "terminal-kit"
+import _, { result } from "lodash"
 import {
     ExecutionResult,
     ValidityData,
@@ -52,6 +51,7 @@ import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
+
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
 
 // REVIEW: PR Fix #12 - Interface for L2PS hash update payload with proper type safety
@@ -68,6 +68,7 @@ import {
 import { IdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
+import { DTRManager } from "./dtr/dtrmanager"
 /* // ! Note: this will be removed once demosWork is in place
 import {
     NativePayload,
@@ -76,8 +77,6 @@ import {
     XMPayload,
 } from "@kynesyslabs/demosdk/types"
 */
-
-const term = terminalKit.terminal
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -92,9 +91,9 @@ export default class ServerHandlers {
         tx: Transaction,
         sender: string,
     ): Promise<ValidityData> {
-        term.yellow("[handleTransactions] Handling a DEMOS tx...\n")
+        log.info("SERVER", "[handleTransactions] Handling a DEMOS tx...")
         const fname = "[handleTransactions] "
-        term.yellow(fname + "Handling transaction...")
+        log.info("SERVER", fname + "Handling transaction...")
         // Verify and execute the transaction
         let validationData: ValidityData
         try {
@@ -120,15 +119,23 @@ export default class ServerHandlers {
             })
             // Hashing both the gcredits
             const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
-            console.log("gcrEditsHash: " + gcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
+            )
             const txGcrEditsHash = Hashing.sha256(
                 JSON.stringify(tx.content.gcr_edits),
             )
-            console.log("txGcrEditsHash: " + txGcrEditsHash)
+            log.debug(
+                "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
+            )
             const comparison = txGcrEditsHash == gcrEditsHash
             if (!comparison) {
-                log.error("[handleValidateTransaction] GCREdit mismatch")
-                console.log(txGcrEditsHash + " <> " + gcrEditsHash)
+                log.error(
+                    "[handleValidateTransaction] GCREdit mismatch: " +
+                        txGcrEditsHash +
+                        " <> " +
+                        gcrEditsHash,
+                )
             }
             if (comparison) {
                 log.info("[handleValidateTransaction] GCREdit hash match")
@@ -140,8 +147,7 @@ export default class ServerHandlers {
 
             //console.log(fname + "Fetching result...")
         } catch (e) {
-            term.red.bold("[TX VALIDATION ERROR] 💀 : ")
-            term.red(e)
+            log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)
             validationData = {
                 data: {
                     valid: false,
@@ -170,7 +176,7 @@ export default class ServerHandlers {
             }
         }
 
-        term.bold.white(fname + "Transaction handled.")
+        log.info("SERVER", fname + "Transaction handled.")
         return validationData
     }
 
@@ -182,7 +188,10 @@ export default class ServerHandlers {
         sender: string,
     ): Promise<ExecutionResult> {
         // Log the entire validatedData object to inspect its structure
-        console.log("[handleExecuteTransaction] Validated Data:", validatedData)
+        log.debug(
+            "[handleExecuteTransaction] Validated Data: " +
+                JSON.stringify(validatedData),
+        )
 
         const fname = "[handleExecuteTransaction] "
         const result: ExecutionResult = {
@@ -214,16 +223,14 @@ export default class ServerHandlers {
                     queriedTx.blockNumber,
             )
         }
-        console.log(
+        log.debug(
             "[handleExecuteTransaction] Queried tx processing in block: " +
                 queriedTx.blockNumber,
         )
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
-            term.red.bold(
-                fname + "Invalid validityData signature key (not us) 💀 : ",
-            )
+            log.error("SERVER", fname + "Invalid validityData signature key (not us) 💀")
 
             result.success = false
             result.response = false
@@ -287,7 +294,7 @@ export default class ServerHandlers {
                     We just processed the cryptographic validity of the transaction.
                     We will now try to execute it obtaining valid Operations.
                 */
-        term.green.bold(fname + "Valid validityData! \n")
+        log.info("SERVER", fname + "Valid validityData!")
         // REVIEW Switch case for different types of transactions
         const tx = _.cloneDeep(validatedData.data.transaction) // dataManipulation.copyCreate(validatedData.data.transaction)
         // Using a payload variable to be able to check types immediately
@@ -297,8 +304,10 @@ export default class ServerHandlers {
             // NOTE This is to be removed once demosWork is in place, but is crucial for now
             case "crosschainOperation":
                 payload = tx.content.data
-                console.log("[Included XM Chainscript]")
-                console.log(payload[1])
+                log.debug(
+                    "[handleExecuteTransaction] Included XM Chainscript: " +
+                        JSON.stringify(payload[1]),
+                )
                 // TODO Better types on answers
                 var xmResult = await ServerHandlers.handleXMChainOperation(
                     payload[1] as XMScript,
@@ -312,15 +321,65 @@ export default class ServerHandlers {
                 break
 
             case "subnet":
-                payload = tx.content.data 
-                console.log(
-                    "[handleExecuteTransaction] Subnet payload: " + payload[1],
+                payload = tx.content.data
+                log.debug(
+                    "[handleExecuteTransaction] Subnet payload: " +
+                        JSON.stringify(payload[1]),
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
                     tx as L2PSTransaction,
                 )
                 result.response = subnetResult
                 break
+
+            case "l2psEncryptedTx": {
+                // Handle encrypted L2PS transactions
+                // These are routed to the L2PS mempool via handleSubnetTx (which calls handleL2PS)
+                console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
+                
+                // Authorization check: Verify transaction signature before processing
+                // This ensures only properly signed transactions are accepted
+                if (!tx.signature?.data) {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: missing signature")
+                    result.success = false
+                    result.response = { error: "L2PS transaction requires valid signature" }
+                    break
+                }
+
+                // Verify the transaction has valid L2PS payload structure
+                const l2psPayload = tx.content?.data?.[1]
+                if (!l2psPayload || typeof l2psPayload !== "object") {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: invalid payload structure")
+                    result.success = false
+                    result.response = { error: "Invalid L2PS payload structure" }
+                    break
+                }
+
+                // Verify sender address matches the transaction signature
+                // This prevents unauthorized submission of L2PS transactions
+                const senderAddress = tx.content?.from || tx.content?.from_ed25519_address
+                if (!senderAddress) {
+                    log.error("[handleExecuteTransaction] L2PS tx rejected: missing sender address")
+                    result.success = false
+                    result.response = { error: "L2PS transaction requires sender address" }
+                    break
+                }
+
+                const l2psResult = await ServerHandlers.handleSubnetTx(
+                    tx as L2PSTransaction,
+                )
+                result.response = l2psResult
+                // If successful, we don't want to add this to the main mempool
+                // The handleL2PS routine takes care of adding it to the L2PS mempool
+                if (l2psResult.result === 200) {
+                    result.success = true
+                    // Return early to avoid adding L2PS transactions to main mempool
+                    return result
+                } else {
+                    result.success = false
+                }
+                break
+            }
 
             case "web2Request": {
                 payload = tx.content.data[1] as IWeb2Payload
@@ -374,7 +433,6 @@ export default class ServerHandlers {
                             identityResult.message + `. Transaction ${status}.`,
                     }
                 } catch (e) {
-                    console.error(e)
                     log.error("[handleverifyPayload] Error in identity: " + e)
                     result.success = false
                     result.response = {
@@ -432,84 +490,68 @@ export default class ServerHandlers {
 
             // REVIEW We add the transaction to the mempool
             // DTR: Check if we should relay instead of storing locally (Production only)
-            if (getSharedState.PROD) {
-                const isValidator = await isValidatorForNextBlock()
-                
-                if (!isValidator) {
-                    console.log("[DTR] Non-validator node: attempting relay to all validators")
-                    try {
-                        const { commonValidatorSeed } = await getCommonValidatorSeed()
-                        const validators = await getShard(commonValidatorSeed)
-                        const availableValidators = validators
-                            .filter(v => v.status.online && v.sync.status)
-                            .sort(() => Math.random() - 0.5) // Random order for load balancing
-                        
-                        console.log(`[DTR] Found ${availableValidators.length} available validators`)
+            log.debug("PROD: " + getSharedState.PROD)
+            const { isValidator, validators } = await isValidatorForNextBlock()
 
-                        // REVIEW: PR Fix #7 - Parallel relay with concurrency limit to prevent blocking timeouts
-                        // Use Promise.allSettled() with limited concurrency (3-5 validators) instead of sequential blocking calls
-                        const concurrencyLimit = 5
-                        const validatorsToTry = availableValidators.slice(0, concurrencyLimit)
-                        console.log(`[DTR] Attempting parallel relay to ${validatorsToTry.length} validators (concurrency limit: ${concurrencyLimit})`)
+            if (!isValidator) {
+                log.debug(
+                    "[DTR] Non-validator node: attempting relay to all validators",
+                )
+                const availableValidators = validators.sort(
+                    () => Math.random() - 0.5,
+                ) // Random order for load balancing
 
-                        const relayPromises = validatorsToTry.map(async (validator) => {
-                            try {
-                                const relayResult = await validator.call({
-                                    method: "nodeCall",
-                                    params: [{
-                                        type: "RELAY_TX",
-                                        data: { transaction: queriedTx, validityData: validatedData },
-                                    }],
-                                }, true)
+                log.debug(
+                    `[DTR] Found ${availableValidators.length} available validators, trying all`,
+                )
 
-                                if (relayResult.result === 200) {
-                                    return { success: true, validator, result: relayResult }
-                                }
+                // Try ALL validators in random order
+                const results = await Promise.allSettled(
+                    availableValidators.map(validator =>
+                        DTRManager.relayTransactions(validator, [
+                            validatedData,
+                        ]),
+                    ),
+                )
 
-                                return { success: false, validator, error: `Rejected: ${relayResult.response}` }
-                            } catch (error: any) {
-                                return { success: false, validator, error: error.message }
-                            }
-                        })
-
-                        const results = await Promise.allSettled(relayPromises)
-
-                        // Check if any relay succeeded
-                        for (const promiseResult of results) {
-                            if (promiseResult.status === "fulfilled" && promiseResult.value.success) {
-                                const { validator } = promiseResult.value
-                                console.log(`[DTR] Successfully relayed to validator ${validator.identity.substring(0, 8)}...`)
-                                result.success = true
-                                result.response = { message: "Transaction relayed to validator" }
-                                result.require_reply = false
-                                return result
-                            }
+                for (const result of results) {
+                    if (result.status === "fulfilled") {
+                        const response = result.value
+                        if (response.result == 200) {
+                            continue
                         }
 
-                        // Log all failures
-                        for (const promiseResult of results) {
-                            if (promiseResult.status === "fulfilled" && !promiseResult.value.success) {
-                                const { validator, error } = promiseResult.value
-                                console.log(`[DTR] Validator ${validator.identity.substring(0, 8)}... ${error}`)
-                            } else if (promiseResult.status === "rejected") {
-                                console.log(`[DTR] Validator promise rejected: ${promiseResult.reason}`)
-                            }
-                        }
-
-                        console.log("[DTR] All validators failed, storing locally for background retry")
-                        
-                    } catch (relayError) {
-                        console.log("[DTR] Relay system error, storing locally:", relayError)
+                        // TODO: Handle response codes individually
+                        DTRManager.validityDataCache.set(
+                            validatedData.data.transaction.hash,
+                            validatedData,
+                        )
                     }
-                    
-                    // Store ValidityData in shared state for retry service
-                    getSharedState.validityDataCache.set(queriedTx.hash, validatedData)
-                    console.log(`[DTR] Stored ValidityData for ${queriedTx.hash} in memory cache for retry service`)
+                }
+
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 1,
+                    },
+                    require_reply: false,
                 }
             }
 
+            if (getSharedState.inConsensusLoop) {
+                return await DTRManager.inConsensusHandler(validatedData)
+            }
+
+            log.debug(
+                "👀 not in consensus loop, adding tx to mempool: " +
+                    queriedTx.hash,
+            )
+
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)
-            console.log(
+            log.debug(
                 "[handleExecuteTransaction] Adding tx with hash: " +
                     queriedTx.hash +
                     " to the mempool",
@@ -521,7 +563,7 @@ export default class ServerHandlers {
                         reference_block: validatedData.data.reference_block,
                     })
 
-                console.log(
+                log.debug(
                     "[handleExecuteTransaction] Transaction added to mempool",
                 )
 
@@ -577,7 +619,7 @@ export default class ServerHandlers {
          * An operation for the gas is also pushed it pn the GCR.
          * The tx is pushed in the mempool if applicable.
          */
-        console.log("[XMChain] Handling XM Chain Operation...")
+        log.debug("[XMChain] Handling XM Chain Operation...")
         // REVIEW Remember that crosschain operations can be in chainscript syntax
         // INFO Use the src/features/multichain/chainscript/chainscript.chs for the specs
         //console.log(content.data)
@@ -598,6 +640,13 @@ export default class ServerHandlers {
 
     // NOTE If we receive a SubnetPayload, we use handleL2PS to register the transaction
     static async handleSubnetTx(content: L2PSTransaction) {
+        let response: RPCResponse = _.cloneDeep(emptyResponse)
+        response = await handleL2PS(content)
+        return response
+    }
+
+    // Handle L2PS requests directly
+    static async handleL2PS(content: any): Promise<RPCResponse> {
         let response: RPCResponse = _.cloneDeep(emptyResponse)
         response = await handleL2PS(content)
         return response
@@ -695,20 +744,18 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 
-    static async handleMempool(content: any): Promise<any> {
+    static async handleMempool(txs: Transaction[]): Promise<any> {
         // Basic message handling logic
         // ...
-        log.info("[handleMempool] Received a message")
-        log.info(content)
         let response = {
             success: false,
             mempool: [],
         }
 
         try {
-            response = await Mempool.receive(content.data as Transaction[])
+            response = await Mempool.receive(txs)
         } catch (error) {
-            console.error(error)
+            log.error("[handleMempool] Error receiving mempool: " + error)
         }
 
         const ourId = getSharedState.publicKeyHex
@@ -769,7 +816,7 @@ export default class ServerHandlers {
                 return response
             }
 
-            if (!tx.block_number) {
+            if (!tx.blockNumber) {
                 response.result = 400
                 response.response = "Missing block_number"
                 response.extra = "L2PS hash updates require valid block_number (cannot default to 0)"
@@ -813,7 +860,7 @@ export default class ServerHandlers {
                     l2psHashPayload.l2ps_uid,
                     l2psHashPayload.consolidated_hash,
                     l2psHashPayload.transaction_count,
-                    BigInt(tx.block_number), // Now guaranteed to exist due to validation above
+                    BigInt(tx.blockNumber), // Now guaranteed to exist due to validation above
                 )
 
                 log.info(`[L2PS Hash Update] Stored hash for L2PS ${l2psUid}: ${l2psHashPayload.consolidated_hash.substring(0, 16)}... (${l2psHashPayload.transaction_count} txs)`)

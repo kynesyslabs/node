@@ -18,6 +18,7 @@ import {
 import { z } from "zod"
 import log from "@/utilities/logger"
 import express from "express"
+import helmet from "helmet"
 import cors from "cors"
 import http from "http"
 
@@ -145,7 +146,7 @@ export class MCPServerManager {
                     content: [
                         {
                             type: "text",
-                            text: JSON.stringify(result, null, 2),
+                            text: JSON.stringify(result),
                         },
                     ],
                 }
@@ -255,6 +256,7 @@ export class MCPServerManager {
 
         // Create Express app for SSE transport
         this.expressApp = express()
+        this.expressApp.use(helmet())
         this.expressApp.use(cors())
         this.expressApp.use(express.json())
 
@@ -291,7 +293,7 @@ export class MCPServerManager {
             // Handle client disconnect
             req.on("close", () => {
                 log.info("[MCP] SSE client disconnected")
-                sseTransport.close().catch(console.error)
+                sseTransport.close().catch((err) => log.error("[MCP] SSE transport close error:", err))
             })
         })
 
@@ -443,4 +445,3 @@ export function createDemosMCPServer(options?: {
     return new MCPServerManager(config)
 }
 
-export default MCPServerManager

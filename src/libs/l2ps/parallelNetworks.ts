@@ -1,7 +1,5 @@
-// FIXME Add L2PS private mempool logic with L2PS mempool/txs hash in the global GCR for integrity
-// FIXME Add L2PS Sync in Sync.ts (I guess)
-
-import { UnifiedCrypto, ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import type { EncryptedTransaction } from "./types"
 import * as forge from "node-forge"
 import fs from "fs"
 import path from "path"
@@ -10,8 +8,11 @@ import {
     L2PSConfig,
     L2PSEncryptedPayload,
 } from "@kynesyslabs/demosdk/l2ps"
-import { L2PSTransaction, Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
+import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
 /**
  * Configuration interface for an L2PS node.
@@ -53,6 +54,28 @@ interface L2PSNodeConfig {
     auto_start?: boolean
 }
 
+function hexFileToBytes(value: string, label: string): string {
+    if (!value) {
+        throw new Error(`${label} is empty`)
+    }
+
+    const cleaned = value.trim().replace(/^0x/, "").replaceAll(/\s+/g, "")
+
+    if (cleaned.length === 0) {
+        throw new Error(`${label} is empty`)
+    }
+
+    if (cleaned.length % 2 !== 0) {
+        throw new Error(`${label} hex length must be even`)
+    }
+
+    if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
+        throw new Error(`${label} contains non-hex characters`)
+    }
+
+    return forge.util.hexToBytes(cleaned)
+}
+
 /**
  * Manages parallel L2PS (Layer 2 Private System) networks.
  * This class implements the Singleton pattern to ensure only one instance exists.
@@ -62,7 +85,7 @@ export default class ParallelNetworks {
     private static instance: ParallelNetworks
     private l2pses: Map<string, L2PS> = new Map()
     private configs: Map<string, L2PSNodeConfig> = new Map()
-    // REVIEW: PR Fix - Promise lock to prevent concurrent loadL2PS race conditions
+    /** Promise lock to prevent concurrent loadL2PS race conditions */
     private loadingPromises: Map<string, Promise<L2PS>> = new Map()
 
     private constructor() {}
@@ -85,7 +108,7 @@ export default class ParallelNetworks {
      * @throws {Error} If the configuration is invalid or required files are missing
      */
     async loadL2PS(uid: string): Promise<L2PS> {
-        // REVIEW: PR Fix - Validate uid to prevent path traversal attacks
+        // Validate uid to prevent path traversal attacks
         if (!uid || !/^[A-Za-z0-9_-]+$/.test(uid)) {
             throw new Error(`Invalid L2PS uid: ${uid}`)
         }
@@ -94,7 +117,7 @@ export default class ParallelNetworks {
             return this.l2pses.get(uid) as L2PS
         }
 
-        // REVIEW: PR Fix - Check if already loading to prevent race conditions
+        // Check if already loading to prevent race conditions
         const existingPromise = this.loadingPromises.get(uid)
         if (existingPromise) {
             return existingPromise
@@ -113,13 +136,12 @@ export default class ParallelNetworks {
 
     /**
      * Internal method to load L2PS configuration and initialize instance
-     * REVIEW: PR Fix - Extracted from loadL2PS to enable promise locking
      * @param {string} uid - The unique identifier of the L2PS network
      * @returns {Promise<L2PS>} The initialized L2PS instance
      * @private
      */
     private async loadL2PSInternal(uid: string): Promise<L2PS> {
-        // REVIEW: PR Fix - Verify resolved path is within expected directory
+        // Verify resolved path is within expected directory
         const basePath = path.resolve(process.cwd(), "data", "l2ps")
         const configPath = path.resolve(basePath, uid, "config.json")
 
@@ -130,21 +152,21 @@ export default class ParallelNetworks {
             throw new Error(`L2PS config file not found: ${configPath}`)
         }
 
-        // REVIEW: PR Fix #18 - Add JSON parsing error handling
         let nodeConfig: L2PSNodeConfig
         try {
             nodeConfig = JSON.parse(
                 fs.readFileSync(configPath, "utf8"),
             )
-        } catch (error: any) {
-            throw new Error(`Failed to parse L2PS config for ${uid}: ${error.message}`)
+        } catch (error) {
+            const message = getErrorMessage(error)
+            throw new Error(`Failed to parse L2PS config for ${uid}: ${message}`)
         }
 
         if (!nodeConfig.uid || !nodeConfig.enabled) {
             throw new Error(`L2PS config invalid or disabled: ${uid}`)
         }
 
-        // REVIEW: PR Fix - Validate nodeConfig.keys exists before accessing
+        // Validate nodeConfig.keys exists before accessing
         if (!nodeConfig.keys || !nodeConfig.keys.private_key_path || !nodeConfig.keys.iv_path) {
             throw new Error(`L2PS config missing required keys for ${uid}`)
         }
@@ -159,10 +181,13 @@ export default class ParallelNetworks {
             throw new Error(`L2PS key files not found for ${uid}`)
         }
 
-        const privateKey = fs.readFileSync(privateKeyPath, "utf8").trim()
-        const iv = fs.readFileSync(ivPath, "utf8").trim()
+        const privateKeyHex = fs.readFileSync(privateKeyPath, "utf8").trim()
+        const ivHex = fs.readFileSync(ivPath, "utf8").trim()
 
-        const l2ps = await L2PS.create(privateKey, iv)
+        const privateKeyBytes = hexFileToBytes(privateKeyHex, `${uid} private key`)
+        const ivBytes = hexFileToBytes(ivHex, `${uid} IV`)
+
+        const l2ps = await L2PS.create(privateKeyBytes, ivBytes)
         const l2psConfig: L2PSConfig = {
             uid: nodeConfig.uid,
             config: nodeConfig.config,
@@ -184,7 +209,8 @@ export default class ParallelNetworks {
         try {
             return await this.loadL2PS(uid)
         } catch (error) {
-            console.error(`Failed to load L2PS ${uid}:`, error)
+            const message = getErrorMessage(error)
+            log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             return undefined
         }
     }
@@ -202,11 +228,10 @@ export default class ParallelNetworks {
      * @returns {Promise<string[]>} Array of successfully loaded L2PS network IDs
      */
     async loadAllL2PS(): Promise<string[]> {
-        // REVIEW: PR Fix - Changed var to const for better scoping and immutability
         const l2psJoinedUids: string[] = []
         const l2psDir = path.join(process.cwd(), "data", "l2ps")
         if (!fs.existsSync(l2psDir)) {
-            console.warn("L2PS data directory not found, creating...")
+            log.warning("[L2PS] Data directory not found, creating...")
             fs.mkdirSync(l2psDir, { recursive: true })
             return []
         }
@@ -220,9 +245,10 @@ export default class ParallelNetworks {
             try {
                 await this.loadL2PS(uid)
                 l2psJoinedUids.push(uid)
-                console.log(`Loaded L2PS: ${uid}`)
+                log.info(`[L2PS] Loaded L2PS: ${uid}`)
             } catch (error) {
-                console.error(`Failed to load L2PS ${uid}:`, error)
+                const message = getErrorMessage(error)
+                log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             }
         }
         getSharedState.l2psJoinedUids = l2psJoinedUids
@@ -242,10 +268,10 @@ export default class ParallelNetworks {
         senderIdentity?: any,
     ): Promise<Transaction> {
         const l2ps = await this.loadL2PS(uid)
-        const encryptedTx = l2ps.encryptTx(tx, senderIdentity)
+        const encryptedTx = await l2ps.encryptTx(tx, senderIdentity)
 
-        // REVIEW: PR Fix - Sign encrypted transaction with node's private key
-        const sharedState = getSharedState()
+        // Sign encrypted transaction with node's private key
+        const sharedState = getSharedState
         const signature = await ucrypto.sign(
             sharedState.signingAlgorithm,
             new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
@@ -273,7 +299,7 @@ export default class ParallelNetworks {
     ): Promise<Transaction> {
         const l2ps = await this.loadL2PS(uid)
 
-        // REVIEW: PR Fix - Verify signature before decrypting
+        // Verify signature before decrypting
         if (encryptedTx.signature) {
             const isValid = await ucrypto.verify({
                 algorithm: encryptedTx.signature.type as SigningAlgorithm,
@@ -286,7 +312,7 @@ export default class ParallelNetworks {
                 throw new Error(`L2PS transaction signature verification failed for ${uid}`)
             }
         } else {
-            console.warn(`[L2PS] Warning: No signature found on encrypted transaction for ${uid}`)
+            log.warning(`[L2PS] No signature found on encrypted transaction for ${uid}`)
         }
 
         return l2ps.decryptTx(encryptedTx)
@@ -312,9 +338,9 @@ export default class ParallelNetworks {
         }
 
         try {
-            // REVIEW: PR Fix #17 - Add array validation before destructuring
+            // Validate array before destructuring
             if (!Array.isArray(tx.content.data) || tx.content.data.length < 2) {
-                console.error("Invalid L2PS transaction data format: expected array with at least 2 elements")
+                log.error("[L2PS] Invalid transaction data format: expected array with at least 2 elements")
                 return undefined
             }
 
@@ -324,7 +350,8 @@ export default class ParallelNetworks {
                 return encryptedPayload.l2ps_uid
             }
         } catch (error) {
-            console.error("Error extracting L2PS UID from transaction:", error)
+            const message = getErrorMessage(error)
+            log.error(`[L2PS] Error extracting L2PS UID from transaction: ${message}`)
         }
 
         return undefined
@@ -372,25 +399,19 @@ export default class ParallelNetworks {
                 }
             }
 
-            // TODO: Implement actual processing logic
-            // This could include:
-            // 1. Validating the transaction signature
-            // 2. Adding to L2PS-specific mempool
-            // 3. Broadcasting to L2PS network participants
-            // 4. Scheduling for inclusion in next L2PS block
-            
-            console.log(`TODO: Process L2PS transaction for network ${l2psUid}`)
-            console.log(`Transaction hash: ${tx.hash}`)
+            // L2PS transaction processing is handled by L2PSBatchAggregator
+            log.debug(`[L2PS] Received L2PS transaction for network ${l2psUid}: ${tx.hash.slice(0, 20)}...`)
             
             return {
                 success: true,
                 l2ps_uid: l2psUid,
-                processed: false, // Set to true when actual processing is implemented
+                processed: true,
             }
-        } catch (error: any) {
+        } catch (error) {
+            const message = getErrorMessage(error)
             return {
                 success: false,
-                error: `Failed to process L2PS transaction: ${error.message}`,
+                error: `Failed to process L2PS transaction: ${message}`,
             }
         }
     }

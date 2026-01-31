@@ -2,11 +2,12 @@ import type { IOperation } from "@kynesyslabs/demosdk/types"
 import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
+import log from "@/utilities/logger"
 
 export default async function handleAptosBalanceQuery(
     operation: IOperation,
 ) {
-    console.log("[XM Method] Aptos Balance Query")
+    log.debug("[XM Method] Aptos Balance Query")
     
     try {
         // Get the provider URL from our configuration
@@ -18,10 +19,10 @@ export default async function handleAptosBalanceQuery(
             }
         }
 
-        console.log(
+        log.debug(
             `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
         )
-        console.log(`[XM Method]: providerUrl: ${providerUrl}`)
+        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
 
         // Map subchain to Network enum
         const networkMap = {
@@ -42,16 +43,16 @@ export default async function handleAptosBalanceQuery(
         const aptosInstance = new multichain.APTOS(providerUrl, network)
         await aptosInstance.connect()
 
-        console.log("params: \n")
-        console.log(operation.task.params)
-        console.log("\n end params: \n")
+        log.debug("params: \n")
+        log.debug(operation.task.params)
+        log.debug("\n end params: \n")
 
         const params = operation.task.params
-        console.log("parsed params: " + JSON.stringify(params))
+        log.debug("parsed params: " + JSON.stringify(params))
 
         // Validate required parameters for Aptos balance queries
         if (!params.address) {
-            console.log("Missing address")
+            log.debug("Missing address")
             return {
                 result: "error",
                 error: "Missing address",
@@ -59,15 +60,15 @@ export default async function handleAptosBalanceQuery(
         }
 
         if (!params.coinType) {
-            console.log("Missing coinType")
+            log.debug("Missing coinType")
             return {
                 result: "error",
                 error: "Missing coinType",
             }
         }
 
-        console.log(`querying balance for address: ${params.address}`)
-        console.log(`coin type: ${params.coinType}`)
+        log.debug(`querying balance for address: ${params.address}`)
+        log.debug(`coin type: ${params.coinType}`)
 
         // Query balance using the appropriate method
         let balance: string
@@ -80,7 +81,7 @@ export default async function handleAptosBalanceQuery(
             balance = await aptosInstance.getCoinBalanceDirect(params.coinType, params.address)
         }
 
-        console.log("balance query result:", balance)
+        log.debug("balance query result:", balance)
 
         return {
             result: balance,
@@ -88,7 +89,7 @@ export default async function handleAptosBalanceQuery(
         }
 
     } catch (error) {
-        console.error("Aptos balance query error:", error)
+        log.error("Aptos balance query error:", error)
         return {
             result: "error",
             error: error.toString(),

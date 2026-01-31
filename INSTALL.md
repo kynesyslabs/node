@@ -62,9 +62,11 @@ cd node
 ### 4. Install Dependencies
 
 ```bash
-# Install all dependencies at once
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying.
 
 ### 5. Run Node and Generate Keys
 
@@ -197,9 +199,15 @@ git branch
 #### 2. Install Dependencies
 
 ```bash
-# Install All dependencies
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:
+> ```bash
+> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+> source ~/.cargo/env
+> ```
 
 ## 🎯 Starting and Configuring the Node
 
@@ -416,8 +424,26 @@ bun install
 
 ## 🌐 Network Information
 
--   Default node port: 53550
--   Default database port: 5332
+> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+
+### Required Ports
+
+| Port | Service | Description |
+|------|---------|-------------|
+| 53550 | Node RPC | Main node API endpoint |
+| 53551 | OmniProtocol | P2P communication (TCP+UDP) |
+| 7047 | TLSNotary | TLSNotary server |
+| 55000-60000 | WS Proxy | WebSocket proxy for TLSNotary (TCP+UDP) |
+
+### Optional Ports
+
+| Port | Service | Description |
+|------|---------|-------------|
+| 9090 | Metrics | Node Prometheus metrics endpoint |
+| 9091 | Prometheus | Prometheus server (monitoring stack) |
+| 3000 | Grafana | Dashboard UI (monitoring stack) |
+| 5332 | PostgreSQL | Database (local only, do not expose) |
+
 -   Logs directory: `logs_53550_demos_identity/`
 -   Configuration: `.env` and `demos_peerlist.json`
 

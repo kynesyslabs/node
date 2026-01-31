@@ -18,12 +18,11 @@ import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
-import terminalkit from "terminal-kit"
+import log from "src/utilities/logger"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-const term = terminalkit.terminal
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -31,15 +30,12 @@ export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
     sender: string,
 ): Promise<ValidityData> {
-    term.yellow("\n[Native Tx Validation] Validating transaction...\n")
+    log.info("TX", "[Native Tx Validation] Validating transaction...")
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
     // REVIEW This should work just fine
-    console.log("Signature: ")
-    console.log(tx.signature)
-
-    console.log("[Tx Validation] Examining it\n")
-    console.log(tx)
+    log.debug(`[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`)
+    log.debug(`[TX] confirmTransaction - Examining tx: ${JSON.stringify(tx)}`)
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
         data: {
@@ -101,9 +97,7 @@ export async function confirmTransaction(
         return validityData
     }
 
-    console.log(
-        "[Tx Validation] Transaction validity verified, compiling ValidityData\n",
-    )
+    log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
@@ -147,13 +141,9 @@ async function defineGas(
         } else {
             from = forgeToHex(tx.content.from)
         }
-        console.log(
-            "[Native Tx Validation] Calculating gas for: " + from + "\n",
-        )
+        log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
-        term.red.bold(
-            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n",
-        )
+        log.error("TX", "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction")
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
@@ -173,11 +163,7 @@ async function defineGas(
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
-        term.red.bold(
-            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
-                from +
-                "\n",
-        )
+        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " + from)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
@@ -198,14 +184,8 @@ async function defineGas(
     const compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
     if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
-        term.red.bold(
-            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-                compositeFeeAmount +
-                "; available: " +
-                fromBalance +
-                "\n" +
-                "\n",
-        )
+        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+            compositeFeeAmount + "; available: " + fromBalance)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
             compositeFeeAmount +
@@ -244,7 +224,7 @@ async function defineGas(
             additional_fee: 0,
         }, // This is the gas operation so it doesn't have additional fees
     }
-    console.log("[Native Tx Validation] Gas Operation derived\n")
+    log.debug("[TX] defineGas - Gas Operation derived")
     //console.log(gas_operation)
     return [true, gasOperation]
 }

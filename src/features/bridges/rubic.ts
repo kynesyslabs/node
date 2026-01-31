@@ -16,6 +16,7 @@ import {
     RUBIC_API_V2_ROUTES,
 } from "./bridgeUtils"
 import { Connection } from "@solana/web3.js"
+import log from "@/utilities/logger"
 
 export default class RubicService {
     public static getTokenAddress(
@@ -72,7 +73,7 @@ export default class RubicService {
 
             return await quoteResponse.json()
         } catch (error) {
-            console.error("Error fetching quote from Rubic API v2:", error)
+            log.error("Error fetching quote from Rubic API v2:", error)
             throw error
         }
     }
@@ -143,7 +144,7 @@ export default class RubicService {
 
             return await swapResponse.json()
         } catch (error) {
-            console.error("Error fetching swap data from Rubic API v2:", error)
+            log.error("Error fetching swap data from Rubic API v2:", error)
             throw error
         }
     }

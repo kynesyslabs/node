@@ -1,0 +1,314 @@
+# OmniProtocol Message Format
+
+## Overview
+
+OmniProtocol uses a compact binary message format designed for efficient network transmission. Each message consists of a fixed 12-byte header, an optional authentication block, a variable-length payload, and a 4-byte CRC32 checksum.
+
+## Message Structure
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                          OmniProtocol Message                            │
+├──────────────────────────────────────────────────────────────────────────┤
+│  Header (12 bytes)  │  Auth Block (optional)  │  Payload  │  CRC32 (4)  │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+### Complete Layout
+
+```
+Offset │ Size    │ Field         │ Description
+───────┼─────────┼───────────────┼────────────────────────────
+0      │ 2 bytes │ version       │ Protocol version (0x0001 = v1.0)
+2      │ 1 byte  │ opcode        │ Message type identifier
+3      │ 1 byte  │ flags         │ Message flags (bit 0 = auth present)
+4      │ 4 bytes │ payloadLength │ Payload size in bytes
+8      │ 4 bytes │ sequence      │ Message ID for request-response
+12     │ varies  │ authBlock     │ Optional authentication block
+12+A   │ varies  │ payload       │ Message payload data
+12+A+P │ 4 bytes │ checksum      │ CRC32 over header + auth + payload
+```
+
+## Header Format (12 bytes)
+
+The header is always 12 bytes and uses big-endian byte ordering.
+
+```typescript
+interface OmniMessageHeader {
+    version: number        // uint16 - Protocol version
+    opcode: number         // uint8  - Message type
+    flags: number          // uint8  - Message flags
+    payloadLength: number  // uint32 - Payload size in bytes
+    sequence: number       // uint32 - Request/response correlation ID
+}
+```
+
+### Header Fields
+
+#### Version (2 bytes)
+Protocol version in semver-like format.
+
+| Value | Version |
+|-------|---------|
+| `0x0001` | v1.0 |
+| `0x0002` | v2.0 (reserved) |
+
+#### Opcode (1 byte)
+Message type identifier. See [04_Opcode_Reference.mdx](./04_Opcode_Reference.mdx) for complete list.
+
+#### Flags (1 byte)
+Bit flags for message properties.
+
+| Bit | Name | Description |
+|-----|------|-------------|
+| 0 | AUTH_PRESENT | Authentication block follows header |
+| 1-7 | Reserved | Reserved for future use |
+
+```typescript
+// Check if auth block is present
+const hasAuth = (flags & 0x01) === 0x01
+```
+
+#### Payload Length (4 bytes)
+Size of the payload in bytes. Maximum allowed: 16 MB (16,777,216 bytes).
+
+```typescript
+private static readonly MAX_PAYLOAD_SIZE = 16 * 1024 * 1024
+```
+
+#### Sequence (4 bytes)
+Message identifier for request-response correlation. Responses must include the same sequence number as the request.
+
+## Authentication Block (Optional)
+
+Present only when `flags & 0x01 === 1`. See [03_Authentication.mdx](./03_Authentication.mdx) for details.
+
+```
+Offset │ Size    │ Field           │ Description
+───────┼─────────┼─────────────────┼────────────────────────────
+0      │ 1 byte  │ algorithm       │ Signature algorithm
+1      │ 1 byte  │ signatureMode   │ What data is signed
+2      │ 8 bytes │ timestamp       │ Unix timestamp (milliseconds)
+10     │ 2 bytes │ identityLength  │ Public key length
+12     │ varies  │ identity        │ Public key bytes
+12+I   │ 2 bytes │ signatureLength │ Signature length
+14+I   │ varies  │ signature       │ Signature bytes
+```
+
+### Auth Block Size
+
+For Ed25519 (most common):
+- Base size: 14 bytes (algorithm + mode + timestamp + length fields)
+- Identity (public key): 32 bytes
+- Signature: 64 bytes
+- **Total: 110 bytes**
+
+## Payload
+
+Variable-length message data. Format depends on the opcode.
+
+### Common Payload Formats
+
+#### JSON Envelope
+Many messages use a JSON envelope for backward compatibility:
+
+```typescript
+interface JsonEnvelope<T> {
+    data: T
+}
+```
+
+Encoded as:
+```
+[4 bytes: JSON length] + [JSON UTF-8 bytes]
+```
+
+#### Binary Payloads
+Performance-critical messages use direct binary encoding.
+
+## Checksum (4 bytes)
+
+CRC32 checksum computed over header + auth block (if present) + payload.
+
+```typescript
+import { crc32 } from "crc"
+
+// Validate checksum
+const dataToCheck = messageBuffer.subarray(0, messageBuffer.length - 4)
+const calculatedChecksum = crc32(dataToCheck)
+const receivedChecksum = messageBuffer.readUInt32BE(checksumOffset)
+
+if (calculatedChecksum !== receivedChecksum) {
+    throw new Error("Message checksum validation failed")
+}
+```
+
+## Message Sizes
+
+### Minimum Message Sizes
+
+| Type | Size | Components |
+|------|------|------------|
+| Unauthenticated (no payload) | 16 bytes | Header (12) + CRC (4) |
+| Authenticated (no payload) | 126 bytes | Header (12) + Auth (110) + CRC (4) |
+| Typical request | 150-300 bytes | Header + Auth + Payload + CRC |
+
+### Comparison with HTTP
+
+| Message Type | HTTP | OmniProtocol | Savings |
+|--------------|------|--------------|---------|
+| Simple ping | 300+ bytes | 16 bytes | 95% |
+| Authenticated request | 500+ bytes | 126+ bytes | 75% |
+| Transaction | 1000+ bytes | 200-400 bytes | 60-80% |
+
+## Encoding Examples
+
+### Encode a Simple Message
+
+```typescript
+import { MessageFramer } from "./transport/MessageFramer"
+
+const header: OmniMessageHeader = {
+    version: 1,
+    opcode: 0x00, // PING
+    sequence: 12345,
+    payloadLength: 0
+}
+
+const payload = Buffer.alloc(0)
+const message = MessageFramer.encodeMessage(header, payload)
+// Result: 16 bytes (12 header + 0 payload + 4 CRC)
+```
+
+### Encode Authenticated Message
+
+```typescript
+import { MessageFramer } from "./transport/MessageFramer"
+import { AuthBlock, SignatureAlgorithm, SignatureMode } from "./auth/types"
+
+const header: OmniMessageHeader = {
+    version: 1,
+    opcode: 0x10, // EXECUTE
+    sequence: 12346,
+    payloadLength: 256
+}
+
+const auth: AuthBlock = {
+    algorithm: SignatureAlgorithm.ED25519,
+    signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
+    timestamp: Date.now(),
+    identity: publicKeyBuffer,  // 32 bytes
+    signature: signatureBuffer  // 64 bytes
+}
+
+const payload = Buffer.from(JSON.stringify({ content: txContent }))
+const message = MessageFramer.encodeMessage(header, payload, auth)
+// Result: 12 + 110 + 256 + 4 = 382 bytes
+```
+
+## Decoding Messages
+
+The `MessageFramer` class handles TCP stream parsing and message extraction.
+
+```typescript
+import { MessageFramer } from "./transport/MessageFramer"
+
+const framer = new MessageFramer()
+
+// Add incoming TCP data
+framer.addData(chunk)
+
+// Extract complete messages
+let message = framer.extractMessage()
+while (message) {
+    // Process message
+    console.log(`Opcode: 0x${message.header.opcode.toString(16)}`)
+    console.log(`Sequence: ${message.header.sequence}`)
+    console.log(`Auth: ${message.auth ? 'present' : 'none'}`)
+    console.log(`Payload: ${message.payload.length} bytes`)
+
+    message = framer.extractMessage()
+}
+```
+
+## Error Handling
+
+### Invalid Payload Size
+
+```typescript
+if (payloadLength > MessageFramer.MAX_PAYLOAD_SIZE) {
+    // Drop buffered data to prevent memory attacks
+    this.buffer = Buffer.alloc(0)
+    throw new Error(`Payload size ${payloadLength} exceeds maximum`)
+}
+```
+
+### Checksum Validation Failure
+
+```typescript
+if (!this.validateChecksum(messageBuffer, checksum)) {
+    throw new Error("Message checksum validation failed - corrupted data")
+}
+```
+
+### Invalid Auth Block
+
+```typescript
+try {
+    const authResult = AuthBlockParser.parse(this.buffer, offset)
+} catch (error) {
+    throw new InvalidAuthBlockFormatError("Failed to parse auth block")
+}
+```
+
+## Wire Format Example
+
+### PING Message (Unauthenticated)
+
+```
+00 01           # version: 1
+00              # opcode: PING (0x00)
+00              # flags: no auth
+00 00 00 00     # payloadLength: 0
+00 00 30 39     # sequence: 12345
+XX XX XX XX     # CRC32 checksum
+```
+
+### EXECUTE Message (Authenticated)
+
+```
+00 01           # version: 1
+10              # opcode: EXECUTE (0x10)
+01              # flags: auth present
+00 00 01 00     # payloadLength: 256
+00 00 30 3A     # sequence: 12346
+
+# Auth Block (110 bytes)
+01              # algorithm: ED25519
+04              # mode: SIGN_MESSAGE_ID_PAYLOAD_HASH
+00 00 01 8D...  # timestamp (8 bytes)
+00 20           # identityLength: 32
+XX XX XX...     # identity (32 bytes)
+00 40           # signatureLength: 64
+XX XX XX...     # signature (64 bytes)
+
+# Payload (256 bytes)
+XX XX XX...     # JSON-encoded transaction data
+
+# CRC32 (4 bytes)
+XX XX XX XX     # checksum over all previous bytes
+```
+
+## Best Practices
+
+1. **Always validate checksums** before processing messages
+2. **Check payload size** before allocating memory
+3. **Verify auth blocks** for authenticated opcodes
+4. **Use sequence numbers** for request-response correlation
+5. **Handle partial messages** gracefully with MessageFramer buffering
+
+## Related Documentation
+
+- [03_Authentication.mdx](./03_Authentication.mdx) - Authentication block details
+- [04_Opcode_Reference.mdx](./04_Opcode_Reference.mdx) - Opcode definitions
+- [08_Serialization.mdx](./08_Serialization.mdx) - Payload encoding

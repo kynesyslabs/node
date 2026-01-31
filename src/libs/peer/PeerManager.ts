@@ -9,13 +9,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import fs from "fs"
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import fs from "fs"
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -27,9 +27,17 @@ export default class PeerManager {
         this.offlinePeers = {}
     }
 
+    get ourPeer() {
+        return this.peerList[getSharedState.publicKeyHex]
+    }
+
     get ourSyncData() {
-        const peer = this.peerList[getSharedState.publicKeyHex]
-        return peer.sync
+        return this.ourPeer.sync
+    }
+
+    get ourSyncDataString() {
+        const { status, block, block_hash: blockHash } = this.ourPeer.sync
+        return `${status ? "1" : "0"}:${block}:${blockHash}`
     }
 
     static getInstance(): PeerManager {
@@ -49,7 +57,7 @@ export default class PeerManager {
             // INFO: Skip no file error
             if (!(error instanceof Error && error.message.includes("ENOENT"))) {
                 // INFO: Crash for debugging purposes
-                console.error("[PeerManager] Error loading peer list: " + error)
+                log.error("[PEER] Error loading peer list: " + error)
                 process.exit(1)
             }
         }
@@ -65,7 +73,24 @@ export default class PeerManager {
         // Creating a peer object for each peer in the peer list, assigning the connection string and adding it to the peer list
         for (const peer in peerList) {
             const peerObject = this.createNewPeer(peer)
-            peerObject.connection.string = peerList[peer]
+            // REVIEW: Handle both old format (string) and new format (object with url property)
+            const peerData = peerList[peer]
+            if (typeof peerData === "string") {
+                // Old format: { "pubkey": "http://..." }
+                peerObject.connection.string = peerData
+            } else if (typeof peerData === "object" && peerData !== null && "url" in peerData) {
+                // New format: { "pubkey": { "url": "http://...", "capabilities": {...} } }
+                // REVIEW: Validate that url is a non-empty string before assignment
+                const url = peerData.url
+                if (typeof url !== "string" || url.trim().length === 0) {
+                    log.warning(`[PEER] Invalid or empty URL for peer ${peer}: ${JSON.stringify(peerData)}`)
+                    continue
+                }
+                peerObject.connection.string = url
+            } else {
+                log.warning(`[PEER] Invalid peer data format for ${peer}: ${JSON.stringify(peerData)}`)
+                continue
+            }
             this.addPeer(peerObject)
         }
     }
@@ -89,7 +114,7 @@ export default class PeerManager {
     getPeer(identity: string): Peer {
         const peer = this.peerList[identity]
 
-        log.debug("[PeerManager] Peer: " + JSON.stringify(peer, null, 2))
+        log.debug("[PeerManager] Peer: " + JSON.stringify(peer))
 
         return peer
     }
@@ -103,30 +128,27 @@ export default class PeerManager {
     }
 
     private getActors(peers: boolean, connections: boolean): Peer[] {
-        console.log("[PeerManager] Getting all peers...")
-        console.log("[PeerManager] peers: " + peers)
-        console.log("[PeerManager] connections: " + connections)
+        log.debug(
+            `[PEER] Getting all peers... peers=${peers}, connections=${connections}`,
+        )
 
         const actorList: Peer[] = []
         const connectedList: Peer[] = []
         const authenticatedList: Peer[] = []
 
-        //console.log(this.peerList)
         for (const peer in this.peerList) {
-            console.log("[PeerManager] Getting peer " + peer)
+            log.debug(`[PEER] Getting peer ${peer}`)
             const peerInstance = this.peerList[peer]
-            console.log(
-                "[PeerManager] With url: " + peerInstance.connection.string,
-            )
+            log.debug(`[PEER] With url: ${peerInstance.connection.string}`)
             // Filtering
             if (peerInstance.identity != undefined) {
-                console.log(
-                    "[PEERMANAGER] This peer has an identity: treating it as an authenticated peer",
+                log.debug(
+                    "[PEER] This peer has an identity: treating it as an authenticated peer",
                 )
                 authenticatedList.push(peerInstance)
             } else {
-                console.log(
-                    "[PEERMANAGER] This peer has no identity: treating it as a connection only peer",
+                log.debug(
+                    "[PEER] This peer has no identity: treating it as a connection only peer",
                 )
                 connectedList.push(peerInstance)
             }
@@ -141,9 +163,8 @@ export default class PeerManager {
             actorList.push(...connectedList)
         }
 
-        console.log(
-            "[PEERMANAGER] Retrieved and filtered actor list length: " +
-                actorList.length,
+        log.debug(
+            `[PEER] Retrieved and filtered actor list length: ${actorList.length}`,
         )
         return actorList
     }
@@ -159,34 +180,33 @@ export default class PeerManager {
             }
         }
         // Flushing the log file and logging the peerlist
-        log.custom(
-            "peer_list",
-            JSON.stringify(jsonPeerList, null, 2),
-            false,
-            true,
-        )
+        log.custom("peer_list", JSON.stringify(jsonPeerList), false, true)
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
         //const onlinePeers: Peer[] = []
-        for await (const peerInstance of Object.values(this.peerList)) {
-            log.info(
-                "[PEERMANAGER] Checking online status of peer " +
-                    peerInstance.identity,
-                false,
-            )
-            if (peerInstance.identity == getSharedState.publicKeyHex) {
-                log.info("[PEERMANAGER] Peer is us: skipping", false)
-                continue
-            }
-            await PeerManager.sayHelloToPeer(peerInstance)
-        }
+        await Promise.all(
+            Object.values(this.peerList).map(async peerInstance => {
+                log.info(
+                    "[PEERMANAGER] Checking online status of peer " +
+                        peerInstance.identity,
+                    false,
+                )
+                if (peerInstance.identity == getSharedState.publicKeyHex) {
+                    log.info("[PEERMANAGER] Peer is us: skipping", false)
+                    return
+                }
+
+                await PeerManager.sayHelloToPeer(peerInstance)
+            }),
+        )
+
         // Returning the list of online peers from the peerlist
         return this.getPeers() // REVIEW is this working?
     }
 
     addPeer(peer: Peer) {
-        log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer, null, 2))
+        log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer))
         log.info("[PEERMANAGER] Adding peer: " + peer.identity)
         log.info("[PEERMANAGER] Adding peer", false)
         if (peer.identity === "placeholder") {
@@ -194,10 +214,7 @@ export default class PeerManager {
                 "[PEERMANAGER] No identity detected: refusing to add peer",
                 true,
             )
-            log.info(
-                "[PEERMANAGER] Peer: " + JSON.stringify(peer, null, 2),
-                false,
-            )
+            log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer), false)
             return false
         }
 
@@ -207,7 +224,7 @@ export default class PeerManager {
         const existingPeer = this.peerList[identity]
 
         if (existingPeer) {
-            console.log("[PEERMANAGER] Peer already exists: updating it")
+            log.debug("[PEER] Peer already exists: updating it")
             action = "updated"
 
             const { block, status } = existingPeer.sync
@@ -274,6 +291,32 @@ export default class PeerManager {
         peer.sync.status = getSharedState.syncStatus
         peer.sync.block = getSharedState.lastBlockNumber
         peer.sync.block_hash = getSharedState.lastBlockHash
+
+        log.info("OUR PEER SYNC DATA UPDATED: " + JSON.stringify(peer.sync))
+    }
+
+    updatePeerLastSeen(pubkey: string) {
+        let peer = this.peerList[pubkey]
+
+        offlineCheck: if (!peer) {
+            // check if peer is in offlinePeers
+            if (this.offlinePeers[pubkey]) {
+                log.warn(
+                    "[PEERMANAGER] Peer is in offlinePeers: removing from offlinePeers and adding to peer list",
+                )
+
+                this.addPeer(this.offlinePeers[pubkey])
+                this.removeOfflinePeer(pubkey)
+                peer = this.peerList[pubkey]
+
+                break offlineCheck
+            }
+
+            return
+        }
+
+        peer.status.online = true
+        peer.status.timestamp = Date.now()
     }
 
     addOfflinePeer(peerInstance: Peer) {
@@ -308,9 +351,7 @@ export default class PeerManager {
     }
 
     // REVIEW This method should be tested and finalized with the new peer structure
-    static async sayHelloToPeer(peer: Peer) {
-        getSharedState.peerRoutineRunning += 1 // Adding one to the peer routine running counter
-
+    static async sayHelloToPeer(peer: Peer, recursive = false) {
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
@@ -340,10 +381,7 @@ export default class PeerManager {
             },
         }
 
-        log.debug(
-            "[Hello Peer] Hello request: " +
-                JSON.stringify(helloRequest, null, 2),
-        )
+        log.debug("[Hello Peer] Hello request: " + JSON.stringify(helloRequest))
         // Not awaiting the response to not block the main thread
         const response = await peer.longCall(
             {
@@ -354,20 +392,33 @@ export default class PeerManager {
             250,
             3,
         )
-        return PeerManager.helloPeerCallback(response, peer)
 
-        // then(response => {
-        //     PeerManager.helloPeerCallback(response, peer)
-        // })
-        log.debug("[Hello Peer] Hello request sent: waiting for response")
+        log.debug("[Hello Peer] Response: " + JSON.stringify(response))
+
+        const newPeersUnfiltered = PeerManager.helloPeerCallback(response, peer)
+        if (!recursive) {
+            return
+        }
+
+        // INFO: Recursively say hello to the new peers
+        const peerManager = PeerManager.getInstance()
+        const newPeers = newPeersUnfiltered.filter(
+            ({ publicKey }) => !peerManager.getPeer(publicKey),
+        )
+
+        // say hello to the new peers
+        await Promise.all(
+            newPeers.map(peer =>
+                PeerManager.sayHelloToPeer(new Peer(peer.url, peer.publicKey)),
+            ),
+        )
     }
 
     // Callback for the hello peer
-    static helloPeerCallback(response: RPCResponse, peer: Peer) {
-        log.info(
-            "[Hello Peer] Response received from peer: " + peer.identity,
-            false,
-        )
+    static helloPeerCallback(
+        response: RPCResponse,
+        peer: Peer,
+    ): { url: string; publicKey: string }[] {
         //console.log(response) // ? Delete this if not needed
         // TODO Test and Finish this
         // REVIEW is the message the response itself?
@@ -393,11 +444,18 @@ export default class PeerManager {
 
             log.debug(
                 "[Hello Peer] Final Peer sync data: " +
-                    JSON.stringify(peer.sync, null, 2),
+                    JSON.stringify(peer.sync),
             )
 
             PeerManager.getInstance().addPeer(peer)
             PeerManager.getInstance().removeOfflinePeer(peer.identity)
+
+            log.debug(
+                "[Hello Peer] New peers: " +
+                    JSON.stringify(response.extra.peerlist, null, 2),
+            )
+
+            return response.extra.peerlist || []
         } else {
             log.info(
                 "[Hello Peer] Failed to connect to peer: " +
@@ -409,15 +467,9 @@ export default class PeerManager {
             PeerManager.getInstance().addOfflinePeer(peer)
             PeerManager.getInstance().removeOnlinePeer(peer.identity)
         }
-        getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
+
+        // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
-    }
-
-    async sayHelloToAllPeers() {
-        const allPeers = this.getPeers()
-
-        await Promise.all(
-            allPeers.map(peer => PeerManager.sayHelloToPeer(peer)),
-        )
+        return []
     }
 }

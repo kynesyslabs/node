@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryGeneratedColumn, Index } from "typeorm"
-import { SerializedEncryptedObject } from "@kynesyslabs/demosdk/types"
+import type { SerializedEncryptedObject } from "@kynesyslabs/demosdk/types"
 
 @Entity("offline_messages") 
 export class OfflineMessage {

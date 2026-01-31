@@ -1,5 +1,5 @@
 import { Entity, PrimaryColumn, Column, Index } from "typeorm"
-import { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 
 /**
  * L2PS Mempool Entity
@@ -11,6 +11,10 @@ import { L2PSTransaction } from "@kynesyslabs/demosdk/types"
  * @entity l2ps_mempool
  */
 @Entity("l2ps_mempool")
+@Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
+@Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
+@Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
+@Index("IDX_L2PS_UID_SEQUENCE", ["l2ps_uid", "sequence_number"])
 export class L2PSMempoolTx {
     /**
      * Primary key: Hash of the encrypted L2PS transaction wrapper
@@ -24,12 +28,16 @@ export class L2PSMempoolTx {
      * L2PS network identifier
      * @example "network_1", "private_subnet_alpha"
      */
-    @Index()
-    @Index(["l2ps_uid", "timestamp"])
-    @Index(["l2ps_uid", "status"])
-    @Index(["l2ps_uid", "block_number"])
     @Column("text") 
     l2ps_uid: string
+
+    /**
+     * Sequence number within the L2PS network for ordering
+     * Auto-incremented per l2ps_uid to ensure deterministic transaction order
+     * @example 1, 2, 3... or timestamp-based sequence like 1697049600, 1697049601...
+     */
+    @Column("bigint", { default: "0" })
+    sequence_number: string
 
     /**
      * Hash of the original transaction before encryption
@@ -67,6 +75,21 @@ export class L2PSMempoolTx {
      * Target block number for inclusion (follows main mempool pattern)
      */
     @Index()
-    @Column("integer") 
+    @Column("integer")
     block_number: number
+
+    /**
+     * GCR edits generated during transaction execution
+     * Stored temporarily until batch aggregation creates a unified proof
+     * @example [{ type: "balance", operation: "add", account: "0x...", amount: 100 }]
+     */
+    @Column("jsonb", { nullable: true })
+    gcr_edits: GCREdit[] | null
+
+    /**
+     * Number of accounts affected by this transaction's GCR edits
+     * Only stores count to preserve L2PS privacy (not actual addresses)
+     */
+    @Column("integer", { nullable: true, default: 0 })
+    affected_accounts_count: number | null
 }   

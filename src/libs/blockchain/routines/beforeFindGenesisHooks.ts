@@ -283,7 +283,7 @@ export class BeforeFindGenesisHooks {
             },
         })
 
-        console.log("total flagged evm_no_tx accounts: " + accounts.length)
+        log.info("total flagged evm_no_tx accounts: " + accounts.length)
 
         // Process accounts in batches of N
         const batchSize = 1
@@ -349,7 +349,7 @@ export class BeforeFindGenesisHooks {
                                 referral.referredUserId,
                         )
                         log.only(
-                            "referral: " + JSON.stringify(referral, null, 2),
+                            "referral: " + JSON.stringify(referral),
                         )
 
                         account.points.totalPoints -= referral.pointsAwarded

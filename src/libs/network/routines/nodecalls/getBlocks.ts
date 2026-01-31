@@ -1,5 +1,6 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
 
 interface InterfaceGetBlocksData {
     start: number | "latest"
@@ -30,7 +31,7 @@ export default async function getBlocks(
 
     const [start, limit] = params
 
-    console.log(`[SERVER] Received getBlocks: start=${start}, limit=${limit}`)
+    log.debug(`[SERVER] Received getBlocks: start=${start}, limit=${limit}`)
 
     const blocks = await Chain.getBlocks(start, limit as any)
 

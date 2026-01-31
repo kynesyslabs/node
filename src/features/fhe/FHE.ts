@@ -1,4 +1,5 @@
 import SEAL from "node-seal"
+import log from "@/utilities/logger"
 import { BatchEncoder } from "node-seal/implementation/batch-encoder"
 import { CipherText } from "node-seal/implementation/cipher-text"
 import { Context } from "node-seal/implementation/context"
@@ -187,7 +188,7 @@ export default class FHE {
         try {
             return await this.evaluator[methodName](cipherText1, cipherText2)
         } catch (error) {
-            console.log("[FHE] Error: " + JSON.stringify(error))
+            log.error("[FHE] Error: " + JSON.stringify(error))
             return null
         }
     }

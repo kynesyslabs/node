@@ -6,6 +6,8 @@ import { IncentiveManager } from "../blockchain/gcr/gcr_routines/IncentiveManage
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
+import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
+import { BroadcastManager } from "../communications/broadcastManager"
 
 interface GCRRoutinePayload {
     method: string
@@ -48,6 +50,13 @@ export default async function manageGCRRoutines(
             )
             break
 
+        case "getUDIdentities":
+            response.response = await IdentityManager.getIdentities(
+                params[0],
+                "ud",
+            )
+            break
+
         case "getPoints":
             response.response = await IncentiveManager.getPoints(params[0])
             break
@@ -85,6 +94,69 @@ export default async function manageGCRRoutines(
             }
 
             response.response = await GCR.getAccountByIdentity(identity)
+            break
+        }
+
+        case "getNomisScore": {
+            const options = params[0]
+
+            if (!options?.walletAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "walletAddress is required" }
+                break
+            }
+
+            try {
+                response.response = await NomisIdentityProvider.getWalletScore(
+                    sender,
+                    options.walletAddress,
+                    {
+                        chain: options.chain,
+                        subchain: options.subchain,
+                        scoreType: options.scoreType,
+                        nonce: options.nonce,
+                        deadline: options.deadline,
+                    },
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error: error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getNomisIdentities": {
+            try {
+                response.response = await NomisIdentityProvider.listIdentities(
+                    sender,
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error: error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+        
+        case "syncNewBlock": {
+            response.response = await BroadcastManager.handleNewBlock(
+                sender,
+                params[0],
+            )
+            break
+        }
+
+        case "updateSyncData": {
+            response.response = await BroadcastManager.handleUpdatePeerSyncData(
+                sender,
+                params[0],
+            )
             break
         }
 

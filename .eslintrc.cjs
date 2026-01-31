@@ -21,7 +21,9 @@ module.exports = {
         // "linebreak-style": ["error", "unix"],
         quotes: ["error", "double"],
         semi: ["error", "never"],
-        // "no-console": "warn",
+        // no-console: warn for all src/ files to encourage CategorizedLogger usage
+        // Excluded files are defined in overrides below
+        "no-console": ["warn", { allow: ["error"] }],
         // no-unused-vars is disabled
         "no-unused-vars": ["off"],
         "no-var": ["off"],
@@ -72,4 +74,57 @@ module.exports = {
             },
         ],
     },
+    // Override no-console for files where console.log is acceptable
+    overrides: [
+        {
+            // Standalone CLI tools and utilities where console output is intended
+            files: [
+                "src/benchmark.ts",
+                "src/client/**/*.ts",
+                // CLI utilities (both paths)
+                "src/utilities/keyMaker.ts",
+                "src/utilities/showPubkey.ts",
+                "src/utilities/backupAndRestore.ts",
+                "src/utilities/commandLine.ts",
+                "src/utilities/cli_libraries/**/*.ts",
+                "src/utilities/Diagnostic.ts",
+                "src/utilities/evmInfo.ts",
+                "src/libs/utils/keyMaker.ts",
+                "src/libs/utils/showPubkey.ts",
+                // TUI components need console access
+                "src/utilities/tui/**/*.ts",
+                "src/tests/**/*.ts",
+            ],
+            rules: {
+                "no-console": "off",
+            },
+        },
+        {
+            // Test files, PoC scripts, and fixture scripts where console output is expected
+            files: [
+                "tests/**/*.ts",
+                "src/tests/**/*.ts",
+                "**/test.ts",
+                "**/test/*.ts",
+                "**/*_test.ts",
+                "**/*Test.ts",
+                "**/PoC.ts",
+                "**/poc.ts",
+                "omniprotocol_fixtures_scripts/**/*.ts",
+                "local_tests/**/*.ts",
+                "aptos_tests/**/*.ts",
+            ],
+            rules: {
+                "no-console": "off",
+                "@typescript-eslint/naming-convention": "off",
+            },
+        },
+        {
+            // Main entry point startup/shutdown logs are acceptable
+            files: ["src/index.ts"],
+            rules: {
+                "no-console": "off",
+            },
+        },
+    ],
 }

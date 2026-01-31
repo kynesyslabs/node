@@ -49,12 +49,12 @@ export default class Mempool {
     }
 
     /**
-     * Returns a map of mempool hashes to null (for lookup only)
+     * Returns a map of mempool hashes (for lookup only)
      */
     public static async getMempoolHashMap(blockNumber: number) {
         const hashes = await this.repo.find({
             select: ["hash"],
-            where: { blockNumber: blockNumber },
+            where: { blockNumber: LessThanOrEqual(blockNumber) },
         })
 
         return hashes.reduce((acc, tx) => {
@@ -73,6 +73,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
+        blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -90,10 +91,10 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number
+        let blockNumber: number = blockRef ?? undefined
 
         // INFO: If we're in consensus, move tx to next block
-        if (getSharedState.inConsensusLoop) {
+        if (getSharedState.inConsensusLoop && !blockNumber) {
             blockNumber = SecretaryManager.lastBlockRef + 1
         }
 
@@ -150,7 +151,7 @@ export default class Mempool {
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
-                        tx.hash,
+                    tx.hash,
                 )
                 return {
                     success: false,
@@ -205,6 +206,18 @@ export default class Mempool {
     }
 
     /**
+     * Returns the difference between the mempool and the given transaction hashes
+     *
+     * @param txHashes - Array of transaction hashes
+     * @returns Array of transaction hashes that are not in the mempool
+     */
+    public static async getDifference(txHashes: string[]) {
+        const incomingSet = new Set(txHashes)
+        const mempool = await this.getMempool(SecretaryManager.lastBlockRef)
+        return mempool.filter(tx => !incomingSet.has(tx.hash))
+    }
+
+    /**
      * Removes a specific transaction from the mempool by hash
      * Used by DTR relay service when transactions are successfully relayed to validators
      * @param txHash - Hash of the transaction to remove
@@ -213,17 +226,24 @@ export default class Mempool {
     static async removeTransaction(txHash: string): Promise<void> {
         try {
             const result = await this.repo.delete({ hash: txHash })
-            
+
             if (result.affected > 0) {
-                console.log(`[Mempool] Removed transaction ${txHash} (DTR relay success)`)
+                console.log(
+                    `[Mempool] Removed transaction ${txHash} (DTR relay success)`,
+                )
             } else {
-                console.log(`[Mempool] Transaction ${txHash} not found for removal`)
+                console.log(
+                    `[Mempool] Transaction ${txHash} not found for removal`,
+                )
             }
         } catch (error) {
-            console.log(`[Mempool] Error removing transaction ${txHash}:`, error)
+            console.log(
+                `[Mempool] Error removing transaction ${txHash}:`,
+                error,
+            )
             throw error
         }
     }
 }
 
-await Mempool.init()
+// await Mempool.init()

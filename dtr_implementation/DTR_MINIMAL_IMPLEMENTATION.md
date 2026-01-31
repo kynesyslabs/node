@@ -128,7 +128,7 @@ case "RELAY_TX":
 
 ### Total New Files: 2
 - `src/libs/consensus/v2/routines/isValidator.ts` (15 lines)
-- `src/libs/network/dtr/relayRetryService.ts` (240 lines) - Background retry service
+- `src/libs/network/dtr/dtrmanager.ts` (240 lines) - Background retry service
 
 ### Total Modified Files: 4
 - `src/libs/network/endpointHandlers.ts` (+50 lines) - Enhanced DTR logic with multi-validator retry
