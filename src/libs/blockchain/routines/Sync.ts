@@ -32,7 +32,6 @@ import HandleGCR from "../gcr/handleGCR"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 
-
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -516,7 +515,9 @@ async function batchDownloadBlocks(
  */
 async function waitForNextBlock() {
     try {
-        log.debug("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
+        log.debug(
+            "[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳",
+        )
         const [newBlock, peer] = await Waiter.wait(
             Waiter.keys.SYNC_WAIT_FOR_BLOCK,
             120_000,
@@ -672,15 +673,18 @@ export async function askTxsForBlock(
     }
 
     // fetch all transactions by hashes
-    res = await peer.httpCall({
-        method: "nodeCall",
-        params: [
-            {
-                message: "getTxsByHashes",
-                data: { hashes: block.content.ordered_transactions },
-            },
-        ],
-    }, true)
+    res = await peer.httpCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getTxsByHashes",
+                    data: { hashes: block.content.ordered_transactions },
+                },
+            ],
+        },
+        true,
+    )
 
     if (res.result === 200) {
         return res.response as Transaction[]
@@ -759,6 +763,11 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<boolean> {
+    if (getSharedState.inSyncLoop) {
+        log.debug("[fastSync] Sync loop already running, skipping")
+        return true
+    }
+
     getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
     log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
