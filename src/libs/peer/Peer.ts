@@ -45,6 +45,16 @@ export default class Peer {
         )
     }
 
+    /**
+     * Marks this peer as offline in PeerManager and updates local status
+     */
+    private markPeerOffline(): void {
+        PeerManager.getInstance().addOfflinePeer(this)
+        PeerManager.getInstance().removeOnlinePeer(this.identity)
+        this.status.online = false
+        this.status.timestamp = Date.now()
+    }
+
     // Creating an empty peer
     constructor(url = "", publicKey = "") {
         this.connection = {
@@ -246,143 +256,234 @@ export default class Peer {
     async httpCall(
         request: RPCRequest,
         isAuthenticated = true,
+        sleepTime = 1000,
+        retries = 3,
+        allowedErrors: number[] = [],
     ): Promise<RPCResponse> {
-        log.info(
-            "[RPC Call] [" +
-                request.method +
-                "] [" +
-                new Date(Date.now()).toISOString() +
-                "] Making RPC call to: " +
-                this.connection.string,
-        )
-        // Get some informations
-        const method = request.method
-        const currentTimestampReadable = new Date(Date.now()).toISOString()
-        // Prepare a request with our identity
-        let pubkey = ""
-        let signature = ""
+        let tries = 0
+        let lastResponse: RPCResponse | null = null
 
-        if (isAuthenticated) {
-            const ourPublicKey = (
-                await ucrypto.getIdentity(getSharedState.signingAlgorithm)
-            ).publicKey
-            const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
-            const bufferSignature = await ucrypto.sign(
-                getSharedState.signingAlgorithm,
-                new TextEncoder().encode(hexPublicKey),
-            )
-
-            pubkey = getSharedState.signingAlgorithm + ":" + hexPublicKey
-            signature = uint8ArrayToHex(bufferSignature.signature)
-        }
-
-        // REVIEW Using the connection string as the url with the new format
-        let connectionUrl = this.connection.string
-
-        // INFO: If the peer is the local node, we use the internal connection string
-        if (this.isLocalNode) {
-            connectionUrl = getSharedState.connectionString
-        }
-
-        log.info(
-            "[RPC Call] [" +
-                method +
-                "] [" +
-                currentTimestampReadable +
-                "] Making RPC call to: " +
-                connectionUrl,
-        )
-        // Make the request
-        try {
-            const response = await axios.post<RPCResponse>(
-                connectionUrl,
-                request,
-                {
-                    headers: {
-                        "Content-Type": "application/json",
-                        identity: pubkey,
-                        signature: signature,
-                    },
-                    timeout: 3000,
-                },
-            )
+        while (tries < retries) {
             log.info(
                 "[RPC Call] [" +
-                    method +
+                    request.method +
                     "] [" +
-                    currentTimestampReadable +
-                    "] Response received ",
+                    new Date(Date.now()).toISOString() +
+                    "] Making RPC call to: " +
+                    this.connection.string +
+                    (tries > 0 ? ` (attempt ${tries + 1}/${retries})` : ""),
             )
-            // log.info(JSON.stringify(response.data, null, 2))
-            if (response.data.result !== 200) {
-                log.warning(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Response not OK: " +
-                        response.data.response +
-                        " - " +
-                        response.data.result,
+
+            // Get some informations
+            const method = request.method
+            const currentTimestampReadable = new Date(Date.now()).toISOString()
+            // Prepare a request with our identity
+            let pubkey = ""
+            let signature = ""
+
+            if (isAuthenticated) {
+                const ourPublicKey = (
+                    await ucrypto.getIdentity(getSharedState.signingAlgorithm)
+                ).publicKey
+                const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
+                const bufferSignature = await ucrypto.sign(
+                    getSharedState.signingAlgorithm,
+                    new TextEncoder().encode(hexPublicKey),
                 )
-            } else {
+
+                pubkey = getSharedState.signingAlgorithm + ":" + hexPublicKey
+                signature = uint8ArrayToHex(bufferSignature.signature)
+            }
+
+            // REVIEW Using the connection string as the url with the new format
+            let connectionUrl = this.connection.string
+
+            // INFO: If the peer is the local node, we use the internal connection string
+            if (this.isLocalNode) {
+                connectionUrl = getSharedState.connectionString
+            }
+
+            // Make the request
+            let timeoutId: NodeJS.Timeout | undefined
+            try {
+                // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
+                const abortController = new AbortController()
+                timeoutId = setTimeout(() => {
+                    abortController.abort()
+                }, 3000)
+
+                const response = await axios.post<RPCResponse>(
+                    connectionUrl,
+                    request,
+                    {
+                        headers: {
+                            "Content-Type": "application/json",
+                            identity: pubkey,
+                            signature: signature,
+                        },
+                        timeout: 3000,
+                        signal: abortController.signal,
+                    },
+                )
+
+                clearTimeout(timeoutId)
                 log.info(
                     "[RPC Call] [" +
                         method +
                         "] [" +
                         currentTimestampReadable +
-                        "] Response OK: " +
-                        response.data.result,
+                        "] Response received ",
                 )
-            }
-            return response.data
-        } catch (error) {
-            // Handle ECONNREFUSED error
-            if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
-                log.warn(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Connection refused to: " +
-                        connectionUrl,
-                )
+                // log.info(JSON.stringify(response.data, null, 2))
+                if (response.data.result !== 200) {
+                    log.warning(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Response not OK: " +
+                            response.data.response +
+                            " - " +
+                            response.data.result,
+                    )
+                } else {
+                    log.info(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Response OK: " +
+                            response.data.result,
+                    )
+                }
 
-                PeerManager.getInstance().addOfflinePeer(this)
-                PeerManager.getInstance().removeOnlinePeer(this.identity)
+                lastResponse = response.data
 
-                this.status.online = false
-                this.status.timestamp = Date.now()
+                if (
+                    response.data.result === 200 ||
+                    allowedErrors.includes(response.data.result)
+                ) {
+                    return response.data
+                }
+            } catch (error) {
+                // Clear timeout if request completed (error or success)
+                if (timeoutId) {
+                    clearTimeout(timeoutId)
+                }
 
-                return {
-                    result: 503,
-                    response: "Connection refused",
-                    require_reply: false,
-                    extra: {
-                        code: error.code,
-                        url: connectionUrl,
-                    },
+                // Handle abort/timeout errors
+                if (
+                    axios.isAxiosError(error) &&
+                    (error.code === "ECONNABORTED" ||
+                        error.message === "canceled" ||
+                        error.name === "AbortError" ||
+                        error.code === "ETIMEDOUT")
+                ) {
+                    log.warn(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Request timeout/aborted to: " +
+                            connectionUrl,
+                    )
+
+                    this.markPeerOffline()
+
+                    lastResponse = {
+                        result: 504,
+                        response: "Request timeout",
+                        require_reply: false,
+                        extra: {
+                            code: error.code || "ETIMEDOUT",
+                            url: connectionUrl,
+                        },
+                    }
+
+                    if (allowedErrors.includes(504)) {
+                        return lastResponse
+                    }
+                }
+                // Handle ECONNREFUSED error
+                else if (
+                    axios.isAxiosError(error) &&
+                    error.code === "ECONNREFUSED"
+                ) {
+                    log.warn(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Connection refused to: " +
+                            connectionUrl,
+                    )
+
+                    this.markPeerOffline()
+
+                    lastResponse = {
+                        result: 503,
+                        response: "Connection refused",
+                        require_reply: false,
+                        extra: {
+                            code: error.code,
+                            url: connectionUrl,
+                        },
+                    }
+
+                    if (allowedErrors.includes(503)) {
+                        return lastResponse
+                    }
+                } else {
+                    log.error(
+                        "[RPC Call] [" +
+                            method +
+                            "] [" +
+                            currentTimestampReadable +
+                            "] Error making RPC call:" +
+                            error,
+                    )
+                    log.error("CONNECTION URL: " + connectionUrl)
+                    log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
+
+                    lastResponse = {
+                        result: 500,
+                        response: error,
+                        require_reply: false,
+                        extra: null,
+                    }
+
+                    if (allowedErrors.includes(500)) {
+                        return lastResponse
+                    }
                 }
             }
 
-            log.error(
-                "[RPC Call] [" +
-                    method +
-                    "] [" +
-                    currentTimestampReadable +
-                    "] Error making RPC call:" +
-                    error,
-            )
-            log.error("CONNECTION URL: " + connectionUrl)
-            log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
+            tries++
+            if (tries < retries) {
+                await new Promise(resolve => setTimeout(resolve, sleepTime))
+            }
+        }
 
-            return {
-                result: 500,
-                response: error,
+        const methodString =
+            request.params && request.params.length > 0
+                ? `${request.method}.${request.params[0].method}`
+                : request.method
+        log.error(
+            "[RPC Call] [HTTP CALL] [" +
+                this.connection.string +
+                "] Max retries reached for method: " +
+                methodString +
+                " - " +
+                lastResponse,
+        )
+        return (
+            lastResponse || {
+                result: 400,
+                response: "Max retries reached",
                 require_reply: false,
                 extra: null,
             }
-        }
+        )
     }
 
     // INFO Fetch through http get

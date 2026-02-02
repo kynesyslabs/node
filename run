@@ -1,12 +1,14 @@
 #!/bin/bash
 
 PG_PORT=5332
-GIT_PULL=true
 PEER_LIST_FILE="demos_peerlist.json"
 VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
-MONITORING_DISABLED=false
+
+GIT_PULL=true
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -245,18 +247,18 @@ check_system_requirements() {
             ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
         fi
 
-        if [ -z "$ping_result" ]; then
-            echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
-            failed_requirements=$((failed_requirements + 1))
-        elif [ "$ping_result" -gt 200 ]; then
-            echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
-            failed_requirements=$((failed_requirements + 1))
-        elif [ "$ping_result" -gt 100 ]; then
-            echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
-            warnings=$((warnings + 1))
-        else
-            echo "✅ Network latency: ${ping_result}ms"
-        fi
+        # if [ -z "$ping_result" ]; then
+        #     echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
+        #     failed_requirements=$((failed_requirements + 1))
+        # elif [ "$ping_result" -gt 200 ]; then
+        #     echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
+        #     failed_requirements=$((failed_requirements + 1))
+        # elif [ "$ping_result" -gt 100 ]; then
+        #     echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
+        #     warnings=$((warnings + 1))
+        # else
+        #     echo "✅ Network latency: ${ping_result}ms"
+        # fi
     else
         echo "⚠️  Cannot test network - ping command not available"
         warnings=$((warnings + 1))

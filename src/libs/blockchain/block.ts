@@ -20,7 +20,7 @@ export default class Block implements BlockType {
     number: number
     hash: string
     content: BlockContent
-    status:  "derived" | "confirmed"
+    status: "derived" | "confirmed"
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     next_proposer: string
     validation_data: { signatures: { [key: string]: string } }
@@ -40,10 +40,12 @@ export default class Block implements BlockType {
             peerlist: [],
             l2ps_partecipating_nodes: new Map(),
             l2ps_banned_nodes: new Map(),
+
+            // @ts-expect-error native_tlsnotary has been disabled intentionally to make genesis hash coherent
             native_tables_hashes: {
                 native_gcr: "placeholder",
                 native_subnets_txs: "placeholder",
-                native_tlsnotary: "placeholder",
+                // native_tlsnotary: "placeholder",
             },
         }
         this.proposer = null

@@ -25,7 +25,7 @@ export interface InboundConnectionConfig {
  * Manages message parsing, dispatching, and response sending
  */
 export class InboundConnection extends EventEmitter {
-    private socket: Socket
+    public socket: Socket
     private connectionId: string
     private framer: MessageFramer
     private state: ConnectionState = "PENDING_AUTH"

@@ -4,7 +4,6 @@
 import {
     BrowserRequest,
     BundleContent,
-    Ed25519SignedObject,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -23,17 +22,13 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
-import { ucrypto } from "@kynesyslabs/demosdk/encryption"
-import { signedObject } from "@kynesyslabs/demosdk/types"
-import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
-import GCR from "../blockchain/gcr/gcr"
+import { getAuthContext } from "./authContext"
+import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 // Reading the port from sharedState
-
-const noAuthMethods = ["nodeCall"]
 
 // INFO: Protected endpoints
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -74,67 +69,6 @@ function isRPCRequest(obj: any): obj is RPCRequest {
         "params" in obj &&
         Array.isArray(obj.params)
     )
-}
-
-// Validate the headers
-async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
-    // Check if we have a valid signature and identity header
-    if (!headers.get("signature")) {
-        return [false, "Missing signature header"]
-    }
-    if (!headers.get("identity")) {
-        log.error("[RPC Call] Missing identity header")
-        return [false, "Missing identity header"]
-    }
-    // Check if the signature is valid
-    const signature = headers.get("signature") as string
-    const identity = headers.get("identity") as string
-    const message = identity
-
-    const splits = identity.split(":")
-
-    let isValid = false
-    let signatureObj: signedObject
-    const supportedAlgorithms = ["ed25519", "falcon", "ml-dsa"]
-
-    if (splits.length > 1) {
-        // INFO: Handle Ed25519 signatures
-        if (supportedAlgorithms.includes(splits[0])) {
-            const publicKey = hexToUint8Array(splits[1])
-            const _signature = hexToUint8Array(signature)
-
-            signatureObj = {
-                algorithm: splits[0],
-                signature: _signature,
-                message: new TextEncoder().encode(splits[1]),
-                publicKey: publicKey,
-            } as Ed25519SignedObject
-        }
-
-        // TODO: Handle other signature algorithms
-    } else {
-        signatureObj = {
-            algorithm: "ed25519",
-            signature: hexToUint8Array(signature),
-            message: new TextEncoder().encode(message),
-            publicKey: hexToUint8Array(identity),
-        } as Ed25519SignedObject
-    }
-
-    if (!signatureObj) {
-        log.error("[RPC Call] Invalid signature object")
-        return [false, "Unsupported or malformed identity or signature header"]
-    }
-
-    isValid = await ucrypto.verify(signatureObj)
-
-    if (isValid) {
-        log.info("[RPC Call] Headers are valid for: " + identity)
-        return [true, "Signature validated"]
-    }
-
-    log.error("[RPC Call] Invalid signature for: " + identity)
-    return [false, "Invalid signature"]
 }
 
 /* End of helper functions */
@@ -290,10 +224,7 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const awardPointsData = payload.params[0].message as {
-                username: string
-                points: number
-            }[]
+            const awardPointsData = payload.params[0].message as AccountParams[]
             const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
@@ -418,7 +349,10 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format. Not an RPCRequest" }, 400)
+                return jsonResponse(
+                    { error: "Invalid request format. Not an RPCRequest" },
+                    400,
+                )
             }
 
             log.info(
@@ -426,24 +360,8 @@ export async function serverRpcBun() {
                 false,
             )
 
-            let sender = ""
-            if (!noAuthMethods.includes(payload.method)) {
-                const headers = req.headers
-                log.info("[RPC Call] Headers: " + JSON.stringify(headers), true)
-                const headerValidation = await validateHeaders(headers)
-                log.debug(
-                    "[RPC Call] Header validation: " +
-                        JSON.stringify(headerValidation),
-                )
-                if (!headerValidation[0]) {
-                    return jsonResponse(
-                        { error: "Invalid headers:" + headerValidation[1] },
-                        401,
-                    )
-                }
-                sender = headers.get("identity") || ""
-            }
-
+            const authCtx = getAuthContext(req)
+            const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
@@ -455,7 +373,9 @@ export async function serverRpcBun() {
     // REVIEW: Register TLSNotary routes if enabled
     if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
         try {
-            const { registerTLSNotaryRoutes } = await import("@/features/tlsnotary/routes")
+            const { registerTLSNotaryRoutes } = await import(
+                "@/features/tlsnotary/routes"
+            )
             registerTLSNotaryRoutes(server)
         } catch (error) {
             log.warning("[RPC] Failed to register TLSNotary routes: " + error)

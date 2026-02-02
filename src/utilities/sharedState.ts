@@ -86,6 +86,13 @@ export default class SharedState {
     // Sync
     fastSyncCount = 0
     _syncStatus = false
+
+    // Batch sync configuration
+    batchSyncBlockSize = 100 // Number of blocks to fetch per batch sync request
+    batchSyncTxSize = 100 // Number of transactions to fetch per batch sync request
+    batchSyncTxLimit = 100 // Maximum number of transactions to send back per batch request
+    batchSyncBlockLimit = 100 // Maximum number of blocks to send back per batch request
+
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
         // INFO: Update our peer object when we get a new sync status
@@ -255,6 +262,11 @@ export default class SharedState {
             ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
                 []),
         ],
+        // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
+        whitelistedKeys: [
+            ...(process.env.WHITELISTED_KEYS?.split(",").map(key => key.trim()).filter(key => key.length > 0) ||
+                []),
+        ],
         methodLimits: {
             // REVIEW: Do we need this?
             POST: { maxRequests: 200000, windowMs: 86400000 },
@@ -280,12 +292,22 @@ export default class SharedState {
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server
     public async getInfo(): Promise<any> {
+        const peerlist = PeerManager.getInstance().getPeers()
+
+        // change our connection string to the exposed url
+        for (const peer of peerlist) {
+            if (peer.identity === this.publicKeyHex) {
+                peer.connection.string = await this.getConnectionString()
+            }
+        }
+
         const info = {
             version: this.version,
             identity: this.publicKeyHex,
             connectionString: await this.getConnectionString(),
-            peerlist: PeerManager.getInstance().getPeers(),
+            peerlist: peerlist,
         }
+
         return info
     }
 

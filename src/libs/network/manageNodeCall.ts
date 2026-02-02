@@ -14,6 +14,7 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
+import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
@@ -154,6 +155,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+        case "getTxsByHashes":
+            return await getTxsByHashes(data)
 
         case "getBlockTransactions": {
             if (!data.blockHash) {
