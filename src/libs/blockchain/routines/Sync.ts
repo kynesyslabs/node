@@ -202,7 +202,11 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest, true)
+    const blockResponse = await peer.longCall(blockRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     if (blockResponse.result === 200) {
         return blockResponse.response as Block
@@ -318,7 +322,11 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest, true)
+    const blockResponse = await peer.longCall(blockRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
     log.debug("Block response: " + blockResponse.result)
 
     // INFO: Handle max retries reached
@@ -437,7 +445,11 @@ async function batchDownloadBlocks(
         ],
     }
 
-    const blocksResponse = await peer.httpCall(blocksRequest, true)
+    const blocksResponse = await peer.longCall(blocksRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     // Handle errors
     if (blocksResponse.result === 400) {
@@ -655,36 +667,42 @@ export async function askTxsForBlock(
         return []
     }
 
-    let res = await peer.httpCall(
-        {
-            method: "nodeCall",
-            params: [
-                {
-                    message: "getBlockTransactions",
-                    data: { blockHash: block.hash },
-                },
-            ],
-        },
-        true,
-    )
+    let request: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlockTransactions",
+                data: { blockHash: block.hash },
+            },
+        ],
+    }
+
+    let res = await peer.longCall(request, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     if (res.result === 200) {
         return res.response as Transaction[]
     }
 
-    // fetch all transactions by hashes
-    res = await peer.httpCall(
-        {
-            method: "nodeCall",
-            params: [
-                {
-                    message: "getTxsByHashes",
-                    data: { hashes: block.content.ordered_transactions },
-                },
-            ],
-        },
-        true,
-    )
+    // INFO: fetch all transactions by hashes
+    request = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getTxsByHashes",
+                data: { hashes: block.content.ordered_transactions },
+            },
+        ],
+    }
+
+    res = await peer.longCall(request, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     if (res.result === 200) {
         return res.response as Transaction[]

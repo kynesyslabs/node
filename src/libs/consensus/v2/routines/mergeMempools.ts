@@ -1,22 +1,22 @@
-import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
-import Mempool from "@/libs/blockchain/mempool_v2"
 import { Peer } from "@/libs/peer"
 import log from "@/utilities/logger"
+import Mempool from "@/libs/blockchain/mempool_v2"
+import { RPCRequest, RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
 
 export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     const promises: Promise<RPCResponse>[] = []
+    const request: RPCRequest = {
+        method: "mempool",
+        params: mempool,
+    }
+
     for (const peer of shard) {
         log.info(`[mergeMempools] Merging mempool with ${peer.identity}`)
         promises.push(
-            peer.longCall(
-                {
-                    method: "mempool",
-                    params: mempool,
-                },
-                true,
-                250,
-                3,
-            ),
+            peer.longCall(request, true, {
+                sleepTime: 250,
+                retries: 3,
+            }),
         )
     }
 

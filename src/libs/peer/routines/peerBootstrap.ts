@@ -15,6 +15,7 @@ import Peer from "../Peer"
 import PeerManager from "../PeerManager"
 import getPeerIdentity from "./getPeerIdentity"
 import log from "src/utilities/logger"
+import { sleep } from "@kynesyslabs/demosdk/utils"
 
 const peerManager = PeerManager.getInstance()
 // ANCHOR Main function
@@ -23,26 +24,31 @@ export default async function peerBootstrap(
     localList: Peer[],
 ): Promise<Peer[]> {
     log.info("[BOOTSTRAP] Loading peers...")
+
     // Validity check
-    for (let i = 0; i < localList.length; i++) {
+    anchorLoop: for (let i = 0; i < localList.length; i++) {
         log.debug("[BOOTSTRAP] Checking peer " + localList[i])
         // ANCHOR Extract peer info from the string
         const currentPeer: Peer = localList[i] // The url of the peer
         // If there is a : in the url, we assume it's a address + port
         const currentPeerUrl: string = currentPeer.connection.string
         const currentPublicKey: string = currentPeer.identity
-        log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " with id " + currentPublicKey)
+        log.debug(
+            "[BOOTSTRAP] Testing " +
+                currentPeerUrl +
+                " with id " +
+                currentPublicKey,
+        )
         // ANCHOR Connection test and hello_peer routine
         const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
-            // Adding identity if any
+        // Adding identity if any
         log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
         // After this, the peer object will have an identity and thus will be verified
-        const verifiedPeer = await getPeerIdentity(
-            blankPeer,
-            currentPublicKey,
-        )
+        const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
         if (!verifiedPeer) {
-            log.warning("[BOOTSTRAP] [FAILED] Failed to get peer identity: see above")
+            log.warning(
+                "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
+            )
             peerManager.addOfflinePeer(blankPeer)
             peerManager.removeOnlinePeer(blankPeer.identity)
             continue
@@ -50,7 +56,7 @@ export default async function peerBootstrap(
 
         log.debug("[BOOTSTRAP] Overriding connection string: " + currentPeerUrl)
         log.debug("[BOOTSTRAP] Verified peer: " + JSON.stringify(verifiedPeer))
-        // ! remove debug code
+
         try {
             verifiedPeer.connection.string = currentPeerUrl // Adding this step
         } catch (error) {
@@ -60,24 +66,49 @@ export default async function peerBootstrap(
         }
         log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
 
-        log.debug("[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer))
-        // This should automatically add the peer to the peer list or the offline list
-        // let response = await verifiedPeer.longCall({
-        //     method: "hello_peer",
-        //     params: [{
-        //         url: verifiedPeer.connection.string,
-        //         publicKey: currentPublicKey,
-        //     }],
-        // }, true, 250, 3)
-        await PeerManager.sayHelloToPeer(verifiedPeer, true)
-        // console.log("[BOOTSTRAP] Response: " + JSON.stringify(response, null, 2))
+        log.debug(
+            "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
+        )
+
+        let maxRetries = 3
+        while (maxRetries > 0) {
+            await PeerManager.sayHelloToPeer(verifiedPeer, true)
+
+            // INFO: Confirmed we paired with anchor node
+            if (
+                peerManager
+                    .getPeers()
+                    .find(p => p.identity === verifiedPeer.identity)
+            ) {
+                continue anchorLoop
+            }
+
+            log.warn("[BOOTSTRAP] Failed to pair with anchor node, retrying...")
+            maxRetries--
+            await sleep(1000)
+        }
+
+        log.error(
+            "[BOOTSTRAP] Failed to pair with anchor peer: " +
+                verifiedPeer.identity +
+                " @ " +
+                verifiedPeer.connection.string +
+                ". Exiting ...",
+        )
+        process.exit(1)
     }
+
     // Dying if there are no valid peers
     if (peerManager.getPeers().length == 0) {
         // Exit if there are no valid peers
-        log.warning("[BOOTSTRAP] No valid peers found, listening for connections...")
+        log.warning(
+            "[BOOTSTRAP] No valid peers found, listening for connections...",
+        )
     } else {
-        log.info("[BOOTSTRAP] Valid peers found: " + peerManager.getPeers().length)
+        log.info(
+            "[BOOTSTRAP] Valid peers found: " + peerManager.getPeers().length,
+        )
     }
+
     return peerManager.getPeers()
 }
