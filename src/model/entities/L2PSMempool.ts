@@ -1,4 +1,4 @@
-import { Entity, PrimaryColumn, Column, Index } from "typeorm"
+import { Entity, PrimaryColumn, Column, Index, Unique } from "typeorm"
 import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
 
 /**
@@ -11,6 +11,7 @@ import type { L2PSTransaction, GCREdit } from "@kynesyslabs/demosdk/types"
  * @entity l2ps_mempool
  */
 @Entity("l2ps_mempool")
+@Unique("UQ_L2PS_UID_SEQUENCE", ["l2ps_uid", "sequence_number"])
 @Index("IDX_L2PS_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
 @Index("IDX_L2PS_UID_STATUS", ["l2ps_uid", "status"])
 @Index("IDX_L2PS_UID_BLOCK", ["l2ps_uid", "block_number"])
@@ -28,7 +29,7 @@ export class L2PSMempoolTx {
      * L2PS network identifier
      * @example "network_1", "private_subnet_alpha"
      */
-    @Column("text") 
+    @Column("text")
     l2ps_uid: string
 
     /**
@@ -45,7 +46,7 @@ export class L2PSMempoolTx {
      * @example "0xe5f6g7h8..."
      */
     @Index()
-    @Column("text") 
+    @Column("text")
     original_hash: string
 
     /**
@@ -59,7 +60,7 @@ export class L2PSMempoolTx {
      * Processing status of the transaction
      * @example "pending", "processed", "failed"
      */
-    @Column("text") 
+    @Column("text")
     status: string
 
     /**

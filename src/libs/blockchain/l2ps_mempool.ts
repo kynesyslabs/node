@@ -161,23 +161,56 @@ export default class L2PSMempool {
                 }
             }
 
-            // Get next sequence number for this L2PS network
-            const sequenceNumber = await this.getNextSequenceNumber(l2psUid)
+            // Atomic sequence allocation with retries to resolve race conditions
+            let retries = 3
+            while (retries > 0) {
+                try {
+                    await this.ensureInitialized()
+                    const result = await this.repo!.manager.transaction(async (transactionalEntityManager) => {
+                        // Get next sequence number inside transaction with lock to serialize allocation
+                        const sequenceNumber = await (this as any).getNextSequenceNumber(l2psUid, transactionalEntityManager)
 
-            // Save to L2PS mempool
-            await this.repo.save({
-                hash: encryptedTx.hash,
-                l2ps_uid: l2psUid,
-                sequence_number: sequenceNumber.toString(),
-                original_hash: originalHash,
-                encrypted_tx: encryptedTx,
-                status: status,
-                timestamp: Date.now().toString(),
-                block_number: blockNumber,
-            })
+                        // Save inside transaction
+                        await transactionalEntityManager.save(L2PSMempoolTx, {
+                            hash: encryptedTx.hash,
+                            l2ps_uid: l2psUid,
+                            sequence_number: sequenceNumber.toString(),
+                            original_hash: originalHash,
+                            encrypted_tx: encryptedTx,
+                            status: status,
+                            timestamp: Date.now().toString(),
+                            block_number: blockNumber,
+                        })
 
-            log.info(`[L2PS Mempool] Added transaction ${encryptedTx.hash} for L2PS ${l2psUid}`)
-            return { success: true }
+                        return { sequenceNumber }
+                    })
+
+                    log.info(`[L2PS Mempool] Added transaction ${encryptedTx.hash} (seq: ${result.sequenceNumber}) for L2PS ${l2psUid}`)
+                    return { success: true }
+
+                } catch (error: any) {
+                    // Check for unique constraint violation (Postgres error code 23505)
+                    const isUniqueViolation = error.code === "23505" ||
+                        error.message?.includes("UQ_L2PS_UID_SEQUENCE") ||
+                        error.message?.includes("unique constraint")
+
+                    if (isUniqueViolation && retries > 1) {
+                        retries--
+                        log.warning(`[L2PS Mempool] Sequence collision for ${l2psUid}, retrying (${retries} attempts left)...`)
+                        // Jittered backoff to let other transactions complete
+                        await new Promise(resolve => setTimeout(resolve, Math.random() * 50 + 10))
+                        continue
+                    }
+
+                    log.error("[L2PS Mempool] Error adding transaction:", error)
+                    return {
+                        success: false,
+                        error: error.message || "Unknown error",
+                    }
+                }
+            }
+
+            return { success: false, error: "Maximum retries exceeded for sequence allocation" }
 
         } catch (error: any) {
             log.error("[L2PS Mempool] Error adding transaction:", error)
@@ -195,22 +228,34 @@ export default class L2PSMempool {
      * @param l2psUid - L2PS network identifier
      * @returns Promise resolving to the next sequence number
      */
-    private static async getNextSequenceNumber(l2psUid: string): Promise<number> {
+    private static async getNextSequenceNumber(l2psUid: string, manager?: any): Promise<number> {
         try {
             await this.ensureInitialized()
 
-            const result = await this.repo
-                .createQueryBuilder("tx")
-                .select("MAX(CAST(tx.sequence_number AS INTEGER))", "max_seq")
+            // Use provided manager or default repo
+            const queryBuilder = manager
+                ? manager.createQueryBuilder(L2PSMempoolTx, "tx")
+                : this.repo!.createQueryBuilder("tx")
+
+            const result = await queryBuilder
+                .select("MAX(CAST(tx.sequence_number AS BIGINT))", "max_seq")
                 .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+                // Lock rows for this UID if inside a transaction to prevent concurrent reads of the same MAX
+                .setLock(manager ? "pessimistic_write" : undefined)
                 .getRawOne()
 
-            const maxSeq = result?.max_seq ?? -1
+            // result.max_seq may be a string from BIGINT cast, so we use Number() or BigInt()
+            // We return Number since we expect sequence to stay within JS precision (2^53 - 1)
+            const maxSeq = result?.max_seq !== null && result?.max_seq !== undefined ? Number(result.max_seq) : -1
             return maxSeq + 1
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error)
             log.error(`[L2PS Mempool] Error getting next sequence number: ${errorMsg}`)
-            // Fallback to timestamp-based sequence
+
+            // If in a transaction, we want to rethrow to trigger a retry instead of falling back to timestamp
+            if (manager) throw error
+
+            // Fallback to timestamp-based sequence only for non-atomic reads
             return Date.now()
         }
     }
