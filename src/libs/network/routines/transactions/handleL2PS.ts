@@ -2,7 +2,7 @@ import type { BlockContent, L2PSTransaction, RPCResponse } from "@kynesyslabs/de
 import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
 import { emptyResponse } from "../../server_rpc"
-import _ from "lodash"
+
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
@@ -75,7 +75,7 @@ async function decryptAndValidate(
 export default async function handleL2PS(
     l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
-    const response = _.cloneDeep(emptyResponse)
+    const response = structuredClone(emptyResponse)
 
     // Validate transaction structure
     const structureError = validateL2PSStructure(l2psTx)

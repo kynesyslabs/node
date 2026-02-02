@@ -18,6 +18,29 @@ interface CliOptions {
     outputPath: string
 }
 
+type ArgHandler = (options: CliOptions, value: string) => void
+
+const ARG_HANDLERS: Record<string, ArgHandler> = {
+    "--count": (opts, val) => { opts.count = Number.parseInt(val, 10) },
+    "--balance": (opts, val) => { opts.balance = val },
+    "--genesis": (opts, val) => { opts.genesisPath = val },
+    "--output": (opts, val) => { opts.outputPath = val },
+}
+
+function showHelp(): never {
+    console.log(`
+Usage: npx tsx scripts/generate-test-wallets.ts [options]
+
+Options:
+  --count <n>        Number of wallets to generate (default: 10)
+  --balance <amount> Balance for each wallet (default: 1000000000000000000)
+  --genesis <path>   Path to genesis.json (default: data/genesis.json)
+  --output <path>    Output file for wallet mnemonics (default: data/test-wallets.json)
+  --help             Show this help
+`)
+    process.exit(0)
+}
+
 function parseArgs(argv: string[]): CliOptions {
     const options: CliOptions = {
         count: 10,
@@ -28,30 +51,15 @@ function parseArgs(argv: string[]): CliOptions {
 
     for (let i = 2; i < argv.length; i++) {
         const arg = argv[i]
-        if (arg === "--count" && argv[i + 1]) {
-            options.count = parseInt(argv[i + 1], 10)
-            i++
-        } else if (arg === "--balance" && argv[i + 1]) {
-            options.balance = argv[i + 1]
-            i++
-        } else if (arg === "--genesis" && argv[i + 1]) {
-            options.genesisPath = argv[i + 1]
-            i++
-        } else if (arg === "--output" && argv[i + 1]) {
-            options.outputPath = argv[i + 1]
-            i++
-        } else if (arg === "--help") {
-            console.log(`
-Usage: npx tsx scripts/generate-test-wallets.ts [options]
 
-Options:
-  --count <n>        Number of wallets to generate (default: 10)
-  --balance <amount> Balance for each wallet (default: 1000000000000000000)
-  --genesis <path>   Path to genesis.json (default: data/genesis.json)
-  --output <path>    Output file for wallet mnemonics (default: data/test-wallets.json)
-  --help             Show this help
-`)
-            process.exit(0)
+        if (arg === "--help") {
+            showHelp()
+        }
+
+        const handler = ARG_HANDLERS[arg]
+        if (handler && argv[i + 1]) {
+            handler(options, argv[i + 1])
+            i++
         }
     }
 
@@ -86,23 +94,24 @@ async function main() {
     // Generate new wallets
     const newWallets: { mnemonic: string; address: string; index: number }[] = []
 
-    for (let i = 0; i < options.count; i++) {
+    let generatedCount = 0
+    while (generatedCount < options.count) {
         const wallet = await generateWallet()
 
         // Skip if already exists
         if (existingAddresses.has(wallet.address.toLowerCase())) {
-            console.log(`   ⚠️  Wallet ${i + 1} already exists, regenerating...`)
-            i--
+            console.log(`   ⚠️  Wallet ${generatedCount + 1} already exists, regenerating...`)
             continue
         }
 
-        newWallets.push({ ...wallet, index: i + 1 })
+        newWallets.push({ ...wallet, index: generatedCount + 1 })
         existingAddresses.add(wallet.address.toLowerCase())
 
         // Add to genesis balances
         genesis.balances.push([wallet.address, options.balance])
 
-        console.log(`   ✅ Wallet ${i + 1}: ${wallet.address.slice(0, 20)}...`)
+        console.log(`   ✅ Wallet ${generatedCount + 1}: ${wallet.address.slice(0, 20)}...`)
+        generatedCount++
     }
 
     // Save updated genesis

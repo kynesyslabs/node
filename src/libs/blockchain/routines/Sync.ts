@@ -72,9 +72,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 
     log.info(
         "[fastSync] Our last block number is " +
-            ourLastBlockNumber +
-            " and our last block hash is " +
-            ourLastBlockHash,
+        ourLastBlockNumber +
+        " and our last block hash is " +
+        ourLastBlockHash,
     )
 
     // REVIEW: With the peer gossip working, can we replace getLastBlockNumber
@@ -143,9 +143,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
             peerLastBlockNumbers.push(response[1].response as number)
             log.info(
                 "[fastSync] Peer " +
-                    response[0] +
-                    " has last block number: " +
-                    response[1].response,
+                response[0] +
+                " has last block number: " +
+                response[1].response,
             )
             // INFO: Log request block number for insights!
             requestBlockNumbers.push({
@@ -188,9 +188,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     const highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
     log.info(
         "[fastSync] Peer with highest last block number: " +
-            highestBlockNumberPeer.identity +
-            " with block number: " +
-            highestBlockNumber,
+        highestBlockNumberPeer.identity +
+        " with block number: " +
+        highestBlockNumber,
     )
 
     return {
@@ -283,9 +283,9 @@ export async function syncBlock(block: Block, peer: Peer) {
     log.debug("Block inserted successfully")
     log.debug(
         "Last block number: " +
-            getSharedState.lastBlockNumber +
-            " Last block hash: " +
-            getSharedState.lastBlockHash,
+        getSharedState.lastBlockNumber +
+        " Last block hash: " +
+        getSharedState.lastBlockHash,
     )
     log.info("[fastSync] Block inserted successfully at the head of the chain!")
 
@@ -391,86 +391,99 @@ async function waitForNextBlock() {
 }
 
 /**
+ * Trigger L2PS mempool sync with peer in background (non-blocking)
+ */
+function triggerL2PSSync(peer: Peer): void {
+    if (!getSharedState.l2psJoinedUids?.length || !peer) {
+        return
+    }
+
+    for (const l2psUid of getSharedState.l2psJoinedUids) {
+        syncL2PSWithPeer(peer, l2psUid)
+            .then(() => {
+                log.debug(`[Sync] L2PS mempool synced: ${l2psUid}`)
+            })
+            .catch(error => {
+                log.error(`[Sync] L2PS sync failed for ${l2psUid}:`, error.message)
+            })
+    }
+}
+
+/**
+ * Find the next available peer with highest block, excluding seen peers
+ */
+function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
+    const highestBlockPeers = peerManager
+        .getAll()
+        .filter(p => p.sync.block === latestBlock())
+        .filter(p => !seenPeers.has(p.identity))
+
+    log.info(
+        "[fastSync] Highest block peers: " +
+        JSON.stringify(
+            highestBlockPeers.map(p => p.connection.string),
+            null,
+            2,
+        ),
+    )
+
+    if (highestBlockPeers.length === 0) {
+        return null
+    }
+
+    log.info(
+        "[fastSync] Switched to peer: " +
+        highestBlockPeers[0].connection.string,
+    )
+    return highestBlockPeers[0]
+}
+
+/**
+ * Handle peer unreachable error during block sync
+ */
+function handlePeerUnreachable(
+    peer: Peer,
+    seenPeers: Set<string>,
+): Peer | null {
+    log.debug(
+        "[fastSync] Peer " +
+        peer.identity +
+        " is unreachable. Switching to the next peer.",
+    )
+    seenPeers.add(peer.identity)
+    return findNextAvailablePeer(seenPeers)
+}
+
+/**
  * Request the blocks from the peer
  *
  * @param peer - The peer to request the blocks from
  * @returns True if the blocks were requested successfully, false otherwise
  */
 async function requestBlocks() {
-    // REVIEW: lowest or highest?
-    // Sync the blocks one by one starting from the lowest block number that we do not have
-    // ? Way more error handling needed
-    // console.error(
-    //     "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
-    // )
-
-    // if (!peerManager.getPeer(peer.identity)) {
-    //     log.error("[fastSync] Peer not found")
-    //     return false
-    // }
     const seenPeers = new Set<string>()
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber <= latestBlock()) {
         const blockToAsk = getSharedState.lastBlockNumber + 1
-        // log.debug("[fastSync] Sleeping for 1 second")
         await sleep(250)
+
         try {
             await downloadBlock(peer, blockToAsk)
-
-            // REVIEW: Phase 3c-3 - Sync L2PS mempools concurrently with blockchain sync
-            // Run L2PS sync in background (non-blocking, doesn't block blockchain sync)
-            if (getSharedState.l2psJoinedUids?.length > 0 && peer) {
-                for (const l2psUid of getSharedState.l2psJoinedUids) {
-                    syncL2PSWithPeer(peer, l2psUid)
-                        .then(() => {
-                            log.debug(`[Sync] L2PS mempool synced: ${l2psUid}`)
-                        })
-                        .catch(error => {
-                            log.error(`[Sync] L2PS sync failed for ${l2psUid}:`, error.message)
-                            // Don't break blockchain sync on L2PS errors
-                        })
-                }
-            }
+            triggerL2PSSync(peer)
         } catch (error) {
-            // INFO: Handle chain head reached
             if (error instanceof BlockNotFoundError) {
                 log.info("[fastSync] Block not found")
                 break
             }
 
             if (error instanceof PeerUnreachableError) {
-                log.debug(
-                    "[fastSync] Peer " +
-                        peer.identity +
-                        " is unreachable. Switching to the next peer.",
-                )
-                seenPeers.add(peer.identity)
-
-                const highestBlockPeers = peerManager
-                    .getAll()
-                    .filter(p => p.sync.block === latestBlock())
-                    .filter(p => !seenPeers.has(p.identity))
-
-                log.info(
-                    "[fastSync] Highest block peers: " +
-                        JSON.stringify(
-                            highestBlockPeers.map(p => p.connection.string),
-                            null,
-                            2,
-                        ),
-                )
-
-                if (highestBlockPeers.length === 0) {
+                const nextPeer = handlePeerUnreachable(peer, seenPeers)
+                if (!nextPeer) {
                     log.error("[fastSync] No more peers to try")
                     return false
                 }
-
-                log.info(
-                    "[fastSync] Switched to peer: " +
-                        highestBlockPeers[0].connection.string,
-                )
-                peer = highestBlockPeers[0]
+                peer = nextPeer
             }
         }
     }
@@ -618,9 +631,9 @@ export async function fastSync(
     const lastBlockNumber = await Chain.getLastBlockNumber()
     log.info(
         "[fastSync] DB Last block number after sync: " +
-            lastBlockNumber +
-            " from: " +
-            from,
+        lastBlockNumber +
+        " from: " +
+        from,
     )
 
     getSharedState.inSyncLoop = false

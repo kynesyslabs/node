@@ -34,6 +34,35 @@ interface CliOptions {
     delayMs: number
 }
 
+type ArgHandler = (options: CliOptions, value: string) => void
+
+const ARG_HANDLERS: Record<string, ArgHandler> = {
+    "--node": (opts, val) => { opts.nodeUrl = val },
+    "--uid": (opts, val) => { opts.uid = val },
+    "--wallets-file": (opts, val) => { opts.walletsFile = val },
+    "--count": (opts, val) => { opts.count = Number.parseInt(val, 10) },
+    "--value": (opts, val) => { opts.value = Number.parseInt(val, 10) },
+    "--concurrency": (opts, val) => { opts.concurrency = Number.parseInt(val, 10) },
+    "--delay": (opts, val) => { opts.delayMs = Number.parseInt(val, 10) },
+}
+
+function showHelp(): never {
+    console.log(`
+Usage: npx tsx scripts/l2ps-stress-test.ts [options]
+
+Options:
+  --node <url>           Node RPC URL (default: http://127.0.0.1:53550)
+  --uid <uid>            L2PS network UID (default: testnet_l2ps_001)
+  --wallets-file <path>  Path to wallets JSON file (default: data/test-wallets.json)
+  --count <n>            Total number of transactions (default: 100)
+  --value <amount>       Amount per transaction (default: 10)
+  --concurrency <n>      Number of parallel senders (default: 5)
+  --delay <ms>           Delay between transactions in ms (default: 100)
+  --help                 Show this help
+`)
+    process.exit(0)
+}
+
 function parseArgs(argv: string[]): CliOptions {
     const options: CliOptions = {
         nodeUrl: "http://127.0.0.1:53550",
@@ -47,42 +76,15 @@ function parseArgs(argv: string[]): CliOptions {
 
     for (let i = 2; i < argv.length; i++) {
         const arg = argv[i]
-        if (arg === "--node" && argv[i + 1]) {
-            options.nodeUrl = argv[i + 1]
-            i++
-        } else if (arg === "--uid" && argv[i + 1]) {
-            options.uid = argv[i + 1]
-            i++
-        } else if (arg === "--wallets-file" && argv[i + 1]) {
-            options.walletsFile = argv[i + 1]
-            i++
-        } else if (arg === "--count" && argv[i + 1]) {
-            options.count = parseInt(argv[i + 1], 10)
-            i++
-        } else if (arg === "--value" && argv[i + 1]) {
-            options.value = parseInt(argv[i + 1], 10)
-            i++
-        } else if (arg === "--concurrency" && argv[i + 1]) {
-            options.concurrency = parseInt(argv[i + 1], 10)
-            i++
-        } else if (arg === "--delay" && argv[i + 1]) {
-            options.delayMs = parseInt(argv[i + 1], 10)
-            i++
-        } else if (arg === "--help") {
-            console.log(`
-Usage: npx tsx scripts/l2ps-stress-test.ts [options]
 
-Options:
-  --node <url>           Node RPC URL (default: http://127.0.0.1:53550)
-  --uid <uid>            L2PS network UID (default: testnet_l2ps_001)
-  --wallets-file <path>  Path to wallets JSON file (default: data/test-wallets.json)
-  --count <n>            Total number of transactions (default: 100)
-  --value <amount>       Amount per transaction (default: 10)
-  --concurrency <n>      Number of parallel senders (default: 5)
-  --delay <ms>           Delay between transactions in ms (default: 100)
-  --help                 Show this help
-`)
-            process.exit(0)
+        if (arg === "--help") {
+            showHelp()
+        }
+
+        const handler = ARG_HANDLERS[arg]
+        if (handler && argv[i + 1]) {
+            handler(options, argv[i + 1])
+            i++
         }
     }
 
@@ -298,7 +300,7 @@ async function main() {
 
             if ((i + 1) % 10 === 0 || i === options.count - 1) {
                 const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-                const tps = (successCount / parseFloat(elapsed)).toFixed(2)
+                const tps = (successCount / Number.parseFloat(elapsed)).toFixed(2)
                 console.log(`   📊 Progress: ${i + 1}/${options.count} | Success: ${successCount} | Failed: ${failCount} | TPS: ${tps}`)
             }
         } catch (error) {

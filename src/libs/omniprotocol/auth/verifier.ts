@@ -1,5 +1,5 @@
 import forge from "node-forge"
-import { keccak_256 } from "@noble/hashes/sha3"
+import { keccak_256 } from "@noble/hashes/sha3.js"
 import { AuthBlock, SignatureAlgorithm, SignatureMode, VerificationResult } from "./types"
 import type { OmniMessageHeader } from "../types/message"
 import log from "src/utilities/logger"

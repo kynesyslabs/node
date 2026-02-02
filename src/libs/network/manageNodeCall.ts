@@ -3,7 +3,6 @@ import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
@@ -54,7 +53,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
     const { data } = content
-    let response = _.cloneDeep(emptyResponse)
+    let response = structuredClone(emptyResponse) as RPCResponse
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
@@ -67,7 +66,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.response = await getPeerlist()
             break
         case "getPeerlistHash":
-            var peerlist = await getPeerlist()
+            let peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
                 "manageNodeCall",
@@ -831,7 +830,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
 
             // Validate timestamp (max 5 minutes old to prevent replay attacks)
-            const requestTime = parseInt(data.timestamp)
+            const requestTime = Number.parseInt(data.timestamp, 10)
             const now = Date.now()
             if (isNaN(requestTime) || now - requestTime > 5 * 60 * 1000) {
                 response.result = 401

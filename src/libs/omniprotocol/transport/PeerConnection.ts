@@ -2,7 +2,7 @@
 import log from "src/utilities/logger"
 import { Socket } from "net"
 import forge from "node-forge"
-import { keccak_256 } from "@noble/hashes/sha3"
+import { keccak_256 } from "@noble/hashes/sha3.js"
 import { MessageFramer } from "./MessageFramer"
 import type { OmniMessageHeader } from "../types/message"
 import type { AuthBlock } from "../auth/types"
@@ -225,8 +225,7 @@ export class PeerConnection {
             signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${
-                    privateKey.length
+                `Ed25519 signing failed (privateKey length: ${privateKey.length
                 } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )

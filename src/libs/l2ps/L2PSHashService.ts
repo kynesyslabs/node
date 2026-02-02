@@ -1,8 +1,7 @@
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
-import SharedState from "@/utilities/sharedState"
+import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
-import { getSharedState } from "@/utilities/sharedState"
 import getShard from "@/libs/consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
 import { getErrorMessage } from "@/utilities/errorMessage"
@@ -34,17 +33,17 @@ export class L2PSHashService {
     private intervalId: NodeJS.Timeout | null = null
 
     /** Private constructor enforces singleton pattern */
-    private constructor() {}
-    
+    private constructor() { }
+
     /** Reentrancy protection flag - prevents overlapping operations */
     private isGenerating = false
-    
+
     /** Service running state */
     private isRunning = false
-    
+
     /** Hash generation interval in milliseconds */
-    private readonly GENERATION_INTERVAL = parseInt(process.env.L2PS_HASH_INTERVAL_MS || "5000", 10)
-    
+    private readonly GENERATION_INTERVAL = Number.parseInt(process.env.L2PS_HASH_INTERVAL_MS || "5000", 10)
+
     /** Statistics tracking */
     private stats = {
         totalCycles: 0,
@@ -64,7 +63,7 @@ export class L2PSHashService {
     private connectionPool: ConnectionPool | null = null
 
     /** OmniProtocol enabled flag */
-    private omniEnabled: boolean = process.env.OMNI_ENABLED === "true"
+    private readonly omniEnabled: boolean = process.env.OMNI_ENABLED === "true"
 
     /**
      * Get singleton instance of L2PS Hash Service
@@ -143,7 +142,7 @@ export class L2PSHashService {
         }
 
         log.info("[L2PS Hash Service] Stopping hash generation service")
-        
+
         this.isRunning = false
 
         // Clear the interval
@@ -187,19 +186,19 @@ export class L2PSHashService {
 
         this.stats.totalCycles++
         const cycleStartTime = Date.now()
-        
+
         try {
             this.isGenerating = true
             await this.generateAndRelayHashes()
-            
+
             this.stats.successfulCycles++
             this.updateCycleTime(Date.now() - cycleStartTime)
-            
+
         } catch (error: unknown) {
             this.stats.failedCycles++
             const message = getErrorMessage(error)
             log.error(`[L2PS Hash Service] Hash generation cycle failed: ${message}`)
-            
+
         } finally {
             this.isGenerating = false
         }
@@ -218,7 +217,7 @@ export class L2PSHashService {
         try {
             // Get all joined L2PS UIDs from shared state
             const joinedUIDs = SharedState.getInstance().l2psJoinedUids || []
-            
+
             if (joinedUIDs.length === 0) {
                 return // No L2PS networks to process
             }
@@ -400,7 +399,7 @@ export class L2PSHashService {
 
             const url = new URL(httpUrl)
             const tcpProtocol = process.env.OMNI_TLS_ENABLED === "true" ? "tls" : "tcp"
-            const peerHttpPort = parseInt(url.port) || 80
+            const peerHttpPort = Number.parseInt(url.port, 10) || 80
             const omniPort = peerHttpPort + 1
             const tcpConnectionString = `${tcpProtocol}://${url.hostname}:${omniPort}`
 
@@ -453,7 +452,7 @@ export class L2PSHashService {
      */
     private updateCycleTime(cycleTime: number): void {
         this.stats.lastCycleTime = cycleTime
-        
+
         // Calculate running average
         const totalTime = (this.stats.averageCycleTime * (this.stats.successfulCycles - 1)) + cycleTime
         this.stats.averageCycleTime = Math.round(totalTime / this.stats.successfulCycles)
@@ -463,7 +462,7 @@ export class L2PSHashService {
      * Log comprehensive service statistics
      */
     private logStatistics(): void {
-        log.info("[L2PS Hash Service] Final Statistics:" + "\n" + JSON.stringify( {
+        log.info("[L2PS Hash Service] Final Statistics:" + "\n" + JSON.stringify({
             totalCycles: this.stats.totalCycles,
             successfulCycles: this.stats.successfulCycles,
             failedCycles: this.stats.failedCycles,

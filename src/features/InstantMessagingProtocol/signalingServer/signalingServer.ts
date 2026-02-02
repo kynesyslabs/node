@@ -187,7 +187,7 @@ export class SignalingServer {
                     log.debug("[IM] Received a register message")
                     // Validate the message schema
                     log.debug(data)
-                    var registerMessage: ImRegisterMessage =
+                    let registerMessage: ImRegisterMessage =
                         data as ImRegisterMessage
                     if (
                         registerMessage.type !== "register" ||
@@ -296,7 +296,7 @@ export class SignalingServer {
 
             // Validate public key format
             // Transform the public key to a Uint8Array
-            var publicKeyUint8Array = new Uint8Array(publicKey)
+            const publicKeyUint8Array = new Uint8Array(publicKey)
             log.debug("[IM] Public key: ", publicKey)
             if (publicKeyUint8Array.length === 0) {
                 this.sendError(

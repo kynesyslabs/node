@@ -11,7 +11,7 @@ const isBun = (globalThis as any).Bun !== undefined;
 if (isBun) {
     // Suppress web-worker errors in Bun by patching dispatchEvent
     const originalDispatchEvent = EventTarget.prototype.dispatchEvent;
-    EventTarget.prototype.dispatchEvent = function(event: any) {
+    EventTarget.prototype.dispatchEvent = function (event: any) {
         if (!(event instanceof Event)) {
             // Convert plain object to Event for Bun compatibility
             const realEvent = new Event(event.type || 'message');
@@ -72,7 +72,7 @@ export class L2PSBatchProver {
     /** Child process for non-blocking proof generation */
     private childProcess: ChildProcess | null = null;
     private processReady = false;
-    private pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }> = new Map();
+    private readonly pendingRequests: Map<string, { resolve: (value: any) => void; reject: (error: Error) => void }> = new Map();
     private requestCounter = 0;
     private responseBuffer = '';
 
@@ -183,10 +183,10 @@ export class L2PSBatchProver {
                         resolve();
                     }
                 };
-                this.pendingRequests.set('__ready__', { resolve: checkReady, reject: () => {} });
+                this.pendingRequests.set('__ready__', { resolve: checkReady, reject: () => { } });
 
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Failed to spawn subprocess: ${error instanceof Error ? error.message : error}`);
+                log.warning(`[L2PSBatchProver] Failed to spawn subprocess: ${error instanceof Error ? error.message : String(error)}`);
                 this.useSubprocess = false;
                 resolve(); // Continue without subprocess
             }
@@ -225,8 +225,8 @@ export class L2PSBatchProver {
                         pending.resolve(response.data);
                     }
                 }
-            } catch (e) {
-                log.debug(`[L2PSBatchProver] Failed to parse response: ${line}`);
+            } catch {
+                log.debug(`[L2PSBatchProver] Failed to parse response line (invalid JSON): ${line.slice(0, 100)}...`);
             }
         }
     }
@@ -303,20 +303,20 @@ export class L2PSBatchProver {
      */
     private selectBatchSize(txCount: number): BatchSize {
         const available = this.getAvailableBatchSizes();
-        
+
         if (txCount > MAX_BATCH_SIZE) {
             throw new Error(
                 `Transaction count ${txCount} exceeds maximum batch size ${MAX_BATCH_SIZE}. ` +
                 `Split into multiple batches.`
             );
         }
-        
+
         for (const size of available) {
             if (txCount <= size) {
                 return size;
             }
         }
-        
+
         const maxSize = Math.max(...available);
         throw new Error(
             `Transaction count ${txCount} exceeds available batch size ${maxSize}. ` +
@@ -362,7 +362,7 @@ export class L2PSBatchProver {
      */
     private padTransactions(txs: L2PSTransaction[], targetSize: BatchSize): L2PSTransaction[] {
         const padded = [...txs];
-        
+
         while (padded.length < targetSize) {
             // Zero-amount transfer (no-op)
             padded.push({
@@ -373,7 +373,7 @@ export class L2PSBatchProver {
                 amount: 0n
             });
         }
-        
+
         return padded;
     }
 
@@ -390,10 +390,10 @@ export class L2PSBatchProver {
         for (const tx of transactions) {
             // Compute post-state hash for this transfer
             const postHash = this.hash([tx.senderAfter, tx.receiverAfter]);
-            
+
             // Chain state: combine previous state with new transfer
             stateRoot = this.hash([stateRoot, postHash]);
-            
+
             // Accumulate volume
             totalVolume += tx.amount;
         }
@@ -455,7 +455,7 @@ export class L2PSBatchProver {
                     totalVolume: BigInt(result.totalVolume)
                 };
             } catch (error) {
-                log.warning(`[L2PSBatchProver] Subprocess failed, falling back to main thread: ${error instanceof Error ? error.message : error}`);
+                log.warning(`[L2PSBatchProver] Subprocess failed, falling back to main thread: ${error instanceof Error ? error.message : String(error)}`);
                 // Fall through to main thread execution
             }
         }
@@ -539,13 +539,13 @@ export class L2PSBatchProver {
         }
 
         const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf-8'));
-        
+
         const startTime = Date.now();
-        
+
         // Use Bun-compatible wrapper (uses singleThread mode to avoid worker crashes)
         const isBun = (globalThis as any).Bun !== undefined;
         let valid: boolean;
-        
+
         if (isBun) {
             // Use Bun-compatible wrapper that avoids web workers
             valid = await plonkVerifyBun(vkey, batchProof.publicSignals, batchProof.proof);
@@ -553,11 +553,11 @@ export class L2PSBatchProver {
             // Use snarkjs directly in Node.js
             valid = await snarkjs.plonk.verify(vkey, batchProof.publicSignals, batchProof.proof);
         }
-        
+
         const duration = Date.now() - startTime;
-        
+
         log.debug(`[L2PSBatchProver] Verification: ${valid ? 'VALID' : 'INVALID'} (${duration}ms)`);
-        
+
         return valid;
     }
 

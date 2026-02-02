@@ -3,7 +3,6 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 // FIX: Default import for the service class and use relative path or alias correctly
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
-import L2PSTransactionExecutor from "./L2PSTransactionExecutor"
 import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 
 /**
@@ -31,7 +30,7 @@ export async function discoverL2PSParticipants(peers: Peer[]): Promise<void> {
             try {
                 // If we already know this peer participates, skip query
                 const cached = l2psParticipantCache.get(uid)
-                if (cached && cached.has(peer.identity)) continue
+                if (cached?.has(peer.identity)) continue
 
                 // Query peer
                 peer.call({
@@ -53,8 +52,8 @@ export async function discoverL2PSParticipants(peers: Peer[]): Promise<void> {
                     // Ignore errors during discovery
                 })
 
-            } catch (e) {
-                // Ignore
+            } catch {
+                // Discovery errors are non-critical, peer may be unreachable
             }
         }
     }
@@ -128,13 +127,13 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
                         log.debug(`[L2PS-SYNC] Failed to insert synced tx ${validL2PSTx.hash}: ${result.error}`)
                     }
                 } catch (err) {
-                    log.warning(`[L2PS-SYNC] Exception processing synced tx: ${err}`)
+                    log.warning(`[L2PS-SYNC] Exception processing synced tx: ${err instanceof Error ? err.message : String(err)}`)
                 }
             }
         }
 
     } catch (e) {
-        log.warning(`[L2PS-SYNC] Failed to sync with ${peer.identity}: ${e}`)
+        log.warning(`[L2PS-SYNC] Failed to sync with ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`)
     }
 }
 

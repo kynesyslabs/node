@@ -715,7 +715,7 @@ export default class L2PSMempool {
                 .getRawMany()
 
             const transactionsByUID = byUID.reduce((acc, row) => {
-                acc[row.l2ps_uid] = parseInt(row.count)
+                acc[row.l2ps_uid] = Number.parseInt(row.count, 10)
                 return acc
             }, {})
 
@@ -728,7 +728,7 @@ export default class L2PSMempool {
                 .getRawMany()
 
             const transactionsByStatus = byStatus.reduce((acc, row) => {
-                acc[row.status] = parseInt(row.count)
+                acc[row.status] = Number.parseInt(row.count, 10)
                 return acc
             }, {})
 

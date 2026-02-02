@@ -1,8 +1,7 @@
 import { ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import type { EncryptedTransaction } from "./types"
 import * as forge from "node-forge"
-import fs from "fs"
-import path from "path"
+import fs from "node:fs"
+import path from "node:path"
 import {
     L2PS,
     L2PSConfig,
@@ -83,12 +82,12 @@ function hexFileToBytes(value: string, label: string): string {
  */
 export default class ParallelNetworks {
     private static instance: ParallelNetworks
-    private l2pses: Map<string, L2PS> = new Map()
-    private configs: Map<string, L2PSNodeConfig> = new Map()
+    private readonly l2pses: Map<string, L2PS> = new Map()
+    private readonly configs: Map<string, L2PSNodeConfig> = new Map()
     /** Promise lock to prevent concurrent loadL2PS race conditions */
-    private loadingPromises: Map<string, Promise<L2PS>> = new Map()
+    private readonly loadingPromises: Map<string, Promise<L2PS>> = new Map()
 
-    private constructor() {}
+    private constructor() { }
 
     /**
      * Gets the singleton instance of ParallelNetworks.
@@ -401,7 +400,7 @@ export default class ParallelNetworks {
 
             // L2PS transaction processing is handled by L2PSBatchAggregator
             log.debug(`[L2PS] Received L2PS transaction for network ${l2psUid}: ${tx.hash.slice(0, 20)}...`)
-            
+
             return {
                 success: true,
                 l2ps_uid: l2psUid,
