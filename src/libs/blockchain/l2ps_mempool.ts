@@ -76,7 +76,7 @@ export default class L2PSMempool {
     private static async ensureInitialized(): Promise<void> {
         if (this.repo) return
 
-        if (!this.initPromise) {
+        if (this.initPromise === null) {
             this.initPromise = this.init().catch((error) => {
                 this.initPromise = null  // Clear promise on failure
                 throw error

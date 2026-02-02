@@ -118,7 +118,7 @@ export default class ParallelNetworks {
 
         // Check if already loading to prevent race conditions
         const existingPromise = this.loadingPromises.get(uid)
-        if (existingPromise) {
+        if (existingPromise !== undefined) {
             return existingPromise
         }
 
@@ -166,7 +166,7 @@ export default class ParallelNetworks {
         }
 
         // Validate nodeConfig.keys exists before accessing
-        if (!nodeConfig.keys || !nodeConfig.keys.private_key_path || !nodeConfig.keys.iv_path) {
+        if (!nodeConfig.keys?.private_key_path || !nodeConfig.keys?.iv_path) {
             throw new Error(`L2PS config missing required keys for ${uid}`)
         }
 

@@ -66,7 +66,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getPeerlist":
             response.response = await getPeerlist()
             break
-        case "getPeerlistHash":
+        case "getPeerlistHash": {
             let peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
@@ -75,6 +75,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 true,
             )
             break
+        }
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
             result = await getPreviousHashFromBlockNumber(data)
@@ -749,12 +750,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = {
                     l2psUid: data.l2psUid,
                     transactionCount: transactions.length,
-                    lastTimestamp: transactions.length > 0
-                        ? transactions[transactions.length - 1].timestamp
-                        : 0,
-                    oldestTimestamp: transactions.length > 0
-                        ? transactions[0].timestamp
-                        : 0,
+                    lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
+                    oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
                 }
             } catch (error: any) {
                 log.error("[L2PS] Failed to get mempool info:", error)
@@ -835,9 +832,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             // Validate timestamp (max 5 minutes old to prevent replay attacks)
             const requestTime = Number.parseInt(data.timestamp, 10)
             const now = Date.now()
-            if (isNaN(requestTime) || now - requestTime > 5 * 60 * 1000) {
+            if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
                 response.result = 401
-                response.response = "Request expired. Timestamp must be within 5 minutes."
+                response.response = "Request expired or invalid timestamp."
                 break
             }
 
@@ -875,8 +872,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 // Signature verified - user owns this address
                 log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
 
-                const limit = data.limit || 100
-                const offset = data.offset || 0
+                const maxLimit = 1000
+                const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
+                const offset = Math.max(0, data.offset || 0)
 
                 // Import the executor to get account transactions
                 const { default: L2PSTransactionExecutor } = await import("../l2ps/L2PSTransactionExecutor")

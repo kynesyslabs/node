@@ -106,6 +106,25 @@ export default async function handleL2PS(
     const encryptedPayload = payloadData as L2PSEncryptedPayload
     const originalHash = encryptedPayload.original_hash
 
+    // Verify decrypted hash matches original hash declared in payload
+    if (decryptedTx.hash !== originalHash) {
+        return createErrorResponse(response, 400, `Decrypted transaction hash mismatch: expected ${originalHash}, got ${decryptedTx.hash}`)
+    }
+
+    // Process Valid Transaction
+    return await processValidL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+}
+
+/**
+ * Process a validated L2PS transaction (check mempool, store, execute)
+ */
+async function processValidL2PSTransaction(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string
+): Promise<RPCResponse> {
     // Check for duplicates
     let alreadyProcessed
     try {

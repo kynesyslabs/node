@@ -47,9 +47,8 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
-import { L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
-import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 
 import handleIdentityRequest from "./routines/transactions/handleIdentityRequest"
@@ -132,9 +131,9 @@ export default class ServerHandlers {
             if (!comparison) {
                 log.error(
                     "[handleValidateTransaction] GCREdit mismatch: " +
-                        txGcrEditsHash +
-                        " <> " +
-                        gcrEditsHash,
+                    txGcrEditsHash +
+                    " <> " +
+                    gcrEditsHash,
                 )
             }
             if (comparison) {
@@ -190,7 +189,7 @@ export default class ServerHandlers {
         // Log the entire validatedData object to inspect its structure
         log.debug(
             "[handleExecuteTransaction] Validated Data: " +
-                JSON.stringify(validatedData),
+            JSON.stringify(validatedData),
         )
 
         const fname = "[handleExecuteTransaction] "
@@ -214,18 +213,18 @@ export default class ServerHandlers {
         if (!queriedTx.blockNumber) {
             log.warning(
                 "[handleExecuteTransaction] Queried tx has no block number: " +
-                    queriedTx.hash,
+                queriedTx.hash,
             )
             const lastBlockNumber = await Chain.getLastBlockNumber()
             queriedTx.blockNumber = lastBlockNumber + 1
             log.warning(
                 "[handleExecuteTransaction] Queried tx block number set to: " +
-                    queriedTx.blockNumber,
+                queriedTx.blockNumber,
             )
         }
         log.debug(
             "[handleExecuteTransaction] Queried tx processing in block: " +
-                queriedTx.blockNumber,
+            queriedTx.blockNumber,
         )
 
         // We need to have issued the validity data
@@ -252,9 +251,9 @@ export default class ServerHandlers {
         if (!signatureValid) {
             log.error(
                 "[handleExecuteTransaction] Invalid validityData signature: " +
-                    validatedData.signature.data +
-                    " - " +
-                    validatedData.rpc_public_key.data,
+                validatedData.signature.data +
+                " - " +
+                validatedData.rpc_public_key.data,
             )
             result.success = false
             result.response = false
@@ -268,9 +267,9 @@ export default class ServerHandlers {
         if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
             log.error(
                 "[handleExecuteTransaction] Invalid validityData block reference: " +
-                    blockNumber +
-                    " - " +
-                    lastBlockNumber,
+                blockNumber +
+                " - " +
+                lastBlockNumber,
             )
             result.success = false
             result.response = false
@@ -282,7 +281,7 @@ export default class ServerHandlers {
             // An invalid transaction won't even be added to the mempool
             log.error(
                 "[handleExecuteTransaction] Invalid validityData: " +
-                    validatedData.data.message,
+                validatedData.data.message,
             )
             result.success = false
             result.response = false
@@ -306,7 +305,7 @@ export default class ServerHandlers {
                 payload = tx.content.data
                 log.debug(
                     "[handleExecuteTransaction] Included XM Chainscript: " +
-                        JSON.stringify(payload[1]),
+                    JSON.stringify(payload[1]),
                 )
                 // TODO Better types on answers
                 var xmResult = await ServerHandlers.handleXMChainOperation(
@@ -324,7 +323,7 @@ export default class ServerHandlers {
                 payload = tx.content.data
                 log.debug(
                     "[handleExecuteTransaction] Subnet payload: " +
-                        JSON.stringify(payload[1]),
+                    JSON.stringify(payload[1]),
                 )
                 var subnetResult = await ServerHandlers.handleSubnetTx(
                     tx as L2PSTransaction,
@@ -336,7 +335,7 @@ export default class ServerHandlers {
                 // Handle encrypted L2PS transactions
                 // These are routed to the L2PS mempool via handleSubnetTx (which calls handleL2PS)
                 console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
-                
+
                 // Authorization check: Verify transaction signature before processing
                 // This ensures only properly signed transactions are accepted
                 if (!tx.signature?.data) {
@@ -459,11 +458,12 @@ export default class ServerHandlers {
                 result.response = nativeBridgeResult
                 break
 
-            case "l2ps_hash_update":
-                var l2psHashResult = await ServerHandlers.handleL2PSHashUpdate(tx)
+            case "l2ps_hash_update": {
+                const l2psHashResult = await ServerHandlers.handleL2PSHashUpdate(tx)
                 result.response = l2psHashResult
                 result.success = l2psHashResult.result === 200
                 break
+            }
         }
 
         // Only if the transaction is valid we add it to the mempool
@@ -547,14 +547,14 @@ export default class ServerHandlers {
 
             log.debug(
                 "👀 not in consensus loop, adding tx to mempool: " +
-                    queriedTx.hash,
+                queriedTx.hash,
             )
 
             // Proceeding with the mempool addition (either we are a validator or this is a fallback)
             log.debug(
                 "[handleExecuteTransaction] Adding tx with hash: " +
-                    queriedTx.hash +
-                    " to the mempool",
+                queriedTx.hash +
+                " to the mempool",
             )
             try {
                 const { confirmationBlock, error } =
@@ -589,7 +589,7 @@ export default class ServerHandlers {
 
                 log.error(
                     "[handleExecuteTransaction] Failed to add transaction to mempool: " +
-                        e,
+                    e,
                 )
             }
         }
@@ -647,9 +647,7 @@ export default class ServerHandlers {
 
     // Handle L2PS requests directly
     static async handleL2PS(content: any): Promise<RPCResponse> {
-        let response: RPCResponse = _.cloneDeep(emptyResponse)
-        response = await handleL2PS(content)
-        return response
+        return await handleL2PS(content)
     }
 
     static async handleConsensusRequest(
@@ -809,7 +807,7 @@ export default class ServerHandlers {
 
         try {
             // REVIEW: PR Fix #12 - Validate payload structure and reject transactions without block_number
-            if (!tx.content || !tx.content.data || !tx.content.data[1]) {
+            if (!tx.content?.data?.[1]) {
                 response.result = 400
                 response.response = "Invalid transaction structure"
                 response.extra = "Missing L2PS hash payload in transaction data"
@@ -871,7 +869,7 @@ export default class ServerHandlers {
                 response.extra = storageError.message || "Storage error"
                 return response
             }
-            
+
             response.result = 200
             response.response = {
                 message: "L2PS hash update processed",
@@ -880,7 +878,7 @@ export default class ServerHandlers {
                 transaction_count: l2psHashPayload.transaction_count,
             }
             return response
-            
+
         } catch (error: any) {
             log.error("[L2PS Hash Update] Error processing hash update:", error)
             response.result = 500

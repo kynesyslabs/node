@@ -30,7 +30,7 @@ interface CliOptions {
     walletsFile: string
     count: number
     value: number
-    concurrency: number
+
     delayMs: number
 }
 
@@ -42,7 +42,7 @@ const ARG_HANDLERS: Record<string, ArgHandler> = {
     "--wallets-file": (opts, val) => { opts.walletsFile = val },
     "--count": (opts, val) => { opts.count = Number.parseInt(val, 10) },
     "--value": (opts, val) => { opts.value = Number.parseInt(val, 10) },
-    "--concurrency": (opts, val) => { opts.concurrency = Number.parseInt(val, 10) },
+
     "--delay": (opts, val) => { opts.delayMs = Number.parseInt(val, 10) },
 }
 
@@ -56,7 +56,7 @@ Options:
   --wallets-file <path>  Path to wallets JSON file (default: data/test-wallets.json)
   --count <n>            Total number of transactions (default: 100)
   --value <amount>       Amount per transaction (default: 10)
-  --concurrency <n>      Number of parallel senders (default: 5)
+
   --delay <ms>           Delay between transactions in ms (default: 100)
   --help                 Show this help
 `)
@@ -70,7 +70,7 @@ function parseArgs(argv: string[]): CliOptions {
         walletsFile: "data/test-wallets.json",
         count: 100,
         value: 10,
-        concurrency: 5,
+
         delayMs: 100,
     }
 
@@ -212,7 +212,7 @@ async function main() {
     console.log(`   UID: ${options.uid}`)
     console.log(`   Total transactions: ${options.count}`)
     console.log(`   Value per tx: ${options.value}`)
-    console.log(`   Concurrency: ${options.concurrency}`)
+
     console.log(`   Delay: ${options.delayMs}ms`)
 
     // Load wallets
@@ -285,9 +285,11 @@ async function main() {
                 sender.address,
                 receiver.address,
                 options.value,
-                sender.nonce++,
+                sender.nonce,
                 options.uid,
             )
+
+            sender.nonce++
 
             successCount++
             results.push({

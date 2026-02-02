@@ -59,12 +59,11 @@ import {
     signedObject,
     SerializedSignedObject,
     ucrypto,
+    Cryptography,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
 
 import type { SerializedEncryptedObject } from "@kynesyslabs/demosdk/types"
-import { Cryptography } from "@kynesyslabs/demosdk/encryption"
-import { UnifiedCrypto } from "@kynesyslabs/demosdk/encryption"
 import Hashing from "@/libs/crypto/hashing"
 import { getSharedState } from "@/utilities/sharedState"
 import Datasource from "@/model/datasource"
@@ -80,15 +79,15 @@ export class SignalingServer {
     private peers: Map<string, ImPeer> = new Map()
     private server: Server
     /** Per-sender nonce counter for transaction uniqueness and replay prevention */
-    private senderNonces: Map<string, number> = new Map()
+    private readonly senderNonces: Map<string, number> = new Map()
     /** Mutex to protect senderNonces from race conditions */
     // REVIEW: PR Fix #2 - Add mutex for thread-safe nonce management
-    private nonceMutex: Mutex = new Mutex()
+    private readonly nonceMutex: Mutex = new Mutex()
     /** Basic DoS protection: track offline message count per sender (reset on successful delivery) */
-    private offlineMessageCounts: Map<string, number> = new Map()
+    private readonly offlineMessageCounts: Map<string, number> = new Map()
     /** Mutex to protect offlineMessageCounts from race conditions */
     // REVIEW: PR Fix #2 - Add mutex for thread-safe count management
-    private countMutex: Mutex = new Mutex()
+    private readonly countMutex: Mutex = new Mutex()
     private readonly MAX_OFFLINE_MESSAGES_PER_SENDER = 100
 
     /**
@@ -183,7 +182,7 @@ export class SignalingServer {
             }
 
             switch (data.type) {
-                case "register":
+                case "register": {
                     log.debug("[IM] Received a register message")
                     // Validate the message schema
                     log.debug(data)
@@ -211,6 +210,7 @@ export class SignalingServer {
                     ) // REVIEW As this is async, is ok not to await it?
                     log.debug("[IM] Register message handled")
                     break
+                }
                 case "discover":
                     this.handleDiscover(ws)
                     break
@@ -405,8 +405,10 @@ export class SignalingServer {
                 // Store as offline message if target is not online
                 // REVIEW: PR Fix #3 #5 - Store to database first (easier to rollback), then blockchain (best-effort)
                 // REVIEW: PR Fix #2 - Removed redundant rate limit check; storeOfflineMessage has authoritative check with mutex
+                let messageId: string
                 try {
-                    await this.storeOfflineMessage(senderId, payload.targetId, payload.message)
+                    // @ts-ignore - We know this returns a string ID now
+                    messageId = await this.storeOfflineMessage(senderId, payload.targetId, payload.message) as unknown as string
                 } catch (error: any) {
                     console.error("Failed to store offline message in DB:", error)
                     // REVIEW: PR Fix #2 - Provide specific error message for rate limit
@@ -428,6 +430,10 @@ export class SignalingServer {
                     await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
                 } catch (error) {
                     console.error("Failed to store message on blockchain:", error)
+                    // Rollback DB storage
+                    if (messageId) {
+                        await this.rollbackOfflineMessage(messageId, senderId)
+                    }
                     this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store offline message")
                     return  // Abort on blockchain failure for audit trail consistency
                 }
@@ -730,6 +736,32 @@ export class SignalingServer {
 
             // REVIEW: PR Fix #9 - Increment count after successful save
             this.offlineMessageCounts.set(senderId, currentCount + 1)
+
+            return offlineMessage.id
+        })
+    }
+
+    /**
+     * Rolls back an offline message storage operation (used when blockchain write fails)
+     * @param messageId - The ID of the message to delete
+     * @param senderId - The ID of the sender to decrement count for
+     */
+    private async rollbackOfflineMessage(messageId: string, senderId: string) {
+        await this.countMutex.runExclusive(async () => {
+            try {
+                const db = await Datasource.getInstance()
+                const offlineMessageRepository = db.getDataSource().getRepository(OfflineMessage)
+                await offlineMessageRepository.delete(messageId)
+
+                const currentCount = this.offlineMessageCounts.get(senderId) || 0
+                this.offlineMessageCounts.set(senderId, Math.max(0, currentCount - 1))
+                if (this.offlineMessageCounts.get(senderId) === 0) {
+                    this.offlineMessageCounts.delete(senderId)
+                }
+                log.debug(`[Signaling Server] Rolled back offline message ${messageId} for sender ${senderId}`)
+            } catch (error) {
+                log.error(`[Signaling Server] Failed to rollback offline message ${messageId}:`, error)
+            }
         })
     }
 

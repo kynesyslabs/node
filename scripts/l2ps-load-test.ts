@@ -291,7 +291,8 @@ async function runLoadTest(ctx: LoadTestContext): Promise<LoadTestResults> {
         const recipient = ctx.validRecipients[i % ctx.validRecipients.length]
 
         try {
-            await processSingleTransaction(ctx, recipient, currentNonce++)
+            await processSingleTransaction(ctx, recipient, currentNonce)
+            currentNonce++
             successCount++
         } catch (error) {
             failCount++

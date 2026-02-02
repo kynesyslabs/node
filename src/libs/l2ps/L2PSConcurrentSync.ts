@@ -106,30 +106,7 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
             log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
 
             // 3. Process transactions (verify & store)
-            for (const txData of txs) {
-                try {
-                    // Extract and validate L2PS transaction object
-                    const l2psTx = txData.encrypted_tx
-                    const originalHash = txData.original_hash
-
-                    if (!l2psTx || !originalHash || !l2psTx.hash || !l2psTx.content) {
-                        log.debug(`[L2PS-SYNC] Invalid transaction structure received from ${peer.identity}`)
-                        continue
-                    }
-
-                    // Cast to typed object after structural check
-                    const validL2PSTx = l2psTx as L2PSTransaction
-
-                    // Add to mempool (handles duplication checks and internal storage)
-                    const result = await L2PSMempool.addTransaction(l2psUid, validL2PSTx, originalHash, "processed")
-
-                    if (!result.success && result.error !== "Transaction already processed" && result.error !== "Encrypted transaction already in L2PS mempool") {
-                        log.debug(`[L2PS-SYNC] Failed to insert synced tx ${validL2PSTx.hash}: ${result.error}`)
-                    }
-                } catch (err) {
-                    log.warning(`[L2PS-SYNC] Exception processing synced tx: ${err instanceof Error ? err.message : String(err)}`)
-                }
-            }
+            await processReceivedTransactions(l2psUid, txs, peer.identity)
         }
 
     } catch (e) {
@@ -143,4 +120,34 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
 export async function exchangeL2PSParticipation(peers: Peer[]): Promise<void> {
     // Piggyback on discovery for now
     await discoverL2PSParticipants(peers)
+}
+
+/**
+ * Helper to process a batch of received L2PS transactions
+ */
+async function processReceivedTransactions(l2psUid: string, txs: any[], peerIdentity: string): Promise<void> {
+    for (const txData of txs) {
+        try {
+            // Extract and validate L2PS transaction object
+            const l2psTx = txData.encrypted_tx
+            const originalHash = txData.original_hash
+
+            if (!l2psTx || !originalHash || !l2psTx.hash || !l2psTx.content) {
+                log.debug(`[L2PS-SYNC] Invalid transaction structure received from ${peerIdentity}`)
+                continue
+            }
+
+            // Cast to typed object after structural check
+            const validL2PSTx = l2psTx as L2PSTransaction
+
+            // Add to mempool (handles duplication checks and internal storage)
+            const result = await L2PSMempool.addTransaction(l2psUid, validL2PSTx, originalHash, "processed")
+
+            if (!result.success && result.error !== "Transaction already processed" && result.error !== "Encrypted transaction already in L2PS mempool") {
+                log.debug(`[L2PS-SYNC] Failed to insert synced tx ${validL2PSTx.hash}: ${result.error}`)
+            }
+        } catch (err) {
+            log.warning(`[L2PS-SYNC] Exception processing synced tx: ${err instanceof Error ? err.message : String(err)}`)
+        }
+    }
 }

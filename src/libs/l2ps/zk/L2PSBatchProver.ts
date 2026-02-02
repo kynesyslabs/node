@@ -244,8 +244,6 @@ export class L2PSBatchProver {
             const id = `req_${++this.requestCounter}`;
             const request = JSON.stringify({ type, id, data }) + '\n';
 
-            this.pendingRequests.set(id, { resolve, reject });
-
             // Set timeout for request
             const timeout = setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
