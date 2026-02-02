@@ -22,7 +22,8 @@ import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/buil
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { NomisWalletIdentity, SavedHumanPassportIdentity } from "@/model/entities/types/IdentityTypes"
+import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -279,11 +280,10 @@ export default class IdentityManager {
 
         return {
             success: true,
-            message: `Signature proof${
-                payloads.length > 1 ? "s" : ""
-            } verified. ${JSON.stringify(
-                payloads.map(p => p.algorithm),
-            )} identities assigned`,
+            message: `Signature proof${payloads.length > 1 ? "s" : ""
+                } verified. ${JSON.stringify(
+                    payloads.map(p => p.algorithm),
+                )} identities assigned`,
         }
     }
 
@@ -355,7 +355,7 @@ export default class IdentityManager {
      */
     static async getIdentities(
         address: string,
-        key?: "xm" | "web2" | "pqc" | "ud" | "nomis",
+        key?: "xm" | "web2" | "pqc" | "ud" | "nomis" | "humanpassport",
     ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
@@ -367,5 +367,114 @@ export default class IdentityManager {
 
     static async getUDIdentities(address: string) {
         return await this.getIdentities(address, "ud")
+    }
+
+    // SECTION: Human Passport Identity
+
+    /**
+     * Verify the payload for a Human Passport identity assign
+     *
+     * Validates the address and fetches the score from Human Passport API.
+     * Requires score >= 20 (passing threshold) to succeed.
+     *
+     * @param payload - The payload containing the address and signature
+     * @returns {success: boolean, message: string, data?: SavedHumanPassportIdentity}
+     */
+    static async verifyHumanPassportPayload(
+        payload: {
+            address: string
+            signature?: string
+            verificationMethod: "api" | "onchain"
+            chainId?: number
+            referralCode?: string
+        },
+    ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
+        const { address, verificationMethod } = payload
+
+        if (!address) {
+            return {
+                success: false,
+                message: "Invalid Human Passport payload: missing address",
+            }
+        }
+
+        try {
+            // Verify score via Human Passport API
+            const provider = HumanPassportProvider.getInstance()
+            const verification = await provider.verifyAddress(address)
+
+            if (!verification.passingScore) {
+                return {
+                    success: false,
+                    message: `Human Passport score ${verification.score} below threshold (${verification.threshold}). ` +
+                        `User needs to verify more stamps at passport.human.tech. Transaction not applied.`,
+                }
+            }
+
+            // Build saved identity
+            const savedIdentity: SavedHumanPassportIdentity = {
+                address: verification.address,
+                score: verification.score,
+                passingScore: verification.passingScore,
+                threshold: verification.threshold,
+                stamps: verification.stamps,
+                verificationMethod: verificationMethod,
+                chainId: payload.chainId,
+                verifiedAt: verification.verifiedAt,
+                expiresAt: verification.expirationTimestamp
+                    ? new Date(verification.expirationTimestamp).getTime()
+                    : null,
+            }
+
+            log.info(
+                `[IdentityManager] Human Passport verified: ${address} ` +
+                `(score: ${verification.score}, stamps: ${verification.stamps.length})`,
+            )
+
+            return {
+                success: true,
+                message: `Human Passport identity verified with score ${verification.score}`,
+                data: savedIdentity,
+            }
+        } catch (error: any) {
+            log.error(`[IdentityManager] Human Passport verification failed: ${error.message}`)
+            return {
+                success: false,
+                message: error.message || "Failed to verify Human Passport identity",
+            }
+        }
+    }
+
+    /**
+     * Get Human Passport identities for a Demos address
+     */
+    static async getHumanPassportIdentities(
+        address: string,
+    ): Promise<SavedHumanPassportIdentity[]> {
+        const identities = await this.getIdentities(address, "humanpassport")
+        return identities || []
+    }
+
+    /**
+     * Get Human Passport score for an address (fetches from API)
+     */
+    static async getHumanPassportScore(address: string): Promise<{
+        address: string
+        score: number
+        passingScore: boolean
+        stamps: string[]
+    } | null> {
+        try {
+            const provider = HumanPassportProvider.getInstance()
+            const verification = await provider.verifyAddress(address)
+            return {
+                address: verification.address,
+                score: verification.score,
+                passingScore: verification.passingScore,
+                stamps: verification.stamps,
+            }
+        } catch {
+            return null
+        }
     }
 }

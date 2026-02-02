@@ -3,6 +3,7 @@ import {
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
     UDIdentityAssignPayload,
+    HumanPassportIdentityData,
 } from "@kynesyslabs/demosdk/abstraction"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
@@ -100,11 +101,16 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
+        case "humanpassport_identity_assign":
+            return await IdentityManager.verifyHumanPassportPayload(
+                payload.payload as HumanPassportIdentityData,
+            )
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
         case "nomis_identity_remove":
         case "ud_identity_remove":
+        case "humanpassport_identity_remove":
             return {
                 success: true,
                 message: "Identity removed",

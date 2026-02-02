@@ -45,6 +45,34 @@ export interface SavedNomisIdentity {
 }
 
 /**
+ * Human Passport (formerly Gitcoin Passport) identity saved in the GCR
+ *
+ * Stores verified humanity score from Human Passport's Stamps API.
+ * Users verify stamps (Google, Discord, GitHub, etc.) to build a score.
+ * Score >= 20 is considered "human" (Sybil resistant).
+ */
+export interface SavedHumanPassportIdentity {
+    /** EVM address */
+    address: string
+    /** Humanity score (0-100+) */
+    score: number
+    /** Whether score met threshold at verification time */
+    passingScore: boolean
+    /** Score threshold used (default: 20) */
+    threshold: number
+    /** List of verified stamp provider names */
+    stamps: string[]
+    /** Verification method: "api" or "onchain" */
+    verificationMethod: "api" | "onchain"
+    /** Chain ID for onchain verification */
+    chainId?: number
+    /** Timestamp when verified */
+    verifiedAt: number
+    /** Timestamp when score expires (if applicable) */
+    expiresAt: number | null
+}
+
+/**
  * The PQC identity saved in the GCR
  */
 export interface SavedPqcIdentity {
@@ -105,4 +133,5 @@ export type StoredIdentities = {
             [subchain: string]: SavedNomisIdentity[]
         }
     }
+    humanpassport?: SavedHumanPassportIdentity[] // Human Passport (Proof of Personhood) identities
 }

@@ -14,12 +14,14 @@ import Hashing from "@/libs/crypto/hashing"
 import {
     NomisWalletIdentity,
     PqcIdentityEdit,
+    SavedHumanPassportIdentity,
     SavedNomisIdentity,
     SavedXmIdentity,
     SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -869,6 +871,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "humanpassportadd":
+                result = await this.applyHumanPassportIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "humanpassportremove":
+                result = await this.applyHumanPassportIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             default:
                 result = {
                     success: false,
@@ -1121,5 +1137,98 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Nomis identity removed" }
+    }
+
+    // SECTION Human Passport Identity Routines
+
+    private static async applyHumanPassportIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const clientData = editOperation.data as { address: string; verificationMethod: "api" | "onchain" }
+        const normalizedAddress = clientData.address.toLowerCase()
+
+        // Fetch verified score from Human Passport API (uses cache from earlier verification)
+        const provider = HumanPassportProvider.getInstance()
+        const verification = await provider.verifyAddress(normalizedAddress)
+
+        const savedIdentity: SavedHumanPassportIdentity = {
+            address: verification.address,
+            score: verification.score,
+            passingScore: verification.passingScore,
+            threshold: verification.threshold,
+            stamps: verification.stamps,
+            verificationMethod: clientData.verificationMethod,
+            verifiedAt: verification.verifiedAt,
+            expiresAt: verification.expirationTimestamp
+                ? new Date(verification.expirationTimestamp).getTime()
+                : null,
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        // Initialize humanpassport array if needed
+        if (!accountGCR.identities.humanpassport) {
+            accountGCR.identities.humanpassport = []
+        }
+
+        // Check if already linked
+        const existing = accountGCR.identities.humanpassport.find(
+            (hp: SavedHumanPassportIdentity) =>
+                hp.address.toLowerCase() === normalizedAddress,
+        )
+
+        const isFirst = !existing
+
+        // Upsert: remove existing then add new
+        accountGCR.identities.humanpassport =
+            accountGCR.identities.humanpassport.filter(
+                (hp: SavedHumanPassportIdentity) =>
+                    hp.address.toLowerCase() !== normalizedAddress,
+            )
+        accountGCR.identities.humanpassport.push(savedIdentity)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            if (isFirst) {
+                await IncentiveManager.humanPassportLinked(
+                    accountGCR.pubkey,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Human Passport identity added" }
+    }
+
+    private static async applyHumanPassportIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const data = editOperation.data as { address: string }
+        const normalizedAddress = data.address.toLowerCase()
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        if (!accountGCR.identities.humanpassport) {
+            return { success: true, message: "No Human Passport identities to remove" }
+        }
+
+        accountGCR.identities.humanpassport =
+            accountGCR.identities.humanpassport.filter(
+                (hp: SavedHumanPassportIdentity) =>
+                    hp.address.toLowerCase() !== normalizedAddress,
+            )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
+        }
+
+        return { success: true, message: "Human Passport identity removed" }
     }
 }
