@@ -204,29 +204,32 @@ export class L2PSBatchProver {
             if (!line.trim()) continue;
             try {
                 const response = JSON.parse(line);
-
-                // Handle ready signal
-                if (response.type === 'ready') {
-                    const readyHandler = this.pendingRequests.get('__ready__');
-                    if (readyHandler) {
-                        this.pendingRequests.delete('__ready__');
-                        readyHandler.resolve(response);
-                    }
-                    continue;
-                }
-
-                // Handle regular responses
-                const pending = this.pendingRequests.get(response.id);
-                if (pending) {
-                    this.pendingRequests.delete(response.id);
-                    if (response.type === 'error') {
-                        pending.reject(new Error(response.error || 'Unknown process error'));
-                    } else {
-                        pending.resolve(response.data);
-                    }
-                }
+                this.handleResponse(response);
             } catch {
                 log.debug(`[L2PSBatchProver] Failed to parse response line (invalid JSON): ${line.slice(0, 100)}...`);
+            }
+        }
+    }
+
+    private handleResponse(response: any): void {
+        // Handle ready signal
+        if (response.type === 'ready') {
+            const readyHandler = this.pendingRequests.get('__ready__');
+            if (readyHandler) {
+                this.pendingRequests.delete('__ready__');
+                readyHandler.resolve(response);
+            }
+            return;
+        }
+
+        // Handle regular responses
+        const pending = this.pendingRequests.get(response.id);
+        if (pending) {
+            this.pendingRequests.delete(response.id);
+            if (response.type === 'error') {
+                pending.reject(new Error(response.error || 'Unknown process error'));
+            } else {
+                pending.resolve(response.data);
             }
         }
     }

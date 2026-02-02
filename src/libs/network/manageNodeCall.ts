@@ -54,7 +54,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
     const { data } = content
-    let response = structuredClone(emptyResponse) as RPCResponse
+    let response = structuredClone(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
@@ -727,7 +727,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
                 log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
             } catch (error) {
-                log.error("[L2PS] Error checking L2PS participation: " + error)
+                log.error("[L2PS] Error checking L2PS participation:", error)
                 response.result = 500
                 response.response = "Internal error checking L2PS participation"
             }

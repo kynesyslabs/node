@@ -147,6 +147,19 @@ async function processValidL2PSTransaction(
     }
 
     // Execute transaction
+    return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+}
+
+/**
+ * Execute L2PS transaction and record history
+ */
+async function executeAndRecordL2PSTransaction(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string
+): Promise<RPCResponse> {
     let executionResult
     try {
         executionResult = await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)

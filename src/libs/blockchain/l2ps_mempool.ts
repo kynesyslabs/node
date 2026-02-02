@@ -76,12 +76,10 @@ export default class L2PSMempool {
     private static async ensureInitialized(): Promise<void> {
         if (this.repo) return
 
-        if (this.initPromise === null) {
-            this.initPromise = this.init().catch((error) => {
-                this.initPromise = null  // Clear promise on failure
-                throw error
-            })
-        }
+        this.initPromise ??= this.init().catch((error) => {
+            this.initPromise = null  // Clear promise on failure
+            throw error
+        })
 
         await this.initPromise
     }
@@ -318,7 +316,7 @@ export default class L2PSMempool {
 
             if (transactions.length === 0) {
                 // Return deterministic empty hash
-                const suffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
+                const suffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
                 return Hashing.sha256(`L2PS_EMPTY_${l2psUid}${suffix}`)
             }
 
@@ -339,7 +337,7 @@ export default class L2PSMempool {
         } catch (error: any) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
             // Return deterministic error hash
-            const blockSuffix = blockNumber !== undefined ? `_BLOCK_${blockNumber}` : "_ALL"
+            const blockSuffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
             return Hashing.sha256(`L2PS_ERROR_${l2psUid}${blockSuffix}`)
         }
     }

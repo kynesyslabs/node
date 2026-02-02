@@ -64,7 +64,7 @@ export const handleL2PSGeneric: OmniHandler<Buffer> = async ({ message, context 
             )
         }
     } catch (error) {
-        log.error("[handleL2PSGeneric] Error: " + error)
+        log.error("[handleL2PSGeneric] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -120,7 +120,7 @@ export const handleL2PSSubmitEncryptedTx: OmniHandler<Buffer> = async ({ message
             )
         }
     } catch (error) {
-        log.error("[handleL2PSSubmitEncryptedTx] Error: " + error)
+        log.error("[handleL2PSSubmitEncryptedTx] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -163,7 +163,7 @@ export const handleL2PSGetProof: OmniHandler<Buffer> = async ({ message, context
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSGetProof] Error: " + error)
+        log.error("[handleL2PSGetProof] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -220,7 +220,7 @@ export const handleL2PSVerifyBatch: OmniHandler<Buffer> = async ({ message, cont
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSVerifyBatch] Error: " + error)
+        log.error("[handleL2PSVerifyBatch] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -272,7 +272,7 @@ export const handleL2PSSyncMempool: OmniHandler<Buffer> = async ({ message, cont
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSSyncMempool] Error: " + error)
+        log.error("[handleL2PSSyncMempool] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -310,7 +310,7 @@ export const handleL2PSGetBatchStatus: OmniHandler<Buffer> = async ({ message, c
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSGetBatchStatus] Error: " + error)
+        log.error("[handleL2PSGetBatchStatus] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -357,7 +357,7 @@ export const handleL2PSGetParticipation: OmniHandler<Buffer> = async ({ message,
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSGetParticipation] Error: " + error)
+        log.error("[handleL2PSGetParticipation] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )
@@ -412,7 +412,7 @@ export const handleL2PSHashUpdate: OmniHandler<Buffer> = async ({ message, conte
             }),
         )
     } catch (error) {
-        log.error("[handleL2PSHashUpdate] Error: " + error)
+        log.error("[handleL2PSHashUpdate] Error:", error)
         return encodeResponse(
             errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
         )

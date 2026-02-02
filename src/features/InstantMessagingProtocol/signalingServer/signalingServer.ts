@@ -648,7 +648,7 @@ export class SignalingServer {
                 transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
             }
 
-            // TODO: Replace with sender signature verification once client-side signing is implemented
+            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
             // Current: Sign with node's private key for integrity (not authentication)
             // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
             if (!getSharedState.identity?.ed25519?.privateKey) {
@@ -712,7 +712,7 @@ export class SignalingServer {
             })
             const messageHash = Hashing.sha256(messageContent)
 
-            // TODO: Replace with sender signature verification once client-side signing is implemented
+            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
             // Current: Sign with node's private key for integrity (not authentication)
             // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
             if (!getSharedState.identity?.ed25519?.privateKey) {

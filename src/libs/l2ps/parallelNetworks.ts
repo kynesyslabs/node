@@ -113,7 +113,7 @@ export default class ParallelNetworks {
         }
 
         if (this.l2pses.has(uid)) {
-            return this.l2pses.get(uid) as L2PS
+            return this.l2pses.get(uid)!
         }
 
         // Check if already loading to prevent race conditions

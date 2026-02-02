@@ -806,7 +806,7 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
     if (mergedPeers.length > 0 && getSharedState.l2psJoinedUids?.length > 0) {
         const newPeerObjects = mergedPeers
             .map(identity => peerManager.getPeer(identity))
-            .filter(peer => peer !== undefined) as Peer[]
+            .filter((peer): peer is Peer => peer !== undefined)
 
         if (newPeerObjects.length > 0) {
             // Run in background, don't block blockchain sync

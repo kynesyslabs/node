@@ -653,7 +653,7 @@ export default class ServerHandlers {
     static async handleConsensusRequest(
         request: ConsensusRequest,
     ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = structuredClone(emptyResponse)
         const senderIdentity = request.sender
         //console.log("[SERVER] Received consensus request")
         /*console.log(
@@ -803,7 +803,7 @@ export default class ServerHandlers {
      * @returns RPCResponse with processing result
      */
     static async handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
+        const response: RPCResponse = structuredClone(emptyResponse)
 
         try {
             // REVIEW: PR Fix #12 - Validate payload structure and reject transactions without block_number
