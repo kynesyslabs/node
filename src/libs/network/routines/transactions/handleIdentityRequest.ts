@@ -13,14 +13,18 @@ import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
 import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
-import { verifyGithubTLSNProof, TLSNotaryPresentation } from "@/libs/tlsnotary"
+import {
+    verifyGithubTLSNProof,
+    verifyDiscordTLSNProof,
+    verifyTelegramTLSNProof,
+    TLSNotaryPresentation,
+} from "@/libs/tlsnotary"
 
 /**
- * TLSN GitHub identity payload (local definition until SDK is updated)
- * This matches the InferFromTLSNGithubPayload structure in the SDK
+ * TLSN identity payload base structure
  */
-interface InferFromTLSNGithubPayload {
-    context: "github"
+interface TLSNIdentityPayload {
+    context: "github" | "discord" | "telegram"
     proof: TLSNotaryPresentation
     username: string
     userId: string
@@ -114,18 +118,40 @@ export default async function handleIdentityRequest(
                 payload.payload as NomisWalletIdentity,
             )
         case "tlsn_identity_assign": {
-            // TLSNotary identity verification - cryptographically verify the proof
-            const tlsnPayload = payload.payload as InferFromTLSNGithubPayload
+            // TLSNotary identity verification - verify proof structure
+            const tlsnPayload = payload.payload as TLSNIdentityPayload
 
-            // The verifyGithubTLSNProof function:
-            // 1. Verifies the TLSNotary proof cryptographically using WASM
-            // 2. Extracts the server name and response from the proof
-            // 3. Compares extracted data with claimed username/userId
-            const result = await verifyGithubTLSNProof(
-                tlsnPayload.proof,
-                tlsnPayload.username,
-                tlsnPayload.userId,
-            )
+            // Route to appropriate verifier based on context
+            let result: { success: boolean; message: string }
+
+            switch (tlsnPayload.context) {
+                case "github":
+                    result = await verifyGithubTLSNProof(
+                        tlsnPayload.proof,
+                        tlsnPayload.username,
+                        tlsnPayload.userId,
+                    )
+                    break
+                case "discord":
+                    result = await verifyDiscordTLSNProof(
+                        tlsnPayload.proof,
+                        tlsnPayload.username,
+                        tlsnPayload.userId,
+                    )
+                    break
+                case "telegram":
+                    result = await verifyTelegramTLSNProof(
+                        tlsnPayload.proof,
+                        tlsnPayload.username,
+                        tlsnPayload.userId,
+                    )
+                    break
+                default:
+                    return {
+                        success: false,
+                        message: `Unsupported TLSN context: ${(tlsnPayload as TLSNIdentityPayload).context}`,
+                    }
+            }
 
             return {
                 success: result.success,

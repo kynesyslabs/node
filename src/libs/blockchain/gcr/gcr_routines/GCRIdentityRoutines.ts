@@ -25,6 +25,7 @@ import {
     parseHttpResponse,
     extractGithubUser,
     extractDiscordUser,
+    extractTelegramUser,
     type TLSNotaryPresentation,
 } from "@/libs/tlsnotary"
 
@@ -1156,7 +1157,7 @@ export default class GCRIdentityRoutines {
     > = {
         github: { server: "api.github.com", pathPrefix: "/user" },
         discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
-        // Future: telegram
+        telegram: { server: "telegram-backend", pathPrefix: "/api/telegram/user" },
     }
 
     /**
@@ -1288,8 +1289,9 @@ export default class GCRIdentityRoutines {
                 extractedUser = extractGithubUser(httpResponse.body)
             } else if (context === "discord") {
                 extractedUser = extractDiscordUser(httpResponse.body)
+            } else if (context === "telegram") {
+                extractedUser = extractTelegramUser(httpResponse.body)
             }
-            // Future: Add extractors for telegram
 
             if (!extractedUser) {
                 return {
@@ -1394,8 +1396,22 @@ export default class GCRIdentityRoutines {
                         referralCode,
                     )
                 }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.telegramLinked(
+                        editOperation.account,
+                        String(userId),
+                        referralCode,
+                    )
+                }
             }
-            // Future: Add incentives for telegram
         }
 
         return { success: true, message: "TLSN identity added successfully" }
@@ -1451,6 +1467,8 @@ export default class GCRIdentityRoutines {
                 )
             } else if (context === "discord") {
                 await IncentiveManager.discordUnlinked(editOperation.account)
+            } else if (context === "telegram") {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
             }
         }
 

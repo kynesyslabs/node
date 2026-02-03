@@ -66,6 +66,14 @@ export interface ExtractedDiscordUser {
 }
 
 /**
+ * Extracted Telegram user data
+ */
+export interface ExtractedTelegramUser {
+    username: string
+    userId: string
+}
+
+/**
  * Initialize TLSNotary verifier (no-op in current implementation)
  *
  * This function exists for API compatibility. Full WASM initialization
@@ -355,6 +363,86 @@ export async function verifyDiscordTLSNProof(
 
     log.info(
         `[TLSNotary Verifier] Discord proof structure validated for: username=${claimedUsername}, userId=${claimedUserId}`,
+    )
+
+    return {
+        success: true,
+        message: "Proof structure verified",
+        extractedUsername: claimedUsername,
+        extractedUserId: claimedUserId,
+    }
+}
+
+/**
+ * Extract user data from Telegram API response body
+ *
+ * Parses the JSON response from the backend's /api/telegram/user endpoint
+ * and extracts the username and user ID.
+ *
+ * @param responseBody - The JSON body from the Telegram user endpoint
+ * @returns Extracted user data or null if extraction fails
+ */
+export function extractTelegramUser(
+    responseBody: string,
+): ExtractedTelegramUser | null {
+    try {
+        const json = JSON.parse(responseBody)
+
+        // Handle response format: { user: { id, username, first_name, ... } }
+        const user = json.user || json
+
+        if (user.id !== undefined) {
+            return {
+                username: user.username || user.first_name || "",
+                userId: String(user.id),
+            }
+        }
+
+        log.warn(
+            "[TLSNotary Verifier] Telegram response missing 'id' field",
+        )
+        return null
+    } catch (error) {
+        log.error(
+            `[TLSNotary Verifier] Failed to parse Telegram response: ${error}`,
+        )
+        return null
+    }
+}
+
+/**
+ * Verify a Telegram TLSNotary proof
+ *
+ * Validates the proof structure. The cryptographic verification is done
+ * on the frontend. This function trusts the claimed username/userId
+ * after validating the proof has a valid structure.
+ *
+ * @param proof - The TLSNotary presentation
+ * @param claimedUsername - The username claimed by the client
+ * @param claimedUserId - The user ID claimed by the client
+ * @returns Verification result
+ */
+export async function verifyTelegramTLSNProof(
+    proof: TLSNotaryPresentation,
+    claimedUsername: string,
+    claimedUserId: string,
+): Promise<{
+    success: boolean
+    message: string
+    extractedUsername?: string
+    extractedUserId?: string
+}> {
+    // Verify the proof structure
+    const verified = await verifyTLSNotaryPresentation(proof)
+    if (!verified.success) {
+        return {
+            success: false,
+            message: `Proof verification failed: ${verified.error}`,
+        }
+    }
+
+    log.info(
+        `[TLSNotary Verifier] Telegram proof structure validated for: username=${claimedUsername}, userId=${claimedUserId}`,
     )
 
     return {
