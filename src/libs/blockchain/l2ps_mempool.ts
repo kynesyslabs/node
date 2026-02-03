@@ -134,83 +134,14 @@ export default class L2PSMempool {
                 }
             }
 
-            // Determine block number (following main mempool pattern)
-            let blockNumber: number
-            const manager = SecretaryManager.getInstance()
-            const shardBlockRef = manager?.shard?.blockRef
-
-            if (typeof shardBlockRef === "number" && shardBlockRef >= 0) {
-                blockNumber = shardBlockRef + 1
-            } else {
-                const lastBlockNumber = await Chain.getLastBlockNumber()
-                // Validate lastBlockNumber is a valid positive number
-                if (typeof lastBlockNumber !== "number" || lastBlockNumber < 0) {
-                    return {
-                        success: false,
-                        error: `Invalid last block number: ${lastBlockNumber}`,
-                    }
-                }
-                blockNumber = lastBlockNumber + 1
+            // Determine block number
+            const { blockNumber, error } = await this.determineBlockNumber()
+            if (error || blockNumber === undefined) {
+                return { success: false, error }
             }
 
-            // Additional safety check for final blockNumber
-            if (!Number.isFinite(blockNumber) || blockNumber <= 0) {
-                return {
-                    success: false,
-                    error: `Calculated invalid block number: ${blockNumber}`,
-                }
-            }
-
-            // Atomic sequence allocation with retries to resolve race conditions
-            let retries = 3
-            while (retries > 0) {
-                try {
-                    await this.ensureInitialized()
-                    const result = await this.repo!.manager.transaction(async (transactionalEntityManager) => {
-                        // Get next sequence number inside transaction with lock to serialize allocation
-                        const sequenceNumber = await (this as any).getNextSequenceNumber(l2psUid, transactionalEntityManager)
-
-                        // Save inside transaction
-                        await transactionalEntityManager.save(L2PSMempoolTx, {
-                            hash: encryptedTx.hash,
-                            l2ps_uid: l2psUid,
-                            sequence_number: sequenceNumber.toString(),
-                            original_hash: originalHash,
-                            encrypted_tx: encryptedTx,
-                            status: status,
-                            timestamp: Date.now().toString(),
-                            block_number: blockNumber,
-                        })
-
-                        return { sequenceNumber }
-                    })
-
-                    log.info(`[L2PS Mempool] Added transaction ${encryptedTx.hash} (seq: ${result.sequenceNumber}) for L2PS ${l2psUid}`)
-                    return { success: true }
-
-                } catch (error: any) {
-                    // Check for unique constraint violation (Postgres error code 23505)
-                    const isUniqueViolation = error.code === "23505" ||
-                        error.message?.includes("UQ_L2PS_UID_SEQUENCE") ||
-                        error.message?.includes("unique constraint")
-
-                    if (isUniqueViolation && retries > 1) {
-                        retries--
-                        log.warning(`[L2PS Mempool] Sequence collision for ${l2psUid}, retrying (${retries} attempts left)...`)
-                        // Jittered backoff to let other transactions complete
-                        await new Promise(resolve => setTimeout(resolve, Math.random() * 50 + 10))
-                        continue
-                    }
-
-                    log.error("[L2PS Mempool] Error adding transaction:", error)
-                    return {
-                        success: false,
-                        error: error.message || "Unknown error",
-                    }
-                }
-            }
-
-            return { success: false, error: "Maximum retries exceeded for sequence allocation" }
+            // Save with retries
+            return await this.saveTransactionWithRetry(l2psUid, encryptedTx, originalHash, blockNumber, status)
 
         } catch (error: any) {
             log.error("[L2PS Mempool] Error adding transaction:", error)
@@ -219,6 +150,93 @@ export default class L2PSMempool {
                 error: error.message || "Unknown error",
             }
         }
+    }
+
+    private static async determineBlockNumber(): Promise<{ blockNumber?: number; error?: string }> {
+        // Determine block number (following main mempool pattern)
+        let blockNumber: number
+        const manager = SecretaryManager.getInstance()
+        const shardBlockRef = manager?.shard?.blockRef
+
+        if (typeof shardBlockRef === "number" && shardBlockRef >= 0) {
+            blockNumber = shardBlockRef + 1
+        } else {
+            const lastBlockNumber = await Chain.getLastBlockNumber()
+            // Validate lastBlockNumber is a valid positive number
+            if (typeof lastBlockNumber !== "number" || lastBlockNumber < 0) {
+                return {
+                    error: `Invalid last block number: ${lastBlockNumber}`,
+                }
+            }
+            blockNumber = lastBlockNumber + 1
+        }
+
+        // Additional safety check for final blockNumber
+        if (!Number.isFinite(blockNumber) || blockNumber <= 0) {
+            return {
+                error: `Calculated invalid block number: ${blockNumber}`,
+            }
+        }
+        return { blockNumber }
+    }
+
+    private static async saveTransactionWithRetry(
+        l2psUid: string,
+        encryptedTx: L2PSTransaction,
+        originalHash: string,
+        blockNumber: number,
+        status: string,
+    ): Promise<{ success: boolean; error?: string }> {
+        // Atomic sequence allocation with retries to resolve race conditions
+        let retries = 3
+        while (retries > 0) {
+            try {
+                await this.ensureInitialized()
+                const result = await this.repo!.manager.transaction(async (transactionalEntityManager) => {
+                    // Get next sequence number inside transaction with lock to serialize allocation
+                    const sequenceNumber = await (this as any).getNextSequenceNumber(l2psUid, transactionalEntityManager)
+
+                    // Save inside transaction
+                    await transactionalEntityManager.save(L2PSMempoolTx, {
+                        hash: encryptedTx.hash,
+                        l2ps_uid: l2psUid,
+                        sequence_number: sequenceNumber.toString(),
+                        original_hash: originalHash,
+                        encrypted_tx: encryptedTx,
+                        status: status,
+                        timestamp: Date.now().toString(),
+                        block_number: blockNumber,
+                    })
+
+                    return { sequenceNumber }
+                })
+
+                log.info(`[L2PS Mempool] Added transaction ${encryptedTx.hash} (seq: ${result.sequenceNumber}) for L2PS ${l2psUid}`)
+                return { success: true }
+
+            } catch (error: any) {
+                // Check for unique constraint violation (Postgres error code 23505)
+                const isUniqueViolation = error.code === "23505" ||
+                    error.message?.includes("UQ_L2PS_UID_SEQUENCE") ||
+                    error.message?.includes("unique constraint")
+
+                if (isUniqueViolation && retries > 1) {
+                    retries--
+                    log.warning(`[L2PS Mempool] Sequence collision for ${l2psUid}, retrying (${retries} attempts left)...`)
+                    // Jittered backoff to let other transactions complete
+                    await new Promise(resolve => setTimeout(resolve, Math.random() * 50 + 10))
+                    continue
+                }
+
+                log.error("[L2PS Mempool] Error adding transaction:", error)
+                return {
+                    success: false,
+                    error: error.message || "Unknown error",
+                }
+            }
+        }
+
+        return { success: false, error: "Maximum retries exceeded for sequence allocation" }
     }
 
     /**
