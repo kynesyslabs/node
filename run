@@ -7,8 +7,8 @@ NO_TUI=false
 EXTERNAL_DB=false
 
 GIT_PULL=true
-TLSNOTARY_DISABLED=true
-MONITORING_DISABLED=true
+TLSNOTARY_DISABLED=false
+MONITORING_DISABLED=false
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)

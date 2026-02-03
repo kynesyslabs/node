@@ -33,7 +33,11 @@ export class BroadcastManager {
 
             return {
                 pubkey: peer.identity,
-                result: await peer.longCall(request, true, 250, 3, [400]),
+                result: await peer.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 3,
+                    allowedCodes: [400],
+                }),
             }
         })
 
@@ -140,7 +144,11 @@ export class BroadcastManager {
 
             return {
                 pubkey: peer.identity,
-                result: await peer.longCall(request, true, 250, 3, [400]),
+                result: await peer.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 3,
+                    allowedCodes: [400],
+                }),
             }
         })
 

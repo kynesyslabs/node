@@ -420,8 +420,10 @@ export default class PeerManager {
                 params: [helloRequest],
             },
             true,
-            250,
-            3,
+            {
+                sleepTime: 250,
+                retries: 3,
+            },
         )
 
         log.debug("[Hello Peer] Response: " + JSON.stringify(response))

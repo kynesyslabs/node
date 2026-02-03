@@ -257,9 +257,6 @@ export async function consensusRoutine(): Promise<void> {
  */
 export function isConsensusAlreadyRunning(): boolean {
     if (getSharedState.inConsensusLoop) {
-        log.warning(
-            "Consensus loop already running: keeping it running (returning)",
-        )
         return true
     }
 
@@ -288,7 +285,6 @@ async function initializeConsensusState(): Promise<void> {
 async function initializeShard(blockRef: number): Promise<Peer[]> {
     const { commonValidatorSeed, lastBlockNumber } =
         await getCommonValidatorSeed()
-    // return await getShard(commonValidatorSeed)
 
     const manager = SecretaryManager.getInstance(blockRef)
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
