@@ -50,27 +50,27 @@ export interface ParsedHttpResponse {
 }
 
 /**
- * Extracted GitHub user data
+ * Supported TLSN identity contexts
  */
-export interface ExtractedGithubUser {
+export type TLSNIdentityContext = "github" | "discord" | "telegram"
+
+/**
+ * Extracted user data (generic for all platforms)
+ */
+export interface ExtractedUser {
     username: string
     userId: string
 }
 
 /**
- * Extracted Discord user data
+ * TLSN identity payload structure for verification
  */
-export interface ExtractedDiscordUser {
+export interface TLSNIdentityPayload {
+    context: TLSNIdentityContext
+    proof: TLSNotaryPresentation
     username: string
     userId: string
-}
-
-/**
- * Extracted Telegram user data
- */
-export interface ExtractedTelegramUser {
-    username: string
-    userId: string
+    referralCode?: string
 }
 
 /**
@@ -220,95 +220,100 @@ export function parseHttpResponse(
 }
 
 /**
- * Extract user data from GitHub API response body
+ * Extract user data from API response body based on context
  *
- * Parses the JSON response from api.github.com/user and extracts
- * the username (login) and user ID.
+ * Parses the JSON response from the platform's API and extracts
+ * the username and user ID based on the context.
  *
- * @param responseBody - The JSON body from GitHub's /user endpoint
+ * @param context - The platform context (github, discord, telegram)
+ * @param responseBody - The JSON body from the platform's API endpoint
  * @returns Extracted user data or null if extraction fails
  */
-export function extractGithubUser(
+export function extractUser(
+    context: TLSNIdentityContext,
     responseBody: string,
-): ExtractedGithubUser | null {
+): ExtractedUser | null {
     try {
         const json = JSON.parse(responseBody)
 
-        if (json.login && json.id !== undefined) {
-            return {
-                username: json.login,
-                userId: String(json.id),
-            }
-        }
+        switch (context) {
+            case "github":
+                if (json.login && json.id !== undefined) {
+                    return {
+                        username: json.login,
+                        userId: String(json.id),
+                    }
+                }
+                log.warn(
+                    "[TLSNotary Verifier] GitHub response missing 'login' or 'id' fields",
+                )
+                return null
 
-        log.warn(
-            "[TLSNotary Verifier] GitHub response missing 'login' or 'id' fields",
-        )
-        return null
+            case "discord":
+                if (json.username && json.id !== undefined) {
+                    return {
+                        username: json.username,
+                        userId: String(json.id),
+                    }
+                }
+                log.warn(
+                    "[TLSNotary Verifier] Discord response missing 'username' or 'id' fields",
+                )
+                return null
+
+            case "telegram": {
+                // Handle response format: { user: { id, username, first_name, ... } }
+                const user = json.user || json
+                if (user.id !== undefined) {
+                    return {
+                        username: user.username || user.first_name || "",
+                        userId: String(user.id),
+                    }
+                }
+                log.warn(
+                    "[TLSNotary Verifier] Telegram response missing 'id' field",
+                )
+                return null
+            }
+
+            default:
+                log.warn(`[TLSNotary Verifier] Unsupported context: ${context}`)
+                return null
+        }
     } catch (error) {
         log.error(
-            `[TLSNotary Verifier] Failed to parse GitHub response: ${error}`,
+            `[TLSNotary Verifier] Failed to parse ${context} response: ${error}`,
         )
         return null
     }
 }
 
 /**
- * Extract user data from Discord API response body
- *
- * Parses the JSON response from discord.com/api/users/@me and extracts
- * the username and user ID.
- *
- * @param responseBody - The JSON body from Discord's /api/users/@me endpoint
- * @returns Extracted user data or null if extraction fails
- */
-export function extractDiscordUser(
-    responseBody: string,
-): ExtractedDiscordUser | null {
-    try {
-        const json = JSON.parse(responseBody)
-
-        if (json.username && json.id !== undefined) {
-            return {
-                username: json.username,
-                userId: String(json.id),
-            }
-        }
-
-        log.warn(
-            "[TLSNotary Verifier] Discord response missing 'username' or 'id' fields",
-        )
-        return null
-    } catch (error) {
-        log.error(
-            `[TLSNotary Verifier] Failed to parse Discord response: ${error}`,
-        )
-        return null
-    }
-}
-
-/**
- * Verify a GitHub TLSNotary proof
+ * Verify a TLSNotary proof for any supported context
  *
  * Validates the proof structure. The cryptographic verification is done
  * on the frontend. This function trusts the claimed username/userId
  * after validating the proof has a valid structure.
  *
- * @param proof - The TLSNotary presentation
- * @param claimedUsername - The username claimed by the client
- * @param claimedUserId - The user ID claimed by the client
+ * @param payload - The TLSN identity payload containing context, proof, username, and userId
  * @returns Verification result
  */
-export async function verifyGithubTLSNProof(
-    proof: TLSNotaryPresentation,
-    claimedUsername: string,
-    claimedUserId: string,
-): Promise<{
+export async function verifyTLSNProof(payload: TLSNIdentityPayload): Promise<{
     success: boolean
     message: string
     extractedUsername?: string
     extractedUserId?: string
 }> {
+    const { context, proof, username, userId } = payload
+
+    // Validate context
+    if (!["github", "discord", "telegram"].includes(context)) {
+        return {
+            success: false,
+            message: `Unsupported TLSN context: ${context}`,
+        }
+    }
+
     // Verify the proof structure
     const verified = await verifyTLSNotaryPresentation(proof)
     if (!verified.success) {
@@ -319,136 +324,13 @@ export async function verifyGithubTLSNProof(
     }
 
     log.info(
-        `[TLSNotary Verifier] GitHub proof structure validated for: username=${claimedUsername}, userId=${claimedUserId}`,
+        `[TLSNotary Verifier] ${context} proof structure validated for: username=${username}, userId=${userId}`,
     )
 
     return {
         success: true,
         message: "Proof structure verified",
-        extractedUsername: claimedUsername,
-        extractedUserId: claimedUserId,
-    }
-}
-
-/**
- * Verify a Discord TLSNotary proof
- *
- * Validates the proof structure. The cryptographic verification is done
- * on the frontend. This function trusts the claimed username/userId
- * after validating the proof has a valid structure.
- *
- * @param proof - The TLSNotary presentation
- * @param claimedUsername - The username claimed by the client
- * @param claimedUserId - The user ID claimed by the client
- * @returns Verification result
- */
-export async function verifyDiscordTLSNProof(
-    proof: TLSNotaryPresentation,
-    claimedUsername: string,
-    claimedUserId: string,
-): Promise<{
-    success: boolean
-    message: string
-    extractedUsername?: string
-    extractedUserId?: string
-}> {
-    // Verify the proof structure
-    const verified = await verifyTLSNotaryPresentation(proof)
-    if (!verified.success) {
-        return {
-            success: false,
-            message: `Proof verification failed: ${verified.error}`,
-        }
-    }
-
-    log.info(
-        `[TLSNotary Verifier] Discord proof structure validated for: username=${claimedUsername}, userId=${claimedUserId}`,
-    )
-
-    return {
-        success: true,
-        message: "Proof structure verified",
-        extractedUsername: claimedUsername,
-        extractedUserId: claimedUserId,
-    }
-}
-
-/**
- * Extract user data from Telegram API response body
- *
- * Parses the JSON response from the backend's /api/telegram/user endpoint
- * and extracts the username and user ID.
- *
- * @param responseBody - The JSON body from the Telegram user endpoint
- * @returns Extracted user data or null if extraction fails
- */
-export function extractTelegramUser(
-    responseBody: string,
-): ExtractedTelegramUser | null {
-    try {
-        const json = JSON.parse(responseBody)
-
-        // Handle response format: { user: { id, username, first_name, ... } }
-        const user = json.user || json
-
-        if (user.id !== undefined) {
-            return {
-                username: user.username || user.first_name || "",
-                userId: String(user.id),
-            }
-        }
-
-        log.warn(
-            "[TLSNotary Verifier] Telegram response missing 'id' field",
-        )
-        return null
-    } catch (error) {
-        log.error(
-            `[TLSNotary Verifier] Failed to parse Telegram response: ${error}`,
-        )
-        return null
-    }
-}
-
-/**
- * Verify a Telegram TLSNotary proof
- *
- * Validates the proof structure. The cryptographic verification is done
- * on the frontend. This function trusts the claimed username/userId
- * after validating the proof has a valid structure.
- *
- * @param proof - The TLSNotary presentation
- * @param claimedUsername - The username claimed by the client
- * @param claimedUserId - The user ID claimed by the client
- * @returns Verification result
- */
-export async function verifyTelegramTLSNProof(
-    proof: TLSNotaryPresentation,
-    claimedUsername: string,
-    claimedUserId: string,
-): Promise<{
-    success: boolean
-    message: string
-    extractedUsername?: string
-    extractedUserId?: string
-}> {
-    // Verify the proof structure
-    const verified = await verifyTLSNotaryPresentation(proof)
-    if (!verified.success) {
-        return {
-            success: false,
-            message: `Proof verification failed: ${verified.error}`,
-        }
-    }
-
-    log.info(
-        `[TLSNotary Verifier] Telegram proof structure validated for: username=${claimedUsername}, userId=${claimedUserId}`,
-    )
-
-    return {
-        success: true,
-        message: "Proof structure verified",
-        extractedUsername: claimedUsername,
-        extractedUserId: claimedUserId,
+        extractedUsername: username,
+        extractedUserId: userId,
     }
 }

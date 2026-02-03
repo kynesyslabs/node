@@ -11,25 +11,7 @@ import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
-import log from "@/utilities/logger"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
-import {
-    verifyGithubTLSNProof,
-    verifyDiscordTLSNProof,
-    verifyTelegramTLSNProof,
-    TLSNotaryPresentation,
-} from "@/libs/tlsnotary"
-
-/**
- * TLSN identity payload base structure
- */
-interface TLSNIdentityPayload {
-    context: "github" | "discord" | "telegram"
-    proof: TLSNotaryPresentation
-    username: string
-    userId: string
-    referralCode?: string
-}
+import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 
 interface IdentityResponse {
     success: boolean
@@ -117,47 +99,9 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
-        case "tlsn_identity_assign": {
+        case "tlsn_identity_assign":
             // TLSNotary identity verification - verify proof structure
-            const tlsnPayload = payload.payload as TLSNIdentityPayload
-
-            // Route to appropriate verifier based on context
-            let result: { success: boolean; message: string }
-
-            switch (tlsnPayload.context) {
-                case "github":
-                    result = await verifyGithubTLSNProof(
-                        tlsnPayload.proof,
-                        tlsnPayload.username,
-                        tlsnPayload.userId,
-                    )
-                    break
-                case "discord":
-                    result = await verifyDiscordTLSNProof(
-                        tlsnPayload.proof,
-                        tlsnPayload.username,
-                        tlsnPayload.userId,
-                    )
-                    break
-                case "telegram":
-                    result = await verifyTelegramTLSNProof(
-                        tlsnPayload.proof,
-                        tlsnPayload.username,
-                        tlsnPayload.userId,
-                    )
-                    break
-                default:
-                    return {
-                        success: false,
-                        message: `Unsupported TLSN context: ${(tlsnPayload as TLSNIdentityPayload).context}`,
-                    }
-            }
-
-            return {
-                success: result.success,
-                message: result.message,
-            }
-        }
+            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
@@ -171,7 +115,9 @@ export default async function handleIdentityRequest(
         default:
             return {
                 success: false,
-                message: `Unsupported identity method: ${(payload as IdentityPayload).method}`,
+                message: `Unsupported identity method: ${
+                    (payload as IdentityPayload).method
+                }`,
             }
     }
 }

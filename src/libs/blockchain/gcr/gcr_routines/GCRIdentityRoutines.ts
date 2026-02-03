@@ -23,10 +23,9 @@ import { IncentiveManager } from "./IncentiveManager"
 import {
     verifyTLSNotaryPresentation,
     parseHttpResponse,
-    extractGithubUser,
-    extractDiscordUser,
-    extractTelegramUser,
+    extractUser,
     type TLSNotaryPresentation,
+    type TLSNIdentityContext,
 } from "@/libs/tlsnotary"
 
 export default class GCRIdentityRoutines {
@@ -1157,7 +1156,10 @@ export default class GCRIdentityRoutines {
     > = {
         github: { server: "api.github.com", pathPrefix: "/user" },
         discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
-        telegram: { server: "telegram-backend", pathPrefix: "/api/telegram/user" },
+        telegram: {
+            server: "telegram-backend",
+            pathPrefix: "/api/telegram/user",
+        },
     }
 
     /**
@@ -1283,15 +1285,10 @@ export default class GCRIdentityRoutines {
             }
 
             // 6. Extract user data based on context
-            // let extractedUser: { username: string; userId: string } | null = null
-
-            if (context === "github") {
-                extractedUser = extractGithubUser(httpResponse.body)
-            } else if (context === "discord") {
-                extractedUser = extractDiscordUser(httpResponse.body)
-            } else if (context === "telegram") {
-                extractedUser = extractTelegramUser(httpResponse.body)
-            }
+            extractedUser = extractUser(
+                context as TLSNIdentityContext,
+                httpResponse.body,
+            )
 
             if (!extractedUser) {
                 return {
