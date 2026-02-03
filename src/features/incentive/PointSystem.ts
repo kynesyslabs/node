@@ -161,17 +161,12 @@ export class PointSystem {
             }
         }
 
-        const linkedHumanPassport: { address: string; score: number; passingScore: boolean }[] = []
-        const humanPassportIdentities = await IdentityManager.getIdentities(userId, "humanpassport")
-        if (Array.isArray(humanPassportIdentities)) {
-            for (const hp of humanPassportIdentities) {
-                linkedHumanPassport.push({
-                    address: hp.address,
-                    score: hp.score || 0,
-                    passingScore: hp.passingScore || false,
-                })
-            }
-        }
+        const humanPassportIdentities: any[] = (await IdentityManager.getIdentities(userId, "humanpassport")) || []
+        const linkedHumanPassport = humanPassportIdentities.map(hp => ({
+            address: hp.address,
+            score: hp.score || 0,
+            passingScore: hp.passingScore || false,
+        }))
 
         return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport }
     }
@@ -1584,6 +1579,23 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
+            // Verify the Human Passport identity is actually linked
+            const account = await ensureGCRForUser(userId)
+            const hpIdentities = account.identities.humanpassport || []
+
+            if (hpIdentities.length === 0) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Human Passport not linked",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
             const userPointsWithIdentities = await this.getUserPointsInternal(
                 userId,
             )

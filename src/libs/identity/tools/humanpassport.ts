@@ -55,15 +55,15 @@ export class HumanPassportProvider {
     private readonly cache: Map<string, CachedScore> = new Map()
 
     private constructor() {
-        this.scorerId = DEFAULT_SCORER_ID
-
         if (!DEFAULT_API_KEY) {
-            log.warn("[HumanPassportProvider] HUMAN_PASSPORT_API_KEY not set")
+            throw new Error("HUMAN_PASSPORT_API_KEY is not set in environment variables")
         }
 
         if (!DEFAULT_SCORER_ID) {
-            log.warn("[HumanPassportProvider] HUMAN_PASSPORT_SCORER_ID not set")
+            throw new Error("HUMAN_PASSPORT_SCORER_ID is not set in environment variables")
         }
+
+        this.scorerId = DEFAULT_SCORER_ID
 
         this.http = axios.create({
             baseURL: DEFAULT_BASE_URL,

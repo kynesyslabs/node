@@ -66,9 +66,9 @@ export interface SavedHumanPassportIdentity {
     verificationMethod: "api" | "onchain"
     /** Chain ID for onchain verification */
     chainId?: number
-    /** Timestamp when verified */
+    /** Milliseconds since Unix epoch when verified (converted from API date string by identityManager/GCRIdentityRoutines) */
     verifiedAt: number
-    /** Timestamp when score expires (if applicable) */
+    /** Milliseconds since Unix epoch when score expires, or null if not applicable (converted from API date string by identityManager/GCRIdentityRoutines) */
     expiresAt: number | null
 }
 
