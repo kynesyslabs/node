@@ -96,6 +96,13 @@ export class HumanPassportProvider {
         address: string,
         forceRefresh = false,
     ): Promise<HumanPassportVerification> {
+        // Early validation guard for API credentials
+        if (!this.scorerId || !this.http.defaults.headers?.["X-API-KEY"]) {
+            throw new Error(
+                "Human Passport API credentials missing: set HUMAN_PASSPORT_API_KEY and HUMAN_PASSPORT_SCORER_ID"
+            )
+        }
+
         const normalizedAddress = address.toLowerCase()
 
         // Check cache
@@ -123,7 +130,7 @@ export class HumanPassportProvider {
 
             if (error.response?.status === 404) {
                 throw new Error(
-                    "User has not created a Human Passport. Direct them to passport.human.tech",
+                    "User has not created a Human Passport. Direct them to https://app.passport.xyz/",
                 )
             }
 

@@ -165,10 +165,12 @@ export default async function manageGCRRoutines(
 
             try {
                 const provider = HumanPassportProvider.getInstance()
-                response.response = await provider.verifyAddress(
+                const verification = await provider.verifyAddress(
                     address,
                     forceRefresh,
                 )
+                // Return only the numeric score (method name implies a number, not full object)
+                response.response = verification.score
             } catch (error) {
                 response.result = 400
                 response.response = null

@@ -101,10 +101,13 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
-        case "humanpassport_identity_assign":
+        case "humanpassport_identity_assign": {
+            const hpPayload = payload.payload as HumanPassportIdentityData
             return await IdentityManager.verifyHumanPassportPayload(
-                payload.payload as HumanPassportIdentityData,
+                hpPayload,
+                sender,
             )
+        }
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":

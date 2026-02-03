@@ -378,6 +378,7 @@ export default class IdentityManager {
      * Requires score >= 20 (passing threshold) to succeed.
      *
      * @param payload - The payload containing the address and signature
+     * @param sender - The transaction sender's address (for binding verification)
      * @returns {success: boolean, message: string, data?: SavedHumanPassportIdentity}
      */
     static async verifyHumanPassportPayload(
@@ -388,6 +389,7 @@ export default class IdentityManager {
             chainId?: number
             referralCode?: string
         },
+        sender: string,
     ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
         const { address, verificationMethod } = payload
 
@@ -407,7 +409,7 @@ export default class IdentityManager {
                 return {
                     success: false,
                     message: `Human Passport score ${verification.score} below threshold (${verification.threshold}). ` +
-                        `User needs to verify more stamps at passport.human.tech. Transaction not applied.`,
+                        `User needs to verify more stamps at https://app.passport.xyz/. Transaction not applied.`,
                 }
             }
 
