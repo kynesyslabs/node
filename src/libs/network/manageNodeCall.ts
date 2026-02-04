@@ -62,6 +62,18 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getPeerInfo":
             response.response = await getPeerInfo()
             break
+        case "getGenesisDataHash": {
+            const genesisBlock = await Chain.getGenesisBlock()
+            let genesisData = genesisBlock.content.extra?.genesisData || null
+
+            if (typeof genesisData === "string") {
+                genesisData = JSON.parse(genesisData)
+            }
+
+            response.response = Hashing.sha256(JSON.stringify(genesisData))
+            break
+        }
+
         case "getPeerlist":
             response.response = await getPeerlist()
             break
@@ -300,7 +312,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = res
                 }
             } catch (error) {
-                log.error("[manageNodeCall] Failed to resolve web3 domain: " + error)
+                log.error(
+                    "[manageNodeCall] Failed to resolve web3 domain: " + error,
+                )
                 response.result = 400
                 response.response = {
                     success: false,
@@ -486,8 +500,12 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
         case "requestTLSNproxy": {
             try {
-                const { requestProxy, ProxyError } = await import("@/features/tlsnotary/proxyManager")
-                const { validateToken, consumeRetry } = await import("@/features/tlsnotary/tokenManager")
+                const { requestProxy, ProxyError } = await import(
+                    "@/features/tlsnotary/proxyManager"
+                )
+                const { validateToken, consumeRetry } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
 
                 // Require tokenId and owner (pubkey) for paid access
                 if (!data.tokenId || !data.owner) {
@@ -513,15 +531,21 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.result = 400
                     response.response = {
                         error: ProxyError.INVALID_URL,
-                        message: "Only HTTPS URLs are supported for TLS attestation",
+                        message:
+                            "Only HTTPS URLs are supported for TLS attestation",
                     }
                     break
                 }
 
                 // Validate the token
-                const validation = validateToken(data.tokenId, data.owner, data.targetUrl)
+                const validation = validateToken(
+                    data.tokenId,
+                    data.owner,
+                    data.targetUrl,
+                )
                 if (!validation.valid) {
-                    response.result = validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.result =
+                        validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
                     response.response = {
                         error: validation.error,
                         message: `Token validation failed: ${validation.error}`,
@@ -531,7 +555,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 }
 
                 // Request the proxy (this spawns wstcp if needed)
-                const result = await requestProxy(data.targetUrl, data.requestOrigin)
+                const result = await requestProxy(
+                    data.targetUrl,
+                    data.requestOrigin,
+                )
 
                 if ("error" in result) {
                     // Map proxy errors to appropriate HTTP status codes
@@ -551,9 +578,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = result
                 } else {
                     // Success - consume a retry and link proxyId to token
-                    const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                    const updatedToken = consumeRetry(
+                        data.tokenId,
+                        result.proxyId,
+                    )
                     if (updatedToken) {
-                        log.info(`[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`)
+                        log.info(
+                            `[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`,
+                        )
                     }
 
                     // Add token info to response
@@ -578,7 +610,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "tlsnotary.getInfo": {
             // Dynamic import to avoid circular dependencies and check if enabled
             try {
-                const { getTLSNotaryService } = await import("@/features/tlsnotary")
+                const { getTLSNotaryService } = await import(
+                    "@/features/tlsnotary"
+                )
                 const service = getTLSNotaryService()
 
                 if (!service || !service.isRunning()) {
@@ -638,10 +672,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token lookup by transaction hash
         case "tlsnotary.getToken": {
             try {
-                const { getTokenByTxHash, getToken } = await import("@/features/tlsnotary/tokenManager")
+                const { getTokenByTxHash, getToken } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
 
                 // Support lookup by either tokenId or txHash
-                const { tokenId, txHash } = data as { tokenId?: string; txHash?: string }
+                const { tokenId, txHash } = data as {
+                    tokenId?: string
+                    txHash?: string
+                }
 
                 let token
                 if (tokenId) {
@@ -689,11 +728,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token stats for monitoring
         case "tlsnotary.getTokenStats": {
             try {
-                const { getTokenStats } = await import("@/features/tlsnotary/tokenManager")
+                const { getTokenStats } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
                 const stats = getTokenStats()
                 response.response = { stats }
             } catch (error) {
-                log.error("[manageNodeCall] tlsnotary.getTokenStats error: " + error)
+                log.error(
+                    "[manageNodeCall] tlsnotary.getTokenStats error: " + error,
+                )
                 response.result = 500
                 response.response = {
                     error: "INTERNAL_ERROR",
