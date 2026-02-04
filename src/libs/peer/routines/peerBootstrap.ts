@@ -49,8 +49,8 @@ export default async function peerBootstrap(
             log.warning(
                 "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
             )
-            peerManager.addOfflinePeer(blankPeer)
-            peerManager.removeOnlinePeer(blankPeer.identity)
+
+            PeerManager.markPeerOffline(blankPeer)
             continue
         }
 
