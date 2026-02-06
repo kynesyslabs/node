@@ -312,10 +312,13 @@ export default class IdentityManager {
     }
 
     /**
-     * Verify the payload for an Ethos identity assign payload
+     * Verify the payload for an Ethos identity assign payload.
+     * NOTE: This only validates required fields (chain, subchain, address).
+     * The score is intentionally NOT validated here - it is fetched server-side
+     * from the Ethos API in applyEthosIdentityUpsert() to prevent score spoofing.
+     * Any client-supplied score in the payload is ignored.
      *
      * @param payload - The payload to verify
-     *
      * @returns {success: boolean, message: string}
      */
     static async verifyEthosPayload(

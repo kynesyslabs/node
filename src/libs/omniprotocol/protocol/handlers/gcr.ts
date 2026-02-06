@@ -34,7 +34,7 @@ interface IdentityAssignRequest {
         type: "identity"
         isRollback: boolean
         account: string
-        context: "xm" | "web2" | "pqc" | "ud"
+        context: "xm" | "web2" | "pqc" | "ud" | "ethos"
         operation: "add" | "remove"
         data: any  // Varies by context - see GCREditIdentity
         txhash: string
@@ -46,7 +46,7 @@ interface IdentityAssignRequest {
  * Handler for 0x41 GCR_IDENTITY_ASSIGN opcode
  *
  * Internal operation triggered by write transactions to assign/remove identities.
- * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud).
+ * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud, ethos).
  */
 export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
@@ -71,8 +71,8 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, conte
             return encodeResponse(errorResponse(400, "account is required"))
         }
 
-        if (!editOperation.context || !["xm", "web2", "pqc", "ud"].includes(editOperation.context)) {
-            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, or ud"))
+        if (!editOperation.context || !["xm", "web2", "pqc", "ud", "ethos"].includes(editOperation.context)) {
+            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, or ethos"))
         }
 
         if (!editOperation.operation || !["add", "remove"].includes(editOperation.operation)) {

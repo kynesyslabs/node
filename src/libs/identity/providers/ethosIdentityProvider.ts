@@ -74,9 +74,7 @@ export class EthosIdentityProvider {
             }) || false
 
         if (!linked) {
-            throw new Error(
-                `Wallet ${walletAddress} is not linked to ${account.pubkey} on ${chain}:${subchain}`,
-            )
+            throw new Error("Wallet is not linked to this account")
         }
     }
 

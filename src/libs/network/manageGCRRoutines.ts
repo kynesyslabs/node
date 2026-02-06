@@ -169,9 +169,18 @@ export default async function manageGCRRoutines(
             } catch (error) {
                 response.result = 400
                 response.response = null
+                const errorMsg = error instanceof Error ? error.message : ""
+                // Whitelist of safe user-facing Ethos error messages
+                const safeEthosErrors = [
+                    "Wallet is not linked to this account",
+                    "Wallet address is required",
+                    "This wallet does not have an Ethos profile",
+                    "Failed to fetch Ethos score",
+                    "Ethos API returned no score data",
+                ]
+                const isSafeError = safeEthosErrors.some(safe => errorMsg.includes(safe))
                 response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
+                    error: isSafeError ? errorMsg : "Failed to fetch Ethos score",
                 }
             }
             break
@@ -186,8 +195,7 @@ export default async function manageGCRRoutines(
                 response.result = 400
                 response.response = null
                 response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
+                    error: "Failed to fetch Ethos identities",
                 }
             }
             break

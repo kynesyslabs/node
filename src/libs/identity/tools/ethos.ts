@@ -80,13 +80,20 @@ export class EthosApiClient {
             // Check if it's a 404 - wallet has no Ethos profile
             if (error?.response?.status === 404) {
                 throw new Error(
-                    `This wallet does not have an Ethos profile. Please create one at ethos.network first.`,
+                    "This wallet does not have an Ethos profile. Please create one at ethos.network first.",
                 )
             }
+
+            const statusCode = error?.response?.status ?? "unknown"
+            const errorType = error?.code === "ECONNREFUSED"
+                ? "connection_refused"
+                : error?.code === "ETIMEDOUT"
+                    ? "timeout"
+                    : "api_error"
             log.error(
-                `[EthosApiClient] Failed to fetch score for ${normalized}: ${error}`,
+                `[EthosApiClient] API request failed: status=${statusCode}, type=${errorType}`,
             )
-            throw error
+            throw new Error("Failed to fetch Ethos score")
         }
     }
 }

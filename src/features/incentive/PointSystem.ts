@@ -1687,6 +1687,10 @@ export class PointSystem {
 
             const updatedPoints = await this.getUserPointsInternal(userId)
 
+            log.info(
+                `[EthosPoints] AWARDED: account=${userId.substring(0, 16)}..., chain=${chain}, ethosScore=${ethosScore}, pointsAwarded=${pointsToAward}, totalPoints=${updatedPoints.totalPoints}`,
+            )
+
             return {
                 result: 200,
                 response: {
@@ -1763,6 +1767,10 @@ export class PointSystem {
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)
+
+            log.info(
+                `[EthosPoints] DEDUCTED: account=${userId.substring(0, 16)}..., chain=${chain}, pointsDeducted=${pointsToDeduct}, totalPoints=${updatedPoints.totalPoints}`,
+            )
 
             return {
                 result: 200,
