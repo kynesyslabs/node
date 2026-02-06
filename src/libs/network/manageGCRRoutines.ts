@@ -7,6 +7,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
+import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
 
 interface GCRRoutinePayload {
@@ -133,6 +134,52 @@ export default async function manageGCRRoutines(
         case "getNomisIdentities": {
             try {
                 response.response = await NomisIdentityProvider.listIdentities(
+                    sender,
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getEthosScore": {
+            const options = params[0]
+
+            if (!options?.walletAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "walletAddress is required" }
+                break
+            }
+
+            try {
+                response.response = await EthosIdentityProvider.getWalletScore(
+                    sender,
+                    options.walletAddress,
+                    {
+                        chain: options.chain,
+                        subchain: options.subchain,
+                    },
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getEthosIdentities": {
+            try {
+                response.response = await EthosIdentityProvider.listIdentities(
                     sender,
                 )
             } catch (error) {

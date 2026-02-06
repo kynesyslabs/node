@@ -10,7 +10,7 @@ import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -45,6 +45,7 @@ export class PointSystem {
             [network: string]: string[]
         }
         linkedNomis: NomisWalletIdentity[]
+        linkedEthos: EthosWalletIdentity[]
     }> {
         const identities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
@@ -119,6 +120,31 @@ export class PointSystem {
             }
         }
 
+        const linkedEthos: EthosWalletIdentity[] = []
+
+        if (identities?.ethos) {
+            const ethosChains = Object.keys(identities.ethos)
+
+            for (const chain of ethosChains) {
+                const subChains = identities.ethos[chain]
+                const subChainKeys = Object.keys(subChains)
+
+                for (const subChain of subChainKeys) {
+                    const ethosIdentities = subChains[subChain]
+
+                    if (Array.isArray(ethosIdentities)) {
+                        const mapped = ethosIdentities.map(ethosIdentity => ({
+                            chain,
+                            subchain: subChain,
+                            ...ethosIdentity,
+                        }))
+
+                        linkedEthos.push(...mapped)
+                    }
+                }
+            }
+        }
+
         const linkedSocials: {
             twitter?: string
             github?: string
@@ -159,7 +185,7 @@ export class PointSystem {
             }
         }
 
-        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis }
+        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedEthos }
     }
 
     /**
@@ -175,7 +201,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis } =
+        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedEthos } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -212,6 +238,7 @@ export class PointSystem {
                 },
                 udDomains: account.points.breakdown?.udDomains || {},
                 nomisScores: account.points.breakdown?.nomisScores || {},
+                ethosScores: account.points.breakdown?.ethosScores || {},
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
             },
@@ -219,6 +246,7 @@ export class PointSystem {
             linkedSocials,
             linkedUDDomains,
             linkedNomisIdentities: linkedNomis,
+            linkedEthosIdentities: linkedEthos,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
             flaggedReason: account.flaggedReason || null,
@@ -236,6 +264,7 @@ export class PointSystem {
             | "socialAccounts"
             | "udDomains"
             | "nomisScores"
+            | "ethosScores"
             | "demosFollow",
         platform: string,
         referralCode?: string,
@@ -253,6 +282,7 @@ export class PointSystem {
             referrals: 0,
             demosFollow: 0,
             nomisScores: {},
+            ethosScores: {},
         }
 
         const oldTotal = account.points.totalPoints || 0
@@ -302,6 +332,15 @@ export class PointSystem {
             const newChainPoints = Math.max(0, oldChainPoints + points)
             appliedDelta = newChainPoints - oldChainPoints
             account.points.breakdown.nomisScores[platform] = newChainPoints
+        } else if (type === "ethosScores") {
+            account.points.breakdown.ethosScores =
+                account.points.breakdown.ethosScores || {}
+            const oldChainPoints =
+                account.points.breakdown.ethosScores[platform] || 0
+
+            const newChainPoints = Math.max(0, oldChainPoints + points)
+            appliedDelta = newChainPoints - oldChainPoints
+            account.points.breakdown.ethosScores[platform] = newChainPoints
         } else if (type === "demosFollow") {
             const oldDemosFollowPoints =
                 account.points.breakdown.demosFollow || 0
@@ -1555,6 +1594,204 @@ export class PointSystem {
         if (formattedScore >= 60) return 4
         if (formattedScore >= 40) return 3
         if (formattedScore >= 20) return 2
+        return 1
+    }
+
+    /**
+     * Award points for linking an Ethos score
+     * @param userId The user's Demos address
+     * @param chain The chain type (must be "evm")
+     * @param ethosScore The Ethos reputation score (0-2800)
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardEthosScorePoints(
+        userId: string,
+        chain: string,
+        ethosScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        const validChains = ["evm"]
+        const invalidChainMessage =
+            "Invalid Ethos chain. Allowed values are 'evm'."
+        const ethosScoreAlreadyLinkedMessage = `An Ethos score for ${chain} is already linked.`
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            if (!userPointsWithIdentities.linkedSocials.twitter) {
+                return {
+                    result: 400,
+                    response: "Twitter account not linked. Not awarding points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const hasEvmWallet =
+                userPointsWithIdentities.linkedWallets.some(w =>
+                    w.startsWith("evm:"),
+                )
+
+            if (!hasEvmWallet) {
+                return {
+                    result: 400,
+                    response:
+                        "EVM wallet not linked. Cannot award Ethos points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const existingEthosScoreOnChain =
+                userPointsWithIdentities.breakdown.ethosScores?.[chain]
+
+            if (
+                existingEthosScoreOnChain != null &&
+                existingEthosScoreOnChain > 0
+            ) {
+                const updatedPoints = await this.getUserPointsInternal(userId)
+
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: updatedPoints.totalPoints,
+                        message: ethosScoreAlreadyLinkedMessage,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const pointsToAward = this.getEthosPointsByScore(ethosScore)
+
+            await this.addPointsToGCR(
+                userId,
+                pointsToAward,
+                "ethosScores",
+                chain,
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointsToAward,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points awarded for linking Ethos score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding Ethos score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking an Ethos score
+     * @param userId The user's Demos address
+     * @param chain The chain type (must be "evm")
+     * @returns RPCResponse
+     */
+    async deductEthosScorePoints(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        const validChains = ["evm"]
+        const invalidChainMessage =
+            "Invalid Ethos chain. Allowed values are 'evm'."
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const account = await ensureGCRForUser(userId)
+            const currentEthosForChain =
+                account.points.breakdown?.ethosScores?.[chain] ?? 0
+
+            if (currentEthosForChain <= 0) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `No Ethos points to deduct for ${chain}`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const pointsToDeduct = currentEthosForChain
+
+            await this.addPointsToGCR(
+                userId,
+                -pointsToDeduct,
+                "ethosScores",
+                chain,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointsToDeduct,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points deducted for unlinking Ethos score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting Ethos score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    private getEthosPointsByScore(score: number): number {
+        if (score >= 2000) return 5
+        if (score >= 1600) return 4
+        if (score >= 1200) return 3
+        if (score >= 800) return 2
         return 1
     }
 }

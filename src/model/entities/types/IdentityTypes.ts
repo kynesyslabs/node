@@ -47,6 +47,32 @@ export interface SavedNomisIdentity {
 /**
  * The PQC identity saved in the GCR
  */
+export interface EthosWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
+}
+
+export interface SavedEthosIdentity {
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
+}
+
 export interface SavedPqcIdentity {
     address: string
     signature: string
@@ -103,6 +129,11 @@ export type StoredIdentities = {
     nomis?: {
         [chain: string]: {
             [subchain: string]: SavedNomisIdentity[]
+        }
+    }
+    ethos?: {
+        [chain: string]: {
+            [subchain: string]: SavedEthosIdentity[]
         }
     }
 }
