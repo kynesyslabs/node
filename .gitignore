@@ -219,15 +219,31 @@ ZK_CEREMONY_GUIDE.md
 attestation_20251204_125424.txt
 prop_agent
 
-# ZK Artifacts (L2PS)
+# ===========================================
+# ZK GENERATED ARTIFACTS (Both ZK Identity & L2PS)
+# ===========================================
+# These files are generated during zk:setup and should NOT be committed
+# Only verification_key*.json files should be committed (they are small and required)
+
+# ZK Identity System (src/features/zk/)
+src/features/zk/keys/*.zkey
+src/features/zk/keys/*.ptau
+src/features/zk/circuits/*.r1cs
+src/features/zk/circuits/*.sym
+src/features/zk/circuits/*.wasm
+src/features/zk/circuits/*_js/
+# Allow verification keys (must be committed)
+!src/features/zk/keys/verification_key.json
+!src/features/zk/keys/verification_key_merkle.json
+
+# L2PS ZK System (src/libs/l2ps/zk/)
 src/libs/l2ps/zk/keys/**/*.zkey
-src/libs/l2ps/zk/keys/**/*.ptau
 src/libs/l2ps/zk/keys/**/*.r1cs
 src/libs/l2ps/zk/keys/**/*.sym
 src/libs/l2ps/zk/keys/**/*.wasm
 src/libs/l2ps/zk/keys/**/*_js/
 src/libs/l2ps/zk/ptau/
-# Allow verification keys
+# Allow verification keys (must be committed)
 !src/libs/l2ps/zk/keys/**/verification_key.json
 
 # Security & Secrets
