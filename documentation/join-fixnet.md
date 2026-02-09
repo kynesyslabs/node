@@ -46,7 +46,7 @@ Your node should be able to run at this point. Confirm this by running the follo
 
 This should setup all the Docker containers needed and run the node on <http://127.0.0.1:53550>. You can check the node info by checking <http://127.0.0.1:53550/info>.
 
-To access the node outside your server, open ports `53550` (for node queries and transactions) and `53551` (for internode communication). You should then be able to access your node on `http://yourIP:53550/info`.
+To access the node outside your server, open ports `53550` (for node queries and transactions) and `53551` (for internode communication). You should then be able to access your node on `http://<your-server-i>:53550/info`.
 
 Confirm you can access your node on the internet before proceeding.
 
@@ -64,7 +64,7 @@ Then create a `demos_peerlist.json` file. This should contain a JSON map of an a
 
 ```json
 {
-    "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:20002"
+  "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:20002"
 }
 ```
 
@@ -122,13 +122,13 @@ There are 3 DEMOS networks:
 
 ## 3. Switching Networks
 
-Here are all the `demos_peerlist.json` contents for the various networks:
+Here are the `demos_peerlist.json` contents for the various networks:
 
 1. Fixnet:
 
 ```json
 {
-    "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:20002"
+  "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:20002"
 }
 ```
 
@@ -136,7 +136,7 @@ Here are all the `demos_peerlist.json` contents for the various networks:
 
 ```json
 {
-    "0xd17624072cb243567b9699cee0fef34c324298b1fb4e9361e284b3cf4091d98a": "http://node2.demos.sh:53560"
+  "0xd17624072cb243567b9699cee0fef34c324298b1fb4e9361e284b3cf4091d98a": "http://node2.demos.sh:53560"
 }
 ```
 
@@ -144,7 +144,7 @@ Here are all the `demos_peerlist.json` contents for the various networks:
 
 ```json
 {
-    "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82": "http://node2.demos.sh:53550"
+  "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82": "http://node2.demos.sh:53550"
 }
 ```
 
