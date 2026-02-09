@@ -32,9 +32,15 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
-import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+// DTR and L2PS imports
+import Mempool from "./libs/blockchain/mempool_v2"
+import { DTRManager } from "./libs/network/dtr/dtrmanager"
+import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
+import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
+import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 
 dotenv.config()
 
@@ -156,11 +162,11 @@ async function digestArguments() {
                     ) {
                         CategorizedLogger.getInstance().setMinLevel(
                             level as
-                                | "debug"
-                                | "info"
-                                | "warning"
-                                | "error"
-                                | "critical",
+                            | "debug"
+                            | "info"
+                            | "warning"
+                            | "error"
+                            | "critical",
                         )
                         log.info(`[MAIN] Log level set to: ${level}`)
                     } else {
@@ -354,7 +360,7 @@ async function preMainLoop() {
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
         "[PEER] Peer list: " +
-            JSON.stringify(indexState.PeerList.map(p => p.identity)),
+        JSON.stringify(indexState.PeerList.map(p => p.identity)),
     )
     await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
@@ -364,8 +370,8 @@ async function preMainLoop() {
 
     log.info(
         "[PEER] 🌐 Peers loaded (" +
-            indexState.peerManager.getPeers().length +
-            ")",
+        indexState.peerManager.getPeers().length +
+        ")",
     )
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
@@ -455,6 +461,7 @@ async function main() {
     }
 
     await Chain.setup()
+    await Mempool.init()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
 
@@ -502,12 +509,12 @@ async function main() {
                     ),
                     maxRequestsPerSecondPerIP: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                            "100",
+                        "100",
                         10,
                     ),
                     maxRequestsPerSecondPerIdentity: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                            "200",
+                        "200",
                         10,
                     ),
                 },
@@ -840,25 +847,69 @@ async function main() {
                 "[DTR] Initializing relay retry service (will start after sync)",
             )
             // Service will check syncStatus internally before processing
-            // DTRManager.getInstance().start()
+            DTRManager.getInstance().start()
+        }
+
+        // Load L2PS networks configuration
+        try {
+            await ParallelNetworks.getInstance().loadAllL2PS()
+        } catch (error) {
+            console.error("[L2PS] Failed to load L2PS networks:", error)
+        }
+
+        // Start L2PS hash generation service (for L2PS participating nodes)
+        // Note: l2psJoinedUids is populated during ParallelNetworks initialization
+        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+            try {
+                const l2psHashService = L2PSHashService.getInstance()
+                await l2psHashService.start()
+                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+
+                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                await l2psBatchAggregator.start()
+                console.log(`[L2PS] Batch aggregator service started`)
+            } catch (error) {
+                console.error("[L2PS] Failed to start L2PS services:", error)
+            }
+        } else {
+            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
         }
     }
 }
 
-// Graceful shutdown handling for DTR service
+// Graceful shutdown handling for services
 process.on("SIGINT", () => {
-    console.log("[DTR] Received SIGINT, shutting down gracefully...")
-    // if (getSharedState.PROD) {
-    //     DTRManager.getInstance().stop()
-    // }
+    console.log("[Services] Received SIGINT, shutting down gracefully...")
+    if (getSharedState.PROD) {
+        DTRManager.getInstance().stop()
+    }
+
+    // Stop L2PS services if running
+    try {
+        L2PSHashService.getInstance().stop()
+        L2PSBatchAggregator.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping L2PS services:", error)
+    }
+
     process.exit(0)
 })
 
 process.on("SIGTERM", () => {
-    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
-    // if (getSharedState.PROD) {
-    //     DTRManager.getInstance().stop()
-    // }
+    console.log("[Services] Received SIGTERM, shutting down gracefully...")
+    if (getSharedState.PROD) {
+        DTRManager.getInstance().stop()
+    }
+
+    // Stop L2PS services if running
+    try {
+        L2PSHashService.getInstance().stop()
+        L2PSBatchAggregator.getInstance().stop()
+    } catch (error) {
+        console.error("[L2PS] Error stopping L2PS services:", error)
+    }
+
     process.exit(0)
 })
 

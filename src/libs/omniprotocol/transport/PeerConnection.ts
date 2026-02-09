@@ -225,8 +225,7 @@ export class PeerConnection {
             signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${
-                    privateKey.length
+                `Ed25519 signing failed (privateKey length: ${privateKey.length
                 } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )

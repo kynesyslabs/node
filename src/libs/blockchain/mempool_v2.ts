@@ -160,7 +160,7 @@ export default class Mempool {
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
-                        tx.hash,
+                    tx.hash,
                 )
                 return {
                     success: false,
@@ -255,4 +255,4 @@ export default class Mempool {
     }
 }
 
-await Mempool.init()
+// await Mempool.init()

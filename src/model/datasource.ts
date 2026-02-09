@@ -23,9 +23,16 @@ import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
+// ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
 import { UsedNullifier } from "./entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "./entities/GCRv2/MerkleTreeState.js"
+// L2PS entities
+import { OfflineMessage } from "./entities/OfflineMessages"
+import { L2PSHash } from "./entities/L2PSHashes.js"
+import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
+import { L2PSTransaction } from "./entities/L2PSTransactions.js"
+import { L2PSProof } from "./entities/L2PSProofs.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -48,9 +55,16 @@ export const dataSource = new DataSource({
         GCRTracker,
         GCRMain,
         GCRTLSNotary,
+        // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
         MerkleTreeState,
+        // L2PS entities
+        OfflineMessage,
+        L2PSHash,
+        L2PSMempoolTx,
+        L2PSTransaction,
+        L2PSProof,
     ],
     synchronize: true,
     logging: false,

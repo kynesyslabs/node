@@ -1,263 +1,445 @@
-import type { BlockContent, Transaction } from "@kynesyslabs/demosdk/types"
-import type { EncryptedTransaction } from "./types"
+import { ucrypto, hexToUint8Array, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import * as forge from "node-forge"
-import Cryptography from "../crypto/cryptography"
-import Hashing from "../crypto/hashing"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { emptyResponse } from "../network/server_rpc"
-import _ from "lodash"
-import Peer from "../peer/Peer"
-import Chain from "../blockchain/chain"
-import log from "src/utilities/logger"
-// SECTION L2PS Message types and interfaces
+import fs from "node:fs"
+import path from "node:path"
+import {
+    L2PS,
+    L2PSConfig,
+    L2PSEncryptedPayload,
+} from "@kynesyslabs/demosdk/l2ps"
+import { Transaction, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import { getSharedState } from "@/utilities/sharedState"
+import log from "@/utilities/logger"
+import { getErrorMessage } from "@/utilities/errorMessage"
 
-export interface L2PSMessage {
-    type: "retrieve" | "retrieveAll" | "registerTx" | "registerAsPartecipant"
-    data: {
-        uid: string
-    }
-    extra: string
-}
-
-export interface L2PSRetrieveAllTxMessage extends L2PSMessage {
-    type: "retrieveAll"
-    data: {
-        uid: string
-        blockNumber: number
-    }
-}
-
-export interface L2PSRegisterTxMessage extends L2PSMessage {
-    type: "registerTx"
-    data: {
-        uid: string
-        encryptedTransaction: EncryptedTransaction
-    }
-}
-
-// NOTE Peer extension for L2PS
-interface PeerL2PS extends Peer {
-    L2PSpublicKeys: Map<string, string> // uid, public key in PEM format
-}
-
-// ANCHOR Basic L2PS implementation class
-
-export class Subnet {
-    // Multiton implementation
-    private static instances: Map<string, Subnet> = new Map() // uid, subnet
-
-    private nodes: Map<string, string> // publicKey, connectionString
-    public uid: string // Hash of the public key in PEM format
-    private keypair: forge.pki.rsa.KeyPair
-
-    // One must initialize the subnet with an uid, which is the hash of the public key in PEM format
-    constructor(uid: string) {
-        this.uid = uid
-    }
-
-    // SECTION Multiton implementation
-    public static getInstance(uid: string): Subnet {
-        if (!this.instances.has(uid)) {
-            this.instances.set(uid, new Subnet(uid))
+/**
+ * Configuration interface for an L2PS node.
+ * @interface L2PSNodeConfig
+ */
+interface L2PSNodeConfig {
+    /** Unique identifier for the L2PS node */
+    uid: string
+    /** Display name of the L2PS node */
+    name: string
+    /** Optional description of the L2PS node */
+    description?: string
+    /** Configuration parameters for the L2PS node */
+    config: {
+        /** Block number when the L2PS node was created */
+        created_at_block: number
+        /** List of known RPC endpoints for the network */
+        known_rpcs: string[]
+        /** Optional network-specific parameters */
+        network_params?: {
+            /** Maximum number of transactions per block */
+            max_tx_per_block?: number
+            /** Block time in milliseconds */
+            block_time_ms?: number
+            /** Consensus threshold for block validation */
+            consensus_threshold?: number
         }
-        return this.instances.get(uid)
+    }
+    /** Key configuration for encryption/decryption */
+    keys: {
+        /** Path to the private key file */
+        private_key_path: string
+        /** Path to the initialization vector file */
+        iv_path: string
+    }
+    /** Whether the L2PS node is enabled */
+    enabled: boolean
+    /** Whether the L2PS node should start automatically */
+    auto_start?: boolean
+}
+
+function hexFileToBytes(value: string, label: string): string {
+    if (!value) {
+        throw new Error(`${label} is empty`)
     }
 
-    // SECTION Settings methods
+    const cleaned = value.trim().replace(/^0x/, "").replaceAll(/\s+/g, "")
 
-    // Setting a private key will also set the uid of the subnet (hash of the public key in PEM format)
-    public setPrivateKey(privateKeyPEM: string): RPCResponse {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        let msg = ""
+    if (cleaned.length === 0) {
+        throw new Error(`${label} is empty`)
+    }
+
+    if (cleaned.length % 2 !== 0) {
+        throw new Error(`${label} hex length must be even`)
+    }
+
+    if (!/^[0-9a-fA-F]+$/.test(cleaned)) {
+        throw new Error(`${label} contains non-hex characters`)
+    }
+
+    return forge.util.hexToBytes(cleaned)
+}
+
+/**
+ * Manages parallel L2PS (Layer 2 Private System) networks.
+ * This class implements the Singleton pattern to ensure only one instance exists.
+ * It handles loading, managing, and processing L2PS networks and their transactions.
+ */
+export default class ParallelNetworks {
+    private static instance: ParallelNetworks
+    private readonly l2pses: Map<string, L2PS> = new Map()
+    private readonly configs: Map<string, L2PSNodeConfig> = new Map()
+    /** Promise lock to prevent concurrent loadL2PS race conditions */
+    private readonly loadingPromises: Map<string, Promise<L2PS>> = new Map()
+
+    private constructor() { }
+
+    /**
+     * Gets the singleton instance of ParallelNetworks.
+     * @returns {ParallelNetworks} The singleton instance
+     */
+    static getInstance(): ParallelNetworks {
+        if (!ParallelNetworks.instance) {
+            ParallelNetworks.instance = new ParallelNetworks()
+        }
+        return ParallelNetworks.instance
+    }
+
+    /**
+     * Loads an L2PS network configuration and initializes it.
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS>} The initialized L2PS instance
+     * @throws {Error} If the configuration is invalid or required files are missing
+     */
+    async loadL2PS(uid: string): Promise<L2PS> {
+        // Validate uid to prevent path traversal attacks
+        if (!uid || !/^[A-Za-z0-9_-]+$/.test(uid)) {
+            throw new Error(`Invalid L2PS uid: ${uid}`)
+        }
+
+        if (this.l2pses.has(uid)) {
+            return this.l2pses.get(uid)!
+        }
+
+        // Check if already loading to prevent race conditions
+        const existingPromise = this.loadingPromises.get(uid)
+        if (existingPromise !== undefined) {
+            return existingPromise
+        }
+
+        const loadPromise = this.loadL2PSInternal(uid)
+        this.loadingPromises.set(uid, loadPromise)
+
         try {
-            this.keypair.privateKey = forge.pki.privateKeyFromPem(privateKeyPEM)
-            this.keypair.publicKey = forge.pki.publicKeyFromPem(privateKeyPEM)
-            const uid = Hashing.sha256(
-                forge.pki.publicKeyToPem(this.keypair.publicKey),
+            const l2ps = await loadPromise
+            return l2ps
+        } finally {
+            this.loadingPromises.delete(uid)
+        }
+    }
+
+    /**
+     * Internal method to load L2PS configuration and initialize instance
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS>} The initialized L2PS instance
+     * @private
+     */
+    private async loadL2PSInternal(uid: string): Promise<L2PS> {
+        // Verify resolved path is within expected directory
+        const basePath = path.resolve(process.cwd(), "data", "l2ps")
+        const configPath = path.resolve(basePath, uid, "config.json")
+
+        if (!configPath.startsWith(basePath)) {
+            throw new Error(`Path traversal detected in uid: ${uid}`)
+        }
+        if (!fs.existsSync(configPath)) {
+            throw new Error(`L2PS config file not found: ${configPath}`)
+        }
+
+        let nodeConfig: L2PSNodeConfig
+        try {
+            nodeConfig = JSON.parse(
+                fs.readFileSync(configPath, "utf8"),
             )
-            if (this.uid !== uid) {
-                msg =
-                    "Mismatching uid: is your private key correct and your uid is the hash of the public key in PEM format?"
+        } catch (error) {
+            const message = getErrorMessage(error)
+            throw new Error(`Failed to parse L2PS config for ${uid}: ${message}`)
+        }
+
+        if (!nodeConfig.uid || !nodeConfig.enabled) {
+            throw new Error(`L2PS config invalid or disabled: ${uid}`)
+        }
+
+        // Validate nodeConfig.keys exists before accessing
+        if (!nodeConfig.keys?.private_key_path || !nodeConfig.keys?.iv_path) {
+            throw new Error(`L2PS config missing required keys for ${uid}`)
+        }
+
+        const privateKeyPath = path.resolve(
+            process.cwd(),
+            nodeConfig.keys.private_key_path,
+        )
+        const ivPath = path.resolve(process.cwd(), nodeConfig.keys.iv_path)
+
+        if (!fs.existsSync(privateKeyPath) || !fs.existsSync(ivPath)) {
+            throw new Error(`L2PS key files not found for ${uid}`)
+        }
+
+        const privateKeyHex = fs.readFileSync(privateKeyPath, "utf8").trim()
+        const ivHex = fs.readFileSync(ivPath, "utf8").trim()
+
+        const privateKeyBytes = hexFileToBytes(privateKeyHex, `${uid} private key`)
+        const ivBytes = hexFileToBytes(ivHex, `${uid} IV`)
+
+        const l2ps = await L2PS.create(privateKeyBytes, ivBytes)
+        const l2psConfig: L2PSConfig = {
+            uid: nodeConfig.uid,
+            config: nodeConfig.config,
+        }
+        l2ps.setConfig(l2psConfig)
+
+        this.l2pses.set(uid, l2ps)
+        this.configs.set(uid, nodeConfig)
+
+        return l2ps
+    }
+
+    /**
+     * Attempts to get an L2PS instance, loading it if necessary.
+     * @param {string} uid - The unique identifier of the L2PS network
+     * @returns {Promise<L2PS | undefined>} The L2PS instance if successful, undefined otherwise
+     */
+    async getL2PS(uid: string): Promise<L2PS | undefined> {
+        try {
+            return await this.loadL2PS(uid)
+        } catch (error) {
+            const message = getErrorMessage(error)
+            log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
+            return undefined
+        }
+    }
+
+    /**
+     * Gets all currently loaded L2PS network IDs.
+     * @returns {string[]} Array of L2PS network IDs
+     */
+    getAllL2PSIds(): string[] {
+        return Array.from(this.l2pses.keys())
+    }
+
+    /**
+     * Loads all available L2PS networks from the data directory.
+     * @returns {Promise<string[]>} Array of successfully loaded L2PS network IDs
+     */
+    async loadAllL2PS(): Promise<string[]> {
+        const l2psJoinedUids: string[] = []
+        const l2psDir = path.join(process.cwd(), "data", "l2ps")
+        if (!fs.existsSync(l2psDir)) {
+            log.warning("[L2PS] Data directory not found, creating...")
+            fs.mkdirSync(l2psDir, { recursive: true })
+            return []
+        }
+
+        const dirs = fs
+            .readdirSync(l2psDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name)
+
+        for (const uid of dirs) {
+            try {
+                await this.loadL2PS(uid)
+                l2psJoinedUids.push(uid)
+                log.info(`[L2PS] Loaded L2PS: ${uid}`)
+            } catch (error) {
+                const message = getErrorMessage(error)
+                log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
             }
-            this.uid = uid
-            response.result = 200
-        } catch (error) {
-            msg =
-                "Could not set the private key: is it in PEM format and valid?"
-            response.result = 400
         }
-        response.response = msg
-        response.require_reply = false
-        response.extra = this.uid
-        return response
+        getSharedState.l2psJoinedUids = l2psJoinedUids
+        return l2psJoinedUids
     }
 
-    public setPublicKey(publicKeyPEM: string): RPCResponse {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        let msg = ""
-        try {
-            this.keypair.publicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
-            response.result = 200
-        } catch (error) {
-            msg = "Could not set the public key: is it in PEM format and valid?"
-            response.result = 400
-        }
-        response.response = msg
-        response.require_reply = false
-        response.extra = this.uid
-        return response
-    }
-
-    // SECTION API methods
-
-    // Getting all the transactions in a N block for this subnet
-    public async getTransactions(blockNumber: number): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        response.result = 200
-
-        const block = await Chain.getBlockByNumber(blockNumber)
-        const blockContent: BlockContent = JSON.parse(block.content)
-        const encryptedTransactions = blockContent.encrypted_transactions_hashes
-        response.response = encryptedTransactions
-        return response
-    }
-
-    public async getAllTransactions(): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        response.result = 200
-        response.response = "not implemented"
-        response.require_reply = false
-        response.extra = "getAllTransactions not implemented"
-        // TODO
-        return response
-    }
-
-    // Registering a transaction in the L2PS
-    public async registerTx(
-        encryptedTransaction: EncryptedTransaction,
-    ): Promise<RPCResponse> {
-        /* Workflow:
-         * We first need to check if the payload is valid by checking the hash of the encrypted transaction.
-         */
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        response.result = 200
-        response.response = "not implemented"
-        response.require_reply = false
-        response.extra = "registerTx not implemented"
-        // Checking if the encrypted transaction coherent
-        const expectedHash = Hashing.sha256(
-            encryptedTransaction.encryptedTransaction,
-        ) // Hashing the encrypted transaction
-        if (expectedHash != encryptedTransaction.encryptedHash) {
-            response.result = 422
-            response.response = "Unprocessable Entity"
-            response.require_reply = false
-            response.extra = "The encrypted transaction is not coherent"
-            return response
-        }
-        // TODO Check if the transaction is already in the L2PS
-        // TODO Register the transaction in the L2PS if this node is inside the L2PS (See block.content.l2ps_partecipating_nodes)
-        return response
-    }
-
-    // Registering a node as partecipant in the L2PS
-    public async registerAsPartecipant(peer: Peer): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        response.result = 200
-        response.response = "not implemented"
-        response.require_reply = false
-        response.extra = "registerAsPartecipant not implemented"
-        // TODO
-        return response
-    }
-
-    // SECTION Local methods
-    // ! These methods should go in the sdk
-
-    // REVIEW Decrypt a transaction
-    public async decryptTransaction(
-        encryptedTransaction: EncryptedTransaction,
+    /**
+     * Encrypts a transaction for the specified L2PS network.
+     * @param {string} uid - The L2PS network UID
+     * @param {Transaction} tx - The original transaction to encrypt
+     * @param {any} [senderIdentity] - Optional sender identity for the encrypted transaction wrapper
+     * @returns {Promise<Transaction>} A new Transaction object containing the encrypted data
+     */
+    async encryptTransaction(
+        uid: string,
+        tx: Transaction,
+        senderIdentity?: any,
     ): Promise<Transaction> {
-        if (!this.keypair || !this.keypair.privateKey) {
-            log.warning(
-                "[L2PS] Subnet " +
-                    this.uid +
-                    " has no private key, cannot decrypt transaction",
-            )
-            return null
+        const l2ps = await this.loadL2PS(uid)
+        const encryptedTx = await l2ps.encryptTx(tx, senderIdentity)
+
+        // Sign encrypted transaction with node's private key
+        const sharedState = getSharedState
+        const signature = await ucrypto.sign(
+            sharedState.signingAlgorithm,
+            new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
+        )
+
+        if (signature) {
+            encryptedTx.signature = {
+                type: sharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            }
         }
-        // ! TODO Clean the typing of Cryptography.rsa.decrypt
-        const decryptedTransactionResponse = Cryptography.rsa.decrypt(encryptedTransaction.encryptedTransaction, this.keypair.privateKey)
-        if (!decryptedTransactionResponse[0]) {
-            log.error("[L2PS] Error decrypting transaction " + encryptedTransaction.hash + " on subnet " + this.uid)
-            return decryptedTransactionResponse[1]
-        }
-        const decryptedTransaction: Transaction = decryptedTransactionResponse[1]
-        return decryptedTransaction
+
+        return encryptedTx
     }
 
-    // REVIEW Implement a public key encryption method for the L2PS
-    public async encryptTransaction(transaction: Transaction): Promise<EncryptedTransaction> {
-        if (!this.keypair || !this.keypair.publicKey) {
-            log.warning(
-                "[L2PS] Subnet " +
-                    this.uid +
-                    " has no public key, cannot encrypt transaction",
-            )
-            return null
+    /**
+     * Decrypts an L2PS encrypted transaction.
+     * @param {string} uid - The L2PS network UID
+     * @param {L2PSTransaction} encryptedTx - The encrypted Transaction object
+     * @returns {Promise<Transaction>} The original decrypted Transaction
+     */
+    async decryptTransaction(
+        uid: string,
+        encryptedTx: L2PSTransaction,
+    ): Promise<Transaction> {
+        const l2ps = await this.loadL2PS(uid)
+
+        // Verify signature before decrypting
+        if (encryptedTx.signature) {
+            const isValid = await ucrypto.verify({
+                algorithm: encryptedTx.signature.type as SigningAlgorithm,
+                message: new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
+                publicKey: hexToUint8Array(encryptedTx.content.from as string),
+                signature: hexToUint8Array(encryptedTx.signature.data),
+            })
+
+            if (!isValid) {
+                throw new Error(`L2PS transaction signature verification failed for ${uid}`)
+            }
+        } else {
+            log.warning(`[L2PS] No signature found on encrypted transaction for ${uid}`)
         }
-        // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        const encryptedTransactionResponse = Cryptography.rsa.encrypt(JSON.stringify(transaction), this.keypair.publicKey)
-        if (!encryptedTransactionResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction " + transaction.hash + " on subnet " + this.uid)
-            return encryptedTransactionResponse[1]
-        }
-        const encryptedTransaction: EncryptedTransaction = encryptedTransactionResponse[1]
-        return encryptedTransaction
+
+        return l2ps.decryptTx(encryptedTx)
     }
 
-    // REVIEW Implement a peer specific public key encryption method for e2e messages
-    public async encryptTransactionForPeer(
-        transaction: Transaction,
-        peer: PeerL2PS,
-    ): Promise<EncryptedTransaction> {
-        if (!peer.L2PSpublicKeys.has(this.uid)) {
-            log.warning(
-                "[L2PS] Peer " +
-                    peer.connection.string +
-                    "(" +
-                    peer.identity +
-                    ")" +
-                    " has no public key for subnet " +
-                    this.uid,
-            )
-            return null
+    /**
+     * Checks if a transaction is an L2PS encrypted transaction.
+     * @param {L2PSTransaction} tx - The transaction to check
+     * @returns {boolean} True if the transaction is of type l2psEncryptedTx
+     */
+    isL2PSTransaction(tx: L2PSTransaction): boolean {
+        return tx.content.type === "l2psEncryptedTx"
+    }
+
+    /**
+     * Extracts the L2PS UID from an encrypted transaction.
+     * @param {L2PSTransaction} tx - The encrypted transaction
+     * @returns {string | undefined} The L2PS UID if valid, undefined otherwise
+     */
+    getL2PSUidFromTransaction(tx: L2PSTransaction): string | undefined {
+        if (!this.isL2PSTransaction(tx)) {
+            return undefined
         }
-        const publicKeyPEM = peer.L2PSpublicKeys.get(this.uid)
-        const publicKey: forge.pki.rsa.PublicKey = forge.pki.publicKeyFromPem(publicKeyPEM)
-        const jsonTransaction = JSON.stringify(transaction)
-        // ! TODO Clean the typing of Cryptography.rsa.encrypt
-        const encryptedBaseTxResponse = Cryptography.rsa.encrypt(jsonTransaction, publicKey)
-        if (!encryptedBaseTxResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
-            return encryptedBaseTxResponse[1]
+
+        try {
+            // Validate array before destructuring
+            if (!Array.isArray(tx.content.data) || tx.content.data.length < 2) {
+                log.error("[L2PS] Invalid transaction data format: expected array with at least 2 elements")
+                return undefined
+            }
+
+            const [dataType, payload] = tx.content.data
+            if (dataType === "l2psEncryptedTx") {
+                const encryptedPayload = payload as L2PSEncryptedPayload
+                return encryptedPayload.l2ps_uid
+            }
+        } catch (error) {
+            const message = getErrorMessage(error)
+            log.error(`[L2PS] Error extracting L2PS UID from transaction: ${message}`)
         }
-        const encryptedBaseTx = encryptedBaseTxResponse[1]
-        const encryptedTxHash = Hashing.sha256(JSON.stringify(encryptedBaseTx))
-        let encryptedTransaction: EncryptedTransaction = {
-            hash: transaction.hash,
-            encryptedTransaction: encryptedBaseTx,
-            encryptedHash: encryptedTxHash,
-            blockNumber: transaction.blockNumber,
-            L2PS: this.keypair.publicKey,
+
+        return undefined
+    }
+
+    /**
+     * Processes an L2PS transaction in the mempool.
+     * @param {L2PSTransaction} tx - The L2PS encrypted transaction to process
+     * @returns {Promise<{success: boolean, error?: string, l2ps_uid?: string, processed?: boolean}>} Processing result
+     */
+    async processL2PSTransaction(tx: L2PSTransaction): Promise<{
+        success: boolean
+        error?: string
+        l2ps_uid?: string
+        processed?: boolean
+    }> {
+        // Validate that this is an L2PS transaction
+        if (!this.isL2PSTransaction(tx)) {
+            return {
+                success: false,
+                error: "Transaction is not of type l2psEncryptedTx",
+            }
         }
-        // REVIEW Double pass encryption with the subnet public key
-        const encryptedTransactionDoublePassResponse = Cryptography.rsa.encrypt(JSON.stringify(encryptedTransaction), this.keypair.publicKey)
-        if (!encryptedTransactionDoublePassResponse[0]) {
-            log.error("[L2PS] Error encrypting transaction for peer " + peer.connection.string + "(" + peer.identity + ")" + " on subnet " + this.uid)
-            return encryptedTransactionDoublePassResponse[1]
+
+        try {
+            // Extract L2PS UID
+            const l2psUid = this.getL2PSUidFromTransaction(tx)
+            if (!l2psUid) {
+                return {
+                    success: false,
+                    error: "Could not extract L2PS UID from transaction",
+                }
+            }
+
+            // Check if we have this L2PS loaded
+            if (!this.isL2PSLoaded(l2psUid)) {
+                // Try to load the L2PS
+                const l2ps = await this.getL2PS(l2psUid)
+                if (!l2ps) {
+                    return {
+                        success: false,
+                        error: `L2PS ${l2psUid} not available on this node`,
+                        l2ps_uid: l2psUid,
+                    }
+                }
+            }
+
+            // L2PS transaction processing is handled by L2PSBatchAggregator
+            log.debug(`[L2PS] Received L2PS transaction for network ${l2psUid}: ${tx.hash.slice(0, 20)}...`)
+
+            return {
+                success: true,
+                l2ps_uid: l2psUid,
+                processed: true,
+            }
+        } catch (error) {
+            const message = getErrorMessage(error)
+            return {
+                success: false,
+                error: `Failed to process L2PS transaction: ${message}`,
+            }
         }
-        encryptedTransaction = encryptedTransactionDoublePassResponse[1]
-        return encryptedTransaction
+    }
+
+    /**
+     * Gets the configuration for a specific L2PS network.
+     * @param {string} uid - The L2PS network UID
+     * @returns {L2PSNodeConfig | undefined} The L2PS network configuration if found
+     */
+    getL2PSConfig(uid: string): L2PSNodeConfig | undefined {
+        return this.configs.get(uid)
+    }
+
+    /**
+     * Checks if an L2PS network is currently loaded.
+     * @param {string} uid - The L2PS network UID
+     * @returns {boolean} True if the L2PS network is loaded
+     */
+    isL2PSLoaded(uid: string): boolean {
+        return this.l2pses.has(uid)
+    }
+
+    /**
+     * Unloads an L2PS network and removes its configuration.
+     * @param {string} uid - The L2PS network UID
+     * @returns {boolean} True if the L2PS network was successfully unloaded
+     */
+    unloadL2PS(uid: string): boolean {
+        this.configs.delete(uid)
+        return this.l2pses.delete(uid)
     }
 }
