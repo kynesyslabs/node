@@ -1,4 +1,5 @@
 import {
+    EntityManager,
     FindManyOptions,
     In,
     LessThanOrEqual,
@@ -130,8 +131,16 @@ export default class Mempool {
         }
     }
 
-    public static async removeTransactionsByHashes(hashes: string[]) {
-        return await this.repo.delete({ hash: In(hashes) })
+    public static async removeTransactionsByHashes(
+        hashes: string[],
+        transactionalEntityManager?: EntityManager,
+    ) {
+        // REVIEW: CRITICAL FIX - Support transactional entity manager for atomic operations
+        // When called within a transaction, use the transactional manager to ensure atomicity
+        const repo = transactionalEntityManager
+            ? transactionalEntityManager.getRepository(this.repo.target)
+            : this.repo
+        return await repo.delete({ hash: In(hashes) })
     }
 
     public static async receive(incoming: Transaction[]) {

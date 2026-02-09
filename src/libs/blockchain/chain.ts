@@ -28,6 +28,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
@@ -391,37 +392,79 @@ export default class Chain {
                     position +
                     " does not exist: inserting a new block",
             )
-            const result = await this.blocks.save(newBlock)
 
-            if (block.number > getSharedState.lastBlockNumber) {
-                getSharedState.lastBlockNumber = block.number
-                getSharedState.lastBlockHash = block.hash
-            }
-
-            log.debug(
-                "[insertBlock] lastBlockNumber: " +
-                    getSharedState.lastBlockNumber,
-            )
-            log.debug(
-                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
-            )
-            // REVIEW We then add the transactions to the Transactions repository
+            // Get transaction entities from mempool before starting transaction
             const transactionEntities = await Mempool.getTransactionsByHashes(
                 orderedTransactionsHashes,
             )
 
-            for (let i = 0; i < transactionEntities.length; i++) {
-                const tx = transactionEntities[i]
-                await this.insertTransaction(tx)
-            }
+            // REVIEW: Wrap block insertion and Merkle tree update in transaction
+            // This ensures both succeed or both fail (prevents state divergence)
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
 
-            // REVIEW And we clean the mempool
-            if (cleanMempool) {
-                await Mempool.removeTransactionsByHashes(
-                    transactionEntities.map(tx => tx.hash),
+            // REVIEW: HIGH FIX - Wrap transaction in try/catch for proper error handling
+            try {
+                // REVIEW: Transaction boundary fix - defer shared state updates until after commit
+                const result = await dataSource.transaction(async (transactionalEntityManager) => {
+                    // Save block within transaction
+                    const savedBlock = await transactionalEntityManager.save(this.blocks.target, newBlock)
+
+                    // REVIEW: Add transactions using transactional manager (not direct repository)
+                    // This ensures all saves are part of the same transaction
+                    for (let i = 0; i < transactionEntities.length; i++) {
+                        const tx = transactionEntities[i]
+                        const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
+                        await transactionalEntityManager.save(this.transactions.target, rawTransaction)
+                    }
+
+                    // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
+                    // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
+                    if (cleanMempool) {
+                        await Mempool.removeTransactionsByHashes(
+                            transactionEntities.map(tx => tx.hash),
+                            transactionalEntityManager,
+                        )
+                    }
+
+                    // Update ZK Merkle tree within same transaction
+                    // If this fails, entire block commit rolls back
+                    const commitmentsAdded = await updateMerkleTreeAfterBlock(
+                        dataSource,
+                        block.number,
+                        transactionalEntityManager,
+                    )
+                    if (commitmentsAdded > 0) {
+                        log.info(
+                            `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                        )
+                    }
+
+                    return savedBlock
+                })
+
+                // REVIEW: Update shared state AFTER transaction commits successfully
+                // This prevents memory state corruption if transaction rolls back
+                if (block.number > getSharedState.lastBlockNumber) {
+                    getSharedState.lastBlockNumber = block.number
+                    getSharedState.lastBlockHash = block.hash
+                }
+
+                log.debug(
+                    "[insertBlock] lastBlockNumber: " +
+                        getSharedState.lastBlockNumber,
                 )
+                log.debug(
+                    "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+                )
+
+                return result
+            } catch (error) {
+                log.error(
+                    `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
+                )
+                throw error
             }
-            return result
         }
     }
 
