@@ -99,7 +99,15 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     )
                     process.exit(1)
                 }
+
+                return
             }
+
+            log.error(
+                "[BOOTSTRAP] Failed to download genesis data from peer: " +
+                    verifiedPeer.connection.string,
+            )
+            process.exit(1)
         }
     } else {
         log.error(
