@@ -205,6 +205,8 @@ export default async function peerBootstrap(
     }
 
     ourGenesisDataHash = null
+    discoveredGenesisDataHashes.clear()
+
     log.info("[BOOTSTRAP] Valid peers found: " + peerman.getPeers().length)
     return peerman.getPeers()
 }

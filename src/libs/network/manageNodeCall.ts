@@ -63,14 +63,28 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.response = await getPeerInfo()
             break
         case "getGenesisDataHash": {
-            const genesisBlock = await Chain.getGenesisBlock()
-            let genesisData = genesisBlock.content.extra?.genesisData || null
+            try {
+                const genesisBlock = await Chain.getGenesisBlock()
+                let genesisData =
+                    genesisBlock.content.extra?.genesisData || null
 
-            if (typeof genesisData === "string") {
-                genesisData = JSON.parse(genesisData)
+                if (typeof genesisData === "string") {
+                    genesisData = JSON.parse(genesisData)
+                }
+
+                response.response = Hashing.sha256(JSON.stringify(genesisData))
+                break
+            } catch (error) {
+                log.error(
+                    "[manageNodeCall] Failed to get genesis data hash: " +
+                        error,
+                )
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get genesis data hash",
+                }
             }
-
-            response.response = Hashing.sha256(JSON.stringify(genesisData))
             break
         }
 
