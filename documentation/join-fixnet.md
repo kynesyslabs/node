@@ -44,7 +44,7 @@ Your node should be able to run at this point. Confirm this by running the follo
 
 This should setup all the Docker containers needed and run the node on <http://127.0.0.1:53550>. You can check the node info by checking <http://127.0.0.1:53550/info>.
 
-To access the node outside your server, open ports `53550` (for node queries and transactions) and `53551` (for internode communication). You should then be able to access your node on `http://<your-server-i>:53550/info`.
+To access the node outside your server, open ports `53550` (for node queries and transactions) and `53551` (for internode communication). You should then be able to access your node on `http://<your-server-ip>:53550/info`.
 
 Confirm you can access your node on the internet before proceeding.
 
@@ -84,7 +84,7 @@ To make starting the node easier, create a `node1.sh` script with the following 
 ./run -c false -u http://<your-server-ip>:53550 -t true
 ```
 
-The flags are configure the following:
+The flags are configure as follows:
 
 | Flag                               | Description                                                                                            |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -112,7 +112,7 @@ Your node should start and join the network. You can confirm that by checking th
 
 There are 3 DEMOS networks:
 
-1. Fixnet - For first time joiners, used to test connectivity and catch bugs & crashes that might happen due to new run environments.
+1. Fixnet - For first-time joiners, used to test connectivity and catch bugs & crashes that might happen due to new run environments.
 2. Devnet - A fork of the public testnet with real transaction activity. Processes copies of transactions relayed to it from the public testnet. For testing full node activity on node runners intending to join the public testnet.
 3. Public testnet - The main DEMOS network.
 
