@@ -67,11 +67,16 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                         JSON.parse(fs.readFileSync(genesisFile, "utf8")),
                     ),
                 )
+
+                // INFO: Update discovered genesis hashes and current genesis hash
                 discoveredGenesisDataHashes.add(ourNewGenesisDataHash)
+                ourGenesisDataHash = ourNewGenesisDataHash
 
                 // INFO: Ensure all peers have the same genesis data
                 if (discoveredGenesisDataHashes.size > 1) {
-                    log.error("[BOOTSTRAP] Multiple genesis data hashes found")
+                    log.error(
+                        "[BOOTSTRAP] Conflicting genesis data hashes found",
+                    )
                     process.exit(1)
                 }
 
