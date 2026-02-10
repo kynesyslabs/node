@@ -18,9 +18,7 @@ systemctl status docker
 ```
 
 > [!IMPORTANT]
-> Make sure you are logged in as a privileged user before proceeding. This is required to be able to delete folders created by Docker from the DEMOS run scripts.
->
-> You can log in as root by running `sudo su` in your current shell session.
+> Follow the Docker post-installation instructions, then restart your server to be able to delete folders created by Docker without using `sudo`.
 
 ## 1. Initial Setup
 
