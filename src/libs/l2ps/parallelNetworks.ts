@@ -176,6 +176,12 @@ export default class ParallelNetworks {
         )
         const ivPath = path.resolve(process.cwd(), nodeConfig.keys.iv_path)
 
+        // REVIEW: FIX - Prevent path traversal (must be within project root)
+        const projectRoot = process.cwd()
+        if (!privateKeyPath.startsWith(projectRoot) || !ivPath.startsWith(projectRoot)) {
+            throw new Error(`Path traversal detected: Key files must be within project directory (${uid})`)
+        }
+
         if (!fs.existsSync(privateKeyPath) || !fs.existsSync(ivPath)) {
             throw new Error(`L2PS key files not found for ${uid}`)
         }

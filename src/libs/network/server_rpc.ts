@@ -354,14 +354,33 @@ async function processPayload(
                 const dataSource = db.getDataSource()
                 const verifier = new ProofVerifier(dataSource)
 
-                const verificationResult =
-                    await verifier.verifyIdentityAttestation(attestation)
+                // 1. Check if nullifier is already used
+                const isUsed = await verifier.isNullifierUsed(attestation.publicSignals[0])
+                if (isUsed) {
+                    return {
+                        result: 200, // Valid request, but nullifier used
+                        response: {
+                            valid: false,
+                            reason: "Nullifier already used",
+                            nullifier: attestation.publicSignals[0],
+                            merkleRoot: attestation.publicSignals[1],
+                        },
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+
+                // 2. Verify cryptography only
+                const isValid = await ProofVerifier.verifyProofOnly(
+                    attestation.proof,
+                    attestation.publicSignals
+                )
 
                 return {
-                    result: verificationResult.valid ? 200 : 400,
+                    result: isValid ? 200 : 400,
                     response: {
-                        valid: verificationResult.valid,
-                        reason: verificationResult.reason,
+                        valid: isValid,
+                        reason: isValid ? "Valid proof" : "Invalid cryptographic proof",
                         nullifier: attestation.publicSignals[0],
                         merkleRoot: attestation.publicSignals[1],
                     },

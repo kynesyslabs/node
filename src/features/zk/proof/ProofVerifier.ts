@@ -115,7 +115,7 @@ export class ProofVerifier {
      * @param nullifierHash - The nullifier to check
      * @returns True if nullifier is already used
      */
-    private async isNullifierUsed(nullifierHash: string): Promise<boolean> {
+    public async isNullifierUsed(nullifierHash: string): Promise<boolean> {
         const existing = await this.nullifierRepo.findOne({
             where: { nullifierHash },
         })
@@ -234,8 +234,8 @@ export class ProofVerifier {
             }
 
             // Step 4: Mark nullifier with CORRECT values (not dummy data)
-            // REVIEW: Use consistent timestamp type (number, not string)
-            await nullifierRepo.save({
+            // REVIEW: Use insert() to strict ensure no update on existing
+            await nullifierRepo.insert({
                 nullifierHash: nullifier,
                 blockNumber: metadata?.blockNumber || 0,
                 timestamp: Date.now(),
@@ -322,7 +322,7 @@ export class ProofVerifier {
     ): Promise<void> {
         // REVIEW: Primary key constraint on nullifierHash prevents double-attestation
         try {
-            await this.nullifierRepo.save({
+            await this.nullifierRepo.insert({
                 nullifierHash,
                 blockNumber,
                 // REVIEW: Use number for timestamp consistency with blockNumber (not string)

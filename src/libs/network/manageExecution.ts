@@ -17,7 +17,9 @@ export async function manageExecution(
     log.debug("[serverListeners] content.type: " + content.type)
     log.debug("[serverListeners] content.extra: " + content.extra)
 
-    if (content.type === "l2ps") {
+    log.info(`[serverListeners] Received execution request for type: ${content.type}`)
+
+    if (content.type === "l2ps" || content.type === "l2psEncryptedTx") {
         const response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {
             log.error("SERVER", "Error while handling L2PS request, aborting")

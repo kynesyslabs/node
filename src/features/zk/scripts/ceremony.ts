@@ -95,8 +95,8 @@ function getParticipantName(): string {
 
     const genericFiles = readdirSync(".")
         .filter(f => f.startsWith("publickey_") &&
-                     !f.startsWith("publickey_ed25519_") &&
-                     f !== "publickey_")
+            !f.startsWith("publickey_ed25519_") &&
+            f !== "publickey_")
 
     // Prefer ed25519 files if available
     const files = ed25519Files.length > 0 ? ed25519Files : genericFiles
@@ -349,8 +349,13 @@ async function contributeCeremony() {
 
     try {
         execSync(
-            `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -e="${entropy}"`,
-            { stdio: "inherit", shell: "/bin/bash", env: process.env },
+            `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}"`,
+            {
+                input: entropy,
+                stdio: ["pipe", "inherit", "inherit"],
+                shell: "/bin/bash",
+                env: process.env
+            },
         )
         success("Contribution added successfully")
     } catch (err) {

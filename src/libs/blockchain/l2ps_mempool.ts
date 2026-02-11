@@ -258,8 +258,6 @@ export default class L2PSMempool {
             const result = await queryBuilder
                 .select("MAX(CAST(tx.sequence_number AS BIGINT))", "max_seq")
                 .where("tx.l2ps_uid = :l2psUid", { l2psUid })
-                // Lock rows for this UID if inside a transaction to prevent concurrent reads of the same MAX
-                .setLock(manager ? "pessimistic_write" : undefined)
                 .getRawOne()
 
             // result.max_seq may be a string from BIGINT cast, so we use Number() or BigInt()

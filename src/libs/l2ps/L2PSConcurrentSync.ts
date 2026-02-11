@@ -20,20 +20,32 @@ const l2psParticipantCache = new Map<string, Set<string>>()
  * Queries peers for their "getL2PSParticipationById" status.
  * 
  * @param peers List of peers to query
+ * @param l2psUids Optional list of L2PS UIDs to discover for (defaults to shared state)
+ * @returns Map of l2psUid -> array of participant node IDs
  */
-export async function discoverL2PSParticipants(peers: Peer[]): Promise<void> {
-    const myUids = getSharedState.l2psJoinedUids || []
-    if (myUids.length === 0) return
+export async function discoverL2PSParticipants(peers: Peer[], l2psUids?: string[]): Promise<Map<string, string[]>> {
+    const myUids = l2psUids || getSharedState.l2psJoinedUids || []
+    const result = new Map<string, string[]>()
+
+    if (myUids.length === 0) return result
+
+    // Collect all discovery promises so we can await them
+    const discoveryPromises: Promise<void>[] = []
 
     for (const uid of myUids) {
+        result.set(uid, [])
+
         for (const peer of peers) {
             try {
-                // If we already know this peer participates, skip query
+                // If we already know this peer participates, add to result and skip query
                 const cached = l2psParticipantCache.get(uid)
-                if (cached?.has(peer.identity)) continue
+                if (cached?.has(peer.identity)) {
+                    result.get(uid)!.push(peer.identity)
+                    continue
+                }
 
                 // Query peer
-                peer.call({
+                const promise = peer.call({
                     method: "nodeCall",
                     params: [{
                         message: "getL2PSParticipationById",
@@ -43,20 +55,30 @@ export async function discoverL2PSParticipants(peers: Peer[]): Promise<void> {
                 }).then(response => {
                     if (response?.result === 200 && response?.response?.participating) {
                         addL2PSParticipant(uid, peer.identity)
+                        result.get(uid)!.push(peer.identity)
                         log.debug(`[L2PS-SYNC] Discovered participant for ${uid}: ${peer.identity}`)
 
                         // Opportunistic sync after discovery
-                        syncL2PSWithPeer(peer, uid)
+                        syncL2PSWithPeer(peer, uid).catch(() => {
+                            // Non-critical: sync will be retried later
+                        })
                     }
                 }).catch(() => {
                     // Ignore errors during discovery
                 })
+
+                discoveryPromises.push(promise)
 
             } catch {
                 // Discovery errors are non-critical, peer may be unreachable
             }
         }
     }
+
+    // Wait for all discovery queries to complete
+    await Promise.allSettled(discoveryPromises)
+
+    return result
 }
 
 /**

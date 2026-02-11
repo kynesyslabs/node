@@ -204,9 +204,9 @@ export default class L2PSTransactionExecutor {
             const [to, amount] = nativePayload.args as [string, number]
             const sender = tx.content.from as string
 
-            // Validate amount (type check and positive)
-            if (typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0) {
-                return { success: false, message: "Invalid amount: must be a positive number" }
+            // Validate amount (type check, integer, and positive)
+            if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+                return { success: false, message: "Invalid amount: must be a positive integer" }
             }
 
             // Check sender balance in L1 state (amount + fee)

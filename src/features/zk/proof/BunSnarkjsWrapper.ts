@@ -72,9 +72,7 @@ export async function groth16VerifyBun(
 
         // REVIEW: HIGH FIX - Use public API (getCurveFromName from ffjavascript)
         // CRITICAL: Pass singleThread: true to avoid worker threads
-        curve = await getCurveFromName(vk_verifier.curve, {
-            singleThread: true,
-        })
+        curve = await getCurveFromName(vk_verifier.curve, true)
 
         // REVIEW: Validate curve initialization succeeded
         if (!curve || !curve.G1 || !curve.G2) {

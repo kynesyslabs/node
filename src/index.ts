@@ -789,32 +789,40 @@ async function main() {
                 }
             } else {
                 // Non-TUI mode: set up Enter key listener to skip the wait
-                const wasRawMode = process.stdin.isRaw
-                if (!wasRawMode) {
-                    process.stdin.setRawMode(true)
-                }
-                process.stdin.resume()
+                // ONLY DO THIS IF STDIN IS TTY
+                let cleanupStdin = () => { }
 
-                const enterKeyHandler = (chunk: Buffer) => {
-                    const key = chunk.toString()
-                    if (key === "\r" || key === "\n" || key === "\u0003") {
-                        // Enter key or Ctrl+C
-                        if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
-                            Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
-                            log.info(
-                                "[MAIN] Wait skipped by user, starting sync loop",
-                            )
+                if (process.stdin.isTTY) {
+                    const wasRawMode = process.stdin.isRaw
+                    if (!wasRawMode && process.stdin.setRawMode) {
+                        process.stdin.setRawMode(true)
+                    }
+                    process.stdin.resume()
+
+                    const enterKeyHandler = (chunk: Buffer) => {
+                        const key = chunk.toString()
+                        if (key === "\r" || key === "\n" || key === "\u0003") {
+                            // Enter key or Ctrl+C
+                            if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+                                Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
+                                log.info(
+                                    "[MAIN] Wait skipped by user, starting sync loop",
+                                )
+                            }
+                            cleanupStdin()
                         }
-                        // Clean up
+                    }
+
+                    process.stdin.on("data", enterKeyHandler)
+
+                    cleanupStdin = () => {
                         process.stdin.removeListener("data", enterKeyHandler)
-                        if (!wasRawMode) {
+                        if (!wasRawMode && process.stdin.setRawMode) {
                             process.stdin.setRawMode(false)
                         }
                         process.stdin.pause()
                     }
                 }
-
-                process.stdin.on("data", enterKeyHandler)
 
                 try {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
@@ -825,12 +833,7 @@ async function main() {
                         // Already logged above
                     }
                 } finally {
-                    // Clean up listener if still attached
-                    process.stdin.removeListener("data", enterKeyHandler)
-                    if (!wasRawMode) {
-                        process.stdin.setRawMode(false)
-                    }
-                    process.stdin.pause()
+                    cleanupStdin()
                 }
             }
         }
