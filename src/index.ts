@@ -346,6 +346,13 @@ async function preMainLoop() {
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
+    log.info("[PEER] 🌐 Bootstrapping peers...")
+    log.debug(
+        "[PEER] Peer list: " +
+        JSON.stringify(indexState.PeerList.map(p => p.identity)),
+    )
+    await peerBootstrap(indexState.PeerList)
+
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
@@ -357,12 +364,6 @@ async function preMainLoop() {
     //PeerList.push(ourselves)
 
     // ANCHOR Bootstrapping the peers
-    log.info("[PEER] 🌐 Bootstrapping peers...")
-    log.debug(
-        "[PEER] Peer list: " +
-        JSON.stringify(indexState.PeerList.map(p => p.identity)),
-    )
-    await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)

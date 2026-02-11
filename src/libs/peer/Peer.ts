@@ -57,16 +57,6 @@ export default class Peer {
         )
     }
 
-    /**
-     * Marks this peer as offline in PeerManager and updates local status
-     */
-    private markPeerOffline(): void {
-        PeerManager.getInstance().addOfflinePeer(this)
-        PeerManager.getInstance().removeOnlinePeer(this.identity)
-        this.status.online = false
-        this.status.timestamp = Date.now()
-    }
-
     // Creating an empty peer
     constructor(url = "", publicKey = "") {
         this.connection = {
@@ -385,7 +375,7 @@ export default class Peer {
                         connectionUrl,
                 )
 
-                this.markPeerOffline()
+                PeerManager.markPeerOffline(this)
 
                 return {
                     result: 504,
@@ -411,7 +401,7 @@ export default class Peer {
                         connectionUrl,
                 )
 
-                this.markPeerOffline()
+                PeerManager.markPeerOffline(this)
 
                 return {
                     result: 503,
