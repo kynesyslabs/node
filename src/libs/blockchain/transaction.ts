@@ -44,12 +44,12 @@ interface TransactionResponse {
 
 export default class Transaction implements ITransaction {
     // Properties automatically follow ITransaction interface
-    content!: TransactionContent
-    signature!: ISignature
-    ed25519_signature!: string
-    hash!: string
-    status!: string
-    blockNumber!: number
+    content: TransactionContent | null = null
+    signature: ISignature | null = null
+    ed25519_signature: string | null = null
+    hash: string | null = null
+    status: string | null = null
+    blockNumber: number | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data
@@ -339,9 +339,8 @@ export default class Transaction implements ITransaction {
             log.error(`[TX] validateToField - Error validating TO field: ${e instanceof Error ? e.message : String(e)}`)
             return {
                 valid: false,
-                message: `Error validating TO field: ${
-                    e instanceof Error ? e.message : String(e)
-                }`,
+                message: `Error validating TO field: ${e instanceof Error ? e.message : String(e)
+                    }`,
             }
         }
     }
@@ -453,7 +452,7 @@ export default class Transaction implements ITransaction {
             content: JSON.stringify(tx.content),
             type: tx.content.type,
             from_ed25519_address: tx.content.from_ed25519_address,
-            
+
             to: tx.content.to,
             from: tx.content.from,
             amount: tx.content.amount,
@@ -475,7 +474,7 @@ export default class Transaction implements ITransaction {
 
         console.log(
             "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
-                rawTx.hash,
+            rawTx.hash,
         )
         const tx = new Transaction()
 

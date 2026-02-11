@@ -199,7 +199,25 @@ async function sendTransaction(
         throw new Error(validityData?.data?.message ?? "Transaction invalid")
     }
 
-    await demos.broadcast(validityResponse)
+    const broadcastResponse: any = await demos.broadcast(validityResponse)
+
+    // Check for broadcast failure
+    if (broadcastResponse.result !== 200) {
+        let failureReason = "Broadcast failed"
+
+        // Extract error message from nested response structures
+        if (broadcastResponse.response?.extra) {
+            failureReason = broadcastResponse.response.extra
+        } else if (broadcastResponse.extra) {
+            failureReason = typeof broadcastResponse.extra === 'string'
+                ? broadcastResponse.extra
+                : JSON.stringify(broadcastResponse.extra)
+        } else if (broadcastResponse.response?.response?.extra) {
+            failureReason = broadcastResponse.response.response.extra
+        }
+
+        throw new Error(failureReason)
+    }
 
     return { outerHash: subnetTx.hash, innerHash: innerTx.hash }
 }
