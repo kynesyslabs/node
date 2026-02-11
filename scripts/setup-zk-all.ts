@@ -168,7 +168,7 @@ async function setupZkIdentity(): Promise<boolean> {
         if (existsSync(circuitPath)) {
             try {
                 exec(
-                    `circom ${circuitPath} --r1cs --wasm --sym -o ${circuitsDir}/ -l node_modules`,
+                    `circom2 ${circuitPath} --r1cs --wasm --sym -o ${circuitsDir}/ -l node_modules`,
                     `Compile ${circuit}.circom`,
                 )
                 compiledCircuit = circuit
@@ -266,7 +266,7 @@ async function setupL2psZk(): Promise<boolean> {
 
             // Compile circuit
             exec(
-                `circom ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ${circomlibPath}`,
+                `circom2 ${circuitPath} --r1cs --wasm --sym -o ${outputDir} -l ${circomlibPath}`,
                 `Compile ${circuit}.circom`,
             )
 

@@ -883,39 +883,7 @@ async function main() {
 }
 
 // Graceful shutdown handling for services
-process.on("SIGINT", () => {
-    console.log("[Services] Received SIGINT, shutting down gracefully...")
-    if (getSharedState.PROD) {
-        DTRManager.getInstance().stop()
-    }
-
-    // Stop L2PS services if running
-    try {
-        L2PSHashService.getInstance().stop()
-        L2PSBatchAggregator.getInstance().stop()
-    } catch (error) {
-        console.error("[L2PS] Error stopping L2PS services:", error)
-    }
-
-    process.exit(0)
-})
-
-process.on("SIGTERM", () => {
-    console.log("[Services] Received SIGTERM, shutting down gracefully...")
-    if (getSharedState.PROD) {
-        DTRManager.getInstance().stop()
-    }
-
-    // Stop L2PS services if running
-    try {
-        L2PSHashService.getInstance().stop()
-        L2PSBatchAggregator.getInstance().stop()
-    } catch (error) {
-        console.error("[L2PS] Error stopping L2PS services:", error)
-    }
-
-    process.exit(0)
-})
+// Redundant handlers removed. Cleanup logic moved to gracefulShutdown.
 
 // INFO Starting the main routine
 main()
@@ -924,6 +892,21 @@ async function gracefulShutdown(signal: string) {
     console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
 
     try {
+        // Stop DTR manager if running (PROD only)
+        if (getSharedState.PROD) {
+            console.log("[SHUTDOWN] Stopping DTR manager...")
+            DTRManager.getInstance().stop()
+        }
+
+        // Stop L2PS services if running
+        try {
+            console.log("[SHUTDOWN] Stopping L2PS services...")
+            L2PSHashService.getInstance().stop()
+            L2PSBatchAggregator.getInstance().stop()
+        } catch (error) {
+            console.error("[SHUTDOWN] Error stopping L2PS services:", error)
+        }
+
         // Stop OmniProtocol server if running
         if (indexState.omniServer) {
             console.log("[SHUTDOWN] Stopping OmniProtocol server...")

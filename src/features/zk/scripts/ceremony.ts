@@ -338,28 +338,22 @@ async function contributeCeremony() {
     info(`Input key: ceremony_${lastKeyNumber.toString().padStart(4, "0")}.zkey`)
     info(`Output key: ceremony_${nextKeyNumber.toString().padStart(4, "0")}.zkey`)
 
-    // REVIEW: Generate cryptographically secure random entropy
-    log("\n→ Generating secure random entropy...", "yellow")
-    const entropy = randomBytes(32).toString("hex")
-    success("Entropy generated (kept secret)")
-
-    // Add contribution
-    log(`→ Adding contribution from ${participantName}...`, "yellow")
-    log("  This may take a minute...", "yellow")
+    // REVIEW: SECURITY FIX - Use interactive mode for entropy (users typically type it)
+    // Removing -e flag prevents entropy from being visible in process list
+    log("  Please type random entropy characters when prompted...", "cyan")
 
     try {
         execSync(
-            `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}"`,
+            `${NPX} snarkjs zkey contribute ${inputKeyPath} ${outputKeyPath} --name="${participantName}" -v`,
             {
-                input: entropy,
-                stdio: ["pipe", "inherit", "inherit"],
+                stdio: "inherit",
                 shell: "/bin/bash",
                 env: process.env
             },
         )
         success("Contribution added successfully")
     } catch (err) {
-        error("Failed to add contribution")
+        error("Failed to add contribution: " + err)
     }
 
     // Compute attestation hash
