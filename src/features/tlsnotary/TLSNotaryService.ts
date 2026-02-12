@@ -187,10 +187,10 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
   }
 
   return {
-    port: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    port: Number.parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
     signingKey,
-    maxSentData: parseInt(process.env.TLSNOTARY_MAX_SENT_DATA ?? "16384", 10),
-    maxRecvData: parseInt(process.env.TLSNOTARY_MAX_RECV_DATA ?? "65536", 10),
+    maxSentData: Number.parseInt(process.env.TLSNOTARY_MAX_SENT_DATA ?? "16384", 10),
+    maxRecvData: Number.parseInt(process.env.TLSNOTARY_MAX_RECV_DATA ?? "65536", 10),
     autoStart: process.env.TLSNOTARY_AUTO_START?.toLowerCase() !== "false",
     mode,
   }
@@ -771,11 +771,11 @@ export class TLSNotaryService {
       health = this.ffi
         ? this.ffi.getHealthStatus()
         : {
-            healthy: false,
-            initialized: false,
-            serverRunning: false,
-            error: "Service not initialized",
-          }
+          healthy: false,
+          initialized: false,
+          serverRunning: false,
+          error: "Service not initialized",
+        }
     }
 
     return {

@@ -3,7 +3,6 @@ import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
@@ -19,7 +18,9 @@ import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import L2PSMempool from "../blockchain/l2ps_mempool"
 import TxUtils from "../blockchain/transaction"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
@@ -53,7 +54,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
     const { data } = content
-    let response = _.cloneDeep(emptyResponse)
+    let response = structuredClone(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
@@ -91,8 +92,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getPeerlist":
             response.response = await getPeerlist()
             break
-        case "getPeerlistHash":
-            var peerlist = await getPeerlist()
+        case "getPeerlistHash": {
+            let peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
                 "manageNodeCall",
@@ -100,6 +101,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 true,
             )
             break
+        }
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
             result = await getPreviousHashFromBlockNumber(data)
@@ -756,6 +758,225 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     error: "INTERNAL_ERROR",
                     message: "Failed to get token stats",
                 }
+            }
+            break
+        }
+
+        // REVIEW L2PS: Node-to-node communication for L2PS mempool synchronization
+        case "getL2PSParticipationById":
+            console.log("[L2PS] Received L2PS participation query")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+            try {
+                // Check if this node participates in the specified L2PS network
+                const joinedUIDs = getSharedState.l2psJoinedUids || []
+                const isParticipating = joinedUIDs.includes(data.l2psUid)
+
+                response.result = 200
+                response.response = {
+                    participating: isParticipating,
+                    l2psUid: data.l2psUid,
+                    nodeIdentity: getSharedState.publicKeyHex,
+                }
+
+                log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
+            } catch (error) {
+                log.error("[L2PS] Error checking L2PS participation:", error)
+                response.result = 500
+                response.response = "Internal error checking L2PS participation"
+            }
+            break
+
+        case "getL2PSMempoolInfo": {
+            // REVIEW: Phase 3c-1 - L2PS mempool info endpoint
+            console.log("[L2PS] Received L2PS mempool info request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+
+            try {
+                // Get all processed transactions for this L2PS UID
+                const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactionCount: transactions.length,
+                    lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
+                    oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get mempool info:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS mempool info"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        case "getL2PSTransactions": {
+            // REVIEW: Phase 3c-1 - L2PS transactions sync endpoint
+            console.log("[L2PS] Received L2PS transactions sync request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+
+            try {
+                // Optional timestamp filter for incremental sync
+                const sinceTimestamp = data.since_timestamp || 0
+
+                // Get all processed transactions for this L2PS UID
+                let transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                // Filter by timestamp if provided (incremental sync)
+                if (sinceTimestamp > 0) {
+                    transactions = transactions.filter(tx => tx.timestamp > sinceTimestamp)
+                }
+
+                // Return encrypted transactions (validators never see this)
+                // Only L2PS participants can decrypt
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactions: transactions.map(tx => ({
+                        hash: tx.hash,
+                        l2ps_uid: tx.l2ps_uid,
+                        original_hash: tx.original_hash,
+                        encrypted_tx: tx.encrypted_tx,
+                        timestamp: tx.timestamp,
+                        block_number: tx.block_number,
+                    })),
+                    count: transactions.length,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS transactions"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        case "getL2PSAccountTransactions": {
+            // L2PS transaction history for a specific account
+            // REQUIRES AUTHENTICATION: User must sign a message to prove address ownership
+            console.log("[L2PS] Received account transactions request")
+            if (!data.l2psUid || !data.address) {
+                response.result = 400
+                response.response = "L2PS UID and address are required"
+                break
+            }
+
+            // Verify ownership via signature
+            // User must provide: signature of message "getL2PSHistory:{address}:{timestamp}"
+            if (!data.signature || !data.timestamp) {
+                response.result = 401
+                response.response = "Authentication required. Provide signature and timestamp."
+                response.extra = {
+                    message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
+                    example: `getL2PSHistory:${data.address}:${Date.now()}`
+                }
+                break
+            }
+
+            // Validate timestamp (max 5 minutes old to prevent replay attacks)
+            const requestTime = Number.parseInt(data.timestamp, 10)
+            const now = Date.now()
+            if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
+                response.result = 401
+                response.response = "Request expired or invalid timestamp."
+                break
+            }
+
+            try {
+                // Verify signature using Cryptography class
+                const expectedMessage = `getL2PSHistory:${data.address}:${data.timestamp}`
+
+                // Import Cryptography for signature verification
+                const Cryptography = (await import("../crypto/cryptography")).default
+
+                // Address should be hex public key, signature should be hex
+                let signature = data.signature
+                let publicKey = data.address
+
+                // Remove 0x prefix if present
+                if (signature.startsWith("0x")) signature = signature.slice(2)
+                if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
+
+                // Verify signature - wrap in try-catch as invalid format throws
+                let isValid = false
+                try {
+                    isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+                } catch (verifyError: any) {
+                    log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
+                    // Invalid signature format - treat as auth failure
+                    isValid = false
+                }
+
+                if (!isValid) {
+                    response.result = 403
+                    response.response = "Invalid signature. Unable to verify address ownership."
+                    break
+                }
+
+                // Signature verified - user owns this address
+                log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
+
+                const maxLimit = 1000
+                const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
+                const offset = Math.max(0, data.offset || 0)
+
+                // Import the executor to get account transactions
+                const { default: L2PSTransactionExecutor } = await import("../l2ps/L2PSTransactionExecutor")
+                const transactions = await L2PSTransactionExecutor.getAccountTransactions(
+                    data.l2psUid,
+                    data.address,
+                    limit,
+                    offset
+                )
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    address: data.address,
+                    authenticated: true,
+                    transactions: transactions.map(tx => {
+                        // Extract message from transaction content if execution_message is not set
+                        // Content structure: data[1].message
+                        let txMessage = tx.execution_message
+                        if (!txMessage && tx.content?.data?.[1]?.message) {
+                            txMessage = tx.content.data[1].message
+                        }
+
+                        return {
+                            hash: tx.hash,
+                            encrypted_hash: tx.encrypted_hash,
+                            l1_batch_hash: tx.l1_batch_hash,
+                            type: tx.type,
+                            from: tx.from_address,
+                            to: tx.to_address,
+                            amount: tx.amount?.toString() || "0",
+                            status: tx.status,
+                            timestamp: tx.timestamp?.toString() || "0",
+                            l1_block_number: tx.l1_block_number,
+                            execution_message: txMessage
+                        }
+                    }),
+                    count: transactions.length,
+                    hasMore: transactions.length === limit
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get account transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS account transactions"
+                response.extra = error.message || "Internal error"
             }
             break
         }
