@@ -99,6 +99,155 @@ function decodeRevealedRecv(revealedRecv: number[]): Uint8Array | null {
     return null
 }
 
+function findBalancedJsonValue(text: string): string | null {
+    for (let start = 0; start < text.length; start++) {
+        const first = text[start]
+        if (first !== "{" && first !== "[") {
+            continue
+        }
+
+        const stack: string[] = [first]
+        let inString = false
+        let escaped = false
+
+        for (let i = start + 1; i < text.length; i++) {
+            const ch = text[i]
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                    continue
+                }
+
+                if (ch === "\\") {
+                    escaped = true
+                    continue
+                }
+
+                if (ch === '"') {
+                    inString = false
+                }
+
+                continue
+            }
+
+            if (ch === '"') {
+                inString = true
+                continue
+            }
+
+            if (ch === "{" || ch === "[") {
+                stack.push(ch)
+                continue
+            }
+
+            if (ch === "}" || ch === "]") {
+                const open = stack.pop()
+                if (!open) {
+                    break
+                }
+
+                const isMatch =
+                    (open === "{" && ch === "}") || (open === "[" && ch === "]")
+                if (!isMatch) {
+                    break
+                }
+
+                if (stack.length === 0) {
+                    return text.slice(start, i + 1)
+                }
+            }
+        }
+    }
+
+    return null
+}
+
+function findBalancedJsonValueAt(
+    text: string,
+    start: number,
+): { value: string; end: number } | null {
+    const first = text[start]
+    if (first !== "{" && first !== "[") {
+        return null
+    }
+
+    const stack: string[] = [first]
+    let inString = false
+    let escaped = false
+
+    for (let i = start + 1; i < text.length; i++) {
+        const ch = text[i]
+
+        if (inString) {
+            if (escaped) {
+                escaped = false
+                continue
+            }
+
+            if (ch === "\\") {
+                escaped = true
+                continue
+            }
+
+            if (ch === '"') {
+                inString = false
+            }
+
+            continue
+        }
+
+        if (ch === '"') {
+            inString = true
+            continue
+        }
+
+        if (ch === "{" || ch === "[") {
+            stack.push(ch)
+            continue
+        }
+
+        if (ch === "}" || ch === "]") {
+            const open = stack.pop()
+            if (!open) {
+                return null
+            }
+
+            const isMatch =
+                (open === "{" && ch === "}") || (open === "[" && ch === "]")
+            if (!isMatch) {
+                return null
+            }
+
+            if (stack.length === 0) {
+                return { value: text.slice(start, i + 1), end: i }
+            }
+        }
+    }
+
+    return null
+}
+
+function findBalancedJsonCandidates(text: string): string[] {
+    const candidates: string[] = []
+
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] !== "{" && text[i] !== "[") {
+            continue
+        }
+
+        const match = findBalancedJsonValueAt(text, i)
+        if (!match) {
+            continue
+        }
+
+        candidates.push(match.value)
+        i = match.end
+    }
+
+    return candidates
+}
+
 function maybeParseJsonText(text: string): string | null {
     const trimmed = text.trim()
     if (!trimmed) {
@@ -124,16 +273,11 @@ function maybeParseJsonText(text: string): string | null {
         }
     }
 
-    // Last-resort extraction for mixed text containing JSON.
-    const objStart = trimmed.indexOf("{")
-    const objEnd = trimmed.lastIndexOf("}")
-    if (objStart !== -1 && objEnd > objStart) {
-        return trimmed.slice(objStart, objEnd + 1)
-    }
-    const arrStart = trimmed.indexOf("[")
-    const arrEnd = trimmed.lastIndexOf("]")
-    if (arrStart !== -1 && arrEnd > arrStart) {
-        return trimmed.slice(arrStart, arrEnd + 1)
+    // Last-resort extraction for mixed text containing JSON:
+    // return the first balanced JSON object/array substring.
+    const balancedJson = findBalancedJsonValue(trimmed)
+    if (balancedJson) {
+        return balancedJson
     }
 
     return null
@@ -163,30 +307,178 @@ function extractUserFromRawText(
     text: string,
 ): ExtractedUser | null {
     try {
+        const candidates = findBalancedJsonCandidates(text)
+
+        for (const candidate of candidates) {
+            let parsed: unknown
+            try {
+                parsed = JSON.parse(candidate)
+            } catch {
+                parsed = null
+            }
+
+            const objects: unknown[] = parsed
+                ? Array.isArray(parsed)
+                    ? parsed
+                    : [parsed]
+                : []
+
+            for (const obj of objects) {
+                if (!obj || typeof obj !== "object") {
+                    continue
+                }
+                const value = obj as Record<string, any>
+
+                if (
+                    context === "github" &&
+                    value.login &&
+                    value.id !== undefined
+                ) {
+                    return {
+                        username: String(value.login),
+                        userId: String(value.id),
+                    }
+                }
+
+                if (
+                    context === "discord" &&
+                    value.username &&
+                    value.id !== undefined
+                ) {
+                    return {
+                        username: String(value.username),
+                        userId: String(value.id),
+                    }
+                }
+
+                if (context === "telegram") {
+                    const user =
+                        value.user && typeof value.user === "object"
+                            ? (value.user as Record<string, any>)
+                            : value
+                    const extractedUsername = user.username || user.first_name
+                    if (user.id !== undefined && extractedUsername) {
+                        return {
+                            username: String(extractedUsername),
+                            userId: String(user.id),
+                        }
+                    }
+                }
+            }
+
+            // Fallback for partially redacted/non-strict JSON candidates:
+            // still require both fields to come from the same candidate blob.
+            if (context === "github") {
+                const loginMatch = candidate.match(/"login"\s*:\s*"([^"]+)"/)
+                const idMatch = candidate.match(/"id"\s*:\s*"?(\d+)"?/)
+                if (loginMatch?.[1] && idMatch?.[1]) {
+                    return { username: loginMatch[1], userId: idMatch[1] }
+                }
+            }
+
+            if (context === "discord") {
+                const usernameMatch = candidate.match(
+                    /"username"\s*:\s*"([^"]+)"/,
+                )
+                const idMatch = candidate.match(/"id"\s*:\s*"?(\d+)"?/)
+                if (usernameMatch?.[1] && idMatch?.[1]) {
+                    return { username: usernameMatch[1], userId: idMatch[1] }
+                }
+            }
+
+            if (context === "telegram") {
+                const usernameMatch = candidate.match(
+                    /"username"\s*:\s*"([^"]+)"/,
+                )
+                const firstNameMatch = candidate.match(
+                    /"first_name"\s*:\s*"([^"]+)"/,
+                )
+                const idMatch = candidate.match(/"id"\s*:\s*"?(\d+)"?/)
+                const extractedUsername =
+                    usernameMatch?.[1] || firstNameMatch?.[1]
+                if (idMatch?.[1] && extractedUsername) {
+                    return {
+                        username: extractedUsername,
+                        userId: idMatch[1],
+                    }
+                }
+            }
+        }
+
+        // Final fallback when no balanced JSON candidate is discoverable
+        // (e.g. heavily redacted/truncated bodies): require both fields
+        // within the same bounded text window.
         if (context === "github") {
-            const loginMatch = text.match(/"login"\s*:\s*"([^"]+)"/)
-            const idMatch = text.match(/"id"\s*:\s*(\d+)/)
-            if (loginMatch?.[1] && idMatch?.[1]) {
-                return { username: loginMatch[1], userId: idMatch[1] }
+            const pairMatch =
+                text.match(
+                    /"login"\s*:\s*"([^"]+)"[\s\S]{0,2000}"id"\s*:\s*"?(\d+)"?/,
+                ) ||
+                text.match(
+                    /"id"\s*:\s*"?(\d+)"?[\s\S]{0,2000}"login"\s*:\s*"([^"]+)"/,
+                )
+
+            if (pairMatch) {
+                if (pairMatch[1]?.match(/^\d+$/)) {
+                    return { username: pairMatch[2], userId: pairMatch[1] }
+                }
+                return { username: pairMatch[1], userId: pairMatch[2] }
             }
         }
 
         if (context === "discord") {
-            const usernameMatch = text.match(/"username"\s*:\s*"([^"]+)"/)
-            const idMatch = text.match(/"id"\s*:\s*"?(\d+)"?/)
-            if (usernameMatch?.[1] && idMatch?.[1]) {
-                return { username: usernameMatch[1], userId: idMatch[1] }
+            const pairMatch =
+                text.match(
+                    /"username"\s*:\s*"([^"]+)"[\s\S]{0,2000}"id"\s*:\s*"?(\d+)"?/,
+                ) ||
+                text.match(
+                    /"id"\s*:\s*"?(\d+)"?[\s\S]{0,2000}"username"\s*:\s*"([^"]+)"/,
+                )
+
+            if (pairMatch) {
+                if (pairMatch[1]?.match(/^\d+$/)) {
+                    return { username: pairMatch[2], userId: pairMatch[1] }
+                }
+                return { username: pairMatch[1], userId: pairMatch[2] }
             }
         }
 
         if (context === "telegram") {
-            const usernameMatch = text.match(/"username"\s*:\s*"([^"]+)"/)
-            const firstNameMatch = text.match(/"first_name"\s*:\s*"([^"]+)"/)
-            const idMatch = text.match(/"id"\s*:\s*"?(\d+)"?/)
-            if (idMatch?.[1]) {
+            const usernameAndId =
+                text.match(
+                    /"username"\s*:\s*"([^"]+)"[\s\S]{0,2000}"id"\s*:\s*"?(\d+)"?/,
+                ) ||
+                text.match(
+                    /"id"\s*:\s*"?(\d+)"?[\s\S]{0,2000}"username"\s*:\s*"([^"]+)"/,
+                )
+
+            if (usernameAndId) {
+                if (usernameAndId[1]?.match(/^\d+$/)) {
+                    return {
+                        username: usernameAndId[2],
+                        userId: usernameAndId[1],
+                    }
+                }
+                return { username: usernameAndId[1], userId: usernameAndId[2] }
+            }
+
+            const firstNameAndId =
+                text.match(
+                    /"first_name"\s*:\s*"([^"]+)"[\s\S]{0,2000}"id"\s*:\s*"?(\d+)"?/,
+                ) ||
+                text.match(
+                    /"id"\s*:\s*"?(\d+)"?[\s\S]{0,2000}"first_name"\s*:\s*"([^"]+)"/,
+                )
+
+            if (firstNameAndId) {
+                if (firstNameAndId[1]?.match(/^\d+$/)) {
+                    return {
+                        username: firstNameAndId[2],
+                        userId: firstNameAndId[1],
+                    }
+                }
                 return {
-                    username: usernameMatch?.[1] || firstNameMatch?.[1] || "",
-                    userId: idMatch[1],
+                    username: firstNameAndId[1],
+                    userId: firstNameAndId[2],
                 }
             }
         }
@@ -389,8 +681,15 @@ export function extractUser(
                 // Handle response format: { user: { id, username, first_name, ... } }
                 const user = json.user || json
                 if (user.id !== undefined) {
+                    const extractedUsername = user.username || user.first_name
+                    if (!extractedUsername) {
+                        log.warn(
+                            "[TLSNotary Verifier] Telegram response missing 'username' and 'first_name' fields",
+                        )
+                        return null
+                    }
                     return {
-                        username: user.username || user.first_name || "",
+                        username: extractedUsername,
                         userId: String(user.id),
                     }
                 }

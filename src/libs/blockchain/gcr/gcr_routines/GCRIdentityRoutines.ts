@@ -1676,19 +1676,29 @@ export default class GCRIdentityRoutines {
     /**
      * Remove an identity that was added via TLSNotary.
      *
-     * Removes the identity from the web2 identities storage.
+     * Removes only TLSN-proven identities (proofType === "tlsn") from web2 storage.
      */
     static async applyTLSNIdentityRemove(
         editOperation: any,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { context, username } = editOperation.data
+        const { context, username } = editOperation.data as {
+            context?: string
+            username?: string
+        }
 
         if (!context || !username) {
             return {
                 success: false,
                 message: "Invalid payload: missing context or username",
+            }
+        }
+
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
+            return {
+                success: false,
+                message: `Unsupported TLSN context: ${context}`,
             }
         }
 
@@ -1704,24 +1714,35 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.web2[context] =
             accountGCR.identities.web2[context] || []
 
-        // Find the identity to remove
+        const isMatch = (id: Web2GCRData["data"] & { proofType?: string }) => {
+            // TLSN remove must never affect legacy/non-TLSN web2 identities.
+            if (id.proofType !== "tlsn") {
+                return false
+            }
+            return id.username === username
+        }
+
+        // Find the TLSN identity to remove
         const identity = accountGCR.identities.web2[context].find(
-            (id: Web2GCRData["data"]) => id.username === username,
+            (id: Web2GCRData["data"]) => isMatch(id as Web2GCRData["data"] & { proofType?: string }),
         )
 
         if (!identity) {
-            return { success: false, message: "Identity not found" }
+            return { success: false, message: "TLSN identity not found" }
         }
 
-        // Filter out the identity
+        // Filter out only the matching TLSN identity
         accountGCR.identities.web2[context] = accountGCR.identities.web2[
             context
-        ].filter((id: Web2GCRData["data"]) => id.username !== username)
+        ].filter(
+            (id: Web2GCRData["data"]) =>
+                !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
 
         if (!simulate) {
             await gcrMainRepository.save(accountGCR)
 
-            // Trigger incentive rollback if applicable
+            // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
             if (context === "github" && identity.userId) {
                 await IncentiveManager.githubUnlinked(
                     editOperation.account,
