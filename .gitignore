@@ -222,3 +222,6 @@ nohup.out
 /.beads/daemon.log
 /.beads/beads.db
 
+documentation/Demos_ Technical Design Decisions.pdf
+documentation/demos_yp_v5.odt
+documentation/demos_yp_v5.pdf
