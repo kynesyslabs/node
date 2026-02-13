@@ -21,11 +21,10 @@ import {
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
 import {
-    verifyTLSNotaryPresentation,
-    parseHttpResponse,
-    extractUser,
+    verifyTLSNProof,
+    type TLSNIdentityPayload,
+    type TLSNProofRanges,
     type TLSNotaryPresentation,
-    type TLSNIdentityContext,
 } from "@/libs/tlsnotary"
 
 export default class GCRIdentityRoutines {
@@ -1164,13 +1163,6 @@ export default class GCRIdentityRoutines {
 
     /**
      * Add an identity via TLSNotary proof verification.
-     *
-     * This method performs cryptographic verification of the TLSNotary proof,
-     * extracts the proven data, and compares it with the claimed values.
-     * Only stores the identity if the proof is valid and claims match.
-     *
-     * Security: Data is extracted directly from the cryptographic proof,
-     * never trusting client-provided claims without verification.
      */
     static async applyTLSNIdentityAdd(
         editOperation: any,
@@ -1182,11 +1174,63 @@ export default class GCRIdentityRoutines {
         // Extract nested data fields (proof, username, userId are inside data.data)
         const {
             proof: proofString,
+            recvHash,
+            proofRanges,
+            revealedRecv,
             username,
             userId,
         } = editOperation.data.data || {}
         // referralCode is at the editOperation level
         const referralCode = editOperation.referralCode
+
+        if (!context) {
+            return {
+                success: false,
+                message: "Missing TLSN context",
+            }
+        }
+
+        if (!username) {
+            return {
+                success: false,
+                message: "Missing TLSN username",
+            }
+        }
+
+        if (userId === undefined || userId === null) {
+            return {
+                success: false,
+                message: "Missing TLSN userId",
+            }
+        }
+
+        if (proofString === undefined || proofString === null) {
+            return {
+                success: false,
+                message: "Missing TLSN proof",
+            }
+        }
+
+        if (!recvHash) {
+            return {
+                success: false,
+                message: "Missing TLSN recvHash",
+            }
+        }
+
+        if (!proofRanges) {
+            return {
+                success: false,
+                message: "Missing TLSN proofRanges",
+            }
+        }
+
+        if (revealedRecv === undefined || revealedRecv === null) {
+            return {
+                success: false,
+                message: "Missing TLSN revealedRecv",
+            }
+        }
 
         // Parse the proof JSON string back to object
         let proof: any
@@ -1203,8 +1247,7 @@ export default class GCRIdentityRoutines {
         }
 
         // 1. Validate context is supported
-        const expected = this.TLSN_EXPECTED_ENDPOINTS[context]
-        if (!expected) {
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
             return {
                 success: false,
                 message: `Unsupported TLSN context: ${context}`,
@@ -1227,108 +1270,26 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        // 3. Verify proof using WASM
-        log.info(
-            `[TLSN Identity] Verifying proof for ${context} identity: ${username}`,
-        )
-        const verified = await verifyTLSNotaryPresentation(
-            proof as TLSNotaryPresentation,
-        )
+        // 3. Verify proof and validate recvHash/proofRanges-derived identity claims
+        const verification = await verifyTLSNProof({
+            context,
+            proof: proof as TLSNotaryPresentation,
+            recvHash,
+            proofRanges: proofRanges as TLSNProofRanges,
+            revealedRecv,
+            username: String(username),
+            userId: String(userId),
+            referralCode,
+        } as TLSNIdentityPayload)
 
-        if (!verified.success) {
+        if (!verification.success) {
             log.warn(
-                `[TLSN Identity] Proof verification failed: ${verified.error}`,
+                `[TLSN Identity] Proof verification failed: ${verification.message}`,
             )
             return {
                 success: false,
-                message: `Proof verification failed: ${verified.error}`,
+                message: verification.message,
             }
-        }
-
-        // 4. Check server name matches expected (skip if WASM verification disabled)
-        // When WASM is disabled, serverName is not extracted from proof
-        // We trust the frontend's cryptographic verification in this mode
-        if (verified.verifyingKey !== "structure-validation-only") {
-            if (verified.serverName !== expected.server) {
-                log.warn(
-                    `[TLSN Identity] Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
-                )
-                return {
-                    success: false,
-                    message: `Server mismatch: expected ${expected.server}, got ${verified.serverName}`,
-                }
-            }
-        } else {
-            log.info(
-                `[TLSN Identity] Skipping serverName check (structure-validation-only mode)`,
-            )
-        }
-
-        // 5. Parse HTTP response and extract user data (if WASM provided recv data)
-        let extractedUser: { username: string; userId: string } | null = null
-
-        // 5. Parse HTTP response and extract user data
-        // if (!verified.recv) {
-        //     return {
-        //         success: false,
-        //         message: "No response data in proof",
-        //     }
-        // }
-
-        if (verified.recv) {
-            const httpResponse = parseHttpResponse(verified.recv)
-            if (!httpResponse) {
-                return {
-                    success: false,
-                    message: "Failed to parse HTTP response from proof",
-                }
-            }
-
-            // 6. Extract user data based on context
-            extractedUser = extractUser(
-                context as TLSNIdentityContext,
-                httpResponse.body,
-            )
-
-            if (!extractedUser) {
-                return {
-                    success: false,
-                    message: `Failed to extract user data from ${context} response`,
-                }
-            }
-
-            // 7. CRITICAL SECURITY CHECK: Compare claimed vs extracted values
-            if (extractedUser.username !== username) {
-                log.warn(
-                    `[TLSN Identity] Username mismatch: claimed "${username}", proof contains "${extractedUser.username}"`,
-                )
-                return {
-                    success: false,
-                    message: `Username mismatch: claimed "${username}", proof contains "${extractedUser.username}"`,
-                }
-            }
-
-            if (extractedUser.userId !== String(userId)) {
-                log.warn(
-                    `[TLSN Identity] UserId mismatch: claimed "${userId}", proof contains "${extractedUser.userId}"`,
-                )
-                return {
-                    success: false,
-                    message: `UserId mismatch: claimed "${userId}", proof contains "${extractedUser.userId}"`,
-                }
-            }
-
-            log.info(
-                // `[TLSN Identity] Proof verified successfully for ${context}: ${username} (${userId})`,
-                `[TLSN Identity] Proof verified with WASM for ${context}: ${username} (${userId})`,
-            )
-        } else {
-            // WASM verification disabled - trust claimed data with warning
-            // NOTE: This is less secure but allows operation until WASM works in Node.js
-            log.warn(
-                `[TLSN Identity] WASM disabled - trusting claimed data for ${context}: ${username} (${userId})`,
-            )
-            extractedUser = { username, userId: String(userId) }
         }
 
         // 8. Get/create GCR and check for duplicates
@@ -1352,7 +1313,7 @@ export default class GCRIdentityRoutines {
         const data = {
             userId: String(userId),
             username: username,
-            proof: proof, // Store full TLSNotary proof for re-verification
+            proof: proof,
             proofHash: proofHash,
             proofType: "tlsn", // Mark as TLSNotary-verified
             timestamp: Date.now(),
@@ -1402,7 +1363,7 @@ export default class GCRIdentityRoutines {
                 )
 
                 if (isFirst) {
-                    await IncentiveManager.telegramLinked(
+                    await IncentiveManager.telegramTLSNLinked(
                         editOperation.account,
                         String(userId),
                         referralCode,
@@ -1433,7 +1394,13 @@ export default class GCRIdentityRoutines {
             }
         }
 
-        const accountGCR = await ensureGCRForUser(editOperation.account)
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
 
         accountGCR.identities.web2 = accountGCR.identities.web2 || {}
         accountGCR.identities.web2[context] =

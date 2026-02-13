@@ -98,10 +98,8 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, conte
         const gcrMainRepository = db.getDataSource().getRepository(gcrMain)
 
         // Apply the identity operation (simulate = false for actual execution)
-        // Type assertion needed: local IdentityAssignRequest includes "tlsn" context
-        // but the GCREdit type from SDK package may not have it yet
         const result = await gcrIdentityRoutines.apply(
-            editOperation as any,
+            editOperation,
             gcrMainRepository,
             false,  // simulate = false (actually apply changes)
         )
