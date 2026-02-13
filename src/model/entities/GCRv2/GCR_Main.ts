@@ -41,6 +41,11 @@ export class GCRMain {
                 points: number
             }>
             nomisScores: { [chain: string]: number }
+            zkAttestation?: Array<{
+                date: string
+                points: number
+                nullifier: string
+            }>
         }
         lastUpdated: Date
     }

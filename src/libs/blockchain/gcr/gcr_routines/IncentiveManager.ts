@@ -105,6 +105,21 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after TLSN Telegram linking
+     */
+    static async telegramTLSNLinked(
+        userId: string,
+        telegramUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardTelegramTLSNPoints(
+            userId,
+            telegramUserId,
+            referralCode,
+        )
+    }
+
+    /**
      * Hook to be called after Telegram unlinking
      */
     static async telegramUnlinked(userId: string): Promise<RPCResponse> {

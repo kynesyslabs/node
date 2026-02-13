@@ -3,6 +3,9 @@ set -e
 set -u
 set -o pipefail
 
+# Add cargo to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
+
 # Verify prerequisites
 command -v bun >/dev/null 2>&1 || { echo "Error: bun is not installed" >&2; exit 1; }
 command -v cargo >/dev/null 2>&1 || { echo "Error: cargo is not installed" >&2; exit 1; }
