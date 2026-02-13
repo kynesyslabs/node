@@ -145,7 +145,7 @@ check_git_origin() {
 
 			# Update origin to official repo
 			git remote set-url origin "${valid_https}"
-			echo "   ✅ Origin updated to${ $valid_htt}ps"
+			echo "   ✅ Origin updated to ${valid_https}"
 
 			# Fetch from new origin
 			echo "   🔄 Fetching from official repository..."
@@ -290,7 +290,7 @@ check_system_requirements() {
 		if [[ "${EXTERNAL_DB}" = false ]]; then
 			# Check PostgreSQL port with auto-recovery attempt
 			if is_port_in_use "$PG_PORT"; then
-				echo "⚠️  PostgreSQL p${rt $PG_}PORT is in use, attempting to stop leftover containers..."
+				echo "⚠️  PostgreSQL port ${PG_PORT} is in use, attempting to stop leftover containers..."
 				log_verbose "Trying to stop postgres_${PG_PORT} container"
 
 				# Try to stop the docker container that might be using the port
@@ -308,23 +308,23 @@ check_system_requirements() {
 
 				# Recheck after cleanup attempt
 				if is_port_in_use "$PG_PORT"; then
-					echo "❌ PostgreSQL por${ $PG_PO}RT is still in use after cleanup attempt"
+					echo "❌ PostgreSQL ${PG_PORT} is still in use after cleanup attempt"
 					echo "   Another process is using this port. Check with: lsof -i :${PG_PORT}"
 					failed_requirements=$((failed_requirements + 1))
 				else
-					echo "✅ PostgreSQL por${ $PG_PO}RT is now available (stopped leftover container)"
+					echo "✅ PostgreSQL ${PG_PORT} is now available (stopped leftover container)"
 				fi
 			else
-				echo "✅ PostgreSQL por${ $PG_PO}RT is available"
+				echo "✅ PostgreSQL ${$PG_PORT} is available"
 			fi
 		fi
 
 		# Check Node port
 		if is_port_in_use "$PORT"; then
-			echo "❌ Node por${ $PO}RT is already in use"
+			echo "❌ Node ${PORT} is already in use"	
 			failed_requirements=$((failed_requirements + 1))
 		else
-			echo "✅ Node por${ $PO}RT is available"
+			echo "✅ Node ${$PORT} is available"
 		fi
 	fi
 
@@ -339,7 +339,7 @@ check_system_requirements() {
 		exit 1
 	elif [[ "$warnings" -gt 0 ]]; then
 		echo ""
-		echo "⚠️  System requirements check passed w${th $warn}ings warning(s)"
+		echo "⚠️  System requirements check passed with ${warnings} warning(s)"
 		echo "   The node will run but performance may be limited."
 		echo ""
 	else
@@ -681,7 +681,7 @@ if [[ "${EXTERNAL_DB}" = false ]]; then
 		local port=$1
 		local timeout=${2:-30} # Increased timeout to 30 seconds
 
-		echo "⏳ Waiting for PostgreSQL to be available on por${ $po}rt..."
+		echo "⏳ Waiting for PostgreSQL to be available on port ${port}..."
 		log_verbose "Checking database connectivity with timeout of ${timeout}s"
 		local count=0
 		while ! nc -z localhost "$port"; do
@@ -787,7 +787,7 @@ if [[ "${TLSNOTARY_DISABLED}" != "true" ]]; then
 			echo "⚠️  Warning: Failed to start TLSNotary container"
 			echo "💡 TLSNotary attestation features will not be available"
 		else
-			echo "✅ TLSNotary container started on por${ $TLSNOTARY_PO}RT"
+			echo "✅ TLSNotary container started on port ${TLSNOTARY_PORT}"
 
 			# Wait for TLSNotary to be healthy (max 15 seconds)
 			log_verbose "Waiting for TLSNotary to be healthy..."

@@ -218,3 +218,8 @@ ipfs/data_53550/ipfs
 nohup.out
 \*.db
 /internal-docs
+/.beads/beads.db-shm
+/.beads/beads.db-shm
+/.beads/beads.db-wal
+/.beads/daemon.log
+/.beads/beads.db
