@@ -24,7 +24,7 @@ export default async function getBlockByNumber(
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),
-            }
+            } as Partial<Blocks> as Blocks
         } else {
             block = await Chain.getBlockByNumber(blockNumber)
         }

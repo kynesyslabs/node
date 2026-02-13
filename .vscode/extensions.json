@@ -30,6 +30,7 @@
         "gruntfuggly.todo-tree",
         "strigo.linear",
         "linear.linear-connect",
-        "linearflow.linear-flow"
+        "linearflow.linear-flow",
+        "nur-publisher.hypercomments-vscode"
     ]
 }
