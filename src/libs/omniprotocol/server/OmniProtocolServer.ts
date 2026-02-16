@@ -145,9 +145,30 @@ export class OmniProtocolServer extends EventEmitter {
 
         log.debug(`[OmniProtocolServer] New connection from ${remoteAddress}`)
 
-        // Check rate limits for IP
+        // DEBUG ======
+        // log all connections from remote address
         const connectionCount =
             this.connectionManager.getConnectionCountByIp(ipAddress)
+        log.debug(
+            `[OmniProtocolServer] Connections from ${remoteAddress}: ${connectionCount}`,
+        )
+
+        // log state of all connections from remote address
+        const connections = this.connectionManager.connections.values()
+        connections.forEach(connection => {
+            if (connection.socket.remoteAddress === ipAddress) {
+                log.debug(
+                    `[OmniProtocolServer] Connection ${
+                        connection.socket.remoteAddress
+                    }:${
+                        connection.socket.remotePort
+                    } state: ${connection.getState()}`,
+                )
+            }
+        })
+        // !DEBUG ======
+
+        // Check rate limits for IP
         const rateLimitResult = this.rateLimiter.checkConnection(
             ipAddress,
             connectionCount,
