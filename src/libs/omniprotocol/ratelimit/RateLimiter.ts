@@ -39,7 +39,11 @@ export class RateLimiter {
     /**
      * Check if a connection from an IP is allowed
      */
-    checkConnection(ipAddress: string): RateLimitResult {
+    checkConnection(
+        ipAddress: string,
+        connectionCount: number,
+        callerName: string,
+    ): RateLimitResult {
         if (!this.config.enabled) {
             return { allowed: true, currentCount: 0, limit: Infinity }
         }
@@ -54,7 +58,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: "IP temporarily blocked",
+                reason: `[${callerName}] IP temporarily blocked`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: entry.blockExpiry - now,
@@ -67,6 +71,10 @@ export class RateLimiter {
             entry.blockExpiry = undefined
         }
 
+        if (connectionCount) {
+            entry.connections = connectionCount
+        }
+
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {
             // Block IP for 1 minute
@@ -75,7 +83,7 @@ export class RateLimiter {
 
             return {
                 allowed: false,
-                reason: `Too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
+                reason: `[${callerName}] too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: 60000,
@@ -177,7 +185,7 @@ export class RateLimiter {
         }
 
         // Remove timestamps outside the current window (sliding window)
-        entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart)
+        entry.timestamps = entry.timestamps.filter(ts => ts > windowStart)
 
         // Check if limit exceeded
         if (entry.timestamps.length >= maxRequests) {
@@ -212,11 +220,9 @@ export class RateLimiter {
     /**
      * Get or create a rate limit entry
      */
-    private getOrCreateEntry(
-        key: string,
-        type: RateLimitType,
-    ): RateLimitEntry {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+    private getOrCreateEntry(key: string, type: RateLimitType): RateLimitEntry {
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
 
         let entry = map.get(key)
         if (!entry) {
@@ -313,7 +319,8 @@ export class RateLimiter {
      * Manually unblock an IP or identity
      */
     unblockKey(key: string, type: RateLimitType): void {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
         const entry = map.get(key)
         if (entry) {
             entry.blocked = false
