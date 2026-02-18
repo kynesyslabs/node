@@ -1,6 +1,24 @@
 import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
 import { DemosOwnershipProof } from "@kynesyslabs/demosdk/abstraction"
 
+export interface NomisWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
+
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
     // The signed message is the ed25519 address (with 0x prefix) of the sender which can
@@ -10,6 +28,21 @@ export interface SavedXmIdentity {
     publicKey: string
     timestamp: number
     signedData: string
+}
+export interface SavedNomisIdentity {
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
 }
 
 /**
@@ -93,5 +126,10 @@ export type StoredIdentities = {
     agent: {
         // A mapping of chain (e.g., "base.sepolia") to array of agent identities
         [chain: string]: SavedAgentIdentity[]
+    }
+    nomis?: {
+        [chain: string]: {
+            [subchain: string]: SavedNomisIdentity[]
+        }
     }
 }

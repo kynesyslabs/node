@@ -1,0 +1,595 @@
+# OmniProtocol Integration Guide
+
+## Overview
+
+This guide covers integrating OmniProtocol into the Demos Network node, including server startup, peer communication, and migration strategies.
+
+## Integration Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                          Demos Node                                    │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌────────────────────────────────────────────────────────────────┐  │
+│  │                       src/index.ts                              │  │
+│  │                    Main Node Entry Point                        │  │
+│  └───────────────────────────┬────────────────────────────────────┘  │
+│                              │                                        │
+│           ┌──────────────────┴──────────────────┐                    │
+│           │                                      │                    │
+│           ▼                                      ▼                    │
+│  ┌──────────────────────┐            ┌──────────────────────┐        │
+│  │    HTTP Server       │            │  OmniProtocol Server │        │
+│  │    (Port 3000)       │            │    (Port 3001)       │        │
+│  └──────────┬───────────┘            └──────────┬───────────┘        │
+│             │                                   │                    │
+│             └────────────────┬──────────────────┘                    │
+│                              │                                        │
+│                              ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │                     PeerOmniAdapter                              │ │
+│  │           Routes peer communication to HTTP or Omni             │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+│                              │                                        │
+│                              ▼                                        │
+│  ┌─────────────────────────────────────────────────────────────────┐ │
+│  │                      Peer Manager                                │ │
+│  │                   Manages peer connections                       │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+## Server Integration
+
+### Starting the Server
+
+```typescript
+// src/index.ts
+
+import {
+    startOmniProtocolServer,
+    stopOmniProtocolServer,
+    getOmniProtocolServerStats
+} from "./libs/omniprotocol/integration"
+
+async function initializeNode() {
+    // Start HTTP server first
+    await startHttpServer()
+
+    // Start OmniProtocol server
+    const omniServer = await startOmniProtocolServer({
+        enabled: process.env.OMNI_ENABLED === "true",
+        port: parseInt(process.env.OMNI_PORT || "3001"),
+        tls: {
+            enabled: process.env.OMNI_TLS_ENABLED === "true",
+            mode: "self-signed"
+        },
+        rateLimit: {
+            enabled: true,
+            maxConnectionsPerIP: 10,
+            maxRequestsPerSecondPerIP: 100
+        }
+    })
+
+    if (omniServer) {
+        console.log("OmniProtocol server started")
+        console.log(JSON.stringify(omniServer.getStats()))
+    }
+}
+```
+
+### Graceful Shutdown
+
+```typescript
+async function shutdownNode() {
+    console.log("Shutting down node...")
+
+    // Stop OmniProtocol server first
+    await stopOmniProtocolServer()
+    console.log("OmniProtocol server stopped")
+
+    // Stop HTTP server
+    await stopHttpServer()
+    console.log("HTTP server stopped")
+
+    process.exit(0)
+}
+
+// Handle shutdown signals
+process.on("SIGTERM", shutdownNode)
+process.on("SIGINT", shutdownNode)
+```
+
+### Health Checks
+
+```typescript
+import { getOmniProtocolServerStats } from "./libs/omniprotocol/integration"
+
+function getHealthStatus() {
+    const omniStats = getOmniProtocolServerStats()
+
+    return {
+        http: {
+            healthy: true,
+            // ... HTTP stats
+        },
+        omni: omniStats ? {
+            healthy: omniStats.isRunning,
+            port: omniStats.port,
+            connections: omniStats.connections,
+            rateLimit: omniStats.rateLimit
+        } : null
+    }
+}
+```
+
+## Key Management
+
+### Accessing Node Keys
+
+```typescript
+// integration/keys.ts
+
+import { getSharedState } from "@/utilities/sharedState"
+
+export function getNodePrivateKey(): Buffer {
+    const state = getSharedState()
+    const keypair = state.node.keypair
+
+    // node-forge keypair has 64-byte privateKey
+    return Buffer.from(keypair.privateKey)
+}
+
+export function getNodePublicKey(): Buffer {
+    const state = getSharedState()
+    const keypair = state.node.keypair
+
+    // Extract 32-byte public key
+    return Buffer.from(keypair.publicKey)
+}
+
+export function getNodeIdentity(): string {
+    const publicKey = getNodePublicKey()
+    return "0x" + publicKey.toString("hex")
+}
+```
+
+### Using Keys for Authentication
+
+```typescript
+import { getNodePrivateKey, getNodePublicKey } from "./integration/keys"
+
+const privateKey = getNodePrivateKey()
+const publicKey = getNodePublicKey()
+
+// Send authenticated request
+const response = await pool.sendAuthenticated(
+    peerIdentity,
+    connectionString,
+    opcode,
+    payload,
+    privateKey,
+    publicKey,
+    { timeout: 30000 }
+)
+```
+
+## Peer Communication Adapter
+
+### PeerOmniAdapter
+
+Routes peer communication to either HTTP or OmniProtocol based on configuration.
+
+```typescript
+// integration/peerAdapter.ts
+
+import { ConnectionPool } from "../transport/ConnectionPool"
+
+export class PeerOmniAdapter {
+    private pool: ConnectionPool
+    private migrationMode: MigrationMode
+    private omniCapablePeers: Set<string> = new Set()
+
+    constructor(config: AdapterConfig) {
+        this.pool = new ConnectionPool(config.pool)
+        this.migrationMode = config.migrationMode
+    }
+
+    async sendToPeer(
+        peer: Peer,
+        method: string,
+        params: unknown[]
+    ): Promise<unknown> {
+        // Determine protocol to use
+        const useOmni = this.shouldUseOmniProtocol(peer)
+
+        if (useOmni) {
+            try {
+                return await this.sendViaOmniProtocol(peer, method, params)
+            } catch (error) {
+                // Fallback to HTTP if configured
+                if (this.migrationMode === "OMNI_PREFERRED") {
+                    return this.sendViaHttp(peer, method, params)
+                }
+                throw error
+            }
+        }
+
+        return this.sendViaHttp(peer, method, params)
+    }
+
+    private shouldUseOmniProtocol(peer: Peer): boolean {
+        switch (this.migrationMode) {
+            case "HTTP_ONLY":
+                return false
+            case "OMNI_ONLY":
+                return true
+            case "OMNI_PREFERRED":
+                return this.omniCapablePeers.has(peer.identity)
+            default:
+                return false
+        }
+    }
+
+    private async sendViaOmniProtocol(
+        peer: Peer,
+        method: string,
+        params: unknown[]
+    ): Promise<unknown> {
+        const opcode = this.methodToOpcode(method)
+        const payload = this.encodePayload(method, params)
+        const connectionString = this.getOmniConnectionString(peer)
+
+        const response = await this.pool.sendAuthenticated(
+            peer.identity,
+            connectionString,
+            opcode,
+            payload,
+            getNodePrivateKey(),
+            getNodePublicKey()
+        )
+
+        return this.decodeResponse(response)
+    }
+
+    private async sendViaHttp(
+        peer: Peer,
+        method: string,
+        params: unknown[]
+    ): Promise<unknown> {
+        // Use existing HTTP client
+        return peer.call(method, params)
+    }
+}
+```
+
+### Method to Opcode Mapping
+
+```typescript
+const METHOD_TO_OPCODE: Map<string, number> = new Map([
+    // Control
+    ["ping", 0x00],
+    ["getPeerlist", 0x04],
+    ["getPeerInfo", 0x05],
+    ["getNodeVersion", 0x06],
+    ["getNodeStatus", 0x07],
+
+    // Transactions
+    ["execute", 0x10],
+    ["nativeBridge", 0x11],
+    ["bridge", 0x12],
+    ["confirm", 0x15],
+    ["broadcast", 0x16],
+
+    // Sync
+    ["mempool_sync", 0x20],
+    ["peerlist_sync", 0x22],
+    ["block_sync", 0x23],
+
+    // Consensus
+    ["proposeBlockHash", 0x31],
+    ["getCommonValidatorSeed", 0x34],
+    ["getValidatorTimestamp", 0x35],
+    ["setValidatorPhase", 0x36],
+    ["greenlight", 0x38],
+
+    // GCR
+    ["gcr_getIdentities", 0x42],
+    ["gcr_getPoints", 0x45],
+    // ... more mappings
+])
+
+function methodToOpcode(method: string): number {
+    const opcode = METHOD_TO_OPCODE.get(method)
+    if (opcode === undefined) {
+        throw new Error(`Unknown method: ${method}`)
+    }
+    return opcode
+}
+```
+
+## Handler Implementation
+
+### Creating Custom Handlers
+
+```typescript
+// protocol/handlers/custom.ts
+
+import { OmniHandler } from "../../types/message"
+import { encodeResponse, successResponse, errorResponse } from "./utils"
+
+export const handleCustomOperation: OmniHandler<Buffer> = async ({
+    message,
+    context,
+    fallbackToHttp
+}) => {
+    // Option 1: Implement natively
+    try {
+        const result = await processCustomOperation(message.payload)
+        return encodeResponse(successResponse(result))
+    } catch (error) {
+        return encodeResponse(errorResponse(500, "Failed", error.message))
+    }
+
+    // Option 2: Fallback to HTTP
+    // return fallbackToHttp()
+}
+```
+
+### Registering Handlers
+
+```typescript
+// protocol/registry.ts
+
+import { handleCustomOperation } from "./handlers/custom"
+
+const DESCRIPTORS: HandlerDescriptor[] = [
+    // ... existing handlers
+    {
+        opcode: OmniOpcode.CUSTOM_OP,
+        name: "customOp",
+        authRequired: true,
+        handler: handleCustomOperation
+    }
+]
+```
+
+## Migration Strategy
+
+### Phase 1: HTTP Only (Current)
+
+```typescript
+const config = {
+    migrationMode: "HTTP_ONLY"
+}
+```
+- All communication uses HTTP
+- OmniProtocol server runs but not used for peer communication
+- Test infrastructure
+
+### Phase 2: Omni Preferred
+
+```typescript
+const config = {
+    migrationMode: "OMNI_PREFERRED",
+    autoDetect: true
+}
+```
+- Detect peer OmniProtocol capability via version negotiation
+- Use OmniProtocol when available
+- Fall back to HTTP on failure
+
+### Phase 3: Omni Only
+
+```typescript
+const config = {
+    migrationMode: "OMNI_ONLY"
+}
+```
+- Require OmniProtocol for all peer communication
+- No HTTP fallback
+- Reject peers without OmniProtocol support
+
+### Peer Capability Detection
+
+```typescript
+async function detectPeerCapabilities(peer: Peer): Promise<boolean> {
+    try {
+        // Try OmniProtocol version negotiation
+        const connection = new PeerConnection(
+            peer.identity,
+            getOmniConnectionString(peer)
+        )
+
+        await connection.connect({ timeout: 2000 })
+
+        // Send version negotiation
+        const response = await connection.send(
+            0xF0,  // PROTO_VERSION_NEGOTIATE
+            encodeVersionRequest([0x01]),
+            { timeout: 1000 }
+        )
+
+        await connection.close()
+        return true
+    } catch {
+        return false
+    }
+}
+```
+
+## Error Handling
+
+### Connection Errors
+
+```typescript
+try {
+    const response = await adapter.sendToPeer(peer, method, params)
+} catch (error) {
+    if (error instanceof ConnectionTimeoutError) {
+        // Peer not responding
+        peerManager.markPeerUnreachable(peer)
+    } else if (error instanceof PoolCapacityError) {
+        // Too many connections
+        await delay(1000)
+        return retryOperation()
+    } else if (error instanceof AuthenticationError) {
+        // Peer authentication failed
+        peerManager.markPeerUntrusted(peer)
+    }
+    throw error
+}
+```
+
+### Rate Limit Handling
+
+```typescript
+try {
+    const response = await adapter.sendToPeer(peer, method, params)
+} catch (error) {
+    if (error.code === 0xf429) {
+        // Rate limited
+        const resetIn = error.resetIn || 60000
+        await delay(resetIn)
+        return retryOperation()
+    }
+    throw error
+}
+```
+
+## Monitoring and Observability
+
+### Metrics
+
+```typescript
+// Collect OmniProtocol metrics
+function collectOmniMetrics() {
+    const stats = getOmniProtocolServerStats()
+    if (!stats) return
+
+    // Connection metrics
+    metrics.gauge("omni.connections.total", stats.connections.total)
+    metrics.gauge("omni.connections.active", stats.connections.authenticated)
+    metrics.gauge("omni.connections.pending", stats.connections.pending)
+
+    // Rate limit metrics
+    metrics.gauge("omni.ratelimit.blocked_ips", stats.rateLimit.blockedIPs)
+    metrics.gauge("omni.ratelimit.tracked_ips", stats.rateLimit.ipEntries)
+}
+```
+
+### Logging
+
+```typescript
+import log from "src/utilities/logger"
+
+// Server lifecycle
+server.on("listening", (port) => {
+    log.info(`[OmniProtocol] Server listening on port ${port}`)
+})
+
+// Connection events
+server.on("connection_accepted", (address) => {
+    log.debug(`[OmniProtocol] Connection from ${address}`)
+})
+
+server.on("connection_rejected", (address, reason) => {
+    log.warn(`[OmniProtocol] Rejected ${address}: ${reason}`)
+})
+
+// Rate limiting
+server.on("rate_limit_exceeded", (ip, result) => {
+    log.warn(`[OmniProtocol] Rate limit: ${ip} - ${result.reason}`)
+})
+```
+
+## Testing Integration
+
+### Unit Tests
+
+```typescript
+// tests/omniprotocol/integration.test.ts
+
+describe("OmniProtocol Integration", () => {
+    it("should start server", async () => {
+        const server = await startOmniProtocolServer({
+            enabled: true,
+            port: 0  // Random available port
+        })
+
+        expect(server).toBeDefined()
+        expect(server.getStats().isRunning).toBe(true)
+
+        await stopOmniProtocolServer()
+    })
+
+    it("should handle peer communication", async () => {
+        // Start server
+        await startOmniProtocolServer({ enabled: true, port: 0 })
+
+        // Create client connection
+        const pool = new ConnectionPool()
+        const response = await pool.send(
+            "test-identity",
+            `tcp://localhost:${port}`,
+            0x00,  // PING
+            Buffer.alloc(0)
+        )
+
+        expect(response).toBeDefined()
+        await pool.shutdown()
+        await stopOmniProtocolServer()
+    })
+})
+```
+
+### Integration Tests
+
+```typescript
+describe("OmniProtocol E2E", () => {
+    it("should communicate between nodes", async () => {
+        // Start two nodes
+        const node1 = await startTestNode({ omniPort: 3001 })
+        const node2 = await startTestNode({ omniPort: 3002 })
+
+        // Send message from node1 to node2
+        const response = await node1.adapter.sendToPeer(
+            node2.peer,
+            "ping",
+            []
+        )
+
+        expect(response).toBe("pong")
+
+        await node1.shutdown()
+        await node2.shutdown()
+    })
+})
+```
+
+## Production Checklist
+
+### Before Deployment
+
+- [ ] TLS certificates configured
+- [ ] Rate limiting enabled and tuned
+- [ ] Monitoring and alerting set up
+- [ ] Log aggregation configured
+- [ ] Graceful shutdown tested
+- [ ] Connection limits appropriate for load
+- [ ] Key management secure
+
+### Rollout Strategy
+
+1. Deploy with `HTTP_ONLY` mode
+2. Monitor server health and metrics
+3. Enable `OMNI_PREFERRED` for subset of peers
+4. Gradually expand to all peers
+5. Switch to `OMNI_ONLY` when confident
+
+## Related Documentation
+
+- [06_Server_Architecture.mdx](./06_Server_Architecture.mdx) - Server details
+- [09_Configuration.mdx](./09_Configuration.mdx) - Configuration options
+- [05_Transport_Layer.mdx](./05_Transport_Layer.mdx) - Client connections

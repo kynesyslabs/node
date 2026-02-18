@@ -1,0 +1,515 @@
+# OmniProtocol Transport Layer
+
+## Overview
+
+The transport layer manages TCP connections between nodes, handling message framing, connection pooling, and state management.
+
+## Architecture
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│                         Transport Layer                                │
+├───────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                     ConnectionPool                               │  │
+│  │           Manages persistent connections to peers                │  │
+│  └───────────────────────────┬─────────────────────────────────────┘  │
+│                              │                                        │
+│           ┌──────────────────┼──────────────────┐                    │
+│           │                  │                  │                    │
+│           ▼                  ▼                  ▼                    │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐             │
+│  │PeerConnection│   │PeerConnection│   │PeerConnection│    ...      │
+│  │   Peer A     │   │   Peer B     │   │   Peer C     │             │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘             │
+│         │                  │                  │                      │
+│         └──────────────────┼──────────────────┘                      │
+│                            ▼                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                      MessageFramer                               │  │
+│  │              TCP stream → Complete messages                      │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+## Connection States
+
+```typescript
+type ConnectionState =
+    | "UNINITIALIZED"   // Not yet connected
+    | "CONNECTING"      // TCP handshake in progress
+    | "AUTHENTICATING"  // hello_peer exchange in progress
+    | "READY"           // Connected and ready for messages
+    | "IDLE_PENDING"    // Idle timeout reached
+    | "CLOSING"         // Graceful shutdown in progress
+    | "CLOSED"          // Connection terminated
+    | "ERROR"           // Error state (can retry)
+```
+
+### State Machine
+
+```
+                    ┌─────────────────┐
+                    │  UNINITIALIZED  │
+                    └────────┬────────┘
+                             │ connect()
+                             ▼
+                    ┌─────────────────┐
+                    │   CONNECTING    │
+                    └────────┬────────┘
+                             │ TCP established
+                             ▼
+                    ┌─────────────────┐
+                    │ AUTHENTICATING  │ (optional)
+                    └────────┬────────┘
+                             │ hello_peer complete
+                             ▼
+                    ┌─────────────────┐
+            ┌──────▶│     READY       │◀─────┐
+            │       └────────┬────────┘      │
+            │                │               │
+            │                │ idle timeout  │ activity
+            │                ▼               │
+            │       ┌─────────────────┐      │
+            │       │  IDLE_PENDING   │──────┘
+            │       └────────┬────────┘
+            │                │ close() or no in-flight
+            │                ▼
+            │       ┌─────────────────┐
+            └───────│    CLOSING      │
+                    └────────┬────────┘
+                             │ socket closed
+                             ▼
+                    ┌─────────────────┐
+                    │     CLOSED      │
+                    └─────────────────┘
+
+                    ┌─────────────────┐
+                    │     ERROR       │ (from any state)
+                    └─────────────────┘
+```
+
+## MessageFramer
+
+Parses TCP byte streams into complete OmniProtocol messages.
+
+### Usage
+
+```typescript
+import { MessageFramer } from "./transport/MessageFramer"
+
+const framer = new MessageFramer()
+
+// Add incoming TCP data
+socket.on("data", (chunk: Buffer) => {
+    framer.addData(chunk)
+
+    // Extract complete messages
+    let message = framer.extractMessage()
+    while (message) {
+        handleMessage(message)
+        message = framer.extractMessage()
+    }
+})
+```
+
+### Interface
+
+```typescript
+class MessageFramer {
+    // Add received data to buffer
+    addData(chunk: Buffer): void
+
+    // Extract complete message (returns null if incomplete)
+    extractMessage(): ParsedOmniMessage | null
+
+    // Extract without auth block parsing (legacy)
+    extractLegacyMessage(): OmniMessage | null
+
+    // Encode message for sending
+    static encodeMessage(
+        header: OmniMessageHeader,
+        payload: Buffer,
+        auth?: AuthBlock | null,
+        flags?: number
+    ): Buffer
+
+    // Clear internal buffer
+    clear(): void
+
+    // Get buffer size (for debugging)
+    getBufferSize(): number
+}
+```
+
+### Message Parsing Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                         TCP Stream                                    │
+│  [...partial...][...complete message...][...partial next message...] │
+└──────────────────────────────┬───────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                         addData(chunk)                                │
+│                     Append to internal buffer                         │
+└──────────────────────────────┬───────────────────────────────────────┘
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│                      extractMessage()                                 │
+│                                                                       │
+│  1. Check if buffer has ≥ 16 bytes (min message)                     │
+│  2. Parse 12-byte header                                             │
+│  3. Check flags for auth block                                       │
+│  4. If auth: parse auth block, get variable length                   │
+│  5. Calculate total: header + auth + payload + checksum              │
+│  6. If buffer < total: return null (need more data)                  │
+│  7. Extract complete message bytes                                   │
+│  8. Validate CRC32 checksum                                          │
+│  9. Remove message from buffer                                       │
+│  10. Return ParsedOmniMessage                                        │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+## PeerConnection
+
+Manages a single TCP connection to a peer node.
+
+### Creation
+
+```typescript
+import { PeerConnection } from "./transport/PeerConnection"
+
+const connection = new PeerConnection(
+    "0x1234...",           // Peer identity (public key)
+    "tcp://192.168.1.1:3001"  // Connection string
+)
+```
+
+### Connecting
+
+```typescript
+await connection.connect({
+    timeout: 5000,    // Connection timeout (ms)
+    retries: 3        // Retry attempts
+})
+```
+
+### Sending Messages
+
+```typescript
+// Send and await response
+const response = await connection.send(
+    0x10,              // Opcode
+    payloadBuffer,     // Request payload
+    { timeout: 30000 } // Options
+)
+
+// Send authenticated message
+const response = await connection.sendAuthenticated(
+    0x10,              // Opcode
+    payloadBuffer,     // Request payload
+    privateKey,        // Ed25519 private key
+    publicKey,         // Ed25519 public key
+    { timeout: 30000 } // Options
+)
+
+// Fire-and-forget (no response expected)
+connection.sendOneWay(0xF4, Buffer.alloc(0))
+```
+
+### Connection Info
+
+```typescript
+interface ConnectionInfo {
+    peerIdentity: string
+    connectionString: string
+    state: ConnectionState
+    connectedAt: number | null
+    lastActivity: number
+    inFlightCount: number
+}
+
+const info = connection.getInfo()
+console.log(`State: ${info.state}`)
+console.log(`In-flight: ${info.inFlightCount}`)
+```
+
+### Closing
+
+```typescript
+// Graceful close (sends PROTO_DISCONNECT)
+await connection.close()
+```
+
+### Request-Response Correlation
+
+```
+Request (sequence=123)                Response (sequence=123)
+┌────────────────────┐                ┌────────────────────┐
+│ sequence: 123      │───────────────▶│ sequence: 123      │
+│ opcode: 0x10       │                │ opcode: 0x10       │
+│ payload: ...       │                │ payload: result    │
+└────────────────────┘                └────────────────────┘
+
+inFlightRequests Map:
+┌───────────┬─────────────────────────────────────┐
+│ Key: 123  │ { resolve, reject, timer, sentAt } │
+└───────────┴─────────────────────────────────────┘
+```
+
+## ConnectionPool
+
+Manages persistent connections to multiple peer nodes.
+
+### Configuration
+
+```typescript
+interface PoolConfig {
+    maxTotalConnections: number      // Default: 100
+    maxConnectionsPerPeer: number    // Default: 1
+    idleTimeout: number              // Default: 10 minutes
+    connectTimeout: number           // Default: 5 seconds
+    authTimeout: number              // Default: 5 seconds
+}
+```
+
+### Usage
+
+```typescript
+import { ConnectionPool } from "./transport/ConnectionPool"
+
+const pool = new ConnectionPool({
+    maxTotalConnections: 100,
+    maxConnectionsPerPeer: 1,
+    idleTimeout: 10 * 60 * 1000
+})
+```
+
+### Acquiring Connections
+
+```typescript
+// Get or create connection
+const connection = await pool.acquire(
+    "0x1234...",             // Peer identity
+    "tcp://host:port",       // Connection string
+    { timeout: 5000 }        // Options
+)
+
+// Use connection
+const response = await connection.send(opcode, payload)
+
+// Release back to pool
+pool.release(connection)
+```
+
+### Convenience Methods
+
+```typescript
+// Send (handles acquire/release automatically)
+const response = await pool.send(
+    "0x1234...",             // Peer identity
+    "tcp://host:port",       // Connection string
+    0x10,                    // Opcode
+    payloadBuffer,           // Payload
+    { timeout: 30000 }       // Options
+)
+
+// Send authenticated
+const response = await pool.sendAuthenticated(
+    "0x1234...",             // Peer identity
+    "tcp://host:port",       // Connection string
+    0x10,                    // Opcode
+    payloadBuffer,           // Payload
+    privateKey,              // Private key
+    publicKey,               // Public key
+    { timeout: 30000 }       // Options
+)
+```
+
+### Pool Statistics
+
+```typescript
+interface PoolStats {
+    totalConnections: number
+    activeConnections: number    // READY state
+    idleConnections: number      // IDLE_PENDING state
+    connectingConnections: number
+    deadConnections: number      // ERROR/CLOSED state
+}
+
+const stats = pool.getStats()
+console.log(`Active: ${stats.activeConnections}`)
+console.log(`Idle: ${stats.idleConnections}`)
+```
+
+### Connection Info
+
+```typescript
+// Info for specific peer
+const peerInfo = pool.getConnectionInfo("0x1234...")
+
+// Info for all peers
+const allInfo = pool.getAllConnectionInfo()
+```
+
+### Shutdown
+
+```typescript
+// Close all connections
+await pool.shutdown()
+```
+
+### Automatic Cleanup
+
+The pool automatically:
+- Removes CLOSED/ERROR connections
+- Closes IDLE_PENDING connections after timeout
+- Runs cleanup every 60 seconds
+
+## Connection Strings
+
+### Format
+
+```
+protocol://host:port
+```
+
+### Supported Protocols
+
+| Protocol | Description |
+|----------|-------------|
+| `tcp://` | Plain TCP connection |
+| `tls://` | TLS-encrypted connection |
+| `tcps://` | Alias for TLS |
+
+### Parsing
+
+```typescript
+import { parseConnectionString } from "./transport/types"
+
+const parsed = parseConnectionString("tcp://192.168.1.1:3001")
+// { protocol: "tcp", host: "192.168.1.1", port: 3001 }
+
+const tlsParsed = parseConnectionString("tls://example.com:3001")
+// { protocol: "tls", host: "example.com", port: 3001 }
+```
+
+## TLS Connections
+
+### TLSConnection
+
+Wraps PeerConnection with TLS encryption.
+
+```typescript
+import { TLSConnection } from "./transport/TLSConnection"
+
+const tlsConnection = new TLSConnection(
+    "0x1234...",
+    "tls://host:port",
+    {
+        rejectUnauthorized: false,  // Custom verification
+        minVersion: "TLSv1.3",
+        ca: caCertBuffer            // Optional CA cert
+    }
+)
+
+await tlsConnection.connect()
+```
+
+### Connection Factory
+
+Automatically routes based on protocol.
+
+```typescript
+import { createConnection } from "./transport/ConnectionFactory"
+
+// Creates PeerConnection for tcp://
+const tcpConn = await createConnection("0x1234", "tcp://host:3001")
+
+// Creates TLSConnection for tls://
+const tlsConn = await createConnection("0x1234", "tls://host:3001")
+```
+
+## Error Handling
+
+### Error Types
+
+```typescript
+// Pool at capacity
+class PoolCapacityError extends OmniProtocolError {
+    // Thrown when pool.acquire() exceeds limits
+}
+
+// Connection timeout
+class ConnectionTimeoutError extends OmniProtocolError {
+    // Thrown when connect() or send() times out
+}
+
+// Authentication failed
+class AuthenticationError extends OmniProtocolError {
+    // Thrown when hello_peer handshake fails
+}
+```
+
+### Handling Errors
+
+```typescript
+try {
+    const response = await pool.send(peer, conn, opcode, payload)
+} catch (error) {
+    if (error instanceof PoolCapacityError) {
+        // Wait and retry
+        await delay(1000)
+        return pool.send(peer, conn, opcode, payload)
+    }
+
+    if (error instanceof ConnectionTimeoutError) {
+        // Log and potentially remove peer
+        console.error(`Peer ${peer} timed out`)
+    }
+
+    throw error
+}
+```
+
+## Best Practices
+
+### Connection Reuse
+```typescript
+// GOOD: Reuse connections from pool
+const pool = new ConnectionPool()
+await pool.send(peer, conn, opcode1, payload1)
+await pool.send(peer, conn, opcode2, payload2)
+
+// BAD: Create new connection for each request
+const conn1 = new PeerConnection(peer, conn)
+await conn1.connect()
+await conn1.send(opcode1, payload1)
+await conn1.close()
+```
+
+### Timeout Configuration
+```typescript
+// Short timeouts for quick operations
+await pool.send(peer, conn, 0x00, Buffer.alloc(0), { timeout: 5000 })
+
+// Longer timeouts for data sync
+await pool.send(peer, conn, 0x23, blockSyncPayload, { timeout: 60000 })
+```
+
+### Graceful Shutdown
+```typescript
+process.on("SIGTERM", async () => {
+    await pool.shutdown()  // Closes all connections gracefully
+    process.exit(0)
+})
+```
+
+## Related Documentation
+
+- [02_Message_Format.mdx](./02_Message_Format.mdx) - Message structure
+- [03_Authentication.mdx](./03_Authentication.mdx) - Authenticated connections
+- [06_Server_Architecture.mdx](./06_Server_Architecture.mdx) - Server-side connections

@@ -124,13 +124,17 @@ function getTLSNotaryState(): TLSNotaryState {
  * @throws Error if wstcp cannot be found or installed
  */
 export async function ensureWstcp(): Promise<void> {
+  const cargoHome = process.env.CARGO_HOME || `${process.env.HOME}/.cargo`
+  const wstcpPath = `${cargoHome}/bin/wstcp`
+  const cargoPath = `${cargoHome}/bin/cargo`
+  
   try {
-    await execAsync("which wstcp")
-    log.debug("[TLSNotary] wstcp binary found")
+    await execAsync(`test -x "${wstcpPath}"`)
+    log.debug("[TLSNotary] wstcp binary found at " + wstcpPath)
   } catch {
     log.info("[TLSNotary] wstcp not found, installing via cargo...")
     try {
-      await execAsync("cargo install wstcp")
+      await execAsync(`"${cargoPath}" install wstcp`)
       log.info("[TLSNotary] wstcp installed successfully")
     } catch (installError: any) {
       throw new Error(`Failed to install wstcp: ${installError.message}`)
@@ -265,7 +269,10 @@ async function spawnProxy(
   const args = ["--bind-addr", `0.0.0.0:${localPort}`, `${domain}:${targetPort}`]
   log.info(`[TLSNotary] Spawning wstcp: wstcp ${args.join(" ")}`)
 
-  const childProcess = spawn("wstcp", args, {
+  const cargoHome = process.env.CARGO_HOME || `${process.env.HOME}/.cargo`
+  const wstcpPath = `${cargoHome}/bin/wstcp`
+
+  const childProcess = spawn(wstcpPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
   })

@@ -19,7 +19,7 @@ import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import { Waiter } from "./utilities/waiter"
-import { TimeoutError } from "./exceptions"
+import { TimeoutError, AbortError } from "./exceptions"
 import {
     startOmniProtocolServer,
     stopOmniProtocolServer,
@@ -32,9 +32,15 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
-import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
+// DTR and L2PS imports
+import Mempool from "./libs/blockchain/mempool_v2"
+import { DTRManager } from "./libs/network/dtr/dtrmanager"
+import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
+import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
+import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 
 dotenv.config()
 
@@ -63,6 +69,10 @@ const indexState: {
     TLSNOTARY_ENABLED: boolean
     TLSNOTARY_PORT: number
     tlsnotaryService: any
+    // REVIEW: Prometheus Metrics configuration
+    METRICS_ENABLED: boolean
+    METRICS_PORT: number
+    metricsServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -87,6 +97,10 @@ const indexState: {
     TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
     TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
     tlsnotaryService: null,
+    // REVIEW: Prometheus Metrics defaults - enabled by default
+    METRICS_ENABLED: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
+    METRICS_PORT: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    metricsServer: null,
 }
 
 // SECTION Preparation methods
@@ -148,11 +162,11 @@ async function digestArguments() {
                     ) {
                         CategorizedLogger.getInstance().setMinLevel(
                             level as
-                                | "debug"
-                                | "info"
-                                | "warning"
-                                | "error"
-                                | "critical",
+                            | "debug"
+                            | "info"
+                            | "warning"
+                            | "error"
+                            | "critical",
                         )
                         log.info(`[MAIN] Log level set to: ${level}`)
                     } else {
@@ -332,6 +346,13 @@ async function preMainLoop() {
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
+    log.info("[PEER] 🌐 Bootstrapping peers...")
+    log.debug(
+        "[PEER] Peer list: " +
+        JSON.stringify(indexState.PeerList.map(p => p.identity)),
+    )
+    await peerBootstrap(indexState.PeerList)
+
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
@@ -343,12 +364,6 @@ async function preMainLoop() {
     //PeerList.push(ourselves)
 
     // ANCHOR Bootstrapping the peers
-    log.info("[PEER] 🌐 Bootstrapping peers...")
-    log.debug(
-        "[PEER] Peer list: " +
-            JSON.stringify(indexState.PeerList.map(p => p.identity)),
-    )
-    await peerBootstrap(indexState.PeerList)
     // ? Remove the following code if it's not needed: indexState.peerManager.addPeer(peer) is called within peerBootstrap (hello_peer routines)
     /*for (const peer of peerList) {
         peerManager.addPeer(peer)
@@ -356,8 +371,8 @@ async function preMainLoop() {
 
     log.info(
         "[PEER] 🌐 Peers loaded (" +
-            indexState.peerManager.getPeers().length +
-            ")",
+        indexState.peerManager.getPeers().length +
+        ")",
     )
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
@@ -376,6 +391,7 @@ async function preMainLoop() {
  * - Starts background services (MCP server and DTRManager) when configured.
  */
 async function main() {
+    getSharedState.isInitialized = false
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
@@ -446,6 +462,7 @@ async function main() {
     }
 
     await Chain.setup()
+    await Mempool.init()
     // INFO Warming up the node (including arguments digesting)
     await warmup()
 
@@ -493,12 +510,12 @@ async function main() {
                     ),
                     maxRequestsPerSecondPerIP: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                            "100",
+                        "100",
                         10,
                     ),
                     maxRequestsPerSecondPerIdentity: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                            "200",
+                        "200",
                         10,
                     ),
                 },
@@ -545,6 +562,48 @@ async function main() {
             blockNumber: getSharedState.lastBlockNumber,
             status: "syncing",
         })
+    }
+
+    // REVIEW: Start Prometheus Metrics server (enabled by default)
+    if (indexState.METRICS_ENABLED) {
+        try {
+            const { getMetricsServer, getMetricsCollector } = await import(
+                "./features/metrics"
+            )
+
+            indexState.METRICS_PORT = await getNextAvailablePort(
+                indexState.METRICS_PORT,
+            )
+
+            const metricsServer = getMetricsServer({
+                port: indexState.METRICS_PORT,
+                enabled: true,
+            })
+
+            await metricsServer.start()
+
+            indexState.metricsServer = metricsServer
+            log.info(
+                `[METRICS] Prometheus metrics server started on http://0.0.0.0:${indexState.METRICS_PORT}/metrics`,
+            )
+
+            // REVIEW: Start metrics collector for live data gathering
+            const metricsCollector = getMetricsCollector({
+                enabled: true,
+                collectionIntervalMs: 2500, // 2.5 seconds for real-time monitoring
+                dockerHealthEnabled: true,
+                portHealthEnabled: true,
+            })
+            await metricsCollector.start()
+            log.info("[METRICS] Metrics collector started")
+        } catch (error) {
+            log.error("[METRICS] Failed to start metrics server: " + error)
+            // Continue without metrics (failsafe)
+        }
+    } else {
+        log.info(
+            "[METRICS] Metrics server disabled (set METRICS_ENABLED=true to enable)",
+        )
     }
 
     // ANCHOR Based on the above methods, we can now start the main loop
@@ -709,20 +768,79 @@ async function main() {
             peers[0].identity === getSharedState.publicKeyHex
         ) {
             log.info(
-                "[MAIN] We are the anchor node, listening for peers ... (15s)",
+                "[MAIN] We are the anchor node, listening for peers ... (15s, press Enter to skip)",
             )
             // INFO: Wait for hello peer if we are the anchor node
             // useful when anchor node is re-joining the network
-            try {
-                await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 10 seconds
-            } catch (error) {
-                if (error instanceof TimeoutError) {
-                    log.info("[MAIN] No wild peers found, starting sync loop")
+
+            // REVIEW: When TUI is enabled, don't manipulate stdin directly
+            // terminal-kit already controls stdin via grabInput(), and calling
+            // process.stdin.pause() will break TUI keyboard input.
+            // Instead, just wait the timeout - TUI users can press 'q' to quit if needed.
+            if (indexState.TUI_ENABLED) {
+                // TUI mode: just wait, no stdin manipulation
+                try {
+                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
+                } catch (error) {
+                    if (error instanceof TimeoutError) {
+                        log.info("[MAIN] No wild peers found, starting sync loop")
+                    } else if (error instanceof AbortError) {
+                        log.info("[MAIN] Wait aborted, starting sync loop")
+                    }
+                }
+            } else {
+                // Non-TUI mode: set up Enter key listener to skip the wait
+                // ONLY DO THIS IF STDIN IS TTY
+                let cleanupStdin = () => { }
+
+                if (process.stdin.isTTY) {
+                    const wasRawMode = process.stdin.isRaw
+                    if (!wasRawMode && process.stdin.setRawMode) {
+                        process.stdin.setRawMode(true)
+                    }
+                    process.stdin.resume()
+
+                    const enterKeyHandler = (chunk: Buffer) => {
+                        const key = chunk.toString()
+                        if (key === "\r" || key === "\n" || key === "\u0003") {
+                            // Enter key or Ctrl+C
+                            if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+                                Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
+                                log.info(
+                                    "[MAIN] Wait skipped by user, starting sync loop",
+                                )
+                            }
+                            cleanupStdin()
+                        }
+                    }
+
+                    process.stdin.on("data", enterKeyHandler)
+
+                    cleanupStdin = () => {
+                        process.stdin.removeListener("data", enterKeyHandler)
+                        if (!wasRawMode && process.stdin.setRawMode) {
+                            process.stdin.setRawMode(false)
+                        }
+                        process.stdin.pause()
+                    }
+                }
+
+                try {
+                    await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
+                } catch (error) {
+                    if (error instanceof TimeoutError) {
+                        log.info("[MAIN] No wild peers found, starting sync loop")
+                    } else if (error instanceof AbortError) {
+                        // Already logged above
+                    }
+                } finally {
+                    cleanupStdin()
                 }
             }
         }
 
         await fastSync([], "index.ts")
+        getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
         mainLoop() // Is an async function so running without waiting send that to the background
 
@@ -733,27 +851,39 @@ async function main() {
                 "[DTR] Initializing relay retry service (will start after sync)",
             )
             // Service will check syncStatus internally before processing
-            // DTRManager.getInstance().start()
+            DTRManager.getInstance().start()
+        }
+
+        // Load L2PS networks configuration
+        try {
+            await ParallelNetworks.getInstance().loadAllL2PS()
+        } catch (error) {
+            console.error("[L2PS] Failed to load L2PS networks:", error)
+        }
+
+        // Start L2PS hash generation service (for L2PS participating nodes)
+        // Note: l2psJoinedUids is populated during ParallelNetworks initialization
+        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+            try {
+                const l2psHashService = L2PSHashService.getInstance()
+                await l2psHashService.start()
+                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+
+                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                await l2psBatchAggregator.start()
+                console.log(`[L2PS] Batch aggregator service started`)
+            } catch (error) {
+                console.error("[L2PS] Failed to start L2PS services:", error)
+            }
+        } else {
+            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
         }
     }
 }
 
-// Graceful shutdown handling for DTR service
-process.on("SIGINT", () => {
-    console.log("[DTR] Received SIGINT, shutting down gracefully...")
-    // if (getSharedState.PROD) {
-    //     DTRManager.getInstance().stop()
-    // }
-    process.exit(0)
-})
-
-process.on("SIGTERM", () => {
-    console.log("[DTR] Received SIGTERM, shutting down gracefully...")
-    // if (getSharedState.PROD) {
-    //     DTRManager.getInstance().stop()
-    // }
-    process.exit(0)
-})
+// Graceful shutdown handling for services
+// Redundant handlers removed. Cleanup logic moved to gracefulShutdown.
 
 // INFO Starting the main routine
 main()
@@ -762,6 +892,21 @@ async function gracefulShutdown(signal: string) {
     console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
 
     try {
+        // Stop DTR manager if running (PROD only)
+        if (getSharedState.PROD) {
+            console.log("[SHUTDOWN] Stopping DTR manager...")
+            DTRManager.getInstance().stop()
+        }
+
+        // Stop L2PS services if running
+        try {
+            console.log("[SHUTDOWN] Stopping L2PS services...")
+            L2PSHashService.getInstance().stop()
+            L2PSBatchAggregator.getInstance().stop()
+        } catch (error) {
+            console.error("[SHUTDOWN] Error stopping L2PS services:", error)
+        }
+
         // Stop OmniProtocol server if running
         if (indexState.omniServer) {
             console.log("[SHUTDOWN] Stopping OmniProtocol server...")
@@ -788,6 +933,19 @@ async function gracefulShutdown(signal: string) {
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
+            }
+        }
+
+        // REVIEW: Stop Metrics collector and server if running
+        if (indexState.metricsServer) {
+            console.log("[SHUTDOWN] Stopping Metrics collector and server...")
+            try {
+                // Stop the collector first to clear interval timer and prevent collection during shutdown
+                const { getMetricsCollector } = await import("./features/metrics")
+                getMetricsCollector().stop()
+                indexState.metricsServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping Metrics:", error)
             }
         }
 

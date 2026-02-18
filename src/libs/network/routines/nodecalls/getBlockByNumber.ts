@@ -6,9 +6,7 @@ import log from "src/utilities/logger"
 export default async function getBlockByNumber(
     data: any,
 ): Promise<RPCResponse> {
-    const blockNumber: number = data.blockNumber
-
-    if (!blockNumber) {
+    if (!data.blockNumber) {
         log.error("[SERVER ERROR] Missing blockNumber 💀")
         return {
             result: 400,
@@ -17,6 +15,7 @@ export default async function getBlockByNumber(
             require_reply: false,
         }
     } else {
+        const blockNumber = parseInt(data.blockNumber)
         log.debug("[SERVER] Received getBlockByNumber: " + blockNumber)
 
         let block: Blocks
@@ -25,7 +24,7 @@ export default async function getBlockByNumber(
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),
-            }
+            } as Partial<Blocks> as Blocks
         } else {
             block = await Chain.getBlockByNumber(blockNumber)
         }

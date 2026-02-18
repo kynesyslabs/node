@@ -6,11 +6,23 @@ import Cryptography from "../crypto/cryptography"
 import { NodeCall } from "../network/manageNodeCall"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "./PeerManager"
+import { sleep } from "@kynesyslabs/demosdk/utils"
 
 export interface SyncData {
     status: boolean
     block: number
     block_hash: string
+}
+
+export interface CallOptions {
+    /** Protocol selection (default: 'omni' - uses OmniProtocol when enabled, falls back to HTTP) */
+    protocol?: "http" | "omni"
+    /** Number of retry attempts (default: 3 for longCall) */
+    retries?: number
+    /** Milliseconds between retries (default: 1000) */
+    sleepTime?: number
+    /** Response codes that don't trigger retry (default: []) */
+    allowedCodes?: number[]
 }
 
 export default class Peer {
@@ -136,28 +148,33 @@ export default class Peer {
         }
     }
 
-    // TODO (WIP) call with retries on fail
+    // Call with retries on fail
     async longCall(
         request: RPCRequest,
         isAuthenticated = true,
-        sleepTime = 1000,
-        retries = 3,
-        allowedErrors: number[] = [],
+        options?: CallOptions,
     ): Promise<RPCResponse> {
+        const retries = options?.retries ?? 3
+        const sleepTime = options?.sleepTime ?? 1000
+        const allowedCodes = options?.allowedCodes ?? []
+
         let tries = 0
-        let response = null
+        let response: RPCResponse | null = null
         while (tries < retries) {
-            response = await this.call(request, isAuthenticated)
+            response = await this.call(request, isAuthenticated, options)
             if (
                 response.result === 200 ||
-                allowedErrors.includes(response.result)
+                allowedCodes.includes(response.result)
             ) {
                 return response
             }
             tries++
-            // Sleep for sleepTime milliseconds
-            await new Promise(resolve => setTimeout(resolve, sleepTime))
+            // Sleep for sleepTime milliseconds before next retry
+            if (tries < retries) {
+                await sleep(sleepTime)
+            }
         }
+
         const methodString =
             request.params.length > 0
                 ? `${request.method}.${request.params[0].method}`
@@ -213,23 +230,30 @@ export default class Peer {
         return response
     }
 
-    // New method to make an arbitrary RPC call
+    // Make an arbitrary RPC call (single call, no retries - use longCall for retries)
     async call(
         request: RPCRequest,
         isAuthenticated = true,
+        options?: CallOptions,
     ): Promise<RPCResponse> {
-        // REVIEW: Check if OmniProtocol should be used for this peer
+        const protocol = options?.protocol ?? "omni"
+
+        // INFO: If is local peer (us), always use httpCall
+        if (this.isLocalNode || protocol === "http") {
+            return await this.httpCall(request, isAuthenticated)
+        }
+
+        // Protocol is 'omni' (default): Check if OmniProtocol should be used for this peer
         if (
             getSharedState.isOmniProtocolEnabled &&
             getSharedState.omniAdapter
         ) {
             try {
-                const response = await getSharedState.omniAdapter.adaptCall(
+                return await getSharedState.omniAdapter.adaptCall(
                     this,
                     request,
                     isAuthenticated,
                 )
-                return response
             } catch (error) {
                 log.error(
                     `[Peer] OmniProtocol adaptCall failed, falling back to HTTP: ${error}`,
@@ -239,10 +263,10 @@ export default class Peer {
         }
 
         // HTTP fallback / default path
-        return this.httpCall(request, isAuthenticated)
+        return await this.httpCall(request, isAuthenticated)
     }
 
-    // REVIEW: Extracted HTTP call logic for reuse and fallback
+    // Single HTTP call (no retry logic - use longCall for retries)
     async httpCall(
         request: RPCRequest,
         isAuthenticated = true,
@@ -255,6 +279,7 @@ export default class Peer {
                 "] Making RPC call to: " +
                 this.connection.string,
         )
+
         // Get some informations
         const method = request.method
         const currentTimestampReadable = new Date(Date.now()).toISOString()
@@ -284,16 +309,15 @@ export default class Peer {
             connectionUrl = getSharedState.connectionString
         }
 
-        log.info(
-            "[RPC Call] [" +
-                method +
-                "] [" +
-                currentTimestampReadable +
-                "] Making RPC call to: " +
-                connectionUrl,
-        )
         // Make the request
+        let timeoutId: NodeJS.Timeout | undefined
         try {
+            // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
+            const abortController = new AbortController()
+            timeoutId = setTimeout(() => {
+                abortController.abort()
+            }, 3000)
+
             const response = await axios.post<RPCResponse>(
                 connectionUrl,
                 request,
@@ -304,8 +328,11 @@ export default class Peer {
                         signature: signature,
                     },
                     timeout: 3000,
+                    signal: abortController.signal,
                 },
             )
+
+            clearTimeout(timeoutId)
             log.info(
                 "[RPC Call] [" +
                     method +
@@ -313,19 +340,7 @@ export default class Peer {
                     currentTimestampReadable +
                     "] Response received ",
             )
-            // log.info(JSON.stringify(response.data, null, 2))
-            if (response.data.result !== 200) {
-                log.warning(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Response not OK: " +
-                        response.data.response +
-                        " - " +
-                        response.data.result,
-                )
-            } else {
+            if (response.data.result == 200) {
                 log.info(
                     "[RPC Call] [" +
                         method +
@@ -335,10 +350,48 @@ export default class Peer {
                         response.data.result,
                 )
             }
+
             return response.data
         } catch (error) {
+            // Clear timeout if request completed (error or success)
+            if (timeoutId) {
+                clearTimeout(timeoutId)
+            }
+
+            // Handle abort/timeout errors
+            if (
+                axios.isAxiosError(error) &&
+                (error.code === "ECONNABORTED" ||
+                    error.message === "canceled" ||
+                    error.name === "AbortError" ||
+                    error.code === "ETIMEDOUT")
+            ) {
+                log.warn(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Request timeout/aborted to: " +
+                        connectionUrl,
+                )
+
+                PeerManager.markPeerOffline(this)
+
+                return {
+                    result: 504,
+                    response: "Request timeout",
+                    require_reply: false,
+                    extra: {
+                        code: error.code || "ETIMEDOUT",
+                        url: connectionUrl,
+                    },
+                }
+            }
             // Handle ECONNREFUSED error
-            if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
+            else if (
+                axios.isAxiosError(error) &&
+                error.code === "ECONNREFUSED"
+            ) {
                 log.warn(
                     "[RPC Call] [" +
                         method +
@@ -348,11 +401,7 @@ export default class Peer {
                         connectionUrl,
                 )
 
-                PeerManager.getInstance().addOfflinePeer(this)
-                PeerManager.getInstance().removeOnlinePeer(this.identity)
-
-                this.status.online = false
-                this.status.timestamp = Date.now()
+                PeerManager.markPeerOffline(this)
 
                 return {
                     result: 503,
@@ -363,24 +412,24 @@ export default class Peer {
                         url: connectionUrl,
                     },
                 }
-            }
+            } else {
+                log.error(
+                    "[RPC Call] [" +
+                        method +
+                        "] [" +
+                        currentTimestampReadable +
+                        "] Error making RPC call:" +
+                        error,
+                )
+                log.error("CONNECTION URL: " + connectionUrl)
+                log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
 
-            log.error(
-                "[RPC Call] [" +
-                    method +
-                    "] [" +
-                    currentTimestampReadable +
-                    "] Error making RPC call:" +
-                    error,
-            )
-            log.error("CONNECTION URL: " + connectionUrl)
-            log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
-
-            return {
-                result: 500,
-                response: error,
-                require_reply: false,
-                extra: null,
+                return {
+                    result: 500,
+                    response: error,
+                    require_reply: false,
+                    extra: null,
+                }
             }
         }
     }

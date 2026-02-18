@@ -1,0 +1,450 @@
+# OmniProtocol Configuration
+
+## Overview
+
+OmniProtocol configuration is organized into several categories:
+- Server configuration
+- TLS/SSL configuration
+- Rate limiting configuration
+- Connection pool configuration
+- Protocol runtime configuration
+
+## Configuration Interfaces
+
+### OmniProtocolConfig
+
+Master configuration interface combining all settings.
+
+```typescript
+interface OmniProtocolConfig {
+    pool: ConnectionPoolConfig
+    migration: MigrationConfig
+    protocol: ProtocolRuntimeConfig
+}
+```
+
+### ConnectionPoolConfig
+
+Client-side connection pooling settings.
+
+```typescript
+interface ConnectionPoolConfig {
+    maxTotalConnections: number        // Max TCP connections (default: 100)
+    maxConnectionsPerPeer: number      // Per-peer limit (default: 1)
+    idleTimeout: number                // Idle timeout ms (default: 600000)
+    connectTimeout: number             // Connect timeout ms (default: 5000)
+    authTimeout: number                // Auth timeout ms (default: 5000)
+    maxConcurrentRequests: number      // Per-connection concurrent (default: 100)
+    maxTotalConcurrentRequests: number // Global concurrent (default: 1000)
+    circuitBreakerThreshold: number    // Failures before circuit break (default: 5)
+    circuitBreakerTimeout: number      // Circuit break duration ms (default: 30000)
+}
+```
+
+### ProtocolRuntimeConfig
+
+Protocol behavior settings.
+
+```typescript
+interface ProtocolRuntimeConfig {
+    version: number          // Protocol version (default: 0x01)
+    defaultTimeout: number   // Default request timeout ms (default: 3000)
+    longCallTimeout: number  // Long operation timeout ms (default: 10000)
+    maxPayloadSize: number   // Max payload bytes (default: 10MB)
+}
+```
+
+### MigrationConfig
+
+Migration mode settings for gradual adoption.
+
+```typescript
+type MigrationMode = "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY"
+
+interface MigrationConfig {
+    mode: MigrationMode        // Migration mode (default: "HTTP_ONLY")
+    omniPeers: Set<string>     // Known OmniProtocol-capable peers
+    autoDetect: boolean        // Auto-detect peer capabilities (default: true)
+    fallbackTimeout: number    // Fallback to HTTP timeout ms (default: 1000)
+}
+```
+
+### ServerConfig
+
+Server-side settings.
+
+```typescript
+interface ServerConfig {
+    host: string                   // Listen address (default: "0.0.0.0")
+    port: number                   // Listen port (default: HTTP port + 1)
+    maxConnections: number         // Max concurrent connections (default: 1000)
+    connectionTimeout: number      // Idle timeout ms (default: 600000)
+    authTimeout: number            // Auth handshake timeout ms (default: 5000)
+    backlog: number                // TCP backlog queue (default: 511)
+    enableKeepalive: boolean       // TCP keepalive (default: true)
+    keepaliveInitialDelay: number  // Keepalive delay ms (default: 60000)
+    rateLimit?: Partial<RateLimitConfig>
+}
+```
+
+### TLSConfig
+
+TLS/SSL encryption settings.
+
+```typescript
+interface TLSConfig {
+    enabled: boolean                    // Enable TLS (default: false)
+    mode: "self-signed" | "ca"         // Certificate mode
+    certPath: string                   // Path to certificate file
+    keyPath: string                    // Path to private key file
+    caPath?: string                    // Path to CA certificate
+    rejectUnauthorized: boolean        // Verify peer certs (default: false)
+    minVersion: "TLSv1.2" | "TLSv1.3" // Min TLS version (default: "TLSv1.3")
+    ciphers?: string                   // Allowed cipher suites
+    requestCert: boolean               // Request client cert (default: true)
+    trustedFingerprints?: Map<string, string>  // Peer fingerprint map
+}
+```
+
+### RateLimitConfig
+
+Rate limiting settings.
+
+```typescript
+interface RateLimitConfig {
+    enabled: boolean                       // Enable rate limiting (default: true)
+    maxConnectionsPerIP: number            // Max conn per IP (default: 10)
+    maxRequestsPerSecondPerIP: number      // Max req/s per IP (default: 100)
+    maxRequestsPerSecondPerIdentity: number // Max req/s per identity (default: 200)
+    windowMs: number                       // Rate window ms (default: 1000)
+    entryTTL: number                       // Entry lifetime ms (default: 60000)
+    cleanupInterval: number                // Cleanup interval ms (default: 10000)
+}
+```
+
+## Default Configuration
+
+```typescript
+const DEFAULT_OMNIPROTOCOL_CONFIG: OmniProtocolConfig = {
+    pool: {
+        maxTotalConnections: 100,
+        maxConnectionsPerPeer: 1,
+        idleTimeout: 10 * 60 * 1000,      // 10 minutes
+        connectTimeout: 5_000,             // 5 seconds
+        authTimeout: 5_000,                // 5 seconds
+        maxConcurrentRequests: 100,
+        maxTotalConcurrentRequests: 1_000,
+        circuitBreakerThreshold: 5,
+        circuitBreakerTimeout: 30_000,     // 30 seconds
+    },
+    migration: {
+        mode: "HTTP_ONLY",
+        omniPeers: new Set<string>(),
+        autoDetect: true,
+        fallbackTimeout: 1_000,            // 1 second
+    },
+    protocol: {
+        version: 0x01,
+        defaultTimeout: 3_000,             // 3 seconds
+        longCallTimeout: 10_000,           // 10 seconds
+        maxPayloadSize: 10 * 1024 * 1024,  // 10 MB
+    },
+}
+
+const DEFAULT_TLS_CONFIG: Partial<TLSConfig> = {
+    enabled: false,
+    mode: "self-signed",
+    rejectUnauthorized: false,
+    minVersion: "TLSv1.3",
+    requestCert: true,
+    ciphers: [
+        "ECDHE-ECDSA-AES256-GCM-SHA384",
+        "ECDHE-RSA-AES256-GCM-SHA384",
+        "ECDHE-ECDSA-CHACHA20-POLY1305",
+        "ECDHE-RSA-CHACHA20-POLY1305",
+        "ECDHE-ECDSA-AES128-GCM-SHA256",
+        "ECDHE-RSA-AES128-GCM-SHA256",
+    ].join(":"),
+}
+```
+
+## Environment Variables
+
+### Server Configuration
+
+```bash
+# Enable/disable OmniProtocol server
+OMNI_ENABLED=true
+
+# Server listening port (default: HTTP port + 1)
+OMNI_PORT=3001
+
+# Server listening address
+OMNI_HOST=0.0.0.0
+
+# Maximum concurrent connections
+OMNI_MAX_CONNECTIONS=1000
+
+# Idle connection timeout (milliseconds)
+OMNI_CONNECTION_TIMEOUT=600000
+
+# Authentication handshake timeout (milliseconds)
+OMNI_AUTH_TIMEOUT=5000
+```
+
+### TLS Configuration
+
+```bash
+# Enable TLS encryption
+OMNI_TLS_ENABLED=true
+
+# Certificate mode: "self-signed" or "ca"
+OMNI_TLS_MODE=self-signed
+
+# Path to certificate file
+OMNI_CERT_PATH=./certs/node-cert.pem
+
+# Path to private key file
+OMNI_KEY_PATH=./certs/node-key.pem
+
+# Path to CA certificate (optional)
+OMNI_CA_PATH=./certs/ca-cert.pem
+
+# Minimum TLS version: "TLSv1.2" or "TLSv1.3"
+OMNI_TLS_MIN_VERSION=TLSv1.3
+```
+
+### Rate Limiting Configuration
+
+```bash
+# Enable rate limiting
+OMNI_RATE_LIMIT_ENABLED=true
+
+# Maximum connections per IP address
+OMNI_MAX_CONNECTIONS_PER_IP=10
+
+# Maximum requests per second per IP
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IP=100
+
+# Maximum requests per second per authenticated identity
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY=200
+```
+
+### Migration Configuration
+
+```bash
+# Migration mode: HTTP_ONLY, OMNI_PREFERRED, or OMNI_ONLY
+OMNI_MIGRATION_MODE=HTTP_ONLY
+
+# Auto-detect peer OmniProtocol capability
+OMNI_AUTO_DETECT=true
+
+# Fallback to HTTP timeout (milliseconds)
+OMNI_FALLBACK_TIMEOUT=1000
+```
+
+## Configuration Examples
+
+### Development Configuration
+
+```typescript
+const devConfig: OmniServerConfig = {
+    enabled: true,
+    port: 3001,
+    maxConnections: 100,
+    tls: {
+        enabled: false  // No TLS in development
+    },
+    rateLimit: {
+        enabled: true,
+        maxConnectionsPerIP: 100,        // Relaxed for testing
+        maxRequestsPerSecondPerIP: 1000,
+        maxRequestsPerSecondPerIdentity: 2000
+    }
+}
+```
+
+### Production Configuration
+
+```typescript
+const prodConfig: OmniServerConfig = {
+    enabled: true,
+    port: 3001,
+    maxConnections: 1000,
+    authTimeout: 5000,
+    connectionTimeout: 600000,
+    tls: {
+        enabled: true,
+        mode: "self-signed",
+        certPath: "/etc/omni/certs/node-cert.pem",
+        keyPath: "/etc/omni/certs/node-key.pem",
+        minVersion: "TLSv1.3"
+    },
+    rateLimit: {
+        enabled: true,
+        maxConnectionsPerIP: 10,
+        maxRequestsPerSecondPerIP: 100,
+        maxRequestsPerSecondPerIdentity: 200
+    }
+}
+```
+
+### High-Performance Configuration
+
+```typescript
+const highPerfConfig: OmniServerConfig = {
+    enabled: true,
+    port: 3001,
+    maxConnections: 5000,
+    backlog: 2048,
+    enableKeepalive: true,
+    keepaliveInitialDelay: 30000,
+    tls: {
+        enabled: true,
+        mode: "self-signed",
+        minVersion: "TLSv1.3"
+    },
+    rateLimit: {
+        enabled: true,
+        maxConnectionsPerIP: 50,
+        maxRequestsPerSecondPerIP: 500,
+        maxRequestsPerSecondPerIdentity: 1000
+    }
+}
+```
+
+### Minimal Configuration
+
+```typescript
+// Minimal config - uses all defaults
+const minimalConfig: OmniServerConfig = {
+    enabled: true
+}
+
+// Server will:
+// - Listen on port (HTTP port + 1)
+// - Accept up to 1000 connections
+// - Use plain TCP (no TLS)
+// - Enable rate limiting with defaults
+```
+
+## Configuration Loading
+
+### From Environment
+
+```typescript
+function loadConfigFromEnv(): OmniServerConfig {
+    return {
+        enabled: process.env.OMNI_ENABLED === "true",
+        host: process.env.OMNI_HOST || "0.0.0.0",
+        port: parseInt(process.env.OMNI_PORT || "") || undefined,
+        maxConnections: parseInt(process.env.OMNI_MAX_CONNECTIONS || "1000"),
+        tls: {
+            enabled: process.env.OMNI_TLS_ENABLED === "true",
+            mode: (process.env.OMNI_TLS_MODE || "self-signed") as "self-signed" | "ca",
+            certPath: process.env.OMNI_CERT_PATH,
+            keyPath: process.env.OMNI_KEY_PATH,
+            caPath: process.env.OMNI_CA_PATH,
+            minVersion: (process.env.OMNI_TLS_MIN_VERSION || "TLSv1.3") as "TLSv1.2" | "TLSv1.3"
+        },
+        rateLimit: {
+            enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false",
+            maxConnectionsPerIP: parseInt(process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10"),
+            maxRequestsPerSecondPerIP: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100"),
+            maxRequestsPerSecondPerIdentity: parseInt(process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200")
+        }
+    }
+}
+```
+
+### From File
+
+```typescript
+import { readFileSync } from "fs"
+
+function loadConfigFromFile(path: string): OmniServerConfig {
+    const content = readFileSync(path, "utf-8")
+    return JSON.parse(content)
+}
+```
+
+### Example .env File
+
+```bash
+# OmniProtocol Configuration
+# Copy to .env and customize
+
+# Server
+OMNI_ENABLED=true
+OMNI_PORT=3001
+OMNI_HOST=0.0.0.0
+OMNI_MAX_CONNECTIONS=1000
+
+# TLS
+OMNI_TLS_ENABLED=true
+OMNI_TLS_MODE=self-signed
+OMNI_CERT_PATH=./certs/node-cert.pem
+OMNI_KEY_PATH=./certs/node-key.pem
+OMNI_TLS_MIN_VERSION=TLSv1.3
+
+# Rate Limiting
+OMNI_RATE_LIMIT_ENABLED=true
+OMNI_MAX_CONNECTIONS_PER_IP=10
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IP=100
+OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY=200
+
+# Migration
+OMNI_MIGRATION_MODE=HTTP_ONLY
+OMNI_AUTO_DETECT=true
+```
+
+## Configuration Validation
+
+```typescript
+function validateConfig(config: OmniServerConfig): string[] {
+    const errors: string[] = []
+
+    if (config.port && (config.port < 1 || config.port > 65535)) {
+        errors.push("Port must be between 1 and 65535")
+    }
+
+    if (config.maxConnections && config.maxConnections < 1) {
+        errors.push("maxConnections must be at least 1")
+    }
+
+    if (config.tls?.enabled) {
+        if (!config.tls.certPath) {
+            errors.push("TLS enabled but certPath not specified")
+        }
+        if (!config.tls.keyPath) {
+            errors.push("TLS enabled but keyPath not specified")
+        }
+    }
+
+    if (config.rateLimit?.maxConnectionsPerIP &&
+        config.rateLimit.maxConnectionsPerIP < 1) {
+        errors.push("maxConnectionsPerIP must be at least 1")
+    }
+
+    return errors
+}
+```
+
+## Runtime Configuration Updates
+
+Some settings can be updated at runtime:
+
+```typescript
+// Update rate limit settings
+const rateLimiter = server.getRateLimiter()
+rateLimiter.blockKey("192.168.1.100", RateLimitType.IP, 3600000)
+rateLimiter.unblockKey("192.168.1.100", RateLimitType.IP)
+
+// Note: Most settings require server restart
+```
+
+## Related Documentation
+
+- [06_Server_Architecture.mdx](./06_Server_Architecture.mdx) - Server configuration
+- [07_Rate_Limiting.mdx](./07_Rate_Limiting.mdx) - Rate limit settings
+- [10_Integration.mdx](./10_Integration.mdx) - Integration with node

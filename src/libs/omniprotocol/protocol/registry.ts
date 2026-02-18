@@ -54,6 +54,16 @@ import {
     handleGetValidatorPhase,
     handleGetBlockTimestamp,
 } from "./handlers/consensus"
+import {
+    handleL2PSGeneric,
+    handleL2PSSubmitEncryptedTx,
+    handleL2PSGetProof,
+    handleL2PSVerifyBatch,
+    handleL2PSSyncMempool,
+    handleL2PSGetBatchStatus,
+    handleL2PSGetParticipation,
+    handleL2PSHashUpdate,
+} from "./handlers/l2ps"
 
 export interface HandlerDescriptor {
     opcode: OmniOpcode
@@ -137,6 +147,16 @@ const DESCRIPTORS: HandlerDescriptor[] = [
     { opcode: OmniOpcode.ADMIN_RATE_LIMIT_UNBLOCK, name: "admin_rateLimitUnblock", authRequired: true, handler: createHttpFallbackHandler() },
     { opcode: OmniOpcode.ADMIN_GET_CAMPAIGN_DATA, name: "admin_getCampaignData", authRequired: true, handler: createHttpFallbackHandler() },
     { opcode: OmniOpcode.ADMIN_AWARD_POINTS, name: "admin_awardPoints", authRequired: true, handler: createHttpFallbackHandler() },
+
+    // 0x7X Layer 2 Private System (L2PS)
+    { opcode: OmniOpcode.L2PS_GENERIC, name: "l2ps_generic", authRequired: true, handler: handleL2PSGeneric },
+    { opcode: OmniOpcode.L2PS_SUBMIT_ENCRYPTED_TX, name: "l2ps_submitEncryptedTx", authRequired: true, handler: handleL2PSSubmitEncryptedTx },
+    { opcode: OmniOpcode.L2PS_GET_PROOF, name: "l2ps_getProof", authRequired: false, handler: handleL2PSGetProof },
+    { opcode: OmniOpcode.L2PS_VERIFY_BATCH, name: "l2ps_verifyBatch", authRequired: true, handler: handleL2PSVerifyBatch },
+    { opcode: OmniOpcode.L2PS_SYNC_MEMPOOL, name: "l2ps_syncMempool", authRequired: true, handler: handleL2PSSyncMempool },
+    { opcode: OmniOpcode.L2PS_GET_BATCH_STATUS, name: "l2ps_getBatchStatus", authRequired: false, handler: handleL2PSGetBatchStatus },
+    { opcode: OmniOpcode.L2PS_GET_PARTICIPATION, name: "l2ps_getParticipation", authRequired: false, handler: handleL2PSGetParticipation },
+    { opcode: OmniOpcode.L2PS_HASH_UPDATE, name: "l2ps_hashUpdate", authRequired: true, handler: handleL2PSHashUpdate },
 
     // 0xFX Meta
     { opcode: OmniOpcode.PROTO_VERSION_NEGOTIATE, name: "proto_versionNegotiate", authRequired: false, handler: handleProtoVersionNegotiate },

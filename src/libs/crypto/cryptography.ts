@@ -12,12 +12,9 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { promises as fs } from "fs"
 import forge from "node-forge"
 import { getSharedState } from "src/utilities/sharedState"
-import terminalkit from "terminal-kit"
 import log from "src/utilities/logger"
 
 import { forgeToHex } from "./forgeUtils"
-
-const term = terminalkit.terminal
 
 export default class Cryptography {
     static new() {
@@ -228,20 +225,22 @@ export default class Cryptography {
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
-                term.yellow(
-                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed\n",
+                log.debug(
+                    "CRYPTO",
+                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed",
                 )
-                log.error(e)
+                log.error("CRYPTO", e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one
             if (!privateKey) {
-                term.yellow(
-                    "[DECRYPTION] No private key provided, using our one...\n",
+                log.warning(
+                    "CRYPTO",
+                    "[DECRYPTION] No private key provided, using our one...",
                 )
                 privateKey = getSharedState.identity.rsa.privateKey
                 if (!privateKey) {
-                    term.red("[DECRYPTION] No private key found\n")
+                    log.error("CRYPTO", "[DECRYPTION] No private key found")
                     return [false, "No private key found"]
                 }
             }

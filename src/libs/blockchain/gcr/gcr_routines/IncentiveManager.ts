@@ -105,6 +105,21 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after TLSN Telegram linking
+     */
+    static async telegramTLSNLinked(
+        userId: string,
+        telegramUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardTelegramTLSNPoints(
+            userId,
+            telegramUserId,
+            referralCode,
+        )
+    }
+
+    /**
      * Hook to be called after Telegram unlinking
      */
     static async telegramUnlinked(userId: string): Promise<RPCResponse> {
@@ -188,5 +203,35 @@ export class IncentiveManager {
         chain: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.deductAgentPoints(userId, agentId, chain)
+    }
+
+    /**
+     * Hook to be called after Nomis score linking
+     */
+    static async nomisLinked(
+        userId: string,
+        chain: string,
+        nomisScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardNomisScorePoints(
+            userId,
+            chain,
+            nomisScore,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Nomis score unlinking
+     */
+    static async nomisUnlinked(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductNomisScorePoints(
+            userId,
+            chain,
+        )
     }
 }

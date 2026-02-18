@@ -51,7 +51,6 @@ import Datasource from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { Validators } from "src/model/entities/Validators"
-import terminalkit from "terminal-kit"
 import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import {
@@ -72,8 +71,6 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool_v2"
-
-const term = terminalkit.terminal
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -104,6 +101,47 @@ export class OperationsRegistry {
     get(): OperationRegistrySlot[] {
         return this.operations
     }
+}
+
+interface Web2AccountParams {
+    username: string
+    platform: "twitter" | "discord" | "telegram" | "github"
+}
+
+interface XMAccountParams {
+    chain: `${string}.${string}` // eg. "eth.mainnet" | "solana.mainnet", etc.
+    address: string
+}
+
+interface NativeAccountParams {
+    address: string
+}
+
+export type AccountParams = (
+    | Web2AccountParams
+    | XMAccountParams
+    | NativeAccountParams
+) & {
+    points: number
+}
+
+// Type guard functions
+function isWeb2Account(
+    account: AccountParams,
+): account is Web2AccountParams & { points: number } {
+    return "platform" in account && "username" in account
+}
+
+function isXmAccount(
+    account: AccountParams,
+): account is XMAccountParams & { points: number } {
+    return "chain" in account && "address" in account && !!account.chain
+}
+
+function isNativeAccount(
+    account: AccountParams,
+): account is NativeAccountParams & { points: number } {
+    return "address" in account && !("chain" in account)
 }
 
 // INFO Besides the static methods, the GCR store all the operations to be done in the current block so that they can be executed in order
@@ -189,7 +227,7 @@ export default class GCR {
             })
             return response ? response.details.content.balance : 0
         } catch (e) {
-            term.yellow("[GET BALANCE] No balance for: " + address + "\n")
+            log.debug("[GET BALANCE] No balance for: " + address)
             return 0
         }
     }
@@ -529,7 +567,9 @@ export default class GCR {
             // Note: The original function returns responses from Chain.write, consider what you need to return here.
             return true // Adjust the return value as needed based on your requirements.
         } catch (e) {
-            log.error("[GCR ERROR: NATIVE] Error setting GCR native balance: " + e)
+            log.error(
+                "[GCR ERROR: NATIVE] Error setting GCR native balance: " + e,
+            )
             return false
         }
     }
@@ -765,41 +805,70 @@ export default class GCR {
         return campaignData
     }
 
-    static async getAddressesByTwitterUsernames(twitterUsernames: string[]) {
+    static async getAddressesByWeb2Usernames(
+        queries: {
+            platform: "twitter" | "discord" | "telegram" | "github"
+            username: string
+        }[],
+    ): Promise<Record<string, string>> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        if (!twitterUsernames || twitterUsernames.length === 0) {
+        if (!queries || queries.length === 0) {
             return {}
         }
 
-        // Query accounts that have Twitter identities with usernames in the provided array
-        const accounts = await gcrMainRepository
-            .createQueryBuilder("gcr")
-            .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = ANY(:usernames))",
-                { usernames: twitterUsernames },
-            )
-            .getMany()
+        // Group queries by platform for efficient batch queries
+        const queriesByPlatform: Record<
+            string,
+            { platform: string; username: string }[]
+        > = {}
+        for (const query of queries) {
+            if (!queriesByPlatform[query.platform]) {
+                queriesByPlatform[query.platform] = []
+            }
+            queriesByPlatform[query.platform].push(query)
+        }
 
         const usernameToAddressMap: Record<string, string> = {}
 
-        for (const account of accounts) {
-            // Check if the account has zero Twitter points (means Twitter was already connected elsewhere)
-            if (account.points?.breakdown?.socialAccounts?.twitter === 0) {
-                log.debug(
-                    `Skipping account ${account.pubkey} - Twitter already connected to another account`,
+        // Process each platform separately
+        for (const [platform, platformQueries] of Object.entries(
+            queriesByPlatform,
+        )) {
+            const usernames = platformQueries.map(q => q.username)
+
+            // Query accounts that have identities with usernames in the provided array for this platform
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->:platform, '[]'::jsonb)) as platform_id WHERE platform_id->>'username' = ANY(:usernames))",
+                    { platform, usernames },
                 )
-                continue
-            }
+                .getMany()
 
-            // Find Twitter identities that match the provided usernames
-            const twitterIdentities = account.identities.web2?.twitter || []
+            for (const account of accounts) {
+                // Check if the account has zero points for this platform (means account was already connected elsewhere)
+                const platformPoints =
+                    account.points?.breakdown?.socialAccounts?.[platform]
+                if (platformPoints === 0) {
+                    log.debug(
+                        `Skipping account ${account.pubkey} - ${platform} already connected to another account`,
+                    )
+                    continue
+                }
 
-            for (const twitterIdentity of twitterIdentities) {
-                if (twitterUsernames.includes(twitterIdentity.username)) {
-                    usernameToAddressMap[twitterIdentity.username] =
-                        account.pubkey
+                // Find identities that match the provided usernames for this platform
+                const platformIdentities =
+                    account.identities.web2?.[platform] || []
+
+                for (const identity of platformIdentities) {
+                    if (usernames.includes(identity.username)) {
+                        // Use platform:username as key to avoid collisions between platforms
+                        usernameToAddressMap[
+                            `${platform}:${identity.username}`
+                        ] = account.pubkey
+                    }
                 }
             }
         }
@@ -807,47 +876,238 @@ export default class GCR {
         return usernameToAddressMap
     }
 
+    static async getAddressesByNativeAddresses(
+        addresses: string[],
+    ): Promise<Record<string, string>> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!addresses || addresses.length === 0) {
+            return {}
+        }
+
+        // Query accounts by pubkey directly
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where("gcr.pubkey = ANY(:addresses)", { addresses })
+            .getMany()
+
+        const addressToPubkeyMap: Record<string, string> = {}
+
+        for (const account of accounts) {
+            if (addresses.includes(account.pubkey)) {
+                addressToPubkeyMap[account.pubkey] = account.pubkey
+            }
+        }
+
+        return addressToPubkeyMap
+    }
+
+    static async getAddressesByXmAccounts(
+        queries: {
+            chain: string
+            address: string
+        }[],
+    ): Promise<Record<string, string>> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!queries || queries.length === 0) {
+            return {}
+        }
+
+        // Group queries by chain for efficient batch queries
+        const queriesByChain: Record<
+            string,
+            {
+                chain: string
+                subchain: string
+                address: string
+                originalChain: string
+            }[]
+        > = {}
+
+        for (const query of queries) {
+            // Split chain.subchain format (e.g., "eth.mainnet" -> chain="evm", subchain="mainnet")
+            const [chainPart, subchainPart] = query.chain.split(".")
+            if (!chainPart || !subchainPart) {
+                continue
+            }
+
+            // Replace "eth" with "evm" (as done in getAccountByIdentity)
+            let chain = chainPart
+            if (chain === "eth") {
+                chain = "evm"
+            }
+            const subchain = subchainPart
+
+            const chainKey = `${chain}.${subchain}`
+            if (!queriesByChain[chainKey]) {
+                queriesByChain[chainKey] = []
+            }
+            queriesByChain[chainKey].push({
+                chain,
+                subchain,
+                address: query.address,
+                originalChain: query.chain,
+            })
+        }
+
+        const addressToPubkeyMap: Record<string, string> = {}
+
+        // Helper function to determine if a chain is EVM-based (case-insensitive addresses)
+        const isEvmChain = (chainName: string): boolean => {
+            return chainName === "evm" || chainName === "eth"
+        }
+
+        // Process each chain separately
+        for (const [chainKey, chainQueries] of Object.entries(queriesByChain)) {
+            const [chain, subchain] = chainKey.split(".") as [string, string]
+            const isEvm = isEvmChain(chain)
+            const addresses = chainQueries.map(q => q.address)
+
+            // Build query based on chain type - EVM addresses are case-insensitive, others are case-sensitive
+            let queryString: string
+            let queryAddresses: string[]
+
+            if (isEvm) {
+                // EVM addresses: use lowercase comparison
+                queryString =
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE lower(xm_id->>'address') = ANY(:addresses))"
+                queryAddresses = addresses.map(addr => addr.toLowerCase())
+            } else {
+                // Non-EVM addresses (e.g., Solana): case-sensitive comparison
+                queryString =
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE xm_id->>'address' = ANY(:addresses))"
+                queryAddresses = addresses
+            }
+
+            // Query accounts that have the specified web3 wallet address under the specific chain/subchain
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(queryString, {
+                    chain,
+                    subchain,
+                    addresses: queryAddresses,
+                })
+                .getMany()
+
+            for (const account of accounts) {
+                // Find identities that match the provided addresses for this chain/subchain
+                const xmIdentities =
+                    account.identities.xm?.[chain]?.[subchain] || []
+
+                for (const identity of xmIdentities) {
+                    for (const query of chainQueries) {
+                        // Compare addresses based on chain type
+                        let matches = false
+                        if (isEvm) {
+                            // EVM: case-insensitive comparison
+                            matches =
+                                identity.address.toLowerCase() ===
+                                query.address.toLowerCase()
+                        } else {
+                            // Non-EVM (e.g., Solana): case-sensitive comparison
+                            matches = identity.address === query.address
+                        }
+
+                        if (matches) {
+                            // Use originalChain:address as key to match what caller expects
+                            addressToPubkeyMap[
+                                `${query.originalChain}:${query.address}`
+                            ] = account.pubkey
+                        }
+                    }
+                }
+            }
+        }
+
+        return addressToPubkeyMap
+    }
+
     /**
      * Create a transaction to award points to the users
-     * @param twitterUsernames List of twitter usernames to award points to
+     * @param accounts List of accounts to award points to (supports web2 platforms, native addresses, and web3 accounts)
      *
      */
-    static async createAwardPointsTransaction(
-        twitterUsernames: {
-            /**
-             * The username of the user to award points to
-             */
-            username: string
-            /**
-             * The amount of points to award
-             */
-            points: number
-        }[],
-    ) {
+    static async createAwardPointsTransaction(accounts: AccountParams[]) {
         const awardDate = new Date().toISOString()
-        const addresses = await this.getAddressesByTwitterUsernames(
-            twitterUsernames.map(u => u.username),
+
+        // Separate accounts by type
+        const web2Accounts = accounts.filter(isWeb2Account)
+        const nativeAccounts = accounts.filter(isNativeAccount)
+        const xmAccounts = accounts.filter(isXmAccount)
+
+        // Resolve addresses for each account type
+        const web2Addresses = await this.getAddressesByWeb2Usernames(
+            web2Accounts.map(a => ({
+                platform: a.platform,
+                username: a.username,
+            })),
         )
+
+        const nativeAddresses = await this.getAddressesByNativeAddresses(
+            nativeAccounts.map(a => a.address),
+        )
+
+        const xmAddresses = await this.getAddressesByXmAccounts(
+            xmAccounts.map(a => ({
+                chain: a.chain,
+                address: a.address,
+            })),
+        )
+
+        // Merge all address maps
+        const allAddresses = {
+            ...web2Addresses,
+            ...nativeAddresses,
+            ...xmAddresses,
+        }
 
         const edits = []
 
-        for (const account of twitterUsernames as any) {
-            if (addresses[account.username]) {
+        for (const account of accounts as any) {
+            let addressKey: string
+            let lookupValue: string
+
+            if (isWeb2Account(account)) {
+                addressKey = `${account.platform}:${account.username}`
+                lookupValue = `web2.${account.platform}.${account.username}`
+            } else if (isNativeAccount(account)) {
+                addressKey = account.address
+                lookupValue = `native.${account.address}`
+            } else if (isXmAccount(account)) {
+                addressKey = `${account.chain}:${account.address}`
+                lookupValue = `web3.${account.chain}.${account.address}`
+            } else {
+                continue
+            }
+
+            // Set lookup property and remove original properties
+            const accountAny = account as any
+            accountAny.lookup = lookupValue
+
+            // Remove original lookup properties
+            delete accountAny.username
+            delete accountAny.platform
+            delete accountAny.chain
+
+            if (allAddresses[addressKey]) {
                 edits.push({
                     type: "identity",
                     context: "points",
                     isRollback: false,
                     operation: "add",
-                    account: addresses[account.username],
+                    account: allAddresses[addressKey],
                     amount: Number(account.points),
                     date: awardDate,
                     txhash: "",
                 })
-                account.address = addresses[account.username]
-                account.comment = "Account found"
+                accountAny.address = allAddresses[addressKey]
+                accountAny.comment = "Account found. Points awarded."
             } else {
-                account.address = null
-                account.comment = "Account not found"
+                accountAny.address = null
+                accountAny.comment = "Account not found. Points NOT awarded."
             }
         }
 
@@ -861,7 +1121,7 @@ export default class GCR {
         tx.content.timestamp = Date.now()
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
-        tx.content.data = ["awardPoints", twitterUsernames]
+        tx.content.data = ["awardPoints", accounts]
         tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
         const signature = await ucrypto.sign(
@@ -953,44 +1213,95 @@ export default class GCR {
     }
 
     /**
-     * @param twitterUsernames List of twitter usernames to award points to
-     * @returns Array of usernames that were successfully awarded points
+     * @param accounts List of accounts to award points to (supports multiple web2 platforms)
+     * @returns Result of the award points operation
      */
-    static async awardPoints(
-        twitterUsernames: {
-            username: string
-            points: number
-        }[],
-    ): Promise<{
+    static async awardPoints(accounts: AccountParams[]): Promise<{
         success: boolean
         error?: string
         message: string
         txhash?: string
         confirmationBlock: number
     }> {
-        if (!twitterUsernames || twitterUsernames.length === 0) {
-            log.warning("No Twitter usernames provided")
+        if (!accounts || accounts.length === 0) {
+            log.warning("No accounts provided")
             return {
                 success: false,
-                message: "No Twitter usernames provided",
+                message: "No accounts provided",
                 confirmationBlock: null,
             }
         }
 
-        // INFO: Make sure each twitter username has valid points
-        for (const account of twitterUsernames) {
+        // INFO: Validate each account based on its type
+        for (const account of accounts) {
+            // INFO: Make sure each account has valid points
             const points = Number(account.points)
             if (isNaN(points) || points <= 0) {
+                const accountIdentifier = isWeb2Account(account)
+                    ? account.username
+                    : isXmAccount(account)
+                    ? `${account.chain}:${account.address}`
+                    : account.address
                 return {
                     success: false,
                     message:
-                        "Failed: Invalid input. Point value must be a number greater than 0.",
+                        "Failed: Invalid input. Point value must be a number greater than 0. Account: " +
+                        accountIdentifier,
                     confirmationBlock: null,
+                }
+            }
+
+            // INFO: Validate account type-specific fields
+            if (isWeb2Account(account)) {
+                if (!account.platform) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Platform is not specified for account " +
+                            account.username,
+                        confirmationBlock: null,
+                    }
+                }
+                // INFO: remove @ prefix for web2 accounts
+                if (account.username.startsWith("@")) {
+                    account.username = account.username.slice(1)
+                }
+            } else if (isXmAccount(account)) {
+                if (!account.chain || !account.address) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Chain and address must be specified for web3 account",
+                        confirmationBlock: null,
+                    }
+                }
+                // Validate chain.subchain format
+                const [chain, subchain] = account.chain.split(".")
+                if (!chain || !subchain) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Chain must be in format 'chain.subchain' (e.g., 'eth.mainnet')",
+                        confirmationBlock: null,
+                    }
+                }
+                // Normalize eth.subchain to evm.subchain (eth is stored as evm in DB)
+                if (chain === "eth") {
+                    account.chain = `evm.${subchain}` as `${string}.${string}`
+                }
+            } else if (isNativeAccount(account)) {
+                if (!account.address) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Address must be specified for native account",
+                        confirmationBlock: null,
+                    }
                 }
             }
         }
 
-        const tx = await this.createAwardPointsTransaction(twitterUsernames)
+        const tx = await this.createAwardPointsTransaction(accounts)
 
         const editResults = await HandleGCR.applyToTx(
             structuredClone(tx),

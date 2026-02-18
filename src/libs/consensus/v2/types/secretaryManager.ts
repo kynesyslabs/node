@@ -569,14 +569,17 @@ export default class SecretaryManager {
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity}`,
             )
 
-            log.debug(
-                "Peer to receive greenlight: " +
-                    JSON.stringify(member),
-            )
+            log.debug("Peer to receive greenlight: " + JSON.stringify(member))
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
-            promises.push(member.longCall(request, true, 250, 4, [400]))
+            promises.push(
+                member.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 4,
+                    allowedCodes: [400],
+                }),
+            )
         }
 
         const results = await Promise.all(promises)
@@ -584,10 +587,7 @@ export default class SecretaryManager {
         for (const [index, result] of results.entries()) {
             const pubKey = waitingMembers[index]
             const member = this.shard.members.find(m => m.identity === pubKey)
-            log.debug(
-                "Peer who received greenlight: " +
-                    JSON.stringify(member),
-            )
+            log.debug("Peer who received greenlight: " + JSON.stringify(member))
 
             if (result.result == 400) {
                 log.debug(
@@ -766,7 +766,10 @@ export default class SecretaryManager {
 
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug("Secretary is: " + this.secretary.identity)
-            return await this.secretary.longCall(request, true, 250, retries)
+            return await this.secretary.longCall(request, true, {
+                retries,
+                sleepTime: 250,
+            })
         }
 
         const handleSendStatusRes = async (res: RPCResponse) => {
@@ -775,9 +778,7 @@ export default class SecretaryManager {
                     this.ourValidatorPhase.currentPhase +
                     ") sent to the secretary!",
             )
-            log.debug(
-                "Set validator phase response: " + JSON.stringify(res),
-            )
+            log.debug("Set validator phase response: " + JSON.stringify(res))
 
             if (!Waiter.isWaiting(waiterKey)) {
                 // INFO: The secretary sent the green light for the phase before
@@ -831,9 +832,7 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] SendStatus callback received greenlight",
                 )
-                log.debug(
-                    "Response.extra: " + JSON.stringify(res.extra),
-                )
+                log.debug("Response.extra: " + JSON.stringify(res.extra))
 
                 // INFO: Resolve the waiter with the timestamp
                 return Waiter.resolve<number>(waiterKey, timestamp)
@@ -898,7 +897,9 @@ export default class SecretaryManager {
         try {
             await Promise.all(waiters)
         } catch (error) {
-            log.error("[SECRETARY] Error waiting for hanging greenlights: " + error)
+            log.error(
+                "[SECRETARY] Error waiting for hanging greenlights: " + error,
+            )
             process.exit(1)
         }
 
@@ -908,9 +909,7 @@ export default class SecretaryManager {
             .filter(filter)
             .forEach(key => Waiter.preHeld.delete(key))
 
-        log.debug(
-            "HANGING GREENLIGHTS RESOLVED",
-        )
+        log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 
         if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
