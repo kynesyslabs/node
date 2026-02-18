@@ -420,8 +420,10 @@ export default class PeerManager {
                 params: [helloRequest],
             },
             true,
-            250,
-            3,
+            {
+                sleepTime: 250,
+                retries: 3,
+            },
         )
 
         log.debug("[Hello Peer] Response: " + JSON.stringify(response))
@@ -494,13 +496,26 @@ export default class PeerManager {
                     ". Adding to offline list",
                 false,
             )
-            // Add the peer to the offline list
-            PeerManager.getInstance().addOfflinePeer(peer)
-            PeerManager.getInstance().removeOnlinePeer(peer.identity)
+
+            PeerManager.markPeerOffline(peer)
         }
 
         // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
         return []
+    }
+
+    static markPeerOffline(peer: Peer) {
+        // INFO: Local peer should always be accessible
+        if (peer.identity === getSharedState.publicKeyHex) {
+            return
+        }
+
+        peer.status.online = false
+        peer.status.timestamp = Date.now()
+
+        const peerman = PeerManager.getInstance()
+        peerman.addOfflinePeer(peer)
+        peerman.removeOnlinePeer(peer.identity)
     }
 }

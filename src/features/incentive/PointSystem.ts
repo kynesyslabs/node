@@ -954,6 +954,95 @@ export class PointSystem {
     }
 
     /**
+     * Award points for linking a Telegram account via TLSN.
+     * @param userId The user's Demos address
+     * @param telegramUserId The Telegram user ID
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardTelegramTLSNPoints(
+        userId: string,
+        telegramUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Get user's account data from GCR to verify Telegram ownership
+            const account = await ensureGCRForUser(userId)
+
+            // Verify the Telegram account is actually linked to this user
+            const telegramIdentities = account.identities.web2?.telegram || []
+            const isOwner = telegramIdentities.some(
+                (tg: any) => tg.userId === telegramUserId,
+            )
+
+            if (!isOwner) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message:
+                            "Error: Telegram account not linked to this user",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user already has Telegram points specifically
+            if (
+                userPointsWithIdentities.breakdown.socialAccounts.telegram > 0
+            ) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Telegram points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_TELEGRAM,
+                "socialAccounts",
+                "telegram",
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_TELEGRAM,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking Telegram",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
      * Deduct points for unlinking a Telegram account
      * @param userId The user's Demos address
      * @param telegramUserId The Telegram user ID to verify ownership

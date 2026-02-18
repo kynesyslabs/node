@@ -46,7 +46,7 @@ export default class MultichainDispatcher {
         log.debug(JSON.stringify(script))
         const results = await XMParser.execute(script)
         log.debug("[XM EXECUTE] Successfully executed")
-        log.debug(results)
+        log.debug("[XM EXECUTE] results: " + JSON.stringify(results))
 
         const totalOperations = Object.values(results).length
         const failedOperations = Object.values(results).filter(

@@ -34,8 +34,8 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-    shardSize = parseInt(process.env.SHARD_SIZE) || 4
-    mainLoopSleepTime = parseInt(process.env.MAIN_LOOP_SLEEP_TIME) || 1000 // 1 second
+    shardSize = Number.parseInt(process.env.SHARD_SIZE ?? "4", 10)
+    mainLoopSleepTime = Number.parseInt(process.env.MAIN_LOOP_SLEEP_TIME ?? "1000", 10) // 1 second
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
@@ -108,19 +108,24 @@ export default class SharedState {
     }
 
     peerRoutineRunning = 0
+
+    // SECTION L2PS
+    l2psJoinedUids: string[] = [] // UIDs of the L2PS networks that are joined to the node (loaded from the data directory)
+    l2psBatchNonce: number = 0 // Persistent nonce for L2PS batch transactions
+
     // SECTION shared state variables
     shard: Peer[]
     // lastShard: string[] // ? Should be used by PoRBFT.ts consensus and should contain all the public keys of the nodes in the last shard
     identity: Identity
     keypair: {
         publicKey:
-            | Uint8Array
-            | forge.pki.rsa.PublicKey
-            | forge.pki.ed25519.NativeBuffer
+        | Uint8Array
+        | forge.pki.rsa.PublicKey
+        | forge.pki.ed25519.NativeBuffer
         privateKey:
-            | Uint8Array
-            | forge.pki.rsa.PrivateKey
-            | forge.pki.ed25519.NativeBuffer
+        | Uint8Array
+        | forge.pki.rsa.PrivateKey
+        | forge.pki.ed25519.NativeBuffer
         genKey?: Uint8Array
     }
     get publicKeyHex(): string {
@@ -156,7 +161,7 @@ export default class SharedState {
     }
 
     // SECTION Configuration
-    rpcFee: number = parseInt(process.env.RPC_FEE_PERCENT) // TODO Implement // Percentage of the fee to be charged for the rpc
+    rpcFee: number = Number.parseInt(process.env.RPC_FEE_PERCENT ?? "10", 10) // TODO Implement // Percentage of the fee to be charged for the rpc
     serverPort = 53550
     identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
     peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
@@ -169,7 +174,7 @@ export default class SharedState {
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
-    maxMessageSize = parseInt(process.env.MAX_MESSAGE_SIZE) // TODO Implement // 5 GB just for debug purpose
+    maxMessageSize = Number.parseInt(process.env.MAX_MESSAGE_SIZE ?? "0", 10) // TODO Implement // 5 GB just for debug purpose
 
     constructor() {
         this.identity = Identity.getInstance()

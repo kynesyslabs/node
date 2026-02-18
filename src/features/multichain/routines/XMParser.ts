@@ -84,7 +84,7 @@ class XMParser {
                 log.debug("[XMParser]: partial operation")
                 log.debug(operation)
                 const result = await XMParser.executeOperation(operation)
-                results[name] = stringify(result)
+                results[name] = result
                 log.debug("[RESULT]: " + results[name])
             } catch (e) {
                 log.error("[XM EXECUTE] Error: " + e)
