@@ -20,9 +20,12 @@ import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
+import type { INativePayload } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import L2PSTransactionExecutor, { L2PS_TX_FEE } from "@/libs/l2ps/L2PSTransactionExecutor"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -98,11 +101,84 @@ export async function confirmTransaction(
     }
 
     log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
+
+    // Check sender balance covers the transfer amount
+    if (tx.content.amount > 0) {
+        const from = typeof tx.content.from === "string" ? tx.content.from : forgeToHex(tx.content.from)
+        let fromBalance = 0
+        try {
+            fromBalance = await GCR.getGCRNativeBalance(from)
+        } catch {
+            // Address not in GCR — balance is 0
+        }
+        if (fromBalance < tx.content.amount) {
+            validityData.data.message =
+                `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${tx.content.amount} but have ${fromBalance}\n`
+            validityData.data.valid = false
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
+
+    // For L2PS encrypted transactions, decrypt inner tx and check balance
+    if (tx.content.type === "l2psEncryptedTx") {
+        const l2psBalanceError = await checkL2PSBalance(tx)
+        if (l2psBalanceError) {
+            validityData.data.message = l2psBalanceError
+            validityData.data.valid = false
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
+
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
     validityData = await signValidityData(validityData)
     return validityData
+}
+
+/**
+ * Decrypt L2PS encrypted tx and check inner tx balance before mempool.
+ * Returns error message string if insufficient, null if OK.
+ */
+async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
+    try {
+        const l2psPayload = (tx.content?.data as any)?.[1]
+        const l2psUid = l2psPayload?.l2ps_uid as string | undefined
+        if (!l2psUid) return null // Can't check without UID, let handleL2PS catch it
+
+        const parallelNetworks = ParallelNetworks.getInstance()
+        let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+        if (!l2psInstance) {
+            l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
+        }
+        if (!l2psInstance) return null // No L2PS config, let handleL2PS catch it
+
+        const decryptedTx = await l2psInstance.decryptTx(tx as any)
+        if (!decryptedTx?.content?.from) return null
+
+        const sender = decryptedTx.content.from as string
+
+        let amount = 0
+        if (decryptedTx.content.type === "native" && Array.isArray(decryptedTx.content.data)) {
+            const nativePayload = decryptedTx.content.data[1] as INativePayload
+            if (nativePayload?.nativeOperation === "send") {
+                const [, sendAmount] = nativePayload.args as [string, number]
+                amount = sendAmount || 0
+            }
+        }
+
+        const totalRequired = amount + L2PS_TX_FEE
+        const balance = await L2PSTransactionExecutor.getBalance(sender)
+        if (balance < BigInt(totalRequired)) {
+            return `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${totalRequired} but have ${balance}\n`
+        }
+    } catch (error) {
+        log.error(`[confirmTransaction] L2PS balance pre-check error: ${error instanceof Error ? error.message : error}`)
+        // Don't block on decryption errors — let handleL2PS deal with it
+    }
+    return null
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {

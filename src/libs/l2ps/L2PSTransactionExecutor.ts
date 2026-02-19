@@ -30,7 +30,7 @@ import { getErrorMessage } from "@/utilities/errorMessage"
  * L2PS Transaction Fee (in DEM)
  * This fee is burned (removed from sender, not added anywhere)
  */
-const L2PS_TX_FEE = 1
+export const L2PS_TX_FEE = 1
 
 /**
  * Result of executing an L2PS transaction

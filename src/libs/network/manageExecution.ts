@@ -79,6 +79,9 @@ export async function manageExecution(
                 returnValue.response = result.response
                 returnValue.require_reply = result.require_reply
                 returnValue.extra = result.extra
+                if (!result.success) {
+                    log.error(`[SERVER] broadcastTx FAILED — returning to client: result=${returnValue.result}, extra=${JSON.stringify(returnValue.extra)}, response.extra=${result.response?.extra}`)
+                }
                 break
             } catch (error) {
                 const errorMessage =

@@ -1,4 +1,4 @@
-import type { BlockContent, L2PSTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, L2PSTransaction, RPCResponse, INativePayload } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
 import { emptyResponse } from "../../server_rpc"
@@ -6,7 +6,7 @@ import { emptyResponse } from "../../server_rpc"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
-import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import L2PSTransactionExecutor, { L2PS_TX_FEE } from "@/libs/l2ps/L2PSTransactionExecutor"
 import log from "@/utilities/logger"
 
 /**
@@ -72,6 +72,38 @@ async function decryptAndValidate(
 }
 
 
+
+/**
+ * Check sender balance before mempool insertion.
+ * Returns an error message if balance is insufficient, null if OK.
+ */
+async function checkSenderBalance(decryptedTx: Transaction): Promise<string | null> {
+    const sender = decryptedTx.content.from as string
+    if (!sender) return "Missing sender address in decrypted transaction"
+
+    // Extract amount from native payload
+    let amount = 0
+    if (decryptedTx.content.type === "native" && Array.isArray(decryptedTx.content.data)) {
+        const nativePayload = decryptedTx.content.data[1] as INativePayload
+        if (nativePayload?.nativeOperation === "send") {
+            const [, sendAmount] = nativePayload.args as [string, number]
+            amount = sendAmount || 0
+        }
+    }
+
+    const totalRequired = amount + L2PS_TX_FEE
+    try {
+        const balance = await L2PSTransactionExecutor.getBalance(sender)
+        if (balance < BigInt(totalRequired)) {
+            return `Insufficient balance: need ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee) but have ${balance}`
+        }
+    } catch (error) {
+        return `Balance check failed: ${error instanceof Error ? error.message : "Unknown error"}`
+    }
+
+    return null
+}
+
 export default async function handleL2PS(
     l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
@@ -109,6 +141,13 @@ export default async function handleL2PS(
     // Verify decrypted hash matches original hash declared in payload
     if (decryptedTx.hash !== originalHash) {
         return createErrorResponse(response, 400, `Decrypted transaction hash mismatch: expected ${originalHash}, got ${decryptedTx.hash}`)
+    }
+
+    // Pre-check sender balance BEFORE mempool insertion
+    const balanceError = await checkSenderBalance(decryptedTx)
+    if (balanceError) {
+        log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
+        return createErrorResponse(response, 400, balanceError)
     }
 
     // Process Valid Transaction
