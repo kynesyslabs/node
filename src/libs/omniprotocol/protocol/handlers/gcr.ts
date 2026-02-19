@@ -34,7 +34,7 @@ interface IdentityAssignRequest {
         type: "identity"
         isRollback: boolean
         account: string
-        context: "xm" | "web2" | "pqc" | "ud" | "ethos"
+        context: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos" | "tlsn"
         operation: "add" | "remove"
         data: any  // Varies by context - see GCREditIdentity
         txhash: string
@@ -71,8 +71,8 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, conte
             return encodeResponse(errorResponse(400, "account is required"))
         }
 
-        if (!editOperation.context || !["xm", "web2", "pqc", "ud", "ethos"].includes(editOperation.context)) {
-            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, or ethos"))
+        if (!editOperation.context || !["xm", "web2", "pqc", "ud", "nomis", "ethos", "tlsn"].includes(editOperation.context)) {
+            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, ud, nomis, ethos, or tlsn"))
         }
 
         if (!editOperation.operation || !["add", "remove"].includes(editOperation.operation)) {

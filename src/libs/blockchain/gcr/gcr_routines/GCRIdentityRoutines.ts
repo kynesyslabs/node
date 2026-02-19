@@ -23,6 +23,19 @@ import {
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
 import { EthosApiClient } from "@/libs/identity/tools/ethos"
+import {
+    verifyTLSNProof,
+    type TLSNIdentityPayload,
+    type TLSNProofRanges,
+    type TLSNotaryPresentation,
+} from "@/libs/tlsnotary"
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
+import {
+    IdentityCommitmentPayload,
+    IdentityAttestationPayload,
+} from "@/features/zk/types"
+import Datasource from "@/model/datasource"
 
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
@@ -264,9 +277,9 @@ export default class GCRIdentityRoutines {
                     context === "telegram"
                         ? "Telegram attestation validation failed"
                         : "Sha256 proof mismatch: Expected " +
-                        data.proofHash +
-                        " but got " +
-                        Hashing.sha256(data.proof),
+                          data.proofHash +
+                          " but got " +
+                          Hashing.sha256(data.proof),
             }
         }
 
@@ -578,8 +591,9 @@ export default class GCRIdentityRoutines {
         if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid network: ${payload.network
-                    }. Must be one of: ${validNetworks.join(", ")}`,
+                message: `Invalid network: ${
+                    payload.network
+                }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
         if (!validRegistryTypes.includes(payload.registryType)) {
@@ -757,6 +771,283 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "Points deducted" }
     }
 
+    // SECTION ZK Identity Routines
+
+    /**
+     * Process ZK commitment addition
+     * Stores user's identity commitment (to be added to Merkle tree during block commit)
+     */
+    static async applyZkCommitmentAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as IdentityCommitmentPayload
+
+        // REVIEW: HIGH FIX - Strengthen commitment hash format validation
+        // Validate commitment format (should be 64-char hex or large number string)
+        if (
+            !payload.commitment_hash ||
+            typeof payload.commitment_hash !== "string" ||
+            payload.commitment_hash.length === 0
+        ) {
+            return {
+                success: false,
+                message: "Invalid commitment hash format",
+            }
+        }
+
+        // Validate format: either 64-char hex (with optional 0x prefix) or numeric string
+        const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+        const isValidHex = hexPattern.test(payload.commitment_hash)
+        const isValidNumber =
+            /^\d+$/.test(payload.commitment_hash) && payload.commitment_hash.length > 0
+
+        if (!isValidHex && !isValidNumber) {
+            return {
+                success: false,
+                message: "Commitment hash must be 64-char hex or numeric string",
+            }
+        }
+
+        // REVIEW: CRITICAL FIX - Normalize commitment hash to prevent duplicates
+        // Remove 0x prefix and convert hex to lowercase for consistent storage
+        // This prevents "0x1234..." and "1234..." from being stored as separate records
+        const normalizedCommitment = isValidHex
+            ? payload.commitment_hash.toLowerCase().replace(/^0x/, "")
+            : payload.commitment_hash
+
+        // REVIEW: MEDIUM FIX - Add provider field validation
+        if (
+            !payload.provider ||
+            typeof payload.provider !== "string" ||
+            payload.provider.trim().length === 0
+        ) {
+            return {
+                success: false,
+                message: "Invalid or missing provider field",
+            }
+        }
+
+        // REVIEW: MEDIUM FIX - Add timestamp validation
+        if (!payload.timestamp || typeof payload.timestamp !== "number") {
+            return {
+                success: false,
+                message: "Invalid or missing timestamp",
+            }
+        }
+
+        // Get datasource for IdentityCommitment repository
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const commitmentRepo = dataSource.getRepository(IdentityCommitment)
+
+        // REVIEW: Removed check-then-insert TOCTOU race condition
+        // Primary key constraint on commitmentHash prevents duplicates at DB level
+        if (!simulate) {
+            try {
+                await commitmentRepo.save({
+                    commitmentHash: normalizedCommitment,
+                    leafIndex: -1, // Placeholder, will be updated during Merkle tree insertion
+                    provider: payload.provider,
+                    blockNumber: 0, // Will be updated during block commit
+                    timestamp: payload.timestamp.toString(),
+                    transactionHash: editOperation.txhash || "",
+                })
+
+                log.info(
+                    `✅ ZK commitment stored: ${normalizedCommitment.slice(0, 10)}... (provider: ${payload.provider})`,
+                )
+            } catch (error: any) {
+                // Handle primary key constraint violation (commitment already exists)
+                // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
+                if (error.code === "23505" || error.code?.startsWith("SQLITE_CONSTRAINT")) {
+                    return {
+                        success: false,
+                        message: "Commitment already exists",
+                    }
+                }
+                // Re-throw other errors
+                throw error
+            }
+        }
+
+        return {
+            success: true,
+            message: "ZK commitment stored (pending Merkle tree insertion)",
+        }
+    }
+
+    /**
+     * Process ZK attestation (anonymous identity proof)
+     * Verifies ZK-SNARK proof and awards points if valid
+     */
+    static async applyZkAttestationAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as IdentityAttestationPayload
+
+        // REVIEW: MEDIUM FIX - Validate payload structure with type and format checks
+        if (
+            !payload.nullifier_hash ||
+            typeof payload.nullifier_hash !== "string" ||
+            payload.nullifier_hash.length === 0 ||
+            !payload.merkle_root ||
+            typeof payload.merkle_root !== "string" ||
+            payload.merkle_root.length === 0 ||
+            !payload.proof ||
+            typeof payload.proof !== "object" ||
+            !payload.public_signals ||
+            !Array.isArray(payload.public_signals)
+        ) {
+            return {
+                success: false,
+                message: "Invalid ZK attestation payload",
+            }
+        }
+
+        // REVIEW: MEDIUM FIX - Validate nullifier hash format (should match commitment format)
+        const hexPattern = /^(0x)?[0-9a-fA-F]{64}$/
+        const isValidNullifier =
+            hexPattern.test(payload.nullifier_hash) ||
+            (/^\d+$/.test(payload.nullifier_hash) && payload.nullifier_hash.length > 0)
+
+        if (!isValidNullifier) {
+            return {
+                success: false,
+                message: "Invalid nullifier hash format",
+            }
+        }
+
+        // Get datasource for verification
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const verifier = new ProofVerifier(dataSource)
+
+        // REVIEW: HIGH FIX - Validate env configuration BEFORE transaction to avoid wasting resources
+        // Get configurable points from environment (default: 10)
+        const zkAttestationPoints = parseInt(
+            process.env.ZK_ATTESTATION_POINTS || "10",
+            10,
+        )
+
+        // Validate environment variable before starting transaction
+        if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
+            log.error(
+                `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
+            )
+            return {
+                success: false,
+                message: "System configuration error: invalid attestation points",
+            }
+        }
+
+        // REVIEW: CRITICAL FIX - Perform verification and points awarding atomically within transaction
+        // This ensures nullifier marking uses correct values and prevents dirty data
+        if (!simulate) {
+            const queryRunner = dataSource.createQueryRunner()
+            await queryRunner.connect()
+            await queryRunner.startTransaction()
+
+            try {
+                // REVIEW: CRITICAL FIX - Verify ZK proof WITH transactional manager for pessimistic locking
+                // Pass manager and metadata to ensure nullifier is marked with correct values only after verification
+                const verificationResult = await verifier.verifyIdentityAttestation(
+                    {
+                        proof: payload.proof,
+                        publicSignals: payload.public_signals,
+                    },
+                    queryRunner.manager,
+                    {
+                        blockNumber: 0, // Will be updated during block commit
+                        transactionHash: editOperation.txhash || "",
+                    },
+                )
+
+                if (!verificationResult.valid) {
+                    await queryRunner.rollbackTransaction()
+                    log.warn(
+                        `❌ ZK attestation verification failed: ${verificationResult.reason}`,
+                    )
+                    return {
+                        success: false,
+                        message: `ZK proof verification failed: ${verificationResult.reason}`,
+                    }
+                }
+
+                // REVIEW: Award points for ZK attestation atomically with nullifier update
+                // REVIEW: Phase 10.1 - Configurable ZK attestation points
+                //
+                // Design Note: ZK Privacy vs Points
+                // - The ZK proof preserves identity privacy (we don't know WHICH identity proved ownership)
+                // - The transaction submitter (editOperation.account) receives points
+                // - The submitter may or may not be the identity holder (could be a relayer)
+                // - This is intentional: points reward the transaction submission, not identity disclosure
+                // - For fully private identities, users can choose not to submit attestation transactions
+                const account = await ensureGCRForUser(editOperation.account)
+
+                const zkAttestationEntry = {
+                    date: new Date().toISOString(),
+                    points: zkAttestationPoints,
+                    nullifier: payload.nullifier_hash.slice(0, 10) + "...", // Store abbreviated for reference
+                }
+
+                if (!account.points.breakdown.zkAttestation) {
+                    account.points.breakdown.zkAttestation = []
+                }
+
+                account.points.breakdown.zkAttestation.push(zkAttestationEntry)
+                account.points.totalPoints =
+                    (account.points.totalPoints || 0) + zkAttestationPoints
+                account.points.lastUpdated = new Date()
+
+                // Save account with transaction manager for atomicity
+                await queryRunner.manager.save(account)
+
+                // Commit transaction - both nullifier update and points awarding succeed together
+                await queryRunner.commitTransaction()
+
+                log.info(
+                    `✅ ZK attestation verified and points awarded (nullifier: ${payload.nullifier_hash.slice(0, 10)}...)`,
+                )
+            } catch (error) {
+                await queryRunner.rollbackTransaction()
+                throw error
+            } finally {
+                await queryRunner.release()
+            }
+        } else {
+            // REVIEW: CRITICAL FIX - Simulate path: verify without transaction
+            const verificationResult = await verifier.verifyIdentityAttestation({
+                proof: payload.proof,
+                publicSignals: payload.public_signals,
+            })
+
+            if (!verificationResult.valid) {
+                log.warn(
+                    `❌ ZK attestation verification failed (simulate): ${verificationResult.reason}`,
+                )
+                return {
+                    success: false,
+                    message: `ZK proof verification failed: ${verificationResult.reason}`,
+                }
+            }
+
+            log.info(
+                "✅ ZK attestation verified (simulate mode - no points awarded)",
+            )
+        }
+
+        return {
+            success: true,
+            message: simulate
+                ? "ZK attestation verified (simulation)"
+                : "ZK attestation verified and points awarded",
+        }
+    }
+
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
@@ -865,6 +1156,13 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "zk_commitmentadd":
+                result = await this.applyZkCommitmentAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "nomisremove":
                 result = await this.applyNomisIdentityRemove(
                     identityEdit,
@@ -881,6 +1179,27 @@ export default class GCRIdentityRoutines {
                 break
             case "ethosremove":
                 result = await this.applyEthosIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "tlsnadd":
+                result = await this.applyTLSNIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "tlsnremove":
+                result = await this.applyTLSNIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "zk_attestationadd":
+                result = await this.applyZkAttestationAdd(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
@@ -1328,5 +1647,321 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Ethos identity removed" }
+    }
+
+    // SECTION TLSNotary Identity Routines
+
+    /**
+     * Expected API endpoints for TLSN verification per context
+     */
+    private static TLSN_EXPECTED_ENDPOINTS: Record<
+        string,
+        { server: string; pathPrefix: string }
+    > = {
+        github: { server: "api.github.com", pathPrefix: "/user" },
+        discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
+        telegram: {
+            server: "telegram-backend",
+            pathPrefix: "/api/telegram/user",
+        },
+    }
+
+    /**
+     * Add an identity via TLSNotary proof verification.
+     */
+    static async applyTLSNIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        // Extract context from editOperation.data (top level)
+        const { context } = editOperation.data
+        // Extract nested data fields (proof, username, userId are inside data.data)
+        const {
+            proof: proofString,
+            recvHash,
+            proofRanges,
+            revealedRecv,
+            username,
+            userId,
+        } = editOperation.data.data || {}
+        // referralCode is at the editOperation level
+        const referralCode = editOperation.referralCode
+
+        if (!context) {
+            return {
+                success: false,
+                message: "Missing TLSN context",
+            }
+        }
+
+        if (!username) {
+            return {
+                success: false,
+                message: "Missing TLSN username",
+            }
+        }
+
+        if (userId === undefined || userId === null) {
+            return {
+                success: false,
+                message: "Missing TLSN userId",
+            }
+        }
+
+        if (proofString === undefined || proofString === null) {
+            return {
+                success: false,
+                message: "Missing TLSN proof",
+            }
+        }
+
+        if (!recvHash) {
+            return {
+                success: false,
+                message: "Missing TLSN recvHash",
+            }
+        }
+
+        if (!proofRanges) {
+            return {
+                success: false,
+                message: "Missing TLSN proofRanges",
+            }
+        }
+
+        if (revealedRecv === undefined || revealedRecv === null) {
+            return {
+                success: false,
+                message: "Missing TLSN revealedRecv",
+            }
+        }
+
+        // Parse the proof JSON string back to object
+        let proof: any
+        try {
+            proof =
+                typeof proofString === "string"
+                    ? JSON.parse(proofString)
+                    : proofString
+        } catch (e) {
+            return {
+                success: false,
+                message: "Invalid proof: failed to parse proof JSON string",
+            }
+        }
+
+        // 1. Validate context is supported
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
+            return {
+                success: false,
+                message: `Unsupported TLSN context: ${context}`,
+            }
+        }
+
+        // 2. Validate proof structure
+        if (!proof || typeof proof !== "object") {
+            return {
+                success: false,
+                message:
+                    "Invalid proof: expected TLSNotary presentation object",
+            }
+        }
+
+        if (!proof.data || !proof.version) {
+            return {
+                success: false,
+                message: "Invalid proof structure: missing data or version",
+            }
+        }
+
+        // 3. Verify proof and validate recvHash/proofRanges-derived identity claims
+        const verification = await verifyTLSNProof({
+            context,
+            proof: proof as TLSNotaryPresentation,
+            recvHash,
+            proofRanges: proofRanges as TLSNProofRanges,
+            revealedRecv,
+            username: String(username),
+            userId: String(userId),
+            referralCode,
+        } as TLSNIdentityPayload)
+
+        if (!verification.success) {
+            log.warn(
+                `[TLSN Identity] Proof verification failed: ${verification.message}`,
+            )
+            return {
+                success: false,
+                message: verification.message,
+            }
+        }
+
+        // 8. Get/create GCR and check for duplicates
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        // Check if identity already exists (by userId to prevent duplicate registrations)
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.userId === String(userId),
+        )
+
+        if (exists) {
+            return { success: false, message: "Identity already exists" }
+        }
+
+        // 9. Prepare data for storage
+        const proofHash = Hashing.sha256(JSON.stringify(proof))
+        const data = {
+            userId: String(userId),
+            username: username,
+            proof: proof,
+            proofHash: proofHash,
+            proofType: "tlsn", // Mark as TLSNotary-verified
+            timestamp: Date.now(),
+        }
+
+        accountGCR.identities.web2[context].push(data)
+
+        // 10. Save and award incentives
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            if (context === "github") {
+                const isFirst = await this.isFirstConnection(
+                    "github",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.githubLinked(
+                        editOperation.account,
+                        String(userId),
+                        referralCode,
+                    )
+                }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        referralCode,
+                    )
+                }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.telegramTLSNLinked(
+                        editOperation.account,
+                        String(userId),
+                        referralCode,
+                    )
+                }
+            }
+        }
+
+        return { success: true, message: "TLSN identity added successfully" }
+    }
+
+    /**
+     * Remove an identity that was added via TLSNotary.
+     *
+     * Removes only TLSN-proven identities (proofType === "tlsn") from web2 storage.
+     */
+    static async applyTLSNIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { context, username } = editOperation.data as {
+            context?: string
+            username?: string
+        }
+
+        if (!context || !username) {
+            return {
+                success: false,
+                message: "Invalid payload: missing context or username",
+            }
+        }
+
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
+            return {
+                success: false,
+                message: `Unsupported TLSN context: ${context}`,
+            }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        const isMatch = (id: Web2GCRData["data"] & { proofType?: string }) => {
+            // TLSN remove must never affect legacy/non-TLSN web2 identities.
+            if (id.proofType !== "tlsn") {
+                return false
+            }
+            return id.username === username
+        }
+
+        // Find the TLSN identity to remove
+        const identity = accountGCR.identities.web2[context].find(
+            (id: Web2GCRData["data"]) => isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
+
+        if (!identity) {
+            return { success: false, message: "TLSN identity not found" }
+        }
+
+        // Filter out only the matching TLSN identity
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter(
+            (id: Web2GCRData["data"]) =>
+                !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
+            if (context === "github" && identity.userId) {
+                await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    identity.userId,
+                )
+            } else if (context === "discord") {
+                await IncentiveManager.discordUnlinked(editOperation.account)
+            } else if (context === "telegram") {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
+            }
+        }
+
+        return { success: true, message: "TLSN identity removed successfully" }
     }
 }

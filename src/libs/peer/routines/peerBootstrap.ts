@@ -9,106 +9,217 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { cryptography } from "src/libs/crypto"
+import fs from "fs"
+import axios from "axios"
 
 import Peer from "../Peer"
-import PeerManager from "../PeerManager"
-import getPeerIdentity from "./getPeerIdentity"
 import log from "src/utilities/logger"
+import PeerManager from "../PeerManager"
+import Hashing from "@/libs/crypto/hashing"
+import getPeerIdentity from "./getPeerIdentity"
 import { sleep } from "@kynesyslabs/demosdk/utils"
+import { RPCRequest } from "@kynesyslabs/demosdk/types"
+import { getSharedState } from "@/utilities/sharedState"
 
-const peerManager = PeerManager.getInstance()
+let ourGenesisDataHash = ""
+const genesisFile = "data/genesis.json"
+const peerman = PeerManager.getInstance()
+const discoveredGenesisDataHashes = new Set<string>()
+
+async function ensureGenesisDataMatch(verifiedPeer: Peer) {
+    const request: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getGenesisDataHash",
+            },
+        ],
+    }
+
+    const res = await verifiedPeer.call(request)
+    log.debug("[BOOTSTRAP] Genesis data hash: " + JSON.stringify(res))
+
+    if (res.result === 200) {
+        const peerGenesisDataHash = res.response
+
+        if (peerGenesisDataHash !== ourGenesisDataHash) {
+            log.error("[BOOTSTRAP] Genesis data hash does not match")
+            log.warn(
+                "[BOOTSTRAP] Expected: " +
+                    ourGenesisDataHash +
+                    " Got: " +
+                    peerGenesisDataHash,
+            )
+            log.debug(
+                "[BOOTSTRAP] Fetching new genesis data from peer: " +
+                    verifiedPeer.connection.string,
+            )
+
+            const res = await axios.get(
+                verifiedPeer.connection.string + "/genesis",
+            )
+
+            if (res.status === 200) {
+                // INFO: Save the new genesis data to the file
+                fs.writeFileSync(genesisFile, JSON.stringify(res.data, null, 2))
+                const ourNewGenesisDataHash = Hashing.sha256(
+                    JSON.stringify(
+                        JSON.parse(fs.readFileSync(genesisFile, "utf8")),
+                    ),
+                )
+
+                // INFO: Update discovered genesis hashes and current genesis hash
+                discoveredGenesisDataHashes.add(ourNewGenesisDataHash)
+                ourGenesisDataHash = ourNewGenesisDataHash
+
+                // INFO: Ensure all peers have the same genesis data
+                if (discoveredGenesisDataHashes.size > 1) {
+                    log.error(
+                        "[BOOTSTRAP] Conflicting genesis data hashes found",
+                    )
+                    process.exit(1)
+                }
+
+                log.debug(
+                    "[BOOTSTRAP] Downloaded genesis data with hash: " +
+                        ourNewGenesisDataHash,
+                )
+
+                log.debug(
+                    "[BOOTSTRAP] Updated genesis data to match peer's hash: " +
+                        ourNewGenesisDataHash,
+                )
+
+                if (ourNewGenesisDataHash !== peerGenesisDataHash) {
+                    log.error(
+                        "[BOOTSTRAP] New genesis data hash still does not match: " +
+                            ourNewGenesisDataHash +
+                            " != " +
+                            peerGenesisDataHash,
+                    )
+                    process.exit(1)
+                }
+
+                return
+            }
+
+            log.error(
+                "[BOOTSTRAP] Failed to download genesis data from peer: " +
+                    verifiedPeer.connection.string,
+            )
+            process.exit(1)
+        }
+    } else {
+        log.error(
+            "[BOOTSTRAP] Failed to get genesis data hash from peer: " +
+                verifiedPeer.connection.string,
+        )
+        process.exit(1)
+    }
+}
+
+async function tryConnectPeer(peer: Peer) {
+    if (peer.identity === getSharedState.publicKeyHex) {
+        return
+    }
+
+    log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
+    // ANCHOR Extract peer info from the string
+    // If there is a : in the url, we assume it's a address + port
+    const currentPeerUrl: string = peer.connection.string
+    const currentPublicKey: string = peer.identity
+    log.debug(
+        "[BOOTSTRAP] Testing " +
+            currentPeerUrl +
+            " with id " +
+            currentPublicKey,
+    )
+    // ANCHOR Connection test and hello_peer routine
+    const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
+    // Adding identity if any
+    log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
+    // After this, the peer object will have an identity and thus will be verified
+    const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
+    if (!verifiedPeer) {
+        log.warning(
+            "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
+        )
+
+        PeerManager.markPeerOffline(blankPeer)
+        return
+    }
+
+    log.debug("[BOOTSTRAP] Overriding connection string: " + currentPeerUrl)
+    log.debug("[BOOTSTRAP] Verified peer: " + JSON.stringify(verifiedPeer))
+
+    try {
+        verifiedPeer.connection.string = currentPeerUrl // Adding this step
+    } catch (error) {
+        log.error("[BOOTSTRAP] Error setting connection string: " + error)
+        log.critical("Error setting connection string: " + error)
+        return
+    }
+    log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
+
+    log.debug(
+        "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
+    )
+
+    try {
+        await ensureGenesisDataMatch(verifiedPeer)
+    } catch (error) {
+        log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
+        console.error(error)
+        process.exit(1)
+    }
+
+    let maxRetries = 3
+    while (maxRetries > 0) {
+        // INFO: Check if peer's genesis hash matches ours, else download their genesis data
+        await PeerManager.sayHelloToPeer(verifiedPeer, true)
+
+        // INFO: Confirmed we paired with anchor node
+        if (
+            peerman.getPeers().find(p => p.identity === verifiedPeer.identity)
+        ) {
+            return
+        }
+
+        log.warn("[BOOTSTRAP] Failed to pair with anchor node, retrying...")
+        maxRetries--
+        await sleep(1000)
+    }
+
+    log.error(
+        "[BOOTSTRAP] Failed to pair with anchor peer: " +
+            verifiedPeer.identity +
+            " @ " +
+            verifiedPeer.connection.string +
+            ". Exiting ...",
+    )
+    process.exit(1)
+}
+
 // ANCHOR Main function
-
 export default async function peerBootstrap(
     localList: Peer[],
 ): Promise<Peer[]> {
     log.info("[BOOTSTRAP] Loading peers...")
 
+    // INFO: Get our genesis data hash
+    const genesisFile = "data/genesis.json"
+    const genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
+    ourGenesisDataHash = Hashing.sha256(JSON.stringify(genesisData))
+    log.debug("[BOOTSTRAP] Our genesis data hash: " + ourGenesisDataHash)
+
     // Validity check
-    anchorLoop: for (let i = 0; i < localList.length; i++) {
-        log.debug("[BOOTSTRAP] Checking peer " + localList[i])
-        // ANCHOR Extract peer info from the string
-        const currentPeer: Peer = localList[i] // The url of the peer
-        // If there is a : in the url, we assume it's a address + port
-        const currentPeerUrl: string = currentPeer.connection.string
-        const currentPublicKey: string = currentPeer.identity
-        log.debug(
-            "[BOOTSTRAP] Testing " +
-                currentPeerUrl +
-                " with id " +
-                currentPublicKey,
-        )
-        // ANCHOR Connection test and hello_peer routine
-        const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
-        // Adding identity if any
-        log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
-        // After this, the peer object will have an identity and thus will be verified
-        const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
-        if (!verifiedPeer) {
-            log.warning(
-                "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
-            )
-            peerManager.addOfflinePeer(blankPeer)
-            peerManager.removeOnlinePeer(blankPeer.identity)
-            continue
-        }
-
-        log.debug("[BOOTSTRAP] Overriding connection string: " + currentPeerUrl)
-        log.debug("[BOOTSTRAP] Verified peer: " + JSON.stringify(verifiedPeer))
-
-        try {
-            verifiedPeer.connection.string = currentPeerUrl // Adding this step
-        } catch (error) {
-            log.error("[BOOTSTRAP] Error setting connection string: " + error)
-            log.critical("Error setting connection string: " + error)
-            continue
-        }
-        log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
-
-        log.debug(
-            "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
-        )
-
-        let maxRetries = 3
-        while (maxRetries > 0) {
-            await PeerManager.sayHelloToPeer(verifiedPeer, true)
-
-            // INFO: Confirmed we paired with anchor node
-            if (
-                peerManager
-                    .getPeers()
-                    .find(p => p.identity === verifiedPeer.identity)
-            ) {
-                continue anchorLoop
-            }
-
-            log.warn("[BOOTSTRAP] Failed to pair with anchor node, retrying...")
-            maxRetries--
-            await sleep(1000)
-        }
-
-        log.error(
-            "[BOOTSTRAP] Failed to pair with anchor peer: " +
-                verifiedPeer.identity +
-                " @ " +
-                verifiedPeer.connection.string +
-                ". Exiting ...",
-        )
-        process.exit(1)
+    for (const peer of localList) {
+        await tryConnectPeer(peer)
     }
 
-    // Dying if there are no valid peers
-    if (peerManager.getPeers().length == 0) {
-        // Exit if there are no valid peers
-        log.warning(
-            "[BOOTSTRAP] No valid peers found, listening for connections...",
-        )
-    } else {
-        log.info(
-            "[BOOTSTRAP] Valid peers found: " + peerManager.getPeers().length,
-        )
-    }
+    ourGenesisDataHash = null
+    discoveredGenesisDataHashes.clear()
 
-    return peerManager.getPeers()
+    log.info("[BOOTSTRAP] Valid peers found: " + peerman.getPeers().length)
+    return peerman.getPeers()
 }

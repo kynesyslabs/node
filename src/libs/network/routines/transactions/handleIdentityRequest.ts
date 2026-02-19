@@ -11,8 +11,7 @@ import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
-import log from "@/utilities/logger"
-import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
 
 interface IdentityResponse {
     success: boolean
@@ -104,12 +103,16 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyEthosPayload(
                 payload.payload as EthosWalletIdentity,
             )
+        case "tlsn_identity_assign":
+            // TLSNotary identity verification - verify proof structure
+            return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
         case "nomis_identity_remove":
         case "ethos_identity_remove":
         case "ud_identity_remove":
+        case "tlsn_identity_remove":
             return {
                 success: true,
                 message: "Identity removed",
@@ -117,7 +120,9 @@ export default async function handleIdentityRequest(
         default:
             return {
                 success: false,
-                message: `Unsupported identity method: ${(payload as IdentityPayload).method}`,
+                message: `Unsupported identity method: ${
+                    (payload as IdentityPayload).method
+                }`,
             }
     }
 }
