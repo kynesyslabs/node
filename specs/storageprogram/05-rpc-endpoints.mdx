@@ -19,7 +19,8 @@ This document provides the HTTP API reference for reading StorageProgram data.
 | `/storage-program/:address/has/:field` | GET | Check if field exists |
 | `/storage-program/:address/type/:field` | GET | Get field value type |
 | `/storage-program/:address/all` | GET | Get all data |
-| `/storage-program/search/:name` | GET | Search by program name |
+| `/storage-program/search?q=:query` | GET | Search by program name (partial match by default) |
+| `/storage-program/search/:name` | GET | Search by program name (path alias) |
 
 ## Read Storage Program
 
@@ -35,10 +36,10 @@ GET /storage-program/stor-abc123def456...
 
 | Header | Required | Description |
 |--------|----------|-------------|
-| `identity` | Conditional | Required for owner/restricted mode. Format: `algorithm:publicKey` or just `publicKey` |
-| `signature` | Conditional | Required with identity. Signature of the public key |
+| `identity` | Optional | Used for ACL checks on owner/restricted data. Format: `algorithm:publicKey` or just `publicKey` |
+| `signature` | Optional | Reserved for authenticated client flows; current storage GET routes use `identity` for access checks |
 
-**Note**: Headers are optional for public storage programs.
+**Note**: For anonymous requests, only publicly readable programs are accessible.
 
 ### Response
 
@@ -123,7 +124,6 @@ GET /storage-program/stor-abc123def456...
 | `NOT_FOUND` | 404 | Storage program doesn't exist |
 | `INVALID_REQUEST` | 400 | Invalid address format or malformed request |
 | `PERMISSION_DENIED` | 403 | Requester lacks read access |
-| `DELETED` | 404 | Storage program was soft deleted |
 | `INTERNAL_ERROR` | 500 | Server error during processing |
 
 ### Example: cURL
@@ -427,7 +427,13 @@ GET /storage-program/:address/all
 Search for storage programs by name with partial matching.
 
 ```http
-GET /storage-program/search/:name
+GET /storage-program/search?q=user
+```
+
+Path alias is also supported:
+
+```http
+GET /storage-program/search/user
 ```
 
 **Response (200)**
@@ -464,7 +470,7 @@ GET /storage-program/search/:name
 | `/storage-program/:address/has/:field` | GET | Check if field exists |
 | `/storage-program/:address/type/:field` | GET | Get field value type |
 | `/storage-program/:address/all` | GET | Get all data |
-| `/storage-program/search/:name` | GET | Search by program name |
+| `/storage-program/search?q=:query` | GET | Search by program name |
 
 ### Example: JavaScript with Granular Endpoints
 
@@ -528,10 +534,7 @@ const signatureHex = Buffer.from(signature).toString("hex")
 
 ### Signature Verification
 
-The server verifies:
-1. The signature is valid for the public key
-2. The algorithm matches the identity prefix
-3. The identity has read permission for the requested resource
+For storage GET routes, access checks are based on `identity` + ACL rules in storage handlers. Signature-based verification may be applied in broader node flows, but should not be assumed as mandatory for these direct GET endpoints.
 
 ## Write Operations
 

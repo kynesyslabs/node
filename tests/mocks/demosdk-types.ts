@@ -37,3 +37,59 @@ export type EncryptedTransaction = Record<string, unknown>
 export type BrowserRequest = Record<string, unknown>
 export type ValidationData = Record<string, unknown>
 export type UserPoints = Record<string, unknown>
+
+// StorageProgram types used by GCRStorageProgramRoutines
+export interface GCREdit {
+    target: string
+    type: string
+    context: {
+        sender: string
+        data?: Record<string, unknown>
+    }
+    txhash: string
+}
+
+export interface GCREditStorageProgram extends GCREdit {
+    type: "storageProgram"
+    context: {
+        sender: string
+        data?: {
+            variables?: StorageProgramPayload & {
+                field?: string
+                index?: number
+                value?: unknown
+            }
+            metadata?: Record<string, unknown>
+        }
+    }
+}
+
+export interface StorageProgramPayload {
+    operation: string
+    storageAddress: string
+    programName?: string
+    encoding?: "json" | "binary"
+    data?: Record<string, unknown> | string | null
+    acl?: {
+        mode: string
+        allowed?: string[]
+        blacklisted?: string[]
+        groups?: Record<
+            string,
+            { members: string[]; permissions: string[] }
+        >
+    }
+    metadata?: Record<string, unknown> | null
+    storageLocation?: string
+    salt?: string | null
+}
+
+// Namespace re-exports matching SDK structure
+export const types = {
+    GCREdit: {} as GCREdit,
+    GCREditStorageProgram: {} as GCREditStorageProgram,
+}
+
+export const storage = {
+    StorageProgramPayload: {} as StorageProgramPayload,
+}

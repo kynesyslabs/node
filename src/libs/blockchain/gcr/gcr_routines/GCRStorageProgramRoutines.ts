@@ -23,6 +23,31 @@ type StorageProgramPayload = storage.StorageProgramPayload
 const STORAGE_PROGRAM_MAX_SIZE_BYTES = 1048576 // 1MB
 const STORAGE_PROGRAM_PRICING_CHUNK_BYTES = 10240 // 10KB
 const STORAGE_PROGRAM_FEE_PER_CHUNK = 1n // 1 DEM per chunk
+const MAX_INTERACTION_TXS = 1000
+
+function deepMerge(
+    target: Record<string, unknown>,
+    source: Record<string, unknown>,
+): Record<string, unknown> {
+    const result = { ...target }
+    for (const key of Object.keys(source)) {
+        const tVal = target[key]
+        const sVal = source[key]
+        if (
+            tVal && sVal &&
+            typeof tVal === "object" && !Array.isArray(tVal) &&
+            typeof sVal === "object" && !Array.isArray(sVal)
+        ) {
+            result[key] = deepMerge(
+                tVal as Record<string, unknown>,
+                sVal as Record<string, unknown>,
+            )
+        } else {
+            result[key] = sVal
+        }
+    }
+    return result
+}
 
 /**
  * StorageProgram cost breakdown for confirm flow
@@ -529,20 +554,45 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        if (simulate) {
-            log.debug(`[StorageProgram] Simulated create: ${storageAddress}`)
-            return { success: true, message: "Simulated create successful" }
-        }
-
-        // Calculate size and fee
+        // Calculate size and fee (validate before simulate to catch invalid payloads early)
         const encoding = variables.encoding || "json"
         const sizeBytes = variables.data
             ? calculateDataSize(variables.data, encoding)
             : 0
+
+        if (sizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            return {
+                success: false,
+                message: `Data size ${sizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
+        }
+
+        if (encoding === "json" && variables.data && typeof variables.data === "object") {
+            const depth = calculateJsonNestingDepth(variables.data)
+            if (depth > 64) {
+                return {
+                    success: false,
+                    message: `JSON nesting depth ${depth} exceeds maximum 64 levels`,
+                }
+            }
+        }
+
+        if (encoding === "binary" && typeof variables.data === "string" && !isValidBase64(variables.data)) {
+            return {
+                success: false,
+                message: "Binary data must be valid base64 encoded string",
+            }
+        }
+
         const chunks = Math.ceil(
             sizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
         )
         const fee = BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated create: ${storageAddress}`)
+            return { success: true, message: "Simulated create successful" }
+        }
 
         // Create new storage program
         const program = new GCRStorageProgram()
@@ -639,20 +689,45 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        if (simulate) {
-            log.debug(`[StorageProgram] Simulated write: ${storageAddress}`)
-            return { success: true, message: "Simulated write successful" }
-        }
-
-        // Calculate new size and fee
+        // Calculate new size and fee (validate before simulate to catch invalid payloads early)
         const encoding = variables.encoding || program.encoding
         const newSizeBytes = variables.data
             ? calculateDataSize(variables.data, encoding)
             : program.sizeBytes
+
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
+        }
+
+        if (encoding === "json" && variables.data && typeof variables.data === "object") {
+            const depth = calculateJsonNestingDepth(variables.data)
+            if (depth > 64) {
+                return {
+                    success: false,
+                    message: `JSON nesting depth ${depth} exceeds maximum 64 levels`,
+                }
+            }
+        }
+
+        if (encoding === "binary" && typeof variables.data === "string" && !isValidBase64(variables.data)) {
+            return {
+                success: false,
+                message: "Binary data must be valid base64 encoded string",
+            }
+        }
+
         const chunks = Math.ceil(
             newSizeBytes / STORAGE_PROGRAM_PRICING_CHUNK_BYTES,
         )
         const fee = BigInt(Math.max(1, chunks)) * STORAGE_PROGRAM_FEE_PER_CHUNK
+
+        if (simulate) {
+            log.debug(`[StorageProgram] Simulated write: ${storageAddress}`)
+            return { success: true, message: "Simulated write successful" }
+        }
 
         // Update data
         program.data = variables.data ?? program.data
@@ -660,7 +735,7 @@ export class GCRStorageProgramRoutines {
         program.encoding = encoding
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
@@ -685,7 +760,10 @@ export class GCRStorageProgramRoutines {
             const newMetadata =
                 (edit.context.data?.metadata as Record<string, unknown>) ||
                 variables.metadata
-            program.metadata = { ...program.metadata, ...newMetadata }
+            program.metadata = deepMerge(
+                (program.metadata || {}) as Record<string, unknown>,
+                newMetadata as Record<string, unknown>,
+            )
         }
 
         await repository.save(program)
@@ -753,7 +831,7 @@ export class GCRStorageProgramRoutines {
         program.acl = variables.acl
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
 
@@ -812,7 +890,7 @@ export class GCRStorageProgramRoutines {
         program.deletedByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
 
@@ -948,6 +1026,8 @@ export class GCRStorageProgramRoutines {
             // Check groups for read permission
             if (acl.groups) {
                 for (const group of Object.values(acl.groups)) {
+                    if (!group || typeof group !== "object") continue
+                    if (!Array.isArray(group.members) || !Array.isArray(group.permissions)) continue
                     if (
                         group.members.includes(requesterAddress) &&
                         group.permissions.includes("read")
@@ -1061,7 +1141,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
@@ -1182,7 +1262,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
@@ -1301,7 +1381,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
@@ -1398,7 +1478,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         // No fee added for deletions
@@ -1503,7 +1583,7 @@ export class GCRStorageProgramRoutines {
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
         program.interactionTxs = [
-            ...(program.interactionTxs || []),
+            ...(program.interactionTxs || []).slice(-(MAX_INTERACTION_TXS - 1)),
             edit.txhash,
         ]
         // No fee added for deletions
@@ -1540,6 +1620,8 @@ function checkDeletePermission(
     // Check groups
     if (acl.groups) {
         for (const group of Object.values(acl.groups)) {
+            if (!group || typeof group !== "object") continue
+            if (!Array.isArray(group.members) || !Array.isArray(group.permissions)) continue
             if (
                 group.members.includes(address) &&
                 group.permissions.includes("delete")
@@ -1588,6 +1670,8 @@ function checkWritePermission(
     // Restricted mode: check groups for write permission
     if (acl.mode === "restricted" && acl.groups) {
         for (const group of Object.values(acl.groups)) {
+            if (!group || typeof group !== "object") continue
+            if (!Array.isArray(group.members) || !Array.isArray(group.permissions)) continue
             if (
                 group.members.includes(address) &&
                 group.permissions.includes("write")
