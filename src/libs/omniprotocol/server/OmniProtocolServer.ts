@@ -171,7 +171,6 @@ export class OmniProtocolServer extends EventEmitter {
         // Check rate limits for IP
         const rateLimitResult = this.rateLimiter.checkConnection(
             ipAddress,
-            connectionCount,
             "OmniProtocolServer",
         )
 

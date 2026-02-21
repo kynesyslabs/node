@@ -153,13 +153,8 @@ export class TLSServer extends EventEmitter {
         const ipAddress = socket.remoteAddress || "unknown"
 
         log.debug(`[TLSServer] New TLS connection from ${remoteAddress}`)
-
-        // Check rate limits for IP
-        const connectionCount =
-            this.connectionManager.getConnectionCountByIp(ipAddress)
         const rateLimitResult = this.rateLimiter.checkConnection(
             ipAddress,
-            connectionCount,
             "TLSServer",
         )
         if (!rateLimitResult.allowed) {

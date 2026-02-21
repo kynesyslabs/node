@@ -41,7 +41,6 @@ export class RateLimiter {
      */
     checkConnection(
         ipAddress: string,
-        connectionCount: number,
         callerName: string,
     ): RateLimitResult {
         if (!this.config.enabled) {
@@ -71,9 +70,6 @@ export class RateLimiter {
             entry.blockExpiry = undefined
         }
 
-        if (connectionCount) {
-            entry.connections = connectionCount
-        }
 
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {

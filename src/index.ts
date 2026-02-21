@@ -506,7 +506,7 @@ async function main() {
                     enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
                     maxConnectionsPerIP: parseInt(
                         process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
-                        10,
+                        20,
                     ),
                     maxRequestsPerSecondPerIP: parseInt(
                         process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
