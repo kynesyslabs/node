@@ -1098,4 +1098,6 @@ function main() {
     writeText(path.join(outRoot, "versioning", "changelog.md"), buildChangelogMarkdown(versions))
 }
 
-main()
+if (import.meta.main) {
+    main()
+}
