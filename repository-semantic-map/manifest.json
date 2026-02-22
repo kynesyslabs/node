@@ -1,0 +1,102 @@
+{
+  "generated_at": "2026-02-22T19:10:25.324Z",
+  "git_ref": "67d37a2c",
+  "version": "1.0.1",
+  "scope": {
+    "tracked_ts_files": 369,
+    "exclude_paths": [
+      ".planning/**",
+      "dist/**",
+      "node_modules/**",
+      "local_tests/**",
+      "omniprotocol_fixtures_scripts/**",
+      "sdk/**"
+    ]
+  },
+  "inputs": {
+    "docs_used": [
+      {
+        "path": "README.md",
+        "bytes": 8591,
+        "sha1": "54be0e786c089d4811a772de8daa59ab1772871a"
+      },
+      {
+        "path": "INSTALL.md",
+        "bytes": 12592,
+        "sha1": "a8ac5cb73c95cf47bdbd1edc6d2561bdc8d708ac"
+      },
+      {
+        "path": "CONTRIBUTING.md",
+        "bytes": 5732,
+        "sha1": "423c7fc817bbb39fceab4cd738167e2841b472d9"
+      },
+      {
+        "path": "OMNIPROTOCOL_SETUP.md",
+        "bytes": 5923,
+        "sha1": "87ad7151fe7294aed3fc2dd08296f97c6c90e68d"
+      },
+      {
+        "path": "L2PS_TESTING.md",
+        "bytes": 13228,
+        "sha1": "aabe9fdb424cc12da4bb36a1d7ada4cadae30c7c"
+      },
+      {
+        "path": ".planning/codebase/STACK.md",
+        "bytes": 3254,
+        "sha1": "fe7adf59672cb776f8a0cd54bb007b576ff2f80d"
+      },
+      {
+        "path": ".planning/codebase/INTEGRATIONS.md",
+        "bytes": 3131,
+        "sha1": "a19a1c4eb14239f57095cc90ba2522df76966cf9"
+      },
+      {
+        "path": ".planning/codebase/ARCHITECTURE.md",
+        "bytes": 2735,
+        "sha1": "ae8f6194e395dd7da336c5309ed51fd55f503cbf"
+      },
+      {
+        "path": ".planning/codebase/STRUCTURE.md",
+        "bytes": 2560,
+        "sha1": "fd8adc09d3b7bc12892c88da520ece8914ca0d3b"
+      },
+      {
+        "path": ".planning/codebase/CONVENTIONS.md",
+        "bytes": 1809,
+        "sha1": "1ac1cb9696de93a7bd4dc72ad4b231adf05c9a49"
+      },
+      {
+        "path": ".planning/codebase/TESTING.md",
+        "bytes": 907,
+        "sha1": "4d745fbe375e020f0fb5c15f2beffa42626fc713"
+      },
+      {
+        "path": ".planning/codebase/CONCERNS.md",
+        "bytes": 2703,
+        "sha1": "4a84f0b59ce275738c30c5addb3fb70aa61798a0"
+      }
+    ],
+    "codebase_docs_used": [
+      ".planning/codebase/STACK.md",
+      ".planning/codebase/INTEGRATIONS.md",
+      ".planning/codebase/ARCHITECTURE.md",
+      ".planning/codebase/STRUCTURE.md",
+      ".planning/codebase/CONVENTIONS.md",
+      ".planning/codebase/TESTING.md",
+      ".planning/codebase/CONCERNS.md"
+    ]
+  },
+  "statistics": {
+    "total_atoms": 2471,
+    "total_edges": 3262,
+    "exported_atoms": 2101,
+    "files_indexed": 369,
+    "confidence_avg": 0.7535936867665043,
+    "min_confidence": 0.7,
+    "max_confidence": 0.92
+  },
+  "quality_gates": {
+    "exported_symbols_have_atoms": true,
+    "note": "Exported symbols are detected via syntax (`export` modifiers and export declarations). Exported class members are also indexed as L3 atoms."
+  }
+}

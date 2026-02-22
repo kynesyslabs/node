@@ -1,0 +1,216 @@
+{
+  "generated_at": "2026-02-22T19:10:25.324Z",
+  "terms": [
+    {
+      "term": "bun",
+      "count": 11,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONVENTIONS.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        ".planning/codebase/TESTING.md",
+        "CONTRIBUTING.md",
+        "INSTALL.md",
+        "OMNIPROTOCOL_SETUP.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "peer",
+      "count": 9,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        "INSTALL.md",
+        "L2PS_TESTING.md",
+        "OMNIPROTOCOL_SETUP.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "block",
+      "count": 8,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONCERNS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        "INSTALL.md",
+        "L2PS_TESTING.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "omniprotocol",
+      "count": 8,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        "INSTALL.md",
+        "OMNIPROTOCOL_SETUP.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "typeorm",
+      "count": 8,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONCERNS.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        "L2PS_TESTING.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "postgresql",
+      "count": 6,
+      "sources": [
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        "CONTRIBUTING.md",
+        "INSTALL.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "tlsnotary",
+      "count": 6,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STRUCTURE.md",
+        "INSTALL.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "transaction",
+      "count": 6,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONCERNS.md",
+        "CONTRIBUTING.md",
+        "L2PS_TESTING.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "bridge",
+      "count": 5,
+      "sources": [
+        ".planning/codebase/CONCERNS.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        "INSTALL.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "mcp",
+      "count": 5,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/INTEGRATIONS.md",
+        ".planning/codebase/STACK.md",
+        ".planning/codebase/STRUCTURE.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "demos network",
+      "count": 4,
+      "sources": [
+        "CONTRIBUTING.md",
+        "INSTALL.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "mempool",
+      "count": 4,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONCERNS.md",
+        "L2PS_TESTING.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "gcr",
+      "count": 3,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/CONCERNS.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "porbft",
+      "count": 3,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/STRUCTURE.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "validator",
+      "count": 3,
+      "sources": [
+        "L2PS_TESTING.md",
+        "README.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "zk",
+      "count": 3,
+      "sources": [
+        ".planning/codebase/ARCHITECTURE.md",
+        ".planning/codebase/STRUCTURE.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "l2ps",
+      "count": 2,
+      "sources": [
+        "L2PS_TESTING.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "rubic",
+      "count": 2,
+      "sources": [
+        ".planning/codebase/INTEGRATIONS.md",
+        "seed"
+      ]
+    },
+    {
+      "term": "merkle tree",
+      "count": 1,
+      "sources": [
+        "seed"
+      ]
+    }
+  ]
+}
