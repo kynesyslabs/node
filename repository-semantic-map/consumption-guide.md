@@ -1,7 +1,7 @@
 # Consumption Guide
 
-**Index version:** 1.0.1
-**Git ref:** `67d37a2c`
+**Index version:** 1.0.2
+**Git ref:** `a454f37e`
 
 ## Maintenance protocol
 

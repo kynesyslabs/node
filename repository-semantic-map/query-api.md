@@ -1,7 +1,7 @@
 # Query API
 
-**Index version:** 1.0.1
-**Git ref:** `67d37a2c`
+**Index version:** 1.0.2
+**Git ref:** `a454f37e`
 
 Artifacts:
 - `repository-semantic-map/semantic-index.jsonl` (JSONL atoms)
@@ -44,11 +44,11 @@ Query Patterns:
 
 ```json
 {
-  "total_atoms": 2471,
+  "total_atoms": 2472,
   "total_edges": 3262,
   "exported_atoms": 2101,
-  "files_indexed": 369,
-  "confidence_avg": 0.7535936867665043,
+  "files_indexed": 370,
+  "confidence_avg": 0.7536124595469386,
   "min_confidence": 0.7,
   "max_confidence": 0.92
 }

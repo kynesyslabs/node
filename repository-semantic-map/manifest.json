@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-02-22T19:10:25.324Z",
-  "git_ref": "67d37a2c",
-  "version": "1.0.1",
+  "generated_at": "2026-02-22T19:12:05.352Z",
+  "git_ref": "a454f37e",
+  "version": "1.0.2",
   "scope": {
-    "tracked_ts_files": 369,
+    "tracked_ts_files": 370,
     "exclude_paths": [
       ".planning/**",
       "dist/**",
@@ -87,11 +87,11 @@
     ]
   },
   "statistics": {
-    "total_atoms": 2471,
+    "total_atoms": 2472,
     "total_edges": 3262,
     "exported_atoms": 2101,
-    "files_indexed": 369,
-    "confidence_avg": 0.7535936867665043,
+    "files_indexed": 370,
+    "confidence_avg": 0.7536124595469386,
     "min_confidence": 0.7,
     "max_confidence": 0.92
   },
