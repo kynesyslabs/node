@@ -1,6 +1,7 @@
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
+import fs from "fs"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 // Importing methods themselves
@@ -35,6 +36,12 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { DTRManager } from "./dtr/dtrmanager"
+// REVIEW: Phase 1.6 - Token query imports
+import GCRTokenRoutines from "../blockchain/gcr/gcr_routines/GCRTokenRoutines"
+import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
+import Datasource from "@/model/datasource"
+// REVIEW: Phase 5.2 - Script execution for view methods
+import { scriptExecutor } from "@/libs/scripting"
 
 export interface NodeCall {
     message: string
@@ -65,12 +72,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         case "getGenesisDataHash": {
             try {
-                const genesisBlock = await Chain.getGenesisBlock()
+                const genesisBlock = await Chain.getGenesisBlock().catch(() => null)
                 let genesisData =
-                    genesisBlock.content.extra?.genesisData || null
+                    genesisBlock?.content?.extra?.genesisData || null
 
                 if (typeof genesisData === "string") {
                     genesisData = JSON.parse(genesisData)
+                }
+
+                // During early startup the genesis block may not be persisted yet; fall back to local genesis file
+                // so peer bootstrap doesn't fail with a transient 500.
+                if (!genesisData) {
+                    const genesisFile = "data/genesis.json"
+                    const fileData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
+                    genesisData = fileData
                 }
 
                 response.response = Hashing.sha256(JSON.stringify(genesisData))
@@ -93,7 +108,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.response = await getPeerlist()
             break
         case "getPeerlistHash": {
-            let peerlist = await getPeerlist()
+            const peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
                 "manageNodeCall",
@@ -881,7 +896,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "Authentication required. Provide signature and timestamp."
                 response.extra = {
                     message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
-                    example: `getL2PSHistory:${data.address}:${Date.now()}`
+                    example: `getL2PSHistory:${data.address}:${Date.now()}`,
                 }
                 break
             }
@@ -939,7 +954,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     data.l2psUid,
                     data.address,
                     limit,
-                    offset
+                    offset,
                 )
 
                 response.result = 200
@@ -966,17 +981,385 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                             status: tx.status,
                             timestamp: tx.timestamp?.toString() || "0",
                             l1_block_number: tx.l1_block_number,
-                            execution_message: txMessage
+                            execution_message: txMessage,
                         }
                     }),
                     count: transactions.length,
-                    hasMore: transactions.length === limit
+                    hasMore: transactions.length === limit,
                 }
             } catch (error: any) {
                 log.error("[L2PS] Failed to get account transactions:", error)
                 response.result = 500
                 response.response = "Failed to get L2PS account transactions"
                 response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        // REVIEW: Phase 1.6 - Token NodeCall Methods
+        // ===========================================
+
+        /**
+         * token.getToken - Get token metadata and state by address
+         * @param data.tokenAddress - The token contract address
+         * @returns Token entity with metadata, state, and ACL
+         */
+        case "token.getToken": {
+            if (!data.tokenAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress is required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const token = await GCRTokenRoutines.getToken(
+                    data.tokenAddress,
+                    tokenRepository,
+                )
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                } else {
+                    response.response = {
+                        token: {
+                            address: token.address,
+                            metadata: token.toMetadata(),
+                            state: token.toState(),
+                            accessControl: token.toAccessControl(),
+                            hasScript: token.hasScript,
+                            deployTxHash: token.deployTxHash,
+                        },
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.getToken error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token",
+                }
+            }
+            break
+        }
+
+        /**
+         * token.getBalance - Get balance of an address for a token
+         * @param data.tokenAddress - The token contract address
+         * @param data.holderAddress - The address to check balance for
+         * @returns Balance info with decimals and ticker
+         */
+        case "token.getBalance": {
+            if (!data.tokenAddress || !data.holderAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress and holderAddress are required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const balanceInfo = await GCRTokenRoutines.getBalance(
+                    data.tokenAddress,
+                    data.holderAddress,
+                    tokenRepository,
+                )
+
+                if (!balanceInfo) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                } else {
+                    response.response = {
+                        tokenAddress: data.tokenAddress,
+                        holderAddress: data.holderAddress,
+                        balance: balanceInfo.balance,
+                        decimals: balanceInfo.decimals,
+                        ticker: balanceInfo.ticker,
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.getBalance error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token balance",
+                }
+            }
+            break
+        }
+
+        /**
+         * token.getAllowance - Get allowance for a spender
+         * @param data.tokenAddress - The token contract address
+         * @param data.ownerAddress - The address that granted the allowance
+         * @param data.spenderAddress - The address allowed to spend
+         * @returns Allowance info with decimals and ticker
+         */
+        case "token.getAllowance": {
+            if (!data.tokenAddress || !data.ownerAddress || !data.spenderAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress, ownerAddress, and spenderAddress are required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const allowanceInfo = await GCRTokenRoutines.getAllowance(
+                    data.tokenAddress,
+                    data.ownerAddress,
+                    data.spenderAddress,
+                    tokenRepository,
+                )
+
+                if (!allowanceInfo) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                } else {
+                    response.response = {
+                        tokenAddress: data.tokenAddress,
+                        ownerAddress: data.ownerAddress,
+                        spenderAddress: data.spenderAddress,
+                        allowance: allowanceInfo.allowance,
+                        decimals: allowanceInfo.decimals,
+                        ticker: allowanceInfo.ticker,
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.getAllowance error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token allowance",
+                }
+            }
+            break
+        }
+
+        /**
+         * token.getTokensOf - Get all tokens held by an address
+         * @param data.holderAddress - The address to get tokens for
+         * @returns Array of token info with balances
+         */
+        case "token.getTokensOf": {
+            if (!data.holderAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "holderAddress is required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const tokens = await GCRTokenRoutines.getTokensOf(
+                    data.holderAddress,
+                    tokenRepository,
+                )
+
+                response.response = {
+                    holderAddress: data.holderAddress,
+                    tokens,
+                    count: tokens.length,
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.getTokensOf error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get tokens for holder",
+                }
+            }
+            break
+        }
+
+        /**
+         * token.getTokensByDeployer - Get all tokens deployed by an address
+         * @param data.deployerAddress - The deployer address to filter by
+         * @returns Array of token info
+         */
+        case "token.getTokensByDeployer": {
+            if (!data.deployerAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "deployerAddress is required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const tokens = await GCRTokenRoutines.getTokensByDeployer(
+                    data.deployerAddress,
+                    tokenRepository,
+                )
+
+                response.response = {
+                    deployerAddress: data.deployerAddress,
+                    tokens: tokens.map((token) => ({
+                        address: token.address,
+                        name: token.name,
+                        ticker: token.ticker,
+                        decimals: token.decimals,
+                        totalSupply: token.totalSupply,
+                        paused: token.paused,
+                        hasScript: token.hasScript,
+                        deployedAt: token.deployedAt,
+                        deployTxHash: token.deployTxHash,
+                    })),
+                    count: tokens.length,
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.getTokensByDeployer error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get tokens by deployer",
+                }
+            }
+            break
+        }
+
+        /**
+         * token.callView - Execute view (read-only) script method
+         * @param data.tokenAddress - The token contract address
+         * @param data.method - The view method name to call
+         * @param data.args - Arguments to pass to the method
+         * @returns Result of the view method execution
+         */
+        case "token.callView": {
+            if (!data.tokenAddress || !data.method) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress and method are required",
+                }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const tokenRepository = db.getDataSource().getRepository(GCRToken)
+                const token = await GCRTokenRoutines.getToken(
+                    data.tokenAddress,
+                    tokenRepository,
+                )
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                    break
+                }
+
+                if (!token.hasScript || !token.script) {
+                    response.result = 400
+                    response.response = {
+                        error: "NO_SCRIPT",
+                        message: "Token does not have a script attached",
+                    }
+                    break
+                }
+
+                // REVIEW: Phase 5.2 - Execute view method via ScriptExecutor
+                // Build tokenData from token entity for script execution
+                const tokenData = {
+                    address: token.address,
+                    name: token.name,
+                    ticker: token.ticker,
+                    decimals: token.decimals,
+                    owner: token.owner,
+                    totalSupply: BigInt(token.totalSupply),
+                    balances: Object.fromEntries(
+                        Object.entries(token.balances).map(([k, v]) => [
+                            k,
+                            BigInt(v),
+                        ]),
+                    ),
+                    allowances: Object.fromEntries(
+                        Object.entries(token.allowances).map(
+                            ([owner, spenders]) => [
+                                owner,
+                                Object.fromEntries(
+                                    Object.entries(spenders).map(
+                                        ([spender, v]) => [spender, BigInt(v)],
+                                    ),
+                                ),
+                            ],
+                        ),
+                    ),
+                    paused: token.paused,
+                    storage: token.customState,
+                }
+
+                // Execute the view method
+                const viewResult = await scriptExecutor.executeView({
+                    tokenAddress: data.tokenAddress,
+                    method: data.method,
+                    args: data.args ?? [],
+                    tokenData,
+                })
+
+                if (!viewResult.success) {
+                    // ViewResult is a discriminated union - extract error details
+                    const errorResult = viewResult as Extract<
+                        typeof viewResult,
+                        { success: false }
+                    >
+                    response.result = 400
+                    response.response = {
+                        error: errorResult.errorType?.toUpperCase() ?? "EXECUTION_ERROR",
+                        message: errorResult.error,
+                        tokenAddress: data.tokenAddress,
+                        method: data.method,
+                        executionTimeMs: errorResult.executionTimeMs,
+                        gasUsed: errorResult.gasUsed,
+                    }
+                    break
+                }
+
+                // Success - return the view result
+                response.result = 200
+                response.response = {
+                    tokenAddress: data.tokenAddress,
+                    method: data.method,
+                    value: viewResult.value,
+                    executionTimeMs: viewResult.executionTimeMs,
+                    gasUsed: viewResult.gasUsed,
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] token.callView error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to execute view method",
+                }
             }
             break
         }
