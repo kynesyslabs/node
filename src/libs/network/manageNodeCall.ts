@@ -1,6 +1,7 @@
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
+import fs from "fs"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
 // Importing methods themselves
@@ -65,12 +66,19 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         case "getGenesisDataHash": {
             try {
-                const genesisBlock = await Chain.getGenesisBlock()
+                const genesisBlock = await Chain.getGenesisBlock().catch(() => null)
                 let genesisData =
-                    genesisBlock.content.extra?.genesisData || null
+                    genesisBlock?.content?.extra?.genesisData || null
 
                 if (typeof genesisData === "string") {
                     genesisData = JSON.parse(genesisData)
+                }
+
+                // During early startup the genesis block may not be persisted yet; fall back to local genesis file
+                // so peer bootstrap doesn't fail with a transient 500.
+                if (!genesisData) {
+                    const genesisFile = "data/genesis.json"
+                    genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
                 }
 
                 response.response = Hashing.sha256(JSON.stringify(genesisData))
