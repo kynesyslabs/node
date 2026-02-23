@@ -1,0 +1,315 @@
+# Research: how to run Demos Node for steady-state perf testing
+
+Goal: establish a repeatable way to run a **multi-node** Demos Network locally so we can measure:
+- **steady-state TPS** (requests/txs/messages per second sustained without degradation)
+- **message responsiveness** (end-to-end latency distribution p50/p95/p99 for “messages”)
+
+This document is intentionally “ops/bench harness” focused (no new tests yet).
+
+---
+
+## 0) Current status (phased roadmap)
+
+We’re keeping all harness code in `better_testing/` so we can iterate without touching node runtime code.
+
+### Phase 1 — RPC baseline (DONE)
+- Implemented a Bun load generator that POSTs JSON-RPC-style calls to the node RPC `POST /` and reports RPS + p50/p95/p99.
+- Intended usage: run as a `loadgen` container inside the devnet docker network via overlay compose.
+
+Artifacts:
+- `better_testing/loadgen/src/rpc_loadgen.ts`
+- `better_testing/loadgen/src/main.ts` (`SCENARIO=rpc|transfer`)
+- `better_testing/docker-compose.perf.yml`
+- `better_testing/loadgen/README.md`
+
+### Phase 2 — Native transfer TPS (IN PROGRESS)
+- Implemented a transfer load generator using the SDK path (`confirmTx` + `broadcastTx`) to exercise the real client surface.
+- Current blocker: the devnet nodes are currently crashing during genesis insertion with:
+  - `QueryFailedError: null value in column "from_ed25519_address" of relation "transactions" violates not-null constraint`
+  - This makes RPC intermittently unavailable (loadgen sees `ECONNREFUSED` / high network error rates).
+  - Likely root cause: genesis transaction content lacks `from_ed25519_address` (see `src/libs/blockchain/chain.ts` `generateGenesisBlock()`), but the `transactions` table/entity requires it (see `src/model/entities/Transactions.ts`).
+
+Artifacts:
+- `better_testing/loadgen/src/transfer_loadgen.ts`
+
+### Phase 2.1 — Ramp + hygiene (DONE)
+- Added a `transfer_ramp` scenario to quickly sweep concurrency and spot the knee point.
+- Added scenario hygiene knobs:
+  - `AVOID_SELF_RECIPIENT=true` (default) to avoid self-send skew
+  - `INFLIGHT_PER_WALLET` to increase load even with a small wallet pool
+  - `QUIET=true` (default) to suppress noisy dependency logs so results are readable
+
+### Phase 3 — IM “message responsiveness” (NEXT)
+- Add a WebSocket IM load generator (online + offline paths) using the SDK implementation so we can measure message latency distributions under load.
+
+### Phase 4 — Observability + dashboard (NEXT)
+- Add a simple dashboard/reporting layer to compare runs (time series TPS/latency + node metrics + run metadata).
+
+### Note on “no node modifications”
+The benchmark harness itself lives entirely in `better_testing/`, but devnet/docker tooling may still require occasional repo-level hygiene fixes to run reliably (e.g., `.dockerignore` to avoid accidentally sending local runtime state into the Docker build context). This does not change node behavior; it only prevents build failures.
+
+---
+
+## 1) What “running the node” means in this repo
+
+### Primary entrypoint
+- Runtime entrypoint: `src/index.ts`
+  - Starts the **HTTP RPC server** (`serverRpcBun()` in `src/libs/network/server_rpc.ts`)
+  - Bootstraps chain, peers, and background loops
+  - Starts additional services when conditions/config allow:
+    - **Signaling Server (IM WebSocket)**: `new SignalingServer(port)` in `src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+    - **OmniProtocol server**: `startOmniProtocolServer(...)` in `src/libs/omniprotocol/integration/startup`
+    - **Metrics server + collector**: `src/features/metrics/*` exposed at `/metrics`
+    - **MCP server**: `src/features/mcp` (optional; enabled by default unless `MCP_ENABLED=false`)
+    - **TLSNotary**: `src/features/tlsnotary` (optional; default disabled)
+
+### Two “runner” modes
+
+1) Local runner: `./run`
+   - High-level script that can manage local postgres, monitoring stack, etc.
+   - Supports `--no-tui` for non-interactive logging.
+
+2) Devnet (recommended for performance research): Docker Compose
+   - `devnet/docker-compose.yml` starts:
+     - 1 Postgres container with 4 DBs
+     - 4 node containers on a single docker bridge network
+   - Node containers run `./devnet/run-devnet` as entrypoint (see `devnet/Dockerfile`)
+   - Devnet uses **external DB** (postgres container), and disables the TUI (legacy logs).
+
+Why devnet for perf work:
+- deterministic topology (4 nodes, shared network, shared DB) without needing 4 machines
+- lets us add a **loadgen container inside the same docker network**, avoiding host NAT noise
+
+---
+
+## 2) Runtime topology and ports (devnet)
+
+From `devnet/docker-compose.yml`:
+- Node i:
+  - HTTP RPC port: `${NODEi_PORT}` (defaults 53551..53554)
+  - OmniProtocol port: `${NODEi_OMNI_PORT}` (defaults 53561..53564)
+  - `EXPOSED_URL=http://node-i:${NODEi_PORT}` inside the docker network
+- Postgres:
+  - internal service name: `postgres:5432`
+  - DB names: `node1_db`, `node2_db`, `node3_db`, `node4_db` (created by `devnet/postgres-init/init-databases.sql`)
+
+Important service ports started by `src/index.ts`:
+- **Signaling server** (IM WebSocket): defaults to 3005, and is auto-bumped to next available port
+  - In devnet, each container has its own network namespace, so all 4 nodes can bind to `3005` internally without collisions.
+  - Devnet does **not** publish `3005` to the host, so any IM benchmark should run from inside docker network (recommended) or we must expose it.
+- **Metrics server**: defaults to 9090 (and is auto-bumped to next available port)
+  - Devnet does **not** publish metrics ports by default, so scraping should also happen from inside docker network (recommended).
+
+---
+
+## 3) What counts as a “message” here (and how to exercise it)
+
+There are (at least) two relevant “message” paths:
+
+### A) Instant Messaging Protocol (SignalingServer over WebSocket)
+- Server: `src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts`
+- Registers peers and forwards encrypted messages between them.
+- Registration requires a cryptographic proof:
+  - `register` payload includes `verification: SerializedSignedObject`
+  - Server verifies via `ucrypto.verify(...)`
+
+Practical client implementation already exists in the SDK:
+- `node_modules/@kynesyslabs/demosdk/build/instant_messaging/index.js`
+  - `registerAndWait()` builds the `SerializedSignedObject`
+  - `sendMessage(targetId, message)` encrypts using `ml-kem-aes` and sends `type:"message"`
+
+For responsiveness benchmarks, this is the cleanest “message loop” because it has:
+- a single hop (client -> node signaling server -> peer client) when both online
+- an offline path (store in DB + blockchain write) when recipient is offline
+
+### B) Node RPC (HTTP) request/response path
+- Server: `src/libs/network/server_rpc.ts`
+- Protocol: POST payload with `{ method, params }`, e.g. `ping`, `nodeCall`, `mempool`, etc.
+- This is useful for baseline throughput/latency without WebSocket encryption overhead.
+
+---
+
+## 4) How I plan to run the system for perf research
+
+### 4.1 Baseline: bring up the 4-node devnet
+
+```bash
+cd devnet
+./scripts/setup.sh              # generate identities + peerlist (if needed)
+docker compose up -d --build
+docker compose logs -f node-1   # watch for “Signaling server started”
+```
+
+“Ready” signals (log-based, since compose has no node healthchecks):
+- `[NETWORK] Signaling server started`
+- `[METRICS] Prometheus metrics server started on http://0.0.0.0:<port>/metrics`
+- Peer bootstrap has completed and node is not stuck “listening…”
+
+### 4.2 Stabilize config for benchmarking (reduce noise)
+
+For performance runs (not correctness):
+- disable features that add overhead but aren’t part of the benchmark:
+  - `MCP_ENABLED=false` (unless you are benchmarking MCP)
+  - `TLSNOTARY_ENABLED=false` (already default)
+- reduce logging volume:
+  - pass `log-level=warning` or `log-level=error` via args (supported in `src/index.ts` argument digest)
+
+Note: devnet currently runs `bun start:bun` (TS entrypoint). For *benchmark stability*, a production bundle could be introduced later, but first we need repeatable measurements.
+
+### 4.3 Add a load generator inside the docker network (key step)
+
+Rationale:
+- If we run load from the host, we measure host->docker NAT + scheduling noise.
+- If we run load inside docker network, we measure the node + protocol path more directly.
+
+Plan:
+- Add a `loadgen` container service attached to `demos-network`.
+- The loadgen uses the existing SDK instant messaging client to:
+  1) Connect N clients to `ws://node-1:3005` (or the configured signaling port)
+  2) `registerAndWait()` each client
+  3) Send messages at controlled rates and measure:
+     - time from send -> receive/ack
+     - sustained throughput before latency “knees”
+  4) Repeat for offline path by intentionally disconnecting the receiver
+
+Metrics captured:
+- client-side latency histogram (p50/p95/p99)
+- server-side resource metrics from `/metrics` (CPU, mem, peer count, etc.)
+
+---
+
+## 5) Benchmark scenarios (progressive)
+
+### Scenario 0: “is the harness stable?”
+- 4 nodes running, 1 loadgen with 10 IM clients, low rate (e.g. 1 msg/sec each)
+- verify no disconnect storms, no DB errors, no runaway logs
+
+### Scenario 1: Online IM latency vs throughput
+- 2 cohorts: senders + receivers online
+- ramp msg rate (step or linear) until p99 latency spikes or errors rise
+- record plateau throughput and knee point
+
+### Scenario 2: Offline message path stress
+- receivers offline
+- senders enqueue messages (SignalingServer stores to DB + writes tx to blockchain path)
+- measure enqueue TPS and DB growth behavior
+- then bring receiver online and measure “catch-up” drain latency
+
+### Scenario 3: RPC baseline
+- high-rate `ping` or a light `nodeCall` (no heavy crypto/DB)
+- establishes upper bound for HTTP request handling throughput
+
+---
+
+## 6) Observability plan (minimal, then richer)
+
+### Minimal (works immediately)
+- `docker compose logs -f node-1` (watch errors, restarts, peer churn)
+- client-side loadgen metrics printed periodically (QPS, p50/p95/p99)
+
+### Better (recommended next)
+- run Prometheus/Grafana in the same docker network:
+  - either attach the monitoring stack to `demos-network`, or run a dedicated compose for perf experiments.
+- scrape each node’s `/metrics` endpoint from within docker network (no need to publish ports).
+
+---
+
+## 7) Known intricacies / risks for perf measurement
+
+- **Signaling server port is not published in devnet compose**:
+  - we should benchmark IM from inside docker network (loadgen service).
+  - if benchmarking from host, we must expose `3005` (or actual port) per node.
+- **Metrics port is auto-bumped**:
+  - node uses “next available port” logic; in docker it’s stable, but if multiple metrics servers run in the same namespace it may drift.
+  - for scraping, prefer docker-network DNS + known port conventions.
+- **Registration proof requirement**:
+  - do not hand-roll the proof; use the SDK `registerAndWait()` implementation.
+- **Noise from logging/TUI**:
+  - TUI is already disabled in devnet; still reduce log level for perf runs.
+
+---
+
+## 8) Next actions (not implemented yet)
+
+1) Make devnet RPC reachability deterministic for `loadgen` (Phase 2 unblock)
+   - Confirm whether RPC listens on `0.0.0.0` inside the container (not `127.0.0.1` only).
+   - Add “wait for RPC ready” logic in loadgen (retry/backoff + explicit diagnostics).
+2) Run the first transfer baseline sweep (Phase 2 deliverable)
+   - Start with low concurrency and short duration, then ramp.
+   - Emit time-series samples (per-second TPS + p95/p99) to make the knee point obvious.
+3) Decide the canonical “message responsiveness” target for the next scenario (Phase 3)
+   - IM WS (client ↔ node) vs OmniProtocol (node ↔ node) vs HTTP RPC.
+4) Add IM loadgen (Phase 3)
+   - Online path: sender → signaling server → receiver.
+   - Offline path: sender enqueues to DB/chain, receiver later drains.
+5) Add dashboard scaffolding (Phase 4)
+   - At minimum: a run folder with `run.json` + `timeseries.jsonl` + a small HTML plot (or Grafana).
+
+### Direction: an intuitive testing dashboard (recommended)
+
+Once the harness exists, the natural next step is a small “perf dashboard” that makes runs easy to interpret and compare:
+- A Grafana dashboard (or a lightweight local HTML report) showing:
+  - throughput over time
+  - p50/p95/p99 latency over time
+  - error rate / disconnect rate
+  - queue depth / offline-message backlog (if applicable)
+  - CPU / memory / GC pressure (from `/metrics`)
+- A “run metadata” panel (git SHA, scenario, rates, node counts, env flags) so results are reproducible.
+
+---
+
+## [CLARIFICATION REQUIRED]
+
+Context: “message responsiveness to messages”
+Ambiguity: Should we benchmark:
+1) IM SignalingServer WebSocket messages (client->server->client), or
+2) Node RPC throughput/latency, or
+3) OmniProtocol P2P message latency/throughput?
+Options: (1) is easiest to control + already has SDK client; (3) is closest to node-to-node but requires protocol-specific loadgen.
+Blocking: NO (I can start with IM WebSocket as baseline unless you say otherwise).
+
+## Questions for you to answer (to lock the benchmark spec)
+
+1) Which path is the primary “message responsiveness” KPI?
+   - IM SignalingServer WS (client ↔ node) vs OmniProtocol (node ↔ node) vs HTTP RPC
+2) What is the desired success metric?
+   - e.g. “p99 < 200ms at 1k msgs/sec”, “no message loss”, “max TPS before p99 > 1s”, etc.
+3) What payload size should we use for “messages”?
+   - e.g. 256B / 1KB / 16KB (encrypted payload sizes matter)
+4) How should we define “delivered” for measurement?
+   - “receiver got WS message” vs “receiver ACKed application-level receipt” vs “persisted to DB/chain”
+5) Should the benchmark include the offline path (DB + blockchain write) or online-only?
+6) How many nodes / peers should the harness assume by default?
+   - devnet 4 nodes is the baseline; do you want N configurable?
+7) Do you want the harness to run fully inside docker (recommended) or from host as well?
+
+---
+
+## Answers captured (this chat)
+
+These answers are recorded here so the harness can be implemented deterministically:
+
+1) KPI focus
+- Balanced, but prioritize **TPS** (responsiveness still tracked via latency percentiles).
+
+2) Success metric target
+- No fixed target yet; first produce baseline results, then set thresholds based on observed curves.
+
+3) Payload sizes
+- Define **multiple tests and payload sizes per transaction type** (a small test matrix), rather than a single “message size”.
+
+4) “Delivered” definition
+- Varies by test; choose what is appropriate per scenario (e.g., WS receive vs app-level ACK vs persistence).
+
+5) Offline path
+- Include **both online + offline** paths (offline = DB + blockchain write path where applicable).
+
+6) Scale
+- N configurable, **default 4** (devnet baseline).
+
+7) Execution environment
+- Prefer running fully **inside Docker** (internal network) for stable measurements.
+
+General sequencing note:
+- Start with core/native transaction types (e.g., **transfer**) and baseline RPC/chain paths first.
+- More complex protocols/features (e.g., advanced messaging modes) come later.
