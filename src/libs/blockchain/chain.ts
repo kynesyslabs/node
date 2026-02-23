@@ -484,6 +484,9 @@ export default class Chain {
         const genesisTx = new Transaction()
         genesisTx.content.type = "genesis"
         genesisTx.blockNumber = 0
+        // Ensure genesis tx can be persisted (transactions.from_ed25519_address is NOT NULL).
+        // Use a deterministic 32-byte zero key so genesis hashes remain stable across nodes.
+        genesisTx.content.from_ed25519_address = "0x" + "00".repeat(32)
         genesisTx.content.to = {
             type: getSharedState.signingAlgorithm,
             data: new Uint8Array(Buffer.from("0x0", "hex")),
