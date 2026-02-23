@@ -56,6 +56,8 @@ When running via the overlay compose, the loadgen container writes artifacts to 
 - `better_testing/runs/<RUN_ID>/transfer.summary.json`
 - `better_testing/runs/<RUN_ID>/transfer.timeseries.jsonl`
 
+Note: `loadgen` runs as a non-root user by default (`LOADGEN_UID=1000`, `LOADGEN_GID=1000`) so run outputs are host-writable.
+
 ## Transfer ramp (Phase 2.1)
 
 Runs a small step ramp to find the knee point quickly (prints a `transfer_ramp_summary` JSON):

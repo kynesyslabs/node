@@ -2,6 +2,7 @@ services:
   loadgen:
     image: demos-devnet-node
     entrypoint: ["bun"]
+    user: "${LOADGEN_UID:-1000}:${LOADGEN_GID:-1000}"
     depends_on:
       - node-1
       - node-2

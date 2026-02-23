@@ -275,3 +275,7 @@ nohup.out
 /.beads/last-touched
 /.taskmaster
 /internal-docs
+
+# better_testing run outputs (generated)
+better_testing/runs/*
+!better_testing/runs/.gitkeep
