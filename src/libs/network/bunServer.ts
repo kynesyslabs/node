@@ -2,15 +2,26 @@ import { Server } from "bun"
 import { Headers } from "node-fetch"
 import log from "@/utilities/logger"
 
-export type Handler = (req: Request) => Promise<Response> | Response
+export type BunRequest = Request & {
+    params?: Record<string, string>
+}
+
+export type Handler = (req: BunRequest) => Promise<Response> | Response
 export type Middleware = (
-    req: Request,
+    req: BunRequest,
     next: () => Promise<Response>,
     server?: Server,
 ) => Promise<Response>
 
+type ParamRoute = {
+    path: string
+    segments: string[]
+    handler: Handler
+}
+
 export class BunServer {
     private routes: Map<string, Map<string, Handler>> = new Map()
+    private paramRoutes: Map<string, ParamRoute[]> = new Map()
     private middlewares: Middleware[] = []
     private port: number
     private hostname: string
@@ -37,14 +48,62 @@ export class BunServer {
     }
 
     private addRoute(method: string, path: string, handler: Handler): void {
+        if (path.includes("/:")) {
+            if (!this.paramRoutes.has(method)) {
+                this.paramRoutes.set(method, [])
+            }
+            this.paramRoutes.get(method)!.push({
+                path,
+                segments: path.split("/").filter(Boolean),
+                handler,
+            })
+            return
+        }
         if (!this.routes.has(method)) {
             this.routes.set(method, new Map())
         }
         this.routes.get(method)?.set(path, handler)
     }
 
+    private matchParamRoute(method: string, pathname: string): {
+        handler: Handler
+        params: Record<string, string>
+    } | null {
+        const candidates = this.paramRoutes.get(method)
+        if (!candidates || candidates.length === 0) return null
+
+        const requestSegments = pathname.split("/").filter(Boolean)
+
+        for (const route of candidates) {
+            if (route.segments.length !== requestSegments.length) continue
+            const params: Record<string, string> = {}
+            let matched = true
+
+            for (let i = 0; i < route.segments.length; i++) {
+                const routeSeg = route.segments[i]
+                const reqSeg = requestSegments[i]
+
+                if (routeSeg.startsWith(":")) {
+                    params[routeSeg.slice(1)] = decodeURIComponent(reqSeg)
+                    continue
+                }
+
+                if (routeSeg !== reqSeg) {
+                    matched = false
+                    break
+                }
+            }
+
+            if (matched) {
+                return { handler: route.handler, params }
+            }
+        }
+
+        return null
+    }
+
     private async handleRequest(
-        req: Request,
+        req: BunRequest,
         server?: Server,
     ): Promise<Response> {
         const url = new URL(req.url)
@@ -53,7 +112,14 @@ export class BunServer {
 
         // Create the final handler (route handler)
         const finalHandler = async (): Promise<Response> => {
-            const routeHandler = this.routes.get(method)?.get(path)
+            let routeHandler = this.routes.get(method)?.get(path)
+            if (!routeHandler) {
+                const match = this.matchParamRoute(method, path)
+                if (match) {
+                    routeHandler = match.handler
+                    req.params = match.params
+                }
+            }
             if (routeHandler) {
                 return await routeHandler(req)
             }

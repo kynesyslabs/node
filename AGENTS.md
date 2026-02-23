@@ -2,6 +2,11 @@
 
 Semantic map: see `repository-semantic-map/`.
 
+## Checks (no tests)
+
+- Use `bun run check` as the canonical “magic” check (authoritative `tsc` via `tsconfig.check.json` + a Bun bundling sanity check).
+- Use `bun run check:full` when you need to type-check the full repository.
+
 ## Issue Tracking with bd (beads)
 
 **IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
