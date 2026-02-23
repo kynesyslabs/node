@@ -34,6 +34,7 @@ interface StorageProgramResponse {
     encoding?: "json" | "binary"
     data?: Record<string, unknown> | string | null
     metadata?: Record<string, unknown> | null
+    acl?: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, unknown> }
     storageLocation?: string
     sizeBytes?: number
     createdAt?: string
@@ -60,6 +61,8 @@ interface StorageProgramsListResponse {
         programName: string
         encoding: "json" | "binary"
         sizeBytes: number
+        data?: Record<string, unknown> | string | null
+        acl?: { mode: string; allowed?: string[]; blacklisted?: string[]; groups?: Record<string, unknown> }
         storageLocation: string
         createdAt: string
         updatedAt: string
@@ -231,6 +234,7 @@ async function getStorageProgramHandler(req: Request): Promise<Response> {
             encoding: program.encoding,
             data: program.data,
             metadata: program.metadata,
+            acl: program.acl,
             storageLocation: program.storageLocation,
             sizeBytes: program.sizeBytes,
             createdAt: program.createdAt.toISOString(),
@@ -645,15 +649,19 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
                 repository,
             )
 
-        // Filter to only programs the requester can read
-        const accessiblePrograms = programs.filter(program =>
-            GCRStorageProgramRoutines.checkReadPermission(
-                program,
-                requesterAddress,
-            ),
-        )
+        // Owner always sees all their own programs.
+        // For other requesters, filter by read permission.
+        const isOwnerRequest = !requesterAddress || requesterAddress === owner
+        const accessiblePrograms = isOwnerRequest
+            ? programs
+            : programs.filter(program =>
+                  GCRStorageProgramRoutines.checkReadPermission(
+                      program,
+                      requesterAddress,
+                  ),
+              )
 
-        // Map to response format (without full data for list view)
+        // Map to response format
         const response: StorageProgramsListResponse = {
             success: true,
             programs: accessiblePrograms.map(p => ({
@@ -661,6 +669,8 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
                 programName: p.programName,
                 encoding: p.encoding,
                 sizeBytes: p.sizeBytes,
+                data: p.data,
+                acl: p.acl,
                 storageLocation: p.storageLocation,
                 createdAt: p.createdAt.toISOString(),
                 updatedAt: p.updatedAt.toISOString(),
@@ -742,7 +752,7 @@ async function searchByNameHandler(req: Request): Promise<Response> {
             ),
         )
 
-        // Map to response format (without full data for list view)
+        // Map to response format
         const response: StorageProgramsListResponse = {
             success: true,
             programs: accessiblePrograms.map(p => ({
@@ -750,6 +760,8 @@ async function searchByNameHandler(req: Request): Promise<Response> {
                 programName: p.programName,
                 encoding: p.encoding,
                 sizeBytes: p.sizeBytes,
+                data: p.data,
+                acl: p.acl,
                 storageLocation: p.storageLocation,
                 createdAt: p.createdAt.toISOString(),
                 updatedAt: p.updatedAt.toISOString(),

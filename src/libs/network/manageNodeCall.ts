@@ -857,12 +857,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     ),
                 )
 
-                // Map to response format (without full data for list view)
                 response.response = accessiblePrograms.map(p => ({
                     storageAddress: p.storageAddress,
                     programName: p.programName,
                     encoding: p.encoding,
                     sizeBytes: p.sizeBytes,
+                    data: p.data,
+                    acl: p.acl,
                     storageLocation: p.storageLocation,
                     createdAt: p.createdAt.toISOString(),
                     updatedAt: p.updatedAt.toISOString(),
@@ -920,12 +921,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     ),
                 )
 
-                // Map to response format (without full data for list view)
                 response.response = accessiblePrograms.map(p => ({
                     storageAddress: p.storageAddress,
                     programName: p.programName,
                     encoding: p.encoding,
                     sizeBytes: p.sizeBytes,
+                    data: p.data,
+                    acl: p.acl,
                     storageLocation: p.storageLocation,
                     createdAt: p.createdAt.toISOString(),
                     updatedAt: p.updatedAt.toISOString(),

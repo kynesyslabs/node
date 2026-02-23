@@ -45,6 +45,8 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { SubnetPayload, EncryptedTransaction } from "@/libs/l2ps/types"
 import { L2PSMessage, L2PSRegisterTxMessage } from "../l2ps/parallelNetworks"
@@ -133,6 +135,40 @@ export default class ServerHandlers {
             } else {
                 throw new Error("GCREdit mismatch")
             }
+
+            // Balance check: sum all "remove" balance edits for the sender
+            const totalFee = gcrEdits
+                .filter(
+                    (edit: GCREdit) =>
+                        edit.type === "balance" &&
+                        edit.operation === "remove" &&
+                        (edit.account === sender ||
+                            (typeof edit.account !== "string" &&
+                                edit.account?.toString() === sender)),
+                )
+                .reduce(
+                    (sum: bigint, edit: GCREdit) => sum + BigInt(edit.amount),
+                    0n,
+                )
+
+            if (totalFee > 0n) {
+                const db = await Datasource.getInstance()
+                const gcrMainRepo = db
+                    .getDataSource()
+                    .getRepository(GCRMain)
+                const account = await gcrMainRepo.findOneBy({
+                    pubkey: sender,
+                })
+                const senderBalance = account
+                    ? BigInt(account.balance)
+                    : 0n
+                if (senderBalance < totalFee) {
+                    throw new Error(
+                        `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
+                    )
+                }
+            }
+
             // REVIEW Recalculate the Transaction hash too
             //tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
@@ -144,7 +180,9 @@ export default class ServerHandlers {
                     valid: false,
                     reference_block: null,
                     message:
-                        "An error occurred while validating the transaction",
+                        e instanceof Error
+                            ? e.message
+                            : "An error occurred while validating the transaction",
                     gas_operation: null,
 
                     transaction: null,
