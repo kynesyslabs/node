@@ -22,8 +22,11 @@ services:
       - QUIET=${QUIET:-true}
       - AVOID_SELF_RECIPIENT=${AVOID_SELF_RECIPIENT:-true}
       - INFLIGHT_PER_WALLET=${INFLIGHT_PER_WALLET:-1}
+      - EMIT_TIMESERIES=${EMIT_TIMESERIES:-true}
+      - RUNS_DIR=${RUNS_DIR:-/runs}
+      - RUN_ID=${RUN_ID:-}
       # Ramp scenario config
-      - RAMP_CONCURRENCY=${RAMP_CONCURRENCY:-1,2,4}
+      - RAMP_CONCURRENCY=${RAMP_CONCURRENCY:-1,2,4,8}
       - STEP_DURATION_SEC=${STEP_DURATION_SEC:-15}
       - COOLDOWN_SEC=${COOLDOWN_SEC:-3}
       # Transfer scenario config (native send)
@@ -38,6 +41,8 @@ services:
       # Mount devnet mnemonics so loadgen can reuse funded devnet accounts without baking secrets into images.
       # Path is relative to the `devnet/` directory (where we run docker compose from).
       - ./identities:/wallets:ro
+      # Persist run outputs on the host for dashboarding and comparisons.
+      - ../better_testing/runs:/runs
     command:
       [
         "better_testing/loadgen/src/main.ts"

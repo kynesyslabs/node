@@ -43,10 +43,18 @@ Optional env (recommended):
 - `QUIET`: silence noisy dependency logs (default true)
 - `AVOID_SELF_RECIPIENT`: avoid sending to self if the sender address appears in `RECIPIENTS` (default true)
 - `INFLIGHT_PER_WALLET`: number of concurrent in-flight txs per wallet (default 1)
+- `EMIT_TIMESERIES`: append per-second JSONL points to the run folder (default true)
+- `RUN_ID`: optional run identifier (default: ISO timestamp)
 
 Wallet sourcing (defaults to devnet identities):
 - `MNEMONICS_DIR=/wallets` (set by `better_testing/docker-compose.perf.yml`)
 - `WALLET_FILES=node1.identity,node2.identity,node3.identity,node4.identity`
+
+## Run artifacts
+
+When running via the overlay compose, the loadgen container writes artifacts to the host:
+- `better_testing/runs/<RUN_ID>/transfer.summary.json`
+- `better_testing/runs/<RUN_ID>/transfer.timeseries.jsonl`
 
 ## Transfer ramp (Phase 2.1)
 

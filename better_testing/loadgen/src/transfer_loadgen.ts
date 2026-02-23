@@ -1,5 +1,6 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { appendJsonl, getRunConfig, writeJson } from "./run_io"
 
 type LoadgenConfig = {
   targets: string[]
@@ -9,6 +10,7 @@ type LoadgenConfig = {
   sampleLimit: number
   inflightPerWallet: number
   avoidSelfRecipient: boolean
+  emitTimeseries: boolean
 }
 
 type Counters = {
@@ -19,6 +21,18 @@ type Counters = {
   confirmError: number
   broadcastError: number
   unexpectedError: number
+}
+
+type TimeseriesPoint = {
+  tSec: number
+  ok: number
+  total: number
+  confirmError: number
+  broadcastError: number
+  unexpectedError: number
+  tpsOk: number
+  latencyMs: { sampleCount: number; p50: number; p95: number; p99: number }
+  timestamp: string
 }
 
 function sleep(ms: number): Promise<void> {
@@ -207,6 +221,7 @@ function getConfig(wallets: string[]): LoadgenConfig {
     sampleLimit: envInt("SAMPLE_LIMIT", 200_000),
     inflightPerWallet: Math.max(1, envInt("INFLIGHT_PER_WALLET", 1)),
     avoidSelfRecipient: envBool("AVOID_SELF_RECIPIENT", true),
+    emitTimeseries: envBool("EMIT_TIMESERIES", true),
   }
 }
 
@@ -223,6 +238,7 @@ async function worker(
   cfg: LoadgenConfig,
   counters: Counters,
   sampler: ReservoirSampler,
+  timeseriesSampler: ReservoirSampler,
   stopAtMs: number,
   walletMnemonic: string,
   workerId: number,
@@ -271,6 +287,7 @@ async function worker(
 
       const elapsed = performance.now() - start
       sampler.add(elapsed)
+      timeseriesSampler.add(elapsed)
 
       if (broadcastRes?.result === 200) {
         counters.ok++
@@ -280,6 +297,7 @@ async function worker(
     } catch {
       const elapsed = performance.now() - start
       sampler.add(elapsed)
+      timeseriesSampler.add(elapsed)
       counters.unexpectedError++
     }
   }
@@ -332,10 +350,71 @@ export async function runTransferLoadgen() {
 
   const sampler = new ReservoirSampler(cfg.sampleLimit)
 
+  const run = getRunConfig()
+  const artifactBase = `${run.runDir}/transfer`
+  const artifacts = {
+    runId: run.runId,
+    runDir: run.runDir,
+    summaryPath: `${artifactBase}.summary.json`,
+    timeseriesPath: `${artifactBase}.timeseries.jsonl`,
+  }
+
+  const timeseriesSampler = new ReservoirSampler(50_000)
+  let lastPointAtMs = startedAtMs
+  let lastOk = 0
+  let lastTotal = 0
+  let lastConfirmError = 0
+  let lastBroadcastError = 0
+  let lastUnexpectedError = 0
+
+  async function timeseriesLoop() {
+    if (!cfg.emitTimeseries) return
+    while (nowMs() < stopAtMs) {
+      await sleep(1000)
+      const now = nowMs()
+      const elapsedSinceLast = Math.max(0.001, (now - lastPointAtMs) / 1000)
+      lastPointAtMs = now
+
+      const okDelta = counters.ok - lastOk
+      const totalDelta = counters.total - lastTotal
+      const confirmDelta = counters.confirmError - lastConfirmError
+      const broadcastDelta = counters.broadcastError - lastBroadcastError
+      const unexpectedDelta = counters.unexpectedError - lastUnexpectedError
+
+      lastOk = counters.ok
+      lastTotal = counters.total
+      lastConfirmError = counters.confirmError
+      lastBroadcastError = counters.broadcastError
+      lastUnexpectedError = counters.unexpectedError
+
+      const samples = timeseriesSampler.snapshotSorted()
+      const point: TimeseriesPoint = {
+        tSec: (now - startedAtMs) / 1000,
+        ok: okDelta,
+        total: totalDelta,
+        confirmError: confirmDelta,
+        broadcastError: broadcastDelta,
+        unexpectedError: unexpectedDelta,
+        tpsOk: okDelta / elapsedSinceLast,
+        latencyMs: {
+          sampleCount: timeseriesSampler.size(),
+          p50: percentile(samples, 50),
+          p95: percentile(samples, 95),
+          p99: percentile(samples, 99),
+        },
+        timestamp: new Date().toISOString(),
+      }
+      appendJsonl(artifacts.timeseriesPath, point)
+    }
+  }
+
   await Promise.all(
-    usedWallets.map((mnemonic, idx) =>
-      worker(cfg, counters, sampler, stopAtMs, mnemonic, idx),
-    ),
+    [
+      ...usedWallets.map((mnemonic, idx) =>
+        worker(cfg, counters, sampler, timeseriesSampler, stopAtMs, mnemonic, idx),
+      ),
+      timeseriesLoop(),
+    ],
   )
 
   counters.endedAtMs = nowMs()
@@ -361,9 +440,11 @@ export async function runTransferLoadgen() {
       p99: percentile(samples, 99),
     },
     timestamp: new Date().toISOString(),
+    artifacts,
   }
 
   console.log(JSON.stringify(report, null, 2))
+  writeJson(artifacts.summaryPath, report)
   return report
 }
 

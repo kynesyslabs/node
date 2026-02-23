@@ -38,6 +38,9 @@ Artifacts:
   - `AVOID_SELF_RECIPIENT=true` (default) to avoid self-send skew
   - `INFLIGHT_PER_WALLET` to increase load even with a small wallet pool
   - `QUIET=true` (default) to suppress noisy dependency logs so results are readable
+- Added run artifacts for dashboarding:
+  - `better_testing/runs/<RUN_ID>/transfer.summary.json`
+  - `better_testing/runs/<RUN_ID>/transfer.timeseries.jsonl` (per-second JSONL points)
 
 ### Phase 3 — IM “message responsiveness” (NEXT)
 - Add a WebSocket IM load generator (online + offline paths) using the SDK implementation so we can measure message latency distributions under load.
