@@ -39,7 +39,7 @@ import { getSharedState } from "@/utilities/sharedState"
  * - In-flight request tracking with timeout handling
  */
 export class PeerConnection {
-    protected socket: Socket | null = null
+    public socket: Socket | null = null
     private framer: MessageFramer = new MessageFramer()
     protected state: ConnectionState = "UNINITIALIZED"
     protected peerIdentity: string
@@ -65,6 +65,7 @@ export class PeerConnection {
 
     /**
      * Establish TCP connection to peer
+     * 
      * @param options Connection options (timeout, retries)
      * @returns Promise that resolves when connection is READY
      */
@@ -280,6 +281,7 @@ export class PeerConnection {
 
     /**
      * Send one-way message (fire-and-forget, no response expected)
+     * 
      * @param opcode OmniProtocol opcode
      * @param payload Message payload
      */

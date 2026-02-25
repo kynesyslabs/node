@@ -9,6 +9,7 @@ import type {
 } from "./types"
 import { PoolCapacityError } from "../types/errors"
 import log from "@/utilities/logger"
+import { PeerManager } from "@/libs/peer"
 
 /**
  * ConnectionPool manages persistent TCP connections to multiple peer nodes
@@ -72,10 +73,9 @@ export class ConnectionPool {
             )
         }
 
-        const peerConnections =
-            (this.connections
-                .get(peerIdentity) || [])
-                .filter(conn => conn.getState() === "READY")
+        const peerConnections = (
+            this.connections.get(peerIdentity) || []
+        ).filter(conn => conn.getState() === "READY")
         if (peerConnections.length >= this.config.maxConnectionsPerPeer) {
             throw new PoolCapacityError(
                 `Max connections to peer ${peerIdentity}: ${peerConnections.length}/${this.config.maxConnectionsPerPeer}`,
@@ -306,6 +306,29 @@ export class ConnectionPool {
         if (!peerConnections) {
             return null
         }
+        const peer = PeerManager.getInstance().getPeer(peerIdentity)
+        log.only(
+            `==== DEBUG: Initiating Outbound Connnection to ${peer.connection.string} ====`,
+        )
+        log.only("Connection count to peer : " + peerConnections.length)
+        // loop through peerConnections and log the state of each connection
+        peerConnections.forEach(conn => {
+            log.only(
+                "Connection last activity: " +
+                    (Date.now() - conn.getInfo().lastActivity) +
+                    "ms",
+            )
+            log.only(
+                "Connection local url: " +
+                    `${conn.socket?.localAddress}:${conn.socket?.localPort}`,
+            )
+            log.only(
+                `[ConnectionPool] Connection ${conn.socket?.remoteAddress}:${
+                    conn.socket?.remotePort
+                } state: ${conn.getState()}`,
+            )
+        })
+        log.only("============== DEBUG END 🟢 =============")
 
         // Find first READY connection
         return peerConnections.find(conn => conn.getState() === "READY") || null
