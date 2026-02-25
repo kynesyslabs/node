@@ -10,6 +10,14 @@ devnet/.env
 devnet/demos_peerlist.json
 devnet/postgres-data
 
+# Exclude local runtime state (may contain root-owned files / huge volumes)
+ipfs/data_*/
+ipfs_*/
+docker_data/
+logs/
+postgres/
+postgres_*/
+
 # Exclude unnecessary files
 *.log
 .DS_Store

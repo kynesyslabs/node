@@ -770,7 +770,12 @@ export async function askTxsForBlock(
     })
 
     if (res.result === 200) {
-        return res.response as Transaction[]
+        const txs = res.response as Transaction[]
+        // Some peers may respond 200 with an empty list if the block's transactions
+        // are not yet persisted in their transactions table; fall back to hash lookup.
+        if (Array.isArray(txs) && txs.length > 0) {
+            return txs
+        }
     }
 
     // INFO: fetch all transactions by hashes

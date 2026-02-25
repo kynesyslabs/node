@@ -1152,10 +1152,10 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 })
 
                 if (!holder) {
-                    response.result = 404
+                    response.result = 200
                     response.response = {
-                        error: "HOLDER_NOT_FOUND",
-                        message: `Holder not found: ${data.address}`,
+                        address: data.address,
+                        tokens: [],
                     }
                     break
                 }

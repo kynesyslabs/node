@@ -193,7 +193,7 @@ export async function consensusRoutine(): Promise<void> {
                     pro +
                     " votes",
             )
-            await finalizeBlock(block, pro)
+            await finalizeBlock(block, pro, tempMempool)
 
             // REVIEW: Should we await this?
             if (manager.checkIfWeAreSecretary()) {
@@ -534,10 +534,16 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param block - The block
  * @param pro - The number of votes for the block
  */
-async function finalizeBlock(block: Block, pro: number): Promise<void> {
+async function finalizeBlock(block: Block, pro: number, txs: Transaction[]): Promise<void> {
     log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
     log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
     await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
+    // Ensure the block's ordered transactions are persisted for downstream syncers.
+    // insertBlock relies on mempool-backed lookup; if a tx wasn't in local mempool at commit time,
+    // peers may not be able to fetch it (and would fail to apply GCR edits during sync).
+    if (Array.isArray(txs) && txs.length > 0) {
+        await Chain.insertTransactionsFromSync(txs)
+    }
     //getSharedState.consensusMode = false
     ///getSharedState.inConsensusLoop = false
     log.info("[CONSENSUS] Block added to the chain")

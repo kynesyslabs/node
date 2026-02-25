@@ -4,6 +4,7 @@ import { Repository } from "typeorm"
 
 import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import ensureGCRForUser from "./ensureGCRForUser"
 import Datasource from "@/model/datasource"
 import log from "@/utilities/logger"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
@@ -1505,38 +1506,52 @@ export default class GCRTokenRoutines {
     ): Promise<void> {
         try {
             const db = await Datasource.getInstance()
-            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+            const dataSource = db.getDataSource()
+            const gcrMainRepository = dataSource.getRepository(GCRMain)
 
-            const holder = await gcrMainRepository.findOneBy({
-                pubkey: holderAddress,
-            })
-            if (!holder) {
-                log.debug(
-                    "[GCRTokenRoutines] Holder " +
-                        holderAddress +
-                        " not found, skipping reference add",
+            // Ensure the holder account exists so pointer operations are not dropped.
+            const existing = await gcrMainRepository.findOneBy({ pubkey: holderAddress })
+            if (!existing) {
+                await ensureGCRForUser(holderAddress)
+            }
+
+            await dataSource.transaction(async em => {
+                const repo = em.getRepository(GCRMain)
+                const holder = await repo.findOne({
+                    where: { pubkey: holderAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+
+                if (!holder) {
+                    log.debug(
+                        "[GCRTokenRoutines] Holder " +
+                            holderAddress +
+                            " not found after ensureGCRForUser, skipping reference add",
+                    )
+                    return
+                }
+
+                const current = holder.extended ?? {
+                    tokens: [],
+                    nfts: [],
+                    xm: [],
+                    web2: [],
+                    other: [],
+                }
+                const tokens = Array.isArray(current.tokens) ? current.tokens : []
+
+                const idx = tokens.findIndex(
+                    (t: any) => t?.tokenAddress === reference.tokenAddress,
                 )
-                return
-            }
+                if (idx >= 0) {
+                    tokens[idx] = { ...tokens[idx], ...reference }
+                } else {
+                    tokens.push(reference)
+                }
 
-            const current = holder.extended ?? {
-                tokens: [],
-                nfts: [],
-                xm: [],
-                web2: [],
-                other: [],
-            }
-            const tokens = Array.isArray(current.tokens) ? current.tokens : []
-
-            const idx = tokens.findIndex((t: any) => t?.tokenAddress === reference.tokenAddress)
-            if (idx >= 0) {
-                tokens[idx] = { ...tokens[idx], ...reference }
-            } else {
-                tokens.push(reference)
-            }
-
-            holder.extended = { ...current, tokens }
-            await gcrMainRepository.save(holder)
+                holder.extended = { ...current, tokens }
+                await repo.save(holder)
+            })
         } catch (error) {
             log.error("[GCRTokenRoutines] Failed to add holder reference: " + error)
         }
@@ -1551,7 +1566,8 @@ export default class GCRTokenRoutines {
     ): Promise<void> {
         try {
             const db = await Datasource.getInstance()
-            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+            const dataSource = db.getDataSource()
+            const gcrMainRepository = dataSource.getRepository(GCRMain)
 
             const holder = await gcrMainRepository.findOneBy({
                 pubkey: holderAddress,
@@ -1565,18 +1581,27 @@ export default class GCRTokenRoutines {
                 return
             }
 
-            const current = holder.extended ?? {
-                tokens: [],
-                nfts: [],
-                xm: [],
-                web2: [],
-                other: [],
-            }
-            const tokens = Array.isArray(current.tokens) ? current.tokens : []
-            const next = tokens.filter((t: any) => t?.tokenAddress !== tokenAddress)
+            await dataSource.transaction(async em => {
+                const repo = em.getRepository(GCRMain)
+                const locked = await repo.findOne({
+                    where: { pubkey: holderAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+                if (!locked) return
 
-            holder.extended = { ...current, tokens: next }
-            await gcrMainRepository.save(holder)
+                const current = locked.extended ?? {
+                    tokens: [],
+                    nfts: [],
+                    xm: [],
+                    web2: [],
+                    other: [],
+                }
+                const tokens = Array.isArray(current.tokens) ? current.tokens : []
+                const next = tokens.filter((t: any) => t?.tokenAddress !== tokenAddress)
+
+                locked.extended = { ...current, tokens: next }
+                await repo.save(locked)
+            })
         } catch (error) {
             log.error("[GCRTokenRoutines] Failed to remove holder reference: " + error)
         }

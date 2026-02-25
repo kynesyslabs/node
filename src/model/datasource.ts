@@ -21,6 +21,7 @@ import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRToken } from "./entities/GCRv2/GCR_Token.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 // ZK Identity entities
@@ -54,6 +55,7 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        GCRToken,
         GCRTLSNotary,
         // ZK Identity entities
         IdentityCommitment,
