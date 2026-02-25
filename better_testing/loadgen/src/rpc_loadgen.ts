@@ -6,6 +6,8 @@ type LoadgenConfig = {
   concurrency: number
   rateLimitRps: number
   sampleLimit: number
+  emitTimeseries: boolean
+  waitForRpcSec: number
 }
 
 type Counters = {
@@ -16,6 +18,40 @@ type Counters = {
   httpError: number
   rpcError: number
   networkError: number
+}
+
+type TimeseriesPoint = {
+  tSec: number
+  ok: number
+  total: number
+  httpError: number
+  rpcError: number
+  networkError: number
+  rps: number
+  okRps: number
+  latencyMs: { sampleCount: number; p50: number; p95: number; p99: number }
+  timestamp: string
+}
+
+function envBool(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]
+  if (!raw) return fallback
+  switch (raw.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "y":
+    case "on":
+      return true
+    case "0":
+    case "false":
+    case "no":
+    case "n":
+    case "off":
+      return false
+    default:
+      return fallback
+  }
 }
 
 function envInt(name: string, fallback: number): number {
@@ -46,6 +82,8 @@ function getConfig(): LoadgenConfig {
     concurrency: envInt("CONCURRENCY", 20),
     rateLimitRps: envFloat("RATE_LIMIT_RPS", 0),
     sampleLimit: envInt("SAMPLE_LIMIT", 200_000),
+    emitTimeseries: envBool("EMIT_TIMESERIES", true),
+    waitForRpcSec: envInt("WAIT_FOR_RPC_SEC", 60),
   }
 }
 
@@ -92,6 +130,37 @@ class ReservoirSampler {
   }
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function isRpcReady(baseUrl: string, rpcPath: string): Promise<boolean> {
+  const url = baseUrl.replace(/\/+$/, "") + rpcPath
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ method: "ping", params: [] }),
+    })
+    if (!res.ok) return false
+    const data = (await res.json().catch(() => null)) as any
+    return typeof data?.result === "number" && data.result >= 200 && data.result < 300
+  } catch {
+    return false
+  }
+}
+
+async function waitForRpcReady(baseUrl: string, rpcPath: string, timeoutSec: number) {
+  const deadlineMs = nowMs() + Math.max(1, timeoutSec) * 1000
+  let attempt = 0
+  while (nowMs() < deadlineMs) {
+    if (await isRpcReady(baseUrl, rpcPath)) return
+    attempt++
+    await sleep(Math.min(2000, 100 + attempt * 100))
+  }
+  throw new Error(`RPC not ready at ${baseUrl}${rpcPath} after ${timeoutSec}s`)
+}
+
 async function rpcCall(baseUrl: string, rpcPath: string, method: string) {
   const url = baseUrl.replace(/\/+$/, "") + rpcPath
   const body = JSON.stringify({ method, params: [] })
@@ -136,6 +205,7 @@ async function worker(
   config: LoadgenConfig,
   counters: Counters,
   sampler: ReservoirSampler,
+  timeseriesSampler: ReservoirSampler,
   stopAtMs: number,
   workerId: number,
 ) {
@@ -153,6 +223,7 @@ async function worker(
       const result = await rpcCall(target, config.rpcPath, config.rpcMethod)
       const elapsed = performance.now() - start
       sampler.add(elapsed)
+      timeseriesSampler.add(elapsed)
 
       if (result.ok) {
         counters.ok++
@@ -164,6 +235,7 @@ async function worker(
     } catch {
       const elapsed = performance.now() - start
       sampler.add(elapsed)
+      timeseriesSampler.add(elapsed)
       counters.networkError++
     }
   }
@@ -185,16 +257,82 @@ async function main() {
   }
 
   const sampler = new ReservoirSampler(config.sampleLimit)
+  const timeseriesSampler = new ReservoirSampler(50_000)
 
-  const workers = Array.from({ length: config.concurrency }, (_, idx) =>
-    worker(config, counters, sampler, stopAtMs, idx),
+  // Avoid ramp skew from early-start transient errors.
+  await Promise.all(
+    config.targets.map(t => waitForRpcReady(t, config.rpcPath, config.waitForRpcSec)),
   )
 
-  await Promise.all(workers)
+  const { getRunConfig, appendJsonl, writeJson } = await import("./run_io")
+  const run = getRunConfig()
+  const artifactBase = `${run.runDir}/rpc`
+  const artifacts = {
+    runId: run.runId,
+    runDir: run.runDir,
+    summaryPath: `${artifactBase}.summary.json`,
+    timeseriesPath: `${artifactBase}.timeseries.jsonl`,
+  }
+
+  let lastPointAtMs = startedAtMs
+  let lastOk = 0
+  let lastTotal = 0
+  let lastHttp = 0
+  let lastRpc = 0
+  let lastNet = 0
+
+  async function timeseriesLoop() {
+    if (!config.emitTimeseries) return
+    while (nowMs() < stopAtMs) {
+      await sleep(1000)
+      const now = nowMs()
+      const elapsedSinceLast = Math.max(0.001, (now - lastPointAtMs) / 1000)
+      lastPointAtMs = now
+
+      const okDelta = counters.ok - lastOk
+      const totalDelta = counters.total - lastTotal
+      const httpDelta = counters.httpError - lastHttp
+      const rpcDelta = counters.rpcError - lastRpc
+      const netDelta = counters.networkError - lastNet
+
+      lastOk = counters.ok
+      lastTotal = counters.total
+      lastHttp = counters.httpError
+      lastRpc = counters.rpcError
+      lastNet = counters.networkError
+
+      const samples = timeseriesSampler.snapshotSorted()
+      const point: TimeseriesPoint = {
+        tSec: (now - startedAtMs) / 1000,
+        ok: okDelta,
+        total: totalDelta,
+        httpError: httpDelta,
+        rpcError: rpcDelta,
+        networkError: netDelta,
+        rps: totalDelta / elapsedSinceLast,
+        okRps: okDelta / elapsedSinceLast,
+        latencyMs: {
+          sampleCount: timeseriesSampler.size(),
+          p50: percentile(samples, 50),
+          p95: percentile(samples, 95),
+          p99: percentile(samples, 99),
+        },
+        timestamp: new Date().toISOString(),
+      }
+      appendJsonl(artifacts.timeseriesPath, point)
+    }
+  }
+
+  const workers = Array.from({ length: config.concurrency }, (_, idx) =>
+    worker(config, counters, sampler, timeseriesSampler, stopAtMs, idx),
+  )
+
+  await Promise.all([...workers, timeseriesLoop()])
   counters.endedAtMs = nowMs()
 
   const elapsedSec = Math.max(0.001, (counters.endedAtMs - counters.startedAtMs) / 1000)
   const rps = counters.total / elapsedSec
+  const okRps = counters.ok / elapsedSec
 
   const samples = sampler.snapshotSorted()
   const report = {
@@ -203,6 +341,7 @@ async function main() {
     elapsedSec,
     totals: counters,
     rps,
+    okRps,
     latencyMs: {
       sampleCount: sampler.size(),
       p50: percentile(samples, 50),
@@ -210,13 +349,16 @@ async function main() {
       p99: percentile(samples, 99),
     },
     timestamp: new Date().toISOString(),
+    artifacts,
   }
 
   console.log(JSON.stringify(report, null, 2))
+  writeJson(artifacts.summaryPath, report)
+  return report
 }
 
 export async function runRpcLoadgen() {
-  await main()
+  return await main()
 }
 
 if (import.meta.main) {

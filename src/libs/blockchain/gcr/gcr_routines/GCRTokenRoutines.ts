@@ -1,0 +1,1793 @@
+// REVIEW: GCRTokenRoutines - Handler for token GCREdit operations
+// REVIEW: Phase 5.1 - Integrated with HookExecutor for script execution in consensus
+import { Repository } from "typeorm"
+
+import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
+import log from "@/utilities/logger"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { getSharedState } from "@/utilities/sharedState"
+
+// Scripting system imports for hook execution
+import {
+    HookExecutor,
+    scriptExecutor,
+    applyMutations,
+    createTransferMutations,
+    createMintMutations,
+    createBurnMutations,
+    type ExecuteWithHooksRequest,
+    type HookExecutionResult,
+    type GCRTokenData,
+} from "@/libs/scripting"
+
+// SDK Transaction type for context
+import type { Transaction } from "@kynesyslabs/demosdk/types"
+
+import { GCRResult } from "../handleGCR"
+import {
+    GCREditToken,
+    GCREditTokenCreate,
+    GCREditTokenTransfer,
+    GCREditTokenMint,
+    GCREditTokenBurn,
+    GCREditTokenPause,
+    GCREditTokenUnpause,
+    GCREditTokenUpdateACL,
+    GCREditTokenGrantPermission,
+    GCREditTokenRevokePermission,
+    GCREditTokenUpgradeScript,
+    GCREditTokenTransferOwnership,
+    GCREditTokenCustom,
+} from "../types/token/GCREditToken"
+import type { TokenPermission, TokenHolderReference } from "../types/token/TokenTypes"
+import { hasPermission } from "../types/token/TokenTypes"
+
+/**
+ * GCRTokenRoutines handles all token-related GCR edit operations.
+ *
+ * Implements:
+ * - handleCreateToken: Initialize token GCR entry with metadata, balances, ACL
+ * - handleTransferToken: Update balances in token GCR, update holder pointers (with hooks)
+ * - handleMintToken: Increase supply and balance (check permissions, with hooks)
+ * - handleBurnToken: Decrease supply and balance (check permissions, with hooks)
+ * - handleUpdateTokenACL: Modify ACL entries
+ * - handlePauseToken / handleUnpauseToken: Toggle paused state
+ * - handleUpgradeTokenScript: Replace script code (check permissions)
+ * - handleTransferOwnership: Transfer token ownership
+ *
+ * REVIEW: Phase 5.1 - Script execution integrated via HookExecutor for transfer, mint, burn
+ */
+export default class GCRTokenRoutines {
+    // REVIEW: Phase 5.1 - HookExecutor instance for script execution in consensus
+    private static hookExecutor: HookExecutor | null = null
+
+    /**
+     * Get or create the HookExecutor instance
+     */
+    private static getHookExecutor(): HookExecutor {
+        if (!this.hookExecutor) {
+            this.hookExecutor = new HookExecutor(scriptExecutor)
+        }
+        return this.hookExecutor
+    }
+
+    /**
+     * Convert GCRToken entity to GCRTokenData for hook execution
+     * REVIEW: Phase 5.1 - Required for HookExecutor integration
+     */
+    private static tokenToGCRTokenData(token: GCRToken): GCRTokenData {
+        return {
+            address: token.address,
+            name: token.name,
+            ticker: token.ticker,
+            decimals: token.decimals,
+            owner: token.owner,
+            totalSupply: BigInt(token.totalSupply),
+            balances: Object.fromEntries(
+                Object.entries(token.balances).map(([k, v]) => [k, BigInt(v)]),
+            ),
+            allowances: Object.fromEntries(
+                Object.entries(token.allowances).map(([owner, spenders]) => [
+                    owner,
+                    Object.fromEntries(
+                        Object.entries(spenders).map(([spender, v]) => [spender, BigInt(v)]),
+                    ),
+                ]),
+            ),
+            paused: token.paused,
+            storage: token.customState,
+        }
+    }
+
+    /**
+     * Apply GCRTokenData mutations back to GCRToken entity
+     * REVIEW: Phase 5.1 - Required for HookExecutor integration
+     */
+    private static applyGCRTokenDataToEntity(token: GCRToken, data: GCRTokenData): void {
+        token.totalSupply = data.totalSupply.toString()
+        token.balances = Object.fromEntries(
+            Object.entries(data.balances).map(([k, v]) => [k, v.toString()]),
+        )
+        token.allowances = Object.fromEntries(
+            Object.entries(data.allowances).map(([owner, spenders]) => [
+                owner,
+                Object.fromEntries(
+                    Object.entries(spenders).map(([spender, v]) => [spender, v.toString()]),
+                ),
+            ]),
+        )
+        if (data.storage) {
+            token.customState = data.storage
+        }
+    }
+
+    /**
+     * Main entry point for applying token GCREdit operations
+     * REVIEW: Phase 5.1 - Now accepts optional Transaction for script execution context
+     */
+    static async apply(
+        editOperation: GCREditToken,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+        tx?: Transaction, // REVIEW: Phase 5.1 - Transaction context for hook execution
+    ): Promise<GCRResult> {
+        if (editOperation.type !== "token") {
+            return { success: false, message: "Invalid GCREdit type for token routine" }
+        }
+
+        // Normalize account address
+        const normalizedAccount =
+            typeof editOperation.account !== "string"
+                ? forgeToHex(editOperation.account as any)
+                : editOperation.account
+
+        const rollbackStr = editOperation.isRollback ? "ROLLBACK" : "NORMAL"
+        log.debug(
+            "[GCRTokenRoutines] Applying token operation: " +
+                editOperation.operation +
+                " (" +
+                rollbackStr +
+                ")",
+        )
+
+        // Clone and potentially reverse for rollback
+        const edit = { ...editOperation, account: normalizedAccount }
+
+        // Route to appropriate handler
+        // REVIEW: Phase 5.1 - Pass tx to handlers that support hooks (transfer, mint, burn)
+        switch (edit.operation) {
+            case "create":
+                return this.handleCreateToken(
+                    edit as GCREditTokenCreate,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "transfer":
+                return this.handleTransferToken(
+                    edit as GCREditTokenTransfer,
+                    gcrTokenRepository,
+                    simulate,
+                    tx,
+                )
+            case "mint":
+                return this.handleMintToken(
+                    edit as GCREditTokenMint,
+                    gcrTokenRepository,
+                    simulate,
+                    tx,
+                )
+            case "burn":
+                return this.handleBurnToken(
+                    edit as GCREditTokenBurn,
+                    gcrTokenRepository,
+                    simulate,
+                    tx,
+                )
+            case "pause":
+                return this.handlePauseToken(
+                    edit as GCREditTokenPause,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "unpause":
+                return this.handleUnpauseToken(
+                    edit as GCREditTokenUnpause,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "updateACL":
+                return this.handleUpdateTokenACL(
+                    edit as GCREditTokenUpdateACL,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "grantPermission":
+                return this.handleGrantPermission(
+                    edit as GCREditTokenGrantPermission,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "revokePermission":
+                return this.handleRevokePermission(
+                    edit as GCREditTokenRevokePermission,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "upgradeScript":
+                return this.handleUpgradeTokenScript(
+                    edit as GCREditTokenUpgradeScript,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            case "transferOwnership":
+                return this.handleTransferOwnership(
+                    edit as GCREditTokenTransferOwnership,
+                    gcrTokenRepository,
+                    simulate,
+                )
+            // REVIEW: Phase 5.2 - Custom script method execution
+            case "custom":
+                return this.handleCustomMethod(
+                    edit as GCREditTokenCustom,
+                    gcrTokenRepository,
+                    simulate,
+                    tx,
+                )
+            default:
+                return {
+                    success: false,
+                    message: "Unknown token operation: " + (edit as any).operation,
+                }
+        }
+    }
+
+    /**
+     * Handle token creation - initializes a new token GCR entry
+     */
+    private static async handleCreateToken(
+        edit: GCREditTokenCreate,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { tokenData } = edit.data
+        const tokenAddress = edit.data.tokenAddress
+
+        log.debug("[GCRTokenRoutines] Creating token: " + tokenAddress)
+
+        // For rollback, delete the token
+        if (edit.isRollback) {
+            if (!simulate) {
+                await gcrTokenRepository.delete({ address: tokenAddress })
+                // Remove holder reference for deployer
+                await this.removeHolderReference(
+                    tokenData.metadata.deployer,
+                    tokenAddress,
+                )
+                log.info("[GCRTokenRoutines] Rolled back token creation: " + tokenAddress)
+            }
+            return { success: true, message: "Token creation rolled back" }
+        }
+
+        // Check if token already exists
+        const existing = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (existing) {
+            return {
+                success: false,
+                message: "Token already exists at address: " + tokenAddress,
+            }
+        }
+
+        // Create new token entity
+        const token = new GCRToken()
+        token.address = tokenAddress
+        token.name = tokenData.metadata.name
+        token.ticker = tokenData.metadata.ticker
+        token.decimals = tokenData.metadata.decimals
+        token.deployer = tokenData.metadata.deployer
+        token.deployerNonce = tokenData.metadata.deployerNonce
+        token.deployedAt = tokenData.metadata.deployedAt
+        token.hasScript = tokenData.metadata.hasScript
+        token.totalSupply = tokenData.state.totalSupply
+        token.balances = tokenData.state.balances
+        token.allowances = tokenData.state.allowances
+        token.customState = tokenData.state.customState
+        token.owner = tokenData.accessControl.owner
+        token.paused = tokenData.accessControl.paused
+        token.aclEntries = tokenData.accessControl.entries
+        token.script = tokenData.script
+        token.deployTxHash = edit.txhash
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+
+                // Add holder reference for deployer if they have balance
+                const deployerBalance = tokenData.state.balances[tokenData.metadata.deployer] ?? "0"
+                if (BigInt(deployerBalance) > 0n) {
+                    await this.addHolderReference(tokenData.metadata.deployer, {
+                        tokenAddress,
+                        ticker: tokenData.metadata.ticker,
+                        name: tokenData.metadata.name,
+                        decimals: tokenData.metadata.decimals,
+                    })
+                }
+
+                log.info(
+                    "[GCRTokenRoutines] Created token " +
+                        tokenData.metadata.ticker +
+                        " at " +
+                        tokenAddress,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to create token: " + error)
+                return { success: false, message: "Failed to save token" }
+            }
+        }
+
+        return { success: true, message: "Token created successfully" }
+    }
+
+    /**
+     * Handle token transfer - updates balances and holder pointers
+     */
+    private static async handleTransferToken(
+        edit: GCREditTokenTransfer,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+        tx?: Transaction, // REVIEW: Phase 5.1 - Transaction context for hook execution
+    ): Promise<GCRResult> {
+        const { from, to, amount } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Transfer: " +
+                amount +
+                " from " +
+                from +
+                " to " +
+                to +
+                " for token " +
+                tokenAddress,
+        )
+
+        const transferAmount = BigInt(amount)
+        if (transferAmount <= 0n) {
+            return { success: false, message: "Transfer amount must be positive" }
+        }
+
+        // For rollback, reverse the direction
+        const actualFrom = edit.isRollback ? to : from
+        const actualTo = edit.isRollback ? from : to
+
+        // In simulate mode we must avoid persisting, so a simple read/compute is fine.
+        if (simulate) {
+            const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+            if (!token) return { success: false, message: "Token not found: " + tokenAddress }
+            if (token.paused && !edit.isRollback) return { success: false, message: "Token is paused" }
+
+            const fromBalance = BigInt(token.balances[actualFrom] ?? "0")
+            if (fromBalance < transferAmount) return { success: false, message: "Insufficient balance" }
+
+            const prevToBalance = BigInt(token.balances[actualTo] ?? "0")
+
+            if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
+                try {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createTransferMutations(actualFrom, actualTo, transferAmount)
+
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "transfer",
+                        operationData: { from: actualFrom, to: actualTo, amount: transferAmount },
+                        tokenAddress,
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
+                    }
+
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        return {
+                            success: false,
+                            message: `Transfer rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                        }
+                    }
+
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } catch (error) {
+                    return { success: false, message: `Script execution failed: ${error}` }
+                }
+            } else {
+                token.balances[actualFrom] = (fromBalance - transferAmount).toString()
+                token.balances[actualTo] = (prevToBalance + transferAmount).toString()
+            }
+
+            if (token.balances[actualFrom] === "0") delete token.balances[actualFrom]
+            return { success: true, message: "Transfer completed" }
+        }
+
+        // Non-simulated execution must be serialized per-token to prevent lost updates when multiple
+        // block sync/apply paths touch the same token concurrently.
+        let holderUpdate: null | {
+            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
+            removeFrom: boolean
+            addTo: boolean
+        } = null
+
+        try {
+            await gcrTokenRepository.manager.transaction(async em => {
+                const repo = em.getRepository(GCRToken)
+                const token = await repo.findOne({
+                    where: { address: tokenAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+
+                if (!token) throw new Error("Token not found: " + tokenAddress)
+                if (token.paused && !edit.isRollback) throw new Error("Token is paused")
+
+                const fromBefore = BigInt(token.balances[actualFrom] ?? "0")
+                const toBefore = BigInt(token.balances[actualTo] ?? "0")
+                if (fromBefore < transferAmount) throw new Error("Insufficient balance")
+
+                if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createTransferMutations(actualFrom, actualTo, transferAmount)
+
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "transfer",
+                        operationData: { from: actualFrom, to: actualTo, amount: transferAmount },
+                        tokenAddress,
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
+                    }
+
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        throw new Error(
+                            `Transfer rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                        )
+                    }
+
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } else {
+                    token.balances[actualFrom] = (fromBefore - transferAmount).toString()
+                    token.balances[actualTo] = (toBefore + transferAmount).toString()
+                }
+
+                if (token.balances[actualFrom] === "0") delete token.balances[actualFrom]
+
+                const fromAfter = BigInt(token.balances[actualFrom] ?? "0")
+                const toAfter = BigInt(token.balances[actualTo] ?? "0")
+
+                await repo.save(token)
+
+                holderUpdate = {
+                    tokenMeta: {
+                        tokenAddress,
+                        ticker: token.ticker,
+                        name: token.name,
+                        decimals: token.decimals,
+                    },
+                    removeFrom: fromBefore > 0n && fromAfter === 0n,
+                    addTo: toBefore === 0n && toAfter > 0n,
+                }
+            })
+
+            if (holderUpdate?.removeFrom) {
+                await this.removeHolderReference(actualFrom, tokenAddress)
+            }
+            if (holderUpdate?.addTo) {
+                await this.addHolderReference(actualTo, holderUpdate.tokenMeta)
+            }
+
+            log.info(
+                "[GCRTokenRoutines] Transferred " +
+                    amount +
+                    " " +
+                    holderUpdate?.tokenMeta.ticker +
+                    " from " +
+                    actualFrom +
+                    " to " +
+                    actualTo,
+            )
+        } catch (error) {
+            log.error("[GCRTokenRoutines] Failed to transfer: " + error)
+            return { success: false, message: "Failed to save transfer" }
+        }
+
+        return { success: true, message: "Transfer completed" }
+    }
+
+    /**
+     * Handle token minting - increases supply and target balance
+     */
+    private static async handleMintToken(
+        edit: GCREditTokenMint,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+        tx?: Transaction, // REVIEW: Phase 5.1 - Transaction context for hook execution
+    ): Promise<GCRResult> {
+        const { to, amount } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Mint: " + amount + " to " + to + " for token " + tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check if paused
+        if (token.paused && !edit.isRollback) {
+            return { success: false, message: "Token is paused" }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canMint")) {
+                return { success: false, message: "No mint permission" }
+            }
+        }
+
+        const mintAmount = BigInt(amount)
+        if (mintAmount <= 0n) {
+            return { success: false, message: "Mint amount must be positive" }
+        }
+
+        // Store previous balance for holder reference logic
+        const prevBalance = BigInt(token.balances[to] ?? "0")
+
+        // For rollback, burn instead (no script execution for rollback)
+        if (edit.isRollback) {
+            if (prevBalance < mintAmount) {
+                return { success: false, message: "Cannot rollback: insufficient balance" }
+            }
+            token.balances[to] = (prevBalance - mintAmount).toString()
+            token.totalSupply = (BigInt(token.totalSupply) - mintAmount).toString()
+            if (token.balances[to] === "0") {
+                delete token.balances[to]
+            }
+        } else if (token.hasScript && token.script?.code && tx) {
+            // REVIEW: Phase 5.1 - Execute mint through HookExecutor for script hooks
+            try {
+                const hookExecutor = this.getHookExecutor()
+                const tokenData = this.tokenToGCRTokenData(token)
+
+                // Create native operation mutations
+                const nativeMutations = createMintMutations(to, mintAmount)
+
+                // Build request for hook execution
+                const request: ExecuteWithHooksRequest = {
+                    operation: "mint",
+                    operationData: {
+                        to,
+                        amount: mintAmount,
+                    },
+                    tokenAddress,
+                    tokenData,
+                    scriptCode: token.script.code,
+                    txContext: {
+                        caller: tx.content.from,
+                        txHash: tx.hash,
+                        timestamp: tx.content.timestamp ?? Date.now(),
+                        blockHeight: tx.blockNumber ?? 0,
+                        prevBlockHash: "", // Will be injected by consensus layer
+                    },
+                    nativeOperationMutations: nativeMutations,
+                }
+
+                // Execute with hooks
+                const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+
+                // Handle rejection
+                if (result.rejection) {
+                    log.warn(
+                        `[GCRTokenRoutines] Mint rejected by script hook: ${result.rejection.hookType} - ${result.rejection.reason}`,
+                    )
+                    return {
+                        success: false,
+                        message: `Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                    }
+                }
+
+                // Apply final state from hook execution
+                this.applyGCRTokenDataToEntity(token, result.finalState)
+
+                log.debug(
+                    `[GCRTokenRoutines] Mint executed with hooks: beforeHook=${result.metadata.beforeHookExecuted}, afterHook=${result.metadata.afterHookExecuted}`,
+                )
+            } catch (error) {
+                log.error(`[GCRTokenRoutines] Script hook execution failed: ${error}`)
+                return { success: false, message: `Script execution failed: ${error}` }
+            }
+        } else {
+            // Native mint without script hooks
+            token.balances[to] = (prevBalance + mintAmount).toString()
+            token.totalSupply = (BigInt(token.totalSupply) + mintAmount).toString()
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+
+                // Handle holder reference
+                if (edit.isRollback && token.balances[to] === undefined) {
+                    await this.removeHolderReference(to, tokenAddress)
+                } else if (!edit.isRollback && prevBalance === 0n) {
+                    await this.addHolderReference(to, {
+                        tokenAddress,
+                        ticker: token.ticker,
+                        name: token.name,
+                        decimals: token.decimals,
+                    })
+                }
+
+                log.info("[GCRTokenRoutines] Minted " + amount + " " + token.ticker + " to " + to)
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to mint: " + error)
+                return { success: false, message: "Failed to save mint" }
+            }
+        }
+
+        return { success: true, message: "Mint completed" }
+    }
+
+    /**
+     * Handle token burning - decreases supply and target balance
+     */
+    private static async handleBurnToken(
+        edit: GCREditTokenBurn,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+        tx?: Transaction, // REVIEW: Phase 5.1 - Transaction context for hook execution
+    ): Promise<GCRResult> {
+        const { from, amount } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Burn: " + amount + " from " + from + " for token " + tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check if paused
+        if (token.paused && !edit.isRollback) {
+            return { success: false, message: "Token is paused" }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            // Can burn own tokens OR need canBurn permission for others
+            if (edit.account !== from) {
+                if (!hasPermission(token.toAccessControl(), edit.account, "canBurn")) {
+                    return { success: false, message: "No burn permission" }
+                }
+            }
+        }
+
+        const burnAmount = BigInt(amount)
+        if (burnAmount <= 0n) {
+            return { success: false, message: "Burn amount must be positive" }
+        }
+
+        // Store previous balance for holder reference logic
+        const prevBalance = BigInt(token.balances[from] ?? "0")
+
+        // For rollback, mint instead (no script execution for rollback)
+        if (edit.isRollback) {
+            token.balances[from] = (prevBalance + burnAmount).toString()
+            token.totalSupply = (BigInt(token.totalSupply) + burnAmount).toString()
+        } else if (token.hasScript && token.script?.code && tx) {
+            // REVIEW: Phase 5.1 - Execute burn through HookExecutor for script hooks
+            // First validate balance before hook execution
+            if (prevBalance < burnAmount) {
+                return { success: false, message: "Insufficient balance to burn" }
+            }
+
+            try {
+                const hookExecutor = this.getHookExecutor()
+                const tokenData = this.tokenToGCRTokenData(token)
+
+                // Create native operation mutations
+                const nativeMutations = createBurnMutations(from, burnAmount)
+
+                // Build request for hook execution
+                const request: ExecuteWithHooksRequest = {
+                    operation: "burn",
+                    operationData: {
+                        from,
+                        amount: burnAmount,
+                    },
+                    tokenAddress,
+                    tokenData,
+                    scriptCode: token.script.code,
+                    txContext: {
+                        caller: tx.content.from,
+                        txHash: tx.hash,
+                        timestamp: tx.content.timestamp ?? Date.now(),
+                        blockHeight: tx.blockNumber ?? 0,
+                        prevBlockHash: "", // Will be injected by consensus layer
+                    },
+                    nativeOperationMutations: nativeMutations,
+                }
+
+                // Execute with hooks
+                const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+
+                // Handle rejection
+                if (result.rejection) {
+                    log.warn(
+                        `[GCRTokenRoutines] Burn rejected by script hook: ${result.rejection.hookType} - ${result.rejection.reason}`,
+                    )
+                    return {
+                        success: false,
+                        message: `Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                    }
+                }
+
+                // Apply final state from hook execution
+                this.applyGCRTokenDataToEntity(token, result.finalState)
+
+                log.debug(
+                    `[GCRTokenRoutines] Burn executed with hooks: beforeHook=${result.metadata.beforeHookExecuted}, afterHook=${result.metadata.afterHookExecuted}`,
+                )
+            } catch (error) {
+                log.error(`[GCRTokenRoutines] Script hook execution failed: ${error}`)
+                return { success: false, message: `Script execution failed: ${error}` }
+            }
+        } else {
+            // Native burn without script hooks
+            if (prevBalance < burnAmount) {
+                return { success: false, message: "Insufficient balance to burn" }
+            }
+            token.balances[from] = (prevBalance - burnAmount).toString()
+            token.totalSupply = (BigInt(token.totalSupply) - burnAmount).toString()
+        }
+
+        // Clean up zero balances (only for non-rollback where balance was reduced)
+        if (!edit.isRollback && token.balances[from] === "0") {
+            delete token.balances[from]
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+
+                // Handle holder reference
+                if (!edit.isRollback && token.balances[from] === undefined) {
+                    await this.removeHolderReference(from, tokenAddress)
+                } else if (edit.isRollback && prevBalance === 0n) {
+                    await this.addHolderReference(from, {
+                        tokenAddress,
+                        ticker: token.ticker,
+                        name: token.name,
+                        decimals: token.decimals,
+                    })
+                }
+
+                log.info(
+                    "[GCRTokenRoutines] Burned " + amount + " " + token.ticker + " from " + from,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to burn: " + error)
+                return { success: false, message: "Failed to save burn" }
+            }
+        }
+
+        return { success: true, message: "Burn completed" }
+    }
+
+    /**
+     * Handle pausing a token
+     */
+    private static async handlePauseToken(
+        edit: GCREditTokenPause,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const tokenAddress = edit.tokenAddress
+
+        log.debug("[GCRTokenRoutines] Pause token: " + tokenAddress)
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canPause")) {
+                return { success: false, message: "No pause permission" }
+            }
+        }
+
+        // For rollback, unpause; otherwise pause
+        token.paused = !edit.isRollback
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                const action = edit.isRollback ? "Unpaused" : "Paused"
+                log.info("[GCRTokenRoutines] " + action + " token " + tokenAddress)
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to pause: " + error)
+                return { success: false, message: "Failed to save pause state" }
+            }
+        }
+
+        return { success: true, message: edit.isRollback ? "Token unpaused" : "Token paused" }
+    }
+
+    /**
+     * Handle unpausing a token
+     */
+    private static async handleUnpauseToken(
+        edit: GCREditTokenUnpause,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const tokenAddress = edit.tokenAddress
+
+        log.debug("[GCRTokenRoutines] Unpause token: " + tokenAddress)
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canPause")) {
+                return { success: false, message: "No pause permission" }
+            }
+        }
+
+        // For rollback, pause; otherwise unpause
+        token.paused = edit.isRollback
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                const action = edit.isRollback ? "Paused" : "Unpaused"
+                log.info("[GCRTokenRoutines] " + action + " token " + tokenAddress)
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to unpause: " + error)
+                return { success: false, message: "Failed to save pause state" }
+            }
+        }
+
+        return { success: true, message: edit.isRollback ? "Token paused" : "Token unpaused" }
+    }
+
+    /**
+     * Handle ACL updates - grant or revoke permissions
+     */
+    private static async handleUpdateTokenACL(
+        edit: GCREditTokenUpdateACL,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { action, targetAddress, permissions } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] ACL update: " +
+                action +
+                " " +
+                permissions.join(",") +
+                " for " +
+                targetAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canModifyACL")) {
+                return { success: false, message: "No ACL modification permission" }
+            }
+        }
+
+        // Determine actual action (flip for rollback)
+        const actualAction = edit.isRollback
+            ? (action === "grant" ? "revoke" : "grant")
+            : action
+
+        if (actualAction === "grant") {
+            // Find or create entry
+            let entry = token.aclEntries.find((e) => e.address === targetAddress)
+            if (!entry) {
+                entry = {
+                    address: targetAddress,
+                    permissions: [],
+                    grantedAt: Date.now(),
+                    grantedBy: edit.account,
+                }
+                token.aclEntries.push(entry)
+            }
+            // Add permissions
+            for (const perm of permissions) {
+                if (!entry.permissions.includes(perm)) {
+                    entry.permissions.push(perm)
+                }
+            }
+        } else {
+            // Revoke
+            const entry = token.aclEntries.find((e) => e.address === targetAddress)
+            if (entry) {
+                entry.permissions = entry.permissions.filter(
+                    (p) => !permissions.includes(p as TokenPermission),
+                )
+                // Remove entry if no permissions left
+                if (entry.permissions.length === 0) {
+                    token.aclEntries = token.aclEntries.filter(
+                        (e) => e.address !== targetAddress,
+                    )
+                }
+            }
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                log.info(
+                    "[GCRTokenRoutines] ACL " +
+                        actualAction +
+                        "ed " +
+                        permissions.join(",") +
+                        " for " +
+                        targetAddress,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to update ACL: " + error)
+                return { success: false, message: "Failed to save ACL update" }
+            }
+        }
+
+        return { success: true, message: "ACL " + actualAction + " completed" }
+    }
+
+    // REVIEW: Phase 4.2 - Dedicated Grant/Revoke Permission handlers
+
+    /**
+     * Handle granting permissions to an address.
+     * This is a specialized form of updateACL for grant operations.
+     *
+     * @param edit - GCREdit operation for granting permission
+     * @param gcrTokenRepository - Token repository
+     * @param simulate - Whether to simulate without persisting
+     * @returns GCRResult indicating success or failure
+     */
+    private static async handleGrantPermission(
+        edit: GCREditTokenGrantPermission,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { grantee, permissions } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Grant permission: " +
+                permissions.join(",") +
+                " to " +
+                grantee +
+                " on " +
+                tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canModifyACL")) {
+                return { success: false, message: "No ACL modification permission" }
+            }
+        }
+
+        // For rollback, we revoke instead of grant
+        if (edit.isRollback) {
+            // Revoke the permissions
+            const entry = token.aclEntries.find((e) => e.address === grantee)
+            if (entry) {
+                entry.permissions = entry.permissions.filter(
+                    (p) => !permissions.includes(p as TokenPermission),
+                )
+                // Remove entry if no permissions left
+                if (entry.permissions.length === 0) {
+                    token.aclEntries = token.aclEntries.filter((e) => e.address !== grantee)
+                }
+            }
+        } else {
+            // Normal grant
+            let entry = token.aclEntries.find((e) => e.address === grantee)
+            if (!entry) {
+                entry = {
+                    address: grantee,
+                    permissions: [],
+                    grantedAt: Date.now(),
+                    grantedBy: edit.account,
+                }
+                token.aclEntries.push(entry)
+            }
+            // Add permissions
+            for (const perm of permissions) {
+                if (!entry.permissions.includes(perm)) {
+                    entry.permissions.push(perm)
+                }
+            }
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                const action = edit.isRollback ? "Revoked (rollback)" : "Granted"
+                log.info(
+                    "[GCRTokenRoutines] " +
+                        action +
+                        " " +
+                        permissions.join(",") +
+                        " to " +
+                        grantee,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to grant permission: " + error)
+                return { success: false, message: "Failed to save permission grant" }
+            }
+        }
+
+        return {
+            success: true,
+            message: edit.isRollback ? "Permission revoked (rollback)" : "Permission granted",
+        }
+    }
+
+    /**
+     * Handle revoking permissions from an address.
+     * This is a specialized form of updateACL for revoke operations.
+     *
+     * @param edit - GCREdit operation for revoking permission
+     * @param gcrTokenRepository - Token repository
+     * @param simulate - Whether to simulate without persisting
+     * @returns GCRResult indicating success or failure
+     */
+    private static async handleRevokePermission(
+        edit: GCREditTokenRevokePermission,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { grantee, permissions } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Revoke permission: " +
+                permissions.join(",") +
+                " from " +
+                grantee +
+                " on " +
+                tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canModifyACL")) {
+                return { success: false, message: "No ACL modification permission" }
+            }
+        }
+
+        // For rollback, we grant instead of revoke
+        if (edit.isRollback) {
+            // Re-grant the permissions
+            let entry = token.aclEntries.find((e) => e.address === grantee)
+            if (!entry) {
+                entry = {
+                    address: grantee,
+                    permissions: [],
+                    grantedAt: Date.now(),
+                    grantedBy: edit.account,
+                }
+                token.aclEntries.push(entry)
+            }
+            for (const perm of permissions) {
+                if (!entry.permissions.includes(perm)) {
+                    entry.permissions.push(perm)
+                }
+            }
+        } else {
+            // Normal revoke
+            const entry = token.aclEntries.find((e) => e.address === grantee)
+            if (entry) {
+                entry.permissions = entry.permissions.filter(
+                    (p) => !permissions.includes(p as TokenPermission),
+                )
+                // Remove entry if no permissions left
+                if (entry.permissions.length === 0) {
+                    token.aclEntries = token.aclEntries.filter((e) => e.address !== grantee)
+                }
+            }
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                const action = edit.isRollback ? "Granted (rollback)" : "Revoked"
+                log.info(
+                    "[GCRTokenRoutines] " +
+                        action +
+                        " " +
+                        permissions.join(",") +
+                        " from " +
+                        grantee,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to revoke permission: " + error)
+                return { success: false, message: "Failed to save permission revoke" }
+            }
+        }
+
+        return {
+            success: true,
+            message: edit.isRollback ? "Permission granted (rollback)" : "Permission revoked",
+        }
+    }
+
+    /**
+     * Handle script upgrade
+     */
+    private static async handleUpgradeTokenScript(
+        edit: GCREditTokenUpgradeScript,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { newScript, upgradeReason, previousVersion } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug("[GCRTokenRoutines] Upgrade script for token: " + tokenAddress)
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        // Authorization: Must be owner OR have canUpgrade permission in ACL
+        if (!edit.isRollback) {
+            if (!hasPermission(token.toAccessControl(), edit.account, "canUpgrade")) {
+                return { success: false, message: "No upgrade permission" }
+            }
+        }
+
+        // Store previous version for logging/rollback reference
+        const currentVersion = token.scriptVersion ?? 0
+        const currentTimestamp = Date.now()
+
+        // For rollback, attempt to restore previous version state
+        if (edit.isRollback) {
+            // If previousVersion was provided, use it to decrement
+            if (previousVersion !== undefined && previousVersion >= 0) {
+                token.scriptVersion = previousVersion
+                log.info(
+                    "[GCRTokenRoutines] Script rollback to version " +
+                        previousVersion +
+                        " for " +
+                        tokenAddress,
+                )
+            } else {
+                // Without previous version info, we can only clear the script
+                log.warn(
+                    "[GCRTokenRoutines] Script rollback without version info - clearing script",
+                )
+                token.script = undefined
+                token.hasScript = false
+                token.scriptVersion = 0
+                token.lastScriptUpdate = null
+            }
+        } else {
+            // Normal upgrade: increment version and update script
+            token.script = newScript
+            token.hasScript = true
+            token.scriptVersion = currentVersion + 1
+            token.lastScriptUpdate = currentTimestamp
+
+            // Log upgrade reason if provided
+            if (upgradeReason) {
+                log.info(
+                    "[GCRTokenRoutines] Upgrade reason for " +
+                        tokenAddress +
+                        ": " +
+                        upgradeReason,
+                )
+            }
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                const action = edit.isRollback ? "Rolled back" : "Upgraded"
+                const versionInfo = edit.isRollback
+                    ? "from v" + currentVersion
+                    : "to v" + token.scriptVersion
+
+                log.info(
+                    "[GCRTokenRoutines] " +
+                        action +
+                        " script " +
+                        versionInfo +
+                        " for " +
+                        tokenAddress,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to upgrade script: " + error)
+                return { success: false, message: "Failed to save script upgrade" }
+            }
+        }
+
+        return {
+            success: true,
+            message: edit.isRollback
+                ? "Script rolled back to v" + token.scriptVersion
+                : "Script upgraded to v" + token.scriptVersion,
+            response: {
+                previousVersion: currentVersion,
+                newVersion: token.scriptVersion,
+                upgradedAt: token.lastScriptUpdate,
+            },
+        }
+    }
+
+    /**
+     * Handle ownership transfer
+     */
+    private static async handleTransferOwnership(
+        edit: GCREditTokenTransferOwnership,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { newOwner } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Transfer ownership to " +
+                newOwner +
+                " for token: " +
+                tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check permission (unless rollback)
+        if (!edit.isRollback) {
+            if (
+                !hasPermission(token.toAccessControl(), edit.account, "canTransferOwnership")
+            ) {
+                return { success: false, message: "No ownership transfer permission" }
+            }
+        }
+
+        const oldOwner = token.owner
+
+        // For rollback, swap back
+        if (edit.isRollback) {
+            token.owner = edit.account // Previous owner was the caller
+        } else {
+            token.owner = newOwner
+        }
+
+        if (!simulate) {
+            try {
+                await gcrTokenRepository.save(token)
+                log.info(
+                    "[GCRTokenRoutines] Transferred ownership from " +
+                        oldOwner +
+                        " to " +
+                        token.owner,
+                )
+            } catch (error) {
+                log.error("[GCRTokenRoutines] Failed to transfer ownership: " + error)
+                return { success: false, message: "Failed to save ownership transfer" }
+            }
+        }
+
+        return { success: true, message: "Ownership transferred" }
+    }
+
+    // REVIEW: Phase 5.2 - Custom Script Method Execution
+
+    /**
+     * Handle custom script method execution.
+     * This enables user-defined write operations beyond native operations.
+     *
+     * @param edit - GCREdit operation for custom method
+     * @param gcrTokenRepository - Token repository
+     * @param simulate - Whether to simulate without persisting
+     * @param tx - Optional transaction context for script execution
+     * @returns GCRResult indicating success or failure
+     */
+    private static async handleCustomMethod(
+        edit: GCREditTokenCustom,
+        gcrTokenRepository: Repository<GCRToken>,
+        simulate: boolean,
+        tx?: Transaction,
+    ): Promise<GCRResult> {
+        const { method, params } = edit.data
+        const tokenAddress = edit.tokenAddress
+
+        log.debug(
+            "[GCRTokenRoutines] Custom method: " +
+                method +
+                " on token: " +
+                tokenAddress,
+        )
+
+        // Get token
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return { success: false, message: "Token not found: " + tokenAddress }
+        }
+
+        // Check if token has a script
+        if (!token.hasScript || !token.script) {
+            return {
+                success: false,
+                message: "Token has no script - custom methods not available",
+            }
+        }
+
+        // Check if method is defined in the script
+        const methodDef = token.script.methods?.find((m) => m.name === method)
+        if (!methodDef) {
+            return {
+                success: false,
+                message: "Method not found in script: " + method,
+            }
+        }
+
+        // Verify method is a write operation (not view-only)
+        // TokenScriptMethod uses `mutates: boolean` - methods with mutates=false are view-only
+        if (!methodDef.mutates) {
+            return {
+                success: false,
+                message: "Cannot invoke view method as transaction: " + method,
+            }
+        }
+
+        // Rollback not supported for custom methods (script state is opaque)
+        if (edit.isRollback) {
+            log.warn(
+                "[GCRTokenRoutines] Rollback not fully supported for custom method: " +
+                    method,
+            )
+            // For now, we skip rollback - proper rollback would need mutation logging
+            return {
+                success: true,
+                message: "Custom method rollback skipped (state opaque)",
+            }
+        }
+
+        // Prepare block context for script execution
+        // Note: getSharedState is a getter that returns SharedState instance directly
+        const sharedState = getSharedState
+        const blockContext = {
+            timestamp: tx?.content?.timestamp ?? Date.now(),
+            height: sharedState.lastBlockNumber ?? 0,
+            prevBlockHash: sharedState.lastBlockHash ?? "0".repeat(64),
+        }
+
+        // Prepare script execution request
+        const tokenData = this.tokenToGCRTokenData(token)
+
+        try {
+            // Execute the custom method via ScriptExecutor
+            const result = await scriptExecutor.executeMethod({
+                tokenAddress,
+                method,
+                args: params,
+                caller: edit.account,
+                blockContext,
+                txHash: edit.txhash,
+                tokenData,
+            })
+
+            // ScriptResult is a discriminated union - check success first
+            if (!result.success) {
+                // TypeScript needs explicit type extraction for discriminated union narrowing
+                const errorResult = result as Extract<typeof result, { success: false }>
+                log.error(
+                    "[GCRTokenRoutines] Custom method execution failed: " +
+                        errorResult.error,
+                )
+                return {
+                    success: false,
+                    message: errorResult.error ?? "Script execution failed",
+                }
+            }
+
+            // TypeScript now knows result is ScriptSuccess
+            // Apply state mutations from script execution using applyMutations
+            if (result.mutations.length > 0 && !simulate) {
+                // Apply mutations to get new state
+                const { newState } = applyMutations(tokenData, result.mutations)
+                this.applyGCRTokenDataToEntity(token, newState)
+
+                try {
+                    await gcrTokenRepository.save(token)
+                    log.info(
+                        "[GCRTokenRoutines] Custom method " +
+                            method +
+                            " executed on " +
+                            tokenAddress,
+                    )
+                } catch (error) {
+                    log.error(
+                        "[GCRTokenRoutines] Failed to save custom method state: " +
+                            error,
+                    )
+                    return {
+                        success: false,
+                        message: "Failed to persist custom method state",
+                    }
+                }
+            }
+
+            return {
+                success: true,
+                message: "Custom method executed: " + method,
+                response: {
+                    method,
+                    returnValue: result.returnValue,
+                    mutations: result.mutations.length,
+                },
+            }
+        } catch (error) {
+            log.error(
+                "[GCRTokenRoutines] Custom method execution error: " + error,
+            )
+            return {
+                success: false,
+                message: "Custom method execution error: " + String(error),
+            }
+        }
+    }
+
+    // SECTION: Helper Methods
+
+    /**
+     * Add a holder reference to GCRMain.extended.tokens
+     */
+    private static async addHolderReference(
+        holderAddress: string,
+        reference: TokenHolderReference,
+    ): Promise<void> {
+        try {
+            const db = await Datasource.getInstance()
+            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+            const holder = await gcrMainRepository.findOneBy({
+                pubkey: holderAddress,
+            })
+            if (!holder) {
+                log.debug(
+                    "[GCRTokenRoutines] Holder " +
+                        holderAddress +
+                        " not found, skipping reference add",
+                )
+                return
+            }
+
+            const current = holder.extended ?? {
+                tokens: [],
+                nfts: [],
+                xm: [],
+                web2: [],
+                other: [],
+            }
+            const tokens = Array.isArray(current.tokens) ? current.tokens : []
+
+            const idx = tokens.findIndex((t: any) => t?.tokenAddress === reference.tokenAddress)
+            if (idx >= 0) {
+                tokens[idx] = { ...tokens[idx], ...reference }
+            } else {
+                tokens.push(reference)
+            }
+
+            holder.extended = { ...current, tokens }
+            await gcrMainRepository.save(holder)
+        } catch (error) {
+            log.error("[GCRTokenRoutines] Failed to add holder reference: " + error)
+        }
+    }
+
+    /**
+     * Remove a holder reference from GCRMain.extended.tokens
+     */
+    private static async removeHolderReference(
+        holderAddress: string,
+        tokenAddress: string,
+    ): Promise<void> {
+        try {
+            const db = await Datasource.getInstance()
+            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+            const holder = await gcrMainRepository.findOneBy({
+                pubkey: holderAddress,
+            })
+            if (!holder) {
+                log.debug(
+                    "[GCRTokenRoutines] Holder " +
+                        holderAddress +
+                        " not found, skipping reference remove",
+                )
+                return
+            }
+
+            const current = holder.extended ?? {
+                tokens: [],
+                nfts: [],
+                xm: [],
+                web2: [],
+                other: [],
+            }
+            const tokens = Array.isArray(current.tokens) ? current.tokens : []
+            const next = tokens.filter((t: any) => t?.tokenAddress !== tokenAddress)
+
+            holder.extended = { ...current, tokens: next }
+            await gcrMainRepository.save(holder)
+        } catch (error) {
+            log.error("[GCRTokenRoutines] Failed to remove holder reference: " + error)
+        }
+    }
+
+    // SECTION: Query Methods (for nodeCall)
+
+    /**
+     * Get token by address
+     */
+    static async getToken(
+        tokenAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<GCRToken | null> {
+        return gcrTokenRepository.findOneBy({ address: tokenAddress })
+    }
+
+    /**
+     * Get token balance for a holder
+     */
+    static async getBalance(
+        tokenAddress: string,
+        holderAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<{ balance: string; decimals: number; ticker: string } | null> {
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return null
+        }
+        return {
+            balance: token.balances[holderAddress] ?? "0",
+            decimals: token.decimals,
+            ticker: token.ticker,
+        }
+    }
+
+    /**
+     * Get all tokens by deployer
+     */
+    static async getTokensByDeployer(
+        deployerAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<GCRToken[]> {
+        return gcrTokenRepository.findBy({ deployer: deployerAddress })
+    }
+
+    // REVIEW: Phase 1.6 - Additional query methods for NodeCall
+
+    /**
+     * Get allowance for owner -> spender
+     */
+    static async getAllowance(
+        tokenAddress: string,
+        ownerAddress: string,
+        spenderAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<{ allowance: string; decimals: number; ticker: string } | null> {
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return null
+        }
+        const ownerAllowances = token.allowances[ownerAddress] ?? {}
+        return {
+            allowance: ownerAllowances[spenderAddress] ?? "0",
+            decimals: token.decimals,
+            ticker: token.ticker,
+        }
+    }
+
+    /**
+     * Get all tokens held by an address (by iterating through balances)
+     * Note: This is a potentially expensive operation for large token sets.
+     * In production, consider using holder reference pointers in GCRMain.
+     */
+    static async getTokensOf(
+        holderAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<Array<{
+        tokenAddress: string
+        ticker: string
+        name: string
+        decimals: number
+        balance: string
+    }>> {
+        // Get all tokens and filter by holder balance
+        // REVIEW: This is O(n) over all tokens - consider optimizing with holder pointers
+        const allTokens = await gcrTokenRepository.find()
+        const heldTokens: Array<{
+            tokenAddress: string
+            ticker: string
+            name: string
+            decimals: number
+            balance: string
+        }> = []
+
+        for (const token of allTokens) {
+            const balance = token.balances[holderAddress]
+            if (balance && BigInt(balance) > 0n) {
+                heldTokens.push({
+                    tokenAddress: token.address,
+                    ticker: token.ticker,
+                    name: token.name,
+                    decimals: token.decimals,
+                    balance,
+                })
+            }
+        }
+
+        return heldTokens
+    }
+
+    // REVIEW: Phase 4.2 - Permission checking utilities
+
+    /**
+     * Checks if an address has a specific permission on a token.
+     * This is the primary utility for permission checking across the codebase.
+     *
+     * Permission hierarchy:
+     * - Owner always has all permissions (implicit)
+     * - Other addresses require explicit ACL entries
+     * - Empty ACL = only owner can perform protected operations
+     *
+     * @param tokenAddress - Token to check permissions on
+     * @param address - Address to check permissions for
+     * @param permission - Permission to check
+     * @param gcrTokenRepository - Token repository
+     * @returns True if the address has the permission, false otherwise
+     */
+    static async checkPermission(
+        tokenAddress: string,
+        address: string,
+        permission: TokenPermission,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<boolean> {
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return false
+        }
+
+        return hasPermission(token.toAccessControl(), address, permission)
+    }
+
+    /**
+     * Gets all permissions for an address on a token.
+     *
+     * @param tokenAddress - Token to check
+     * @param address - Address to get permissions for
+     * @param gcrTokenRepository - Token repository
+     * @returns Array of permissions the address has, or null if token not found
+     */
+    static async getPermissions(
+        tokenAddress: string,
+        address: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<TokenPermission[] | null> {
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return null
+        }
+
+        // Owner has all permissions
+        if (token.owner === address) {
+            return [
+                "canMint",
+                "canBurn",
+                "canUpgrade",
+                "canPause",
+                "canTransferOwnership",
+                "canModifyACL",
+                "canExecuteScript",
+            ]
+        }
+
+        // Check ACL entries
+        const entry = token.aclEntries.find((e) => e.address === address)
+        if (!entry) {
+            return []
+        }
+
+        return entry.permissions as TokenPermission[]
+    }
+
+    /**
+     * Gets the full ACL for a token.
+     *
+     * @param tokenAddress - Token to get ACL for
+     * @param gcrTokenRepository - Token repository
+     * @returns ACL data or null if token not found
+     */
+    static async getACL(
+        tokenAddress: string,
+        gcrTokenRepository: Repository<GCRToken>,
+    ): Promise<{
+        owner: string
+        paused: boolean
+        entries: Array<{
+            address: string
+            permissions: string[]
+            grantedAt: number
+            grantedBy: string
+        }>
+    } | null> {
+        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+        if (!token) {
+            return null
+        }
+
+        return {
+            owner: token.owner,
+            paused: token.paused,
+            entries: token.aclEntries,
+        }
+    }
+}

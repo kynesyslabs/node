@@ -50,6 +50,10 @@ import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+// REVIEW: Token GCREdit routines
+import GCRTokenRoutines from "./gcr_routines/GCRTokenRoutines"
+import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
+import { GCREditToken, ExtendedGCREdit, isGCREditToken } from "./types/Token"
 import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
@@ -243,7 +247,7 @@ export default class HandleGCR {
      * @throws May throw database errors during repository operations
      */
     static async apply(
-        editOperation: GCREdit,
+        editOperation: ExtendedGCREdit,
         tx: Transaction,
         rollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
@@ -258,42 +262,55 @@ export default class HandleGCR {
         if (rollback) {
             editOperation.isRollback = true
         }
+        // REVIEW: Handle token operations first (SDK GCREdit does not include token type yet)
+        // REVIEW: Phase 5.1 - Pass transaction for script execution context
+        if (isGCREditToken(editOperation)) {
+            return GCRTokenRoutines.apply(
+                editOperation,
+                repositories.token as Repository<GCRToken>,
+                simulate,
+                tx, // Pass transaction for hook execution context
+            )
+        }
+
+        // Cast to SDK GCREdit for the switch statement
+        const sdkEdit = editOperation as GCREdit
 
         // Applying the edit operations
-        switch (editOperation.type) {
+        switch (sdkEdit.type) {
             case "balance":
                 return GCRBalanceRoutines.apply(
-                    editOperation,
+                    sdkEdit,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
             case "nonce":
                 return GCRNonceRoutines.apply(
-                    editOperation,
+                    sdkEdit,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
             case "identity":
                 return GCRIdentityRoutines.apply(
-                    editOperation,
+                    sdkEdit,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
             case "assign":
             case "subnetsTx":
                 // TODO implementations
-                log.debug(`Assigning GCREdit ${editOperation.type}`)
+                log.debug(`Assigning GCREdit ${sdkEdit.type}`)
                 return { success: true, message: "Not implemented" }
             case "smartContract":
             case "storageProgram":
             case "escrow":
                 // TODO implementations
-                log.debug(`GCREdit ${editOperation.type} not yet implemented`)
+                log.debug(`GCREdit ${sdkEdit.type} not yet implemented`)
                 return { success: true, message: "Not implemented" }
             // REVIEW: TLSNotary attestation proof storage
             case "tlsnotary":
                 return GCRTLSNotaryRoutines.apply(
-                    editOperation,
+                    sdkEdit,
                     repositories.tlsnotary as Repository<GCRTLSNotary>,
                     simulate,
                 )
@@ -549,6 +566,7 @@ export default class HandleGCR {
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCRTracker),
             tlsnotary: dataSource.getRepository(GCRTLSNotary),
+            token: dataSource.getRepository(GCRToken),
         }
     }
 
@@ -589,6 +607,13 @@ export default class HandleGCR {
 
         account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
+        account.extended = fillData["extended"] || {
+            tokens: [],
+            nfts: [],
+            xm: [],
+            web2: [],
+            other: [],
+        }
         account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {

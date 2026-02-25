@@ -7,7 +7,16 @@ import {
     PrimaryColumn,
 } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
+import type { TokenHolderReference } from "@/libs/blockchain/gcr/types/Token"
 // Define the shape of your JSON data
+
+export interface GCRMainExtended {
+    tokens: TokenHolderReference[]
+    nfts: any[]
+    xm: any[]
+    web2: any[]
+    other: any[]
+}
 
 @Entity("gcr_main")
 @Index("idx_gcr_main_pubkey", ["pubkey"])
@@ -22,6 +31,8 @@ export class GCRMain {
     balance: bigint
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities
+    @Column({ type: "jsonb", name: "extended", default: () => "'{}'" })
+    extended: GCRMainExtended
     @Column({ type: "jsonb", name: "points", default: () => "'{}'" })
     points: {
         totalPoints: number

@@ -76,6 +76,34 @@ Returns all transactions in the chain.
 ### hots
 Returns a predefined response (likely an Easter egg).
 
+---
+
+## Token Methods (Phase 1.6)
+
+### token.get
+Get complete token information by address.
+- `.data`: `{ tokenAddress: string }`
+- Returns: Token with metadata/state/access control.
+
+### token.getBalance
+Get balance of a specific address for a token.
+- `.data`: `{ tokenAddress: string, address: string }`
+- Returns: Balance info including `balance` (string).
+
+### token.getHolderPointers
+Get token holder pointers recorded for an address (used by loadgen consistency checks).
+- `.data`: `{ address: string }`
+- Returns: `{ address: string, tokens: Array<{ tokenAddress: string, ... }>|string[] }`
+
+### token.callView
+Execute a read-only script method (view function) on a token.
+- `.data`: `{ tokenAddress: string, method: string, args?: any[] }`
+- Returns: On success: `{ tokenAddress, method, value, executionTimeMs, gasUsed }`
+- On error: `{ error: string, message: string, gasUsed?, executionTimeMs? }`
+- Error codes: `INVALID_REQUEST` (400), `TOKEN_NOT_FOUND` (404), `NO_SCRIPT` (400), `EXECUTION_ERROR` (400), `INTERNAL_ERROR` (500)
+
+---
+
 ## Error Handling
 
 - If required parameters are missing, methods typically return a 400 status with an error message.

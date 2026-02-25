@@ -36,6 +36,9 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { DTRManager } from "./dtr/dtrmanager"
+import { scriptExecutor } from "@/libs/scripting"
+import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
+import { dataSource } from "@/model/datasource"
 
 export interface NodeCall {
     message: string
@@ -1000,6 +1003,294 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             log.debug("[SERVER] Received hots")
             response.response = eggs.hots()
             break
+
+        // REVIEW: Crypto readiness probe (used by perf harness to avoid early-startup tx validation crashes)
+        case "crypto.getIdentity": {
+            try {
+                const algo = (data?.algorithm as SigningAlgorithm) || getSharedState.signingAlgorithm
+                const identity = await ucrypto.getIdentity(algo)
+                response.result = 200
+                response.response = {
+                    algorithm: algo,
+                    publicKeyHex: uint8ArrayToHex(identity.publicKey as Uint8Array),
+                }
+            } catch (error: any) {
+                log.error("[manageNodeCall] crypto.getIdentity error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "NOT_READY",
+                    message: "Crypto identity not ready",
+                    details: error.message || String(error),
+                }
+            }
+            break
+        }
+
+        // REVIEW: Token system - basic read APIs (perf harness support)
+        case "token.get": {
+            if (!data?.tokenAddress) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress is required",
+                }
+                break
+            }
+
+            try {
+                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const token = await gcrTokenRepository.findOneBy({
+                    address: data.tokenAddress,
+                })
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                    break
+                }
+
+                response.result = 200
+                response.response = {
+                    tokenAddress: token.address,
+                    metadata: {
+                        name: token.name,
+                        ticker: token.ticker,
+                        decimals: token.decimals,
+                        deployer: token.deployer,
+                        deployerNonce: token.deployerNonce,
+                        deployedAt: token.deployedAt,
+                        hasScript: token.hasScript,
+                    },
+                    state: {
+                        totalSupply: token.totalSupply,
+                        balances: token.balances ?? {},
+                        allowances: token.allowances ?? {},
+                        customState: token.customState ?? {},
+                    },
+                    accessControl: {
+                        owner: token.owner,
+                        paused: token.paused,
+                        entries: token.aclEntries ?? [],
+                    },
+                }
+            } catch (error: any) {
+                log.error("[manageNodeCall] token.get error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to fetch token",
+                    details: error.message || String(error),
+                }
+            }
+            break
+        }
+
+        case "token.getBalance": {
+            if (!data?.tokenAddress || !data?.address) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress and address are required",
+                }
+                break
+            }
+
+            try {
+                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const token = await gcrTokenRepository.findOneBy({
+                    address: data.tokenAddress,
+                })
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                    break
+                }
+
+                const balances: Record<string, string> = token.balances || {}
+                const balance = balances[data.address] ?? "0"
+
+                response.result = 200
+                response.response = {
+                    tokenAddress: data.tokenAddress,
+                    address: data.address,
+                    balance,
+                }
+            } catch (error: any) {
+                log.error("[manageNodeCall] token.getBalance error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to fetch token balance",
+                    details: error.message || String(error),
+                }
+            }
+            break
+        }
+
+        // REVIEW: Token system - holder pointer lookups (GCRMain.extended.tokens)
+        case "token.getHolderPointers": {
+            if (!data?.address) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "address is required",
+                }
+                break
+            }
+
+            try {
+                const gcrMainRepository = dataSource.getRepository(GCRMain)
+                const holder = await gcrMainRepository.findOneBy({
+                    pubkey: data.address,
+                })
+
+                if (!holder) {
+                    response.result = 404
+                    response.response = {
+                        error: "HOLDER_NOT_FOUND",
+                        message: `Holder not found: ${data.address}`,
+                    }
+                    break
+                }
+
+                response.result = 200
+                response.response = {
+                    address: holder.pubkey,
+                    tokens: holder.extended?.tokens ?? [],
+                }
+            } catch (error: any) {
+                log.error("[manageNodeCall] token.getHolderPointers error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to fetch holder pointers",
+                    details: error.message || String(error),
+                }
+            }
+            break
+        }
+
+        // REVIEW: Token scripting - Phase 3.3: View function execution
+        case "token.callView": {
+            log.debug("[SERVER] Received token.callView")
+
+            // Validate required fields
+            if (!data.tokenAddress || !data.method) {
+                response.result = 400
+                response.response = {
+                    error: "INVALID_REQUEST",
+                    message: "tokenAddress and method are required",
+                }
+                break
+            }
+
+            try {
+                // Get token from repository
+                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const token = await gcrTokenRepository.findOneBy({
+                    address: data.tokenAddress,
+                })
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: `Token not found: ${data.tokenAddress}`,
+                    }
+                    break
+                }
+
+                if (!token.hasScript) {
+                    response.result = 400
+                    response.response = {
+                        error: "NO_SCRIPT",
+                        message: "Token does not have a script",
+                    }
+                    break
+                }
+
+                // Build tokenData from GCRToken entity for ScriptExecutor
+                // Type annotations needed for BigInt conversion from string values
+                const balances: Record<string, string> = token.balances || {}
+                const allowances: Record<string, Record<string, string>> =
+                    token.allowances || {}
+
+                const tokenData = {
+                    address: token.address,
+                    name: token.name,
+                    ticker: token.ticker,
+                    decimals: token.decimals,
+                    owner: token.owner,
+                    totalSupply: BigInt(token.totalSupply),
+                    balances: Object.fromEntries(
+                        Object.entries(balances).map(([k, v]) => [k, BigInt(v)]),
+                    ),
+                    allowances: Object.fromEntries(
+                        Object.entries(allowances).map(([owner, spenders]) => [
+                            owner,
+                            Object.fromEntries(
+                                Object.entries(spenders).map(([spender, v]) => [
+                                    spender,
+                                    BigInt(v),
+                                ]),
+                            ),
+                        ]),
+                    ),
+                    paused: token.paused,
+                    storage: token.customState,
+                }
+
+                // Execute view method via ScriptExecutor
+                const viewResult = await scriptExecutor.executeView({
+                    tokenAddress: data.tokenAddress,
+                    method: data.method,
+                    args: data.args ?? [],
+                    tokenData,
+                })
+
+                if (!viewResult.success) {
+                    // Type narrowing for error result
+                    const errorResult = viewResult as Extract<
+                        typeof viewResult,
+                        { success: false }
+                    >
+                    response.result = 400
+                    response.response = {
+                        error: errorResult.errorType?.toUpperCase() ?? "EXECUTION_ERROR",
+                        message: errorResult.error,
+                        gasUsed: errorResult.gasUsed,
+                        executionTimeMs: errorResult.executionTimeMs,
+                    }
+                    break
+                }
+
+                // Success response
+                response.result = 200
+                response.response = {
+                    tokenAddress: data.tokenAddress,
+                    method: data.method,
+                    value: viewResult.value,
+                    executionTimeMs: viewResult.executionTimeMs,
+                    gasUsed: viewResult.gasUsed,
+                }
+            } catch (error: any) {
+                log.error("[manageNodeCall] token.callView error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to execute view function",
+                    details: error.message || String(error),
+                }
+            }
+            break
+        }
 
         default:
             log.warning("[SERVER] Received unknown message")

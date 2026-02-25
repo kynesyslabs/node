@@ -373,7 +373,7 @@ async function processPayload(
                 // 2. Verify cryptography only
                 const isValid = await ProofVerifier.verifyProofOnly(
                     attestation.proof,
-                    attestation.publicSignals
+                    attestation.publicSignals,
                 )
 
                 return {

@@ -138,6 +138,9 @@ export async function consensusRoutine(): Promise<void> {
                 log.debug("Failed tx: " + tx)
                 await Mempool.removeTransactionsByHashes([tx])
             }
+            // Ensure the forged block uses the same tx set as the applied state.
+            const failedSet = new Set(failedTxs)
+            tempMempool = tempMempool.filter(tx => !failedSet.has(tx.hash))
         }
 
         // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
@@ -380,39 +383,34 @@ async function rollbackGCREditsFromTxs(
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
 ): Promise<[string[], string[]]> {
-    // TODO Implement this
-    const successfulTxs: string[] = []
-    const failedTxs: string[] = []
+    const successfulTxs = new Set<string>()
+    const failedTxs = new Set<string>()
 
-    // 1. Parse the mempool txs to get the GCREdits
+    // Apply edits atomically per-tx (align with sync path).
+    // IMPORTANT: Never apply per-edit here; if a later edit fails it would leave partial state applied.
     for (const tx of mempool) {
         const txExists = await Chain.checkTxExists(tx.hash)
         if (txExists) {
-            failedTxs.push(tx.hash)
+            failedTxs.add(tx.hash)
             continue
         }
 
         const txGCREdits = tx.content.gcr_edits
         // Skip transactions that don't have GCR edits (e.g., l2psBatch)
         if (!txGCREdits || !Array.isArray(txGCREdits) || txGCREdits.length === 0) {
-            // These transactions are valid but don't modify GCR state
-            successfulTxs.push(tx.hash)
+            successfulTxs.add(tx.hash)
             continue
         }
-        // 2. Apply the GCREdits to the state for each tx
-        for (const gcrEdit of txGCREdits) {
-            const applyResult = await HandleGCR.apply(gcrEdit, tx)
-            if (applyResult.success) {
-                // If the apply succeeds, add the tx to the successfulTxs array
-                successfulTxs.push(tx.hash)
-            } else {
-                // If the apply fails, add the tx to the failedTxs array
-                failedTxs.push(tx.hash)
-            }
+
+        const result = await HandleGCR.applyToTx(tx, false, false)
+        if (result.success) {
+            successfulTxs.add(tx.hash)
+        } else {
+            failedTxs.add(tx.hash)
         }
     }
-    // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
-    return [successfulTxs, failedTxs]
+
+    return [[...successfulTxs], [...failedTxs]]
 }
 
 // /**
