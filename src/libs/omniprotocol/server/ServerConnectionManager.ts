@@ -12,6 +12,13 @@ export interface ConnectionManagerConfig {
 }
 
 /**
+ * @deprecated ServerConnectionManager is deprecated and will be removed in a future version.
+ * Use ConnectionPool from ../transport/ConnectionPool instead, which provides unified
+ * management for both inbound and outbound connections with bidirectional support.
+ *
+ * Migration: OmniProtocolServer now uses ConnectionPool.handleInboundSocket() directly.
+ * The ConnectionPool serves as the single source of truth for all peer connections.
+ *
  * ServerConnectionManager manages lifecycle of all inbound connections
  */
 export class ServerConnectionManager extends EventEmitter {

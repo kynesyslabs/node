@@ -1,22 +1,131 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 // REVIEW: Transport layer type definitions for OmniProtocol TCP connections
 
 /**
- * Connection state machine for TCP connections
+ * Connection state machine for bidirectional TCP connections
  *
- * State flow:
- * UNINITIALIZED → CONNECTING → AUTHENTICATING → READY → IDLE_PENDING → CLOSING → CLOSED
- *                      ↓             ↓              ↓
- *                    ERROR ←---------┴--------------┘
+ * States are on a numeric scale:
+ * - Negative values: Connection is not usable (terminal/error states)
+ * - Zero: Initial/transitional state
+ * - Positive values (1-9): Connecting but not yet usable
+ * - Positive values (10+): Connection is usable for messaging
+ *
+ * State flow for OUTBOUND connections:
+ * UNINITIALIZED(0) → CONNECTING(1) → CONNECTED(2) → READY(11)
+ *
+ * State flow for INBOUND connections:
+ * CONNECTED(2) → PENDING_AUTH(3) → READY(11)
+ *
+ * Both can transition to:
+ * → IDLE(10) → CLOSING(-1) → CLOSED(-2)
+ * → ERROR(-3) (from any state on failure)
  */
-export type ConnectionState =
-    | "UNINITIALIZED"  // Not yet connected
-    | "CONNECTING"     // TCP handshake in progress
-    | "AUTHENTICATING" // hello_peer (0x01) exchange in progress
-    | "READY"          // Connected, authenticated, ready for messages
-    | "IDLE_PENDING"   // Idle timeout reached, will close when in-flight complete
-    | "CLOSING"        // Graceful shutdown in progress
-    | "CLOSED"         // Connection terminated
-    | "ERROR"          // Error state, can retry
+export const ConnectionState = {
+    // Terminal/Error states (negative - not usable)
+    ERROR: -3,
+    CLOSED: -2,
+    CLOSING: -1,
+
+    // Initial state (zero)
+    UNINITIALIZED: 0,
+
+    // Connecting states (positive 1-9, not yet usable)
+    CONNECTING: 1,
+    CONNECTED: 2,
+    PENDING_AUTH: 3,
+
+    // Usable states (positive 10+)
+    AUTHENTICATED: 10,
+    READY: 11,
+    IDLE: 10,
+} as const
+
+export type ConnectionStateValue = typeof ConnectionState[keyof typeof ConnectionState]
+
+/**
+ * Connection origin - who initiated the TCP connection
+ */
+export type ConnectionOrigin = "inbound" | "outbound"
+
+/**
+ * Utility functions for ConnectionState operations
+ */
+export const ConnectionStateUtils = {
+    /**
+     * Check if connection can be used for sending/receiving messages
+     * State must be >= AUTHENTICATED (10)
+     */
+    isUsable(state: ConnectionStateValue): boolean {
+        return state >= ConnectionState.AUTHENTICATED
+    },
+
+    /**
+     * Check if TCP socket is connected (even if not authenticated)
+     * State must be >= CONNECTED (2)
+     */
+    isConnected(state: ConnectionStateValue): boolean {
+        return state >= ConnectionState.CONNECTED
+    },
+
+    /**
+     * Check if connection is in a terminal state (closing/closed/error)
+     * State must be <= CLOSING (-1)
+     */
+    isTerminal(state: ConnectionStateValue): boolean {
+        return state <= ConnectionState.CLOSING
+    },
+
+    /**
+     * Check if connection is in an error state
+     */
+    isError(state: ConnectionStateValue): boolean {
+        return state === ConnectionState.ERROR
+    },
+
+    /**
+     * Check if connection needs authentication
+     */
+    needsAuth(state: ConnectionStateValue): boolean {
+        return state === ConnectionState.CONNECTED ||
+               state === ConnectionState.PENDING_AUTH
+    },
+
+    /**
+     * Get human-readable state name
+     */
+    getName(state: ConnectionStateValue): string {
+        const entry = Object.entries(ConnectionState).find(([_, v]) => v === state)
+        return entry ? entry[0] : `UNKNOWN(${state})`
+    },
+
+    /**
+     * Check if state transition is valid
+     */
+    canTransition(from: ConnectionStateValue, to: ConnectionStateValue): boolean {
+        // Can always transition to terminal states
+        if (to <= ConnectionState.CLOSING) return true
+
+        // Can't transition from terminal states (except CLOSING → CLOSED)
+        if (from <= ConnectionState.CLOSING) {
+            return from === ConnectionState.CLOSING && to === ConnectionState.CLOSED
+        }
+
+        // Generally, can move forward (higher value) or to IDLE
+        return to > from || to === ConnectionState.IDLE
+    },
+}
+
+/**
+ * Sequence ID ranges for bidirectional connections
+ * Outbound-initiated connections use low range, inbound use high range
+ * This prevents sequence ID collisions when both sides send requests
+ */
+export const SequenceIdRange = {
+    OUTBOUND_START: 0x00000001,
+    OUTBOUND_END: 0x7FFFFFFF,
+    INBOUND_START: 0x80000001,
+    INBOUND_END: 0xFFFFFFFF,
+} as const
 
 /**
  * Options for connection acquisition and operations
@@ -85,8 +194,8 @@ export interface ConnectionInfo {
     peerIdentity: string
     /** Connection string (e.g., "tcp://ip:port") */
     connectionString: string
-    /** Current connection state */
-    state: ConnectionState
+    /** Current connection state (numeric) */
+    state: ConnectionStateValue
     /** Timestamp when connection was established */
     connectedAt: number | null
     /** Timestamp of last activity */

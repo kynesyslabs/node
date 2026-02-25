@@ -5,30 +5,24 @@
  * Tracks both IP-based and identity-based rate limits.
  */
 
+import { getSharedState } from "@/utilities/sharedState"
 import {
     RateLimitConfig,
     RateLimitEntry,
     RateLimitResult,
     RateLimitType,
 } from "./types"
+import log from "@/utilities/tui/LegacyLoggerAdapter"
 
 export class RateLimiter {
+    private static instance: RateLimiter | null = null
     private config: RateLimitConfig
     private ipLimits: Map<string, RateLimitEntry> = new Map()
     private identityLimits: Map<string, RateLimitEntry> = new Map()
     private cleanupTimer?: NodeJS.Timeout
 
-    constructor(config: Partial<RateLimitConfig> = {}) {
-        this.config = {
-            enabled: config.enabled ?? true,
-            maxConnectionsPerIP: config.maxConnectionsPerIP ?? 10,
-            maxRequestsPerSecondPerIP: config.maxRequestsPerSecondPerIP ?? 100,
-            maxRequestsPerSecondPerIdentity:
-                config.maxRequestsPerSecondPerIdentity ?? 200,
-            windowMs: config.windowMs ?? 1000,
-            entryTTL: config.entryTTL ?? 60000,
-            cleanupInterval: config.cleanupInterval ?? 10000,
-        }
+    constructor() {
+        this.config = structuredClone(getSharedState.omniConfig.rateLimit)
 
         // Start cleanup timer
         if (this.config.enabled) {
@@ -39,15 +33,13 @@ export class RateLimiter {
     /**
      * Check if a connection from an IP is allowed
      */
-    checkConnection(
-        ipAddress: string,
-        callerName: string,
-    ): RateLimitResult {
+    checkConnection(ipAddress: string, callerName: string): RateLimitResult {
         if (!this.config.enabled) {
             return { allowed: true, currentCount: 0, limit: Infinity }
         }
 
         const entry = this.getOrCreateEntry(ipAddress, RateLimitType.IP)
+        log.only(`Entry: ${JSON.stringify(entry, null, 2)}`)
         const now = Date.now()
 
         // Update last access
@@ -69,7 +61,6 @@ export class RateLimiter {
             entry.blocked = false
             entry.blockExpiry = undefined
         }
-
 
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {
@@ -330,5 +321,13 @@ export class RateLimiter {
     clear(): void {
         this.ipLimits.clear()
         this.identityLimits.clear()
+    }
+
+    static getInstance(): RateLimiter {
+        if (!this.instance) {
+            this.instance = new RateLimiter()
+        }
+
+        return this.instance
     }
 }

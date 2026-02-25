@@ -15,6 +15,7 @@ import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
+import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
 
 dotenv.config()
 
@@ -35,7 +36,10 @@ export default class SharedState {
     lastShardSeed = ""
     referenceBlockRoom = 1
     shardSize = Number.parseInt(process.env.SHARD_SIZE ?? "4", 10)
-    mainLoopSleepTime = Number.parseInt(process.env.MAIN_LOOP_SLEEP_TIME ?? "1000", 10) // 1 second
+    mainLoopSleepTime = Number.parseInt(
+        process.env.MAIN_LOOP_SLEEP_TIME ?? "1000",
+        10,
+    ) // 1 second
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
@@ -54,6 +58,46 @@ export default class SharedState {
     isSignalingServerStarted = false
     isMCPServerStarted = false
     isOmniProtocolEnabled = true
+
+    omniConfig: OmniServerConfig = {
+        enabled: true,
+        port: 0, // Will be from indexState during startup
+        maxConnections: 1000,
+        authTimeout: 5000,
+        connectionTimeout: 600000, // 10 minutes
+        // TLS configuration
+        tls: {
+            enabled: process.env.OMNI_TLS_ENABLED === "true",
+            mode:
+                (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
+                "self-signed",
+            certPath: process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
+            keyPath: process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
+            caPath: process.env.OMNI_CA_PATH,
+            minVersion:
+                (process.env.OMNI_TLS_MIN_VERSION as "TLSv1.2" | "TLSv1.3") ||
+                "TLSv1.3",
+        },
+        // Rate limiting configuration
+        rateLimit: {
+            enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
+            maxConnectionsPerIP: parseInt(
+                process.env.OMNI_MAX_CONNECTIONS_PER_IP || "1",
+                1,
+            ),
+            maxRequestsPerSecondPerIP: parseInt(
+                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100",
+                10,
+            ),
+            maxRequestsPerSecondPerIdentity: parseInt(
+                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200",
+                10,
+            ),
+            windowMs: 1000,
+            entryTTL: 60000,
+            cleanupInterval: 10000,
+        },
+    }
 
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
@@ -111,7 +155,7 @@ export default class SharedState {
 
     // SECTION L2PS
     l2psJoinedUids: string[] = [] // UIDs of the L2PS networks that are joined to the node (loaded from the data directory)
-    l2psBatchNonce: number = 0 // Persistent nonce for L2PS batch transactions
+    l2psBatchNonce = 0 // Persistent nonce for L2PS batch transactions
 
     // SECTION shared state variables
     shard: Peer[]
@@ -119,13 +163,13 @@ export default class SharedState {
     identity: Identity
     keypair: {
         publicKey:
-        | Uint8Array
-        | forge.pki.rsa.PublicKey
-        | forge.pki.ed25519.NativeBuffer
+            | Uint8Array
+            | forge.pki.rsa.PublicKey
+            | forge.pki.ed25519.NativeBuffer
         privateKey:
-        | Uint8Array
-        | forge.pki.rsa.PrivateKey
-        | forge.pki.ed25519.NativeBuffer
+            | Uint8Array
+            | forge.pki.rsa.PrivateKey
+            | forge.pki.ed25519.NativeBuffer
         genKey?: Uint8Array
     }
     get publicKeyHex(): string {
@@ -264,8 +308,9 @@ export default class SharedState {
         ],
         // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
         whitelistedKeys: [
-            ...(process.env.WHITELISTED_KEYS?.split(",").map(key => key.trim()).filter(key => key.length > 0) ||
-                []),
+            ...(process.env.WHITELISTED_KEYS?.split(",")
+                .map(key => key.trim())
+                .filter(key => key.length > 0) || []),
         ],
         methodLimits: {
             // REVIEW: Do we need this?

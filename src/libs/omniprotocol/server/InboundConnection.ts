@@ -21,6 +21,14 @@ export interface InboundConnectionConfig {
 }
 
 /**
+ * @deprecated InboundConnection is deprecated and will be removed in a future version.
+ * Use PeerConnection from ../transport/PeerConnection instead, which provides unified
+ * bidirectional connection handling for both inbound and outbound connections.
+ *
+ * Migration: Pass an existing socket to PeerConnection constructor to create an inbound connection.
+ * PeerConnection supports both receiving messages (via 'request' event) and sending messages
+ * (via send/sendAuthenticated methods) on the same connection.
+ *
  * InboundConnection handles a single inbound connection from a peer
  * Manages message parsing, dispatching, and response sending
  */

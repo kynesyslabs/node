@@ -162,11 +162,11 @@ async function digestArguments() {
                     ) {
                         CategorizedLogger.getInstance().setMinLevel(
                             level as
-                            | "debug"
-                            | "info"
-                            | "warning"
-                            | "error"
-                            | "critical",
+                                | "debug"
+                                | "info"
+                                | "warning"
+                                | "error"
+                                | "critical",
                         )
                         log.info(`[MAIN] Log level set to: ${level}`)
                     } else {
@@ -349,7 +349,7 @@ async function preMainLoop() {
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
         "[PEER] Peer list: " +
-        JSON.stringify(indexState.PeerList.map(p => p.identity)),
+            JSON.stringify(indexState.PeerList.map(p => p.identity)),
     )
     await peerBootstrap(indexState.PeerList)
 
@@ -371,8 +371,8 @@ async function preMainLoop() {
 
     log.info(
         "[PEER] 🌐 Peers loaded (" +
-        indexState.peerManager.getPeers().length +
-        ")",
+            indexState.peerManager.getPeers().length +
+            ")",
     )
     // INFO: Set initial last block data
     const lastBlock = await Chain.getLastBlock()
@@ -479,47 +479,10 @@ async function main() {
     // Start OmniProtocol TCP server (optional)
     if (indexState.OMNI_ENABLED) {
         try {
-            const omniServer = await startOmniProtocolServer({
-                enabled: true,
-                port: indexState.OMNI_PORT,
-                maxConnections: 1000,
-                authTimeout: 5000,
-                connectionTimeout: 600000, // 10 minutes
-                // TLS configuration
-                tls: {
-                    enabled: process.env.OMNI_TLS_ENABLED === "true",
-                    mode:
-                        (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
-                        "self-signed",
-                    certPath:
-                        process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
-                    keyPath:
-                        process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
-                    caPath: process.env.OMNI_CA_PATH,
-                    minVersion:
-                        (process.env.OMNI_TLS_MIN_VERSION as
-                            | "TLSv1.2"
-                            | "TLSv1.3") || "TLSv1.3",
-                },
-                // Rate limiting configuration
-                rateLimit: {
-                    enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
-                    maxConnectionsPerIP: parseInt(
-                        process.env.OMNI_MAX_CONNECTIONS_PER_IP || "1",
-                        1,
-                    ),
-                    maxRequestsPerSecondPerIP: parseInt(
-                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                        "100",
-                        10,
-                    ),
-                    maxRequestsPerSecondPerIdentity: parseInt(
-                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                        "200",
-                        10,
-                    ),
-                },
-            })
+            getSharedState.omniConfig.port = indexState.OMNI_PORT
+            const omniServer = await startOmniProtocolServer(
+                getSharedState.omniConfig,
+            )
             indexState.omniServer = omniServer
             console.log(
                 `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
@@ -783,7 +746,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         log.info("[MAIN] Wait aborted, starting sync loop")
                     }
@@ -791,7 +756,7 @@ async function main() {
             } else {
                 // Non-TUI mode: set up Enter key listener to skip the wait
                 // ONLY DO THIS IF STDIN IS TTY
-                let cleanupStdin = () => { }
+                let cleanupStdin = () => {}
 
                 if (process.stdin.isTTY) {
                     const wasRawMode = process.stdin.isRaw
@@ -804,7 +769,9 @@ async function main() {
                         const key = chunk.toString()
                         if (key === "\r" || key === "\n" || key === "\u0003") {
                             // Enter key or Ctrl+C
-                            if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+                            if (
+                                Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)
+                            ) {
                                 Waiter.abort(Waiter.keys.STARTUP_HELLO_PEER)
                                 log.info(
                                     "[MAIN] Wait skipped by user, starting sync loop",
@@ -829,7 +796,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         // Already logged above
                     }
@@ -863,22 +832,22 @@ async function main() {
 
         // Start L2PS hash generation service (for L2PS participating nodes)
         // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
-            try {
-                const l2psHashService = L2PSHashService.getInstance()
-                await l2psHashService.start()
-                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+        // if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+        //     try {
+        //         const l2psHashService = L2PSHashService.getInstance()
+        //         await l2psHashService.start()
+        //         console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
 
-                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
-                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
-                await l2psBatchAggregator.start()
-                console.log(`[L2PS] Batch aggregator service started`)
-            } catch (error) {
-                console.error("[L2PS] Failed to start L2PS services:", error)
-            }
-        } else {
-            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
-        }
+        //         // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+        //         const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+        //         await l2psBatchAggregator.start()
+        //         console.log("[L2PS] Batch aggregator service started")
+        //     } catch (error) {
+        //         console.error("[L2PS] Failed to start L2PS services:", error)
+        //     }
+        // } else {
+        //     console.log("[L2PS] No L2PS networks joined, L2PS services not started")
+        // }
     }
 }
 
@@ -941,7 +910,9 @@ async function gracefulShutdown(signal: string) {
             console.log("[SHUTDOWN] Stopping Metrics collector and server...")
             try {
                 // Stop the collector first to clear interval timer and prevent collection during shutdown
-                const { getMetricsCollector } = await import("./features/metrics")
+                const { getMetricsCollector } = await import(
+                    "./features/metrics"
+                )
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {
