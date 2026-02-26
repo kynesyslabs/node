@@ -43,7 +43,7 @@ export class Transactions {
     @Column("integer", { name: "amount" })
     amount: number
 
-    @Column("integer", { name: "nonce" })
+    @Column("integer", { name: "nonce", nullable: true })
     nonce: number
 
     @Column("bigint", { name: "timestamp" })
