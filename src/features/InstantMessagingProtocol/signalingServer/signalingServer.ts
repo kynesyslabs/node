@@ -59,7 +59,7 @@ import {
     signedObject,
     SerializedSignedObject,
     ucrypto,
-    Cryptography,
+    uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
 
@@ -629,38 +629,40 @@ export class SignalingServer {
         // REVIEW: PR Fix #2 - Use mutex to prevent nonce race conditions
         // Acquire lock before reading/modifying nonce to ensure atomic operation
         return await this.nonceMutex.runExclusive(async () => {
-            // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
-            const currentNonce = this.senderNonces.get(senderId) || 0
+            const signerPublicKeyHex = getSharedState.publicKeyHex
+            if (!signerPublicKeyHex) {
+                throw new Error("[Signaling Server] Node public key not available for message signing")
+            }
+
+            // REVIEW: PR Fix #6 - Nonce must be coherent for the actual signer (`from`)
+            const currentNonce = this.senderNonces.get(signerPublicKeyHex) || 0
             const nonce = currentNonce + 1
             // Don't increment yet - wait for mempool success for better error handling
 
             const transaction = new Transaction()
+            const now = Date.now()
             transaction.content = {
                 type: "instantMessaging",
-                from: senderId,
+                from: signerPublicKeyHex,
                 to: targetId,
-                from_ed25519_address: senderId,
+                from_ed25519_address: signerPublicKeyHex,
                 amount: 0,
-                data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
+                data: ["instantMessaging", { senderId, targetId, message, timestamp: now }] as any,
                 gcr_edits: [],
                 nonce,
-                timestamp: Date.now(),
+                timestamp: now,
                 transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
             }
 
-            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
-            // Current: Sign with node's private key for integrity (not authentication)
-            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
-            if (!getSharedState.identity?.ed25519?.privateKey) {
-                throw new Error("[Signaling Server] Private key not available for message signing")
-            }
-
-            const signature = Cryptography.sign(
-                JSON.stringify(transaction.content),
-                getSharedState.identity.ed25519.privateKey,
-            )
-            transaction.signature = signature as any
             transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(transaction.hash),
+            )
+            transaction.signature = {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            }
 
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
@@ -671,7 +673,7 @@ export class SignalingServer {
                     reference_block: referenceBlock,
                 })
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
-                this.senderNonces.set(senderId, nonce)
+                this.senderNonces.set(signerPublicKeyHex, nonce)
             } catch (error: any) {
                 console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
                 throw error // Rethrow to be caught by caller's error handling
@@ -712,21 +714,17 @@ export class SignalingServer {
             })
             const messageHash = Hashing.sha256(messageContent)
 
-            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
-            // Current: Sign with node's private key for integrity (not authentication)
-            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
-            if (!getSharedState.identity?.ed25519?.privateKey) {
-                throw new Error("[Signaling Server] Private key not available for offline message signing")
-            }
-
-            const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(messageHash),
+            )
 
             const offlineMessage = offlineMessageRepository.create({
                 recipientPublicKey: targetId,
                 senderPublicKey: senderId,
                 messageHash,
                 encryptedContent: message,
-                signature: Buffer.from(signature).toString("base64"),
+                signature: Buffer.from(signature.signature).toString("base64"),
                 // REVIEW: PR Fix #9 - timestamp is string type to match TypeORM bigint behavior
                 timestamp: Date.now().toString(),
                 status: "pending",

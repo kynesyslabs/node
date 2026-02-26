@@ -316,3 +316,44 @@ These answers are recorded here so the harness can be implemented deterministica
 General sequencing note:
 - Start with core/native transaction types (e.g., **transfer**) and baseline RPC/chain paths first.
 - More complex protocols/features (e.g., advanced messaging modes) come later.
+
+---
+
+## IM WS (online) loadgen — implemented
+
+### Root cause (why `im_online` was 0 ok / 100% timeouts)
+
+The IM signaling server’s online path calls `storeMessageOnBlockchain(...)` on every message.
+In devnet, it was throwing:
+- `[Signaling Server] Private key not available for message signing`
+
+Reason: it attempted to read `getSharedState.identity.ed25519.privateKey`, which isn’t populated in the devnet runtime (even though the node can still sign via the active `ucrypto` identity / `getSharedState.keypair`).
+
+### Fix
+
+`src/features/InstantMessagingProtocol/signalingServer/signalingServer.ts` now:
+- signs the IM tx with `ucrypto.sign(getSharedState.signingAlgorithm, tx.hash)`
+- stores a normal `ISignature` `{ type, data }`
+- uses the node’s `getSharedState.publicKeyHex` as the tx `from` signer (and records the peer `senderId` in tx `data`)
+
+### Scenarios
+
+- `SCENARIO=im_online` (steady-state latency + ok TPS)
+- `SCENARIO=im_online_ramp` (sweep `IM_PAIRS` over `RAMP_PAIRS`)
+
+Key env:
+- `IM_PAIRS` (default: 1)
+- `INFLIGHT_PER_SENDER` (default: 1)
+- `IM_MESSAGE_BYTES` (default: 128)
+- `RATE_LIMIT_RPS` (default: 0 = no cap)
+- `IM_LOG_EVENTS` (default: false; when true writes `im_online.log.jsonl`)
+
+### Baseline results (devnet, 4 nodes)
+
+Run: `im-online-fix1-20260226-154137`
+- `IM_PAIRS=2`, `INFLIGHT_PER_SENDER=10`, `IM_MESSAGE_BYTES=64`, `DURATION_SEC=10`
+- ok TPS: ~147.9
+- latency p50/p95/p99: ~105ms / ~196ms / ~657ms
+
+Ramp: `im-online-ramp-fix1-20260226-154224` (`INFLIGHT_PER_SENDER=20`, `IM_MESSAGE_BYTES=64`, step=8s)
+- best ok TPS: ~262.9 @ `IM_PAIRS=4` (p95 ~395ms)
