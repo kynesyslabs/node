@@ -264,6 +264,8 @@ src/features/tlsnotary/SDK_INTEGRATION.md
 ipfs/data_53550/ipfs
 nohup.out
 *.db
+/.beads/
+/.beads_bak/
 /.beads/.jsonl.lock
 /.beads/daemon-2026-02-15T16-27-46.352.log.gz
 /.beads/daemon-2026-02-16T14-05-14.370.log.gz
