@@ -11,6 +11,7 @@ import { runTokenMintLoadgen } from "./token_mint_loadgen"
 import { runTokenBurnLoadgen } from "./token_burn_loadgen"
 import { runTokenMintRamp } from "./token_mint_ramp"
 import { runTokenBurnRamp } from "./token_burn_ramp"
+import { runTokenAclSmoke } from "./token_acl_smoke"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -76,8 +77,11 @@ switch (scenario) {
   case "token_burn_ramp":
     await runTokenBurnRamp()
     break
+  case "token_acl_smoke":
+    await runTokenAclSmoke()
+    break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke`,
     )
 }

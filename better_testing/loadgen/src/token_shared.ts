@@ -792,6 +792,50 @@ export async function sendTokenMintTxWithDemos(params: {
   return { res, fromHex }
 }
 
+export async function sendTokenGrantPermissionTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  grantee: string
+  permissions: string[]
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = params.grantee
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = [
+    "token",
+    {
+      operation: "grantPermission",
+      tokenAddress: params.tokenAddress,
+      grantee: params.grantee,
+      permissions: params.permissions,
+    },
+  ]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "grantPermission",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: { grantee: params.grantee, permissions: params.permissions },
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  const res = await (demos as any).broadcast(validity)
+  return { res, fromHex }
+}
+
 export async function sendTokenBurnTxWithDemos(params: {
   demos: Demos
   tokenAddress: string
