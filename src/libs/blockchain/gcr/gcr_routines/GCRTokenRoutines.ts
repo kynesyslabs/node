@@ -533,122 +533,146 @@ export default class GCRTokenRoutines {
             "[GCRTokenRoutines] Mint: " + amount + " to " + to + " for token " + tokenAddress,
         )
 
-        // Get token
-        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
-        if (!token) {
-            return { success: false, message: "Token not found: " + tokenAddress }
-        }
-
-        // Check if paused
-        if (token.paused && !edit.isRollback) {
-            return { success: false, message: "Token is paused" }
-        }
-
-        // Check permission (unless rollback)
-        if (!edit.isRollback) {
-            if (!hasPermission(token.toAccessControl(), edit.account, "canMint")) {
-                return { success: false, message: "No mint permission" }
-            }
-        }
-
         const mintAmount = BigInt(amount)
         if (mintAmount <= 0n) {
             return { success: false, message: "Mint amount must be positive" }
         }
 
-        // Store previous balance for holder reference logic
-        const prevBalance = BigInt(token.balances[to] ?? "0")
-
-        // For rollback, burn instead (no script execution for rollback)
-        if (edit.isRollback) {
-            if (prevBalance < mintAmount) {
-                return { success: false, message: "Cannot rollback: insufficient balance" }
+        // Simulate mode: validate deterministically without persisting.
+        if (simulate) {
+            const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+            if (!token) return { success: false, message: "Token not found: " + tokenAddress }
+            if (token.paused && !edit.isRollback) return { success: false, message: "Token is paused" }
+            if (!edit.isRollback && !hasPermission(token.toAccessControl(), edit.account, "canMint")) {
+                return { success: false, message: "No mint permission" }
             }
-            token.balances[to] = (prevBalance - mintAmount).toString()
-            token.totalSupply = (BigInt(token.totalSupply) - mintAmount).toString()
-            if (token.balances[to] === "0") {
-                delete token.balances[to]
-            }
-        } else if (token.hasScript && token.script?.code && tx) {
-            // REVIEW: Phase 5.1 - Execute mint through HookExecutor for script hooks
-            try {
-                const hookExecutor = this.getHookExecutor()
-                const tokenData = this.tokenToGCRTokenData(token)
 
-                // Create native operation mutations
-                const nativeMutations = createMintMutations(to, mintAmount)
-
-                // Build request for hook execution
-                const request: ExecuteWithHooksRequest = {
-                    operation: "mint",
-                    operationData: {
-                        to,
-                        amount: mintAmount,
-                    },
-                    tokenAddress,
-                    tokenData,
-                    scriptCode: token.script.code,
-                    txContext: {
-                        caller: tx.content.from,
-                        txHash: tx.hash,
-                        timestamp: tx.content.timestamp ?? Date.now(),
-                        blockHeight: tx.blockNumber ?? 0,
-                        prevBlockHash: "", // Will be injected by consensus layer
-                    },
-                    nativeOperationMutations: nativeMutations,
+            const prevBalance = BigInt(token.balances[to] ?? "0")
+            if (edit.isRollback) {
+                if (prevBalance < mintAmount) {
+                    return { success: false, message: "Cannot rollback: insufficient balance" }
                 }
+                token.balances[to] = (prevBalance - mintAmount).toString()
+                token.totalSupply = (BigInt(token.totalSupply) - mintAmount).toString()
+                if (token.balances[to] === "0") delete token.balances[to]
+            } else if (token.hasScript && token.script?.code && tx) {
+                try {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createMintMutations(to, mintAmount)
 
-                // Execute with hooks
-                const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
-
-                // Handle rejection
-                if (result.rejection) {
-                    log.warn(
-                        `[GCRTokenRoutines] Mint rejected by script hook: ${result.rejection.hookType} - ${result.rejection.reason}`,
-                    )
-                    return {
-                        success: false,
-                        message: `Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "mint",
+                        operationData: { to, amount: mintAmount },
+                        tokenAddress,
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
                     }
+
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        return {
+                            success: false,
+                            message: `Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                        }
+                    }
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } catch (error) {
+                    return { success: false, message: `Script execution failed: ${error}` }
                 }
-
-                // Apply final state from hook execution
-                this.applyGCRTokenDataToEntity(token, result.finalState)
-
-                log.debug(
-                    `[GCRTokenRoutines] Mint executed with hooks: beforeHook=${result.metadata.beforeHookExecuted}, afterHook=${result.metadata.afterHookExecuted}`,
-                )
-            } catch (error) {
-                log.error(`[GCRTokenRoutines] Script hook execution failed: ${error}`)
-                return { success: false, message: `Script execution failed: ${error}` }
+            } else {
+                token.balances[to] = (prevBalance + mintAmount).toString()
+                token.totalSupply = (BigInt(token.totalSupply) + mintAmount).toString()
             }
-        } else {
-            // Native mint without script hooks
-            token.balances[to] = (prevBalance + mintAmount).toString()
-            token.totalSupply = (BigInt(token.totalSupply) + mintAmount).toString()
+
+            return { success: true, message: "Mint completed" }
         }
 
-        if (!simulate) {
-            try {
-                await gcrTokenRepository.save(token)
+        let holderUpdate: null | {
+            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
+            addTo: boolean
+            removeTo: boolean
+        } = null
 
-                // Handle holder reference
-                if (edit.isRollback && token.balances[to] === undefined) {
-                    await this.removeHolderReference(to, tokenAddress)
-                } else if (!edit.isRollback && prevBalance === 0n) {
-                    await this.addHolderReference(to, {
-                        tokenAddress,
-                        ticker: token.ticker,
-                        name: token.name,
-                        decimals: token.decimals,
-                    })
+        try {
+            await gcrTokenRepository.manager.transaction(async em => {
+                const repo = em.getRepository(GCRToken)
+                const token = await repo.findOne({
+                    where: { address: tokenAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+
+                if (!token) throw new Error("Token not found: " + tokenAddress)
+                if (token.paused && !edit.isRollback) throw new Error("Token is paused")
+                if (!edit.isRollback && !hasPermission(token.toAccessControl(), edit.account, "canMint")) {
+                    throw new Error("No mint permission")
                 }
 
-                log.info("[GCRTokenRoutines] Minted " + amount + " " + token.ticker + " to " + to)
-            } catch (error) {
-                log.error("[GCRTokenRoutines] Failed to mint: " + error)
-                return { success: false, message: "Failed to save mint" }
-            }
+                const prevBalance = BigInt(token.balances[to] ?? "0")
+                const supplyBefore = BigInt(token.totalSupply ?? "0")
+
+                if (edit.isRollback) {
+                    if (prevBalance < mintAmount) throw new Error("Cannot rollback: insufficient balance")
+                    token.balances[to] = (prevBalance - mintAmount).toString()
+                    token.totalSupply = (supplyBefore - mintAmount).toString()
+                    if (token.balances[to] === "0") delete token.balances[to]
+                } else if (token.hasScript && token.script?.code && tx) {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createMintMutations(to, mintAmount)
+
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "mint",
+                        operationData: { to, amount: mintAmount },
+                        tokenAddress,
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
+                    }
+
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        throw new Error(`Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
+                    }
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } else {
+                    token.balances[to] = (prevBalance + mintAmount).toString()
+                    token.totalSupply = (supplyBefore + mintAmount).toString()
+                }
+
+                const nextBalance = BigInt(token.balances[to] ?? "0")
+
+                await repo.save(token)
+
+                holderUpdate = {
+                    tokenMeta: { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals },
+                    addTo: !edit.isRollback && prevBalance === 0n && nextBalance > 0n,
+                    removeTo: edit.isRollback && prevBalance > 0n && nextBalance === 0n,
+                }
+            })
+
+            if (holderUpdate?.removeTo) await this.removeHolderReference(to, tokenAddress)
+            if (holderUpdate?.addTo) await this.addHolderReference(to, holderUpdate.tokenMeta)
+
+            log.info("[GCRTokenRoutines] Minted " + amount + " to " + to + " for " + tokenAddress)
+        } catch (error) {
+            log.error("[GCRTokenRoutines] Failed to mint: " + error)
+            return { success: false, message: "Failed to save mint" }
         }
 
         return { success: true, message: "Mint completed" }
@@ -670,134 +694,147 @@ export default class GCRTokenRoutines {
             "[GCRTokenRoutines] Burn: " + amount + " from " + from + " for token " + tokenAddress,
         )
 
-        // Get token
-        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
-        if (!token) {
-            return { success: false, message: "Token not found: " + tokenAddress }
-        }
-
-        // Check if paused
-        if (token.paused && !edit.isRollback) {
-            return { success: false, message: "Token is paused" }
-        }
-
-        // Check permission (unless rollback)
-        if (!edit.isRollback) {
-            // Can burn own tokens OR need canBurn permission for others
-            if (edit.account !== from) {
-                if (!hasPermission(token.toAccessControl(), edit.account, "canBurn")) {
-                    return { success: false, message: "No burn permission" }
-                }
-            }
-        }
-
         const burnAmount = BigInt(amount)
         if (burnAmount <= 0n) {
             return { success: false, message: "Burn amount must be positive" }
         }
 
-        // Store previous balance for holder reference logic
-        const prevBalance = BigInt(token.balances[from] ?? "0")
-
-        // For rollback, mint instead (no script execution for rollback)
-        if (edit.isRollback) {
-            token.balances[from] = (prevBalance + burnAmount).toString()
-            token.totalSupply = (BigInt(token.totalSupply) + burnAmount).toString()
-        } else if (token.hasScript && token.script?.code && tx) {
-            // REVIEW: Phase 5.1 - Execute burn through HookExecutor for script hooks
-            // First validate balance before hook execution
-            if (prevBalance < burnAmount) {
-                return { success: false, message: "Insufficient balance to burn" }
+        if (simulate) {
+            const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
+            if (!token) return { success: false, message: "Token not found: " + tokenAddress }
+            if (token.paused && !edit.isRollback) return { success: false, message: "Token is paused" }
+            if (!edit.isRollback && edit.account !== from) {
+                if (!hasPermission(token.toAccessControl(), edit.account, "canBurn")) {
+                    return { success: false, message: "No burn permission" }
+                }
             }
 
-            try {
-                const hookExecutor = this.getHookExecutor()
-                const tokenData = this.tokenToGCRTokenData(token)
-
-                // Create native operation mutations
-                const nativeMutations = createBurnMutations(from, burnAmount)
-
-                // Build request for hook execution
-                const request: ExecuteWithHooksRequest = {
-                    operation: "burn",
-                    operationData: {
-                        from,
-                        amount: burnAmount,
-                    },
-                    tokenAddress,
-                    tokenData,
-                    scriptCode: token.script.code,
-                    txContext: {
-                        caller: tx.content.from,
-                        txHash: tx.hash,
-                        timestamp: tx.content.timestamp ?? Date.now(),
-                        blockHeight: tx.blockNumber ?? 0,
-                        prevBlockHash: "", // Will be injected by consensus layer
-                    },
-                    nativeOperationMutations: nativeMutations,
+            const prevBalance = BigInt(token.balances[from] ?? "0")
+            if (edit.isRollback) {
+                token.balances[from] = (prevBalance + burnAmount).toString()
+                token.totalSupply = (BigInt(token.totalSupply) + burnAmount).toString()
+            } else if (token.hasScript && token.script?.code && tx) {
+                if (prevBalance < burnAmount) return { success: false, message: "Insufficient balance to burn" }
+                try {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createBurnMutations(from, burnAmount)
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "burn",
+                        operationData: { from, amount: burnAmount },
+                        tokenAddress,
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
+                    }
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        return {
+                            success: false,
+                            message: `Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+                        }
+                    }
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } catch (error) {
+                    return { success: false, message: `Script execution failed: ${error}` }
                 }
+            } else {
+                if (prevBalance < burnAmount) return { success: false, message: "Insufficient balance to burn" }
+                token.balances[from] = (prevBalance - burnAmount).toString()
+                token.totalSupply = (BigInt(token.totalSupply) - burnAmount).toString()
+                if (token.balances[from] === "0") delete token.balances[from]
+            }
 
-                // Execute with hooks
-                const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+            return { success: true, message: "Burn completed" }
+        }
 
-                // Handle rejection
-                if (result.rejection) {
-                    log.warn(
-                        `[GCRTokenRoutines] Burn rejected by script hook: ${result.rejection.hookType} - ${result.rejection.reason}`,
-                    )
-                    return {
-                        success: false,
-                        message: `Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
+        let holderUpdate: null | {
+            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
+            addFrom: boolean
+            removeFrom: boolean
+        } = null
+
+        try {
+            await gcrTokenRepository.manager.transaction(async em => {
+                const repo = em.getRepository(GCRToken)
+                const token = await repo.findOne({
+                    where: { address: tokenAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+
+                if (!token) throw new Error("Token not found: " + tokenAddress)
+                if (token.paused && !edit.isRollback) throw new Error("Token is paused")
+                if (!edit.isRollback && edit.account !== from) {
+                    if (!hasPermission(token.toAccessControl(), edit.account, "canBurn")) {
+                        throw new Error("No burn permission")
                     }
                 }
 
-                // Apply final state from hook execution
-                this.applyGCRTokenDataToEntity(token, result.finalState)
+                const prevBalance = BigInt(token.balances[from] ?? "0")
+                const supplyBefore = BigInt(token.totalSupply ?? "0")
 
-                log.debug(
-                    `[GCRTokenRoutines] Burn executed with hooks: beforeHook=${result.metadata.beforeHookExecuted}, afterHook=${result.metadata.afterHookExecuted}`,
-                )
-            } catch (error) {
-                log.error(`[GCRTokenRoutines] Script hook execution failed: ${error}`)
-                return { success: false, message: `Script execution failed: ${error}` }
-            }
-        } else {
-            // Native burn without script hooks
-            if (prevBalance < burnAmount) {
-                return { success: false, message: "Insufficient balance to burn" }
-            }
-            token.balances[from] = (prevBalance - burnAmount).toString()
-            token.totalSupply = (BigInt(token.totalSupply) - burnAmount).toString()
-        }
+                if (edit.isRollback) {
+                    token.balances[from] = (prevBalance + burnAmount).toString()
+                    token.totalSupply = (supplyBefore + burnAmount).toString()
+                } else if (token.hasScript && token.script?.code && tx) {
+                    if (prevBalance < burnAmount) throw new Error("Insufficient balance to burn")
 
-        // Clean up zero balances (only for non-rollback where balance was reduced)
-        if (!edit.isRollback && token.balances[from] === "0") {
-            delete token.balances[from]
-        }
-
-        if (!simulate) {
-            try {
-                await gcrTokenRepository.save(token)
-
-                // Handle holder reference
-                if (!edit.isRollback && token.balances[from] === undefined) {
-                    await this.removeHolderReference(from, tokenAddress)
-                } else if (edit.isRollback && prevBalance === 0n) {
-                    await this.addHolderReference(from, {
+                    const hookExecutor = this.getHookExecutor()
+                    const tokenData = this.tokenToGCRTokenData(token)
+                    const nativeMutations = createBurnMutations(from, burnAmount)
+                    const request: ExecuteWithHooksRequest = {
+                        operation: "burn",
+                        operationData: { from, amount: burnAmount },
                         tokenAddress,
-                        ticker: token.ticker,
-                        name: token.name,
-                        decimals: token.decimals,
-                    })
+                        tokenData,
+                        scriptCode: token.script.code,
+                        txContext: {
+                            caller: tx.content.from,
+                            txHash: tx.hash,
+                            timestamp: tx.content.timestamp ?? Date.now(),
+                            blockHeight: tx.blockNumber ?? 0,
+                            prevBlockHash: "",
+                        },
+                        nativeOperationMutations: nativeMutations,
+                    }
+
+                    const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
+                    if (result.rejection) {
+                        throw new Error(`Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
+                    }
+                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                } else {
+                    if (prevBalance < burnAmount) throw new Error("Insufficient balance to burn")
+                    token.balances[from] = (prevBalance - burnAmount).toString()
+                    token.totalSupply = (supplyBefore - burnAmount).toString()
+                    if (token.balances[from] === "0") delete token.balances[from]
                 }
 
-                log.info(
-                    "[GCRTokenRoutines] Burned " + amount + " " + token.ticker + " from " + from,
-                )
-            } catch (error) {
-                log.error("[GCRTokenRoutines] Failed to burn: " + error)
-                return { success: false, message: "Failed to save burn" }
-            }
+                const nextBalance = BigInt(token.balances[from] ?? "0")
+
+                await repo.save(token)
+
+                holderUpdate = {
+                    tokenMeta: { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals },
+                    removeFrom: !edit.isRollback && prevBalance > 0n && nextBalance === 0n,
+                    addFrom: edit.isRollback && prevBalance === 0n && nextBalance > 0n,
+                }
+            })
+
+            if (holderUpdate?.removeFrom) await this.removeHolderReference(from, tokenAddress)
+            if (holderUpdate?.addFrom) await this.addHolderReference(from, holderUpdate.tokenMeta)
+
+            log.info("[GCRTokenRoutines] Burned " + amount + " from " + from + " for " + tokenAddress)
+        } catch (error) {
+            log.error("[GCRTokenRoutines] Failed to burn: " + error)
+            return { success: false, message: "Failed to save burn" }
         }
 
         return { success: true, message: "Burn completed" }
