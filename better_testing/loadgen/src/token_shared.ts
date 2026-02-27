@@ -906,6 +906,74 @@ export async function sendTokenRevokePermissionTxWithDemos(params: {
   return { res, fromHex }
 }
 
+export async function sendTokenPauseTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = fromHex
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = ["token", { operation: "pause", tokenAddress: params.tokenAddress }]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "pause",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: {},
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  const res = await (demos as any).broadcast(validity)
+  return { res, fromHex }
+}
+
+export async function sendTokenUnpauseTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = fromHex
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = ["token", { operation: "unpause", tokenAddress: params.tokenAddress }]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "unpause",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: {},
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  const res = await (demos as any).broadcast(validity)
+  return { res, fromHex }
+}
+
 export async function sendTokenBurnTxWithDemos(params: {
   demos: Demos
   tokenAddress: string

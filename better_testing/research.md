@@ -456,6 +456,24 @@ Example run:
 
 ---
 
+## Token ACL pause/unpause matrix scenario (paused blocks writes)
+
+New scenario: `SCENARIO=token_acl_pause_matrix`
+
+What it does:
+- bootstraps + distributes a token to (owner, grantee, outsider)
+- asserts non-owner cannot `pause`/`unpause` (expects `No pause permission`)
+- owner pauses token, waits consensus, asserts `accessControl.paused=true`
+- while paused, asserts `transfer`/`mint`/`burn` are rejected with `Token is paused` and state does not change
+- owner unpauses token, waits consensus, asserts `accessControl.paused=false`
+- asserts a post-unpause transfer applies
+- polls for cross-node convergence (`token.get` + `token.getBalance`)
+
+Example run:
+- (run after adding the scenario; output is `token_acl_pause_matrix.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):
