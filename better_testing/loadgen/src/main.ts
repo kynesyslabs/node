@@ -13,6 +13,7 @@ import { runTokenMintRamp } from "./token_mint_ramp"
 import { runTokenBurnRamp } from "./token_burn_ramp"
 import { runTokenAclSmoke } from "./token_acl_smoke"
 import { runTokenConsensusConsistency } from "./token_consensus_consistency"
+import { runTokenQueryCoverage } from "./token_query_coverage"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
 
@@ -86,6 +87,9 @@ switch (scenario) {
   case "token_consensus_consistency":
     await runTokenConsensusConsistency()
     break
+  case "token_query_coverage":
+    await runTokenQueryCoverage()
+    break
   case "im_online":
     await runImOnlineLoadgen()
     break
@@ -94,6 +98,6 @@ switch (scenario) {
     break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_consensus_consistency, im_online, im_online_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_consensus_consistency, token_query_coverage, im_online, im_online_ramp`,
     )
 }

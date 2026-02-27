@@ -372,3 +372,22 @@ What it does:
 
 Example run:
 - `better_testing/runs/token-consensus-20260227-151903/token_consensus_consistency.summary.json`
+
+---
+
+## Token read/query coverage scenario (cross-node)
+
+New scenario: `SCENARIO=token_query_coverage`
+
+What it does:
+- bootstraps + distributes a token to up to 4 devnet wallets (as configured by `WALLET_FILES`)
+- asserts read APIs behave consistently across *all* nodes:
+  - `token.get` (metadata/state)
+  - `token.getBalance` (for each wallet)
+  - `token.getHolderPointers` (presence matches balance>0)
+  - `token.callView` returns `NO_SCRIPT` when `hasScript=false`
+  - `token.get` returns 404 for a missing token address
+- also runs a `waitForCrossNodeTokenConsistency` snapshot convergence poll
+
+Example run:
+- `better_testing/runs/token-query-20260227-152442/token_query_coverage.summary.json`
