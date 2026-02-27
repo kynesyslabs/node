@@ -1,4 +1,3 @@
-import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { appendJsonl, getRunConfig, writeJson } from "./run_io"
 import {
   ensureTokenAndBalances,
@@ -12,8 +11,7 @@ import {
   sendTokenMintTxWithDemos,
   waitForCrossNodeHolderPointersMatchBalances,
   waitForCrossNodeTokenConsistency,
-  waitForRpcReady,
-  waitForTxReady,
+  withDemosWallet,
 } from "./token_shared"
 
 type Config = {
@@ -108,23 +106,9 @@ function getConfig(): Config {
   }
 }
 
-async function connectWallet(rpcUrl: string, mnemonic: string): Promise<Demos> {
-  const demos = new Demos()
-  await waitForRpcReady(rpcUrl, envInt("WAIT_FOR_RPC_SEC", 120))
-  await waitForTxReady(rpcUrl, envInt("WAIT_FOR_TX_SEC", 120))
-  await demos.connect(rpcUrl)
-  await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
-  return demos
-}
-
 function pickTarget(targets: string[], idx: number): string {
   if (targets.length === 0) throw new Error("No TARGETS configured")
   return targets[Math.abs(idx) % targets.length]!
-}
-
-async function nextNonce(demos: Demos, address: string): Promise<number> {
-  const currentNonce = await demos.getAddressNonce(address)
-  return Number(currentNonce) + 1
 }
 
 export async function runTokenAclSmoke() {
@@ -177,40 +161,74 @@ export async function runTokenAclSmoke() {
   })
 
   // 1) Grant canMint+canBurn to grantee
-  const ownerDemos = await connectWallet(pickTarget(cfg.targets, 0), ownerMnemonic)
-  const grantNonce = await nextNonce(ownerDemos, ownerAddress)
-  const grantRes = await sendTokenGrantPermissionTxWithDemos({
-    demos: ownerDemos,
-    tokenAddress,
-    grantee: granteeAddress,
-    permissions: ["canMint", "canBurn"],
-    nonce: grantNonce,
+  const grantRes = await withDemosWallet({
+    rpcUrl: pickTarget(cfg.targets, 0),
+    mnemonic: ownerMnemonic,
+    fn: async (demos, fromHex) => {
+      const grantNonce = Number(await demos.getAddressNonce(fromHex)) + 1
+      const grant = await sendTokenGrantPermissionTxWithDemos({
+        demos,
+        tokenAddress,
+        grantee: granteeAddress,
+        permissions: ["canMint", "canBurn"],
+        nonce: grantNonce,
+      })
+      return { grantNonce, grant }
+    },
   })
 
-  logEvent({ phase: "grantPermission", nonce: grantNonce, result: grantRes.res?.result, response: cfg.logDetails ? grantRes.res : undefined })
+  logEvent({
+    phase: "grantPermission",
+    nonce: grantRes.grantNonce,
+    result: grantRes.grant.res?.result,
+    response: cfg.logDetails ? grantRes.grant.res : undefined,
+  })
 
   // 2) Grantee mints to owner (permissioned)
-  const granteeDemos = await connectWallet(pickTarget(cfg.targets, 1), granteeMnemonic)
-  let granteeNextNonce = await nextNonce(granteeDemos, granteeAddress)
-
-  const mintRes = await sendTokenMintTxWithDemos({
-    demos: granteeDemos,
-    tokenAddress,
-    to: ownerAddress,
-    amount: cfg.mintAmount,
-    nonce: granteeNextNonce++,
+  const mintRes = await withDemosWallet({
+    rpcUrl: pickTarget(cfg.targets, 1),
+    mnemonic: granteeMnemonic,
+    fn: async (demos, fromHex) => {
+      const nonce = Number(await demos.getAddressNonce(fromHex)) + 1
+      const mint = await sendTokenMintTxWithDemos({
+        demos,
+        tokenAddress,
+        to: ownerAddress,
+        amount: cfg.mintAmount,
+        nonce,
+      })
+      return { nonce, mint }
+    },
   })
-  logEvent({ phase: "granteeMint", result: mintRes.res?.result, response: cfg.logDetails ? mintRes.res : undefined })
+  logEvent({
+    phase: "granteeMint",
+    nonce: mintRes.nonce,
+    result: mintRes.mint.res?.result,
+    response: cfg.logDetails ? mintRes.mint.res : undefined,
+  })
 
   // 3) Grantee burns from owner (permissioned; burn-from-any requires canBurn)
-  const burnRes = await sendTokenBurnTxWithDemos({
-    demos: granteeDemos,
-    tokenAddress,
-    from: ownerAddress,
-    amount: cfg.burnAmount,
-    nonce: granteeNextNonce++,
+  const burnRes = await withDemosWallet({
+    rpcUrl: pickTarget(cfg.targets, 1),
+    mnemonic: granteeMnemonic,
+    fn: async (demos, fromHex) => {
+      const nonce = Number(await demos.getAddressNonce(fromHex)) + 1
+      const burn = await sendTokenBurnTxWithDemos({
+        demos,
+        tokenAddress,
+        from: ownerAddress,
+        amount: cfg.burnAmount,
+        nonce,
+      })
+      return { nonce, burn }
+    },
   })
-  logEvent({ phase: "granteeBurnFromOwner", result: burnRes.res?.result, response: cfg.logDetails ? burnRes.res : undefined })
+  logEvent({
+    phase: "granteeBurnFromOwner",
+    nonce: burnRes.nonce,
+    result: burnRes.burn.res?.result,
+    response: cfg.logDetails ? burnRes.burn.res : undefined,
+  })
 
   // 4) Settle: cross-node state consistency + holder pointers
   const settleAddresses = [ownerAddress, granteeAddress, attackerAddress]
@@ -345,4 +363,3 @@ export async function runTokenAclSmoke() {
   writeJson(artifacts.summaryPath, summary)
   console.log(JSON.stringify({ token_acl_smoke_summary: summary }, null, 2))
 }
-

@@ -517,6 +517,23 @@ export async function getWalletAddresses(rpcUrl: string, mnemonics: string[]): P
   return addresses
 }
 
+export async function withDemosWallet<T>(params: {
+  rpcUrl: string
+  mnemonic: string
+  waitForRpcSec?: number
+  waitForTxSec?: number
+  fn: (demos: Demos, addressHex: string) => Promise<T>
+}): Promise<T> {
+  const demos = new Demos()
+  await waitForRpcReady(params.rpcUrl, params.waitForRpcSec ?? envInt("WAIT_FOR_RPC_SEC", 120))
+  await waitForTxReady(params.rpcUrl, params.waitForTxSec ?? envInt("WAIT_FOR_TX_SEC", 120))
+  await demos.connect(params.rpcUrl)
+  await demos.connectWallet(params.mnemonic, { algorithm: "ed25519" })
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const addressHex = uint8ArrayToHex(publicKey)
+  return params.fn(demos, addressHex)
+}
+
 function buildGasAndNonceEdits(fromEd25519Address: string): GCREdit[] {
   return [
     {
