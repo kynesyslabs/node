@@ -493,6 +493,42 @@ Example run:
 
 ---
 
+## Token ACL multi-permission matrix scenario (compound perms + partial revoke)
+
+New scenario: `SCENARIO=token_acl_multi_permission_matrix`
+
+What it does:
+- bootstraps + distributes a token to (owner, grantee, outsider, target)
+- asserts grantee is rejected for: `mint`, burn-from-other, `pause`, ACL modification, `transferOwnership`
+- owner grants multiple permissions to grantee (`canMint`, `canBurn`, `canPause`, `canModifyACL`, `canTransferOwnership`)
+- grantee executes: mint-to-self, burn-from-owner, pause/unpause, grants `canMint` to outsider, transfers ownership to target
+- new owner revokes a subset (`canModifyACL`, `canPause`) from grantee and asserts those ops are rejected again
+- cross-node convergence checks:
+  - balances/supply snapshot convergence (`token.get` + `token.getBalance`)
+  - accessControl convergence (`token.get` accessControl subset normalized)
+
+Example run:
+- `better_testing/runs/token-acl-multi-perm-20260227-173525/token_acl_multi_permission_matrix.summary.json`
+
+---
+
+## Token ACL updateACL compatibility scenario (updateACL grant/revoke)
+
+New scenario: `SCENARIO=token_acl_updateacl_compat`
+
+What it does:
+- bootstraps + distributes a token
+- exercises `updateACL` (grant/revoke) and compares behavior to `grantPermission`/`revokePermission` semantics:
+  - unauthorized updateACL rejected
+  - owner updateACL grant makes permission effective
+  - owner updateACL revoke removes effectiveness
+- includes consensus/apply polling + cross-node convergence checks
+
+Example run:
+- `better_testing/runs/token-acl-updateacl-compat-20260227-174121/token_acl_updateacl_compat.summary.json`
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):

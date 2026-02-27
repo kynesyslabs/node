@@ -19,6 +19,8 @@ import { runTokenEdgeCases } from "./token_edge_cases"
 import { runTokenAclBurnMatrix } from "./token_acl_burn_matrix"
 import { runTokenAclPauseMatrix } from "./token_acl_pause_matrix"
 import { runTokenAclTransferOwnershipMatrix } from "./token_acl_transfer_ownership_matrix"
+import { runTokenAclMultiPermissionMatrix } from "./token_acl_multi_permission_matrix"
+import { runTokenAclUpdateAclCompat } from "./token_acl_updateacl_compat"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
 
@@ -110,6 +112,12 @@ switch (scenario) {
   case "token_acl_transfer_ownership_matrix":
     await runTokenAclTransferOwnershipMatrix()
     break
+  case "token_acl_multi_permission_matrix":
+    await runTokenAclMultiPermissionMatrix()
+    break
+  case "token_acl_updateacl_compat":
+    await runTokenAclUpdateAclCompat()
+    break
   case "im_online":
     await runImOnlineLoadgen()
     break
@@ -118,6 +126,6 @@ switch (scenario) {
     break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
     )
 }

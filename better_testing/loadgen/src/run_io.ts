@@ -17,13 +17,17 @@ export function ensureDir(dir: string) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
+function stringifyJson(value: unknown, pretty: boolean) {
+  const replacer = (_key: string, v: any) => (typeof v === "bigint" ? v.toString() : v)
+  return pretty ? JSON.stringify(value, replacer, 2) : JSON.stringify(value, replacer)
+}
+
 export function writeJson(filePath: string, data: unknown) {
   ensureDir(path.dirname(filePath))
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf8")
+  fs.writeFileSync(filePath, stringifyJson(data, true) + "\n", "utf8")
 }
 
 export function appendJsonl(filePath: string, obj: unknown) {
   ensureDir(path.dirname(filePath))
-  fs.appendFileSync(filePath, JSON.stringify(obj) + "\n", "utf8")
+  fs.appendFileSync(filePath, stringifyJson(obj, false) + "\n", "utf8")
 }
-

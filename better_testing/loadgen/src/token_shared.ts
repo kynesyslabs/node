@@ -72,14 +72,16 @@ export async function nodeCall(rpcUrl: string, message: string, data: any, muid 
 async function waitForTokenExists(rpcUrl: string, tokenAddress: string, timeoutSec: number): Promise<void> {
   const deadlineMs = nowMs() + Math.max(1, timeoutSec) * 1000
   let attempt = 0
+  let last: any = null
   while (nowMs() < deadlineMs) {
     const res = await nodeCall(rpcUrl, "token.get", { tokenAddress }, `token.get:${attempt}`)
+    last = res
     if (res?.result === 200 && res?.response?.tokenAddress) return
     attempt++
     const backoffMs = Math.min(2000, 100 + attempt * 100)
     await sleep(backoffMs)
   }
-  throw new Error(`Token not visible via nodeCall token.get after ${timeoutSec}s: ${tokenAddress}`)
+  throw new Error(`Token not visible via nodeCall token.get after ${timeoutSec}s: ${tokenAddress}. Last=${JSON.stringify(last)}`)
 }
 
 async function waitForTokenBalanceAtLeast(
@@ -155,6 +157,27 @@ export type CrossNodeTokenConsistencyReport = {
   }>
 }
 
+export type CrossNodeTokenGetConsistencyReport = {
+  ok: boolean
+  tokenAddress: string
+  rpcUrls: string[]
+  attempts: number
+  durationMs: number
+  perNode: Array<{
+    rpcUrl: string
+    ok: boolean
+    normalized: null | {
+      tokenAddress: string
+      accessControl: {
+        owner: string | null
+        paused: boolean
+        entries: Array<{ address: string; permissions: string[] }>
+      }
+    }
+    error: any
+  }>
+}
+
 export type CrossNodeHolderPointersReport = {
   ok: boolean
   tokenAddress: string
@@ -215,6 +238,20 @@ async function fetchTokenSnapshot(rpcUrl: string, tokenAddress: string, addresse
 
 function snapshotsEqual(a: any, b: any): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
+}
+
+function normalizeTokenAclEntries(entries: any): Array<{ address: string; permissions: string[] }> {
+  const list = Array.isArray(entries) ? entries : []
+  const out: Array<{ address: string; permissions: string[] }> = []
+  for (const entry of list) {
+    const address = normalizeHexAddress(entry?.address ?? "")
+    if (!address) continue
+    const permsRaw = Array.isArray(entry?.permissions) ? entry.permissions : []
+    const perms = [...new Set(permsRaw.map((p: any) => String(p)).filter(Boolean))].sort()
+    out.push({ address, permissions: perms })
+  }
+  out.sort((a, b) => a.address.localeCompare(b.address))
+  return out
 }
 
 function normalizeTokenPointerEntry(entry: any): string | null {
@@ -419,6 +456,75 @@ export async function waitForCrossNodeTokenConsistency(params: {
   }
 }
 
+async function fetchTokenGetNormalized(rpcUrl: string, tokenAddress: string) {
+  const tokenRes = await nodeCall(rpcUrl, "token.get", { tokenAddress }, `token.get:${tokenAddress}`)
+  if (tokenRes?.result !== 200) {
+    return { ok: false, normalized: null, error: tokenRes }
+  }
+
+  const owner = tokenRes?.response?.accessControl?.owner
+  const paused = !!tokenRes?.response?.accessControl?.paused
+  const entries = normalizeTokenAclEntries(tokenRes?.response?.accessControl?.entries)
+
+  const normalized = {
+    tokenAddress: normalizeHexAddress(tokenAddress),
+    accessControl: {
+      owner: typeof owner === "string" ? normalizeHexAddress(owner) : null,
+      paused,
+      entries,
+    },
+  }
+
+  return { ok: true, normalized, error: null }
+}
+
+export async function waitForCrossNodeTokenGetConsistency(params: {
+  rpcUrls: string[]
+  tokenAddress: string
+  timeoutSec: number
+  pollMs?: number
+}): Promise<CrossNodeTokenGetConsistencyReport> {
+  const pollMs = Math.max(50, Math.floor(params.pollMs ?? 500))
+  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
+  const startedAtMs = nowMs()
+  let attempts = 0
+
+  const rpcUrls = (params.rpcUrls ?? []).map(normalizeRpcUrl)
+  const tokenAddress = normalizeHexAddress(params.tokenAddress)
+
+  if (rpcUrls.length === 0) {
+    return { ok: false, tokenAddress, rpcUrls: [], attempts, durationMs: nowMs() - startedAtMs, perNode: [] }
+  }
+
+  while (nowMs() < deadlineMs) {
+    attempts++
+    const perNode: CrossNodeTokenGetConsistencyReport["perNode"] = []
+    for (const rpcUrl of rpcUrls) {
+      const one = await fetchTokenGetNormalized(rpcUrl, tokenAddress)
+      perNode.push({ rpcUrl, ok: one.ok, normalized: one.normalized, error: one.error })
+    }
+
+    const okNodes = perNode.filter(n => n.ok && n.normalized)
+    if (okNodes.length === perNode.length) {
+      const first = okNodes[0]!.normalized
+      const allSame = okNodes.every(n => snapshotsEqual(n.normalized, first))
+      if (allSame) {
+        return { ok: true, tokenAddress, rpcUrls, attempts, durationMs: nowMs() - startedAtMs, perNode }
+      }
+    }
+
+    await sleep(pollMs)
+  }
+
+  const perNode: CrossNodeTokenGetConsistencyReport["perNode"] = []
+  for (const rpcUrl of rpcUrls) {
+    const one = await fetchTokenGetNormalized(rpcUrl, tokenAddress)
+    perNode.push({ rpcUrl, ok: one.ok, normalized: one.normalized, error: one.error })
+  }
+
+  return { ok: false, tokenAddress, rpcUrls, attempts, durationMs: nowMs() - startedAtMs, perNode }
+}
+
 async function isRpcReady(rpcUrl: string): Promise<boolean> {
   const url = normalizeRpcUrl(rpcUrl)
   try {
@@ -583,6 +689,59 @@ function deriveTokenAddress(deployer: string, deployerNonce: number, tokenObject
   return "0x" + addrHex
 }
 
+async function findReusableTokenAddress(params: {
+  rpcUrl: string
+  ownerAddress: string
+  excludeAddresses: string[]
+  minOwnerBalance: bigint
+  timeoutSec: number
+}): Promise<string | null> {
+  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
+  const owner = normalizeHexAddress(params.ownerAddress)
+  const excluded = new Set((params.excludeAddresses ?? []).map(normalizeHexAddress))
+
+  while (nowMs() < deadlineMs) {
+    const pointers = await nodeCall(params.rpcUrl, "token.getHolderPointers", { address: owner }, "token.getHolderPointers:reuse")
+    const tokensRaw = pointers?.response?.tokens
+    const list = Array.isArray(tokensRaw) ? tokensRaw : []
+    const tokenAddresses = list.map(normalizeTokenPointerEntry).filter(Boolean) as string[]
+
+    for (const tokenAddress of tokenAddresses.slice().reverse()) {
+      const token = await nodeCall(params.rpcUrl, "token.get", { tokenAddress }, `token.get:reuse:${tokenAddress}`)
+      if (token?.result !== 200) continue
+      const accessControl = token?.response?.accessControl
+      const tokenOwner = normalizeHexAddress(accessControl?.owner ?? "")
+      const paused = !!accessControl?.paused
+      const entries = Array.isArray(accessControl?.entries) ? accessControl.entries : []
+      if (paused) continue
+      if (tokenOwner !== owner) continue
+
+      let clean = true
+      for (const entry of entries) {
+        const addr = normalizeHexAddress(entry?.address ?? "")
+        if (!addr) continue
+        if (addr === owner) continue
+        if (excluded.has(addr)) {
+          clean = false
+          break
+        }
+      }
+      if (!clean) continue
+
+      const balRes = await nodeCall(params.rpcUrl, "token.getBalance", { tokenAddress, address: owner }, `token.getBalance:reuse:${owner}`)
+      if (balRes?.result !== 200) continue
+      const bal = typeof balRes?.response?.balance === "string" ? BigInt(balRes.response.balance) : 0n
+      if (bal < params.minOwnerBalance) continue
+
+      return normalizeHexAddress(tokenAddress)
+    }
+
+    await sleep(500)
+  }
+
+  return null
+}
+
 export async function ensureTokenAndBalances(
   rpcUrl: string,
   deployerMnemonic: string,
@@ -668,12 +827,31 @@ export async function ensureTokenAndBalances(
     const edits = [...buildGasAndNonceEdits(deployerAddress), tokenEdit]
     const signedTx = await signTxWithEdits(demos, tx, edits)
     const validity = await (demos as any).confirm(signedTx)
+    if (validity?.result !== 200) {
+      throw new Error(`Token create confirm failed: ${JSON.stringify(validity)}`)
+    }
     const res = await (demos as any).broadcast(validity)
     if (res?.result !== 200) {
       throw new Error(`Token create broadcast failed: ${JSON.stringify(res)}`)
     }
 
-    await waitForTokenExists(rpcUrl, tokenAddress, envInt("TOKEN_WAIT_EXISTS_SEC", 30))
+    try {
+      await waitForTokenExists(rpcUrl, tokenAddress, envInt("TOKEN_WAIT_EXISTS_SEC", 30))
+    } catch (err) {
+      if (!envBool("TOKEN_FALLBACK_REUSE", true)) throw err
+
+      const distributeAmount = BigInt(process.env.TOKEN_DISTRIBUTE_AMOUNT ?? "100000000000000000000000")
+      const minOwnerBalance = distributeAmount * BigInt(Math.max(0, walletAddresses.length - 1))
+      const reuse = await findReusableTokenAddress({
+        rpcUrl,
+        ownerAddress: deployerAddress,
+        excludeAddresses: walletAddresses.slice(1),
+        minOwnerBalance,
+        timeoutSec: envInt("TOKEN_REUSE_TIMEOUT_SEC", 20),
+      })
+      if (!reuse) throw err
+      tokenAddress = reuse
+    }
   }
 
   if (distribute) {
@@ -706,6 +884,9 @@ export async function ensureTokenAndBalances(
       const edits = [...buildGasAndNonceEdits(deployerAddress), tokenEdit]
       const signedTx = await signTxWithEdits(demos, tx, edits)
       const validity = await (demos as any).confirm(signedTx)
+      if (validity?.result !== 200) {
+        throw new Error(`Token distribute confirm failed: ${JSON.stringify(validity)}`)
+      }
       const res = await (demos as any).broadcast(validity)
       if (res?.result !== 200) {
         throw new Error(`Token distribute transfer failed: ${JSON.stringify(res)}`)
@@ -1000,6 +1181,52 @@ export async function sendTokenTransferOwnershipTxWithDemos(params: {
     txhash: "",
     isRollback: false,
     data: { newOwner: params.newOwner },
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  const res = await (demos as any).broadcast(validity)
+  return { res, fromHex }
+}
+
+export async function sendTokenUpdateAclTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  action: "grant" | "revoke"
+  targetAddress: string
+  permissions: string[]
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = params.targetAddress
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = [
+    "token",
+    {
+      operation: "updateACL",
+      tokenAddress: params.tokenAddress,
+      action: params.action,
+      targetAddress: params.targetAddress,
+      permissions: params.permissions,
+    },
+  ]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "updateACL",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: { action: params.action, targetAddress: params.targetAddress, permissions: params.permissions },
   }
 
   const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
