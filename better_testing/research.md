@@ -474,6 +474,25 @@ Example run:
 
 ---
 
+## Token ACL transferOwnership matrix scenario (owner rotation)
+
+New scenario: `SCENARIO=token_acl_transfer_ownership_matrix`
+
+What it does:
+- bootstraps + distributes a token to (current owner, new owner, outsider)
+- asserts outsider cannot `transferOwnership` (`No ownership transfer permission`)
+- owner transfers ownership to `newOwner`, waits consensus, asserts `accessControl.owner` updates
+- asserts **old owner loses implicit permissions**:
+  - pause rejected (`No pause permission`)
+  - ACL modification rejected (`No ACL modification permission`)
+- asserts new owner can pause/unpause (implicit permissions after ownership rotation)
+- polls all nodes until they agree on `{ owner, paused }`
+
+Example run:
+- (run after adding the scenario; output is `token_acl_transfer_ownership_matrix.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):

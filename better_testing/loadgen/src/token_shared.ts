@@ -974,6 +974,41 @@ export async function sendTokenUnpauseTxWithDemos(params: {
   return { res, fromHex }
 }
 
+export async function sendTokenTransferOwnershipTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  newOwner: string
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = params.newOwner
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = ["token", { operation: "transferOwnership", tokenAddress: params.tokenAddress, newOwner: params.newOwner }]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "transferOwnership",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: { newOwner: params.newOwner },
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  const res = await (demos as any).broadcast(validity)
+  return { res, fromHex }
+}
+
 export async function sendTokenBurnTxWithDemos(params: {
   demos: Demos
   tokenAddress: string
