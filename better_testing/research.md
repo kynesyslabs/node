@@ -436,6 +436,26 @@ Example run:
 
 ---
 
+## Token ACL canBurn matrix scenario (burn semantics + grant/revoke)
+
+New scenario: `SCENARIO=token_acl_burn_matrix`
+
+What it does:
+- bootstraps + distributes a token to (owner, grantee, outsider)
+- asserts **self-burn works without `canBurn`** (by design: only burn-from-other requires `canBurn`)
+- asserts burn-from-other is rejected without `canBurn`
+- owner grants `canBurn`, waits consensus, asserts ACL entry is present
+- grantee burns from owner successfully, waits consensus, asserts supply/balances update
+- owner revokes `canBurn`, waits consensus, asserts ACL entry removed
+- asserts burn-from-other is rejected again
+- asserts non-owner cannot grant permissions
+- polls for cross-node convergence (`token.get` + `token.getBalance`)
+
+Example run:
+- (run after adding the scenario; output is `token_acl_burn_matrix.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):
