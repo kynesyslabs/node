@@ -391,3 +391,56 @@ What it does:
 
 Example run:
 - `better_testing/runs/token-query-20260227-152442/token_query_coverage.summary.json`
+
+---
+
+## Token ACL matrix scenario (grant/revoke + cross-node)
+
+New scenario: `SCENARIO=token_acl_matrix`
+
+What it does:
+- bootstraps + distributes a token
+- asserts unauthorized mint is rejected (no state change)
+- owner grants `canMint` to a grantee, waits consensus, asserts ACL entry is present
+- grantee mints successfully, waits consensus, asserts supply/balances update
+- owner revokes `canMint`, waits consensus, asserts ACL entry removed
+- asserts mint is rejected again
+- asserts non-owner cannot grant permissions
+- polls for cross-node convergence (`token.get` + `token.getBalance`)
+
+Example run:
+- `better_testing/runs/token-acl-matrix-20260227-145423/token_acl_matrix.summary.json`
+
+Note:
+- `@kynesyslabs/demosdk/websdk` appears to share wallet state across `Demos` instances inside a single process. For multi-wallet scenarios, prefer `withDemosWallet(...)` (sequential connections) rather than keeping multiple `Demos` objects alive at once.
+
+---
+
+## Token edge-case scenario (rejects + invariants)
+
+New scenario: `SCENARIO=token_edge_cases`
+
+What it does:
+- bootstraps + distributes a token
+- asserts deterministic rejects:
+  - transfer/mint/burn with amount `0`
+  - transfer > balance
+  - burn > balance
+  - burn-from-other without `canBurn`
+  - mint without `canMint`
+- asserts `totalSupply` + balances are unchanged after the rejected txs
+- also asserts `token.get` returns non-200 for a missing token address
+
+Example run:
+- `better_testing/runs/token-edge-cases-20260227-150320/token_edge_cases.summary.json`
+
+---
+
+## Agent-invokable scripts
+
+Helpers (host-side):
+- `better_testing/scripts/run-scenario.sh` (single scenario runner; supports `--build`, deterministic `RUN_ID`, and extra `--env KEY=VALUE`)
+- `better_testing/scripts/token-perf-baseline.sh` (runs `token_transfer_ramp`, `token_mint_ramp`, `token_burn_ramp` sequentially)
+
+Perf knee heuristic (for ramp summaries):
+- track `okTps` vs `latencyMs.p95` across ramp steps; the “knee” is typically the last step where `okTps` is still increasing meaningfully before latency starts climbing sharply or errors appear.

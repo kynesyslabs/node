@@ -165,7 +165,7 @@ export type CrossNodeHolderPointersReport = {
   perNode: Array<{
     rpcUrl: string
     ok: boolean
-    perAddress: Record<string, { hasPointer: boolean; raw: any }>
+    perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }>
     error: any
   }>
 }
@@ -244,6 +244,7 @@ export async function waitForCrossNodeHolderPointersMatchBalances(params: {
   const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
   const startedAtMs = nowMs()
   let attempts = 0
+  const includeRaw = envBool("HOLDER_POINTER_INCLUDE_RAW", false)
 
   const rpcUrls = (params.rpcUrls ?? []).map(normalizeRpcUrl)
   const expectedPresent: Record<string, boolean> = {}
@@ -258,7 +259,7 @@ export async function waitForCrossNodeHolderPointersMatchBalances(params: {
     const perNode: CrossNodeHolderPointersReport["perNode"] = []
 
     for (const rpcUrl of rpcUrls) {
-      const perAddress: Record<string, { hasPointer: boolean; raw: any }> = {}
+      const perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }> = {}
       let nodeOk = true
       let nodeErr: any = null
 
@@ -267,11 +268,15 @@ export async function waitForCrossNodeHolderPointersMatchBalances(params: {
         if (!holder.ok) {
           nodeOk = false
           nodeErr = holder.raw
-          perAddress[address] = { hasPointer: false, raw: holder.raw }
+          perAddress[address] = includeRaw
+            ? { hasPointer: false, tokenCount: null, raw: holder.raw }
+            : { hasPointer: false, tokenCount: null }
           continue
         }
         const hasPointer = holder.tokens.includes(normalizeHexAddress(params.tokenAddress))
-        perAddress[address] = { hasPointer, raw: holder.raw }
+        perAddress[address] = includeRaw
+          ? { hasPointer, tokenCount: holder.tokens.length, raw: holder.raw }
+          : { hasPointer, tokenCount: holder.tokens.length }
       }
 
       perNode.push({ rpcUrl, ok: nodeOk, perAddress, error: nodeErr })
@@ -310,7 +315,7 @@ export async function waitForCrossNodeHolderPointersMatchBalances(params: {
 
   const perNode: CrossNodeHolderPointersReport["perNode"] = []
   for (const rpcUrl of rpcUrls) {
-    const perAddress: Record<string, { hasPointer: boolean; raw: any }> = {}
+    const perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }> = {}
     let nodeOk = true
     let nodeErr: any = null
     for (const address of addresses) {
@@ -318,11 +323,15 @@ export async function waitForCrossNodeHolderPointersMatchBalances(params: {
       if (!holder.ok) {
         nodeOk = false
         nodeErr = holder.raw
-        perAddress[address] = { hasPointer: false, raw: holder.raw }
+        perAddress[address] = includeRaw
+          ? { hasPointer: false, tokenCount: null, raw: holder.raw }
+          : { hasPointer: false, tokenCount: null }
         continue
       }
       const hasPointer = holder.tokens.includes(normalizeHexAddress(params.tokenAddress))
-      perAddress[address] = { hasPointer, raw: holder.raw }
+      perAddress[address] = includeRaw
+        ? { hasPointer, tokenCount: holder.tokens.length, raw: holder.raw }
+        : { hasPointer, tokenCount: holder.tokens.length }
     }
     perNode.push({ rpcUrl, ok: nodeOk, perAddress, error: nodeErr })
   }
