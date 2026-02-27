@@ -357,3 +357,18 @@ Run: `im-online-fix1-20260226-154137`
 
 Ramp: `im-online-ramp-fix1-20260226-154224` (`INFLIGHT_PER_SENDER=20`, `IM_MESSAGE_BYTES=64`, step=8s)
 - best ok TPS: ~262.9 @ `IM_PAIRS=4` (p95 ~395ms)
+
+---
+
+## Token consensus consistency scenario (cross-node)
+
+New scenario: `SCENARIO=token_consensus_consistency`
+
+What it does:
+- bootstraps a fresh token (unless `TOKEN_BOOTSTRAP=false`)
+- executes a small token tx bundle (transfer + mint + burn) on one node
+- waits for **N consensus rounds** across all nodes (`CONSENSUS_ROUNDS`, default 1) using `nodeCall getLastBlockNumber`
+- polls all nodes until token snapshots match (`token.get` + `token.getBalance`) and asserts expected deltas
+
+Example run:
+- `better_testing/runs/token-consensus-20260227-151903/token_consensus_consistency.summary.json`
