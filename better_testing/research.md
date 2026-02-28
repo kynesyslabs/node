@@ -565,6 +565,24 @@ Example run:
 
 ---
 
+## Token scripting rejects/invariants scenario (script-enforced reject)
+
+New scenario: `SCENARIO=token_script_rejects`
+
+What it does:
+- bootstraps + distributes a token to (owner, other)
+- installs a script with `beforeTransfer` that rejects transfers above a threshold (`SCRIPT_REJECT_THRESHOLD`, default 1)
+- attempts an oversized transfer and asserts:
+  - request is rejected (error contains `rejected`)
+  - `totalSupply`, balances, and `customState` are unchanged after consensus
+  - cross-node convergence (balances/supply + `customState`)
+- then performs a valid transfer at the threshold and asserts it applies
+
+Example run:
+- (run after adding the scenario; output is `token_script_rejects.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):
