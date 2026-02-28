@@ -24,6 +24,8 @@ import { runTokenAclUpdateAclCompat } from "./token_acl_updateacl_compat"
 import { runTokenScriptSmoke } from "./token_script_smoke"
 import { runTokenScriptHooksCorrectness } from "./token_script_hooks_correctness"
 import { runTokenScriptRejects } from "./token_script_rejects"
+import { runTokenScriptTransferLoadgen } from "./token_script_transfer_loadgen"
+import { runTokenScriptTransferRamp } from "./token_script_transfer_ramp"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
 
@@ -130,6 +132,12 @@ switch (scenario) {
   case "token_script_rejects":
     await runTokenScriptRejects()
     break
+  case "token_script_transfer":
+    await runTokenScriptTransferLoadgen()
+    break
+  case "token_script_transfer_ramp":
+    await runTokenScriptTransferRamp()
+    break
   case "im_online":
     await runImOnlineLoadgen()
     break
@@ -138,6 +146,6 @@ switch (scenario) {
     break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_transfer, token_script_transfer_ramp, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
     )
 }

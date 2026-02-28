@@ -583,6 +583,37 @@ Example run:
 
 ---
 
+## Token scripting perf ramp scenario (scripted transfer)
+
+New scenarios:
+- `SCENARIO=token_script_transfer` (single-step loadgen)
+- `SCENARIO=token_script_transfer_ramp` (multi-step ramp)
+
+What it does:
+- bootstraps + distributes a token (unless reused via `TOKEN_ADDRESS` / `TOKEN_BOOTSTRAP=false`)
+- installs a token script (once) that runs `beforeTransfer`/`afterTransfer` hooks
+- runs the same transfer loadgen loop as `token_transfer`, but with hook execution overhead
+- emits:
+  - `token_script_transfer.summary.json`
+  - `token_script_transfer.timeseries.jsonl`
+  - `token_script_transfer_ramp.summary.json` (for ramp mode)
+
+Important env vars:
+- `RAMP_CONCURRENCY=4,8,16` or `RAMP_INFLIGHT_PER_WALLET=1,2,4`
+- `STEP_DURATION_SEC=15` / `COOLDOWN_SEC=3`
+- `SCRIPT_WORK_ITERS=0` (CPU loop iterations executed inside each hook)
+- `SCRIPT_SET_STORAGE=false` (if `true`, each hook writes counters into `customState`)
+- `TOKEN_SCRIPT_UPGRADE=true` (set to `false` on reuse steps; ramp does this automatically)
+
+Example run:
+- `cd devnet && RUN_ID=token-script-transfer-ramp-$(date +%Y%m%d-%H%M%S) docker compose -f docker-compose.yml -f ../better_testing/docker-compose.perf.yml run --rm -e SCENARIO=token_script_transfer_ramp -e RAMP_CONCURRENCY=4,8,16 -e STEP_DURATION_SEC=15 -e SCRIPT_WORK_ITERS=0 loadgen`
+
+Notes from runs:
+- `RUN_ID=token-script-transfer-ramp-20260228-171640` (concurrency ramp): best `okTps≈26.75` but note effective concurrency is capped by available funded wallets.
+- `RUN_ID=token-script-transfer-inflight-ramp-20260228-172100` (inflight ramp): best `okTps≈61.93` at `INFLIGHT_PER_WALLET=8`, but `INFLIGHT_PER_WALLET=16` collapses latency (`p50≈2.3s`, `p95≈9.7s`).
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):
