@@ -545,6 +545,26 @@ Example run:
 
 ---
 
+## Token scripting hooks correctness scenario (transfer/mint/burn)
+
+New scenario: `SCENARIO=token_script_hooks_correctness`
+
+What it does:
+- bootstraps + distributes a token to (owner, other)
+- installs a script with `before*/after*` hooks that increment counters in `customState`
+- executes:
+  - `transfer` (owner -> other)
+  - `mint` (owner -> other)
+  - `burn` (other burns self)
+- polls until `customState` counters match expected values
+- asserts balances/supply deltas match native semantics (script does not alter mutations)
+- asserts all nodes converge on the expected `customState` counters
+
+Example run:
+- (run after adding the scenario; output is `token_script_hooks_correctness.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):
