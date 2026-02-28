@@ -1190,6 +1190,68 @@ export async function sendTokenTransferOwnershipTxWithDemos(params: {
   return { res, fromHex }
 }
 
+export async function sendTokenUpgradeScriptTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  scriptCode: string
+  methodNames: string[]
+  nonce: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const code = String(params.scriptCode ?? "")
+  const codeHash = Hashing.sha256(code)
+
+  const newScript = {
+    version: 1,
+    code,
+    methods: (params.methodNames ?? []).map(name => ({
+      name,
+      params: [],
+      returns: "any",
+      mutates: false,
+    })),
+    hooks: [],
+    codeHash,
+    upgradedAt: Date.now(),
+  }
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = fromHex
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = Date.now()
+  tx.content.data = [
+    "token",
+    { operation: "upgradeScript", tokenAddress: params.tokenAddress, newScript, upgradeReason: "better_testing scripted token smoke" },
+  ]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "upgradeScript",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: { newScript, upgradeReason: "better_testing scripted token smoke" },
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  const validity = await (demos as any).confirm(signedTx)
+  if (validity?.result !== 200) {
+    throw new Error(`Token upgradeScript confirm failed: ${JSON.stringify(validity)}`)
+  }
+  const res = await (demos as any).broadcast(validity)
+  if (res?.result !== 200) {
+    throw new Error(`Token upgradeScript broadcast failed: ${JSON.stringify(res)}`)
+  }
+  return { res, fromHex, codeHash }
+}
+
 export async function sendTokenUpdateAclTxWithDemos(params: {
   demos: Demos
   tokenAddress: string

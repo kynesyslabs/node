@@ -529,6 +529,22 @@ Example run:
 
 ---
 
+## Token scripting smoke scenario (upgradeScript + callView)
+
+New scenario: `SCENARIO=token_script_smoke`
+
+What it does:
+- bootstraps a token (unless `TOKEN_BOOTSTRAP=false`)
+- asserts `token.callView` returns `NO_SCRIPT` before a script is installed
+- upgrades the token script via `upgradeScript`
+- polls until `token.get` shows `hasScript=true` and expected `script.codeHash`
+- calls `token.callView` on **all nodes** and asserts a stable value
+
+Example run:
+- (run after adding the scenario; output is `token_script_smoke.summary.json`)
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):

@@ -1253,6 +1253,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     method: data.method,
                     args: data.args ?? [],
                     tokenData,
+                    scriptCode: token.script?.code ?? "",
                 })
 
                 if (!viewResult.success) {

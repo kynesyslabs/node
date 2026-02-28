@@ -101,6 +101,7 @@ export type ScriptViewRequest = {
     method: string
     args: any[]
     tokenData: GCRTokenData
+    scriptCode: string
 }
 
 export type ScriptMethodRequest = {
@@ -142,25 +143,183 @@ export type ScriptExecutor = {
     executeWithHooks(req: ExecuteWithHooksRequest): Promise<HookExecutionResult>
 }
 
+type CompiledTokenScript = {
+    views: Record<string, Function>
+    hooks: Record<string, Function>
+    methods: Record<string, Function>
+}
+
+const compiledCache = new Map<string, CompiledTokenScript>()
+
+function compileScript(scriptCode: string): CompiledTokenScript {
+    const cached = compiledCache.get(scriptCode)
+    if (cached) return cached
+
+    // Lazy import to keep this module tree simple for Bun bundling.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const vm = require("vm") as typeof import("vm")
+
+    const module = { exports: {} as any }
+    const sandbox = {
+        module,
+        exports: module.exports,
+        BigInt,
+    }
+
+    const context = vm.createContext(sandbox, { name: "TokenScript", codeGeneration: { strings: true, wasm: false } })
+    const script = new vm.Script(String(scriptCode ?? ""), { filename: "token-script.js" })
+    script.runInContext(context, { timeout: 50 })
+
+    const exported = (module.exports ?? sandbox.exports ?? {}) as any
+
+    const compiled: CompiledTokenScript = {
+        views: typeof exported.views === "object" && exported.views ? exported.views : {},
+        hooks: typeof exported.hooks === "object" && exported.hooks ? exported.hooks : {},
+        methods: typeof exported.methods === "object" && exported.methods ? exported.methods : {},
+    }
+
+    compiledCache.set(scriptCode, compiled)
+    return compiled
+}
+
+function hookNameForOperation(operation: string, phase: "before" | "after"): string | null {
+    const op = String(operation ?? "").toLowerCase()
+    if (op === "transfer") return phase === "before" ? "beforeTransfer" : "afterTransfer"
+    if (op === "mint") return phase === "before" ? "beforeMint" : "afterMint"
+    if (op === "burn") return phase === "before" ? "beforeBurn" : "afterBurn"
+    if (op === "approve") return "onApprove"
+    return null
+}
+
 export const scriptExecutor: ScriptExecutor = {
-    async executeView() {
-        return {
-            success: false,
-            error: "SCRIPTING_NOT_IMPLEMENTED",
-            errorType: "not_implemented",
-            executionTimeMs: 0,
-            gasUsed: 0,
+    async executeView(req) {
+        const started = Date.now()
+        try {
+            const compiled = compileScript(req.scriptCode)
+            const fn = compiled.views?.[req.method]
+            if (typeof fn !== "function") {
+                return {
+                    success: false,
+                    error: `Unknown view method: ${req.method}`,
+                    errorType: "unknown_method",
+                    executionTimeMs: Date.now() - started,
+                    gasUsed: 0,
+                }
+            }
+
+            const value = await fn(req.tokenData, ...(Array.isArray(req.args) ? req.args : []))
+            return {
+                success: true,
+                value,
+                executionTimeMs: Date.now() - started,
+                gasUsed: 0,
+            }
+        } catch (error: any) {
+            return {
+                success: false,
+                error: error?.message ?? String(error),
+                errorType: "execution_error",
+                executionTimeMs: Date.now() - started,
+                gasUsed: 0,
+            }
         }
     },
-    async executeMethod() {
-        return { success: false, error: "SCRIPTING_NOT_IMPLEMENTED" }
+    async executeMethod(req) {
+        try {
+            // For now: allow custom method execution for scripted tokens using `methods`.
+            // This is intentionally minimal; advanced gas/metering can be added later.
+            const compiled = compileScript((req as any).scriptCode ?? "")
+            const fn = compiled.methods?.[req.method]
+            if (typeof fn !== "function") {
+                return { success: false, error: `Unknown method: ${req.method}`, errorType: "unknown_method" }
+            }
+            const returnValue = await fn(req.tokenData, ...(Array.isArray(req.args) ? req.args : []))
+            return { success: true, returnValue, mutations: [] }
+        } catch (error: any) {
+            return { success: false, error: error?.message ?? String(error), errorType: "execution_error" }
+        }
     },
     async executeWithHooks(req) {
-        return {
-            finalState: req.tokenData,
-            mutations: [],
-            rejection: { hookType: "engine", reason: "SCRIPTING_NOT_IMPLEMENTED" },
-            metadata: { beforeHookExecuted: false, afterHookExecuted: false },
+        const compiled = compileScript(req.scriptCode)
+
+        const beforeName = hookNameForOperation(req.operation, "before")
+        const afterName = hookNameForOperation(req.operation, "after")
+
+        let tokenData = req.tokenData
+        let mutations: TokenMutation[] = [...(req.nativeOperationMutations ?? [])]
+        let beforeHookExecuted = false
+        let afterHookExecuted = false
+
+        const runHook = async (name: string) => {
+            const hook = compiled.hooks?.[name]
+            if (typeof hook !== "function") return null
+            const ctx = {
+                operation: req.operation,
+                operationData: req.operationData,
+                tokenAddress: req.tokenAddress,
+                token: tokenData,
+                txContext: req.txContext,
+                mutations,
+            }
+            const out = await hook(ctx)
+            return out ?? null
+        }
+
+        try {
+            if (beforeName) {
+                const beforeOut = await runHook(beforeName)
+                if (beforeOut) {
+                    beforeHookExecuted = true
+                    if (beforeOut.reject) {
+                        return {
+                            finalState: tokenData,
+                            mutations: [],
+                            rejection: { hookType: beforeName, reason: String(beforeOut.reject) },
+                            metadata: { beforeHookExecuted, afterHookExecuted },
+                        }
+                    }
+                    if (Array.isArray(beforeOut.mutations)) mutations = beforeOut.mutations
+                    if (beforeOut.setStorage !== undefined) tokenData = { ...tokenData, storage: beforeOut.setStorage }
+                }
+            }
+
+            const applied = applyMutations(tokenData, mutations)
+            tokenData = applied.newState
+
+            if (afterName) {
+                const afterOut = await runHook(afterName)
+                if (afterOut) {
+                    afterHookExecuted = true
+                    if (afterOut.reject) {
+                        return {
+                            finalState: tokenData,
+                            mutations,
+                            rejection: { hookType: afterName, reason: String(afterOut.reject) },
+                            metadata: { beforeHookExecuted, afterHookExecuted },
+                        }
+                    }
+                    if (Array.isArray(afterOut.mutations)) {
+                        const appliedAfter = applyMutations(tokenData, afterOut.mutations)
+                        tokenData = appliedAfter.newState
+                        mutations = [...mutations, ...afterOut.mutations]
+                    }
+                    if (afterOut.setStorage !== undefined) tokenData = { ...tokenData, storage: afterOut.setStorage }
+                }
+            }
+
+            return {
+                finalState: tokenData,
+                mutations,
+                rejection: null,
+                metadata: { beforeHookExecuted, afterHookExecuted },
+            }
+        } catch (error: any) {
+            return {
+                finalState: req.tokenData,
+                mutations: [],
+                rejection: { hookType: "engine", reason: error?.message ?? String(error) },
+                metadata: { beforeHookExecuted, afterHookExecuted },
+            }
         }
     },
 }
@@ -172,4 +331,3 @@ export class HookExecutor {
         return await this.executor.executeWithHooks(req)
     }
 }
-
