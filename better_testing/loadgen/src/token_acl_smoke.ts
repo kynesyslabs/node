@@ -1,3 +1,4 @@
+import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { appendJsonl, getRunConfig, writeJson } from "./run_io"
 import {
   ensureTokenAndBalances,
@@ -109,6 +110,18 @@ function getConfig(): Config {
 function pickTarget(targets: string[], idx: number): string {
   if (targets.length === 0) throw new Error("No TARGETS configured")
   return targets[Math.abs(idx) % targets.length]!
+}
+
+async function connectWallet(rpcUrl: string, mnemonic: string): Promise<Demos> {
+  const demos = new Demos()
+  await demos.connect(rpcUrl)
+  await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
+  return demos
+}
+
+async function nextNonce(demos: Demos, addressHex: string): Promise<number> {
+  const current = await demos.getAddressNonce(addressHex)
+  return Number(current) + 1
 }
 
 export async function runTokenAclSmoke() {

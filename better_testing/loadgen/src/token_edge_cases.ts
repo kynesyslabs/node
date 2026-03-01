@@ -60,6 +60,20 @@ function snapshotsEqual(a: any, b: any): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
+async function waitForBlockAdvance(params: { rpcUrl: string; before: number; timeoutSec: number }) {
+  const deadline = Date.now() + Math.max(1, params.timeoutSec) * 1000
+  let attempt = 0
+  while (Date.now() < deadline) {
+    const res = await nodeCall(params.rpcUrl, "getLastBlockNumber", {}, `edge:lastBlock:${attempt}`)
+    const raw = res?.response
+    const parsed = typeof raw === "string" ? Number.parseInt(raw, 10) : typeof raw === "number" ? raw : NaN
+    if (Number.isFinite(parsed) && parsed > params.before) return parsed
+    attempt++
+    await new Promise(r => setTimeout(r, Math.min(2000, 100 + attempt * 100)))
+  }
+  return null
+}
+
 export async function runTokenEdgeCases() {
   maybeSilenceConsole()
   const targets = getTokenTargets()
@@ -188,6 +202,35 @@ export async function runTokenEdgeCases() {
     cases.push({ name: "mint_no_permission", expected: "No mint permission", res })
   }
 
+  // self-transfer should not mint or otherwise mutate token state
+  {
+    const lastBlockRes = await nodeCall(rpcUrl, "getLastBlockNumber", {}, "edge:lastBlock:beforeSelfTransfer")
+    const lastBlockRaw = lastBlockRes?.response
+    const lastBlockBefore =
+      typeof lastBlockRaw === "string" ? Number.parseInt(lastBlockRaw, 10) : typeof lastBlockRaw === "number" ? lastBlockRaw : 0
+
+    const amount = BigInt(process.env.SELF_TRANSFER_AMOUNT ?? "1")
+    const res = await withDemosWallet({
+      rpcUrl,
+      mnemonic: ownerMnemonic,
+      fn: async (demos, fromHex) => {
+        const nonce = Number(await demos.getAddressNonce(fromHex)) + 1
+        return (await sendTokenTransferTxWithDemos({ demos, tokenAddress, to: owner, amount, nonce })).res
+      },
+    })
+
+    const appliedBlock =
+      res?.result === 200
+        ? await waitForBlockAdvance({ rpcUrl, before: Number.isFinite(lastBlockBefore) ? lastBlockBefore : 0, timeoutSec: envInt("WAIT_FOR_TX_SEC", 120) })
+        : null
+
+    cases.push({
+      name: "self_transfer_noop",
+      expected: "no token state mutation (totalSupply + balances unchanged)",
+      res: { ...res, appliedBlock: appliedBlock ?? null },
+    })
+  }
+
   // non-existent token address read (expects non-200)
   const missingTokenAddress =
     process.env.MISSING_TOKEN_ADDRESS ??
@@ -227,4 +270,3 @@ export async function runTokenEdgeCases() {
     throw new Error("Edge cases mutated token state unexpectedly")
   }
 }
-

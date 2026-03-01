@@ -631,6 +631,18 @@ Fix status (2026-03-01):
 
 ---
 
+## Token suite sanity pass (2026-03-01)
+
+Ran a quick “confidence sweep” on devnet (all green):
+- `RUN_ID=token-edge-20260301-095600` (`SCENARIO=token_edge_cases`): includes explicit self-transfer no-op invariant (tx accepted, state unchanged).
+- `RUN_ID=token-acl-smoke-20260301-100120` (`SCENARIO=token_acl_smoke`): fixed a loadgen crash (`connectWallet` missing) and verified attacker mint/burn attempts do not mutate state.
+- `RUN_ID=token-script-storage-soak-20260301-100200` (`SCENARIO=token_script_transfer_ramp`, `SCRIPT_SET_STORAGE=true`, `STEP_DURATION_SEC=20`):
+  - `INFLIGHT_PER_WALLET=12`: `okTps≈69.55`, `p95≈884ms`, `postRun.settle.ok=true`, `holderPointers.ok=true`.
+
+Note: `token_query_coverage` used to emit very large stdout due to embedding full `token.getHolderPointers` token lists; it now summarizes holder pointers as `(tokenCount, hasPointer)` to keep output manageable.
+
+---
+
 ## Agent-invokable scripts
 
 Helpers (host-side):

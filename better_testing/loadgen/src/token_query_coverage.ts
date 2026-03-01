@@ -43,9 +43,12 @@ type PerNodeReport = {
   rpcUrl: string
   tokenGet: any
   tokenGetMissing: any
-  balances: Record<string, any>
-  holderPointers: Record<string, any>
-  callViewNoScript: any
+  balances: Record<string, { result: any; balance: string | null; raw?: any }>
+  holderPointers: Record<
+    string,
+    { result: any; tokenCount: number | null; hasPointer: boolean | null; rawError?: any }
+  >
+  callViewNoScript: { result: any; error: string | null; message: string | null }
   assertions: {
     tokenGetOk: boolean
     tokenGetMissing404: boolean
@@ -107,14 +110,29 @@ export async function runTokenQueryCoverage() {
     const tokenGet = await nodeCall(target, "token.get", { tokenAddress }, `token.get:${tokenAddress}`)
     const tokenGetMissing = await nodeCall(target, "token.get", { tokenAddress: missingTokenAddress }, `token.get:missing`)
 
-    const balances: Record<string, any> = {}
+    const balances: Record<string, { result: any; balance: string | null; raw?: any }> = {}
     for (const a of normalizedAddresses) {
-      balances[a] = await nodeCall(target, "token.getBalance", { tokenAddress, address: a }, `token.getBalance:${a}`)
+      const res = await nodeCall(target, "token.getBalance", { tokenAddress, address: a }, `token.getBalance:${a}`)
+      balances[a] = {
+        result: res?.result ?? null,
+        balance: res?.result === 200 ? (res?.response?.balance ?? null) : null,
+        raw: res?.result === 200 ? undefined : res,
+      }
     }
 
-    const holderPointers: Record<string, any> = {}
+    const holderPointers: Record<string, { result: any; tokenCount: number | null; hasPointer: boolean | null; rawError?: any }> = {}
     for (const a of normalizedAddresses) {
-      holderPointers[a] = await nodeCall(target, "token.getHolderPointers", { address: a }, `token.getHolderPointers:${a}`)
+      const res = await nodeCall(target, "token.getHolderPointers", { address: a }, `token.getHolderPointers:${a}`)
+      if (res?.result !== 200) {
+        holderPointers[a] = { result: res?.result ?? null, tokenCount: null, hasPointer: null, rawError: res }
+        continue
+      }
+
+      const tokens = Array.isArray(res?.response?.tokens) ? res.response.tokens : []
+      const hasPointer = tokens
+        .map((t: any) => (typeof t === "string" ? normalizeHexAddress(t) : normalizeHexAddress(t?.tokenAddress)))
+        .includes(normalizeHexAddress(tokenAddress))
+      holderPointers[a] = { result: res?.result ?? null, tokenCount: tokens.length, hasPointer }
     }
 
     const callViewNoScript = await nodeCall(
@@ -137,7 +155,7 @@ export async function runTokenQueryCoverage() {
     let balancesOk = true
     for (const a of normalizedAddresses) {
       const one = balances[a]
-      const got = String(one?.response?.balance ?? "0")
+      const got = String(one?.balance ?? "0")
       if (one?.result !== 200 || got !== expectedBalances[a]) {
         balancesOk = false
         break
@@ -153,11 +171,7 @@ export async function runTokenQueryCoverage() {
         holderPointersOk = false
         break
       }
-      const tokens = Array.isArray(holder?.response?.tokens) ? holder.response.tokens : []
-      const hasPointer = tokens
-        .map((t: any) => (typeof t === "string" ? normalizeHexAddress(t) : normalizeHexAddress(t?.tokenAddress)))
-        .includes(normalizeHexAddress(tokenAddress))
-      if (hasPointer !== shouldHave) {
+      if (holder?.hasPointer !== shouldHave) {
         holderPointersOk = false
         break
       }
@@ -174,7 +188,11 @@ export async function runTokenQueryCoverage() {
       tokenGetMissing,
       balances,
       holderPointers,
-      callViewNoScript,
+      callViewNoScript: {
+        result: callViewNoScript?.result ?? null,
+        error: callViewNoScript?.response?.error ?? null,
+        message: callViewNoScript?.response?.message ?? null,
+      },
       assertions: {
         tokenGetOk,
         tokenGetMissing404,
@@ -219,4 +237,3 @@ export async function runTokenQueryCoverage() {
     throw new Error("token_query_coverage failed (one or more node read APIs diverged or assertions failed)")
   }
 }
-
