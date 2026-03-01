@@ -1,0 +1,62 @@
+# Beadspace Dashboard — Auto-deploy on beads changes
+#
+# Copy this file to .github/workflows/beadspace.yml in your repo.
+# Prerequisite: index.html must exist at .beadspace/index.html
+# Enable: Settings > Pages > Source: "GitHub Actions"
+#
+# Security: No untrusted inputs used. Data source is .beads/issues.jsonl
+# (checked into the repo). The deploy step output URL is from a trusted action.
+
+name: Deploy Beadspace
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.beads/**'
+      - '.beadspace/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate issues.json
+        run: |
+          if [ ! -f .beads/issues.jsonl ]; then
+            echo "No .beads/issues.jsonl found"
+            exit 1
+          fi
+          # Convert JSONL to JSON array — reads only from checked-in repo files
+          python3 -c "
+          import json
+          issues = [json.loads(l) for l in open('.beads/issues.jsonl') if l.strip()]
+          json.dump(issues, open('.beadspace/issues.json', 'w'))
+          print(f'{len(issues)} issues exported')
+          "
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .beadspace
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
