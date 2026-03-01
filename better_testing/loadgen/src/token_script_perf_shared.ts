@@ -118,8 +118,23 @@ export async function maybeUpgradeScript(params: {
   upgrade: boolean
   force: boolean
 }) {
-  const token = await nodeCall(params.rpcUrl, "token.get", { tokenAddress: params.tokenAddress }, `token.get:maybeUpgrade:${params.tokenAddress}`)
-  if (token?.result !== 200) throw new Error(`token.get failed before script upgrade: ${JSON.stringify(token)}`)
+  const tokenGetDeadlineMs = Date.now() + Math.max(1, envInt("TOKEN_WAIT_APPLY_SEC", 60)) * 1000
+  let token: any = null
+  while (Date.now() < tokenGetDeadlineMs) {
+    token = await nodeCall(
+      params.rpcUrl,
+      "token.get",
+      { tokenAddress: params.tokenAddress },
+      `token.get:maybeUpgrade:${params.tokenAddress}`,
+    )
+    if (token?.result === 200) break
+    const inFlux = token?.result === 409 && token?.response?.error === "STATE_IN_FLUX"
+    if (!inFlux) break
+    await sleep(250)
+  }
+  if (token?.result !== 200) {
+    throw new Error(`token.get failed before script upgrade: ${JSON.stringify(token)}`)
+  }
   const hasScript = !!token?.response?.metadata?.hasScript
 
   if (!params.upgrade) {

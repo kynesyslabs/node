@@ -74,6 +74,10 @@ export default class SharedState {
     inCleanMempool = false
     // REVIEW Mempool caching
 
+    // GCR / state application
+    // When true, committed-only read APIs should return 409 to avoid serving transient partial state.
+    inGcrApply = false
+
     // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
     // Stores ValidityData for transactions that need to be relayed to validators
     validityDataCache = new Map<string, ValidityData>() // txHash -> ValidityData

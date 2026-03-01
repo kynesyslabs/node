@@ -63,6 +63,19 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
     log.debug("[manageNodeCall] Content: " + JSON.stringify(content))
+
+    const rejectCommittedReadIfStateInFlux = (): boolean => {
+        if (getSharedState.inGcrApply) {
+            response.result = 409
+            response.response = {
+                error: "STATE_IN_FLUX",
+                message:
+                    "Committed state is currently being applied (sync/consensus). Retry shortly.",
+            }
+            return true
+        }
+        return false
+    }
     switch (content.message) {
         case "getPeerInfo":
             response.response = await getPeerInfo()
@@ -1027,7 +1040,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         }
 
         // REVIEW: Token system - basic read APIs (perf harness support)
-        case "token.get": {
+        case "token.get":
+        case "token.getCommitted": {
+            if (
+                content.message === "token.getCommitted" &&
+                rejectCommittedReadIfStateInFlux()
+            )
+                break
             if (!data?.tokenAddress) {
                 response.result = 400
                 response.response = {
@@ -1088,7 +1107,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
-        case "token.getBalance": {
+        case "token.getBalance":
+        case "token.getBalanceCommitted": {
+            if (
+                content.message === "token.getBalanceCommitted" &&
+                rejectCommittedReadIfStateInFlux()
+            )
+                break
             if (!data?.tokenAddress || !data?.address) {
                 response.result = 400
                 response.response = {
@@ -1178,7 +1203,13 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         }
 
         // REVIEW: Token scripting - Phase 3.3: View function execution
-        case "token.callView": {
+        case "token.callView":
+        case "token.callViewCommitted": {
+            if (
+                content.message === "token.callViewCommitted" &&
+                rejectCommittedReadIfStateInFlux()
+            )
+                break
             log.debug("[SERVER] Received token.callView")
 
             // Validate required fields

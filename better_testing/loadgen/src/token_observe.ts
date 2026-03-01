@@ -166,19 +166,36 @@ export async function runTokenObserve() {
       const mempool = includeMempool ? await nodeCall(url, "getMempool", {}, `getMempool:observe:${ticks}:${url}`) : null
       const mempoolCount = includeMempool ? extractMempoolCount(mempool) : null
 
+      let inFlux = false
+
       const balances: Record<string, string | null> = {}
       for (const a of addresses) {
-        const bal = await nodeCall(url, "token.getBalance", { tokenAddress, address: a }, `token.getBalance:observe:${ticks}:${url}:${a}`)
+        const bal = await nodeCall(
+          url,
+          "token.getBalanceCommitted",
+          { tokenAddress, address: a },
+          `token.getBalanceCommitted:observe:${ticks}:${url}:${a}`,
+        )
+        if (bal?.result === 409) inFlux = true
         balances[a] = bal?.result === 200 ? (bal?.response?.balance ?? null) : null
       }
 
-      const tokenGet = includeTokenGet ? await nodeCall(url, "token.get", { tokenAddress }, `token.get:observe:${ticks}:${url}`) : null
+      const tokenGet = includeTokenGet
+        ? await nodeCall(url, "token.getCommitted", { tokenAddress }, `token.getCommitted:observe:${ticks}:${url}`)
+        : null
+      if (tokenGet?.result === 409) inFlux = true
       const totalSupply = tokenGet?.result === 200 ? (tokenGet?.response?.state?.totalSupply ?? null) : null
       const customState = includeScriptState && tokenGet?.result === 200 ? (tokenGet?.response?.state?.customState ?? null) : null
       const hookCounts =
         includeScriptState
-          ? await nodeCall(url, "token.callView", { tokenAddress, method: viewMethod, args: [] }, `token.callView:${viewMethod}:observe:${ticks}:${url}`)
+          ? await nodeCall(
+            url,
+            "token.callViewCommitted",
+            { tokenAddress, method: viewMethod, args: [] },
+            `token.callViewCommitted:${viewMethod}:observe:${ticks}:${url}`,
+          )
           : null
+      if (hookCounts?.result === 409) inFlux = true
 
       const stateForHash = {
         tokenAddress: normalizeHexAddress(tokenAddress),
@@ -193,16 +210,19 @@ export async function runTokenObserve() {
         blockHash,
         mempoolCount,
         token: {
+          inFlux,
           totalSupply,
           balances,
           ...(includeScriptState ? { customState } : {}),
-          stateHash: sha256Hex(stableJson(stateForHash)),
+          stateHash: inFlux ? null : sha256Hex(stableJson(stateForHash)),
           ...(includeTokenGet ? { hasScript: !!tokenGet?.response?.metadata?.hasScript } : {}),
         },
         ...(includeScriptState
           ? {
             script: {
-              hookCountsHash: sha256Hex(stableJson(hookCounts?.result === 200 ? hookCounts?.response?.value ?? null : null)),
+              hookCountsHash: inFlux
+                ? null
+                : sha256Hex(stableJson(hookCounts?.result === 200 ? hookCounts?.response?.value ?? null : null)),
             },
           }
           : {}),
@@ -266,4 +286,3 @@ export async function runTokenObserve() {
   writeJson(artifacts.summaryPath, summary)
   console.log(JSON.stringify({ token_observe_summary: summary }, null, 2))
 }
-

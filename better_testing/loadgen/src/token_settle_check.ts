@@ -377,23 +377,42 @@ export async function runTokenSettleCheck() {
       const customStates: Record<string, string> = {}
       const hookCounts: Record<string, string> = {}
       const hasScriptFlags: Record<string, boolean> = {}
+      let inFlux = false
 
       for (const url of targets) {
-        const token = await nodeCall(url, "token.get", { tokenAddress }, `token.get:settle:${url}`)
-        hasScriptFlags[url] = !!token?.response?.metadata?.hasScript
-        const customState = token?.result === 200 ? token?.response?.state?.customState ?? null : null
-        customStates[url] = stableJson(customState)
+        const token = await nodeCall(
+          url,
+          "token.getCommitted",
+          { tokenAddress },
+          `token.getCommitted:settle:${url}`,
+        )
 
         const view = await nodeCall(
           url,
-          "token.callView",
+          "token.callViewCommitted",
           { tokenAddress, method: scriptViewMethod, args: [] },
-          `token.callView:${scriptViewMethod}:${url}`,
+          `token.callViewCommitted:${scriptViewMethod}:${url}`,
         )
-        const counts = view?.result === 200 ? (view?.response?.value ?? null) : null
-        hookCounts[url] = stableJson(counts)
 
         perNodeScript[url] = { tokenGet: token, hookCountsView: view }
+
+        if (token?.result === 409 || view?.result === 409) {
+          inFlux = true
+          continue
+        }
+
+        hasScriptFlags[url] = !!token?.response?.metadata?.hasScript
+        const customState =
+          token?.result === 200 ? token?.response?.state?.customState ?? null : null
+        customStates[url] = stableJson(customState)
+        const counts = view?.result === 200 ? (view?.response?.value ?? null) : null
+        hookCounts[url] = stableJson(counts)
+      }
+
+      if (inFlux) {
+        stablePolls = 0
+        await sleep(scriptPollMs)
+        continue
       }
 
       const uniqueHasScript = new Set(Object.values(hasScriptFlags).map(v => String(v))).size

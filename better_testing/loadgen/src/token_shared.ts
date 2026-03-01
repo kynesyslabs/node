@@ -60,13 +60,78 @@ async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
 }
 
 export async function nodeCall(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {
-  const payload = {
-    method: "nodeCall",
-    params: [{ message, data, muid }],
+  const toCommitted = (m: string) => {
+    switch (m) {
+      case "token.get":
+        return "token.getCommitted"
+      case "token.getBalance":
+        return "token.getBalanceCommitted"
+      case "token.callView":
+        return "token.callViewCommitted"
+      default:
+        return m
+    }
   }
-  const { ok, json } = await rpcPost(rpcUrl, payload)
-  if (!ok) return json
-  return json
+
+  const toLegacy = (m: string) => {
+    switch (m) {
+      case "token.getCommitted":
+        return "token.get"
+      case "token.getBalanceCommitted":
+        return "token.getBalance"
+      case "token.callViewCommitted":
+        return "token.callView"
+      default:
+        return m
+    }
+  }
+
+  // Prefer committed-only token reads in the harness, but keep backward compatibility:
+  // older nodes may not have the committed aliases yet and will respond with a 200 + "Unknown message".
+  const primaryMessage = toCommitted(message)
+  const fallbackMessage = toLegacy(primaryMessage)
+
+  async function postOnce(msg: string) {
+    const payload = { method: "nodeCall", params: [{ message: msg, data, muid }] }
+    const { ok, json } = await rpcPost(rpcUrl, payload)
+    if (!ok) return json
+    return json
+  }
+
+  const isCommittedTokenRead =
+    primaryMessage === "token.getCommitted" ||
+    primaryMessage === "token.getBalanceCommitted" ||
+    primaryMessage === "token.callViewCommitted"
+
+  // Keep this short by default to avoid stalling time-series probes; higher-level loops (settle checks, script upgrade)
+  // should do their own waiting if they need longer.
+  const inFluxTimeoutMs = isCommittedTokenRead ? envInt("NODECALL_IN_FLUX_TIMEOUT_MS", 2000) : 0
+
+  async function postWithStateInFluxRetry(msg: string) {
+    if (!isCommittedTokenRead || inFluxTimeoutMs <= 0) return await postOnce(msg)
+    const deadlineMs = nowMs() + inFluxTimeoutMs
+    let attempt = 0
+    while (true) {
+      const res = await postOnce(msg)
+      const inFlux = res?.result === 409 && res?.response?.error === "STATE_IN_FLUX"
+      if (!inFlux) return res
+      if (nowMs() >= deadlineMs) return res
+      attempt++
+      const backoffMs = Math.min(2000, 50 + attempt * 75)
+      await sleep(backoffMs)
+    }
+  }
+
+  const first = await postWithStateInFluxRetry(primaryMessage)
+  const unknown =
+    typeof first?.response === "string" &&
+    (first.response.includes("Unknown message") || first.response.includes("unknown message"))
+
+  if (unknown && fallbackMessage !== primaryMessage) {
+    return await postWithStateInFluxRetry(fallbackMessage)
+  }
+
+  return first
 }
 
 async function waitForTokenExists(rpcUrl: string, tokenAddress: string, timeoutSec: number): Promise<void> {
@@ -74,7 +139,7 @@ async function waitForTokenExists(rpcUrl: string, tokenAddress: string, timeoutS
   let attempt = 0
   let last: any = null
   while (nowMs() < deadlineMs) {
-    const res = await nodeCall(rpcUrl, "token.get", { tokenAddress }, `token.get:${attempt}`)
+    const res = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${attempt}`)
     last = res
     if (res?.result === 200 && res?.response?.tokenAddress) return
     attempt++
@@ -94,7 +159,7 @@ async function waitForTokenBalanceAtLeast(
   const deadlineMs = nowMs() + Math.max(1, timeoutSec) * 1000
   let attempt = 0
   while (nowMs() < deadlineMs) {
-    const res = await nodeCall(rpcUrl, "token.getBalance", { tokenAddress, address }, `token.getBalance:${attempt}`)
+    const res = await nodeCall(rpcUrl, "token.getBalanceCommitted", { tokenAddress, address }, `token.getBalanceCommitted:${attempt}`)
     const balRaw = res?.response?.balance
     if (typeof balRaw === "string") {
       try {
@@ -208,14 +273,14 @@ function stableBalances(addresses: string[], balances: Record<string, string | n
 async function fetchTokenSnapshot(rpcUrl: string, tokenAddress: string, addresses: string[]) {
   const addrNorm = addresses.map(normalizeHexAddress)
 
-  const tokenRes = await nodeCall(rpcUrl, "token.get", { tokenAddress }, `token.get:${tokenAddress}`)
+  const tokenRes = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${tokenAddress}`)
   if (tokenRes?.result !== 200) {
     return { ok: false, snapshot: null, error: tokenRes }
   }
 
   const balances: Record<string, string | null> = {}
   for (const a of addrNorm) {
-    const balRes = await nodeCall(rpcUrl, "token.getBalance", { tokenAddress, address: a }, `token.getBalance:${a}`)
+    const balRes = await nodeCall(rpcUrl, "token.getBalanceCommitted", { tokenAddress, address: a }, `token.getBalanceCommitted:${a}`)
     if (balRes?.result === 200) balances[a] = balRes?.response?.balance ?? null
     else balances[a] = null
   }
@@ -457,7 +522,7 @@ export async function waitForCrossNodeTokenConsistency(params: {
 }
 
 async function fetchTokenGetNormalized(rpcUrl: string, tokenAddress: string) {
-  const tokenRes = await nodeCall(rpcUrl, "token.get", { tokenAddress }, `token.get:${tokenAddress}`)
+  const tokenRes = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${tokenAddress}`)
   if (tokenRes?.result !== 200) {
     return { ok: false, normalized: null, error: tokenRes }
   }

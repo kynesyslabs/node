@@ -286,43 +286,66 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    await Chain.insertBlock(block, [], null, false)
-    log.debug("Block inserted successfully")
-    log.debug(
-        "Last block number: " +
-        getSharedState.lastBlockNumber +
-        " Last block hash: " +
-        getSharedState.lastBlockHash,
-    )
-    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+    const prevInGcrApply = getSharedState.inGcrApply
+    getSharedState.inGcrApply = true
+    try {
+        await Chain.insertBlock(block, [], null, false)
+        log.debug("Block inserted successfully")
+        log.debug(
+            "Last block number: " +
+            getSharedState.lastBlockNumber +
+            " Last block hash: " +
+            getSharedState.lastBlockHash,
+        )
+        log.info(
+            "[fastSync] Block inserted successfully at the head of the chain!",
+        )
 
-    // REVIEW Merge the peerlist
-    log.info("[fastSync] Merging peers from block: " + block.hash)
-    const mergedPeerlist = await mergePeerlist(block)
-    log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
-    // REVIEW Parse the txs hashes in the block
-    log.info("[fastSync] Asking for transactions in the block", true)
-    const txs = await askTxsForBlock(block, peer)
-    log.info("[fastSync] Transactions received: " + txs.length, true)
+        // REVIEW Merge the peerlist
+        log.info("[fastSync] Merging peers from block: " + block.hash)
+        const mergedPeerlist = await mergePeerlist(block)
+        log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
+        // REVIEW Parse the txs hashes in the block
+        log.info("[fastSync] Asking for transactions in the block", true)
+        const txs = await askTxsForBlock(block, peer)
+        log.info("[fastSync] Transactions received: " + txs.length, true)
 
-    // ! Sync the native tables
-    await syncGCRTables(txs)
+        // Always apply and persist transactions in block order.
+        // Token validity can be order-dependent (e.g., insufficient balance checks, scripts),
+        // and token state is not currently part of the consensus integrity hash. If we apply
+        // out-of-order during sync, nodes can permanently diverge even while sharing the same
+        // lastBlockHash/lastBlockNumber.
+        const orderedTxs = (() => {
+            const hashes = Array.isArray(block?.content?.ordered_transactions)
+                ? block.content.ordered_transactions
+                : []
+            if (hashes.length === 0) return txs
+            const byHash: Record<string, Transaction> = {}
+            for (const tx of txs) byHash[tx.hash] = tx
+            return hashes.map(h => byHash[h]).filter(Boolean)
+        })()
 
-    // REVIEW Insert the txs into the transactions database table
-    if (txs.length > 0) {
-        log.info("[fastSync] Inserting transactions into the database", true)
-        const success = await Chain.insertTransactionsFromSync(txs)
-        if (success) {
-            log.info("[fastSync] Transactions inserted successfully")
-            return true
+        // ! Sync the native tables
+        await syncGCRTables(orderedTxs)
+
+        // REVIEW Insert the txs into the transactions database table
+        if (orderedTxs.length > 0) {
+            log.info("[fastSync] Inserting transactions into the database", true)
+            const success = await Chain.insertTransactionsFromSync(orderedTxs)
+            if (success) {
+                log.info("[fastSync] Transactions inserted successfully")
+                return true
+            }
+
+            log.error("[fastSync] Transactions insertion failed")
+            return false
         }
 
-        log.error("[fastSync] Transactions insertion failed")
-        return false
+        log.info("[fastSync] No transactions in the block")
+        return true
+    } finally {
+        getSharedState.inGcrApply = prevInGcrApply
     }
-
-    log.info("[fastSync] No transactions in the block")
-    return true
 }
 
 /**
@@ -504,6 +527,9 @@ async function batchDownloadBlocks(
 
     // Process each block in order
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        const prevInGcrApply = getSharedState.inGcrApply
+        getSharedState.inGcrApply = true
+        try {
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
@@ -529,6 +555,9 @@ async function batchDownloadBlocks(
                 )
                 return false
             }
+        }
+        } finally {
+            getSharedState.inGcrApply = prevInGcrApply
         }
     }
 
@@ -719,23 +748,29 @@ async function requestBlocks(): Promise<boolean> {
 export async function syncGCRTables(
     txs: Transaction[],
 ): Promise<[string, boolean]> {
+    const prevInGcrApply = getSharedState.inGcrApply
+    getSharedState.inGcrApply = true
     // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
-    for (const tx of txs) {
-        try {
-            const result = await HandleGCR.applyToTx(tx)
-            if (!result.success) {
+    try {
+        for (const tx of txs) {
+            try {
+                const result = await HandleGCR.applyToTx(tx)
+                if (!result.success) {
+                    log.error(
+                        "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                    )
+                }
+            } catch (error) {
                 log.error(
-                    "[fastSync] GCR edit application failed at tx: " + tx.hash,
+                    "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
                 )
+                console.error("[SYNC] [ ERROR ]")
+                console.error(error)
             }
-        } catch (error) {
-            log.error(
-                "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
-            )
-            console.error("[SYNC] [ ERROR ]")
-            console.error(error)
         }
+    } finally {
+        getSharedState.inGcrApply = prevInGcrApply
     }
 
     return [null, true]

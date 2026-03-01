@@ -85,10 +85,22 @@ Get complete token information by address.
 - `.data`: `{ tokenAddress: string }`
 - Returns: Token with metadata/state/access control.
 
+### token.getCommitted
+Committed-only variant of `token.get` (state as applied from finalized blocks/sync).
+- `.data`: `{ tokenAddress: string }`
+- Returns: Same shape as `token.get`.
+- May return: `409 { error: "STATE_IN_FLUX" }` while the node is applying committed state (sync/consensus). Retry.
+
 ### token.getBalance
 Get balance of a specific address for a token.
 - `.data`: `{ tokenAddress: string, address: string }`
 - Returns: Balance info including `balance` (string).
+
+### token.getBalanceCommitted
+Committed-only variant of `token.getBalance`.
+- `.data`: `{ tokenAddress: string, address: string }`
+- Returns: Same shape as `token.getBalance`.
+- May return: `409 { error: "STATE_IN_FLUX" }` while the node is applying committed state (sync/consensus). Retry.
 
 ### token.getHolderPointers
 Get token holder pointers recorded for an address (used by loadgen consistency checks).
@@ -101,6 +113,12 @@ Execute a read-only script method (view function) on a token.
 - Returns: On success: `{ tokenAddress, method, value, executionTimeMs, gasUsed }`
 - On error: `{ error: string, message: string, gasUsed?, executionTimeMs? }`
 - Error codes: `INVALID_REQUEST` (400), `TOKEN_NOT_FOUND` (404), `NO_SCRIPT` (400), `EXECUTION_ERROR` (400), `INTERNAL_ERROR` (500)
+
+### token.callViewCommitted
+Committed-only variant of `token.callView`.
+- `.data`: `{ tokenAddress: string, method: string, args?: any[] }`
+- Returns: Same shape as `token.callView`.
+- May return: `409 { error: "STATE_IN_FLUX" }` while the node is applying committed state (sync/consensus). Retry.
 
 ---
 
