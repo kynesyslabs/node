@@ -611,6 +611,17 @@ Example run:
 Notes from runs:
 - `RUN_ID=token-script-transfer-ramp-20260228-171640` (concurrency ramp): best `okTps≈26.75` but note effective concurrency is capped by available funded wallets.
 - `RUN_ID=token-script-transfer-inflight-ramp-20260228-172100` (inflight ramp): best `okTps≈61.93` at `INFLIGHT_PER_WALLET=8`, but `INFLIGHT_PER_WALLET=16` collapses latency (`p50≈2.3s`, `p95≈9.7s`).
+- `RUN_ID=token-script-transfer-storage-ramp-20260301-090210` (`SCRIPT_SET_STORAGE=true`, forced script upgrade): best `okTps≈58.12` at `INFLIGHT_PER_WALLET=16`, but latency is very high (`p50≈1.05s`, `p95≈1.45s`).
+
+⚠️ Important observation (potential bug):
+- For `RUN_ID=token-script-transfer-storage-ramp-20260301-090210`, the per-step `postRun.settle.ok` is `false` across ramp steps, and the token balances can diverge across nodes even when `getLastBlockHash` and `getLastBlockNumber` match.
+- Example snapshot (token `0x463c...`):
+  - `token.customState.beforeTransferCount/afterTransferCount` match across nodes
+  - but `token.getBalance` values differ for the same addresses across nodes
+
+Quick repro checks:
+- last block: `curl -s -X POST -H 'content-type: application/json' --data '{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getLastBlockHash\",\"data\":{},\"muid\":\"dbg\"}]}' http://127.0.0.1:53551/ | jq -r '.response'`
+- token balances: `curl -s -X POST -H 'content-type: application/json' --data '{\"method\":\"nodeCall\",\"params\":[{\"message\":\"token.get\",\"data\":{\"tokenAddress\":\"0x463c8d0b0360518757a5d540b1fd31589fb33a3b32b6d132d77e74af1f0ddff5\"},\"muid\":\"dbg\"}]}' http://127.0.0.1:53551/ | jq '.response.state.balances'`
 
 ---
 
