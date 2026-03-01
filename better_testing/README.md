@@ -66,6 +66,10 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_rejects`: script-enforced reject (oversized transfer rejected; state unchanged) + valid transfer accepted.
 - `token_script_transfer`: scripted transfer loadgen (hooks on every transfer).
 - `token_script_transfer_ramp`: ramp scripted transfer load across steps.
+- `token_script_mint`: scripted mint loadgen (owner mints; hooks execute on mint).
+- `token_script_mint_ramp`: ramp scripted mint load.
+- `token_script_burn`: scripted burn loadgen (owner burns; hooks execute on burn).
+- `token_script_burn_ramp`: ramp scripted burn load.
 
 **IM / messaging**
 - `im_online`: IM “online” workload (when enabled).
@@ -92,4 +96,3 @@ You can pass env vars via the wrapper: `--env KEY=VALUE`.
 **Token scripting perf**
 - `SCRIPT_WORK_ITERS` (CPU loop inside hooks)
 - `SCRIPT_SET_STORAGE=true|false` (whether hooks write to `customState`)
-

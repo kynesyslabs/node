@@ -254,6 +254,10 @@ function buildPerfScript(params: { workIters: number; setStorage: boolean }) {
     `  hooks: {`,
     `    beforeTransfer: (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeTransferCount') }" : "return {}"} },`,
     `    afterTransfer:  (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterTransferCount') }" : "return {}"} },`,
+    `    beforeMint:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeMintCount') }" : "return {}"} },`,
+    `    afterMint:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterMintCount') }" : "return {}"} },`,
+    `    beforeBurn:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeBurnCount') }" : "return {}"} },`,
+    `    afterBurn:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterBurnCount') }" : "return {}"} },`,
     `  },`,
     `  views: {`,
     `    ping: (token) => ({ ok: true, address: token.address, ticker: token.ticker, hasScript: true }),`,
@@ -609,4 +613,3 @@ export async function runTokenScriptTransferLoadgen() {
     throw new Error("Post-run holder-pointer check failed (token_script_transfer)")
   }
 }
-
