@@ -134,6 +134,7 @@ better_testing/scripts/run-scenario.sh token_observe \
 - Optional preflight (helps avoid “pending tx” skew):
   - `BLOCK_SYNC_ENABLE=1` with `BLOCK_SYNC_TIMEOUT_SEC`, `BLOCK_SYNC_POLL_MS`, `BLOCK_MAX_SKEW`, `BLOCK_STABLE_POLLS`
   - `MEMPOOL_DRAIN_ENABLE=1` with `MEMPOOL_DRAIN_TIMEOUT_SEC`, `MEMPOOL_DRAIN_POLL_MS`, `MEMPOOL_DRAIN_STABLE_POLLS`
+  - `REQUIRE_MEMPOOL_DRAIN=true|false` (default `true`): fail fast if mempool doesn’t drain, since `token.*` reads may include pending tx effects.
 - `CROSS_NODE_TIMEOUT_SEC`, `CROSS_NODE_POLL_MS`: balance/totalSupply cross-node convergence.
 - `HOLDER_POINTER_CHECK=true|false`, `HOLDER_POINTER_TIMEOUT_SEC`, `HOLDER_POINTER_POLL_MS`
 - Script convergence (when `EXPECT_SCRIPT=true`):

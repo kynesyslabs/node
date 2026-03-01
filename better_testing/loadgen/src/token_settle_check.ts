@@ -315,6 +315,7 @@ export async function runTokenSettleCheck() {
     : null
 
   const mempoolDrainEnable = envInt("MEMPOOL_DRAIN_ENABLE", 1) !== 0
+  const requireMempoolDrain = envBool("REQUIRE_MEMPOOL_DRAIN", true)
   const mempoolDrain = mempoolDrainEnable
     ? await waitForMempoolDrain({
       rpcUrls: targets,
@@ -436,9 +437,15 @@ export async function runTokenSettleCheck() {
     }
   }
 
-  const ok = settle.ok && (holderPointers?.ok ?? true) && (!expectScript || scriptOk)
+  const ok =
+    (!requireMempoolDrain || !mempoolDrainEnable || (mempoolDrain?.ok ?? true)) &&
+    settle.ok &&
+    (holderPointers?.ok ?? true) &&
+    (!expectScript || scriptOk)
   const failureReason =
-    !settle.ok
+    requireMempoolDrain && mempoolDrainEnable && mempoolDrain && !mempoolDrain.ok
+      ? "mempool did not drain (token reads may include pending txs)"
+      : !settle.ok
       ? "cross-node token state differs (token.get/token.getBalance)"
       : holderPointers && !holderPointers.ok
         ? "cross-node holder pointer mismatch (token.getHolderPointers)"
