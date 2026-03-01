@@ -79,6 +79,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_burn`: scripted burn loadgen (owner burns; hooks execute on burn).
 - `token_script_burn_ramp`: ramp scripted burn load.
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
+- `token_observe`: time-series probe for an existing `TOKEN_ADDRESS` (per-node: last block number/hash, mempool size, balances, and stable state hashes). Useful to debug “nodes agree on last block but disagree on token state”.
 
 **IM / messaging**
 - `im_online`: IM “online” workload (when enabled).
@@ -118,6 +119,15 @@ better_testing/scripts/run-scenario.sh token_settle_check \
   --env SETTLE_WALLETS=4
 ```
 
+Example (observe over time after a load run):
+```bash
+better_testing/scripts/run-scenario.sh token_observe \
+  --env TOKEN_ADDRESS=0x... \
+  --env OBSERVE_SEC=180 \
+  --env OBSERVE_POLL_MS=1000 \
+  --env OBSERVE_WALLETS=4
+```
+
 **token_settle_check knobs**
 - `ADDRESSES`: comma-separated list of addresses to check balances for (in addition to derived wallets).
 - `SETTLE_WALLETS`: derive first N wallets from `WALLETS_MNEMONICS` (default `4`).
@@ -130,3 +140,9 @@ better_testing/scripts/run-scenario.sh token_settle_check \
   - `SCRIPT_HOOKCOUNTS_VIEW` (default `getHookCounts`)
   - `SCRIPT_SETTLE_TIMEOUT_SEC`, `SCRIPT_SETTLE_POLL_MS`
   - `SCRIPT_STABLE_POLLS` (default `3`): require N consecutive identical reads across nodes before passing.
+
+**token_observe knobs**
+- `OBSERVE_SEC`, `OBSERVE_POLL_MS`
+- `OBSERVE_WALLETS` (default `4`) or `ADDRESSES=0x...,0x...`
+- `INCLUDE_MEMPOOL=true|false`, `INCLUDE_TOKEN_GET=true|false`, `INCLUDE_SCRIPT_STATE=true|false`
+- `INCLUDE_RAW=true|false` (can get large; keep off unless needed)
