@@ -33,6 +33,7 @@ type Counters = {
   total: number
   ok: number
   error: number
+  errorSamples: Record<string, number>
 }
 
 type TimeseriesPoint = {
@@ -185,22 +186,27 @@ async function worker(
     counters.total++
     try {
       const nonce = nextNonce++
-      await sendTokenTransferTxWithDemos({
+      const { res } = await sendTokenTransferTxWithDemos({
         demos,
         tokenAddress,
         to,
         amount: cfg.amount,
         nonce,
       })
+      if (res?.result !== 200) {
+        throw new Error(`tx rejected: ${JSON.stringify(res)}`)
+      }
       const elapsed = performance.now() - start
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.ok++
-    } catch {
+    } catch (err: any) {
       const elapsed = performance.now() - start
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.error++
+      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      counters.errorSamples[key] = (counters.errorSamples[key] ?? 0) + 1
     }
   }
 
@@ -251,6 +257,7 @@ export async function runTokenTransferLoadgen() {
     total: 0,
     ok: 0,
     error: 0,
+    errorSamples: {},
   }
 
   const sampler = new ReservoirSampler(cfg.sampleLimit)
@@ -365,6 +372,7 @@ export async function runTokenTransferLoadgen() {
     ok: counters.ok,
     total: counters.total,
     error: counters.error,
+    errorSamples: counters.errorSamples,
     durationSec,
     okTps: counters.ok / Math.max(0.001, durationSec),
     latencyMs: {

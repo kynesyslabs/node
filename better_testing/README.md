@@ -18,9 +18,17 @@ better_testing/scripts/run-scenario.sh token_smoke
 better_testing/scripts/run-scenario.sh token_script_transfer_ramp --env SCRIPT_SET_STORAGE=true --env RAMP_INFLIGHT_PER_WALLET=1,2,4,8
 ```
 
+Chaos/resync run (restart a follower mid-load, then verify convergence):
+```bash
+better_testing/scripts/run-chaos-token-script-transfer.sh --build --duration-sec 60 --delay-sec 10 --env SCRIPT_SET_STORAGE=true
+```
+
 3) Inspect artifacts:
 - `better_testing/runs/<RUN_ID>/*.summary.json`
 - `better_testing/runs/<RUN_ID>/*.timeseries.jsonl` (when enabled; good input for future Grafana/Prometheus)
+
+Notes:
+- In loadgens, `ok` only counts transactions accepted (`result===200`); rejected txs are counted in `error` with `errorSamples`.
 
 ## When to rebuild
 
@@ -70,6 +78,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_mint_ramp`: ramp scripted mint load.
 - `token_script_burn`: scripted burn loadgen (owner burns; hooks execute on burn).
 - `token_script_burn_ramp`: ramp scripted burn load.
+- `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
 
 **IM / messaging**
 - `im_online`: IM “online” workload (when enabled).
@@ -96,3 +105,28 @@ You can pass env vars via the wrapper: `--env KEY=VALUE`.
 **Token scripting perf**
 - `SCRIPT_WORK_ITERS` (CPU loop inside hooks)
 - `SCRIPT_SET_STORAGE=true|false` (whether hooks write to `customState`)
+
+## Post-run consistency checks (recommended)
+
+Most load scenarios will create/reuse a token and then emit a `*.summary.json`. For performance runs, it’s often useful to run an explicit post-run verifier against the resulting `TOKEN_ADDRESS`.
+
+Example (verify balances + holder pointers + script counters across all nodes):
+```bash
+better_testing/scripts/run-scenario.sh token_settle_check \
+  --env TOKEN_ADDRESS=0x... \
+  --env EXPECT_SCRIPT=true \
+  --env SETTLE_WALLETS=4
+```
+
+**token_settle_check knobs**
+- `ADDRESSES`: comma-separated list of addresses to check balances for (in addition to derived wallets).
+- `SETTLE_WALLETS`: derive first N wallets from `WALLETS_MNEMONICS` (default `4`).
+- Optional preflight (helps avoid “pending tx” skew):
+  - `BLOCK_SYNC_ENABLE=1` with `BLOCK_SYNC_TIMEOUT_SEC`, `BLOCK_SYNC_POLL_MS`, `BLOCK_MAX_SKEW`, `BLOCK_STABLE_POLLS`
+  - `MEMPOOL_DRAIN_ENABLE=1` with `MEMPOOL_DRAIN_TIMEOUT_SEC`, `MEMPOOL_DRAIN_POLL_MS`, `MEMPOOL_DRAIN_STABLE_POLLS`
+- `CROSS_NODE_TIMEOUT_SEC`, `CROSS_NODE_POLL_MS`: balance/totalSupply cross-node convergence.
+- `HOLDER_POINTER_CHECK=true|false`, `HOLDER_POINTER_TIMEOUT_SEC`, `HOLDER_POINTER_POLL_MS`
+- Script convergence (when `EXPECT_SCRIPT=true`):
+  - `SCRIPT_HOOKCOUNTS_VIEW` (default `getHookCounts`)
+  - `SCRIPT_SETTLE_TIMEOUT_SEC`, `SCRIPT_SETTLE_POLL_MS`
+  - `SCRIPT_STABLE_POLLS` (default `3`): require N consecutive identical reads across nodes before passing.

@@ -40,6 +40,7 @@ type Counters = {
   total: number
   ok: number
   error: number
+  errorSamples: Record<string, number>
 }
 
 type TimeseriesPoint = {
@@ -252,12 +253,12 @@ function buildPerfScript(params: { workIters: number; setStorage: boolean }) {
     ``,
     `module.exports = {`,
     `  hooks: {`,
-    `    beforeTransfer: (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeTransferCount') }" : "return {}"} },`,
-    `    afterTransfer:  (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterTransferCount') }" : "return {}"} },`,
-    `    beforeMint:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeMintCount') }" : "return {}"} },`,
-    `    afterMint:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterMintCount') }" : "return {}"} },`,
-    `    beforeBurn:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeBurnCount') }" : "return {}"} },`,
-    `    afterBurn:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterBurnCount') }" : "return {}"} },`,
+    `    beforeTransfer: (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeTransferCount') })" : "({})"}),`,
+    `    afterTransfer:  (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterTransferCount') })" : "({})"}),`,
+    `    beforeMint:     (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeMintCount') })" : "({})"}),`,
+    `    afterMint:      (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterMintCount') })" : "({})"}),`,
+    `    beforeBurn:     (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeBurnCount') })" : "({})"}),`,
+    `    afterBurn:      (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterBurnCount') })" : "({})"}),`,
     `  },`,
     `  views: {`,
     `    ping: (token) => ({ ok: true, address: token.address, ticker: token.ticker, hasScript: true }),`,
@@ -372,22 +373,27 @@ async function worker(
     counters.total++
     try {
       const nonce = nextNonce++
-      await sendTokenTransferTxWithDemos({
+      const { res } = await sendTokenTransferTxWithDemos({
         demos,
         tokenAddress,
         to,
         amount: cfg.amount,
         nonce,
       })
+      if (res?.result !== 200) {
+        throw new Error(`tx rejected: ${JSON.stringify(res)}`)
+      }
       const elapsed = performance.now() - start
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.ok++
-    } catch {
+    } catch (err: any) {
       const elapsed = performance.now() - start
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.error++
+      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      counters.errorSamples[key] = (counters.errorSamples[key] ?? 0) + 1
     }
   }
 
@@ -454,6 +460,7 @@ export async function runTokenScriptTransferLoadgen() {
     total: 0,
     ok: 0,
     error: 0,
+    errorSamples: {},
   }
 
   const sampler = new ReservoirSampler(cfg.sampleLimit)
@@ -575,6 +582,7 @@ export async function runTokenScriptTransferLoadgen() {
     ok: counters.ok,
     total: counters.total,
     error: counters.error,
+    errorSamples: counters.errorSamples,
     durationSec,
     okTps: counters.ok / Math.max(0.001, durationSec),
     latencyMs: {

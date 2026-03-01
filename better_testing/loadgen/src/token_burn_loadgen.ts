@@ -30,6 +30,7 @@ type Counters = {
   total: number
   ok: number
   error: number
+  errorSamples: Record<string, number>
 }
 
 type TimeseriesPoint = {
@@ -159,22 +160,27 @@ async function worker(params: {
     params.counters.total++
     try {
       const nonce = params.allocateNonce()
-      await sendTokenBurnTxWithDemos({
+      const { res } = await sendTokenBurnTxWithDemos({
         demos,
         tokenAddress: params.tokenAddress,
         from: params.fromAddress,
         amount: cfg.amount,
         nonce,
       })
+      if (res?.result !== 200) {
+        throw new Error(`tx rejected: ${JSON.stringify(res)}`)
+      }
       const elapsed = performance.now() - start
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
       params.counters.ok++
-    } catch {
+    } catch (err: any) {
       const elapsed = performance.now() - start
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
       params.counters.error++
+      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      params.counters.errorSamples[key] = (params.counters.errorSamples[key] ?? 0) + 1
     }
   }
 
@@ -231,6 +237,7 @@ export async function runTokenBurnLoadgen() {
     total: 0,
     ok: 0,
     error: 0,
+    errorSamples: {},
   }
 
   const sampler = new ReservoirSampler(cfg.sampleLimit)
@@ -354,6 +361,7 @@ export async function runTokenBurnLoadgen() {
     ok: counters.ok,
     total: counters.total,
     error: counters.error,
+    errorSamples: counters.errorSamples,
     durationSec,
     okTps: counters.ok / Math.max(0.001, durationSec),
     latencyMs: {

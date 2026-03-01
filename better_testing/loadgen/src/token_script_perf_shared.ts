@@ -35,12 +35,12 @@ export function buildPerfScript(params: { workIters: number; setStorage: boolean
     ``,
     `module.exports = {`,
     `  hooks: {`,
-    `    beforeTransfer: (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeTransferCount') }" : "return {}"} },`,
-    `    afterTransfer:  (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterTransferCount') }" : "return {}"} },`,
-    `    beforeMint:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeMintCount') }" : "return {}"} },`,
-    `    afterMint:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterMintCount') }" : "return {}"} },`,
-    `    beforeBurn:     (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'beforeBurnCount') }" : "return {}"} },`,
-    `    afterBurn:      (ctx) => { spin(${work}); ${setStorage ? "return { setStorage: inc(ctx.token.storage, 'afterBurnCount') }" : "return {}"} },`,
+    `    beforeTransfer: (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeTransferCount') })" : "({})"}),`,
+    `    afterTransfer:  (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterTransferCount') })" : "({})"}),`,
+    `    beforeMint:     (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeMintCount') })" : "({})"}),`,
+    `    afterMint:      (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterMintCount') })" : "({})"}),`,
+    `    beforeBurn:     (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'beforeBurnCount') })" : "({})"}),`,
+    `    afterBurn:      (ctx) => (spin(${work}), ${setStorage ? "({ setStorage: inc(ctx.token.storage, 'afterBurnCount') })" : "({})"}),`,
     `  },`,
     `  views: {`,
     `    ping: (token) => ({ ok: true, address: token.address, ticker: token.ticker, hasScript: true }),`,
@@ -180,4 +180,3 @@ export async function maybeUpgradeScript(params: {
 
   return { upgraded: true, tokenGet: token, upgradeTx, ready }
 }
-
