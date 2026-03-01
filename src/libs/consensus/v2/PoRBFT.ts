@@ -402,12 +402,35 @@ async function applyGCREditsFromMergedMempool(
             continue
         }
 
-        const result = await HandleGCR.applyToTx(tx, false, false)
-        if (result.success) {
-            successfulTxs.add(tx.hash)
-        } else {
-            failedTxs.add(tx.hash)
+        // Token edits are NOT currently included in the GCR integrity hash used by consensus.
+        // Validate token edits in simulate mode (so invalid token txs are pruned),
+        // but defer persistence of token edits until block finalization using the *actual* block tx list.
+        const hasTokenEdits = txGCREdits.some((e: any) => e?.type === "token")
+        if (hasTokenEdits) {
+            const tokenValidation = await HandleGCR.applyTokenEditsToTx(tx, false, true)
+            if (!tokenValidation.success) {
+                failedTxs.add(tx.hash)
+                continue
+            }
         }
+
+        const nonTokenEdits = txGCREdits.filter((e: any) => e?.type !== "token")
+        if (nonTokenEdits.length === 0) {
+            successfulTxs.add(tx.hash)
+            continue
+        }
+
+        const txNonToken = {
+            ...tx,
+            content: {
+                ...tx.content,
+                gcr_edits: nonTokenEdits,
+            },
+        } as any as Transaction
+
+        const result = await HandleGCR.applyToTx(txNonToken, false, false)
+        if (result.success) successfulTxs.add(tx.hash)
+        else failedTxs.add(tx.hash)
     }
 
     return [[...successfulTxs], [...failedTxs]]
@@ -537,6 +560,27 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 async function finalizeBlock(block: Block, pro: number, txs: Transaction[]): Promise<void> {
     log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
     log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
+
+    // Apply token edits deterministically from the finalized block transaction list.
+    // This prevents token-table divergence when shard members have incomplete mempools at forge time.
+    if (Array.isArray(txs) && txs.length > 0 && Array.isArray(block?.content?.ordered_transactions)) {
+        const byHash = new Map<string, Transaction>()
+        for (const tx of txs) byHash.set(tx.hash, tx)
+        const ordered = block.content.ordered_transactions
+            .map((h: string) => byHash.get(h))
+            .filter(Boolean) as Transaction[]
+
+        for (const tx of ordered) {
+            // Ensure scripts see stable block height context.
+            if (!tx.blockNumber) tx.blockNumber = block.number
+            const tokenApply = await HandleGCR.applyTokenEditsToTx(tx, false, false)
+            if (!tokenApply.success) {
+                // Token state must not diverge silently on shard members.
+                throw new Error(`[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`)
+            }
+        }
+    }
+
     await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
     // Ensure the block's ordered transactions are persisted for downstream syncers.
     // insertBlock relies on mempool-backed lookup; if a tx wasn't in local mempool at commit time,

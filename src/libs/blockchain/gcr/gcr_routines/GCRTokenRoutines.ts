@@ -361,6 +361,10 @@ export default class GCRTokenRoutines {
         // For rollback, reverse the direction
         const actualFrom = edit.isRollback ? to : from
         const actualTo = edit.isRollback ? from : to
+        const isSelfTransfer =
+            typeof actualFrom === "string" &&
+            typeof actualTo === "string" &&
+            actualFrom.toLowerCase() === actualTo.toLowerCase()
 
         // In simulate mode we must avoid persisting, so a simple read/compute is fine.
         if (simulate) {
@@ -377,7 +381,9 @@ export default class GCRTokenRoutines {
                 try {
                     const hookExecutor = this.getHookExecutor()
                     const tokenData = this.tokenToGCRTokenData(token)
-                    const nativeMutations = createTransferMutations(actualFrom, actualTo, transferAmount)
+                    const nativeMutations = isSelfTransfer
+                        ? []
+                        : createTransferMutations(actualFrom, actualTo, transferAmount)
 
                     const request: ExecuteWithHooksRequest = {
                         operation: "transfer",
@@ -408,8 +414,11 @@ export default class GCRTokenRoutines {
                     return { success: false, message: `Script execution failed: ${error}` }
                 }
             } else {
-                token.balances[actualFrom] = (fromBalance - transferAmount).toString()
-                token.balances[actualTo] = (prevToBalance + transferAmount).toString()
+                // Self-transfers are a no-op for balances (prevents accidental minting)
+                if (!isSelfTransfer) {
+                    token.balances[actualFrom] = (fromBalance - transferAmount).toString()
+                    token.balances[actualTo] = (prevToBalance + transferAmount).toString()
+                }
             }
 
             if (token.balances[actualFrom] === "0") delete token.balances[actualFrom]
@@ -442,7 +451,9 @@ export default class GCRTokenRoutines {
                 if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                     const hookExecutor = this.getHookExecutor()
                     const tokenData = this.tokenToGCRTokenData(token)
-                    const nativeMutations = createTransferMutations(actualFrom, actualTo, transferAmount)
+                    const nativeMutations = isSelfTransfer
+                        ? []
+                        : createTransferMutations(actualFrom, actualTo, transferAmount)
 
                     const request: ExecuteWithHooksRequest = {
                         operation: "transfer",
@@ -469,8 +480,11 @@ export default class GCRTokenRoutines {
 
                     this.applyGCRTokenDataToEntity(token, result.finalState)
                 } else {
-                    token.balances[actualFrom] = (fromBefore - transferAmount).toString()
-                    token.balances[actualTo] = (toBefore + transferAmount).toString()
+                    // Self-transfers are a no-op for balances (prevents accidental minting)
+                    if (!isSelfTransfer) {
+                        token.balances[actualFrom] = (fromBefore - transferAmount).toString()
+                        token.balances[actualTo] = (toBefore + transferAmount).toString()
+                    }
                 }
 
                 if (token.balances[actualFrom] === "0") delete token.balances[actualFrom]
@@ -487,8 +501,8 @@ export default class GCRTokenRoutines {
                         name: token.name,
                         decimals: token.decimals,
                     },
-                    removeFrom: fromBefore > 0n && fromAfter === 0n,
-                    addTo: toBefore === 0n && toAfter > 0n,
+                    removeFrom: !isSelfTransfer && fromBefore > 0n && fromAfter === 0n,
+                    addTo: !isSelfTransfer && toBefore === 0n && toAfter > 0n,
                 }
             })
 

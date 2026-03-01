@@ -618,10 +618,16 @@ Notes from runs:
 - Example snapshot (token `0x463c...`):
   - `token.customState.beforeTransferCount/afterTransferCount` match across nodes
   - but `token.getBalance` values differ for the same addresses across nodes
+  - additionally, summing `token.state.balances` could exceed `totalSupply` (self-transfer mint bug)
 
 Quick repro checks:
 - last block: `curl -s -X POST -H 'content-type: application/json' --data '{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getLastBlockHash\",\"data\":{},\"muid\":\"dbg\"}]}' http://127.0.0.1:53551/ | jq -r '.response'`
 - token balances: `curl -s -X POST -H 'content-type: application/json' --data '{\"method\":\"nodeCall\",\"params\":[{\"message\":\"token.get\",\"data\":{\"tokenAddress\":\"0x463c8d0b0360518757a5d540b1fd31589fb33a3b32b6d132d77e74af1f0ddff5\"},\"muid\":\"dbg\"}]}' http://127.0.0.1:53551/ | jq '.response.state.balances'`
+
+Fix status (2026-03-01):
+- Self-transfers now behave as a balance no-op (prevents minting).
+- Consensus now validates token edits in `simulate=true`, but persists token edits deterministically at block finalization using the finalized `ordered_transactions` list (avoids token-table divergence when shard members have incomplete mempools at forge time).
+- Loadgen recipient selection now normalizes addresses when avoiding self-send.
 
 ---
 

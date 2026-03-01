@@ -1344,9 +1344,10 @@ export async function sendTokenBurnTxWithDemos(params: {
 
 export function pickRecipient(recipients: string[], senderHex: string, workerId: number, avoidSelf: boolean): string {
   if (!avoidSelf) return recipients[workerId % recipients.length]!
+  const senderNorm = normalizeHexAddress(senderHex)
   for (let i = 0; i < recipients.length; i++) {
     const candidate = recipients[(workerId + i) % recipients.length]!
-    if (candidate !== senderHex) return candidate
+    if (normalizeHexAddress(candidate) !== senderNorm) return candidate
   }
   throw new Error("Recipient set only contains the sender address (self-send avoided). Provide a different recipient.")
 }

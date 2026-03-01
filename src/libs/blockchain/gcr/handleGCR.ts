@@ -422,6 +422,66 @@ export default class HandleGCR {
     }
 
     /**
+     * Apply only token-related GCR edits for a transaction.
+     *
+     * Rationale:
+     * - Token state is not currently included in the GCR integrity hash used during consensus.
+     * - During consensus forging, some nodes may not have the full mempool/tx set yet, causing token tables
+     *   to diverge if token edits are applied pre-forge.
+     * - This helper allows consensus to validate token edits (simulate=true) and later apply them deterministically
+     *   from the finalized block tx list, without coupling to Chain.checkTxExists().
+     */
+    static async applyTokenEditsToTx(
+        tx: Transaction,
+        isRollback = false,
+        simulate = false,
+    ): Promise<GCRResult> {
+        const tokenEdits = Array.isArray(tx?.content?.gcr_edits)
+            ? (tx.content.gcr_edits as any[]).filter(e => e?.type === "token")
+            : []
+
+        if (tokenEdits.length === 0) {
+            return { success: true, message: "" }
+        }
+
+        const editsResults: GCRResult[] = []
+        const appliedEdits: any[] = []
+
+        // NOTE: Rollbacks are applied within routines based on isRollback flag.
+        for (const edit of tokenEdits) {
+            try {
+                const result = await HandleGCR.apply(edit as any, tx, isRollback, simulate)
+                if (!result.success) {
+                    await this.rollback(tx, appliedEdits as any)
+                    throw new Error(
+                        "Token GCREdit failed for " +
+                            (edit as any).operation +
+                            " with message: " +
+                            result.message,
+                    )
+                }
+                editsResults.push(result)
+                appliedEdits.push(edit)
+            } catch (e) {
+                log.error("[applyTokenEditsToTx] Error applying token GCREdit: " + e)
+                editsResults.push({ success: false, message: `${e}` })
+                await this.rollback(tx, appliedEdits as any)
+                if (!simulate) break
+            }
+        }
+
+        if (!editsResults.every(r => r.success)) {
+            const failedMessages = editsResults
+                .filter(r => !r.success)
+                .map(r => r.message)
+                .join(", ")
+            return { success: false, message: failedMessages }
+        }
+
+        return { success: true, message: "" }
+    }
+
+    /**
      * Process side-effects for native transactions that aren't captured in GCR edits
      * Currently handles:
      * - tlsn_request: Creates attestation token when tx enters mempool (simulate=true)

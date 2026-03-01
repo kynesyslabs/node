@@ -44,6 +44,9 @@ export function applyMutations(
 
     for (const m of mutations) {
         if (m.kind === "transfer") {
+            // Self-transfer should be a no-op for balances (prevents accidental minting).
+            // If scripts want special behavior, they can return explicit mutations.
+            if (m.from?.toLowerCase?.() === m.to?.toLowerCase?.()) continue
             const fromBal = balances[m.from] ?? 0n
             const toBal = balances[m.to] ?? 0n
             balances[m.from] = fromBal - m.amount
