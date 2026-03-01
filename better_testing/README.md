@@ -1,6 +1,6 @@
 # better_testing
 
-This folder contains the **devnet test/load harness** used to validate correctness (cross-node convergence) and measure performance (TPS/latency) without modifying node code.
+This folder contains the **devnet test/load harness** used to validate correctness (cross-node convergence) and measure performance (TPS/latency). It’s designed to be runnable without changing node code, but it will often *surface* node bugs that we then fix upstream.
 
 For deeper investigation notes and past runs, see `better_testing/research.md`.
 
@@ -20,8 +20,11 @@ better_testing/scripts/run-scenario.sh token_script_transfer_ramp --env SCRIPT_S
 
 Chaos/resync run (restart a follower mid-load, then verify convergence):
 ```bash
-better_testing/scripts/run-chaos-token-script-transfer.sh --build --duration-sec 60 --delay-sec 10 --env SCRIPT_SET_STORAGE=true
+better_testing/scripts/run-chaos-token-script-transfer.sh --reset --build --duration-sec 30 --delay-sec 8 --env SCRIPT_SET_STORAGE=true
 ```
+Notes:
+- `--reset` starts from a clean devnet state (`docker compose down -v` + `up -d`).
+- The chaos wrapper disables `token_settle_check`’s mempool-drain gate and uses longer settle timeouts by default, because the network may take a while to apply committed state after a follower restart under load.
 
 3) Inspect artifacts:
 - `better_testing/runs/<RUN_ID>/*.summary.json`

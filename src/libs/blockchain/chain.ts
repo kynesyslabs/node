@@ -421,7 +421,16 @@ export default class Chain {
                     for (let i = 0; i < transactionEntities.length; i++) {
                         const tx = transactionEntities[i]
                         const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
-                        await transactionalEntityManager.save(this.transactions.target, rawTransaction)
+                        // NOTE: During sync/consensus edge-cases we can attempt to persist a tx that
+                        // already exists (unique by hash). This must be idempotent; duplicates should
+                        // not abort the whole block commit.
+                        await transactionalEntityManager
+                            .createQueryBuilder()
+                            .insert()
+                            .into(this.transactions.target)
+                            .values(rawTransaction as any)
+                            .orIgnore()
+                            .execute()
                     }
 
                     // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager

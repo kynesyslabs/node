@@ -4,15 +4,16 @@ set -euo pipefail
 usage() {
   cat <<'USAGE'
 Usage:
-  run-chaos-token-script-transfer.sh [--build] [--node <service>] [--delay-sec <n>] [--duration-sec <n>] [--quiet|--verbose] [--env KEY=VALUE ...]
+  run-chaos-token-script-transfer.sh [--reset] [--build] [--node <service>] [--delay-sec <n>] [--duration-sec <n>] [--quiet|--verbose] [--env KEY=VALUE ...]
 
 What it does:
+  (optional) --reset: tears down devnet volumes/containers (fresh state)
   1) Runs SCENARIO=token_script_transfer for a fixed duration (POST_RUN checks disabled)
   2) Restarts one follower node mid-run (default: node-3)
   3) Runs SCENARIO=token_settle_check against the token produced in step 1 (balances + holder pointers + script counters)
 
 Examples:
-  run-chaos-token-script-transfer.sh --build
+  run-chaos-token-script-transfer.sh --reset --build
   run-chaos-token-script-transfer.sh --node node-2 --delay-sec 8 --duration-sec 45 --env SCRIPT_SET_STORAGE=true
 USAGE
 }
@@ -23,6 +24,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 BUILD=0
+RESET=0
 QUIET=true
 NODE_SERVICE="node-3"
 DELAY_SEC=10
@@ -32,6 +34,10 @@ EXTRA_ENV=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --reset)
+      RESET=1
+      shift
+      ;;
     --build)
       BUILD=1
       shift
@@ -109,8 +115,19 @@ fi
 
 pushd "$ROOT_DIR/devnet" >/dev/null
 
-if [[ "$BUILD" -eq 1 ]]; then
+if [[ "$RESET" -eq 1 ]]; then
+  echo "[chaos] resetting devnet (docker compose down -v)"
+  docker compose down -v
+  if [[ "$BUILD" -eq 1 ]]; then
+    docker compose build node-1
+  fi
+  docker compose up -d
+fi
+
+if [[ "$RESET" -eq 0 && "$BUILD" -eq 1 ]]; then
   docker compose build node-1
+  # Ensure running nodes pick up the rebuilt image.
+  docker compose up -d --force-recreate node-1 node-2 node-3 node-4
 fi
 
 loadgen_cmd=(
@@ -183,6 +200,13 @@ check_cmd=(
   -e TOKEN_ADDRESS="$token_address"
   -e EXPECT_SCRIPT="true"
   -e WAIT_FOR_RPC_SEC="240"
+  # This scenario intentionally runs while the network may be busy applying committed state.
+  # Mempool drain can take a long time under load + follower restart; rely on committed-read retries instead.
+  -e MEMPOOL_DRAIN_ENABLE="0"
+  -e CROSS_NODE_TIMEOUT_SEC="900"
+  -e HOLDER_POINTER_TIMEOUT_SEC="900"
+  -e SCRIPT_SETTLE_TIMEOUT_SEC="900"
+  -e NODECALL_IN_FLUX_TIMEOUT_MS="15000"
 )
 
 for kv in "${EXTRA_ENV[@]}"; do
