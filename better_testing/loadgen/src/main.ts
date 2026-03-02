@@ -32,6 +32,7 @@ import { runTokenScriptBurnLoadgen } from "./token_script_burn_loadgen"
 import { runTokenScriptBurnRamp } from "./token_script_burn_ramp"
 import { runTokenSettleCheck } from "./token_settle_check"
 import { runTokenObserve } from "./token_observe"
+import { runTokenInvariantsKnownHolders } from "./token_invariants_known_holders"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
 
@@ -161,6 +162,9 @@ switch (scenario) {
     break
   case "token_observe":
     await runTokenObserve()
+    break
+  case "token_invariants_known_holders":
+    await runTokenInvariantsKnownHolders()
     break
   case "im_online":
     await runImOnlineLoadgen()

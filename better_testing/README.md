@@ -76,6 +76,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_consensus_consistency`: small sequence (transfer + mint + burn) then waits for consensus and asserts identical state on all nodes.
 - `token_query_coverage`: exercises read APIs (`token.get`, `token.getBalance`, `token.getHolderPointers`, missing-token behavior).
 - `token_edge_cases`: negative cases (0 amounts, insufficient balance, missing token) + explicit **self-transfer no-op** invariant.
+- `token_invariants_known_holders`: strict invariant verifier: `totalSupply == sum(balances)` and (optionally) “no unknown holders” in the balances map (useful when the harness controls the full holder set).
 
 **Token ACL**
 - `token_acl_smoke`: minimal grant + action + negative “attacker cannot mint/burn” checks, with cross-node settle + holder pointers.
@@ -94,6 +95,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_burn_ramp`: ramp scripted burn load.
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
 - `token_observe`: time-series probe for an existing `TOKEN_ADDRESS` (per-node: last block number/hash, mempool size, balances, and stable state hashes). Useful to debug “nodes agree on last block but disagree on token state”.
+- `token_invariants_known_holders`: invariant verifier for committed token state (works for both scripted and non-scripted tokens; optional known-holder constraint).
 
 **IM / messaging**
 - `im_online`: IM “online” workload (when enabled).
@@ -120,6 +122,11 @@ You can pass env vars via the wrapper: `--env KEY=VALUE`.
 **Token scripting perf**
 - `SCRIPT_WORK_ITERS` (CPU loop inside hooks)
 - `SCRIPT_SET_STORAGE=true|false` (whether hooks write to `customState`)
+
+**Invariant verifier**
+- `KNOWN_ONLY=true|false` (default `true`): require that every key in `state.balances` is in the “known holders” set derived from `INVARIANT_WALLETS` + `ADDRESSES`.
+- `INVARIANT_WALLETS` (default `4`): number of devnet wallets to derive as “known holders”.
+- `INVARIANT_TIMEOUT_SEC`, `INVARIANT_POLL_MS`
 
 ## Post-run consistency checks (recommended)
 
