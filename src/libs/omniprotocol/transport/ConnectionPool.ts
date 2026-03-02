@@ -389,6 +389,7 @@ export class ConnectionPool extends EventEmitter {
             this.release(connection)
             return response
         } catch (error) {
+            log.error(`[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`)
             // On error, close the connection and remove from pool
             await this.closeConnection(connection)
             throw error

@@ -99,6 +99,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
+            console.error("Error in adaptCall")
             console.error(error)
             // Check for fatal mode - will exit if OMNI_FATAL=true
             this.handleFatalError(
