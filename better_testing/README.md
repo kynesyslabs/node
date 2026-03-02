@@ -26,6 +26,16 @@ Notes:
 - `--reset` starts from a clean devnet state (`docker compose down -v` + `up -d`).
 - The chaos wrapper disables `token_settle_check`’s mempool-drain gate and uses longer settle timeouts by default, because the network may take a while to apply committed state after a follower restart under load.
 
+Committed-read probe under load (task `node-y3g.9.13`):
+```bash
+better_testing/scripts/run-token-observe-under-load.sh --reset --plain --load-sec 30 --concurrency 4 --observe-sec 120 --settle-sec 180 --tail 10
+better_testing/scripts/run-token-observe-under-load.sh --reset --scripted --load-sec 60 --concurrency 8 --observe-sec 170 --settle-sec 180 --tail 10
+```
+This produces `token_observe.timeseries.jsonl` and runs a local analysis pass (`better_testing/scripts/analyze-token-observe.ts`) to assert “no divergence on non-null hashes” + tail convergence.
+Verified example RUN_IDs:
+- `token-observe-under-load-plain-20260302-130537`
+- `token-observe-under-load-scripted-20260302-132018`
+
 3) Inspect artifacts:
 - `better_testing/runs/<RUN_ID>/*.summary.json`
 - `better_testing/runs/<RUN_ID>/*.timeseries.jsonl` (when enabled; good input for future Grafana/Prometheus)

@@ -75,6 +75,10 @@ function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex")
 }
 
+function isNonEmptyString(value: any): value is string {
+  return typeof value === "string" && value.length > 0
+}
+
 function extractMempoolCount(raw: any): number | null {
   const res = raw?.result === 200 ? raw?.response : null
   if (Array.isArray(res)) return res.length
@@ -167,6 +171,7 @@ export async function runTokenObserve() {
       const mempoolCount = includeMempool ? extractMempoolCount(mempool) : null
 
       let inFlux = false
+      if (blockNumber === null || !isNonEmptyString(blockHash)) inFlux = true
 
       const balances: Record<string, string | null> = {}
       for (const a of addresses) {
@@ -235,6 +240,22 @@ export async function runTokenObserve() {
             },
           }
           : {}),
+      }
+    }
+
+    // If nodes are not on the same last block hash, treat this tick as "in flux" globally.
+    // Otherwise, we'd flag transient skew (some nodes slightly ahead) as a committed-state divergence.
+    const blockHashes = Object.values(perNode).map(v => v?.blockHash ?? null)
+    const knownBlockHashes = blockHashes.filter(isNonEmptyString)
+    const uniqueKnownBlockHashes = new Set(knownBlockHashes)
+    const globalSkewInFlux = uniqueKnownBlockHashes.size > 1
+    if (globalSkewInFlux) {
+      for (const url of targets) {
+        const node = perNode[url]
+        if (!node?.token) continue
+        node.token.inFlux = true
+        node.token.stateHash = null
+        if (node?.script) node.script.hookCountsHash = null
       }
     }
 

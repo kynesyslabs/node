@@ -50,13 +50,36 @@ function normalizeRpcUrl(url: string): string {
 
 async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
   const url = normalizeRpcUrl(rpcUrl)
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  const json = await res.json().catch(() => null)
-  return { ok: res.ok, status: res.status, json }
+  const timeoutMs = envInt("NODECALL_FETCH_TIMEOUT_MS", 8000)
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      ...(controller ? { signal: controller.signal } : {}),
+    })
+    const json = await res.json().catch(() => null)
+    return { ok: res.ok, status: res.status, json }
+  } catch (error: any) {
+    const reason =
+      error?.name === "AbortError"
+        ? `NODECALL_FETCH_TIMEOUT_MS exceeded (${timeoutMs}ms)`
+        : (error instanceof Error ? error.message : String(error))
+    return {
+      ok: false,
+      status: 0,
+      json: {
+        result: 599,
+        response: `rpcPost failed: ${reason}`,
+        require_reply: false,
+        extra: null,
+      },
+    }
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export async function nodeCall(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {

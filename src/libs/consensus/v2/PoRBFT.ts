@@ -193,7 +193,19 @@ export async function consensusRoutine(): Promise<void> {
                     pro +
                     " votes",
             )
-            await finalizeBlock(block, pro, tempMempool)
+            const finalized = await finalizeBlock(
+                block,
+                pro,
+                tempMempool,
+                manager.shard.members,
+            )
+            if (!finalized) {
+                log.warning(
+                    "[consensusRoutine] Failed to finalize block locally (missing tx bodies / deterministic apply guard); falling back to fastSync",
+                )
+                await fastSync(manager.shard.members, "finalizeBlock")
+                return
+            }
 
             // REVIEW: Should we await this?
             if (manager.checkIfWeAreSecretary()) {
@@ -579,40 +591,61 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param block - The block
  * @param pro - The number of votes for the block
  */
-async function finalizeBlock(block: Block, pro: number, txs: Transaction[]): Promise<void> {
+async function finalizeBlock(
+    block: Block,
+    pro: number,
+    txs: Transaction[],
+    shardMembers: Peer[],
+): Promise<boolean> {
     log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
     log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
 
     const prevInGcrApply = getSharedState.inGcrApply
     getSharedState.inGcrApply = true
     try {
+        const orderedHashes = Array.isArray(block?.content?.ordered_transactions)
+            ? (block.content.ordered_transactions as string[])
+            : []
+        const byHash = new Map<string, Transaction>()
+        for (const tx of txs) byHash.set(tx.hash, tx)
+
+        const missingHashes = orderedHashes.filter(h => !byHash.has(h))
+        if (missingHashes.length > 0) {
+            log.warning(
+                `[CONSENSUS] Missing ${missingHashes.length}/${orderedHashes.length} tx bodies for finalized block ${block.number} (${block.hash}); attempting to fetch from shard`,
+            )
+
+            const fetched = await fetchTxsByHashesFromPeers(
+                missingHashes,
+                shardMembers,
+            )
+            for (const tx of fetched) byHash.set(tx.hash, tx)
+        }
+
+        const stillMissing = orderedHashes.filter(h => !byHash.has(h))
+        if (stillMissing.length > 0) {
+            log.error(
+                `[CONSENSUS] Cannot finalize block ${block.number} (${block.hash}): still missing ${stillMissing.length}/${orderedHashes.length} tx bodies. Refusing to apply token edits and commit local block.`,
+            )
+            return false
+        }
+
         // Apply token edits deterministically from the finalized block transaction list.
         // This prevents token-table divergence when shard members have incomplete mempools at forge time.
-        if (
-            Array.isArray(txs) &&
-            txs.length > 0 &&
-            Array.isArray(block?.content?.ordered_transactions)
-        ) {
-            const byHash = new Map<string, Transaction>()
-            for (const tx of txs) byHash.set(tx.hash, tx)
-            const ordered = block.content.ordered_transactions
-                .map((h: string) => byHash.get(h))
-                .filter(Boolean) as Transaction[]
-
-            for (const tx of ordered) {
-                // Ensure scripts see stable block height context.
-                if (!tx.blockNumber) tx.blockNumber = block.number
-                const tokenApply = await HandleGCR.applyTokenEditsToTx(
-                    tx,
-                    false,
-                    false,
+        const orderedTxs = orderedHashes.map(h => byHash.get(h)) as Transaction[]
+        for (const tx of orderedTxs) {
+            // Ensure scripts see stable block height context.
+            if (!tx.blockNumber) tx.blockNumber = block.number
+            const tokenApply = await HandleGCR.applyTokenEditsToTx(
+                tx,
+                false,
+                false,
+            )
+            if (!tokenApply.success) {
+                log.error(
+                    `[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`,
                 )
-                if (!tokenApply.success) {
-                    // Token state must not diverge silently on shard members.
-                    throw new Error(
-                        `[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`,
-                    )
-                }
+                return false
             }
         }
 
@@ -620,9 +653,7 @@ async function finalizeBlock(block: Block, pro: number, txs: Transaction[]): Pro
         // Ensure the block's ordered transactions are persisted for downstream syncers.
         // insertBlock relies on mempool-backed lookup; if a tx wasn't in local mempool at commit time,
         // peers may not be able to fetch it (and would fail to apply GCR edits during sync).
-        if (Array.isArray(txs) && txs.length > 0) {
-            await Chain.insertTransactionsFromSync(txs)
-        }
+        if (orderedTxs.length > 0) await Chain.insertTransactionsFromSync(orderedTxs)
     } finally {
         getSharedState.inGcrApply = prevInGcrApply
     }
@@ -631,6 +662,70 @@ async function finalizeBlock(block: Block, pro: number, txs: Transaction[]): Pro
     log.info("[CONSENSUS] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
     log.debug(`[CONSENSUS] Last block: ${JSON.stringify(lastBlock)}`)
+    return true
+}
+
+async function fetchTxsByHashesFromPeers(
+    hashes: string[],
+    peers: Peer[],
+): Promise<Transaction[]> {
+    const remaining = new Set(hashes)
+    const results: Transaction[] = []
+
+    const batchSize =
+        typeof getSharedState.batchSyncTxLimit === "number" &&
+        getSharedState.batchSyncTxLimit > 0
+            ? getSharedState.batchSyncTxLimit
+            : 250
+
+    const chunks: string[][] = []
+    const asArray = [...remaining]
+    for (let i = 0; i < asArray.length; i += batchSize) {
+        chunks.push(asArray.slice(i, i + batchSize))
+    }
+
+    for (const peer of peers) {
+        if (remaining.size === 0) break
+
+        for (const chunk of chunks) {
+            const need = chunk.filter(h => remaining.has(h))
+            if (need.length === 0) continue
+
+            try {
+                const req = {
+                    method: "nodeCall",
+                    params: [
+                        {
+                            message: "getTxsByHashes",
+                            data: { hashes: need },
+                            muid: null,
+                        },
+                    ],
+                }
+
+                const res: any = await peer.longCall(req as any, true, {
+                    protocol: "http",
+                    sleepTime: 250,
+                    retries: 3,
+                })
+
+                if (res?.result !== 200 || !Array.isArray(res?.response)) {
+                    continue
+                }
+
+                for (const tx of res.response as Transaction[]) {
+                    if (tx?.hash && remaining.has(tx.hash)) {
+                        remaining.delete(tx.hash)
+                        results.push(tx)
+                    }
+                }
+            } catch {
+                // best-effort; keep trying other peers
+            }
+        }
+    }
+
+    return results
 }
 
 function preventForgingEnded(blockRef: number) {

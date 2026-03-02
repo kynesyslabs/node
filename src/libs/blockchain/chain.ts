@@ -344,6 +344,7 @@ export default class Chain {
         operations: Operation[] = [],
         position?: number,
         cleanMempool = true,
+        persistTransactions = true,
     ): Promise<Blocks> {
         const orderedTransactionsHashes = block.content.ordered_transactions
         // Fetch transaction entities from the repository based on ordered transaction hashes
@@ -400,9 +401,9 @@ export default class Chain {
             )
 
             // Get transaction entities from mempool before starting transaction
-            const transactionEntities = await Mempool.getTransactionsByHashes(
-                orderedTransactionsHashes,
-            )
+            const transactionEntities = persistTransactions
+                ? await Mempool.getTransactionsByHashes(orderedTransactionsHashes)
+                : []
 
             // REVIEW: Wrap block insertion and Merkle tree update in transaction
             // This ensures both succeed or both fail (prevents state divergence)
@@ -418,24 +419,26 @@ export default class Chain {
 
                     // REVIEW: Add transactions using transactional manager (not direct repository)
                     // This ensures all saves are part of the same transaction
-                    for (let i = 0; i < transactionEntities.length; i++) {
-                        const tx = transactionEntities[i]
-                        const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
-                        // NOTE: During sync/consensus edge-cases we can attempt to persist a tx that
-                        // already exists (unique by hash). This must be idempotent; duplicates should
-                        // not abort the whole block commit.
-                        await transactionalEntityManager
-                            .createQueryBuilder()
-                            .insert()
-                            .into(this.transactions.target)
-                            .values(rawTransaction as any)
-                            .orIgnore()
-                            .execute()
+                    if (persistTransactions) {
+                        for (let i = 0; i < transactionEntities.length; i++) {
+                            const tx = transactionEntities[i]
+                            const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
+                            // NOTE: During sync/consensus edge-cases we can attempt to persist a tx that
+                            // already exists (unique by hash). This must be idempotent; duplicates should
+                            // not abort the whole block commit.
+                            await transactionalEntityManager
+                                .createQueryBuilder()
+                                .insert()
+                                .into(this.transactions.target)
+                                .values(rawTransaction as any)
+                                .orIgnore()
+                                .execute()
+                        }
                     }
 
                     // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
                     // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
-                    if (cleanMempool) {
+                    if (persistTransactions && cleanMempool) {
                         await Mempool.removeTransactionsByHashes(
                             transactionEntities.map(tx => tx.hash),
                             transactionalEntityManager,

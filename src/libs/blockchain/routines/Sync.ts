@@ -289,7 +289,10 @@ export async function syncBlock(block: Block, peer: Peer) {
     const prevInGcrApply = getSharedState.inGcrApply
     getSharedState.inGcrApply = true
     try {
-        await Chain.insertBlock(block, [], null, false)
+        // IMPORTANT: When syncing, do not persist block transactions from local mempool.
+        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
+        // and skip applying GCR/token edits, leading to cross-node state divergence.
+        await Chain.insertBlock(block, [], null, false, false)
         log.debug("Block inserted successfully")
         log.debug(
             "Last block number: " +
