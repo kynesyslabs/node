@@ -33,7 +33,11 @@ export class BroadcastManager {
 
             return {
                 pubkey: peer.identity,
-                result: await peer.longCall(request, true, 250, 3, [400]),
+                result: await peer.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 3,
+                    allowedCodes: [400],
+                }),
             }
         })
 
@@ -62,6 +66,21 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        const peerman = PeerManager.getInstance()
+
+        if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {
+            Waiter.resolve(Waiter.keys.SYNC_WAIT_FOR_BLOCK, [
+                block,
+                peerman.getPeer(sender),
+            ])
+
+            return {
+                result: 200,
+                message: "Block received while waiting for next block",
+                syncData: PeerManager.getInstance().ourSyncDataString,
+            }
+        }
+
         if (!getSharedState.isInitialized) {
             return {
                 result: 200,
@@ -71,7 +90,6 @@ export class BroadcastManager {
         }
 
         // TODO: HANDLE RECEIVING THIS WHEN IN SYNC LOOP
-        const peerman = PeerManager.getInstance()
 
         if (getSharedState.inSyncLoop) {
             return {
@@ -126,7 +144,11 @@ export class BroadcastManager {
 
             return {
                 pubkey: peer.identity,
-                result: await peer.longCall(request, true, 250, 3, [400]),
+                result: await peer.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 3,
+                    allowedCodes: [400],
+                }),
             }
         })
 
@@ -166,7 +188,8 @@ export class BroadcastManager {
 
         const peer = new Peer(ePeer.connection.string, sender)
 
-        const splits = syncData.trim().split(":")
+        const splits = syncData ? syncData.trim().split(":") : []
+
         if (splits.length !== 3) {
             return {
                 result: 400,

@@ -117,14 +117,17 @@ export class ServerConnectionManager extends EventEmitter {
      * Remove connection from tracking
      */
     private removeConnection(connectionId: string, socket?: Socket): void {
-        const removed = this.connections.delete(connectionId)
-        if (removed) {
-            // Notify rate limiter to decrement connection count
-            if (socket && socket.remoteAddress && this.rateLimiter) {
-                this.rateLimiter.removeConnection(socket.remoteAddress)
-            }
-            this.emit("connection_removed", connectionId)
+        if (!socket) {
+            socket = this.connections.get(connectionId)?.socket
         }
+
+        // Notify rate limiter to decrement connection count
+        if (this.rateLimiter && socket && socket.remoteAddress) {
+            this.rateLimiter.removeConnection(socket.remoteAddress)
+        }
+
+        this.connections.delete(connectionId)
+        this.emit("connection_removed", connectionId)
     }
 
     /**

@@ -6,6 +6,7 @@ import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
 import { Peer, PeerManager } from "@/libs/peer"
 import {
+    RPCRequest,
     RPCResponse,
     SigningAlgorithm,
     ValidityData,
@@ -240,21 +241,20 @@ export class DTRManager {
             )
             log.debug("[DTR] ValidityData: " + JSON.stringify(payload))
 
-            const res = await validator.longCall(
-                {
-                    method: "nodeCall",
-                    params: [
-                        {
-                            message: "RELAY_TX",
-                            data: payload,
-                        },
-                    ],
-                },
-                true,
-                250,
-                4,
-                [400, 403], // Allowed error response codes
-            )
+            const request: RPCRequest = {
+                method: "nodeCall",
+                params: [
+                    {
+                        message: "RELAY_TX",
+                        data: payload,
+                    },
+                ],
+            }
+            const res = await validator.longCall(request, true, {
+                sleepTime: 250,
+                retries: 4,
+                allowedCodes: [400, 403], // Allowed error response codes
+            })
 
             return {
                 ...res,

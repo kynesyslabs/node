@@ -226,6 +226,21 @@ export default class PeerManager {
             return false
         }
 
+        if (
+            getSharedState.PROD &&
+            peer.identity !== getSharedState.publicKeyHex &&
+            ["127.0.0.1", "localhost", "0.0.0.0"].includes(
+                new URL(peer.connection.string).hostname,
+            )
+        ) {
+            log.warning(
+                "[PEERMANAGER] Invalid connection string: " +
+                    peer.connection.string,
+            )
+            log.error("[PEERMANAGER] Peer not added: " + peer.identity)
+            return false
+        }
+
         // REVIEW check for duplicates
         const identity = peer.identity
         let action = "added"
@@ -304,6 +319,10 @@ export default class PeerManager {
     }
 
     updatePeerLastSeen(pubkey: string) {
+        if (pubkey && !pubkey.startsWith("0x")) {
+            pubkey = "0x" + pubkey
+        }
+
         let peer = this.peerList[pubkey]
 
         offlineCheck: if (!peer) {
@@ -397,8 +416,10 @@ export default class PeerManager {
                 params: [helloRequest],
             },
             true,
-            250,
-            3,
+            {
+                sleepTime: 250,
+                retries: 3,
+            },
         )
 
         log.debug("[Hello Peer] Response: " + JSON.stringify(response))
@@ -471,13 +492,26 @@ export default class PeerManager {
                     ". Adding to offline list",
                 false,
             )
-            // Add the peer to the offline list
-            PeerManager.getInstance().addOfflinePeer(peer)
-            PeerManager.getInstance().removeOnlinePeer(peer.identity)
+
+            PeerManager.markPeerOffline(peer)
         }
 
         // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
         return []
+    }
+
+    static markPeerOffline(peer: Peer) {
+        // INFO: Local peer should always be accessible
+        if (peer.identity === getSharedState.publicKeyHex) {
+            return
+        }
+
+        peer.status.online = false
+        peer.status.timestamp = Date.now()
+
+        const peerman = PeerManager.getInstance()
+        peerman.addOfflinePeer(peer)
+        peerman.removeOnlinePeer(peer.identity)
     }
 }

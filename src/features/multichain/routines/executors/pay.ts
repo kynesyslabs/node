@@ -8,6 +8,7 @@ import checkSignedPayloads from "src/utilities/checkSignedPayloads"
 import validateIfUint8Array from "@/utilities/validateUint8Array"
 import handleAptosPayRest from "./aptos_pay_rest"
 import log from "@/utilities/logger"
+import { VersionedTransaction } from "@solana/web3.js"
 
 /**
  * Executes a XM pay operation and returns
@@ -75,11 +76,7 @@ export default async function handlePayOperation(
             break
 
         case "solana":
-            result = await genericJsonRpcPay(
-                multichain.SOLANA,
-                rpcUrl,
-                operation,
-            )
+            result = await handleSolanaPay(rpcUrl, operation)
             break
 
         case "ton":
@@ -150,6 +147,44 @@ export async function genericJsonRpcPay(
     } catch (error) {
         log.error("[XMScript Parser] Generic JSON RPC Pay: error: ")
         log.error(error)
+        return {
+            result: "error",
+            error: error.toString(),
+        }
+    }
+}
+
+/**
+ * Simulates a Solana Pay operation, sends the transaction and returns the result
+ *
+ * @param rpcUrl The RPC URL for the Solana network
+ * @param operation The operation to be executed
+ * @returns A promise to an object with the status and the result of the operation
+ */
+async function handleSolanaPay(rpcUrl: string, operation: IOperation) {
+    try {
+        // INFO: payload is an object of Uint8Array values
+        const payload = Uint8Array.from(
+            Object.values(operation.task.signedPayloads[0]),
+        )
+        const solana = await multichain.SOLANA.create(rpcUrl)
+
+        const simulateResult = await solana.provider.simulateTransaction(
+            VersionedTransaction.deserialize(payload),
+            {
+                commitment: "confirmed",
+            },
+        )
+
+        if (simulateResult.value.err) {
+            return {
+                result: "error",
+                error: simulateResult.value.err,
+            }
+        }
+
+        return await solana.sendTransaction(payload)
+    } catch (error) {
         return {
             result: "error",
             error: error.toString(),

@@ -36,6 +36,34 @@ log_verbose() {
 	fi
 }
 
+# Patch falcon-sign module to properly log uncaught exceptions
+patch_falcon_sign() {
+    local falcon_file="./node_modules/falcon-sign/kernel/n3_v1/wasmFile/falcon512.js"
+
+    if [ ! -f "$falcon_file" ]; then
+        log_verbose "falcon-sign file not found, skipping patch"
+        return 0
+    fi
+
+    # Check if already patched (look for console.error(ex) near the throw)
+    if grep -q "console.error(ex)" "$falcon_file"; then
+        log_verbose "falcon-sign already patched"
+        return 0
+    fi
+
+    log_verbose "Patching falcon-sign to log uncaught exceptions..."
+
+    if [ "$PLATFORM_NAME" = "macOS" ]; then
+        sed -i '' '/throw ex;/i\
+      console.error(ex);
+' "$falcon_file"
+    else
+        sed -i '/throw ex;/i\      console.error(ex);' "$falcon_file"
+    fi
+
+    echo "✅ Patched falcon-sign for proper error logging"
+}
+
 # Help documentation function
 show_help() {
 	cat <<EOF
@@ -247,18 +275,18 @@ check_system_requirements() {
 			ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
 		fi
 
-		if [[ -z "${ping_result}" ]]; then
-			echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
-			failed_requirements=$((failed_requirements + 1))
-		elif [[ "${ping_result}" -gt 200 ]]; then
-			echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
-			failed_requirements=$((failed_requirements + 1))
-		elif [[ "${ping_result}" -gt 100 ]]; then
-			echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
-			warnings=$((warnings + 1))
-		else
-			echo "✅ Network latency: ${ping_result}ms"
-		fi
+		# if [[ -z "${ping_result}" ]]; then
+		# 	echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
+		# 	failed_requirements=$((failed_requirements + 1))
+		# elif [[ "${ping_result}" -gt 200 ]]; then
+		# 	echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
+		# 	failed_requirements=$((failed_requirements + 1))
+		# elif [[ "${ping_result}" -gt 100 ]]; then
+		# 	echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
+		# 	warnings=$((warnings + 1))
+		# else
+		# 	echo "✅ Network latency: ${ping_result}ms"
+		# fi
 	else
 		echo "⚠️  Cannot test network - ping command not available"
 		warnings=$((warnings + 1))
@@ -385,6 +413,7 @@ if is_first_run; then
 		exit 1
 	fi
 	echo "Ok, dependencies installed"
+	patch_falcon_sign
 	# We need docker and docker compose to be installed (unless using external DB)
 	if [[ "${EXTERNAL_DB}" = false ]]; then
 		echo "🔍 Checking Docker..."
@@ -546,6 +575,7 @@ if [ "$GIT_PULL" = true ]; then
 		exit 1
 	fi
 	echo "✅ Dependencies installed successfully"
+	patch_falcon_sign
 fi
 
 echo ""

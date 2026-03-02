@@ -316,7 +316,7 @@ export default async function manageConsensusRoutines(
                 }
 
                 const isUs = peerKey === getSharedState.publicKeyHex
-                log.warning(
+                log.debug(
                     "[Consensus Message Received] setValidatorPhase from: " +
                         peerKey,
                 )

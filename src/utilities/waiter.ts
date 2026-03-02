@@ -30,6 +30,7 @@ export class Waiter {
         SET_WAIT_STATUS: "setWaitStatus",
         WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
         DTR_WAIT_FOR_BLOCK: "dtrWaitForBlock",
+        SYNC_WAIT_FOR_BLOCK: "syncWaitForBlock",
         STARTUP_HELLO_PEER: "startupHelloPeer",
         // etc
     }

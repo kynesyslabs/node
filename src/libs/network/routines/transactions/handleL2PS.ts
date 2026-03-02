@@ -1,66 +1,220 @@
-import type { BlockContent } from "@kynesyslabs/demosdk/types"
-import type { EncryptedTransaction } from "src/libs/l2ps/types"
+import type { BlockContent, L2PSTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
-import Hashing from "src/libs/crypto/hashing"
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import Transaction from "src/libs/blockchain/transaction"
 import { emptyResponse } from "../../server_rpc"
-import _ from "lodash"
-import {
-    L2PSMessage,
-    L2PSRetrieveAllTxMessage,
-    L2PSRegisterTxMessage,
-} from "src/libs/l2ps/parallelNetworks"
-import { Subnet } from "src/libs/l2ps/parallelNetworks"
-/* NOTE
-- Each l2ps is a list of nodes that are part of the l2ps
-- Each l2ps partecipant has the private key of the l2ps (or equivalent)
-- Each l2ps partecipant can register a transaction in the l2ps
-- Each l2ps partecipant can retrieve a transaction from the l2ps
-- // ! TODO For each l2ps message, it can be specified another key shared between the session partecipants only
-- // ! TODO Only nodes that partecipate to the l2ps will maintain a copy of the l2ps transactions
-- // ! TODO The non partecipating nodes will have a encrypted transactions hash property
 
-*/
+import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
+import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import log from "@/utilities/logger"
+
+/**
+ * Create an error response with the given status code and message
+ */
+function createErrorResponse(response: RPCResponse, code: number, message: string): RPCResponse {
+    response.result = code
+    response.response = false
+    response.extra = message
+    return response
+}
+
+/**
+ * Validate L2PS transaction structure
+ */
+function validateL2PSStructure(l2psTx: L2PSTransaction): string | null {
+    if (!l2psTx.content?.data?.[1]?.l2ps_uid) {
+        return "Invalid L2PS transaction structure: missing l2ps_uid in data payload"
+    }
+    return null
+}
+
+/**
+ * Get or load L2PS instance
+ */
+async function getL2PSInstance(l2psUid: string): Promise<L2PS | null> {
+    const parallelNetworks = ParallelNetworks.getInstance()
+    let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+    if (!l2psInstance) {
+        l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
+    }
+    return l2psInstance
+}
+
+/**
+ * Decrypt and validate L2PS transaction
+ */
+async function decryptAndValidate(
+    l2psInstance: L2PS,
+    l2psTx: L2PSTransaction
+): Promise<{ decryptedTx: Transaction | null; error: string | null }> {
+    let decryptedTx
+    try {
+        decryptedTx = await l2psInstance.decryptTx(l2psTx)
+    } catch (error) {
+        return {
+            decryptedTx: null,
+            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
+        }
+    }
+
+    if (!decryptedTx?.content?.from) {
+        return { decryptedTx: null, error: "Invalid decrypted transaction structure" }
+    }
+
+    const verificationResult = await Transaction.confirmTx(decryptedTx, decryptedTx.content.from)
+    if (!verificationResult || !verificationResult.success) {
+        const errorMsg = verificationResult?.message || "Transaction signature verification failed"
+        return { decryptedTx: null, error: errorMsg }
+    }
+
+    return { decryptedTx: decryptedTx as unknown as Transaction, error: null }
+}
+
 
 export default async function handleL2PS(
-    content: L2PSMessage,
+    l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
-    // ! TODO Finalize the below TODOs
-    let response = _.cloneDeep(emptyResponse)
-    const data = content.data
-    // REVIEW Defining a subnet from the uid
-    const subnet: Subnet = new Subnet(content.data.uid)
-    // REVIEW Experimental type tightening
-    let payloadContent: L2PSRetrieveAllTxMessage | L2PSRegisterTxMessage
-    switch (content.extra) {
-        case "retrieve":
-            // TODO
-            break
-        // This will retrieve all the transactions from the L2PS on a given block
-        case "retrieveAll":
-            payloadContent = content as L2PSRetrieveAllTxMessage
-            response = await subnet.getTransactions(
-                payloadContent.data.blockNumber,
-            )
-            return response
-        // This will register a transaction in the L2PS
-        case "registerTx":
-            payloadContent = content as L2PSRegisterTxMessage
-            var encryptedTxData: EncryptedTransaction =
-                payloadContent.data.encryptedTransaction
-            // REVIEW Using the subnet to register the transaction
-            response = await subnet.registerTx(encryptedTxData)
-            return response
-        // SECTION Management methods
-        case "registerAsPartecipant":
-            // TODO
-            break
-        default:
-            // TODO
-            response.result = 400
-            response.response = "error"
-            response.require_reply = true
-            response.extra = "Invalid extra"
-            return response
+    const response = structuredClone(emptyResponse)
+
+    // Validate transaction structure
+    const structureError = validateL2PSStructure(l2psTx)
+    if (structureError) {
+        return createErrorResponse(response, 400, structureError)
     }
+
+    const payloadData = l2psTx.content.data[1]
+    const l2psUid = payloadData.l2ps_uid
+
+    // Get L2PS instance
+    const l2psInstance = await getL2PSInstance(l2psUid)
+    if (!l2psInstance) {
+        return createErrorResponse(response, 400, "L2PS network not found and not joined (missing config)")
+    }
+
+    // Decrypt and validate transaction
+    const { decryptedTx, error: decryptError } = await decryptAndValidate(l2psInstance, l2psTx)
+    if (decryptError || !decryptedTx) {
+        return createErrorResponse(response, 400, decryptError || "Decryption failed")
+    }
+
+    // Validate payload structure
+    if (!payloadData || typeof payloadData !== "object" || !("original_hash" in payloadData)) {
+        return createErrorResponse(response, 400, "Invalid L2PS payload: missing original_hash field")
+    }
+
+    const encryptedPayload = payloadData as L2PSEncryptedPayload
+    const originalHash = encryptedPayload.original_hash
+
+    // Verify decrypted hash matches original hash declared in payload
+    if (decryptedTx.hash !== originalHash) {
+        return createErrorResponse(response, 400, `Decrypted transaction hash mismatch: expected ${originalHash}, got ${decryptedTx.hash}`)
+    }
+
+    // Process Valid Transaction
+    return await processValidL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+}
+
+/**
+ * Process a validated L2PS transaction (check mempool, store, execute)
+ */
+async function processValidL2PSTransaction(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string
+): Promise<RPCResponse> {
+    // Check for duplicates
+    let alreadyProcessed
+    try {
+        alreadyProcessed = await L2PSMempool.existsByOriginalHash(originalHash)
+    } catch (error) {
+        return createErrorResponse(response, 500, `Mempool check failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+
+    if (alreadyProcessed) {
+        response.result = 409
+        response.response = "Transaction already processed"
+        response.extra = "Duplicate L2PS transaction detected"
+        return response
+    }
+
+    // Store in mempool
+    const mempoolResult = await L2PSMempool.addTransaction(l2psUid, l2psTx, originalHash, "processed")
+    if (!mempoolResult.success) {
+        return createErrorResponse(response, 500, `Failed to store in L2PS mempool: ${mempoolResult.error}`)
+    }
+
+    // Execute transaction
+    return await executeAndRecordL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+}
+
+/**
+ * Execute L2PS transaction and record history
+ */
+async function executeAndRecordL2PSTransaction(
+    response: RPCResponse,
+    l2psUid: string,
+    l2psTx: L2PSTransaction,
+    decryptedTx: Transaction,
+    originalHash: string
+): Promise<RPCResponse> {
+    let executionResult
+    try {
+        executionResult = await L2PSTransactionExecutor.execute(l2psUid, decryptedTx, l2psTx.hash, false)
+    } catch (error) {
+        log.error(`[handleL2PS] Execution error: ${error instanceof Error ? error.message : "Unknown error"}`)
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return createErrorResponse(response, 500, `L2PS transaction execution failed: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+
+    if (!executionResult.success) {
+        await L2PSMempool.updateStatus(l2psTx.hash, "failed")
+        return createErrorResponse(response, 400, `L2PS transaction execution failed: ${executionResult.message}`)
+    }
+
+    // Store GCR edits in mempool for batch aggregation
+    if (executionResult.gcr_edits && executionResult.gcr_edits.length > 0) {
+        await L2PSMempool.updateGCREdits(
+            l2psTx.hash,
+            executionResult.gcr_edits,
+            executionResult.affected_accounts_count || 0
+        )
+    }
+
+    // Update status and return success
+    await L2PSMempool.updateStatus(l2psTx.hash, "executed")
+
+    // Record transaction in l2ps_transactions table for persistent history
+    try {
+        await L2PSTransactionExecutor.recordTransaction(
+            l2psUid,
+            decryptedTx,
+            "", // l1BatchHash - empty initially, will be updated during consensus
+            l2psTx.hash, // encrypted_hash
+            0, // batch_index
+            "pending" // Initial status - executed locally, waiting for aggregation
+        )
+        log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
+    } catch (recordError) {
+        log.error(`[handleL2PS] Failed to record transaction history: ${recordError instanceof Error ? recordError.message : "Unknown error"}`)
+        // Don't fail the transaction, just log the error
+    }
+
+    response.result = 200
+    response.response = {
+        message: "L2PS transaction executed - awaiting batch aggregation",
+        encrypted_hash: l2psTx.hash,
+        original_hash: originalHash,
+        l2ps_uid: l2psUid,
+        decrypted_tx_hash: decryptedTx.hash,
+        execution: {
+            success: executionResult.success,
+            message: executionResult.message,
+            affected_accounts_count: executionResult.affected_accounts_count,
+            gcr_edits_count: executionResult.gcr_edits?.length || 0
+        }
+    }
+    return response
 }

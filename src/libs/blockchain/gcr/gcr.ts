@@ -103,6 +103,47 @@ export class OperationsRegistry {
     }
 }
 
+interface Web2AccountParams {
+    username: string
+    platform: "twitter" | "discord" | "telegram" | "github"
+}
+
+interface XMAccountParams {
+    chain: `${string}.${string}` // eg. "eth.mainnet" | "solana.mainnet", etc.
+    address: string
+}
+
+interface NativeAccountParams {
+    address: string
+}
+
+export type AccountParams = (
+    | Web2AccountParams
+    | XMAccountParams
+    | NativeAccountParams
+) & {
+    points: number
+}
+
+// Type guard functions
+function isWeb2Account(
+    account: AccountParams,
+): account is Web2AccountParams & { points: number } {
+    return "platform" in account && "username" in account
+}
+
+function isXmAccount(
+    account: AccountParams,
+): account is XMAccountParams & { points: number } {
+    return "chain" in account && "address" in account && !!account.chain
+}
+
+function isNativeAccount(
+    account: AccountParams,
+): account is NativeAccountParams & { points: number } {
+    return "address" in account && !("chain" in account)
+}
+
 // INFO Besides the static methods, the GCR store all the operations to be done in the current block so that they can be executed in order
 export default class GCR {
     private static instance: GCR
@@ -835,55 +876,238 @@ export default class GCR {
         return usernameToAddressMap
     }
 
+    static async getAddressesByNativeAddresses(
+        addresses: string[],
+    ): Promise<Record<string, string>> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!addresses || addresses.length === 0) {
+            return {}
+        }
+
+        // Query accounts by pubkey directly
+        const accounts = await gcrMainRepository
+            .createQueryBuilder("gcr")
+            .where("gcr.pubkey = ANY(:addresses)", { addresses })
+            .getMany()
+
+        const addressToPubkeyMap: Record<string, string> = {}
+
+        for (const account of accounts) {
+            if (addresses.includes(account.pubkey)) {
+                addressToPubkeyMap[account.pubkey] = account.pubkey
+            }
+        }
+
+        return addressToPubkeyMap
+    }
+
+    static async getAddressesByXmAccounts(
+        queries: {
+            chain: string
+            address: string
+        }[],
+    ): Promise<Record<string, string>> {
+        const db = await Datasource.getInstance()
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+        if (!queries || queries.length === 0) {
+            return {}
+        }
+
+        // Group queries by chain for efficient batch queries
+        const queriesByChain: Record<
+            string,
+            {
+                chain: string
+                subchain: string
+                address: string
+                originalChain: string
+            }[]
+        > = {}
+
+        for (const query of queries) {
+            // Split chain.subchain format (e.g., "eth.mainnet" -> chain="evm", subchain="mainnet")
+            const [chainPart, subchainPart] = query.chain.split(".")
+            if (!chainPart || !subchainPart) {
+                continue
+            }
+
+            // Replace "eth" with "evm" (as done in getAccountByIdentity)
+            let chain = chainPart
+            if (chain === "eth") {
+                chain = "evm"
+            }
+            const subchain = subchainPart
+
+            const chainKey = `${chain}.${subchain}`
+            if (!queriesByChain[chainKey]) {
+                queriesByChain[chainKey] = []
+            }
+            queriesByChain[chainKey].push({
+                chain,
+                subchain,
+                address: query.address,
+                originalChain: query.chain,
+            })
+        }
+
+        const addressToPubkeyMap: Record<string, string> = {}
+
+        // Helper function to determine if a chain is EVM-based (case-insensitive addresses)
+        const isEvmChain = (chainName: string): boolean => {
+            return chainName === "evm" || chainName === "eth"
+        }
+
+        // Process each chain separately
+        for (const [chainKey, chainQueries] of Object.entries(queriesByChain)) {
+            const [chain, subchain] = chainKey.split(".") as [string, string]
+            const isEvm = isEvmChain(chain)
+            const addresses = chainQueries.map(q => q.address)
+
+            // Build query based on chain type - EVM addresses are case-insensitive, others are case-sensitive
+            let queryString: string
+            let queryAddresses: string[]
+
+            if (isEvm) {
+                // EVM addresses: use lowercase comparison
+                queryString =
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE lower(xm_id->>'address') = ANY(:addresses))"
+                queryAddresses = addresses.map(addr => addr.toLowerCase())
+            } else {
+                // Non-EVM addresses (e.g., Solana): case-sensitive comparison
+                queryString =
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'xm'->:chain->:subchain, '[]'::jsonb)) AS xm_id WHERE xm_id->>'address' = ANY(:addresses))"
+                queryAddresses = addresses
+            }
+
+            // Query accounts that have the specified web3 wallet address under the specific chain/subchain
+            const accounts = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(queryString, {
+                    chain,
+                    subchain,
+                    addresses: queryAddresses,
+                })
+                .getMany()
+
+            for (const account of accounts) {
+                // Find identities that match the provided addresses for this chain/subchain
+                const xmIdentities =
+                    account.identities.xm?.[chain]?.[subchain] || []
+
+                for (const identity of xmIdentities) {
+                    for (const query of chainQueries) {
+                        // Compare addresses based on chain type
+                        let matches = false
+                        if (isEvm) {
+                            // EVM: case-insensitive comparison
+                            matches =
+                                identity.address.toLowerCase() ===
+                                query.address.toLowerCase()
+                        } else {
+                            // Non-EVM (e.g., Solana): case-sensitive comparison
+                            matches = identity.address === query.address
+                        }
+
+                        if (matches) {
+                            // Use originalChain:address as key to match what caller expects
+                            addressToPubkeyMap[
+                                `${query.originalChain}:${query.address}`
+                            ] = account.pubkey
+                        }
+                    }
+                }
+            }
+        }
+
+        return addressToPubkeyMap
+    }
+
     /**
      * Create a transaction to award points to the users
-     * @param accounts List of accounts to award points to (supports multiple web2 platforms)
+     * @param accounts List of accounts to award points to (supports web2 platforms, native addresses, and web3 accounts)
      *
      */
-    static async createAwardPointsTransaction(
-        accounts: {
-            /**
-             * The username of the user to award points to
-             */
-            username: string
-            /**
-             * The amount of points to award
-             */
-            points: number
-            /**
-             * The platform to find the account by
-             */
-            platform: "twitter" | "discord" | "telegram" | "github"
-        }[],
-    ) {
+    static async createAwardPointsTransaction(accounts: AccountParams[]) {
         const awardDate = new Date().toISOString()
-        const addresses = await this.getAddressesByWeb2Usernames(
-            accounts.map(a => ({
+
+        // Separate accounts by type
+        const web2Accounts = accounts.filter(isWeb2Account)
+        const nativeAccounts = accounts.filter(isNativeAccount)
+        const xmAccounts = accounts.filter(isXmAccount)
+
+        // Resolve addresses for each account type
+        const web2Addresses = await this.getAddressesByWeb2Usernames(
+            web2Accounts.map(a => ({
                 platform: a.platform,
                 username: a.username,
             })),
         )
 
+        const nativeAddresses = await this.getAddressesByNativeAddresses(
+            nativeAccounts.map(a => a.address),
+        )
+
+        const xmAddresses = await this.getAddressesByXmAccounts(
+            xmAccounts.map(a => ({
+                chain: a.chain,
+                address: a.address,
+            })),
+        )
+
+        // Merge all address maps
+        const allAddresses = {
+            ...web2Addresses,
+            ...nativeAddresses,
+            ...xmAddresses,
+        }
+
         const edits = []
 
         for (const account of accounts as any) {
-            const addressKey = `${account.platform}:${account.username}`
-            if (addresses[addressKey]) {
+            let addressKey: string
+            let lookupValue: string
+
+            if (isWeb2Account(account)) {
+                addressKey = `${account.platform}:${account.username}`
+                lookupValue = `web2.${account.platform}.${account.username}`
+            } else if (isNativeAccount(account)) {
+                addressKey = account.address
+                lookupValue = `native.${account.address}`
+            } else if (isXmAccount(account)) {
+                addressKey = `${account.chain}:${account.address}`
+                lookupValue = `web3.${account.chain}.${account.address}`
+            } else {
+                continue
+            }
+
+            // Set lookup property and remove original properties
+            const accountAny = account as any
+            accountAny.lookup = lookupValue
+
+            // Remove original lookup properties
+            delete accountAny.username
+            delete accountAny.platform
+            delete accountAny.chain
+
+            if (allAddresses[addressKey]) {
                 edits.push({
                     type: "identity",
                     context: "points",
                     isRollback: false,
                     operation: "add",
-                    account: addresses[addressKey],
+                    account: allAddresses[addressKey],
                     amount: Number(account.points),
                     date: awardDate,
                     txhash: "",
                 })
-                account.address = addresses[addressKey]
-                account.comment = "Account found"
+                accountAny.address = allAddresses[addressKey]
+                accountAny.comment = "Account found. Points awarded."
             } else {
-                account.address = null
-                account.comment = "Account not found"
+                accountAny.address = null
+                accountAny.comment = "Account not found. Points NOT awarded."
             }
         }
 
@@ -992,13 +1216,7 @@ export default class GCR {
      * @param accounts List of accounts to award points to (supports multiple web2 platforms)
      * @returns Result of the award points operation
      */
-    static async awardPoints(
-        accounts: {
-            username: string
-            points: number
-            platform: "twitter" | "discord" | "telegram" | "github"
-        }[],
-    ): Promise<{
+    static async awardPoints(accounts: AccountParams[]): Promise<{
         success: boolean
         error?: string
         message: string
@@ -1014,33 +1232,72 @@ export default class GCR {
             }
         }
 
-        // INFO: Check if all accounts have a platform
+        // INFO: Validate each account based on its type
         for (const account of accounts) {
-            if (!account.platform) {
-                return {
-                    success: false,
-                    message:
-                        "Failed: Platform is not specified for account " +
-                        account.username,
-                    confirmationBlock: null,
-                }
-            }
-
             // INFO: Make sure each account has valid points
             const points = Number(account.points)
             if (isNaN(points) || points <= 0) {
+                const accountIdentifier = isWeb2Account(account)
+                    ? account.username
+                    : isXmAccount(account)
+                    ? `${account.chain}:${account.address}`
+                    : account.address
                 return {
                     success: false,
                     message:
                         "Failed: Invalid input. Point value must be a number greater than 0. Account: " +
-                        account.username,
+                        accountIdentifier,
                     confirmationBlock: null,
                 }
             }
 
-            // INFO: remove @ prefix
-            if (account.username.startsWith("@")) {
-                account.username = account.username.slice(1)
+            // INFO: Validate account type-specific fields
+            if (isWeb2Account(account)) {
+                if (!account.platform) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Platform is not specified for account " +
+                            account.username,
+                        confirmationBlock: null,
+                    }
+                }
+                // INFO: remove @ prefix for web2 accounts
+                if (account.username.startsWith("@")) {
+                    account.username = account.username.slice(1)
+                }
+            } else if (isXmAccount(account)) {
+                if (!account.chain || !account.address) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Chain and address must be specified for web3 account",
+                        confirmationBlock: null,
+                    }
+                }
+                // Validate chain.subchain format
+                const [chain, subchain] = account.chain.split(".")
+                if (!chain || !subchain) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Chain must be in format 'chain.subchain' (e.g., 'eth.mainnet')",
+                        confirmationBlock: null,
+                    }
+                }
+                // Normalize eth.subchain to evm.subchain (eth is stored as evm in DB)
+                if (chain === "eth") {
+                    account.chain = `evm.${subchain}` as `${string}.${string}`
+                }
+            } else if (isNativeAccount(account)) {
+                if (!account.address) {
+                    return {
+                        success: false,
+                        message:
+                            "Failed: Address must be specified for native account",
+                        confirmationBlock: null,
+                    }
+                }
             }
         }
 

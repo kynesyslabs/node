@@ -7,7 +7,7 @@
 
 import log from "src/utilities/logger"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
-import Peer from "src/libs/peer/Peer"
+import Peer, { CallOptions } from "src/libs/peer/Peer"
 
 import { BaseOmniAdapter, BaseAdapterOptions } from "./BaseAdapter"
 import {
@@ -128,28 +128,14 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
         peer: Peer,
         request: RPCRequest,
         isAuthenticated = true,
-        sleepTime = 1000,
-        retries = 3,
-        allowedErrors: number[] = [],
+        options?: CallOptions,
     ): Promise<RPCResponse> {
         if (!this.shouldUseOmni(peer.identity)) {
-            return peer.longCall(
-                request,
-                isAuthenticated,
-                sleepTime,
-                retries,
-                allowedErrors,
-            )
+            return peer.longCall(request, isAuthenticated, options)
         }
 
         // REVIEW: For now, delegate to standard longCall
         // Future: Implement OmniProtocol-native retry with connection reuse
-        return peer.longCall(
-            request,
-            isAuthenticated,
-            sleepTime,
-            retries,
-            allowedErrors,
-        )
+        return peer.longCall(request, isAuthenticated, options)
     }
 }

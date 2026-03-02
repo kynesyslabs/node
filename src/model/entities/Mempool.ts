@@ -32,7 +32,7 @@ export class MempoolTx implements Transaction {
     @Column("jsonb", { name: "extra", nullable: true })
     extra: Record<string, any> | null
 
-    @Column("integer", { name: "nonce" })
+    @Column("bigint", { name: "nonce", nullable: true, default: 0 })
     nonce: number
 
     @Column("integer", { name: "reference_block" })

@@ -25,23 +25,11 @@
 ## Project Core
 
 - **project_purpose** - Demos Network node software overview
-- **project_context_consolidated** - Consolidated project context
-- **tech_stack** - Languages, frameworks, tools
-- **codebase_structure** - Directory organization
-- **code_style_conventions** - Naming, formatting standards
-- **development_patterns** - Established code patterns
-
-## Development Workflow
-
-- **suggested_commands** - Common CLI commands
-- **task_completion_guidelines** - Workflow patterns
-
-## Memory Organization
-
-**For active work**: Start with `_continue_here`
-
-**For OmniProtocol**: Reference `omniprotocol_complete_2025_11_11` for status
-
-**For UD work**: Start with `ud_phases_tracking`, then specific memories
-
-**For general dev**: `project_purpose`, `tech_stack`, `development_patterns`
+- **Codebase Map** - See `.planning/codebase/` (7 documents):
+  - `STACK.md` - Runtime, dependencies, frameworks
+  - `STRUCTURE.md` - Directory layout, file purposes
+  - `CONVENTIONS.md` - Code style, naming, linting
+  - `ARCHITECTURE.md` - System layers, data flows, patterns
+  - `INTEGRATIONS.md` - External APIs, blockchain networks, protocols
+  - `TESTING.md` - Jest config, mock patterns, coverage
+  - `CONCERNS.md` - Tech debt, security issues, missing features

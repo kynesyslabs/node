@@ -22,6 +22,7 @@ import {
     NotInShardError,
 } from "src/exceptions"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
+import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
@@ -139,6 +140,16 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
 
+        // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
+        // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+        const l2psResult = await L2PSConsensus.applyPendingProofs(blockRef, false)
+        if (l2psResult.proofsApplied > 0) {
+            log.info(`[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`)
+        }
+        if (l2psResult.proofsFailed > 0) {
+            log.warning(`[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`)
+        }
+
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
 
@@ -231,6 +242,9 @@ export async function consensusRoutine(): Promise<void> {
             await rollbackGCREditsFromTxs(txsToRollback)
             await Mempool.removeTransactionsByHashes(successfulTxs)
 
+            // Also rollback any L2PS proofs that were applied
+            await L2PSConsensus.rollbackProofsForBlock(blockRef)
+
             return
         }
 
@@ -257,9 +271,6 @@ export async function consensusRoutine(): Promise<void> {
  */
 export function isConsensusAlreadyRunning(): boolean {
     if (getSharedState.inConsensusLoop) {
-        log.warning(
-            "Consensus loop already running: keeping it running (returning)",
-        )
         return true
     }
 
@@ -288,7 +299,6 @@ async function initializeConsensusState(): Promise<void> {
 async function initializeShard(blockRef: number): Promise<Peer[]> {
     const { commonValidatorSeed, lastBlockNumber } =
         await getCommonValidatorSeed()
-    // return await getShard(commonValidatorSeed)
 
     const manager = SecretaryManager.getInstance(blockRef)
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
@@ -383,6 +393,12 @@ async function applyGCREditsFromMergedMempool(
         }
 
         const txGCREdits = tx.content.gcr_edits
+        // Skip transactions that don't have GCR edits (e.g., l2psBatch)
+        if (!txGCREdits || !Array.isArray(txGCREdits) || txGCREdits.length === 0) {
+            // These transactions are valid but don't modify GCR state
+            successfulTxs.push(tx.hash)
+            continue
+        }
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
             const applyResult = await HandleGCR.apply(gcrEdit, tx)

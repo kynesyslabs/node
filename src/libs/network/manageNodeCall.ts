@@ -3,7 +3,6 @@ import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
@@ -15,10 +14,13 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
+import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import L2PSMempool from "../blockchain/l2ps_mempool"
 import TxUtils from "../blockchain/transaction"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
@@ -33,28 +35,6 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { DTRManager } from "./dtr/dtrmanager"
-// REVIEW: StorageProgram query imports
-import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
-import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
-import Datasource from "@/model/datasource"
-
-/**
- * Normalizes a storage address to ensure it has the 'stor-' prefix.
- * Storage addresses can come with or without the prefix from various sources.
- * @param address - The storage address to normalize
- * @returns The normalized address with 'stor-' prefix
- */
-function normalizeStorageAddress(address: string): string {
-    if (!address) return address
-    // Remove any 0x prefix if present (legacy addresses)
-    const normalized = address.startsWith("0x") ? address.slice(2) : address
-    // Remove 0xstor- prefix if present (legacy format)
-    if (normalized.startsWith("stor-")) {
-        return normalized
-    }
-    // Add stor- prefix if missing
-    return `stor-${normalized}`
-}
 
 export interface NodeCall {
     message: string
@@ -74,7 +54,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
     const { data } = content
-    let response = _.cloneDeep(emptyResponse)
+    let response = structuredClone(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
@@ -83,11 +63,37 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getPeerInfo":
             response.response = await getPeerInfo()
             break
+        case "getGenesisDataHash": {
+            try {
+                const genesisBlock = await Chain.getGenesisBlock()
+                let genesisData =
+                    genesisBlock.content.extra?.genesisData || null
+
+                if (typeof genesisData === "string") {
+                    genesisData = JSON.parse(genesisData)
+                }
+
+                response.response = Hashing.sha256(JSON.stringify(genesisData))
+                break
+            } catch (error) {
+                log.error(
+                    "[manageNodeCall] Failed to get genesis data hash: " +
+                        error,
+                )
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get genesis data hash",
+                }
+            }
+            break
+        }
+
         case "getPeerlist":
             response.response = await getPeerlist()
             break
-        case "getPeerlistHash":
-            var peerlist = await getPeerlist()
+        case "getPeerlistHash": {
+            let peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
                 "manageNodeCall",
@@ -95,6 +101,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 true,
             )
             break
+        }
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
             result = await getPreviousHashFromBlockNumber(data)
@@ -175,6 +182,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+        case "getTxsByHashes":
+            return await getTxsByHashes(data)
 
         case "getBlockTransactions": {
             if (!data.blockHash) {
@@ -507,10 +516,12 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
         case "requestTLSNproxy": {
             try {
-                const { requestProxy, ProxyError } =
-                    await import("@/features/tlsnotary/proxyManager")
-                const { validateToken, consumeRetry } =
-                    await import("@/features/tlsnotary/tokenManager")
+                const { requestProxy, ProxyError } = await import(
+                    "@/features/tlsnotary/proxyManager"
+                )
+                const { validateToken, consumeRetry } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
 
                 // Require tokenId and owner (pubkey) for paid access
                 if (!data.tokenId || !data.owner) {
@@ -615,8 +626,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "tlsnotary.getInfo": {
             // Dynamic import to avoid circular dependencies and check if enabled
             try {
-                const { getTLSNotaryService } =
-                    await import("@/features/tlsnotary")
+                const { getTLSNotaryService } = await import(
+                    "@/features/tlsnotary"
+                )
                 const service = getTLSNotaryService()
 
                 if (!service || !service.isRunning()) {
@@ -676,8 +688,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token lookup by transaction hash
         case "tlsnotary.getToken": {
             try {
-                const { getTokenByTxHash, getToken } =
-                    await import("@/features/tlsnotary/tokenManager")
+                const { getTokenByTxHash, getToken } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
 
                 // Support lookup by either tokenId or txHash
                 const { tokenId, txHash } = data as {
@@ -731,8 +744,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         // REVIEW: TLSNotary token stats for monitoring
         case "tlsnotary.getTokenStats": {
             try {
-                const { getTokenStats } =
-                    await import("@/features/tlsnotary/tokenManager")
+                const { getTokenStats } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
                 const stats = getTokenStats()
                 response.response = { stats }
             } catch (error) {
@@ -748,841 +762,221 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
         }
 
-        // REVIEW: StorageProgram query methods (public, no authentication required)
-        case "getStorageProgram": {
-            const rawStorageAddress = data.storageAddress
-            const requesterAddress = data.requesterAddress // Optional identity for ACL check
-
-            if (!rawStorageAddress) {
+        // REVIEW L2PS: Node-to-node communication for L2PS mempool synchronization
+        case "getL2PSParticipationById":
+            console.log("[L2PS] Received L2PS participation query")
+            if (!data.l2psUid) {
                 response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
+                response.response = "No L2PS UID specified"
                 break
             }
-
-            // Normalize address to ensure stor- prefix
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
-
             try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
+                // Check if this node participates in the specified L2PS network
+                const joinedUIDs = getSharedState.l2psJoinedUids || []
+                const isParticipating = joinedUIDs.includes(data.l2psUid)
 
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
-
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
-                }
-
-                // Check read permission
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
+                response.result = 200
                 response.response = {
-                    storageAddress: program.storageAddress,
-                    owner: program.owner,
-                    programName: program.programName,
-                    encoding: program.encoding,
-                    data: program.data,
-                    metadata: program.metadata,
-                    storageLocation: program.storageLocation,
-                    sizeBytes: program.sizeBytes,
-                    createdAt: program.createdAt.toISOString(),
-                    updatedAt: program.updatedAt.toISOString(),
-                    createdByTx: program.createdByTx,
-                    lastModifiedByTx: program.lastModifiedByTx,
+                    participating: isParticipating,
+                    l2psUid: data.l2psUid,
+                    nodeIdentity: getSharedState.publicKeyHex,
                 }
+
+                log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
             } catch (error) {
-                log.error(`[manageNodeCall] getStorageProgram error: ${error}`)
+                log.error("[L2PS] Error checking L2PS participation:", error)
                 response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
+                response.response = "Internal error checking L2PS participation"
             }
             break
-        }
 
-        case "getStorageProgramsByOwner": {
-            const owner = data.owner
-            const requesterAddress = data.requesterAddress // Optional identity for ACL filtering
-
-            if (!owner) {
+        case "getL2PSMempoolInfo": {
+            // REVIEW: Phase 3c-1 - L2PS mempool info endpoint
+            console.log("[L2PS] Received L2PS mempool info request")
+            if (!data.l2psUid) {
                 response.result = 400
-                response.response = null
-                response.extra = { error: "Owner address is required" }
+                response.response = "No L2PS UID specified"
                 break
             }
 
             try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
+                // Get all processed transactions for this L2PS UID
+                const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
 
-                const programs =
-                    await GCRStorageProgramRoutines.getStorageProgramsByOwner(
-                        owner,
-                        repository,
-                    )
-
-                // Filter to only programs the requester can read
-                const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    ),
-                )
-
-                response.response = accessiblePrograms.map(p => ({
-                    storageAddress: p.storageAddress,
-                    programName: p.programName,
-                    encoding: p.encoding,
-                    sizeBytes: p.sizeBytes,
-                    data: p.data,
-                    acl: p.acl,
-                    storageLocation: p.storageLocation,
-                    createdAt: p.createdAt.toISOString(),
-                    updatedAt: p.updatedAt.toISOString(),
-                }))
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramsByOwner error: ${error}`,
-                )
-                response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
-            break
-        }
-
-        case "searchStoragePrograms": {
-            const query = data.query
-            const options = data.options || {} // { limit, offset, exactMatch }
-            const requesterAddress = data.requesterAddress // Optional identity for ACL filtering
-
-            if (!query || (typeof query === "string" && query.trim() === "")) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "Search query is required" }
-                break
-            }
-
-            try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
-
-                const programs =
-                    await GCRStorageProgramRoutines.searchStorageProgramsByName(
-                        typeof query === "string"
-                            ? query.trim()
-                            : String(query),
-                        repository,
-                        {
-                            limit: options.limit || 50,
-                            offset: options.offset || 0,
-                            exactMatch: options.exactMatch || false,
-                        },
-                    )
-
-                // Filter to only programs the requester can read
-                const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    ),
-                )
-
-                response.response = accessiblePrograms.map(p => ({
-                    storageAddress: p.storageAddress,
-                    programName: p.programName,
-                    encoding: p.encoding,
-                    sizeBytes: p.sizeBytes,
-                    data: p.data,
-                    acl: p.acl,
-                    storageLocation: p.storageLocation,
-                    createdAt: p.createdAt.toISOString(),
-                    updatedAt: p.updatedAt.toISOString(),
-                }))
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] searchStoragePrograms error: ${error}`,
-                )
-                response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
-            break
-        }
-
-        // REVIEW: Storage Program Standard Calls - Granular Read Methods
-        // These methods provide fine-grained access to storage program data fields
-        // All methods enforce ACL permissions and reject binary-encoded data
-
-        /**
-         * getStorageProgramFields - Returns all field names (keys) from the storage program data
-         * @param storageAddress - The storage program address (with or without stor- prefix)
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns Array of field names
-         */
-        case "getStorageProgramFields": {
-            const rawStorageAddress = data.storageAddress
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
-                break
-            }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
-
-            try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
-
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
-
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
-                }
-
-                // Check read permission
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
-                // Reject binary encoding - granular access requires JSON
-                if (program.encoding === "binary") {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
-                    }
-                    break
-                }
-
-                // Return field names
-                const fields =
-                    program.data && typeof program.data === "object"
-                        ? Object.keys(program.data)
-                        : []
-
+                response.result = 200
                 response.response = {
-                    storageAddress: program.storageAddress,
-                    fields,
+                    l2psUid: data.l2psUid,
+                    transactionCount: transactions.length,
+                    lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
+                    oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
                 }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramFields error: ${error}`,
-                )
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get mempool info:", error)
                 response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
+                response.response = "Failed to get L2PS mempool info"
+                response.extra = error.message || "Internal error"
             }
             break
         }
 
-        /**
-         * getStorageProgramValue - Returns the value of a specific field
-         * @param storageAddress - The storage program address
-         * @param field - The field name to retrieve
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns The field value
-         */
-        case "getStorageProgramValue": {
-            const rawStorageAddress = data.storageAddress
-            const field = data.field
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
+        case "getL2PSTransactions": {
+            // REVIEW: Phase 3c-1 - L2PS transactions sync endpoint
+            console.log("[L2PS] Received L2PS transactions sync request")
+            if (!data.l2psUid) {
                 response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
+                response.response = "No L2PS UID specified"
                 break
             }
-
-            if (!field || typeof field !== "string") {
-                response.result = 400
-                response.response = null
-                response.extra = {
-                    error: "Field name is required and must be a string",
-                }
-                break
-            }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
 
             try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
+                // Optional timestamp filter for incremental sync
+                const sinceTimestamp = data.since_timestamp || 0
 
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
+                // Get all processed transactions for this L2PS UID
+                let transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
 
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
+                // Filter by timestamp if provided (incremental sync)
+                if (sinceTimestamp > 0) {
+                    transactions = transactions.filter(tx => tx.timestamp > sinceTimestamp)
                 }
 
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
-                if (program.encoding === "binary") {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
-                    }
-                    break
-                }
-
-                // Check if field exists
-                if (
-                    !program.data ||
-                    typeof program.data !== "object" ||
-                    !(field in program.data)
-                ) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = { error: `Field not found: ${field}` }
-                    break
-                }
-
+                // Return encrypted transactions (validators never see this)
+                // Only L2PS participants can decrypt
+                response.result = 200
                 response.response = {
-                    storageAddress: program.storageAddress,
-                    field,
-                    value: (program.data as Record<string, unknown>)[field],
+                    l2psUid: data.l2psUid,
+                    transactions: transactions.map(tx => ({
+                        hash: tx.hash,
+                        l2ps_uid: tx.l2ps_uid,
+                        original_hash: tx.original_hash,
+                        encrypted_tx: tx.encrypted_tx,
+                        timestamp: tx.timestamp,
+                        block_number: tx.block_number,
+                    })),
+                    count: transactions.length,
                 }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramValue error: ${error}`,
-                )
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get transactions:", error)
                 response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
+                response.response = "Failed to get L2PS transactions"
+                response.extra = error.message || "Internal error"
             }
             break
         }
 
-        /**
-         * getStorageProgramItem - Returns an item from an array field at a specific index
-         * @param storageAddress - The storage program address
-         * @param field - The field name (must be an array)
-         * @param index - The array index to retrieve
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns The item at the specified index
-         */
-        case "getStorageProgramItem": {
-            const rawStorageAddress = data.storageAddress
-            const field = data.field
-            const index = data.index
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
+        case "getL2PSAccountTransactions": {
+            // L2PS transaction history for a specific account
+            // REQUIRES AUTHENTICATION: User must sign a message to prove address ownership
+            console.log("[L2PS] Received account transactions request")
+            if (!data.l2psUid || !data.address) {
                 response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
+                response.response = "L2PS UID and address are required"
                 break
             }
 
-            if (!field || typeof field !== "string") {
-                response.result = 400
-                response.response = null
+            // Verify ownership via signature
+            // User must provide: signature of message "getL2PSHistory:{address}:{timestamp}"
+            if (!data.signature || !data.timestamp) {
+                response.result = 401
+                response.response = "Authentication required. Provide signature and timestamp."
                 response.extra = {
-                    error: "Field name is required and must be a string",
+                    message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
+                    example: `getL2PSHistory:${data.address}:${Date.now()}`
                 }
                 break
             }
 
-            if (
-                typeof index !== "number" ||
-                !Number.isInteger(index) ||
-                index < 0
-            ) {
-                response.result = 400
-                response.response = null
-                response.extra = {
-                    error: "Index is required and must be a non-negative integer",
-                }
+            // Validate timestamp (max 5 minutes old to prevent replay attacks)
+            const requestTime = Number.parseInt(data.timestamp, 10)
+            const now = Date.now()
+            if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
+                response.result = 401
+                response.response = "Request expired or invalid timestamp."
                 break
             }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
 
             try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
+                // Verify signature using Cryptography class
+                const expectedMessage = `getL2PSHistory:${data.address}:${data.timestamp}`
 
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
+                // Import Cryptography for signature verification
+                const Cryptography = (await import("../crypto/cryptography")).default
 
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
+                // Address should be hex public key, signature should be hex
+                let signature = data.signature
+                let publicKey = data.address
+
+                // Remove 0x prefix if present
+                if (signature.startsWith("0x")) signature = signature.slice(2)
+                if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
+
+                // Verify signature - wrap in try-catch as invalid format throws
+                let isValid = false
+                try {
+                    isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+                } catch (verifyError: any) {
+                    log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
+                    // Invalid signature format - treat as auth failure
+                    isValid = false
                 }
 
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
+                if (!isValid) {
                     response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
+                    response.response = "Invalid signature. Unable to verify address ownership."
                     break
                 }
 
-                if (program.encoding === "binary") {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
-                    }
-                    break
-                }
+                // Signature verified - user owns this address
+                log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
 
-                if (
-                    !program.data ||
-                    typeof program.data !== "object" ||
-                    !(field in program.data)
-                ) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = { error: `Field not found: ${field}` }
-                    break
-                }
+                const maxLimit = 1000
+                const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
+                const offset = Math.max(0, data.offset || 0)
 
-                const fieldValue = (program.data as Record<string, unknown>)[
-                    field
-                ]
-                if (!Array.isArray(fieldValue)) {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: `Field '${field}' is not an array`,
-                    }
-                    break
-                }
-
-                if (index >= fieldValue.length) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Index ${index} out of bounds. Array length: ${fieldValue.length}`,
-                    }
-                    break
-                }
-
-                response.response = {
-                    storageAddress: program.storageAddress,
-                    field,
-                    index,
-                    item: fieldValue[index],
-                }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramItem error: ${error}`,
+                // Import the executor to get account transactions
+                const { default: L2PSTransactionExecutor } = await import("../l2ps/L2PSTransactionExecutor")
+                const transactions = await L2PSTransactionExecutor.getAccountTransactions(
+                    data.l2psUid,
+                    data.address,
+                    limit,
+                    offset
                 )
-                response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
-            break
-        }
 
-        /**
-         * hasStorageProgramField - Checks if a field exists in the storage program data
-         * @param storageAddress - The storage program address
-         * @param field - The field name to check
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns Boolean indicating if field exists
-         */
-        case "hasStorageProgramField": {
-            const rawStorageAddress = data.storageAddress
-            const field = data.field
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
-                break
-            }
-
-            if (!field || typeof field !== "string") {
-                response.result = 400
-                response.response = null
-                response.extra = {
-                    error: "Field name is required and must be a string",
-                }
-                break
-            }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
-
-            try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
-
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
-
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
-                }
-
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
-                if (program.encoding === "binary") {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
-                    }
-                    break
-                }
-
-                const hasField =
-                    program.data &&
-                    typeof program.data === "object" &&
-                    field in program.data
-
+                response.result = 200
                 response.response = {
-                    storageAddress: program.storageAddress,
-                    field,
-                    exists: hasField,
+                    l2psUid: data.l2psUid,
+                    address: data.address,
+                    authenticated: true,
+                    transactions: transactions.map(tx => {
+                        // Extract message from transaction content if execution_message is not set
+                        // Content structure: data[1].message
+                        let txMessage = tx.execution_message
+                        if (!txMessage && tx.content?.data?.[1]?.message) {
+                            txMessage = tx.content.data[1].message
+                        }
+
+                        return {
+                            hash: tx.hash,
+                            encrypted_hash: tx.encrypted_hash,
+                            l1_batch_hash: tx.l1_batch_hash,
+                            type: tx.type,
+                            from: tx.from_address,
+                            to: tx.to_address,
+                            amount: tx.amount?.toString() || "0",
+                            status: tx.status,
+                            timestamp: tx.timestamp?.toString() || "0",
+                            l1_block_number: tx.l1_block_number,
+                            execution_message: txMessage
+                        }
+                    }),
+                    count: transactions.length,
+                    hasMore: transactions.length === limit
                 }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] hasStorageProgramField error: ${error}`,
-                )
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get account transactions:", error)
                 response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
-            break
-        }
-
-        /**
-         * getStorageProgramFieldType - Returns the type of a specific field
-         * @param storageAddress - The storage program address
-         * @param field - The field name to check
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns The field type (string, number, boolean, array, object, null, undefined)
-         */
-        case "getStorageProgramFieldType": {
-            const rawStorageAddress = data.storageAddress
-            const field = data.field
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
-                break
-            }
-
-            if (!field || typeof field !== "string") {
-                response.result = 400
-                response.response = null
-                response.extra = {
-                    error: "Field name is required and must be a string",
-                }
-                break
-            }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
-
-            try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
-
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
-
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
-                }
-
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
-                if (program.encoding === "binary") {
-                    response.result = 400
-                    response.response = null
-                    response.extra = {
-                        error: "Granular field access is not supported for binary-encoded storage programs. Use getStorageProgram for full data access.",
-                    }
-                    break
-                }
-
-                if (
-                    !program.data ||
-                    typeof program.data !== "object" ||
-                    !(field in program.data)
-                ) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = { error: `Field not found: ${field}` }
-                    break
-                }
-
-                const value = (program.data as Record<string, unknown>)[field]
-                let fieldType: string
-
-                if (value === null) {
-                    fieldType = "null"
-                } else if (Array.isArray(value)) {
-                    fieldType = "array"
-                } else {
-                    fieldType = typeof value
-                }
-
-                response.response = {
-                    storageAddress: program.storageAddress,
-                    field,
-                    type: fieldType,
-                }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramFieldType error: ${error}`,
-                )
-                response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
-            }
-            break
-        }
-
-        /**
-         * getStorageProgramAll - Alias for getStorageProgram, returns all data
-         * This provides consistency with the granular method naming convention
-         * @param storageAddress - The storage program address
-         * @param requesterAddress - Optional requester identity for ACL check
-         * @returns Full storage program data (same as getStorageProgram)
-         */
-        case "getStorageProgramAll": {
-            const rawStorageAddress = data.storageAddress
-            const requesterAddress = data.requesterAddress
-
-            if (!rawStorageAddress) {
-                response.result = 400
-                response.response = null
-                response.extra = { error: "Storage address is required" }
-                break
-            }
-
-            const storageAddress = normalizeStorageAddress(rawStorageAddress)
-
-            try {
-                const db = await Datasource.getInstance()
-                const repository = db
-                    .getDataSource()
-                    .getRepository(GCRStorageProgram)
-
-                const program =
-                    await GCRStorageProgramRoutines.getStorageProgram(
-                        storageAddress,
-                        repository,
-                    )
-
-                if (!program) {
-                    response.result = 404
-                    response.response = null
-                    response.extra = {
-                        error: `Storage program not found: ${storageAddress}`,
-                    }
-                    break
-                }
-
-                const hasReadAccess =
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    )
-
-                if (!hasReadAccess) {
-                    response.result = 403
-                    response.response = null
-                    response.extra = {
-                        error: "Permission denied: You do not have read access to this storage program",
-                    }
-                    break
-                }
-
-                response.response = {
-                    storageAddress: program.storageAddress,
-                    owner: program.owner,
-                    programName: program.programName,
-                    encoding: program.encoding,
-                    data: program.data,
-                    metadata: program.metadata,
-                    storageLocation: program.storageLocation,
-                    sizeBytes: program.sizeBytes,
-                    createdAt: program.createdAt.toISOString(),
-                    updatedAt: program.updatedAt.toISOString(),
-                    createdByTx: program.createdByTx,
-                    lastModifiedByTx: program.lastModifiedByTx,
-                }
-            } catch (error) {
-                log.error(
-                    `[manageNodeCall] getStorageProgramAll error: ${error}`,
-                )
-                response.result = 500
-                response.response = null
-                response.extra = {
-                    error:
-                        error instanceof Error ? error.message : String(error),
-                }
+                response.response = "Failed to get L2PS account transactions"
+                response.extra = error.message || "Internal error"
             }
             break
         }

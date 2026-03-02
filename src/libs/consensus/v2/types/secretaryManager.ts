@@ -573,7 +573,13 @@ export default class SecretaryManager {
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
-            promises.push(member.longCall(request, true, 250, 4, [400]))
+            promises.push(
+                member.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 4,
+                    allowedCodes: [400],
+                }),
+            )
         }
 
         const results = await Promise.all(promises)
@@ -760,7 +766,10 @@ export default class SecretaryManager {
 
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug("Secretary is: " + this.secretary.identity)
-            return await this.secretary.longCall(request, true, 250, retries)
+            return await this.secretary.longCall(request, true, {
+                retries,
+                sleepTime: 250,
+            })
         }
 
         const handleSendStatusRes = async (res: RPCResponse) => {

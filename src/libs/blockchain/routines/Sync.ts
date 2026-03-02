@@ -13,7 +13,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Conflict handling between peers (longest chain)
 
 import { getSharedState } from "src/utilities/sharedState"
-import terminalkit from "terminal-kit"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
@@ -24,11 +23,19 @@ import {
     RPCResponse,
     Transaction,
 } from "@kynesyslabs/demosdk/types"
-import { BlockNotFoundError, PeerUnreachableError } from "src/exceptions"
+import {
+    BlockNotFoundError,
+    PeerUnreachableError,
+    TimeoutError,
+} from "src/exceptions"
 import HandleGCR from "../gcr/handleGCR"
+import {
+    discoverL2PSParticipants,
+    syncL2PSWithPeer,
+    exchangeL2PSParticipation,
+} from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-
-const term = terminalkit.terminal
+import { Waiter } from "@/utilities/waiter"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -44,6 +51,7 @@ const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
 /**
+ * @deprecated
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
  *
@@ -67,9 +75,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
 
     log.info(
         "[fastSync] Our last block number is " +
-            ourLastBlockNumber +
-            " and our last block hash is " +
-            ourLastBlockHash,
+        ourLastBlockNumber +
+        " and our last block hash is " +
+        ourLastBlockHash,
     )
 
     // REVIEW: With the peer gossip working, can we replace getLastBlockNumber
@@ -108,6 +116,22 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
         promises.set(peer.identity, peer.call(call, false))
     }
 
+    // REVIEW: Phase 3c-3 - Discover L2PS participants concurrently with block discovery
+    // Run L2PS discovery in background (non-blocking, doesn't await)
+    if (getSharedState.l2psJoinedUids?.length > 0) {
+        discoverL2PSParticipants(peers, getSharedState.l2psJoinedUids)
+            .then(participantMap => {
+                let totalParticipants = 0
+                for (const participants of participantMap.values()) {
+                    totalParticipants += participants.length
+                }
+                log.debug(`[Sync] Discovered L2PS participants: ${participantMap.size} networks, ${totalParticipants} total peers`)
+            })
+            .catch(error => {
+                log.error("[Sync] L2PS participant discovery failed:", error.message)
+            })
+    }
+
     // Wait for all the promises to resolve (synchronously?)
     const responses = new Map<string, RPCResponse>()
     for (const [peerId, promise] of promises) {
@@ -122,9 +146,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
             peerLastBlockNumbers.push(response[1].response as number)
             log.info(
                 "[fastSync] Peer " +
-                    response[0] +
-                    " has last block number: " +
-                    response[1].response,
+                response[0] +
+                " has last block number: " +
+                response[1].response,
             )
             // INFO: Log request block number for insights!
             requestBlockNumbers.push({
@@ -167,9 +191,9 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     const highestBlockNumberPeer = peers[highestBlockNumberPeerIndex]
     log.info(
         "[fastSync] Peer with highest last block number: " +
-            highestBlockNumberPeer.identity +
-            " with block number: " +
-            highestBlockNumber,
+        highestBlockNumberPeer.identity +
+        " with block number: " +
+        highestBlockNumber,
     )
 
     return {
@@ -199,7 +223,11 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest)
+    const blockResponse = await peer.longCall(blockRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     if (blockResponse.result === 200) {
         return blockResponse.response as Block
@@ -207,6 +235,7 @@ async function getRemoteBlock(peer: Peer, blockNumber: number) {
 
     return null
 }
+
 /**
  * Verify if our last block is coherent with the same block from the peer.
  *
@@ -257,14 +286,13 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    log.info("[downloadBlock] Block received: " + block.hash)
     await Chain.insertBlock(block, [], null, false)
     log.debug("Block inserted successfully")
     log.debug(
         "Last block number: " +
-            getSharedState.lastBlockNumber +
-            " Last block hash: " +
-            getSharedState.lastBlockHash,
+        getSharedState.lastBlockNumber +
+        " Last block hash: " +
+        getSharedState.lastBlockHash,
     )
     log.info("[fastSync] Block inserted successfully at the head of the chain!")
 
@@ -304,7 +332,6 @@ export async function syncBlock(block: Block, peer: Peer) {
  * @returns The block if downloaded successfully, false otherwise
  */
 async function downloadBlock(peer: Peer, blockToAsk: number) {
-    log.debug("Downloading block: " + blockToAsk)
     const blockRequest: RPCRequest = {
         method: "nodeCall",
         params: [
@@ -316,7 +343,11 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         ],
     }
 
-    const blockResponse = await peer.httpCall(blockRequest)
+    const blockResponse = await peer.longCall(blockRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
     log.debug("Block response: " + blockResponse.result)
 
     // INFO: Handle max retries reached
@@ -351,6 +382,162 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
     return false
 }
 
+// Helper function to ask for transactions in batches
+export async function askTxsForBlocksBatch(
+    blocks: Block[],
+    peer: Peer,
+): Promise<Record<string, Transaction>> {
+    // Extract all unique transaction hashes from all blocks
+    const allTxHashes = blocks.flatMap(
+        block => block.content.ordered_transactions,
+    )
+
+    // Remove duplicates
+    const uniqueTxHashes = [...new Set(allTxHashes)]
+
+    // Fetch transactions in batches
+    const batchSize = getSharedState.batchSyncTxSize
+    const txMap = {}
+
+    for (let i = 0; i < uniqueTxHashes.length; i += batchSize) {
+        const batch = uniqueTxHashes.slice(i, i + batchSize)
+
+        const txRequest: RPCRequest = {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getTxsByHashes",
+                    data: { hashes: batch },
+                    muid: null,
+                },
+            ],
+        }
+
+        const txResponse = await peer.call(txRequest, false)
+
+        if (txResponse.result === 200) {
+            const transactions = txResponse.response as Transaction[]
+            // Build hash -> transaction map
+            transactions.forEach(tx => {
+                txMap[tx.hash] = tx
+            })
+        } else {
+            log.error(
+                "[askTxsForBlocksBatch] Failed to fetch batch of transactions",
+            )
+        }
+    }
+
+    return txMap
+}
+
+/**
+ * Download and process a batch of blocks from a peer
+ *
+ * @param peer - The peer to download blocks from
+ * @param startBlock - The first block number to download
+ * @param endBlock - The last block number to download (inclusive)
+ * @returns True if all blocks were downloaded and processed successfully
+ */
+async function batchDownloadBlocks(
+    peer: Peer,
+    startBlock: number,
+    endBlock: number,
+): Promise<boolean> {
+    const batchSize = getSharedState.batchSyncBlockSize
+    const totalBlocks = endBlock - startBlock + 1
+    const limit = Math.min(totalBlocks, batchSize)
+
+    log.debug(
+        `[batchDownloadBlocks] Fetching ${limit} blocks from ${startBlock} to ${startBlock + limit - 1
+        }`,
+    )
+
+    // Fetch batch of blocks
+    const blocksRequest: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlocks",
+                data: { start: startBlock + limit, limit },
+                muid: null,
+            },
+        ],
+    }
+
+    const blocksResponse = await peer.longCall(blocksRequest, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
+
+    // Handle errors
+    if (blocksResponse.result === 400) {
+        log.error("[batchDownloadBlocks] Peer is offline")
+        throw new PeerUnreachableError("Peer is offline")
+    }
+
+    if (blocksResponse.result === 404) {
+        log.error("[batchDownloadBlocks] Blocks not found")
+        throw new BlockNotFoundError("Blocks not found")
+    }
+
+    if (blocksResponse.result !== 200) {
+        log.error(
+            `[batchDownloadBlocks] Unexpected response: ${blocksResponse.result}`,
+        )
+        return false
+    }
+
+    const blocks = blocksResponse.response as Block[]
+    if (!blocks || blocks.length === 0) {
+        log.error("[batchDownloadBlocks] No blocks received")
+        return false
+    }
+
+    // Fetch all transactions for all blocks in batch
+    const txMap = await askTxsForBlocksBatch(blocks, peer)
+    log.info(
+        `[batchDownloadBlocks] Fetched ${Object.keys(txMap).length
+        } unique transactions`,
+    )
+
+    // Process each block in order
+    for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        const blockTxs = block.content.ordered_transactions
+            .map(txHash => txMap[txHash])
+            .filter(tx => !!tx)
+
+        // Insert block
+        await Chain.insertBlock(block, [], null, false)
+        log.info(
+            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
+        )
+
+        // Merge peerlist
+        await mergePeerlist(block)
+
+        // Sync GCR tables
+        await syncGCRTables(blockTxs)
+
+        // Insert transactions
+        if (blockTxs.length > 0) {
+            const success = await Chain.insertTransactionsFromSync(blockTxs)
+            if (!success) {
+                log.error(
+                    `[batchDownloadBlocks] Failed to insert transactions for block ${block.number}`,
+                )
+                return false
+            }
+        }
+    }
+
+    log.debug(
+        `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
+    )
+    return true
+}
+
 /**
  * Wait for the next block to be generated and download it
  *
@@ -358,85 +545,173 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
  * @returns True if the block was downloaded successfully, false otherwise
  */
 async function waitForNextBlock() {
-    const entryBlock = getSharedState.lastBlockNumber
+    try {
+        log.debug(
+            "[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳",
+        )
+        const [newBlock, peer] = await Waiter.wait(
+            Waiter.keys.SYNC_WAIT_FOR_BLOCK,
+            120_000,
+        )
+        log.debug("[waitForNextBlock] Block received: " + newBlock.number)
 
-    while (entryBlock >= latestBlock()) {
-        await sleep(250)
+        return await syncBlock(newBlock as Block, peer)
+    } catch (error) {
+        if (error instanceof TimeoutError) {
+            log.error("[waitForNextBlock] Timeout waiting for next block")
+            return false
+        }
+
+        console.error(error)
+        return false
+    }
+}
+
+/**
+ * Trigger L2PS mempool sync with peer in background (non-blocking)
+ */
+function triggerL2PSSync(peer: Peer): void {
+    if (!getSharedState.l2psJoinedUids?.length || !peer) {
+        return
     }
 
-    return await downloadBlock(highestBlockPeer(), entryBlock + 1)
+    for (const l2psUid of getSharedState.l2psJoinedUids) {
+        syncL2PSWithPeer(peer, l2psUid)
+            .then(() => {
+                log.debug(`[Sync] L2PS mempool synced: ${l2psUid}`)
+            })
+            .catch(error => {
+                log.error(`[Sync] L2PS sync failed for ${l2psUid}:`, error.message)
+            })
+    }
+}
+
+/**
+ * Find the next available peer with highest block, excluding seen peers
+ */
+function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
+    const highestBlockPeers = peerManager
+        .getAll()
+        .filter(p => p.sync.block === latestBlock())
+        .filter(p => !seenPeers.has(p.identity))
+
+    log.info(
+        "[fastSync] Highest block peers: " +
+        JSON.stringify(
+            highestBlockPeers.map(p => p.connection.string),
+            null,
+            2,
+        ),
+    )
+
+    if (highestBlockPeers.length === 0) {
+        return null
+    }
+
+    log.info(
+        "[fastSync] Switched to peer: " +
+        highestBlockPeers[0].connection.string,
+    )
+    return highestBlockPeers[0]
+}
+
+/**
+ * Handle peer unreachable error during block sync
+ */
+function handlePeerUnreachable(
+    peer: Peer,
+    seenPeers: Set<string>,
+): Peer | null {
+    log.debug(
+        "[fastSync] Peer " +
+        peer.identity +
+        " is unreachable. Switching to the next peer.",
+    )
+    seenPeers.add(peer.identity)
+    return findNextAvailablePeer(seenPeers)
 }
 
 /**
  * Request the blocks from the peer
  *
- * @param peer - The peer to request the blocks from
- * @returns True if the blocks were requested successfully, false otherwise
+ * @returns True if the blocks were synced successfully, false otherwise
  */
-async function requestBlocks() {
-    // REVIEW: lowest or highest?
-    // Sync the blocks one by one starting from the lowest block number that we do not have
-    // ? Way more error handling needed
-    // console.error(
-    //     "[fastSync] Syncing blocks from peer: " + JSON.stringify(peer),
-    // )
-
-    // if (!peerManager.getPeer(peer.identity)) {
-    //     log.error("[fastSync] Peer not found")
-    //     return false
-    // }
+async function requestBlocks(): Promise<boolean> {
     const seenPeers = new Set<string>()
     let peer = highestBlockPeer()
 
-    while (getSharedState.lastBlockNumber <= latestBlock()) {
-        const blockToAsk = getSharedState.lastBlockNumber + 1
-        // log.debug("[fastSync] Sleeping for 1 second")
-        await sleep(250)
+    while (getSharedState.lastBlockNumber < latestBlock()) {
+        log.debug("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
+        const startBlock = getSharedState.lastBlockNumber + 1
+        const endBlock = latestBlock()
+        const blocksToSync = endBlock - startBlock + 1
+
+        log.debug(
+            `[requestBlocks] Need to sync ${blocksToSync} blocks (${startBlock} to ${endBlock})`,
+        )
+
         try {
-            await downloadBlock(peer, blockToAsk)
+            // Download batch of blocks
+            await batchDownloadBlocks(peer, startBlock, endBlock)
+            await BroadcastManager.broadcastOurSyncData()
+
+            // Trigger L2PS sync
+            triggerL2PSSync(peer)
+
+            log.debug(
+                `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
+            )
         } catch (error) {
-            // INFO: Handle chain head reached
+            console.error(error)
+            // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
-                log.info("[fastSync] Block not found")
+                log.info(
+                    "[requestBlocks] Reached end of available blocks on peer",
+                )
                 break
             }
 
+            // Handle peer unreachable - switch to next peer
             if (error instanceof PeerUnreachableError) {
                 log.debug(
-                    "[fastSync] Peer " +
-                        peer.identity +
-                        " is unreachable. Switching to the next peer.",
+                    `[requestBlocks] Peer ${peer.identity} is unreachable. Switching to next peer.`,
                 )
                 seenPeers.add(peer.identity)
 
+                // Find alternative peers with highest block
                 const highestBlockPeers = peerManager
                     .getAll()
                     .filter(p => p.sync.block === latestBlock())
                     .filter(p => !seenPeers.has(p.identity))
 
                 log.info(
-                    "[fastSync] Highest block peers: " +
-                        JSON.stringify(
-                            highestBlockPeers.map(p => p.connection.string),
-                            null,
-                            2,
-                        ),
+                    `[requestBlocks] Available highest block peers: ${highestBlockPeers.length}`,
                 )
 
                 if (highestBlockPeers.length === 0) {
-                    log.error("[fastSync] No more peers to try")
+                    log.error("[requestBlocks] No more peers available to sync")
                     return false
                 }
 
-                log.info(
-                    "[fastSync] Switched to peer: " +
-                        highestBlockPeers[0].connection.string,
-                )
                 peer = highestBlockPeers[0]
+                log.info(
+                    `[requestBlocks] Switched to peer: ${peer.connection.string}`,
+                )
+
+                // Retry the current batch with new peer
+                continue
             }
+
+            // Unknown error - log and break
+            log.error(
+                `[requestBlocks] Unexpected error during batch sync: ${error instanceof Error ? error.message : "Unknown error"
+                }`,
+            )
+            return false
         }
     }
 
+    log.info("[requestBlocks] Block sync completed successfully")
     return latestBlock() === getSharedState.lastBlockNumber
 }
 
@@ -471,23 +746,55 @@ export async function askTxsForBlock(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    const res = await peer.httpCall(
-        {
-            method: "nodeCall",
-            params: [
-                {
-                    message: "getBlockTransactions",
-                    data: { blockHash: block.hash },
-                },
-            ],
-        },
-        false,
-    )
+    if (
+        Array.isArray(block.content.ordered_transactions) &&
+        block.content.ordered_transactions.length === 0
+    ) {
+        return []
+    }
+
+    let request: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlockTransactions",
+                data: { blockHash: block.hash },
+            },
+        ],
+    }
+
+    let res = await peer.longCall(request, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
 
     if (res.result === 200) {
         return res.response as Transaction[]
     }
 
+    // INFO: fetch all transactions by hashes
+    request = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getTxsByHashes",
+                data: { hashes: block.content.ordered_transactions },
+            },
+        ],
+    }
+
+    res = await peer.longCall(request, true, {
+        protocol: "http",
+        sleepTime: 1000,
+        retries: 3,
+    })
+
+    if (res.result === 200) {
+        return res.response as Transaction[]
+    }
+
+    log.error("[askTxsForBlock] Failed to fetch transactions")
     return []
 }
 
@@ -509,6 +816,23 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
         const success = peerManager.addPeer(peerObject)
         if (success) {
             mergedPeers.push(peerObject.identity)
+        }
+    }
+
+    // REVIEW: Phase 3c-3 - Exchange L2PS participation with newly discovered peers
+    // Inform new peers about our L2PS networks (non-blocking)
+    if (mergedPeers.length > 0 && getSharedState.l2psJoinedUids?.length > 0) {
+        const newPeerObjects = mergedPeers
+            .map(identity => peerManager.getPeer(identity))
+            .filter((peer): peer is Peer => peer !== undefined)
+
+        if (newPeerObjects.length > 0) {
+            // Run in background, don't block blockchain sync
+            exchangeL2PSParticipation(newPeerObjects, getSharedState.l2psJoinedUids)
+                .catch(error => {
+                    log.error("[Sync] L2PS participation exchange failed:", error.message)
+                })
+            log.debug(`[Sync] Exchanging L2PS participation with ${newPeerObjects.length} new peers`)
         }
     }
 
@@ -536,11 +860,21 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
+        log.debug(
+            "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
+        )
         await sleep(500)
     }
 
     if (getSharedState.fastSyncCount === 0) {
-        await waitForNextBlock()
+        // await waitForNextBlock()
+        while (!(await waitForNextBlock())) {
+            log.debug(
+                "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
+            )
+        }
+
+        log.debug("[fastSync] Wait for next block complete! 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
     }
 
     return latestBlock() === getSharedState.lastBlockNumber
@@ -550,19 +884,28 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<boolean> {
+    if (getSharedState.inSyncLoop) {
+        log.debug("[fastSync] Sync loop already running, skipping")
+        return true
+    }
+
     getSharedState.inSyncLoop = true
     const synced = await fastSyncRoutine(peers)
+    log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.debug("[fastSync] Sync status: " + synced)
     getSharedState.syncStatus = synced
     await BroadcastManager.broadcastOurSyncData()
 
+    log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.info(
+    log.debug(
         "[fastSync] DB Last block number after sync: " +
-            lastBlockNumber +
-            " from: " +
-            from,
+        lastBlockNumber +
+        " from: " +
+        from,
     )
 
     getSharedState.inSyncLoop = false
+    log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     return true
 }
