@@ -864,20 +864,20 @@ async function main() {
 // INFO Starting the main routine
 main()
 // Graceful shutdown handler
-let isShuttingDown = false
 async function gracefulShutdown(signal: string) {
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
-    if (isShuttingDown) {
+    if (getSharedState.isShuttingDown) {
         return
     }
-    isShuttingDown = true
+    getSharedState.isShuttingDown = true
+    getSharedState.runMainLoop = false
 
     console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
 
     // Force exit after 10 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
-        console.error("[SHUTDOWN] Timeout exceeded, forcing exit...")
-        process.exit(1)
+        console.log("[SHUTDOWN] Timeout exceeded, forcing exit...")
+        process.exit(0)
     }, 10_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
