@@ -868,8 +868,7 @@ let isShuttingDown = false
 async function gracefulShutdown(signal: string) {
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (isShuttingDown) {
-        console.log("[SHUTDOWN] Already shutting down, forcing exit...")
-        process.exit(1)
+        return
     }
     isShuttingDown = true
 
