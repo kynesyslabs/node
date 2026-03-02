@@ -77,6 +77,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_query_coverage`: exercises read APIs (`token.get`, `token.getBalance`, `token.getHolderPointers`, missing-token behavior).
 - `token_edge_cases`: negative cases (0 amounts, insufficient balance, missing token) + explicit **self-transfer no-op** invariant.
 - `token_invariants_known_holders`: strict invariant verifier: `totalSupply == sum(balances)` and (optionally) “no unknown holders” in the balances map (useful when the harness controls the full holder set).
+- `token_pause_under_load`: runs transfer load, pauses mid-run, asserts transfer/mint/burn reject while paused, unpauses, then verifies committed convergence across nodes.
 
 **Token ACL**
 - `token_acl_smoke`: minimal grant + action + negative “attacker cannot mint/burn” checks, with cross-node settle + holder pointers.

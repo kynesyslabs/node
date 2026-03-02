@@ -82,6 +82,13 @@ async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
   }
 }
 
+async function nodeCallExact(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {
+  const payload = { method: "nodeCall", params: [{ message, data, muid }] }
+  const { ok, json } = await rpcPost(rpcUrl, payload)
+  if (!ok) return json
+  return json
+}
+
 export async function nodeCall(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {
   const toCommitted = (m: string) => {
     switch (m) {
@@ -165,11 +172,16 @@ async function waitForTokenExists(rpcUrl: string, tokenAddress: string, timeoutS
     const res = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${attempt}`)
     last = res
     if (res?.result === 200 && res?.response?.tokenAddress) return
+    const live = await nodeCallExact(rpcUrl, "token.get", { tokenAddress }, `token.get:liveFallback:${attempt}`)
+    last = live
+    if (live?.result === 200 && live?.response?.tokenAddress) return
     attempt++
     const backoffMs = Math.min(2000, 100 + attempt * 100)
     await sleep(backoffMs)
   }
-  throw new Error(`Token not visible via nodeCall token.get after ${timeoutSec}s: ${tokenAddress}. Last=${JSON.stringify(last)}`)
+  throw new Error(
+    `Token not visible via nodeCall token.getCommitted (or token.get fallback) after ${timeoutSec}s: ${tokenAddress}. Last=${JSON.stringify(last)}`,
+  )
 }
 
 async function waitForTokenBalanceAtLeast(
@@ -187,6 +199,16 @@ async function waitForTokenBalanceAtLeast(
     if (typeof balRaw === "string") {
       try {
         const bal = BigInt(balRaw)
+        if (bal >= minBalance) return
+      } catch {
+        // ignore
+      }
+    }
+    const live = await nodeCallExact(rpcUrl, "token.getBalance", { tokenAddress, address }, `token.getBalance:liveFallback:${attempt}`)
+    const liveBalRaw = live?.response?.balance
+    if (typeof liveBalRaw === "string") {
+      try {
+        const bal = BigInt(liveBalRaw)
         if (bal >= minBalance) return
       } catch {
         // ignore
