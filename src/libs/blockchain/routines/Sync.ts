@@ -261,8 +261,8 @@ async function verifyLastBlockIntegrity(
 
     if (genesisBlock.hash !== ourGenesisHash) {
         log.error("[fastSync] Genesis hash is not coherent")
-        log.info("[fastSync] Our hash: " + ourGenesisHash)
-        log.info("[fastSync] Peer hash: " + genesisBlock.hash)
+        log.error("[fastSync] Our hash: " + ourGenesisHash)
+        log.error("[fastSync] Peer hash: " + genesisBlock.hash)
         process.exit(1)
     }
 
