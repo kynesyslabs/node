@@ -66,6 +66,24 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
     const rejectCommittedReadIfStateInFlux = (): boolean => {
         if (getSharedState.inGcrApply) {
+            const maxMs = Number.parseInt(
+                process.env.COMMITTED_READ_IN_FLUX_MAX_MS ?? "120000",
+                10,
+            )
+            const since = getSharedState.inGcrApplySinceMs ?? 0
+            const ageMs = since > 0 ? Date.now() - since : 0
+
+            // Watchdog: if the apply phase wedges and never clears, do not permanently
+            // brick committed-only read APIs in dev/test environments. Clear the flag
+            // once it's been stuck long enough, and allow reads to proceed.
+            if (maxMs > 0 && ageMs > maxMs) {
+                log.warn(
+                    `[manageNodeCall] inGcrApply stuck for ${ageMs}ms (> ${maxMs}ms). Clearing inGcrApply to unblock committed reads.`,
+                )
+                getSharedState.inGcrApply = false
+                return false
+            }
+
             response.result = 409
             response.response = {
                 error: "STATE_IN_FLUX",

@@ -76,7 +76,28 @@ export default class SharedState {
 
     // GCR / state application
     // When true, committed-only read APIs should return 409 to avoid serving transient partial state.
-    inGcrApply = false
+    private _inGcrApply = false
+    /**
+     * Timestamp (ms since epoch) marking when `inGcrApply` flipped from false -> true.
+     * Used as a watchdog signal to prevent committed-read APIs from being stuck forever
+     * if the apply phase wedges.
+     */
+    inGcrApplySinceMs = 0
+
+    get inGcrApply(): boolean {
+        return this._inGcrApply
+    }
+
+    set inGcrApply(value: boolean) {
+        const next = !!value
+        if (next && !this._inGcrApply) {
+            this.inGcrApplySinceMs = Date.now()
+        }
+        if (!next) {
+            this.inGcrApplySinceMs = 0
+        }
+        this._inGcrApply = next
+    }
 
     // DTR (Distributed Transaction Routing) - ValidityData cache for retry mechanism
     // Stores ValidityData for transactions that need to be relayed to validators
