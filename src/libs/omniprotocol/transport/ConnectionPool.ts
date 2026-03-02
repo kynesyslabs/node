@@ -268,11 +268,13 @@ export class ConnectionPool extends EventEmitter {
         peerIdentity: string,
         connectionString: string,
         options: ConnectionOptions = {},
-    ): Promise<PeerConnection> {
+    ): Promise<PeerConnection | null> {
         // Try to reuse existing usable connection (prefers newest)
         const peer = PeerManager.getInstance().getPeer(peerIdentity)
         log.only(
-            `==== DEBUG: Acquiring connection to ${peer ? peer.connection.string: "Unknown peer"} ====`,
+            `==== DEBUG: Acquiring connection to ${
+                peer ? peer.connection.string : "Unknown peer"
+            } ====`,
         )
         log.only(`Connection string: ${connectionString}`)
         log.only(`Options: ${JSON.stringify(options)}`)
@@ -323,7 +325,24 @@ export class ConnectionPool extends EventEmitter {
             this.handleConnectionClose(connection, "")
         })
 
+        const removeConnectionFromPool = (connection: PeerConnection): void => {
+            const index = peerConnections.indexOf(connection)
+            if (index !== -1) {
+                peerConnections.splice(index, 1)
+            }
+            if (peerConnections.length === 0) {
+                this.connections.delete(peerIdentity)
+            }
+        }
+
         try {
+            connection.on("error", (error: Error) => {
+                log.error("Connection error in connection handler")
+                // throw error
+                removeConnectionFromPool(connection)
+                return null
+            })
+
             await connection.connect({
                 timeout: options.timeout ?? this.config.connectTimeout,
                 retries: options.retries,
@@ -334,15 +353,9 @@ export class ConnectionPool extends EventEmitter {
             )
             return connection
         } catch (error) {
+            log.error("Error in acquire")
             // Remove failed connection from pool
-            const index = peerConnections.indexOf(connection)
-            if (index !== -1) {
-                peerConnections.splice(index, 1)
-            }
-            if (peerConnections.length === 0) {
-                this.connections.delete(peerIdentity)
-            }
-
+            removeConnectionFromPool(connection)
             throw error
         }
     }
@@ -375,23 +388,36 @@ export class ConnectionPool extends EventEmitter {
     ): Promise<Buffer> {
         const peer = PeerManager.getInstance().getPeer(peerIdentity)
         log.only(
-            `==== DEBUG: Sending request to ${peer ? peer.connection.string: "Unknown peer"} ====`,
+            `==== DEBUG: Sending request to ${
+                peer ? peer.connection.string : "Unknown peer"
+            } ====`,
         )
-        const connection = await this.acquire(
-            peerIdentity,
-            connectionString,
-            options,
-        )
-        log.only(`Resolved connection ID: ${connection.socketId}`)
+        let connection: PeerConnection | null = null
 
         try {
+            connection = await this.acquire(
+                peerIdentity,
+                connectionString,
+                options,
+            )
+            log.only(`Resolved connection ID: ${connection.socketId}`)
+
+            if (!connection) {
+                throw new Error("Connection not found")
+            }
+
             const response = await connection.send(opcode, payload, options)
             this.release(connection)
             return response
         } catch (error) {
-            log.error(`[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`)
+            log.error(
+                `[ConnectionPool] Error sending request to ${peerIdentity}: ${error}`,
+            )
             // On error, close the connection and remove from pool
-            await this.closeConnection(connection)
+            if (connection) {
+                await this.closeConnection(connection)
+            }
+
             throw error
         }
     }
@@ -417,13 +443,19 @@ export class ConnectionPool extends EventEmitter {
         publicKey: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
-        const connection = await this.acquire(
-            peerIdentity,
-            connectionString,
-            options,
-        )
+        let connection: PeerConnection | null = null
 
         try {
+            connection = await this.acquire(
+                peerIdentity,
+                connectionString,
+                options,
+            )
+
+            if (!connection) {
+                throw new Error("Connection not found")
+            }
+
             const response = await connection.sendAuthenticated(
                 opcode,
                 payload,
@@ -435,7 +467,10 @@ export class ConnectionPool extends EventEmitter {
             return response
         } catch (error) {
             // On error, close the connection and remove from pool
-            await this.closeConnection(connection)
+            if (connection) {
+                await this.closeConnection(connection)
+            }
+
             throw error
         }
     }
