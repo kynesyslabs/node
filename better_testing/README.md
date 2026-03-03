@@ -102,6 +102,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_burn_ramp`: ramp scripted burn load.
 - Verified example RUN_IDs:
   - `token_script_burn_ramp-20260303-123438`
+- Complex/branchy scripts (allowlists/fees/quotas/customState maps) are tracked separately in `br` epic `bd-2vy.4` (implementation + runs pending).
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
 - `token_observe`: time-series probe for an existing `TOKEN_ADDRESS` (per-node: last block number/hash, mempool size, balances, and stable state hashes). Useful to debug “nodes agree on last block but disagree on token state”.
 - `token_invariants_known_holders`: invariant verifier for committed token state (works for both scripted and non-scripted tokens; optional known-holder constraint).
