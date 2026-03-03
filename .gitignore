@@ -281,3 +281,6 @@ nohup.out
 # better_testing run outputs (generated)
 better_testing/runs/*
 !better_testing/runs/.gitkeep
+/documentation/internal-docs/src/.deps/npm/@openzeppelin/contracts
+/documentation/internal-docs/src/lib
+/documentation/internal-docs
