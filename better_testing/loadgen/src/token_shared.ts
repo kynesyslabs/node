@@ -1065,6 +1065,49 @@ export async function sendTokenTransferTxWithDemos(params: {
   return { res, fromHex }
 }
 
+export async function buildSignedTokenTransferTxWithDemos(params: {
+  demos: Demos
+  tokenAddress: string
+  to: string
+  amount: bigint
+  nonce: number
+  timestamp?: number
+}) {
+  const { demos } = params
+  const { publicKey } = await demos.crypto.getIdentity("ed25519")
+  const fromHex = uint8ArrayToHex(publicKey)
+
+  const tx = (demos as any).tx.empty()
+  tx.content.type = "native"
+  tx.content.to = params.to
+  tx.content.amount = 0
+  tx.content.nonce = params.nonce
+  tx.content.timestamp = typeof params.timestamp === "number" ? params.timestamp : Date.now()
+  tx.content.data = [
+    "token",
+    {
+      operation: "transfer",
+      tokenAddress: params.tokenAddress,
+      to: params.to,
+      amount: params.amount.toString(),
+    },
+  ]
+
+  const tokenEdit = {
+    type: "token",
+    operation: "transfer",
+    account: fromHex,
+    tokenAddress: params.tokenAddress,
+    txhash: "",
+    isRollback: false,
+    data: { from: fromHex, to: params.to, amount: params.amount.toString() },
+  }
+
+  const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]
+  const signedTx = await signTxWithEdits(demos, tx, edits)
+  return { signedTx, fromHex }
+}
+
 export async function sendTokenMintTxWithDemos(params: {
   demos: Demos
   tokenAddress: string

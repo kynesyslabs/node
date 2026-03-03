@@ -1,4 +1,5 @@
 import {
+  buildSignedTokenTransferTxWithDemos,
   ensureTokenAndBalances,
   getTokenTargets,
   getWalletAddresses,
@@ -62,6 +63,20 @@ function assertRejected(res: any, expectedMessageSubstring: string) {
   if (!haystack.includes(expectedMessageSubstring.toLowerCase())) {
     throw new Error(`Expected error to include "${expectedMessageSubstring}" but got: ${JSON.stringify(res)}`)
   }
+}
+
+function extractRejectSignature(res: any): string | null {
+  const pieces: string[] = []
+  if (typeof res?.extra?.error === "string") pieces.push(res.extra.error)
+  if (typeof res?.response === "string") pieces.push(res.response)
+  if (typeof res?.message === "string") pieces.push(res.message)
+  if (typeof res?.response?.message === "string") pieces.push(res.response.message)
+
+  const text = pieces.join(" ")
+  const m = text.match(/amount-too-large:[0-9]+>[0-9]+/i)
+  if (m?.[0]) return m[0].toLowerCase()
+  if (text.toLowerCase().includes("rejected")) return "rejected"
+  return null
 }
 
 async function snapshot(rpcUrl: string, tokenAddress: string, addresses: string[]) {
@@ -168,7 +183,8 @@ export async function runTokenScriptRejects() {
 
   const { tokenAddress } = await ensureTokenAndBalances(rpcUrl, ownerMnemonic, walletAddresses)
 
-  const threshold = parseBigintOrZero(process.env.SCRIPT_REJECT_THRESHOLD ?? "1")
+  const thresholdRaw = parseBigintOrZero(process.env.SCRIPT_REJECT_THRESHOLD ?? "1")
+  const threshold = thresholdRaw > 0n ? thresholdRaw : 1n
   const tooLarge = threshold + 1n
   const small = threshold
 
@@ -177,19 +193,19 @@ export async function runTokenScriptRejects() {
   const scriptCode =
     process.env.TOKEN_SCRIPT_CODE ??
     [
+      `const LIMIT = BigInt(${JSON.stringify(threshold.toString())});`,
+      "",
       "module.exports = {",
       "  hooks: {",
       "    beforeTransfer: (ctx) => {",
-      "      const amt = ctx.operationData && ctx.operationData.amount;",
-      "      const limit = BigInt(ctx.token.storage && ctx.token.storage.threshold ? ctx.token.storage.threshold : 1);",
-      "      if (typeof amt === 'bigint' && amt > limit) {",
-      "        return { reject: `amount-too-large:${amt.toString()}>${limit.toString()}` };",
-      "      }",
+      "      let amt = 0n;",
+      "      try { amt = BigInt(ctx?.operationData?.amount ?? 0); } catch { amt = 0n; }",
+      "      if (amt > LIMIT) return { reject: `amount-too-large:${amt.toString()}>${LIMIT.toString()}` };",
       "      return null;",
       "    },",
       "  },",
       "  views: {",
-      "    getThreshold: (token) => token.storage || {},",
+      "    getThreshold: (_token) => ({ threshold: LIMIT.toString() }),",
       "  },",
       "}",
       "",
@@ -219,46 +235,19 @@ export async function runTokenScriptRejects() {
   })
   if (!waitUpgradeConsensus.ok) throw new Error("Consensus wait failed after upgradeScript")
 
-  // Attempt an oversized transfer (should be rejected by script) and assert invariants.
-  const rejectedTransfer = await withDemosWallet({
-    rpcUrl,
-    mnemonic: ownerMnemonic,
-    fn: async (demos, fromHex) => {
-      if (normalizeHexAddress(fromHex) !== owner) throw new Error(`owner identity mismatch: ${fromHex} !== ${owner}`)
-      const nonce = Number(await demos.getAddressNonce(owner)) + 1
-      return await sendTokenTransferTxWithDemos({ demos, tokenAddress, to: other, amount: tooLarge, nonce })
-    },
-  })
-  assertRejected(rejectedTransfer?.res, "rejected")
-
-  const waitRejectConsensus = await waitForConsensusRounds({
-    rpcUrls: targets,
-    rounds: envInt("CONSENSUS_ROUNDS", 1),
-    timeoutSec: envInt("CONSENSUS_TIMEOUT_SEC", 180),
-    pollMs: envInt("CONSENSUS_POLL_MS", 500),
-  })
-  if (!waitRejectConsensus.ok) throw new Error("Consensus wait failed after rejected transfer")
-
-  const afterRejected = await (async () => {
-    const deadline = Date.now() + applyTimeoutSec * 1000
-    let last = await snapshot(rpcUrl, tokenAddress, [owner, other])
-    while (Date.now() < deadline) {
-      last = await snapshot(rpcUrl, tokenAddress, [owner, other])
-      const unchanged =
-        last.supply === before.supply &&
-        last.balances[owner] === before.balances[owner] &&
-        last.balances[other] === before.balances[other] &&
-        stableJson(last.customState) === stableJson(before.customState)
-      if (unchanged) return { ok: true, snapshot: last }
-      await sleep(500)
+  const viewPerNode: Record<string, any> = {}
+  for (const url of targets) {
+    const res = await nodeCall(url, "token.callView", { tokenAddress, method: "getThreshold", args: [] }, `token.callView:getThreshold:${url}`)
+    viewPerNode[url] = res
+    if (res?.result !== 200) throw new Error(`token.callView failed on ${url}: ${JSON.stringify(res)}`)
+    const got = res?.response?.value?.threshold
+    if (String(got ?? "") !== threshold.toString()) {
+      throw new Error(`Unexpected getThreshold on ${url}: expected=${threshold.toString()} got=${stringifyJson(res?.response?.value)}`)
     }
-    return { ok: false, snapshot: last }
-  })()
+  }
 
-  const rejectStateUnchanged = afterRejected.ok
-
-  // Sanity: a transfer at the threshold should succeed (native mutation still applied).
-  const okTransfer = await withDemosWallet({
+  // Valid transfer BEFORE invalid (proves hooks are active).
+  const okTransferBefore = await withDemosWallet({
     rpcUrl,
     mnemonic: ownerMnemonic,
     fn: async (demos, fromHex) => {
@@ -267,7 +256,90 @@ export async function runTokenScriptRejects() {
       return await sendTokenTransferTxWithDemos({ demos, tokenAddress, to: other, amount: small, nonce })
     },
   })
-  if (okTransfer?.res?.result !== 200) throw new Error(`Expected ok transfer but got: ${JSON.stringify(okTransfer?.res)}`)
+  if (okTransferBefore?.res?.result !== 200) {
+    throw new Error(`Expected ok transfer-before but got: ${JSON.stringify(okTransferBefore?.res)}`)
+  }
+
+  const waitOkBeforeConsensus = await waitForConsensusRounds({
+    rpcUrls: targets,
+    rounds: envInt("CONSENSUS_ROUNDS", 1),
+    timeoutSec: envInt("CONSENSUS_TIMEOUT_SEC", 180),
+    pollMs: envInt("CONSENSUS_POLL_MS", 500),
+  })
+  if (!waitOkBeforeConsensus.ok) throw new Error("Consensus wait failed after ok transfer-before")
+
+  const baseline = await snapshot(rpcUrl, tokenAddress, [owner, other])
+  const okAppliedBefore =
+    baseline.balances[owner] === before.balances[owner] - small && baseline.balances[other] === before.balances[other] + small
+
+  // Build ONE oversized transfer and confirm it across all nodes (determinism check).
+  const invalidTx = await withDemosWallet({
+    rpcUrl,
+    mnemonic: ownerMnemonic,
+    fn: async (demos, fromHex) => {
+      if (normalizeHexAddress(fromHex) !== owner) throw new Error(`owner identity mismatch: ${fromHex} !== ${owner}`)
+      const nonce = Number(await demos.getAddressNonce(owner)) + 1
+      const timestamp = Date.now()
+      return await buildSignedTokenTransferTxWithDemos({ demos, tokenAddress, to: other, amount: tooLarge, nonce, timestamp })
+    },
+  })
+
+  const invalidBroadcastPerNode: Record<string, any> = {}
+  for (const url of targets) {
+    const out = await withDemosWallet({
+      rpcUrl: url,
+      mnemonic: ownerMnemonic,
+      fn: async (demos, fromHex) => {
+        if (normalizeHexAddress(fromHex) !== owner) throw new Error(`owner identity mismatch: ${fromHex} !== ${owner}`)
+        const validity = await (demos as any).confirm(invalidTx.signedTx)
+        const res = await (demos as any).broadcast(validity)
+        return { validity, res }
+      },
+    })
+    invalidBroadcastPerNode[url] = out
+  }
+
+  const rejectSignatures = targets.map(url => ({ url, sig: extractRejectSignature(invalidBroadcastPerNode[url]?.res) }))
+  const rejectDeterministic =
+    rejectSignatures.every(e => !!e.sig) && rejectSignatures.every(e => e.sig === rejectSignatures[0]!.sig)
+
+  if (!rejectDeterministic) {
+    throw new Error(`Non-deterministic reject across nodes: ${stringifyJson({ rejectSignatures, invalidBroadcastPerNode })}`)
+  }
+
+  for (const url of targets) {
+    assertRejected(invalidBroadcastPerNode[url]?.res, "amount-too-large")
+  }
+
+  const afterRejected = await (async () => {
+    const deadline = Date.now() + applyTimeoutSec * 1000
+    let last = await snapshot(rpcUrl, tokenAddress, [owner, other])
+    while (Date.now() < deadline) {
+      last = await snapshot(rpcUrl, tokenAddress, [owner, other])
+      const unchanged =
+        last.supply === baseline.supply &&
+        last.balances[owner] === baseline.balances[owner] &&
+        last.balances[other] === baseline.balances[other] &&
+        stableJson(last.customState) === stableJson(baseline.customState)
+      if (unchanged) return { ok: true, snapshot: last }
+      await sleep(500)
+    }
+    return { ok: false, snapshot: last }
+  })()
+
+  const rejectStateUnchanged = afterRejected.ok
+
+  // Valid transfer AFTER invalid (proves network continues and state applies).
+  const okTransferAfter = await withDemosWallet({
+    rpcUrl,
+    mnemonic: ownerMnemonic,
+    fn: async (demos, fromHex) => {
+      if (normalizeHexAddress(fromHex) !== owner) throw new Error(`owner identity mismatch: ${fromHex} !== ${owner}`)
+      const nonce = Number(await demos.getAddressNonce(owner)) + 1
+      return await sendTokenTransferTxWithDemos({ demos, tokenAddress, to: other, amount: small, nonce })
+    },
+  })
+  if (okTransferAfter?.res?.result !== 200) throw new Error(`Expected ok transfer-after but got: ${JSON.stringify(okTransferAfter?.res)}`)
 
   const waitOkConsensus = await waitForConsensusRounds({
     rpcUrls: targets,
@@ -275,12 +347,11 @@ export async function runTokenScriptRejects() {
     timeoutSec: envInt("CONSENSUS_TIMEOUT_SEC", 180),
     pollMs: envInt("CONSENSUS_POLL_MS", 500),
   })
-  if (!waitOkConsensus.ok) throw new Error("Consensus wait failed after ok transfer")
+  if (!waitOkConsensus.ok) throw new Error("Consensus wait failed after ok transfer-after")
 
   const afterOk = await snapshot(rpcUrl, tokenAddress, [owner, other])
   const okApplied =
-    afterOk.balances[owner] === afterRejected.snapshot.balances[owner] - small &&
-    afterOk.balances[other] === afterRejected.snapshot.balances[other] + small
+    afterOk.balances[owner] === baseline.balances[owner] - small && afterOk.balances[other] === baseline.balances[other] + small
 
   const crossNodeBalances = await waitForCrossNodeTokenConsistency({
     rpcUrls: targets,
@@ -307,9 +378,13 @@ export async function runTokenScriptRejects() {
     rpcUrls: targets,
     addresses: { owner, other },
     config: { threshold: threshold.toString(), tooLarge: tooLarge.toString(), small: small.toString() },
-    txs: { upgrade, rejectedTransfer, okTransfer },
-    snapshots: { before, afterRejected: afterRejected.snapshot, afterOk },
+    views: { getThreshold: viewPerNode },
+    txs: { upgrade, okTransferBefore, invalidTx, okTransferAfter },
+    broadcasts: { invalidBroadcastPerNode, rejectSignatures },
+    snapshots: { before, baseline, afterRejected: afterRejected.snapshot, afterOk },
     assertions: {
+      okAppliedBefore,
+      rejectDeterministic,
       rejectStateUnchanged,
       okApplied,
       crossNodeBalancesOk: crossNodeBalances.ok,
