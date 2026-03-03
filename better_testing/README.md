@@ -94,6 +94,8 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_transfer_ramp`: ramp scripted transfer load across steps.
 - `token_script_mint`: scripted mint loadgen (owner mints; hooks execute on mint).
 - `token_script_mint_ramp`: ramp scripted mint load.
+- Verified example RUN_IDs:
+  - `token_script_mint_ramp-20260303-112435`
 - `token_script_burn`: scripted burn loadgen (owner burns; hooks execute on burn).
 - `token_script_burn_ramp`: ramp scripted burn load.
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
