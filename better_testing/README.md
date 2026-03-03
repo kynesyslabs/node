@@ -97,6 +97,8 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - Verified example RUN_IDs:
   - `token_script_mint_ramp-20260303-112435`
 - `token_script_burn`: scripted burn loadgen (owner burns; hooks execute on burn).
+- Verified example RUN_IDs:
+  - `token_script_burn-20260303-123048`
 - `token_script_burn_ramp`: ramp scripted burn load.
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
 - `token_observe`: time-series probe for an existing `TOKEN_ADDRESS` (per-node: last block number/hash, mempool size, balances, and stable state hashes). Useful to debug “nodes agree on last block but disagree on token state”.
