@@ -89,6 +89,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_smoke`: install/upgrade script and verify `token.callView` works across nodes.
 - `token_script_hooks_correctness`: verifies before/after hooks for transfer/mint/burn and script `customState` counters converge across nodes.
 - `token_script_rejects`: script-enforced reject (same `amount-too-large:*` reject signature on every node; state unchanged) with a valid transfer before/after.
+- `token_script_upgrade_mid_load`: runs scripted transfer load, upgrades the script mid-run, then asserts all nodes converge on the new script tag + hook-count `customState`.
 - `token_script_transfer`: scripted transfer loadgen (hooks on every transfer).
 - `token_script_transfer_ramp`: ramp scripted transfer load across steps.
 - `token_script_mint`: scripted mint loadgen (owner mints; hooks execute on mint).

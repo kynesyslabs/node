@@ -30,6 +30,7 @@ import { runTokenScriptMintLoadgen } from "./token_script_mint_loadgen"
 import { runTokenScriptMintRamp } from "./token_script_mint_ramp"
 import { runTokenScriptBurnLoadgen } from "./token_script_burn_loadgen"
 import { runTokenScriptBurnRamp } from "./token_script_burn_ramp"
+import { runTokenScriptUpgradeMidLoad } from "./token_script_upgrade_mid_load"
 import { runTokenSettleCheck } from "./token_settle_check"
 import { runTokenObserve } from "./token_observe"
 import { runTokenInvariantsKnownHolders } from "./token_invariants_known_holders"
@@ -141,6 +142,9 @@ switch (scenario) {
   case "token_script_rejects":
     await runTokenScriptRejects()
     break
+  case "token_script_upgrade_mid_load":
+    await runTokenScriptUpgradeMidLoad()
+    break
   case "token_script_transfer":
     await runTokenScriptTransferLoadgen()
     break
@@ -182,6 +186,6 @@ switch (scenario) {
     break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_pause_under_load, token_holders_export, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_transfer, token_script_transfer_ramp, token_script_mint, token_script_mint_ramp, token_script_burn, token_script_burn_ramp, token_settle_check, token_observe, token_invariants_known_holders, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_pause_under_load, token_holders_export, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_upgrade_mid_load, token_script_transfer, token_script_transfer_ramp, token_script_mint, token_script_mint_ramp, token_script_burn, token_script_burn_ramp, token_settle_check, token_observe, token_invariants_known_holders, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
     )
 }
