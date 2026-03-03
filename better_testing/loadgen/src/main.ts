@@ -31,6 +31,11 @@ import { runTokenScriptMintRamp } from "./token_script_mint_ramp"
 import { runTokenScriptBurnLoadgen } from "./token_script_burn_loadgen"
 import { runTokenScriptBurnRamp } from "./token_script_burn_ramp"
 import { runTokenScriptUpgradeMidLoad } from "./token_script_upgrade_mid_load"
+import { runTokenScriptComplexPolicySmoke } from "./token_script_complex_policy_smoke"
+import { runTokenScriptComplexPolicyRamp } from "./token_script_complex_policy_ramp"
+import { runTokenScriptComplexPolicyDynamicUpdates } from "./token_script_complex_policy_dynamic_updates"
+import { runTokenScriptComplexPolicyVestingLockup } from "./token_script_complex_policy_vesting_lockup"
+import { runTokenScriptComplexPolicyEscrowStateMachine } from "./token_script_complex_policy_escrow_state_machine"
 import { runTokenSettleCheck } from "./token_settle_check"
 import { runTokenObserve } from "./token_observe"
 import { runTokenInvariantsKnownHolders } from "./token_invariants_known_holders"
@@ -163,6 +168,21 @@ switch (scenario) {
   case "token_script_burn_ramp":
     await runTokenScriptBurnRamp()
     break
+  case "token_script_complex_policy_smoke":
+    await runTokenScriptComplexPolicySmoke()
+    break
+  case "token_script_complex_policy_ramp":
+    await runTokenScriptComplexPolicyRamp()
+    break
+  case "token_script_complex_policy_dynamic_updates":
+    await runTokenScriptComplexPolicyDynamicUpdates()
+    break
+  case "token_script_complex_policy_vesting_lockup":
+    await runTokenScriptComplexPolicyVestingLockup()
+    break
+  case "token_script_complex_policy_escrow_state_machine":
+    await runTokenScriptComplexPolicyEscrowStateMachine()
+    break
   case "token_settle_check":
     await runTokenSettleCheck()
     break
@@ -186,6 +206,6 @@ switch (scenario) {
     break
   default:
     throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_pause_under_load, token_holders_export, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_upgrade_mid_load, token_script_transfer, token_script_transfer_ramp, token_script_mint, token_script_mint_ramp, token_script_burn, token_script_burn_ramp, token_settle_check, token_observe, token_invariants_known_holders, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
+      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_pause_under_load, token_holders_export, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_upgrade_mid_load, token_script_transfer, token_script_transfer_ramp, token_script_mint, token_script_mint_ramp, token_script_burn, token_script_burn_ramp, token_script_complex_policy_smoke, token_script_complex_policy_ramp, token_script_complex_policy_dynamic_updates, token_script_complex_policy_vesting_lockup, token_script_complex_policy_escrow_state_machine, token_settle_check, token_observe, token_invariants_known_holders, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
     )
 }

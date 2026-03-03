@@ -90,6 +90,23 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_hooks_correctness`: verifies before/after hooks for transfer/mint/burn and script `customState` counters converge across nodes.
 - `token_script_rejects`: script-enforced reject (same `amount-too-large:*` reject signature on every node; state unchanged) with a valid transfer before/after.
 - `token_script_upgrade_mid_load`: runs scripted transfer load, upgrades the script mid-run, then asserts all nodes converge on the new script tag + hook-count `customState`.
+- `token_script_complex_policy_smoke`: installs a “complex policy” script (denylist/allowlist + fee bookkeeping + quota) then exercises multiple branches and verifies cross-node determinism + invariants.
+- Verified example RUN_IDs:
+  - `token_script_complex_policy_smoke-20260303-130602`
+  - `token_script_complex_policy_smoke-20260303-132251`
+  - `token_script_complex_policy_smoke-20260303-150133`
+- `token_script_complex_policy_ramp`: ramps scripted transfer load while using the complex policy script (configured to allow all devnet wallets to avoid rejects).
+- Verified example RUN_IDs:
+  - `token_script_complex_policy_ramp-20260303-130724`
+- `token_script_complex_policy_dynamic_updates`: exercises a “complex policy” script with **in-band admin updates** (owner self-transfer commands updating `customState.policyOverride`), then verifies deterministic rejects/accepts + cross-node state convergence.
+- Verified example RUN_IDs:
+  - `token_script_complex_policy_dynamic_updates-20260303-134836`
+- `token_script_complex_policy_vesting_lockup`: exercises **vesting/lockup transfer gates** using **admin-controlled releases** (the current script hook context does not expose timestamp/nonce/block height), and verifies deterministic rejects + cross-node convergence.
+- Verified example RUN_IDs:
+  - `token_script_complex_policy_vesting_lockup-20260303-151227`
+- `token_script_complex_policy_escrow_state_machine`: exercises a **stateful escrow-like flow** inside a complex token script (deposit -> pending -> approve release/refund -> claimed/refunded), using `customState` to track per-deposit entries and asserting cross-node determinism (including deterministic `escrow_no_entry` rejects).
+- Verified example RUN_IDs:
+  - `token_script_complex_policy_escrow_state_machine-20260303-153800`
 - `token_script_transfer`: scripted transfer loadgen (hooks on every transfer).
 - `token_script_transfer_ramp`: ramp scripted transfer load across steps.
 - `token_script_mint`: scripted mint loadgen (owner mints; hooks execute on mint).
@@ -102,7 +119,7 @@ The scenario is selected via `SCENARIO=...` (the wrapper script sets it for you)
 - `token_script_burn_ramp`: ramp scripted burn load.
 - Verified example RUN_IDs:
   - `token_script_burn_ramp-20260303-123438`
-- Complex/branchy scripts (allowlists/fees/quotas/customState maps) are tracked separately in `br` epic `bd-2vy.4` (implementation + runs pending).
+- Complex/branchy scripts (allowlists/fees/quotas/customState maps) are tracked in `br` epic `bd-2vy.4` (add new tasks there to avoid spreading token-script work across multiple epics).
 - `token_settle_check`: reusable post-run verifier (cross-node convergence for balances + optional script counters) for an existing `TOKEN_ADDRESS`.
 - `token_observe`: time-series probe for an existing `TOKEN_ADDRESS` (per-node: last block number/hash, mempool size, balances, and stable state hashes). Useful to debug “nodes agree on last block but disagree on token state”.
 - `token_invariants_known_holders`: invariant verifier for committed token state (works for both scripted and non-scripted tokens; optional known-holder constraint).
