@@ -55,9 +55,9 @@ export default class Transaction implements ITransaction {
         // Initialize with defaults or provided data
         Object.assign(this, {
             content: {
-                from_ed25519_address: null,
                 type: null,
                 from: "",
+                from_ed25519_address: "",
                 to: "",
                 amount: null,
                 data: [null, null],
