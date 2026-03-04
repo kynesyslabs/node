@@ -104,11 +104,18 @@ export async function manageExecution(
 
     // ANCHOR Reply logic
 
-    // TODO & REVIEW Call security module for send limiting messages
-    const secDisabled = true
-    if (!secDisabled) {
-        const ts = new Date().getTime()
-        const securityInterceptor: ISecurityReport = null // ! implement this
+    // Optional security interceptor (rate limiting). Disabled unless explicitly enabled via env.
+    const securityInterceptor: ISecurityReport = await Security.checkRateLimits(
+        sender,
+        String(content.extra ?? content.type ?? "unknown"),
+        Date.now(),
+    )
+    if (securityInterceptor && (securityInterceptor as any).state === false) {
+        returnValue.result = 429
+        returnValue.response = "Rate limited"
+        returnValue.extra = securityInterceptor.message
+        returnValue.require_reply = false
+        return returnValue
     }
 
     // Sending back the response

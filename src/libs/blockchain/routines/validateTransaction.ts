@@ -23,6 +23,8 @@ import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import Datasource from "src/model/datasource"
+import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -230,10 +232,24 @@ async function defineGas(
 }
 
 export async function assignNonce(tx: Transaction): Promise<boolean> {
-    const validNonce = true // TODO Override for testing
-    // TODO Get, check and increment the nonce of the transaction
-    // while returning either true or false
-    return validNonce
+    const from =
+        typeof tx?.content?.from !== "string"
+            ? forgeToHex(tx?.content?.from as any)
+            : tx.content.from
+
+    const txNonce = (tx as any)?.content?.nonce
+    if (typeof txNonce !== "number" || !Number.isFinite(txNonce) || txNonce < 0) {
+        return false
+    }
+
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRMain)
+    const account = await repo.findOneBy({ pubkey: from })
+    if (!account) return false
+
+    // Nonce must strictly follow the last confirmed nonce.
+    const expected = account.nonce + 1
+    return txNonce === expected
 }
 
 // TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round

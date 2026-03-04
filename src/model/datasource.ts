@@ -35,6 +35,12 @@ import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
 
+const DEFAULT_TYPEORM_SYNCHRONIZE = process.env.NODE_ENV !== "production"
+const TYPEORM_SYNCHRONIZE =
+    typeof process.env.TYPEORM_SYNCHRONIZE === "string"
+        ? process.env.TYPEORM_SYNCHRONIZE.toLowerCase() === "true"
+        : DEFAULT_TYPEORM_SYNCHRONIZE
+
 export const dataSource = new DataSource({
     type: "postgres",
     host: process.env.PG_HOST || "localhost",
@@ -68,7 +74,7 @@ export const dataSource = new DataSource({
         L2PSTransaction,
         L2PSProof,
     ],
-    synchronize: true,
+    synchronize: TYPEORM_SYNCHRONIZE,
     logging: false,
 })
 
