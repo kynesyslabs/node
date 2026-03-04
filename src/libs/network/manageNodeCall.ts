@@ -38,7 +38,7 @@ import {
 import { DTRManager } from "./dtr/dtrmanager"
 import { scriptExecutor } from "@/libs/scripting"
 import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
-import { dataSource } from "@/model/datasource"
+import Datasource from "@/model/datasource"
 
 export interface NodeCall {
     message: string
@@ -93,6 +93,11 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             return true
         }
         return false
+    }
+
+    const getRepo = async <T>(entity: any) => {
+        const db = await Datasource.getInstance()
+        return db.getDataSource().getRepository<T>(entity)
     }
     switch (content.message) {
         case "getPeerInfo":
@@ -1075,7 +1080,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
 
             try {
-                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const gcrTokenRepository = await getRepo<GCRToken>(GCRToken)
                 const token = await gcrTokenRepository.findOneBy({
                     address: data.tokenAddress,
                 })
@@ -1142,7 +1147,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
 
             try {
-                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const gcrTokenRepository = await getRepo<GCRToken>(GCRToken)
                 const token = await gcrTokenRepository.findOneBy({
                     address: data.tokenAddress,
                 })
@@ -1189,7 +1194,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
 
             try {
-                const gcrMainRepository = dataSource.getRepository(GCRMain)
+                const gcrMainRepository = await getRepo<GCRMain>(GCRMain)
                 const holder = await gcrMainRepository.findOneBy({
                     pubkey: data.address,
                 })
@@ -1242,7 +1247,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
             try {
                 // Get token from repository
-                const gcrTokenRepository = dataSource.getRepository(GCRToken)
+                const gcrTokenRepository = await getRepo<GCRToken>(GCRToken)
                 const token = await gcrTokenRepository.findOneBy({
                     address: data.tokenAddress,
                 })
