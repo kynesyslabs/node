@@ -172,6 +172,12 @@ Notes on current implementation details:
 - `prevBlockHash` is currently passed as an empty string in token hook requests from `GCRTokenRoutines`.
 - `blockHeight` is taken from `tx.blockNumber` (or `0` if missing).
 - `timestamp` is `tx.content.timestamp` or `Date.now()` as fallback in some paths.
+- Script execution is time-bounded in the VM to reduce risk of a malicious/buggy infinite loop blocking RPC or consensus/sync apply. Defaults can be overridden via env:
+  - `TOKEN_SCRIPT_COMPILE_TIMEOUT_MS`
+  - `TOKEN_SCRIPT_VIEW_TIMEOUT_MS`
+  - `TOKEN_SCRIPT_HOOK_TIMEOUT_MS`
+  - `TOKEN_SCRIPT_METHOD_TIMEOUT_MS`
+  - `TOKEN_SCRIPT_ASYNC_TIMEOUT_MS` (best-effort for thenables; cannot preempt a CPU-bound loop after an `await`)
 
 ### 4.4 Custom methods (Phase 5.2 / WIP)
 
