@@ -43,26 +43,46 @@ export function applyMutations(
     let totalSupply = tokenData.totalSupply
 
     for (const m of mutations) {
+        if (!m || typeof m !== "object") {
+            throw new Error("Invalid mutation: not an object")
+        }
+
         if (m.kind === "transfer") {
+            if (m.amount <= 0n) throw new Error(`Invalid transfer amount: ${m.amount}`)
             // Self-transfer should be a no-op for balances (prevents accidental minting).
             // If scripts want special behavior, they can return explicit mutations.
             if (m.from?.toLowerCase?.() === m.to?.toLowerCase?.()) continue
             const fromBal = balances[m.from] ?? 0n
             const toBal = balances[m.to] ?? 0n
+            if (fromBal < m.amount) {
+                throw new Error(`Insufficient balance for transfer: from=${m.from} have=${fromBal} need=${m.amount}`)
+            }
             balances[m.from] = fromBal - m.amount
             balances[m.to] = toBal + m.amount
             if (balances[m.from] === 0n) delete balances[m.from]
         } else if (m.kind === "mint") {
+            if (m.amount <= 0n) throw new Error(`Invalid mint amount: ${m.amount}`)
             const toBal = balances[m.to] ?? 0n
             balances[m.to] = toBal + m.amount
             totalSupply += m.amount
         } else if (m.kind === "burn") {
+            if (m.amount <= 0n) throw new Error(`Invalid burn amount: ${m.amount}`)
             const fromBal = balances[m.from] ?? 0n
+            if (fromBal < m.amount) {
+                throw new Error(`Insufficient balance for burn: from=${m.from} have=${fromBal} need=${m.amount}`)
+            }
+            if (totalSupply < m.amount) {
+                throw new Error(`Invalid burn exceeds totalSupply: supply=${totalSupply} burn=${m.amount}`)
+            }
             balances[m.from] = fromBal - m.amount
             if (balances[m.from] === 0n) delete balances[m.from]
             totalSupply -= m.amount
+        } else {
+            throw new Error(`Unknown mutation kind: ${(m as any).kind}`)
         }
     }
+
+    if (totalSupply < 0n) throw new Error(`Invalid totalSupply (negative): ${totalSupply}`)
 
     return {
         newState: {
