@@ -2,46 +2,8 @@
 
 ## Overview
 
-All core phases (0-5.2) of the token scripting system are complete. Phase 3.4 (example documentation) was added and completed. Phase 6 (debugging tools) has been defined but not implemented.
-
-## Phase Summary
-
-### Phase 0: Research ✅
-- SES (Secure EcmaScript) selected as sandbox library
-- POC validated in `scripts/sandbox-poc.ts`
-
-### Phase 1: Data Structures ✅
-- Token types in SDK and Node
-- GCREdit types for token operations
-- GCRTokenRoutines for token handlers
-
-### Phase 2: Scripting Engine ✅
-- TokenSandbox: SES compartment execution
-- ScriptExecutor: High-level orchestration
-- HookExecutor: Native operation hooks
-- MutationApplier: State mutation application
-
-### Phase 3: Read-only Scripts (View Functions) ✅
-- 3.1 ✅ TokenSandbox view execution mode
-- 3.2 ✅ ScriptExecutor.executeView() method  
-- 3.3 ✅ token.callView nodeCall handler (manageNodeCall.ts)
-- 3.4 ✅ Example scripts documentation (EXAMPLE_SCRIPTS.md)
-
-### Phase 4: Token Upgrade System ✅
-- 4.1 ✅ GCREditTokenUpgradeScript type and handler
-- 4.2 ✅ ACL integration with canUpgrade permission
-
-### Phase 5: Full Scripting with State Mutations ✅
-- 5.1 ✅ GCREditTokenCustom for custom method transactions
-- 5.2 ✅ Custom script method execution via ScriptExecutor.executeMethod()
-
-### Phase 6: Script Debugging Tools (Planned - Not Started)
-| ID | Task | Dependencies |
-|---|---|---|
-| 6.1 | Script Dry-Run Endpoint | 5.2 |
-| 6.2 | Gas Profiler | 6.1 |
-| 6.3 | Script Validator | 6.1 |
-| 6.4 | Debug Console Integration | 6.2, 6.3 |
+This document is informational. Work planning and progress tracking must live in `bd/br` (beads),
+not as in-repo phase checklists.
 
 ## Key Files
 
