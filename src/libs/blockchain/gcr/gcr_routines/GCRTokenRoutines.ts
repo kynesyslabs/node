@@ -1483,6 +1483,7 @@ export default class GCRTokenRoutines {
                 blockContext,
                 txHash: edit.txhash,
                 tokenData,
+                scriptCode: token.script.code,
             })
 
             // ScriptResult is a discriminated union - check success first

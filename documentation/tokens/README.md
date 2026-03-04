@@ -177,7 +177,11 @@ Notes on current implementation details:
 
 `GCRTokenRoutines` supports a `"custom"` token operation meant to invoke `module.exports.methods[method]` for scripted tokens.
 
-However, the current `ScriptExecutor.executeMethod` implementation expects `scriptCode` on the request object, while `GCRTokenRoutines.handleCustomMethod` does not provide it. This path should be treated as **work-in-progress** until those pieces are aligned.
+This path now passes `scriptCode` to `scriptExecutor.executeMethod`, so custom method dispatch works as intended (subject to the limitations below).
+
+Current limitations:
+- Rollbacks for `"custom"` are intentionally skipped (script state is opaque unless we log/replay mutations).
+- `executeMethod` currently returns no mutations (hook-based mutations are for transfer/mint/burn; custom-method mutation plumbing can be added later).
 
 ---
 
@@ -249,4 +253,3 @@ stateDiagram-v2
 ## 6) Practical verification (better_testing)
 
 The `better_testing/` harness contains scenarios that exercised and verified this system end-to-end (across multiple nodes, consensus rounds, and committed reads). See `better_testing/README.md` for runnable scenarios and verified RUN_IDs.
-

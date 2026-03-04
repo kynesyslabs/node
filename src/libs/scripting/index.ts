@@ -115,6 +115,7 @@ export type ScriptMethodRequest = {
     blockContext: { timestamp: number; height: number; prevBlockHash: string }
     txHash: string
     tokenData: GCRTokenData
+    scriptCode: string
 }
 
 export type ScriptViewResult =
@@ -231,7 +232,7 @@ export const scriptExecutor: ScriptExecutor = {
         try {
             // For now: allow custom method execution for scripted tokens using `methods`.
             // This is intentionally minimal; advanced gas/metering can be added later.
-            const compiled = compileScript((req as any).scriptCode ?? "")
+            const compiled = compileScript(req.scriptCode ?? "")
             const fn = compiled.methods?.[req.method]
             if (typeof fn !== "function") {
                 return { success: false, error: `Unknown method: ${req.method}`, errorType: "unknown_method" }
