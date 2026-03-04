@@ -192,6 +192,7 @@ const TOKEN_SCRIPT_VIEW_TIMEOUT_MS = envInt("TOKEN_SCRIPT_VIEW_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_HOOK_TIMEOUT_MS = envInt("TOKEN_SCRIPT_HOOK_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_METHOD_TIMEOUT_MS = envInt("TOKEN_SCRIPT_METHOD_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_ASYNC_TIMEOUT_MS = envInt("TOKEN_SCRIPT_ASYNC_TIMEOUT_MS", 2000)
+const TOKEN_SCRIPT_COMPILED_CACHE_MAX = envInt("TOKEN_SCRIPT_COMPILED_CACHE_MAX", 256)
 
 function isThenable(value: any): value is Promise<any> {
     return !!value && (typeof value === "object" || typeof value === "function") && typeof value.then === "function"
@@ -253,7 +254,22 @@ function compileScript(scriptCode: string): CompiledTokenScript {
         BigInt,
     } as Record<string, any>
 
-    const context = vm.createContext(sandbox, { name: "TokenScript", codeGeneration: { strings: true, wasm: false } })
+    const context = vm.createContext(sandbox, { name: "TokenScript", codeGeneration: { strings: false, wasm: false } })
+
+    // Determinism hardening: token scripts must be replayable across nodes. Disable common sources
+    // of nondeterminism and avoid exposing node internals.
+    // NOTE: This is best-effort hardening; the primary safety guard is the per-call VM timeout.
+    const harden = new vm.Script(
+        `
+        try { if (typeof Date !== "undefined") Date.now = () => { throw new Error("Date.now is disabled in token scripts") } } catch {}
+        try { if (typeof Math !== "undefined") Math.random = () => { throw new Error("Math.random is disabled in token scripts") } } catch {}
+        try { globalThis.process = undefined } catch {}
+        try { globalThis.require = undefined } catch {}
+        `,
+        { filename: "token-script-harden.js" },
+    )
+    harden.runInContext(context, { timeout: TOKEN_SCRIPT_COMPILE_TIMEOUT_MS })
+
     const script = new vm.Script(String(scriptCode ?? ""), { filename: "token-script.js" })
     script.runInContext(context, { timeout: TOKEN_SCRIPT_COMPILE_TIMEOUT_MS })
 
@@ -268,7 +284,14 @@ function compileScript(scriptCode: string): CompiledTokenScript {
         context,
     }
 
-    compiledCache.set(scriptCode, compiled)
+    if (TOKEN_SCRIPT_COMPILED_CACHE_MAX > 0) {
+        compiledCache.set(scriptCode, compiled)
+        while (compiledCache.size > TOKEN_SCRIPT_COMPILED_CACHE_MAX) {
+            const oldestKey = compiledCache.keys().next().value
+            if (!oldestKey) break
+            compiledCache.delete(oldestKey)
+        }
+    }
     return compiled
 }
 
