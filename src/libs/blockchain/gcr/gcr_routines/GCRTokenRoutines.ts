@@ -18,6 +18,7 @@ import {
     createTransferMutations,
     createMintMutations,
     createBurnMutations,
+    type TokenMutation,
     type ExecuteWithHooksRequest,
     type HookExecutionResult,
     type GCRTokenData,
@@ -427,11 +428,7 @@ export default class GCRTokenRoutines {
 
         // Non-simulated execution must be serialized per-token to prevent lost updates when multiple
         // block sync/apply paths touch the same token concurrently.
-        let holderUpdate: null | {
-            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
-            removeFrom: boolean
-            addTo: boolean
-        } = null
+        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
 
         try {
             await gcrTokenRepository.manager.transaction(async em => {
@@ -447,6 +444,13 @@ export default class GCRTokenRoutines {
                 const fromBefore = BigInt(token.balances[actualFrom] ?? "0")
                 const toBefore = BigInt(token.balances[actualTo] ?? "0")
                 if (fromBefore < transferAmount) throw new Error("Insufficient balance")
+
+                const tokenMeta: TokenHolderReference = { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals }
+                const beforeByAddr: Record<string, bigint> = {}
+                const recordBefore = (mutations: TokenMutation[]) => {
+                    const affected = this.collectAddressesFromMutations(mutations)
+                    for (const addr of affected) beforeByAddr[addr] = BigInt(token.balances[addr] ?? "0")
+                }
 
                 if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                     const hookExecutor = this.getHookExecutor()
@@ -478,8 +482,13 @@ export default class GCRTokenRoutines {
                         )
                     }
 
+                    recordBefore(result.mutations)
                     this.applyGCRTokenDataToEntity(token, result.finalState)
                 } else {
+                    const nativeMutations = isSelfTransfer
+                        ? []
+                        : createTransferMutations(actualFrom, actualTo, transferAmount)
+                    recordBefore(nativeMutations)
                     // Self-transfers are a no-op for balances (prevents accidental minting)
                     if (!isSelfTransfer) {
                         token.balances[actualFrom] = (fromBefore - transferAmount).toString()
@@ -489,35 +498,31 @@ export default class GCRTokenRoutines {
 
                 if (token.balances[actualFrom] === "0") delete token.balances[actualFrom]
 
-                const fromAfter = BigInt(token.balances[actualFrom] ?? "0")
-                const toAfter = BigInt(token.balances[actualTo] ?? "0")
-
                 await repo.save(token)
 
-                holderUpdate = {
-                    tokenMeta: {
-                        tokenAddress,
-                        ticker: token.ticker,
-                        name: token.name,
-                        decimals: token.decimals,
-                    },
-                    removeFrom: !isSelfTransfer && fromBefore > 0n && fromAfter === 0n,
-                    addTo: !isSelfTransfer && toBefore === 0n && toAfter > 0n,
+                const adds: string[] = []
+                const removes: string[] = []
+                for (const [addr, before] of Object.entries(beforeByAddr)) {
+                    const after = BigInt(token.balances[addr] ?? "0")
+                    if (before === 0n && after > 0n) adds.push(addr)
+                    if (before > 0n && after === 0n) removes.push(addr)
                 }
+
+                holderPointerOps = { tokenMeta, adds, removes }
             })
 
-            if (holderUpdate?.removeFrom) {
-                await this.removeHolderReference(actualFrom, tokenAddress)
+            for (const addr of holderPointerOps?.removes ?? []) {
+                await this.removeHolderReference(addr, tokenAddress)
             }
-            if (holderUpdate?.addTo) {
-                await this.addHolderReference(actualTo, holderUpdate.tokenMeta)
+            for (const addr of holderPointerOps?.adds ?? []) {
+                await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
             }
 
             log.info(
                 "[GCRTokenRoutines] Transferred " +
                     amount +
                     " " +
-                    holderUpdate?.tokenMeta.ticker +
+                    holderPointerOps?.tokenMeta.ticker +
                     " from " +
                     actualFrom +
                     " to " +
@@ -610,11 +615,7 @@ export default class GCRTokenRoutines {
             return { success: true, message: "Mint completed" }
         }
 
-        let holderUpdate: null | {
-            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
-            addTo: boolean
-            removeTo: boolean
-        } = null
+        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
 
         try {
             await gcrTokenRepository.manager.transaction(async em => {
@@ -633,7 +634,15 @@ export default class GCRTokenRoutines {
                 const prevBalance = BigInt(token.balances[to] ?? "0")
                 const supplyBefore = BigInt(token.totalSupply ?? "0")
 
+                const tokenMeta: TokenHolderReference = { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals }
+                const beforeByAddr: Record<string, bigint> = {}
+                const recordBefore = (mutations: TokenMutation[]) => {
+                    const affected = this.collectAddressesFromMutations(mutations)
+                    for (const addr of affected) beforeByAddr[addr] = BigInt(token.balances[addr] ?? "0")
+                }
+
                 if (edit.isRollback) {
+                    recordBefore([{ kind: "burn", from: to, amount: mintAmount }])
                     if (prevBalance < mintAmount) throw new Error("Cannot rollback: insufficient balance")
                     token.balances[to] = (prevBalance - mintAmount).toString()
                     token.totalSupply = (supplyBefore - mintAmount).toString()
@@ -663,25 +672,28 @@ export default class GCRTokenRoutines {
                     if (result.rejection) {
                         throw new Error(`Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
                     }
+                    recordBefore(result.mutations)
                     this.applyGCRTokenDataToEntity(token, result.finalState)
                 } else {
+                    recordBefore(createMintMutations(to, mintAmount))
                     token.balances[to] = (prevBalance + mintAmount).toString()
                     token.totalSupply = (supplyBefore + mintAmount).toString()
                 }
 
-                const nextBalance = BigInt(token.balances[to] ?? "0")
-
                 await repo.save(token)
 
-                holderUpdate = {
-                    tokenMeta: { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals },
-                    addTo: !edit.isRollback && prevBalance === 0n && nextBalance > 0n,
-                    removeTo: edit.isRollback && prevBalance > 0n && nextBalance === 0n,
+                const adds: string[] = []
+                const removes: string[] = []
+                for (const [addr, before] of Object.entries(beforeByAddr)) {
+                    const after = BigInt(token.balances[addr] ?? "0")
+                    if (before === 0n && after > 0n) adds.push(addr)
+                    if (before > 0n && after === 0n) removes.push(addr)
                 }
+                holderPointerOps = { tokenMeta, adds, removes }
             })
 
-            if (holderUpdate?.removeTo) await this.removeHolderReference(to, tokenAddress)
-            if (holderUpdate?.addTo) await this.addHolderReference(to, holderUpdate.tokenMeta)
+            for (const addr of holderPointerOps?.removes ?? []) await this.removeHolderReference(addr, tokenAddress)
+            for (const addr of holderPointerOps?.adds ?? []) await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
 
             log.info("[GCRTokenRoutines] Minted " + amount + " to " + to + " for " + tokenAddress)
         } catch (error) {
@@ -769,11 +781,7 @@ export default class GCRTokenRoutines {
             return { success: true, message: "Burn completed" }
         }
 
-        let holderUpdate: null | {
-            tokenMeta: { tokenAddress: string; ticker: string; name: string; decimals: number }
-            addFrom: boolean
-            removeFrom: boolean
-        } = null
+        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
 
         try {
             await gcrTokenRepository.manager.transaction(async em => {
@@ -794,7 +802,15 @@ export default class GCRTokenRoutines {
                 const prevBalance = BigInt(token.balances[from] ?? "0")
                 const supplyBefore = BigInt(token.totalSupply ?? "0")
 
+                const tokenMeta: TokenHolderReference = { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals }
+                const beforeByAddr: Record<string, bigint> = {}
+                const recordBefore = (mutations: TokenMutation[]) => {
+                    const affected = this.collectAddressesFromMutations(mutations)
+                    for (const addr of affected) beforeByAddr[addr] = BigInt(token.balances[addr] ?? "0")
+                }
+
                 if (edit.isRollback) {
+                    recordBefore([{ kind: "mint", to: from, amount: burnAmount }])
                     token.balances[from] = (prevBalance + burnAmount).toString()
                     token.totalSupply = (supplyBefore + burnAmount).toString()
                 } else if (token.hasScript && token.script?.code && tx) {
@@ -823,27 +839,30 @@ export default class GCRTokenRoutines {
                     if (result.rejection) {
                         throw new Error(`Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
                     }
+                    recordBefore(result.mutations)
                     this.applyGCRTokenDataToEntity(token, result.finalState)
                 } else {
+                    recordBefore(createBurnMutations(from, burnAmount))
                     if (prevBalance < burnAmount) throw new Error("Insufficient balance to burn")
                     token.balances[from] = (prevBalance - burnAmount).toString()
                     token.totalSupply = (supplyBefore - burnAmount).toString()
                     if (token.balances[from] === "0") delete token.balances[from]
                 }
 
-                const nextBalance = BigInt(token.balances[from] ?? "0")
-
                 await repo.save(token)
 
-                holderUpdate = {
-                    tokenMeta: { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals },
-                    removeFrom: !edit.isRollback && prevBalance > 0n && nextBalance === 0n,
-                    addFrom: edit.isRollback && prevBalance === 0n && nextBalance > 0n,
+                const adds: string[] = []
+                const removes: string[] = []
+                for (const [addr, before] of Object.entries(beforeByAddr)) {
+                    const after = BigInt(token.balances[addr] ?? "0")
+                    if (before === 0n && after > 0n) adds.push(addr)
+                    if (before > 0n && after === 0n) removes.push(addr)
                 }
+                holderPointerOps = { tokenMeta, adds, removes }
             })
 
-            if (holderUpdate?.removeFrom) await this.removeHolderReference(from, tokenAddress)
-            if (holderUpdate?.addFrom) await this.addHolderReference(from, holderUpdate.tokenMeta)
+            for (const addr of holderPointerOps?.removes ?? []) await this.removeHolderReference(addr, tokenAddress)
+            for (const addr of holderPointerOps?.adds ?? []) await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
 
             log.info("[GCRTokenRoutines] Burned " + amount + " from " + from + " for " + tokenAddress)
         } catch (error) {
@@ -1657,6 +1676,22 @@ export default class GCRTokenRoutines {
         } catch (error) {
             log.error("[GCRTokenRoutines] Failed to remove holder reference: " + error)
         }
+    }
+
+    private static collectAddressesFromMutations(mutations: TokenMutation[]): Set<string> {
+        const out = new Set<string>()
+        for (const m of mutations ?? []) {
+            if (!m || typeof m !== "object") continue
+            if (m.kind === "transfer") {
+                if (m.from) out.add(m.from)
+                if (m.to) out.add(m.to)
+            } else if (m.kind === "mint") {
+                if (m.to) out.add(m.to)
+            } else if (m.kind === "burn") {
+                if (m.from) out.add(m.from)
+            }
+        }
+        return out
     }
 
     // SECTION: Query Methods (for nodeCall)
