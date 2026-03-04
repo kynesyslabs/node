@@ -367,7 +367,7 @@ export default class HandleGCR {
                 )
                 // If not successful, we stop the execution
                 if (!result.success) {
-                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                    await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
                     throw new Error(
                         "GCREdit failed for " +
                             edit.type +
@@ -383,7 +383,7 @@ export default class HandleGCR {
                     success: false,
                     message: `${e}`,
                 })
-                await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
                 // Stopping the execution
                 if (!simulate) {
                     break
@@ -452,7 +452,7 @@ export default class HandleGCR {
             try {
                 const result = await HandleGCR.apply(edit as any, tx, isRollback, simulate)
                 if (!result.success) {
-                    await this.rollback(tx, appliedEdits as any)
+                    await this.rollback(tx, appliedEdits as any, simulate)
                     throw new Error(
                         "Token GCREdit failed for " +
                             (edit as any).operation +
@@ -465,7 +465,7 @@ export default class HandleGCR {
             } catch (e) {
                 log.error("[applyTokenEditsToTx] Error applying token GCREdit: " + e)
                 editsResults.push({ success: false, message: `${e}` })
-                await this.rollback(tx, appliedEdits as any)
+                await this.rollback(tx, appliedEdits as any, simulate)
                 if (!simulate) break
             }
         }
@@ -545,6 +545,7 @@ export default class HandleGCR {
     static async rollback(
         tx: Transaction,
         appliedEditsOriginal: GCREdit[],
+        simulate = false,
     ): Promise<GCRResult> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
@@ -566,7 +567,7 @@ export default class HandleGCR {
                     ") Rolling back GCREdit: " +
                     edit.type,
             )
-            const result = await this.apply(edit, tx, true)
+            const result = await this.apply(edit, tx, true, simulate)
             results.push(result)
         }
         log.info(
