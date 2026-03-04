@@ -177,6 +177,27 @@ export default class GCRTokenRoutines {
             return { success: false, message: "Invalid GCREdit type for token routine" }
         }
 
+        if (tx) {
+            const txFrom =
+                typeof tx.content?.from !== "string"
+                    ? forgeToHex(tx.content?.from as any)
+                    : tx.content.from
+            const editAccount =
+                typeof editOperation.account !== "string"
+                    ? forgeToHex(editOperation.account as any)
+                    : editOperation.account
+            if (
+                typeof txFrom === "string" &&
+                typeof editAccount === "string" &&
+                txFrom.toLowerCase() !== editAccount.toLowerCase()
+            ) {
+                return {
+                    success: false,
+                    message: "Token edit caller mismatch (edit.account must match tx.content.from)",
+                }
+            }
+        }
+
         // Normalize account address
         const normalizedAccount =
             typeof editOperation.account !== "string"
