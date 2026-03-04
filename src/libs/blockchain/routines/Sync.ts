@@ -537,8 +537,10 @@ async function batchDownloadBlocks(
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
-        // Insert block
-        await Chain.insertBlock(block, [], null, false)
+        // IMPORTANT: When batch syncing, do not persist block transactions from local mempool.
+        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
+        // and skip applying GCR/token edits for those txs, leading to cross-node state divergence.
+        await Chain.insertBlock(block, [], null, false, false)
         log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
