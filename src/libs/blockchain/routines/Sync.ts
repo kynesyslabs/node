@@ -289,25 +289,11 @@ export async function syncBlock(block: Block, peer: Peer) {
     const prevInGcrApply = getSharedState.inGcrApply
     getSharedState.inGcrApply = true
     try {
-        // IMPORTANT: When syncing, do not persist block transactions from local mempool.
-        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
-        // and skip applying GCR/token edits, leading to cross-node state divergence.
-        await Chain.insertBlock(block, [], null, false, false)
-        log.debug("Block inserted successfully")
-        log.debug(
-            "Last block number: " +
-            getSharedState.lastBlockNumber +
-            " Last block hash: " +
-            getSharedState.lastBlockHash,
-        )
-        log.info(
-            "[fastSync] Block inserted successfully at the head of the chain!",
-        )
-
         // REVIEW Merge the peerlist
         log.info("[fastSync] Merging peers from block: " + block.hash)
         const mergedPeerlist = await mergePeerlist(block)
         log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
+
         // REVIEW Parse the txs hashes in the block
         log.info("[fastSync] Asking for transactions in the block", true)
         const txs = await askTxsForBlock(block, peer)
@@ -328,8 +314,32 @@ export async function syncBlock(block: Block, peer: Peer) {
             return hashes.map(h => byHash[h]).filter(Boolean)
         })()
 
+        for (const tx of orderedTxs) {
+            if (!tx.blockNumber) tx.blockNumber = block.number
+        }
+
         // ! Sync the native tables
         await syncGCRTables(orderedTxs)
+
+        // IMPORTANT: Insert the block only AFTER applying GCR/token edits.
+        // Token scripts derive prevBlockHash from shared state; inserting the block first would
+        // advance lastBlockHash to the *current* block and drift hook contexts during sync.
+        // Also, Merkle tree updates can depend on the GCR edits (commitments) being applied first.
+        //
+        // IMPORTANT: When syncing, do not persist block transactions from local mempool.
+        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
+        // and skip applying GCR/token edits, leading to cross-node state divergence.
+        await Chain.insertBlock(block, [], null, false, false)
+        log.debug("Block inserted successfully")
+        log.debug(
+            "Last block number: " +
+            getSharedState.lastBlockNumber +
+            " Last block hash: " +
+            getSharedState.lastBlockHash,
+        )
+        log.info(
+            "[fastSync] Block inserted successfully at the head of the chain!",
+        )
 
         // REVIEW Insert the txs into the transactions database table
         if (orderedTxs.length > 0) {
@@ -537,19 +547,22 @@ async function batchDownloadBlocks(
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
+        // Merge peerlist
+        await mergePeerlist(block)
+
+        for (const tx of blockTxs) {
+            if (!tx.blockNumber) tx.blockNumber = block.number
+        }
+
+        // Sync GCR tables
+        await syncGCRTables(blockTxs)
+
+        // IMPORTANT: Insert the block only AFTER applying GCR/token edits (see syncBlock rationale).
         // IMPORTANT: When batch syncing, do not persist block transactions from local mempool.
-        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
-        // and skip applying GCR/token edits for those txs, leading to cross-node state divergence.
         await Chain.insertBlock(block, [], null, false, false)
         log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
-
-        // Merge peerlist
-        await mergePeerlist(block)
-
-        // Sync GCR tables
-        await syncGCRTables(blockTxs)
 
         // Insert transactions
         if (blockTxs.length > 0) {
