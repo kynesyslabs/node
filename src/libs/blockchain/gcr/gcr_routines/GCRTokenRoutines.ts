@@ -125,6 +125,44 @@ export default class GCRTokenRoutines {
         }
     }
 
+    private static getDeterministicTxTimestamp(tx?: Transaction): number {
+        const raw = (tx as any)?.content?.timestamp
+        const value =
+            typeof raw === "number"
+                ? raw
+                : typeof raw === "string"
+                  ? Number.parseInt(raw, 10)
+                  : Number.NaN
+        if (!Number.isFinite(value)) {
+            throw new Error("Missing deterministic tx.content.timestamp")
+        }
+        return value
+    }
+
+    private static getDeterministicPrevBlockHash(): string {
+        const sharedState = getSharedState
+        return sharedState.lastBlockHash ?? "0".repeat(64)
+    }
+
+    private static getDeterministicBlockHeight(tx?: Transaction): number {
+        const fromTx = (tx as any)?.blockNumber
+        if (typeof fromTx === "number" && Number.isFinite(fromTx) && fromTx >= 0) return fromTx
+        const sharedState = getSharedState
+        const fromShared = sharedState.lastBlockNumber
+        if (typeof fromShared === "number" && Number.isFinite(fromShared) && fromShared >= 0) return fromShared
+        return 0
+    }
+
+    private static buildHookTxContext(tx: Transaction) {
+        return {
+            caller: tx.content.from,
+            txHash: tx.hash,
+            timestamp: this.getDeterministicTxTimestamp(tx),
+            blockHeight: this.getDeterministicBlockHeight(tx),
+            prevBlockHash: this.getDeterministicPrevBlockHash(),
+        }
+    }
+
     /**
      * Main entry point for applying token GCREdit operations
      * REVIEW: Phase 5.1 - Now accepts optional Transaction for script execution context
@@ -204,24 +242,28 @@ export default class GCRTokenRoutines {
                     edit as GCREditTokenUpdateACL,
                     gcrTokenRepository,
                     simulate,
+                    tx,
                 )
             case "grantPermission":
                 return this.handleGrantPermission(
                     edit as GCREditTokenGrantPermission,
                     gcrTokenRepository,
                     simulate,
+                    tx,
                 )
             case "revokePermission":
                 return this.handleRevokePermission(
                     edit as GCREditTokenRevokePermission,
                     gcrTokenRepository,
                     simulate,
+                    tx,
                 )
             case "upgradeScript":
                 return this.handleUpgradeTokenScript(
                     edit as GCREditTokenUpgradeScript,
                     gcrTokenRepository,
                     simulate,
+                    tx,
                 )
             case "transferOwnership":
                 return this.handleTransferOwnership(
@@ -392,13 +434,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
 
@@ -465,13 +501,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
 
@@ -586,13 +616,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
 
@@ -658,13 +682,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
 
@@ -751,13 +769,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
                     const result: HookExecutionResult = await hookExecutor.executeWithHooks(request)
@@ -825,13 +837,7 @@ export default class GCRTokenRoutines {
                         tokenAddress,
                         tokenData,
                         scriptCode: token.script.code,
-                        txContext: {
-                            caller: tx.content.from,
-                            txHash: tx.hash,
-                            timestamp: tx.content.timestamp ?? Date.now(),
-                            blockHeight: tx.blockNumber ?? 0,
-                            prevBlockHash: "",
-                        },
+                        txContext: this.buildHookTxContext(tx),
                         nativeOperationMutations: nativeMutations,
                     }
 
@@ -964,6 +970,7 @@ export default class GCRTokenRoutines {
         edit: GCREditTokenUpdateACL,
         gcrTokenRepository: Repository<GCRToken>,
         simulate: boolean,
+        tx?: Transaction,
     ): Promise<GCRResult> {
         const { action, targetAddress, permissions } = edit.data
         const tokenAddress = edit.tokenAddress
@@ -996,13 +1003,14 @@ export default class GCRTokenRoutines {
             : action
 
         if (actualAction === "grant") {
+            const grantedAt = this.getDeterministicTxTimestamp(tx)
             // Find or create entry
             let entry = token.aclEntries.find((e) => e.address === targetAddress)
             if (!entry) {
                 entry = {
                     address: targetAddress,
                     permissions: [],
-                    grantedAt: Date.now(),
+                    grantedAt,
                     grantedBy: edit.account,
                 }
                 token.aclEntries.push(entry)
@@ -1064,6 +1072,7 @@ export default class GCRTokenRoutines {
         edit: GCREditTokenGrantPermission,
         gcrTokenRepository: Repository<GCRToken>,
         simulate: boolean,
+        tx?: Transaction,
     ): Promise<GCRResult> {
         const { grantee, permissions } = edit.data
         const tokenAddress = edit.tokenAddress
@@ -1105,12 +1114,13 @@ export default class GCRTokenRoutines {
             }
         } else {
             // Normal grant
+            const grantedAt = this.getDeterministicTxTimestamp(tx)
             let entry = token.aclEntries.find((e) => e.address === grantee)
             if (!entry) {
                 entry = {
                     address: grantee,
                     permissions: [],
-                    grantedAt: Date.now(),
+                    grantedAt,
                     grantedBy: edit.account,
                 }
                 token.aclEntries.push(entry)
@@ -1160,6 +1170,7 @@ export default class GCRTokenRoutines {
         edit: GCREditTokenRevokePermission,
         gcrTokenRepository: Repository<GCRToken>,
         simulate: boolean,
+        tx?: Transaction,
     ): Promise<GCRResult> {
         const { grantee, permissions } = edit.data
         const tokenAddress = edit.tokenAddress
@@ -1189,12 +1200,13 @@ export default class GCRTokenRoutines {
         // For rollback, we grant instead of revoke
         if (edit.isRollback) {
             // Re-grant the permissions
+            const grantedAt = this.getDeterministicTxTimestamp(tx)
             let entry = token.aclEntries.find((e) => e.address === grantee)
             if (!entry) {
                 entry = {
                     address: grantee,
                     permissions: [],
-                    grantedAt: Date.now(),
+                    grantedAt,
                     grantedBy: edit.account,
                 }
                 token.aclEntries.push(entry)
@@ -1249,6 +1261,7 @@ export default class GCRTokenRoutines {
         edit: GCREditTokenUpgradeScript,
         gcrTokenRepository: Repository<GCRToken>,
         simulate: boolean,
+        tx?: Transaction,
     ): Promise<GCRResult> {
         const { newScript, upgradeReason, previousVersion } = edit.data
         const tokenAddress = edit.tokenAddress
@@ -1271,7 +1284,7 @@ export default class GCRTokenRoutines {
 
         // Store previous version for logging/rollback reference
         const currentVersion = token.scriptVersion ?? 0
-        const currentTimestamp = Date.now()
+        const currentTimestamp = this.getDeterministicTxTimestamp(tx)
 
         // For rollback, attempt to restore previous version state
         if (edit.isRollback) {
@@ -1484,7 +1497,7 @@ export default class GCRTokenRoutines {
         // Note: getSharedState is a getter that returns SharedState instance directly
         const sharedState = getSharedState
         const blockContext = {
-            timestamp: tx?.content?.timestamp ?? Date.now(),
+            timestamp: this.getDeterministicTxTimestamp(tx),
             height: sharedState.lastBlockNumber ?? 0,
             prevBlockHash: sharedState.lastBlockHash ?? "0".repeat(64),
         }
