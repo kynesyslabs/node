@@ -26,6 +26,7 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
+import Datasource from "src/model/datasource"
 
 /* INFO
 # Semaphore system
@@ -633,23 +634,39 @@ async function finalizeBlock(
         // Apply token edits deterministically from the finalized block transaction list.
         // This prevents token-table divergence when shard members have incomplete mempools at forge time.
         const orderedTxs = orderedHashes.map(h => byHash.get(h)) as Transaction[]
-        for (const tx of orderedTxs) {
-            // Ensure scripts see stable block height context.
-            if (!tx.blockNumber) tx.blockNumber = block.number
-            const tokenApply = await HandleGCR.applyTokenEditsToTx(
-                tx,
-                false,
-                false,
-            )
-            if (!tokenApply.success) {
-                log.error(
-                    `[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`,
-                )
-                return false
-            }
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+
+        try {
+            await dataSource.transaction(async em => {
+                for (const tx of orderedTxs) {
+                    // Ensure scripts see stable block height context.
+                    if (!tx.blockNumber) tx.blockNumber = block.number
+                    const tokenApply = await HandleGCR.applyTokenEditsToTx(
+                        tx,
+                        false,
+                        false,
+                        em,
+                    )
+                    if (!tokenApply.success) {
+                        throw new Error(
+                            `[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`,
+                        )
+                    }
+                }
+
+                await Chain.insertBlock(block, [], undefined, true, true, em) // NOTE Transactions are added to the Transactions table here
+            })
+        } catch (error) {
+            log.error(String(error))
+            return false
         }
 
-        await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
+        if (block.number > getSharedState.lastBlockNumber) {
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
+        }
+
         // Ensure the block's ordered transactions are persisted for downstream syncers.
         // insertBlock relies on mempool-backed lookup; if a tx wasn't in local mempool at commit time,
         // peers may not be able to fetch it (and would fail to apply GCR edits during sync).

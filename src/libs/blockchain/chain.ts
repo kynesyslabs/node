@@ -16,6 +16,7 @@ import {
     In,
     LessThan,
     FindManyOptions,
+    EntityManager,
     Repository,
 } from "typeorm"
 
@@ -345,6 +346,7 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
         persistTransactions = true,
+        transactionalEntityManager?: EntityManager,
     ): Promise<Blocks> {
         const orderedTransactionsHashes = block.content.ordered_transactions
         // Fetch transaction entities from the repository based on ordered transaction hashes
@@ -400,16 +402,49 @@ export default class Chain {
                     " does not exist: inserting a new block",
             )
 
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+
             // Get transaction entities from mempool before starting transaction
             const transactionEntities = persistTransactions
                 ? await Mempool.getTransactionsByHashes(orderedTransactionsHashes)
                 : []
 
+            if (transactionalEntityManager) {
+                const savedBlock = await transactionalEntityManager.save(this.blocks.target, newBlock)
+
+                if (persistTransactions) {
+                    for (let i = 0; i < transactionEntities.length; i++) {
+                        const tx = transactionEntities[i]
+                        const rawTransaction = Transaction.toRawTransaction(tx, "confirmed")
+                        await transactionalEntityManager
+                            .createQueryBuilder()
+                            .insert()
+                            .into(this.transactions.target)
+                            .values(rawTransaction as any)
+                            .orIgnore()
+                            .execute()
+                    }
+                }
+
+                if (persistTransactions && cleanMempool) {
+                    await Mempool.removeTransactionsByHashes(
+                        transactionEntities.map(tx => tx.hash),
+                        transactionalEntityManager,
+                    )
+                }
+
+                await updateMerkleTreeAfterBlock(
+                    dataSource,
+                    block.number,
+                    transactionalEntityManager,
+                )
+
+                return savedBlock
+            }
+
             // REVIEW: Wrap block insertion and Merkle tree update in transaction
             // This ensures both succeed or both fail (prevents state divergence)
-            const db = await Datasource.getInstance()
-            const dataSource = db.getDataSource()
-
             // REVIEW: HIGH FIX - Wrap transaction in try/catch for proper error handling
             try {
                 // REVIEW: Transaction boundary fix - defer shared state updates until after commit

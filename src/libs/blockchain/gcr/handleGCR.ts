@@ -46,7 +46,7 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import Chain from "../chain"
-import { Repository } from "typeorm"
+import { EntityManager, Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -435,12 +435,24 @@ export default class HandleGCR {
         tx: Transaction,
         isRollback = false,
         simulate = false,
+        entityManager?: EntityManager,
     ): Promise<GCRResult> {
         const tokenEdits = Array.isArray(tx?.content?.gcr_edits)
             ? (tx.content.gcr_edits as any[]).filter(e => e?.type === "token")
             : []
 
         if (tokenEdits.length === 0) {
+            return { success: true, message: "" }
+        }
+
+        if (entityManager) {
+            const tokenRepo = entityManager.getRepository(GCRToken)
+            for (const edit of tokenEdits) {
+                const editOp = { ...(edit as any) }
+                if (isRollback) editOp.isRollback = true
+                const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
+                if (!result.success) return result
+            }
             return { success: true, message: "" }
         }
 

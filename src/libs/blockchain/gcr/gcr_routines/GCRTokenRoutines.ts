@@ -1,6 +1,6 @@
 // REVIEW: GCRTokenRoutines - Handler for token GCREdit operations
 // REVIEW: Phase 5.1 - Integrated with HookExecutor for script execution in consensus
-import { Repository } from "typeorm"
+import { EntityManager, Repository } from "typeorm"
 
 import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
@@ -464,7 +464,7 @@ export default class GCRTokenRoutines {
 
         // Non-simulated execution must be serialized per-token to prevent lost updates when multiple
         // block sync/apply paths touch the same token concurrently.
-        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
+        let tokenMetaForLog: TokenHolderReference | null = null
 
         try {
             await gcrTokenRepository.manager.transaction(async em => {
@@ -538,21 +538,20 @@ export default class GCRTokenRoutines {
                     if (before > 0n && after === 0n) removes.push(addr)
                 }
 
-                holderPointerOps = { tokenMeta, adds, removes }
+                tokenMetaForLog = tokenMeta
+                for (const addr of removes) {
+                    await this.removeHolderReference(addr, tokenAddress, em)
+                }
+                for (const addr of adds) {
+                    await this.addHolderReference(addr, tokenMeta, em)
+                }
             })
-
-            for (const addr of holderPointerOps?.removes ?? []) {
-                await this.removeHolderReference(addr, tokenAddress)
-            }
-            for (const addr of holderPointerOps?.adds ?? []) {
-                await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
-            }
 
             log.info(
                 "[GCRTokenRoutines] Transferred " +
                     amount +
                     " " +
-                    holderPointerOps?.tokenMeta.ticker +
+                    tokenMetaForLog?.ticker +
                     " from " +
                     actualFrom +
                     " to " +
@@ -639,8 +638,6 @@ export default class GCRTokenRoutines {
             return { success: true, message: "Mint completed" }
         }
 
-        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
-
         try {
             await gcrTokenRepository.manager.transaction(async em => {
                 const repo = em.getRepository(GCRToken)
@@ -707,11 +704,9 @@ export default class GCRTokenRoutines {
                     if (before === 0n && after > 0n) adds.push(addr)
                     if (before > 0n && after === 0n) removes.push(addr)
                 }
-                holderPointerOps = { tokenMeta, adds, removes }
+                for (const addr of removes) await this.removeHolderReference(addr, tokenAddress, em)
+                for (const addr of adds) await this.addHolderReference(addr, tokenMeta, em)
             })
-
-            for (const addr of holderPointerOps?.removes ?? []) await this.removeHolderReference(addr, tokenAddress)
-            for (const addr of holderPointerOps?.adds ?? []) await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
 
             log.info("[GCRTokenRoutines] Minted " + amount + " to " + to + " for " + tokenAddress)
         } catch (error) {
@@ -793,8 +788,6 @@ export default class GCRTokenRoutines {
             return { success: true, message: "Burn completed" }
         }
 
-        let holderPointerOps: null | { tokenMeta: TokenHolderReference; adds: string[]; removes: string[] } = null
-
         try {
             await gcrTokenRepository.manager.transaction(async em => {
                 const repo = em.getRepository(GCRToken)
@@ -864,11 +857,9 @@ export default class GCRTokenRoutines {
                     if (before === 0n && after > 0n) adds.push(addr)
                     if (before > 0n && after === 0n) removes.push(addr)
                 }
-                holderPointerOps = { tokenMeta, adds, removes }
+                for (const addr of removes) await this.removeHolderReference(addr, tokenAddress, em)
+                for (const addr of adds) await this.addHolderReference(addr, tokenMeta, em)
             })
-
-            for (const addr of holderPointerOps?.removes ?? []) await this.removeHolderReference(addr, tokenAddress)
-            for (const addr of holderPointerOps?.adds ?? []) await this.addHolderReference(addr, holderPointerOps!.tokenMeta)
 
             log.info("[GCRTokenRoutines] Burned " + amount + " from " + from + " for " + tokenAddress)
         } catch (error) {
@@ -1587,8 +1578,48 @@ export default class GCRTokenRoutines {
     private static async addHolderReference(
         holderAddress: string,
         reference: TokenHolderReference,
+        em?: EntityManager,
     ): Promise<void> {
         try {
+            if (em) {
+                const repo = em.getRepository(GCRMain)
+                const holder = await repo.findOne({
+                    where: { pubkey: holderAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+
+                if (!holder) {
+                    log.debug(
+                        "[GCRTokenRoutines] Holder " +
+                            holderAddress +
+                            " not found in transactional context, skipping reference add",
+                    )
+                    return
+                }
+
+                const current = holder.extended ?? {
+                    tokens: [],
+                    nfts: [],
+                    xm: [],
+                    web2: [],
+                    other: [],
+                }
+                const tokens = Array.isArray(current.tokens) ? current.tokens : []
+
+                const idx = tokens.findIndex(
+                    (t: any) => t?.tokenAddress === reference.tokenAddress,
+                )
+                if (idx >= 0) {
+                    tokens[idx] = { ...tokens[idx], ...reference }
+                } else {
+                    tokens.push(reference)
+                }
+
+                holder.extended = { ...current, tokens }
+                await repo.save(holder)
+                return
+            }
+
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
             const gcrMainRepository = dataSource.getRepository(GCRMain)
@@ -1647,8 +1678,32 @@ export default class GCRTokenRoutines {
     private static async removeHolderReference(
         holderAddress: string,
         tokenAddress: string,
+        em?: EntityManager,
     ): Promise<void> {
         try {
+            if (em) {
+                const repo = em.getRepository(GCRMain)
+                const locked = await repo.findOne({
+                    where: { pubkey: holderAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
+                if (!locked) return
+
+                const current = locked.extended ?? {
+                    tokens: [],
+                    nfts: [],
+                    xm: [],
+                    web2: [],
+                    other: [],
+                }
+                const tokens = Array.isArray(current.tokens) ? current.tokens : []
+                const next = tokens.filter((t: any) => t?.tokenAddress !== tokenAddress)
+
+                locked.extended = { ...current, tokens: next }
+                await repo.save(locked)
+                return
+            }
+
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
             const gcrMainRepository = dataSource.getRepository(GCRMain)
