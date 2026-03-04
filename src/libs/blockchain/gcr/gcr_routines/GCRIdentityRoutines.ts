@@ -1487,6 +1487,14 @@ export default class GCRIdentityRoutines {
             const provider = HumanPassportProvider.getInstance()
             const verification = await provider.verifyAddress(normalizedAddress)
 
+            // REVIEW: Guard against score degradation between tx submission and block application
+            if (!verification.passingScore) {
+                return {
+                    success: false,
+                    message: `Human Passport score ${verification.score} no longer meets the required threshold (${verification.threshold})`,
+                }
+            }
+
             const savedIdentity: SavedHumanPassportIdentity = {
                 address: verification.address,
                 score: verification.score,

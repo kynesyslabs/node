@@ -391,6 +391,19 @@ export default class IdentityManager {
         },
         sender: string,
     ): Promise<{ success: boolean; message: string; data?: SavedHumanPassportIdentity }> {
+        // TODO: Implement signature validation to bind payload.address to sender
+        // Currently sender is passed but not validated against payload.address
+        // This would prevent address spoofing by verifying the user signed a message
+        // linking their Human Passport address to their Demos account
+        // Related: payload.signature is accepted but not validated
+
+        // TODO: Implement verificationMethod branching
+        // Currently both "api" and "onchain" use identical API verification logic
+        // "onchain" should query on-chain passport data when implemented
+
+        // Note: referralCode is processed in GCRIdentityRoutines.applyHumanPassportIdentityAdd
+        // It's passed through the editOperation, not used here
+
         const { address, verificationMethod } = payload
 
         if (!address) {

@@ -103,6 +103,12 @@ export class HumanPassportProvider {
             )
         }
 
+        // REVIEW: Validate EVM address format to prevent URL path injection
+        const evmAddressRegex = /^0x[a-fA-F0-9]{40}$/
+        if (!evmAddressRegex.test(address)) {
+            throw new Error("Invalid EVM address format: must be 0x followed by 40 hex characters")
+        }
+
         const normalizedAddress = address.toLowerCase()
 
         // Check cache
