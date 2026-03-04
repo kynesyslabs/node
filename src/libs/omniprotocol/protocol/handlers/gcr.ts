@@ -46,7 +46,7 @@ interface IdentityAssignRequest {
  * Handler for 0x41 GCR_IDENTITY_ASSIGN opcode
  *
  * Internal operation triggered by write transactions to assign/remove identities.
- * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud, ethos).
+ * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud, nomis, ethos, tlsn).
  */
 export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, context }) => {
     if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
