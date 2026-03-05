@@ -208,6 +208,28 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after Human Passport linking
+     */
+    static async humanPassportLinked(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardHumanPassportPoints(
+            userId,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Human Passport unlinking
+     */
+    static async humanPassportUnlinked(
+        userId: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductHumanPassportPoints(userId)
+    }
+
+    /**
      * Hook to be called after Ethos score linking
      */
     static async ethosLinked(

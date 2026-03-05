@@ -21,12 +21,13 @@ const pointValues = {
     LINK_DISCORD: 1,
     LINK_UD_DOMAIN_DEMOS: 3,
     LINK_UD_DOMAIN: 1,
+    LINK_HUMAN_PASSPORT: 1,
 }
 
 export class PointSystem {
     private static instance: PointSystem
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): PointSystem {
         if (!PointSystem.instance) {
@@ -45,6 +46,7 @@ export class PointSystem {
             [network: string]: string[]
         }
         linkedNomis: NomisWalletIdentity[]
+        linkedHumanPassport: { address: string; score: number; passingScore: boolean }[]
         linkedEthos: EthosWalletIdentity[]
     }> {
         const identities = await IdentityManager.getIdentities(userId)
@@ -185,7 +187,14 @@ export class PointSystem {
             }
         }
 
-        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedEthos }
+        const humanPassportIdentities: any[] = (await IdentityManager.getIdentities(userId, "humanpassport")) || []
+        const linkedHumanPassport = humanPassportIdentities.map(hp => ({
+            address: hp.address,
+            score: hp.score || 0,
+            passingScore: hp.passingScore || false,
+        }))
+
+        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos }
     }
 
     /**
@@ -201,7 +210,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedEthos } =
+        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -238,6 +247,7 @@ export class PointSystem {
                 },
                 udDomains: account.points.breakdown?.udDomains || {},
                 nomisScores: account.points.breakdown?.nomisScores || {},
+                humanPassport: account.points.breakdown?.humanPassport || 0,
                 ethosScores: account.points.breakdown?.ethosScores || {},
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
@@ -246,6 +256,7 @@ export class PointSystem {
             linkedSocials,
             linkedUDDomains,
             linkedNomisIdentities: linkedNomis,
+            linkedHumanPassport,
             linkedEthosIdentities: linkedEthos,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
@@ -265,7 +276,8 @@ export class PointSystem {
             | "udDomains"
             | "nomisScores"
             | "ethosScores"
-            | "demosFollow",
+            | "demosFollow"
+            | "humanPassport",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -350,6 +362,15 @@ export class PointSystem {
             )
             appliedDelta = newDemosFollowPoints - oldDemosFollowPoints
             account.points.breakdown.demosFollow = newDemosFollowPoints
+        } else if (type === "humanPassport") {
+            const oldHumanPassportPoints =
+                account.points.breakdown.humanPassport || 0
+            const newHumanPassportPoints = Math.max(
+                0,
+                oldHumanPassportPoints + points,
+            )
+            appliedDelta = newHumanPassportPoints - oldHumanPassportPoints
+            account.points.breakdown.humanPassport = newHumanPassportPoints
         }
 
         if (appliedDelta !== 0) {
@@ -505,8 +526,8 @@ export class PointSystem {
                     message: walletIsAlreadyLinked
                         ? walletIsAlreadyLinkedMessage
                         : hasExistingWalletOnChain
-                        ? hasExistingWalletOnChainMessage
-                        : "Points awarded for linking wallet",
+                            ? hasExistingWalletOnChainMessage
+                            : "Points awarded for linking wallet",
                 },
                 require_reply: false,
                 extra: {},
@@ -1365,9 +1386,8 @@ export class PointSystem {
                 response: {
                     pointsAwarded: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points awarded for linking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points awarded for linking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
@@ -1448,9 +1468,8 @@ export class PointSystem {
                 response: {
                     pointsDeducted: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points deducted for unlinking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points deducted for unlinking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
@@ -1668,6 +1687,143 @@ export class PointSystem {
             return {
                 result: 500,
                 response: "Error deducting Nomis score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking a Human Passport
+     * @param userId The user's Demos address
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardHumanPassportPoints(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Verify the Human Passport identity is actually linked
+            const account = await ensureGCRForUser(userId)
+            const hpIdentities = account.identities.humanpassport || []
+
+            if (hpIdentities.length === 0) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Human Passport not linked",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user already has Human Passport points
+            if ((userPointsWithIdentities.breakdown.humanPassport || 0) > 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Human Passport points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_HUMAN_PASSPORT,
+                "humanPassport",
+                "humanPassport",
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_HUMAN_PASSPORT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking Human Passport",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error awarding Human Passport points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Human Passport
+     * @param userId The user's Demos address
+     * @returns RPCResponse
+     */
+    async deductHumanPassportPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            const currentHumanPassport =
+                userPointsWithIdentities.breakdown.humanPassport || 0
+            if (currentHumanPassport <= 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Human Passport points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_HUMAN_PASSPORT,
+                "humanPassport",
+                "humanPassport",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_HUMAN_PASSPORT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Human Passport",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            return {
+                result: 500,
+                response: "Error deducting Human Passport points",
                 require_reply: false,
                 extra: {
                     error:

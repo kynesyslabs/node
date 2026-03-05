@@ -15,6 +15,7 @@ import {
     NomisWalletIdentity,
     EthosWalletIdentity,
     PqcIdentityEdit,
+    SavedHumanPassportIdentity,
     SavedNomisIdentity,
     SavedEthosIdentity,
     SavedXmIdentity,
@@ -22,6 +23,7 @@ import {
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 import { EthosApiClient } from "@/libs/identity/tools/ethos"
 import {
     verifyTLSNProof,
@@ -1170,6 +1172,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "humanpassportadd":
+                result = await this.applyHumanPassportIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "humanpassportremove":
+                result = await this.applyHumanPassportIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "ethosadd":
                 result = await this.applyEthosIdentityUpsert(
                     identityEdit,
@@ -1191,6 +1207,7 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            
             case "tlsnremove":
                 result = await this.applyTLSNIdentityRemove(
                     identityEdit,
@@ -1224,17 +1241,31 @@ export default class GCRIdentityRoutines {
             | "discord"
             | "ud"
             | "nomis"
+            | "humanpassport"
             | "ethos",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
-            address?: string // for web3
+            address?: string // for web3/humanpassport
             domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
+        if (type === "humanpassport") {
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'humanpassport', '[]'::jsonb)) AS hp WHERE LOWER(hp->>'address') = LOWER(:address))",
+                    { address: data.address },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            return !result
+        }
+
         if (type !== "web3" && type !== "ud" && type !== "nomis" && type !== "ethos") {
             // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
@@ -1458,6 +1489,127 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Nomis identity removed" }
+    }
+
+    // SECTION Human Passport Identity Routines
+
+    private static async applyHumanPassportIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        try {
+            const clientData = editOperation.data as { address: string; verificationMethod: "api" | "onchain" }
+            const normalizedAddress = clientData.address.toLowerCase()
+
+            // Fetch verified score from Human Passport API (uses cache from earlier verification)
+            const provider = HumanPassportProvider.getInstance()
+            const verification = await provider.verifyAddress(normalizedAddress)
+
+            // REVIEW: Guard against score degradation between tx submission and block application
+            if (!verification.passingScore) {
+                return {
+                    success: false,
+                    message: `Human Passport score ${verification.score} no longer meets the required threshold (${verification.threshold})`,
+                }
+            }
+
+            const savedIdentity: SavedHumanPassportIdentity = {
+                address: verification.address,
+                score: verification.score,
+                passingScore: verification.passingScore,
+                threshold: verification.threshold,
+                stamps: verification.stamps,
+                verificationMethod: clientData.verificationMethod,
+                verifiedAt: verification.verifiedAt,
+                expiresAt: verification.expirationTimestamp
+                    ? new Date(verification.expirationTimestamp).getTime()
+                    : null,
+            }
+
+            const accountGCR = await ensureGCRForUser(editOperation.account)
+
+            // Initialize humanpassport array if needed
+            if (!accountGCR.identities.humanpassport) {
+                accountGCR.identities.humanpassport = []
+            }
+
+            // Global uniqueness check across all accounts
+            const isFirst = await this.isFirstConnection(
+                "humanpassport",
+                { address: normalizedAddress },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            // Upsert: remove existing then add new
+            accountGCR.identities.humanpassport =
+                accountGCR.identities.humanpassport.filter(
+                    (hp: SavedHumanPassportIdentity) =>
+                        hp.address.toLowerCase() !== normalizedAddress,
+                )
+            accountGCR.identities.humanpassport.push(savedIdentity)
+
+            if (!simulate) {
+                await gcrMainRepository.save(accountGCR)
+
+                if (isFirst) {
+                    await IncentiveManager.humanPassportLinked(
+                        accountGCR.pubkey,
+                        editOperation.referralCode,
+                    )
+                }
+            }
+
+            return { success: true, message: "Human Passport identity added" }
+        } catch (error: any) {
+            log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${error.message}`)
+            return { success: false, message: error.message || "Failed to add Human Passport identity" }
+        }
+    }
+
+    private static async applyHumanPassportIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const data = editOperation.data as { address: string }
+        const normalizedAddress = data.address.toLowerCase()
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities.humanpassport || accountGCR.identities.humanpassport.length === 0) {
+            return { success: false, message: "No Human Passport identities found" }
+        }
+
+        const addressExists = accountGCR.identities.humanpassport.some(
+            (hp: SavedHumanPassportIdentity) =>
+                hp.address.toLowerCase() === normalizedAddress,
+        )
+
+        if (!addressExists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        accountGCR.identities.humanpassport =
+            accountGCR.identities.humanpassport.filter(
+                (hp: SavedHumanPassportIdentity) =>
+                    hp.address.toLowerCase() !== normalizedAddress,
+            )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
+        }
+
+        return { success: true, message: "Human Passport identity removed" }
     }
 
     // SECTION Ethos Identity Routines

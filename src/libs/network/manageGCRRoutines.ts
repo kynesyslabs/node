@@ -7,6 +7,7 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
 
@@ -136,6 +137,56 @@ export default async function manageGCRRoutines(
                 response.response = await NomisIdentityProvider.listIdentities(
                     sender,
                 )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getHumanPassportScore": {
+            const options = params[0]
+
+            // Support both positional (string) and object ({ address }) param styles
+            const address =
+                typeof options === "string" ? options : options?.address
+            // Always force refresh to get latest score from API
+            const forceRefresh = true
+
+            if (!address) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "address is required" }
+                break
+            }
+
+            try {
+                const provider = HumanPassportProvider.getInstance()
+                const verification = await provider.verifyAddress(
+                    address,
+                    forceRefresh,
+                )
+                // Return only the numeric score (method name implies a number, not full object)
+                response.response = verification.score
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getHumanPassportIdentities": {
+            try {
+                response.response =
+                    await IdentityManager.getHumanPassportIdentities(sender)
             } catch (error) {
                 response.result = 400
                 response.response = null

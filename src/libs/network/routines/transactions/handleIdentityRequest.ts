@@ -3,6 +3,7 @@ import {
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
     UDIdentityAssignPayload,
+    HumanPassportIdentityData,
 } from "@kynesyslabs/demosdk/abstraction"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
@@ -99,6 +100,13 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
+        case "humanpassport_identity_assign": {
+            const hpPayload = payload.payload as HumanPassportIdentityData
+            return await IdentityManager.verifyHumanPassportPayload(
+                hpPayload,
+                sender,
+            )
+        }
         case "ethos_identity_assign":
             return await IdentityManager.verifyEthosPayload(
                 payload.payload as EthosWalletIdentity,
@@ -112,6 +120,7 @@ export default async function handleIdentityRequest(
         case "nomis_identity_remove":
         case "ethos_identity_remove":
         case "ud_identity_remove":
+        case "humanpassport_identity_remove":
         case "tlsn_identity_remove":
             return {
                 success: true,
