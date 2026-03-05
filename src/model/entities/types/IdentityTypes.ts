@@ -45,6 +45,42 @@ export interface SavedNomisIdentity {
 }
 
 /**
+ * Ethos wallet identity structure for linking Ethos reputation scores
+ * @property chain - Blockchain network (e.g., "evm")
+ * @property subchain - Network subchain (e.g., "mainnet")
+ * @property address - Wallet address
+ * @property score - Ethos reputation score (0-2800)
+ * @property profileId - Ethos profile ID
+ * @property lastSyncedAt - ISO timestamp of last sync
+ * @property metadata - Additional profile data (displayName, username)
+ */
+export interface EthosWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
+}
+
+export interface SavedEthosIdentity {
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
+}
+
+/**
  * The PQC identity saved in the GCR
  */
 export interface SavedPqcIdentity {
@@ -103,6 +139,11 @@ export type StoredIdentities = {
     nomis?: {
         [chain: string]: {
             [subchain: string]: SavedNomisIdentity[]
+        }
+    }
+    ethos?: {
+        [chain: string]: {
+            [subchain: string]: SavedEthosIdentity[]
         }
     }
 }

@@ -206,4 +206,34 @@ export class IncentiveManager {
             chain,
         )
     }
+
+    /**
+     * Hook to be called after Ethos score linking
+     */
+    static async ethosLinked(
+        userId: string,
+        chain: string,
+        ethosScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardEthosScorePoints(
+            userId,
+            chain,
+            ethosScore,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Ethos score unlinking
+     */
+    static async ethosUnlinked(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductEthosScorePoints(
+            userId,
+            chain,
+        )
+    }
 }

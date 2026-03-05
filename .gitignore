@@ -264,3 +264,9 @@ src/features/tlsnotary/SDK_INTEGRATION.md
 ipfs/data_53550/ipfs
 nohup.out
 *.db
+/.beads
+/.beads_bak
+/.taskmaster
+/better_testing/runs
+/documentation/internal-docs
+/PR_DUMP.md

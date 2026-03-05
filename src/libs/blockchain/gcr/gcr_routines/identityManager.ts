@@ -22,7 +22,7 @@ import { PqcIdentityAssignPayload } from "node_modules/@kynesyslabs/demosdk/buil
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 /*
  * Example of a payload for the gcr_routine method
@@ -311,6 +311,33 @@ export default class IdentityManager {
         }
     }
 
+    /**
+     * Verify the payload for an Ethos identity assign payload.
+     * NOTE: This only validates required fields (chain, subchain, address).
+     * The score is intentionally NOT validated here - it is fetched server-side
+     * from the Ethos API in applyEthosIdentityUpsert() to prevent score spoofing.
+     * Any client-supplied score in the payload is ignored.
+     *
+     * @param payload - The payload to verify
+     * @returns {success: boolean, message: string}
+     */
+    static async verifyEthosPayload(
+        payload: EthosWalletIdentity,
+    ): Promise<{ success: boolean; message: string }> {
+        if (!payload.chain || !payload.subchain || !payload.address) {
+            return {
+                success: false,
+                message:
+                    "Invalid Ethos identity payload: missing chain, subchain or address",
+            }
+        }
+
+        return {
+            success: true,
+            message: "Ethos identity payload verified",
+        }
+    }
+
     // SECTION Helper functions and Getters
     /**
      * Get the identities related to a demos address
@@ -355,7 +382,7 @@ export default class IdentityManager {
      */
     static async getIdentities(
         address: string,
-        key?: "xm" | "web2" | "pqc" | "ud" | "nomis",
+        key?: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos",
     ): Promise<any> {
         const gcr = await ensureGCRForUser(address)
         if (key) {
