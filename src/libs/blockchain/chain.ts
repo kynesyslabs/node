@@ -461,6 +461,13 @@ export default class Chain {
                                     log.error("Message: " + error.message)
                                     continue
                                 }
+
+                                log.error(
+                                    "Unexpected error while inserting tx: " +
+                                        tx.hash,
+                                )
+                                console.error(error)
+                                throw error
                             }
                         }
 
