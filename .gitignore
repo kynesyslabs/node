@@ -275,3 +275,7 @@ nohup.out
 /.beads/last-touched
 /.taskmaster
 /internal-docs
+/.beads_bak
+/better_testing/runs
+/documentation/internal-docs
+/PR_DUMP.md
