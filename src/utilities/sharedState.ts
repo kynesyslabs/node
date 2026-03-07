@@ -83,10 +83,10 @@ export default class SharedState {
             enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
             maxConnectionsPerIP: parseInt(
                 process.env.OMNI_MAX_CONNECTIONS_PER_IP || "1",
-                1,
+                10,
             ),
             maxRequestsPerSecondPerIP: parseInt(
-                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "100",
+                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "200",
                 10,
             ),
             maxRequestsPerSecondPerIdentity: parseInt(
