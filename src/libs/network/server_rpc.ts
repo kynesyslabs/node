@@ -318,7 +318,17 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const awardPointsData = payload.params[0].message as AccountParams[]
+            // REVIEW: Input validation to prevent undefined property crashes
+            const firstParam = payload.params?.[0]
+            if (!firstParam?.message) {
+                return {
+                    result: 400,
+                    response: { error: "Invalid params: missing message" },
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+            const awardPointsData = firstParam.message as AccountParams[]
             const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
@@ -691,12 +701,19 @@ function handleIdentityTxRateLimit(
         return null
     }
 
-    if (payload.params[0].extra !== "confirmTx") {
+    // REVIEW: Input validation to prevent undefined property crashes
+    const rateFirstParam = payload.params?.[0]
+    if (!rateFirstParam) {
+        return null
+    }
+
+    if (rateFirstParam.extra !== "confirmTx") {
         return null
     }
 
     // INFO: Exit if not an identity tx
-    if (payload.params[0].data.content.data[0] !== "identity") {
+    const contentData = rateFirstParam.data?.content?.data?.[0]
+    if (contentData !== "identity") {
         return null
     }
 
