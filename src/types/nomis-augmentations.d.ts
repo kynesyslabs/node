@@ -19,8 +19,22 @@ declare module "@kynesyslabs/demosdk/build/types/blockchain/GCREdit" {
     metadata?: Record<string, unknown>
   }
 
+  export interface EthosIdentityGCREditData {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+      displayName?: string
+      username?: string
+      [key: string]: unknown
+    }
+  }
+
   export interface GCREditIdentity {
-    context: "xm" | "web2" | "pqc" | "ud" | "nomis"
+    context: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos"
     data:
       | Web2GCRData
       | XmGCRIdentityData
@@ -29,5 +43,6 @@ declare module "@kynesyslabs/demosdk/build/types/blockchain/GCREdit" {
       | PqcIdentityRemovePayload["payload"]
       | UdGCRData
       | NomisIdentityGCREditData
+      | EthosIdentityGCREditData
   }
 }

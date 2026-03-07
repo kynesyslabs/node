@@ -860,6 +860,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
+        if (getSharedState.isShuttingDown) return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -869,6 +870,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     if (getSharedState.fastSyncCount === 0) {
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
+            if (getSharedState.isShuttingDown) return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )

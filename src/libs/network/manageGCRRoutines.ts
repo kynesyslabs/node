@@ -7,6 +7,8 @@ import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Referrals } from "@/features/incentive/referrals"
 import GCR from "../blockchain/gcr/gcr"
 import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityProvider"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
+import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
 
 interface GCRRoutinePayload {
@@ -141,6 +143,110 @@ export default async function manageGCRRoutines(
                 response.extra = {
                     error:
                         error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getHumanPassportScore": {
+            const options = params[0]
+
+            // Support both positional (string) and object ({ address }) param styles
+            const address =
+                typeof options === "string" ? options : options?.address
+            // Always force refresh to get latest score from API
+            const forceRefresh = true
+
+            if (!address) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "address is required" }
+                break
+            }
+
+            try {
+                const provider = HumanPassportProvider.getInstance()
+                const verification = await provider.verifyAddress(
+                    address,
+                    forceRefresh,
+                )
+                // Return only the numeric score (method name implies a number, not full object)
+                response.response = verification.score
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getHumanPassportIdentities": {
+            try {
+                response.response =
+                    await IdentityManager.getHumanPassportIdentities(sender)
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        case "getEthosScore": {
+            const options = params[0]
+
+            if (!options?.walletAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "walletAddress is required" }
+                break
+            }
+
+            try {
+                response.response = await EthosIdentityProvider.getWalletScore(
+                    sender,
+                    options.walletAddress,
+                    {
+                        chain: options.chain,
+                        subchain: options.subchain,
+                    },
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                const errorMsg = error instanceof Error ? error.message : ""
+                // Whitelist of safe user-facing Ethos error messages
+                const safeEthosErrors = [
+                    "Wallet is not linked to this account",
+                    "Wallet address is required",
+                    "This wallet does not have an Ethos profile",
+                    "Failed to fetch Ethos score",
+                    "Ethos API returned no score data",
+                ]
+                const isSafeError = safeEthosErrors.some(safe => errorMsg.includes(safe))
+                response.extra = {
+                    error: isSafeError ? errorMsg : "Failed to fetch Ethos score",
+                }
+            }
+            break
+        }
+
+        case "getEthosIdentities": {
+            try {
+                response.response = await EthosIdentityProvider.listIdentities(
+                    sender,
+                )
+            } catch (error) {
+                response.result = 400
+                response.response = null
+                response.extra = {
+                    error: "Failed to fetch Ethos identities",
                 }
             }
             break

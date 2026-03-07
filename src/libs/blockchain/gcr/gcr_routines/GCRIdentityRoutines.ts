@@ -13,13 +13,18 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
 import {
     NomisWalletIdentity,
+    EthosWalletIdentity,
     PqcIdentityEdit,
+    SavedHumanPassportIdentity,
     SavedNomisIdentity,
+    SavedEthosIdentity,
     SavedXmIdentity,
     SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
+import { EthosApiClient } from "@/libs/identity/tools/ethos"
 import {
     verifyTLSNProof,
     type TLSNIdentityPayload,
@@ -1167,6 +1172,34 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "humanpassportadd":
+                result = await this.applyHumanPassportIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "humanpassportremove":
+                result = await this.applyHumanPassportIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "ethosadd":
+                result = await this.applyEthosIdentityUpsert(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "ethosremove":
+                result = await this.applyEthosIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "tlsnadd":
                 result = await this.applyTLSNIdentityAdd(
                     identityEdit,
@@ -1174,6 +1207,7 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            
             case "tlsnremove":
                 result = await this.applyTLSNIdentityRemove(
                     identityEdit,
@@ -1206,18 +1240,33 @@ export default class GCRIdentityRoutines {
             | "telegram"
             | "discord"
             | "ud"
-            | "nomis",
+            | "nomis"
+            | "humanpassport"
+            | "ethos",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
-            address?: string // for web3
+            address?: string // for web3/humanpassport
             domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3" && type !== "ud" && type !== "nomis") {
+        if (type === "humanpassport") {
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'humanpassport', '[]'::jsonb)) AS hp WHERE LOWER(hp->>'address') = LOWER(:address))",
+                    { address: data.address },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            return !result
+        }
+
+        if (type !== "web3" && type !== "ud" && type !== "nomis" && type !== "ethos") {
             // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
@@ -1257,7 +1306,7 @@ export default class GCRIdentityRoutines {
             const addressToCheck =
                 data.chain === "evm" ? data.address.toLowerCase() : data.address
 
-            const rootKey = type === "web3" ? "xm" : "nomis"
+            const rootKey = type === "web3" ? "xm" : type === "ethos" ? "ethos" : "nomis"
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
@@ -1440,6 +1489,316 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Nomis identity removed" }
+    }
+
+    // SECTION Human Passport Identity Routines
+
+    private static async applyHumanPassportIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        try {
+            const clientData = editOperation.data as { address: string; verificationMethod: "api" | "onchain" }
+            const normalizedAddress = clientData.address.toLowerCase()
+
+            // Fetch verified score from Human Passport API (uses cache from earlier verification)
+            const provider = HumanPassportProvider.getInstance()
+            const verification = await provider.verifyAddress(normalizedAddress)
+
+            // REVIEW: Guard against score degradation between tx submission and block application
+            if (!verification.passingScore) {
+                return {
+                    success: false,
+                    message: `Human Passport score ${verification.score} no longer meets the required threshold (${verification.threshold})`,
+                }
+            }
+
+            const savedIdentity: SavedHumanPassportIdentity = {
+                address: verification.address,
+                score: verification.score,
+                passingScore: verification.passingScore,
+                threshold: verification.threshold,
+                stamps: verification.stamps,
+                verificationMethod: clientData.verificationMethod,
+                verifiedAt: verification.verifiedAt,
+                expiresAt: verification.expirationTimestamp
+                    ? new Date(verification.expirationTimestamp).getTime()
+                    : null,
+            }
+
+            const accountGCR = await ensureGCRForUser(editOperation.account)
+
+            // Initialize humanpassport array if needed
+            if (!accountGCR.identities.humanpassport) {
+                accountGCR.identities.humanpassport = []
+            }
+
+            // Global uniqueness check across all accounts
+            const isFirst = await this.isFirstConnection(
+                "humanpassport",
+                { address: normalizedAddress },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            // Upsert: remove existing then add new
+            accountGCR.identities.humanpassport =
+                accountGCR.identities.humanpassport.filter(
+                    (hp: SavedHumanPassportIdentity) =>
+                        hp.address.toLowerCase() !== normalizedAddress,
+                )
+            accountGCR.identities.humanpassport.push(savedIdentity)
+
+            if (!simulate) {
+                await gcrMainRepository.save(accountGCR)
+
+                if (isFirst) {
+                    await IncentiveManager.humanPassportLinked(
+                        accountGCR.pubkey,
+                        editOperation.referralCode,
+                    )
+                }
+            }
+
+            return { success: true, message: "Human Passport identity added" }
+        } catch (error: any) {
+            log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${error.message}`)
+            return { success: false, message: error.message || "Failed to add Human Passport identity" }
+        }
+    }
+
+    private static async applyHumanPassportIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const data = editOperation.data as { address: string }
+        const normalizedAddress = data.address.toLowerCase()
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities.humanpassport || accountGCR.identities.humanpassport.length === 0) {
+            return { success: false, message: "No Human Passport identities found" }
+        }
+
+        const addressExists = accountGCR.identities.humanpassport.some(
+            (hp: SavedHumanPassportIdentity) =>
+                hp.address.toLowerCase() === normalizedAddress,
+        )
+
+        if (!addressExists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        accountGCR.identities.humanpassport =
+            accountGCR.identities.humanpassport.filter(
+                (hp: SavedHumanPassportIdentity) =>
+                    hp.address.toLowerCase() !== normalizedAddress,
+            )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
+        }
+
+        return { success: true, message: "Human Passport identity removed" }
+    }
+
+    // SECTION Ethos Identity Routines
+
+    private static normalizeEthosAddress(
+        chain: string,
+        address: string,
+    ): string {
+        if (chain === "evm") {
+            return address.trim().toLowerCase()
+        }
+
+        return address.trim()
+    }
+
+    static async applyEthosIdentityUpsert(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            chain,
+            subchain,
+            address,
+        } = editOperation.data
+
+        if (!chain || !subchain || !address) {
+            return { success: false, message: "Invalid Ethos identity payload: missing chain, subchain or address" }
+        }
+
+        const normalizedAddress = this.normalizeEthosAddress(chain, address)
+
+        // Fetch authoritative score from Ethos API server-side
+        const ethosClient = EthosApiClient.getInstance()
+        let serverScore: number
+        let serverProfileId: number | undefined
+        let serverMetadata: { displayName?: string; username?: string } | undefined
+
+        try {
+            const ethosData = await ethosClient.getScore(normalizedAddress)
+            serverScore = ethosData.score
+            serverProfileId = ethosData.profileId
+            serverMetadata = {
+                displayName: ethosData.displayName,
+                username: ethosData.username,
+            }
+        } catch (error: any) {
+            log.error(`[GCRIdentityRoutines] Failed to fetch Ethos score from API`)
+            return { success: false, message: "Failed to fetch Ethos score" }
+        }
+
+        const isFirst = await this.isFirstConnection(
+            "ethos",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            gcrMainRepository,
+            editOperation.account,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.ethos = accountGCR.identities.ethos || {}
+        accountGCR.identities.ethos[chain] =
+            accountGCR.identities.ethos[chain] || {}
+        accountGCR.identities.ethos[chain][subchain] =
+            accountGCR.identities.ethos[chain][subchain] || []
+
+        const chainBucket = accountGCR.identities.ethos[chain][subchain]
+
+        const filtered = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                chain,
+                existing.address,
+            )
+            return existingAddress !== normalizedAddress
+        })
+
+        const record: SavedEthosIdentity = {
+            address: normalizedAddress,
+            score: serverScore,
+            profileId: serverProfileId,
+            lastSyncedAt: new Date().toISOString(),
+            metadata: serverMetadata,
+        }
+
+        filtered.push(record)
+        accountGCR.identities.ethos[chain][subchain] = filtered
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            log.info(
+                `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${serverScore}, isFirstConnection=${isFirst}`,
+            )
+
+            if (isFirst) {
+                await IncentiveManager.ethosLinked(
+                    accountGCR.pubkey,
+                    chain,
+                    serverScore,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Ethos identity upserted" }
+    }
+
+    static async applyEthosIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identity = editOperation.data as EthosWalletIdentity
+
+        if (!identity?.chain || !identity?.subchain || !identity?.address) {
+            return { success: false, message: "Invalid Ethos identity payload" }
+        }
+
+        const normalizedAddress = this.normalizeEthosAddress(
+            identity.chain,
+            identity.address,
+        )
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        const chainBucket =
+            accountGCR.identities?.ethos?.[identity.chain]?.[identity.subchain]
+
+        if (!Array.isArray(chainBucket)) {
+            return { success: false, message: "Ethos identity not found" }
+        }
+
+        const exists = chainBucket.some(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress === normalizedAddress
+        })
+
+        if (!exists) {
+            return { success: false, message: "Ethos identity not found" }
+        }
+
+        const filteredBucket = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress !== normalizedAddress
+        })
+
+        accountGCR.identities.ethos[identity.chain][identity.subchain] =
+            filteredBucket
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            // Only deduct points if NO Ethos identities remain for this chain
+            // (checking all subchains, since points are tracked per-chain)
+            const chainIdentities = accountGCR.identities.ethos[identity.chain]
+            const hasRemainingIdentities = Object.values(chainIdentities).some(
+                subchainBucket =>
+                    Array.isArray(subchainBucket) && subchainBucket.length > 0,
+            )
+
+            log.info(
+                `[EthosIdentity] UNLINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${identity.chain}, subchain=${identity.subchain}, pointsDeducted=${!hasRemainingIdentities}`,
+            )
+
+            if (!hasRemainingIdentities) {
+                await IncentiveManager.ethosUnlinked(
+                    accountGCR.pubkey,
+                    identity.chain,
+                )
+            }
+        }
+
+        return { success: true, message: "Ethos identity removed" }
     }
 
     // SECTION TLSNotary Identity Routines
