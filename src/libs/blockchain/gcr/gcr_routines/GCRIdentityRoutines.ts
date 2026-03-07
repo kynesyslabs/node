@@ -215,7 +215,10 @@ export default class GCRIdentityRoutines {
         )
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyXmIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Deduct incentive points for wallet unlinking
@@ -313,7 +316,10 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.web2[context].push(data)
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyWeb2IdentityAdd")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Only award points if this is the first time this identity is being connected
@@ -420,7 +426,10 @@ export default class GCRIdentityRoutines {
         ].filter((id: Web2GCRData["data"]) => id.username !== username)
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyWeb2IdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Deduct incentive points for Twitter unlinking
@@ -502,7 +511,10 @@ export default class GCRIdentityRoutines {
         }
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyPqcIdentityAdd")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
         }
 
         return { success: true, message: "PQC identities added" }
@@ -579,7 +591,10 @@ export default class GCRIdentityRoutines {
         }
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyPqcIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
         }
 
         return { success: true, message: "PQC identities removed" }
@@ -661,7 +676,10 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.ud.push(payload)
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyUDIdentityAdd")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Check if this is the first connection for this domain
@@ -730,7 +748,10 @@ export default class GCRIdentityRoutines {
         )
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyUDIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Deduct incentive points for UD domain unlinking
@@ -763,7 +784,10 @@ export default class GCRIdentityRoutines {
         account.points.lastUpdated = new Date()
 
         if (!simulate) {
-            await gcrMainRepository.save(account)
+            const saveResult = await safeGCRSave(gcrMainRepository, account, "applyAwardPoints")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
         }
 
         return { success: true, message: "Points awarded" }
@@ -792,7 +816,10 @@ export default class GCRIdentityRoutines {
                 : account.points.totalPoints - amount
 
         if (!simulate) {
-            await gcrMainRepository.save(account)
+            const saveResult = await safeGCRSave(gcrMainRepository, account, "applyAwardPointsRollback")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
         }
 
         return { success: true, message: "Points deducted" }
@@ -1437,7 +1464,10 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.nomis[chain][subchain] = filtered
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyNomisIdentityUpsert")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             if (isFirst) {
                 await IncentiveManager.nomisLinked(
@@ -1505,7 +1535,10 @@ export default class GCRIdentityRoutines {
             })
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyNomisIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             await IncentiveManager.nomisUnlinked(
                 accountGCR.pubkey,
@@ -1576,7 +1609,10 @@ export default class GCRIdentityRoutines {
             accountGCR.identities.humanpassport.push(savedIdentity)
 
             if (!simulate) {
-                await gcrMainRepository.save(accountGCR)
+                const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyHumanPassportIdentityAdd")
+                if (!saveResult.success) {
+                    return { success: false, message: saveResult.error || "Database save failed" }
+                }
 
                 if (isFirst) {
                     await IncentiveManager.humanPassportLinked(
@@ -1629,7 +1665,10 @@ export default class GCRIdentityRoutines {
             )
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyHumanPassportIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
         }
@@ -1727,7 +1766,10 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.ethos[chain][subchain] = filtered
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyEthosIdentityUpsert")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             log.info(
                 `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${serverScore}, isFirstConnection=${isFirst}`,
@@ -1801,7 +1843,10 @@ export default class GCRIdentityRoutines {
             filteredBucket
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyEthosIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             // Only deduct points if NO Ethos identities remain for this chain
             // (checking all subchains, since points are tracked per-chain)
@@ -2005,7 +2050,10 @@ export default class GCRIdentityRoutines {
 
         // 10. Save and award incentives
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyTLSNIdentityAdd")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             if (context === "github") {
                 const isFirst = await this.isFirstConnection(
@@ -2124,7 +2172,10 @@ export default class GCRIdentityRoutines {
         )
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyTLSNIdentityRemove")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
             if (context === "github" && identity.userId) {
