@@ -178,6 +178,34 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after ERC-8004 agent linking
+     */
+    static async agentLinked(
+        userId: string,
+        agentId: string,
+        chain: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardAgentPoints(
+            userId,
+            agentId,
+            chain,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after ERC-8004 agent unlinking
+     */
+    static async agentUnlinked(
+        userId: string,
+        agentId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductAgentPoints(userId, agentId, chain)
+    }
+
+    /**
      * Hook to be called after Nomis score linking
      */
     static async nomisLinked(

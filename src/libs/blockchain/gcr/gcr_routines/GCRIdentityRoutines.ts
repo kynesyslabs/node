@@ -17,9 +17,12 @@ import {
     SavedNomisIdentity,
     SavedXmIdentity,
     SavedUdIdentity,
+    SavedAgentIdentity,
 } from "@/model/entities/types/IdentityTypes"
+import { AgentIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import { AgentIdentityManager } from "./agentIdentityManager"
 import {
     verifyTLSNProof,
     type TLSNIdentityPayload,
@@ -711,6 +714,173 @@ export default class GCRIdentityRoutines {
         return { success: true, message: "UD identity removed" }
     }
 
+    // SECTION Agent Identity Routines
+    static async applyAgentIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const payload = editOperation.data as AgentIdentityPayload
+
+        // Validate required fields
+        if (
+            !payload.agentId ||
+            !payload.evmAddress ||
+            !payload.chain ||
+            !payload.proof
+        ) {
+            return {
+                success: false,
+                message: "Invalid edit operation data: missing required fields (agentId, evmAddress, chain, proof)",
+            }
+        }
+
+        // Validate chain - only base.sepolia is currently supported
+        const canonicalChain = AgentIdentityManager.validateChain(payload.chain)
+        if (!canonicalChain) {
+            return {
+                success: false,
+                message: `Unsupported agent chain: ${payload.chain}. Only base.sepolia is currently supported.`,
+            }
+        }
+
+        // Validate EVM address format
+        const evmPattern = /^0x[0-9a-fA-F]{40}$/
+        if (!evmPattern.test(payload.evmAddress)) {
+            return {
+                success: false,
+                message: `Invalid EVM address format: ${payload.evmAddress}`,
+            }
+        }
+
+        // Validate proof structure
+        if (!payload.proof.type || !payload.proof.message || !payload.proof.signature) {
+            return {
+                success: false,
+                message: "Invalid proof structure: missing required fields",
+            }
+        }
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        // Initialize agent identities structure if not exists
+        accountGCR.identities.agent = accountGCR.identities.agent || {}
+        accountGCR.identities.agent[canonicalChain] =
+            accountGCR.identities.agent[canonicalChain] || []
+
+        // Check if agent already exists for this account
+        const agentExists = accountGCR.identities.agent[canonicalChain].some(
+            (id: SavedAgentIdentity) => id.agentId === payload.agentId,
+        )
+
+        if (agentExists) {
+            return {
+                success: false,
+                message: "Agent already linked to this account",
+            }
+        }
+
+        // Create the saved agent identity
+        const savedAgent: SavedAgentIdentity = {
+            agentId: payload.agentId,
+            evmAddress: payload.evmAddress.toLowerCase(),
+            chain: canonicalChain,
+            txHash: payload.txHash,
+            tokenUri: payload.tokenUri,
+            proof: payload.proof,
+            timestamp: Date.now(),
+            resolverUrl: payload.resolverUrl,
+        }
+
+        accountGCR.identities.agent[canonicalChain].push(savedAgent)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Check if this is the first connection for this agent
+             */
+            const isFirst = await this.isFirstConnection(
+                "agent",
+                { agentId: payload.agentId, chain: canonicalChain },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            /**
+             * Award incentive points for agent linking
+             */
+            if (isFirst) {
+                await IncentiveManager.agentLinked(
+                    accountGCR.pubkey,
+                    payload.agentId,
+                    canonicalChain,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Agent identity added" }
+    }
+
+    static async applyAgentIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { agentId, chain } = editOperation.data
+
+        if (!agentId || !chain) {
+            return { success: false, message: "Invalid edit operation data" }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (
+            !accountGCR.identities ||
+            !accountGCR.identities.agent ||
+            !accountGCR.identities.agent[chain]
+        ) {
+            return {
+                success: false,
+                message: "No agent identities found for this chain",
+            }
+        }
+
+        const agentExists = accountGCR.identities.agent[chain].some(
+            (id: SavedAgentIdentity) => id.agentId === agentId,
+        )
+
+        if (!agentExists) {
+            return { success: false, message: "Agent not found" }
+        }
+
+        accountGCR.identities.agent[chain] = accountGCR.identities.agent[
+            chain
+        ].filter((id: SavedAgentIdentity) => id.agentId !== agentId)
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            /**
+             * Deduct incentive points for agent unlinking
+             */
+            await IncentiveManager.agentUnlinked(
+                accountGCR.pubkey,
+                agentId,
+                chain,
+            )
+        }
+
+        return { success: true, message: "Agent identity removed" }
+    }
+
     static async applyAwardPoints(
         editOperation: any, // GCREditIdentity but typed as any due to union type constraints
         gcrMainRepository: Repository<GCRMain>,
@@ -1132,6 +1302,20 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "agentadd":
+                result = await this.applyAgentIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "agentremove":
+                result = await this.applyAgentIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "pointsadd":
                 result = await this.applyAwardPoints(
                     identityEdit,
@@ -1199,24 +1383,37 @@ export default class GCRIdentityRoutines {
     }
 
     private static async isFirstConnection(
-        type:
-            | "twitter"
-            | "github"
-            | "web3"
-            | "telegram"
-            | "discord"
-            | "ud"
-            | "nomis",
+        type: "twitter" | "github" | "web3" | "telegram" | "discord" | "ud" | "agent" | "nomis",
         data: {
             userId?: string // for twitter/github/discord
-            chain?: string // for web3
+            chain?: string // for web3 and agent
             subchain?: string // for web3
             address?: string // for web3
             domain?: string // for ud
+            agentId?: string // for agent
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
+        if (type === "agent") {
+            /**
+             * Check if this agent exists anywhere
+             */
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'agent'->:chain, '[]'::jsonb)) AS agent_id WHERE agent_id->>'agentId' = :agentId)",
+                    { chain: data.chain, agentId: data.agentId },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            /**
+             * Return true if no account has this agent
+             */
+            return !result
+        }
+
         if (type !== "web3" && type !== "ud" && type !== "nomis") {
             // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `

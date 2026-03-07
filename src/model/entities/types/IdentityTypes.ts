@@ -1,4 +1,5 @@
 import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
+import { DemosOwnershipProof } from "@kynesyslabs/demosdk/abstraction"
 
 export interface NomisWalletIdentity {
     chain: string
@@ -85,6 +86,28 @@ export interface SavedUdIdentity {
     registryType: "UNS" | "CNS" // Which registry was used
 }
 
+/**
+ * ERC-8004 Agent Identity saved in the GCR
+ *
+ * Links an ERC-8004 agent NFT (registered on Base Sepolia) to a Demos identity.
+ * The agent NFT represents an AI agent's on-chain identity.
+ *
+ * Requirements:
+ * - User must have an EVM wallet linked to their Demos identity
+ * - The EVM wallet must own the ERC-8004 agent NFT
+ * - User must sign ownership proof with their Demos wallet
+ */
+export interface SavedAgentIdentity {
+    agentId: string // ERC-8004 token ID
+    evmAddress: string // EVM address that owns the agent NFT
+    chain: string // Chain where agent is registered (e.g., "base.sepolia")
+    txHash: string // Transaction hash of agent registration
+    tokenUri: string // Token URI pointing to agent card metadata
+    proof: DemosOwnershipProof // Ownership proof signed by Demos wallet
+    timestamp: number // When the identity was linked
+    resolverUrl?: string // Optional resolver URL for the agent
+}
+
 export type StoredIdentities = {
     xm: {
         [chain: string]: {
@@ -100,6 +123,10 @@ export type StoredIdentities = {
         [algorithm: string]: SavedPqcIdentity[]
     }
     ud: SavedUdIdentity[] // Unstoppable Domains identities
+    agent: {
+        // A mapping of chain (e.g., "base.sepolia") to array of agent identities
+        [chain: string]: SavedAgentIdentity[]
+    }
     nomis?: {
         [chain: string]: {
             [subchain: string]: SavedNomisIdentity[]
