@@ -39,6 +39,28 @@ import {
 } from "@/features/zk/types"
 import Datasource from "@/model/datasource"
 
+/**
+ * Safe wrapper for GCR repository saves.
+ * Logs errors and returns failure result instead of crashing.
+ */
+async function safeGCRSave(
+    repository: Repository<GCRMain>,
+    gcr: GCRMain,
+    operation: string,
+): Promise<{ success: boolean; error?: string }> {
+    try {
+        await repository.save(gcr)
+        return { success: true }
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        log.error(`[GCR] Database save failed during ${operation}`, {
+            error: errorMessage,
+            pubkey: gcr.pubkey?.substring(0, 16),
+        })
+        return { success: false, error: `Database error: ${errorMessage}` }
+    }
+}
+
 export default class GCRIdentityRoutines {
     // SECTION XM Identity Routines
     static async applyXmIdentityAdd(
@@ -103,7 +125,10 @@ export default class GCRIdentityRoutines {
         accountGCR.identities.xm[chain][subchain].push(data)
 
         if (!simulate) {
-            await gcrMainRepository.save(accountGCR)
+            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyXmIdentityAdd")
+            if (!saveResult.success) {
+                return { success: false, message: saveResult.error || "Database save failed" }
+            }
 
             /**
              * Check if this is the first connection
