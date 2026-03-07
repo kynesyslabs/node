@@ -44,6 +44,24 @@ import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 
 dotenv.config()
 
+// REVIEW: Global error handlers to prevent crashes on unhandled errors
+// These allow the node to continue operating and serving RPC requests
+process.on("uncaughtException", (error: Error) => {
+    console.error("[FATAL] Uncaught Exception - node will attempt to continue", {
+        error: error.message,
+        stack: error.stack,
+    })
+    // Don't exit - let the node try to continue serving RPC
+})
+
+process.on("unhandledRejection", (reason: unknown) => {
+    console.error("[FATAL] Unhandled Rejection - node will attempt to continue", {
+        reason: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined,
+    })
+    // Don't exit - let the node try to continue serving RPC
+})
+
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
 const indexState: {
     OVERRIDE_PORT: number | null
@@ -862,7 +880,15 @@ async function main() {
 // Redundant handlers removed. Cleanup logic moved to gracefulShutdown.
 
 // INFO Starting the main routine
-main()
+main().catch((error: Error) => {
+    console.error("[FATAL] Error in main() - attempting graceful shutdown", {
+        error: error.message,
+        stack: error.stack,
+    })
+    gracefulShutdown("main_error").catch(() => {
+        process.exit(1)
+    })
+})
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
