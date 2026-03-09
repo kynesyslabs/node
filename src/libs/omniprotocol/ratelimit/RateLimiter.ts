@@ -39,7 +39,6 @@ export class RateLimiter {
         }
 
         const entry = this.getOrCreateEntry(ipAddress, RateLimitType.IP)
-        log.only(`Entry: ${JSON.stringify(entry, null, 2)}`)
         const now = Date.now()
 
         // Update last access

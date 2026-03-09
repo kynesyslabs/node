@@ -194,20 +194,16 @@ export class ConnectionPool extends EventEmitter {
             `Max connections per peer: ${this.config.maxConnectionsPerPeer}`,
         )
         if (usableConnections.length >= this.config.maxConnectionsPerPeer) {
-            log.error(`Max connections per peer reached for ${peerIdentity}`)
-            log.error("Closing oldest connection to make room for new inbound")
-            // Close oldest connection to make room
-            const oldest = this.findOldestConnection(usableConnections)
-            if (oldest) {
-                log.debug(
-                    `[ConnectionPool] Closing oldest connection to ${peerIdentity} to make room for new inbound`,
-                )
-                oldest.close().catch(() => {})
-                const index = existing.indexOf(oldest)
-                if (index !== -1) {
-                    existing.splice(index, 1)
-                }
-            }
+            // INFO: Reject the connection
+            log.error(
+                `[ConnectionPool] Max connections per peer reached for ${peerIdentity}`,
+            )
+            log.error(
+                `[ConnectionPool] Rejecting connection ${connection.socketId} for ${peerIdentity}`,
+            )
+            connection.close().catch(() => {})
+            this.emit("connection_rejected", peerIdentity, "max_connections")
+            return
         }
 
         // Add new connection

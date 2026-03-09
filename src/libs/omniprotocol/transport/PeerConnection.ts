@@ -162,8 +162,6 @@ export class PeerConnection extends EventEmitter {
         const endpoints = [localEndpoint, remoteEndpoint].sort()
         const data = endpoints.join("|")
 
-        log.only(`Socket ID data: ${data}`)
-
         // Hash with keccak256 for a compact, unique identifier
         const hash = keccak_256(Buffer.from(data, "utf8"))
         return Buffer.from(hash).toString("hex")
