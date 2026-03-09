@@ -19,7 +19,6 @@ import type {
     HistoryMessage,
     ErrorCode,
 } from "./types"
-import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 /** Max raw WebSocket message size (256 KB) */
 const MAX_MESSAGE_SIZE = 256 * 1024
@@ -76,9 +75,7 @@ export class L2PSMessagingServer {
         let frame: ProtocolFrame
         try {
             frame = JSON.parse(raw)
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error)
-            log.warn("[L2PSMessagingServer] Invalid JSON message:", errorMsg)
+        } catch {
             this.sendError(ws, "INVALID_MESSAGE", "Invalid JSON")
             return
         }
@@ -139,7 +136,7 @@ export class L2PSMessagingServer {
         // Verify proof of key ownership: sign("register:{publicKey}:{timestamp}")
         const proofMessage = `register:${publicKey}:${msg.timestamp}`
         try {
-            const valid = await TxValidatorPool.getInstance().verify({
+            const valid = await ucrypto.verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(publicKey),
@@ -157,9 +154,7 @@ export class L2PSMessagingServer {
         // Remove old connection if re-registering
         const existing = this.peers.get(publicKey)
         if (existing) {
-            try { (existing.ws as ServerWebSocket<WSData>).close() } catch (error) {
-                log.debug("[L2PSMessagingServer] Failed to close existing WebSocket:", error instanceof Error ? error.message : String(error))
-            }
+            try { (existing.ws as ServerWebSocket<WSData>).close() } catch {}
         }
 
         // Register peer
@@ -237,7 +232,16 @@ export class L2PSMessagingServer {
         const recipientPeer = this.peers.get(to)
         const recipientOnline = !!recipientPeer && recipientPeer.l2psUid === l2psUid
 
-        // Process through service (DB + L2PS mempool) before delivering
+        // Route to recipient if online
+        if (recipientOnline) {
+            this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
+                type: "message",
+                payload: { from: senderKey, encrypted, messageHash, offline: false },
+                timestamp: Date.now(),
+            })
+        }
+
+        // Process through service (DB + L2PS mempool)
         const result = await this.service.processMessage(
             senderKey, to, l2psUid, messageId, messageHash, encrypted, recipientOnline,
         )
@@ -247,13 +251,8 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Route to recipient only after successful persistence
+        // Acknowledge to sender
         if (recipientOnline) {
-            this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
-                type: "message",
-                payload: { from: senderKey, encrypted, messageHash, offline: false },
-                timestamp: Date.now(),
-            })
             this.send(ws, {
                 type: "message_sent",
                 payload: {
@@ -289,7 +288,7 @@ export class L2PSMessagingServer {
         // Verify proof: sign("history:{peerKey}:{timestamp}")
         const proofMessage = `history:${peerKey}:${msg.timestamp}`
         try {
-            const valid = await TxValidatorPool.getInstance().verify({
+            const valid = await ucrypto.verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(myKey),
@@ -299,9 +298,7 @@ export class L2PSMessagingServer {
                 this.sendError(ws, "INVALID_PROOF", "History proof failed")
                 return
             }
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error)
-            log.warn("[L2PSMessagingServer] History proof verification failed:", errorMsg)
+        } catch {
             this.sendError(ws, "INVALID_PROOF", "Proof verification error")
             return
         }
@@ -319,14 +316,9 @@ export class L2PSMessagingServer {
     // ─── Discover ────────────────────────────────────────────────
 
     private handleDiscover(ws: ServerWebSocket<WSData>): void {
-        if (!ws.data.publicKey || !ws.data.l2psUid) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before discovering peers")
-            return
-        }
-
         const l2psUid = ws.data.l2psUid
         const peers = Array.from(this.peers.values())
-            .filter(p => p.l2psUid === l2psUid)
+            .filter(p => !l2psUid || p.l2psUid === l2psUid)
             .map(p => p.publicKey)
 
         this.send(ws, {
@@ -339,24 +331,17 @@ export class L2PSMessagingServer {
     // ─── Public Key Request ──────────────────────────────────────
 
     private handleRequestPublicKey(ws: ServerWebSocket<WSData>, targetId: string): void {
-        if (!ws.data.publicKey) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before requesting public keys")
-            return
-        }
-
         if (!targetId) {
             this.sendError(ws, "INVALID_MESSAGE", "Missing targetId")
             return
         }
 
-        // Only return peers in the same L2PS network
         const peer = this.peers.get(targetId)
-        const sameNetwork = peer && peer.l2psUid === ws.data.l2psUid
         this.send(ws, {
             type: "public_key_response",
             payload: {
                 targetId,
-                publicKey: sameNetwork ? peer.publicKey : null,
+                publicKey: peer ? peer.publicKey : null,
             },
             timestamp: Date.now(),
         })
@@ -370,9 +355,6 @@ export class L2PSMessagingServer {
 
         const peer = this.peers.get(publicKey)
         if (!peer) return
-
-        // Only remove if this is the current socket (not a stale one after re-register)
-        if (peer.ws !== ws) return
 
         const l2psUid = peer.l2psUid
         this.peers.delete(publicKey)
@@ -402,7 +384,6 @@ export class L2PSMessagingServer {
         if (queued.length === 0) return
 
         const deliveredIds: string[] = []
-        const senderKeys = new Set<string>()
 
         for (const msg of queued) {
             try {
@@ -417,7 +398,7 @@ export class L2PSMessagingServer {
                     timestamp: Date.now(),
                 })
                 deliveredIds.push(msg.id)
-                senderKeys.add(msg.from)
+                this.service.resetOfflineCount(msg.from)
             } catch {
                 break // Maintain order — stop on first failure
             }
@@ -425,10 +406,6 @@ export class L2PSMessagingServer {
 
         if (deliveredIds.length > 0) {
             await this.service.markDelivered(deliveredIds)
-            // Reset offline quota only after DB commit succeeds
-            for (const key of senderKeys) {
-                this.service.resetOfflineCount(key)
-            }
             log.info(`[L2PS-IM] Delivered ${deliveredIds.length} queued messages to ${toKey.slice(0, 12)}...`)
         }
     }
