@@ -15,8 +15,8 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// npx path - hardcoded to /usr/bin/npx for reliability
-const NPX = "/usr/bin/npx"
+// npx path - resolved dynamically from PATH
+const NPX = execSync("which npx").toString().trim()
 
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"

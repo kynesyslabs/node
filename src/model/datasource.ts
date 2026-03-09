@@ -33,6 +33,8 @@ import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
+// L2PS Messaging
+import { L2PSMessage } from "@/features/l2ps-messaging/entities/L2PSMessage"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -65,6 +67,8 @@ export const dataSource = new DataSource({
         L2PSMempoolTx,
         L2PSTransaction,
         L2PSProof,
+        // L2PS Messaging
+        L2PSMessage,
     ],
     synchronize: true,
     logging: false,

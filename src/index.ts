@@ -107,6 +107,10 @@ const indexState: {
     // Server references for graceful shutdown
     rpcServer: null,
     signalingServer: null,
+    // L2PS Messaging
+    L2PS_MESSAGING_ENABLED: process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true",
+    L2PS_MESSAGING_PORT: parseInt(process.env.L2PS_MESSAGING_PORT ?? "3006", 10),
+    l2psMessagingServer: null as any,
 }
 
 // SECTION Preparation methods
@@ -611,6 +615,20 @@ async function main() {
             process.exit(1)
         }
 
+        // Start L2PS Messaging server (failsafe)
+        if (indexState.L2PS_MESSAGING_ENABLED) {
+            try {
+                const { startL2PSMessaging } = await import("./features/l2ps-messaging")
+                indexState.L2PS_MESSAGING_PORT = await getNextAvailablePort(
+                    indexState.L2PS_MESSAGING_PORT,
+                )
+                indexState.l2psMessagingServer = startL2PSMessaging(indexState.L2PS_MESSAGING_PORT)
+                log.info(`[L2PS-IM] Messaging server started on port ${indexState.L2PS_MESSAGING_PORT}`)
+            } catch (error) {
+                log.error("[L2PS-IM] Failed to start messaging server: " + error)
+            }
+        }
+
         // Start MCP server (failsafe)
         if (indexState.MCP_ENABLED) {
             try {
@@ -977,6 +995,17 @@ async function gracefulShutdown(signal: string) {
             const { RateLimiter: HttpRateLimiter } = await import("./libs/network/middleware/rateLimiter")
             HttpRateLimiter.getInstance().destroy()
         } catch (_) { /* may not be initialized */ }
+
+        // Stop L2PS Messaging server if running
+        if (indexState.l2psMessagingServer) {
+            console.log("[SHUTDOWN] Stopping L2PS Messaging server...")
+            try {
+                const { stopL2PSMessaging } = await import("./features/l2ps-messaging")
+                stopL2PSMessaging()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping L2PS Messaging:", error)
+            }
+        }
 
         console.log("[SHUTDOWN] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
