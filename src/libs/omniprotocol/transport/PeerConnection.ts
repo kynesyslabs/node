@@ -191,7 +191,11 @@ export class PeerConnection extends EventEmitter {
      * @returns Hex string hash of the socket endpoints, or null if socket not connected
      */
     get socketId(): string | null {
-        if (!this.socket || !this.socket.localAddress || !this.socket.remoteAddress) {
+        if (
+            !this.socket ||
+            !this.socket.localAddress ||
+            !this.socket.remoteAddress
+        ) {
             return null
         }
 
@@ -237,7 +241,9 @@ export class PeerConnection extends EventEmitter {
             this._state !== ConnectionState.CLOSED
         ) {
             throw new Error(
-                `Cannot connect from state ${ConnectionStateUtils.getName(this._state)}, must be UNINITIALIZED or CLOSED`,
+                `Cannot connect from state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be UNINITIALIZED or CLOSED`,
             )
         }
 
@@ -300,7 +306,9 @@ export class PeerConnection extends EventEmitter {
         })
 
         this.socket.on("error", (error: Error) => {
-            log.error(`[PeerConnection] ${this._peerIdentity} socket error: ${error}`)
+            log.error(
+                `[PeerConnection] ${this._peerIdentity} socket error: ${error}`,
+            )
             this.emit("error", error)
         })
 
@@ -339,7 +347,9 @@ export class PeerConnection extends EventEmitter {
     ): Promise<Buffer> {
         if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${ConnectionStateUtils.getName(this._state)}, must be AUTHENTICATED or READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
@@ -399,7 +409,9 @@ export class PeerConnection extends EventEmitter {
     ): Promise<Buffer> {
         if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${ConnectionStateUtils.getName(this._state)}, must be AUTHENTICATED or READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
@@ -423,7 +435,9 @@ export class PeerConnection extends EventEmitter {
             signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${privateKey.length} bytes): ${error instanceof Error ? error.message : error}`,
+                `Ed25519 signing failed (privateKey length: ${
+                    privateKey.length
+                } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )
         }
@@ -463,7 +477,11 @@ export class PeerConnection extends EventEmitter {
                 payloadLength: payload.length,
             }
 
-            const messageBuffer = MessageFramer.encodeMessage(header, payload, auth)
+            const messageBuffer = MessageFramer.encodeMessage(
+                header,
+                payload,
+                auth,
+            )
             this.socket.write(messageBuffer)
 
             this.lastActivity = Date.now()
@@ -480,7 +498,9 @@ export class PeerConnection extends EventEmitter {
     sendOneWay(opcode: number, payload: Buffer): void {
         if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${ConnectionStateUtils.getName(this._state)}, must be AUTHENTICATED or READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
@@ -521,9 +541,11 @@ export class PeerConnection extends EventEmitter {
         const messageBuffer = MessageFramer.encodeMessage(header, payload)
 
         return new Promise((resolve, reject) => {
-            this.socket.write(messageBuffer, (error) => {
+            this.socket.write(messageBuffer, error => {
                 if (error) {
-                    log.error(`[PeerConnection] ${this._peerIdentity} write error: ${error}`)
+                    log.error(
+                        `[PeerConnection] ${this._peerIdentity} write error: ${error}`,
+                    )
                     reject(error)
                 } else {
                     resolve()
@@ -544,6 +566,13 @@ export class PeerConnection extends EventEmitter {
         errorCode: number,
         errorMessage: string,
     ): Promise<void> {
+        if (!this.socket.writable) {
+            log.error(
+                "Attempted to send error response to a closed connection, returning!",
+            )
+            return
+        }
+
         const messageBuffer = Buffer.from(errorMessage, "utf8")
         const payload = Buffer.allocUnsafe(2 + messageBuffer.length)
         payload.writeUInt16BE(errorCode, 0)
@@ -593,7 +622,7 @@ export class PeerConnection extends EventEmitter {
         }
 
         // Close socket
-        return new Promise((resolve) => {
+        return new Promise(resolve => {
             if (this.socket) {
                 this.socket.once("close", () => {
                     this.setState(ConnectionState.CLOSED)
@@ -610,7 +639,10 @@ export class PeerConnection extends EventEmitter {
     /**
      * Get connection information for monitoring
      */
-    getInfo(): ConnectionInfo & { origin: ConnectionOrigin; createdAt: number } {
+    getInfo(): ConnectionInfo & {
+        origin: ConnectionOrigin
+        createdAt: number
+    } {
         return {
             peerIdentity: this._peerIdentity,
             connectionString: this.connectionString,
@@ -714,11 +746,17 @@ export class PeerConnection extends EventEmitter {
         auth: AuthBlock | null,
     ): Promise<void> {
         log.debug(
-            `[PeerConnection] ${this._peerIdentity} received request opcode 0x${header.opcode.toString(16)}`,
+            `[PeerConnection] ${
+                this._peerIdentity
+            } received request opcode 0x${header.opcode.toString(16)}`,
         )
 
         // Extract peer identity from auth block for ANY authenticated message
-        if (auth && auth.identity && this._state === ConnectionState.PENDING_AUTH) {
+        if (
+            auth &&
+            auth.identity &&
+            this._state === ConnectionState.PENDING_AUTH
+        ) {
             const newIdentity = "0x" + auth.identity.toString("hex")
             this.setPeerIdentity(newIdentity)
             this.setState(ConnectionState.READY)
@@ -782,7 +820,9 @@ export class PeerConnection extends EventEmitter {
                     isAuthenticated: this.isUsable(),
                 },
                 fallbackToHttp: async () => {
-                    throw new Error("HTTP fallback not available on server side")
+                    throw new Error(
+                        "HTTP fallback not available on server side",
+                    )
                 },
             })
 
@@ -792,12 +832,16 @@ export class PeerConnection extends EventEmitter {
             console.error(error)
 
             if (error instanceof ConnectionError) {
-                log.error(`[PeerConnection] ${this._peerIdentity} handler error: ${error}`)
+                log.error(
+                    `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,
+                )
                 this.emit("error", error)
                 return
             }
 
-            log.error(`[PeerConnection] ${this._peerIdentity} handler error: ${error}`)
+            log.error(
+                `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,
+            )
 
             // Send error response
             const errorPayload = Buffer.from(
@@ -861,7 +905,9 @@ export class PeerConnection extends EventEmitter {
 
         if (!ConnectionStateUtils.canTransition(oldState, newState)) {
             log.warning(
-                `[PeerConnection] Invalid state transition: ${ConnectionStateUtils.getName(oldState)} → ${ConnectionStateUtils.getName(newState)}`,
+                `[PeerConnection] Invalid state transition: ${ConnectionStateUtils.getName(
+                    oldState,
+                )} → ${ConnectionStateUtils.getName(newState)}`,
             )
             return
         }
@@ -870,7 +916,11 @@ export class PeerConnection extends EventEmitter {
 
         if (oldState !== newState) {
             log.debug(
-                `[PeerConnection] ${this._peerIdentity} state: ${ConnectionStateUtils.getName(oldState)} → ${ConnectionStateUtils.getName(newState)}`,
+                `[PeerConnection] ${
+                    this._peerIdentity
+                } state: ${ConnectionStateUtils.getName(
+                    oldState,
+                )} → ${ConnectionStateUtils.getName(newState)}`,
             )
             this.emit("stateChange", { from: oldState, to: newState })
         }
