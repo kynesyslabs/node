@@ -117,6 +117,7 @@ export const ConnectionStateUtils = {
 
 /**
  * Sequence ID ranges for bidirectional connections
+ * 
  * Outbound-initiated connections use low range, inbound use high range
  * This prevents sequence ID collisions when both sides send requests
  */

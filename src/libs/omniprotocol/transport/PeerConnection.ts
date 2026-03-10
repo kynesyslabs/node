@@ -28,6 +28,48 @@ import {
 } from "../types/errors"
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { RateLimiter } from "../ratelimit"
+import { ConnectionPool } from "./ConnectionPool"
+
+/**
+ * Global sequence ID manager for the node.
+ * Ensures unique sequence IDs across all connections,
+ * enabling cross-connection response routing.
+ * Wraps around when range is exhausted.
+ */
+class SequenceManager {
+    private static outboundSequence: number = SequenceIdRange.OUTBOUND_START
+
+    static next(): number {
+        const seq = this.outboundSequence++
+        if (this.outboundSequence > SequenceIdRange.OUTBOUND_END) {
+            this.outboundSequence = SequenceIdRange.OUTBOUND_START
+        }
+        return seq
+    }
+}
+
+/**
+ * Search sibling connections for an in-flight request.
+ * Used when response arrives on different connection than request was sent.
+ */
+function findInFlightRequestAcrossConnections(
+    peerIdentity: string,
+    sequence: number,
+    excludeConnection: PeerConnection,
+): { connection: PeerConnection; pending: PendingRequest } | undefined {
+    const pool = ConnectionPool.getInstance()
+    const connections = pool.getConnections(peerIdentity)
+
+    for (const conn of connections) {
+        if (conn === excludeConnection) continue
+        const pending = conn.inFlightRequests.get(sequence)
+        if (pending) {
+            return { connection: conn, pending }
+        }
+    }
+
+    return undefined
+}
 
 /**
  * PeerConnection manages a single bidirectional TCP connection to a peer node
@@ -65,8 +107,8 @@ export class PeerConnection extends EventEmitter {
     public readonly origin: ConnectionOrigin
 
     // Request tracking for outbound requests we send
-    private inFlightRequests: Map<number, PendingRequest> = new Map()
-    private nextSequence: number
+    // Public for cross-connection response routing (fallback lookup)
+    public readonly inFlightRequests: Map<number, PendingRequest> = new Map()
 
     // Timing and lifecycle
     private idleTimer: NodeJS.Timeout | null = null
@@ -104,7 +146,6 @@ export class PeerConnection extends EventEmitter {
             // INBOUND connection - socket already connected
             this.origin = "inbound"
             this.socket = socket
-            this.nextSequence = SequenceIdRange.INBOUND_START
             this._state = ConnectionState.PENDING_AUTH
             this.connectedAt = Date.now()
             this.setupSocketHandlers()
@@ -112,7 +153,6 @@ export class PeerConnection extends EventEmitter {
         } else {
             // OUTBOUND connection - will connect later
             this.origin = "outbound"
-            this.nextSequence = SequenceIdRange.OUTBOUND_START
             this._state = ConnectionState.UNINITIALIZED
         }
     }
@@ -303,7 +343,7 @@ export class PeerConnection extends EventEmitter {
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
         const timeout = options.timeout ?? 30000 // 30 second default
 
         return new Promise((resolve, reject) => {
@@ -363,7 +403,7 @@ export class PeerConnection extends EventEmitter {
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
 
@@ -444,7 +484,7 @@ export class PeerConnection extends EventEmitter {
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
 
         const header: OmniMessageHeader = {
             version: 1,
@@ -639,6 +679,24 @@ export class PeerConnection extends EventEmitter {
             clearTimeout(pending.timer)
             this.inFlightRequests.delete(header.sequence)
             pending.resolve(payload as Buffer)
+            return
+        }
+
+        // Fallback: Check sibling connections for cross-connection response routing
+        // This handles the case where request was sent on connection A but response arrives on connection B
+        const crossConnection = findInFlightRequestAcrossConnections(
+            this._peerIdentity,
+            header.sequence,
+            this,
+        )
+        if (crossConnection) {
+            const { connection, pending: crossPending } = crossConnection
+            clearTimeout(crossPending.timer)
+            connection.inFlightRequests.delete(header.sequence)
+            crossPending.resolve(payload as Buffer)
+            log.debug(
+                `[PeerConnection] ${this._peerIdentity} resolved cross-connection response for sequence ${header.sequence}`,
+            )
             return
         }
 

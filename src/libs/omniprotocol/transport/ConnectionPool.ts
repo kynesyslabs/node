@@ -568,6 +568,14 @@ export class ConnectionPool extends EventEmitter {
     }
 
     /**
+     * Get all connections for a specific peer
+     * Used for cross-connection response routing
+     */
+    getConnections(peerIdentity: string): PeerConnection[] {
+        return this.connections.get(peerIdentity) ?? []
+    }
+
+    /**
      * Get connection count by IP address
      */
     getConnectionCountByIp(ipAddress: string): number {
