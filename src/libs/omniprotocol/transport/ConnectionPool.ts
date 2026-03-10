@@ -80,43 +80,12 @@ export class ConnectionPool extends EventEmitter {
     handleInboundSocket(socket: Socket): PeerConnection {
         const remoteAddress = socket.remoteAddress || "unknown"
         const remotePort = socket.remotePort || 0
+
         log.only(
             `==== DEBUG: Handling inbound socket from ${remoteAddress}:${remotePort} ====`,
         )
-        const connectionCount = this.getConnectionCountByIp(remoteAddress)
         log.only(`Confirmed Connection count: ${this.connections.size}`)
         log.only(`Pending Connection count: ${this.pendingConnections.size}`)
-
-        // Check rate limits at connection level
-        if (this.rateLimiter) {
-            const result = this.rateLimiter.checkConnection(
-                remoteAddress,
-                "ConnectionPool",
-            )
-            if (!result.allowed) {
-                log.error(
-                    `[ConnectionPool] Rate limit exceeded for ${remoteAddress}: ${result.reason}`,
-                )
-                socket.destroy()
-                this.emit("connection_rejected", remoteAddress, "rate_limit")
-                throw new PoolCapacityError(
-                    result.reason || "Rate limit exceeded",
-                )
-            }
-        }
-
-        // Check global capacity
-        const totalConnections = this.getTotalConnectionCount()
-        if (totalConnections >= this.config.maxTotalConnections) {
-            log.warning(
-                `[ConnectionPool] At capacity (${totalConnections}/${this.config.maxTotalConnections}), rejecting ${remoteAddress}`,
-            )
-            socket.destroy()
-            this.emit("connection_rejected", remoteAddress, "capacity")
-            throw new PoolCapacityError(
-                `Pool at capacity: ${totalConnections}/${this.config.maxTotalConnections}`,
-            )
-        }
 
         // Create temporary ID for tracking before authentication
         const tempId = `pending:${remoteAddress}:${remotePort}:${Date.now()}`

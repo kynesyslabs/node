@@ -173,7 +173,7 @@ export class OmniProtocolServer extends EventEmitter {
         )
 
         if (!rateLimitResult.allowed) {
-            log.warning(
+            log.error(
                 `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
             )
             socket.destroy()
@@ -187,7 +187,7 @@ export class OmniProtocolServer extends EventEmitter {
             this.connectionPool.getTotalConnectionCount() >=
             this.config.maxConnections
         ) {
-            log.warning(
+            log.error(
                 `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
@@ -200,9 +200,6 @@ export class OmniProtocolServer extends EventEmitter {
             socket.setKeepAlive(true, this.config.keepaliveInitialDelay)
         }
         socket.setNoDelay(true) // Disable Nagle's algorithm for low latency
-
-        // Register connection with rate limiter
-        this.rateLimiter.addConnection(ipAddress)
 
         // Hand off to connection pool - creates bidirectional PeerConnection
         try {
