@@ -316,9 +316,14 @@ export class L2PSMessagingServer {
     // ─── Discover ────────────────────────────────────────────────
 
     private handleDiscover(ws: ServerWebSocket<WSData>): void {
+        if (!ws.data.publicKey || !ws.data.l2psUid) {
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before discovering peers")
+            return
+        }
+
         const l2psUid = ws.data.l2psUid
         const peers = Array.from(this.peers.values())
-            .filter(p => !l2psUid || p.l2psUid === l2psUid)
+            .filter(p => p.l2psUid === l2psUid)
             .map(p => p.publicKey)
 
         this.send(ws, {
@@ -331,17 +336,24 @@ export class L2PSMessagingServer {
     // ─── Public Key Request ──────────────────────────────────────
 
     private handleRequestPublicKey(ws: ServerWebSocket<WSData>, targetId: string): void {
+        if (!ws.data.publicKey) {
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before requesting public keys")
+            return
+        }
+
         if (!targetId) {
             this.sendError(ws, "INVALID_MESSAGE", "Missing targetId")
             return
         }
 
+        // Only return peers in the same L2PS network
         const peer = this.peers.get(targetId)
+        const sameNetwork = peer && peer.l2psUid === ws.data.l2psUid
         this.send(ws, {
             type: "public_key_response",
             payload: {
                 targetId,
-                publicKey: peer ? peer.publicKey : null,
+                publicKey: sameNetwork ? peer.publicKey : null,
             },
             timestamp: Date.now(),
         })
@@ -355,6 +367,9 @@ export class L2PSMessagingServer {
 
         const peer = this.peers.get(publicKey)
         if (!peer) return
+
+        // Only remove if this is the current socket (not a stale one after re-register)
+        if (peer.ws !== ws) return
 
         const l2psUid = peer.l2psUid
         this.peers.delete(publicKey)
