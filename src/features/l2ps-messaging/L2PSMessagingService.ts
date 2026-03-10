@@ -76,21 +76,23 @@ export class L2PSMessagingService {
         msg.status = status
         await repo.save(msg)
 
-        // Submit to L2PS mempool (non-blocking for real-time delivery)
+        // Submit to L2PS mempool
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, messageId, messageHash, encrypted, now)
 
-        if (l2psResult.success && l2psResult.txHash) {
+        if (!l2psResult.success) {
+            // Update DB status to reflect failure
+            await repo.update(msg.id, { status: "failed" })
+            return { success: false, error: l2psResult.error }
+        }
+
+        if (l2psResult.txHash) {
             await repo.update(msg.id, {
                 l2psTxHash: l2psResult.txHash,
                 status: recipientOnline ? "delivered" : "queued",
             })
         }
 
-        return {
-            success: true,
-            l2psTxHash: l2psResult.txHash,
-            error: l2psResult.error,
-        }
+        return { success: true, l2psTxHash: l2psResult.txHash }
     }
 
     /**
