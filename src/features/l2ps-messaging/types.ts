@@ -225,6 +225,7 @@ export type MessageStatus =
     | "delivered"   // Sent to recipient via WS
     | "queued"      // Recipient offline, stored for later delivery
     | "sent"        // Delivered from offline queue
+    | "failed"      // L2PS submission or persistence failed
     | "l2ps_pending" // In L2PS mempool, not yet batched
     | "l2ps_batched" // Included in L2PS batch
     | "l2ps_confirmed" // Confirmed on L1

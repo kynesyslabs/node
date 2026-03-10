@@ -74,14 +74,27 @@ export class L2PSMessagingService {
         msg.l2psTxHash = null
         msg.timestamp = String(now)
         msg.status = status
-        await repo.save(msg)
+        try {
+            await repo.save(msg)
+        } catch (saveError: any) {
+            // Catch duplicate-key constraint violation (TOCTOU race)
+            if (saveError?.code === "23505" || saveError?.message?.includes("duplicate key")) {
+                return { success: false, error: "Duplicate message" }
+            }
+            throw saveError
+        }
 
         // Submit to L2PS mempool
         const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, messageId, messageHash, encrypted, now)
 
         if (!l2psResult.success) {
             // Update DB status to reflect failure
-            await repo.update(msg.id, { status: "failed" })
+            await repo.update(msg.id, { status: "failed" as const })
+            // Rollback offline quota if recipient was offline
+            if (!recipientOnline) {
+                const count = this.offlineMessageCounts.get(fromKey) ?? 0
+                if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
+            }
             return { success: false, error: l2psResult.error }
         }
 

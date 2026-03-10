@@ -232,16 +232,7 @@ export class L2PSMessagingServer {
         const recipientPeer = this.peers.get(to)
         const recipientOnline = !!recipientPeer && recipientPeer.l2psUid === l2psUid
 
-        // Route to recipient if online
-        if (recipientOnline) {
-            this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
-                type: "message",
-                payload: { from: senderKey, encrypted, messageHash, offline: false },
-                timestamp: Date.now(),
-            })
-        }
-
-        // Process through service (DB + L2PS mempool)
+        // Process through service (DB + L2PS mempool) before delivering
         const result = await this.service.processMessage(
             senderKey, to, l2psUid, messageId, messageHash, encrypted, recipientOnline,
         )
@@ -251,8 +242,13 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Acknowledge to sender
+        // Route to recipient only after successful persistence
         if (recipientOnline) {
+            this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
+                type: "message",
+                payload: { from: senderKey, encrypted, messageHash, offline: false },
+                timestamp: Date.now(),
+            })
             this.send(ws, {
                 type: "message_sent",
                 payload: {
@@ -399,6 +395,7 @@ export class L2PSMessagingServer {
         if (queued.length === 0) return
 
         const deliveredIds: string[] = []
+        const senderKeys = new Set<string>()
 
         for (const msg of queued) {
             try {
@@ -413,7 +410,7 @@ export class L2PSMessagingServer {
                     timestamp: Date.now(),
                 })
                 deliveredIds.push(msg.id)
-                this.service.resetOfflineCount(msg.from)
+                senderKeys.add(msg.from)
             } catch {
                 break // Maintain order — stop on first failure
             }
@@ -421,6 +418,10 @@ export class L2PSMessagingServer {
 
         if (deliveredIds.length > 0) {
             await this.service.markDelivered(deliveredIds)
+            // Reset offline quota only after DB commit succeeds
+            for (const key of senderKeys) {
+                this.service.resetOfflineCount(key)
+            }
             log.info(`[L2PS-IM] Delivered ${deliveredIds.length} queued messages to ${toKey.slice(0, 12)}...`)
         }
     }
