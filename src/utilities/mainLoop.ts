@@ -57,8 +57,8 @@ async function mainLoopCycle() {
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
-    // let currentlyOnlinePeers: Peer[] = await peerRoutine()
-    // checkOfflinePeers()
+    // await peerRoutine()
+    checkOfflinePeers()
     // await yieldToEventLoop()
 
     // await peerGossip()
