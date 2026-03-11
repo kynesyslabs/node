@@ -878,7 +878,7 @@ async function gracefulShutdown(signal: string) {
     const forceExitTimeout = setTimeout(() => {
         console.log("[SHUTDOWN] Timeout exceeded, forcing exit...")
         process.exit(0)
-    }, 10_000)
+    }, 5_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
 
