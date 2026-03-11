@@ -10,10 +10,8 @@ import { getSharedState } from "@/utilities/sharedState"
 
 export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     // INFO: if shard only contains us, skip network requests
-    if (
-        shard.length === 1 &&
-        shard[0].identity === getSharedState.publicKeyHex
-    ) {
+    shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
+    if (shard.length === 0) {
         return
     }
 
@@ -34,7 +32,6 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     }
 
     const responses = await Promise.all(promises) // ! Add error handling
-
     for (const response of responses) {
         log.info("[mergeMempools] Received mempool merge response:")
         log.debug("[mergeMempools] " + JSON.stringify(response))
