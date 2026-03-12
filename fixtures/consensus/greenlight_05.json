@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "consensus_routine",
+    "params": [
+      {
+        "method": "greenlight",
+        "params": [
+          17,
+          1762006251,
+          7
+        ]
+      }
+    ]
+  },
+  "response": {
+    "result": 400,
+    "response": "Consensus time not reached (checked by manageConsensusRoutines)",
+    "require_reply": false,
+    "extra": "not in consensus"
+  },
+  "frame_request": "30",
+  "frame_response": "32"
+}

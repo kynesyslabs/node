@@ -1,0 +1,9 @@
+# See https://www.git-town.com/configuration-file for details
+
+[branches]
+main = "testnet"
+perennials = ["beads-sync"]
+
+[hosting]
+forge-type = "github"
+github-connector = "gh"

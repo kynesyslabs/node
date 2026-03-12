@@ -108,14 +108,32 @@ src/GTAGS
 # Output files
 output/*
 .env
+bun.lockb
+
+# L2PS files
+CLAUDE.md
+data/l2ps/example/config.json
+data/l2ps/example/iv.key
 data/l2ps/example/config.json
 data/l2ps/example/iv.key
 data/l2ps/*
+
+# Claude specific files
 CLAUDE.md
 GEMINI.md
 
+architecture.gitbook-cache.json
+architecture
 architecture
 .DS_Store
+.serena-backup
+PR_COMMENTS
+bridges_docs
+claudedocs
+dist
+docs
+local_tests
+omniprotocol_fixtures_scripts
 blocked_ips.json
 SMART_CONTRACTS_*.md 
 .gitbook*
@@ -138,6 +156,20 @@ src/features/bridges/EVMSmartContract/out
 src/features/bridges/EVMSmartContract/test
 src/features/bridges/EVMSmartContract/GASLESS_BRIDGE_FLOW_DIAGRAM.md
 src/features/bridges/EVMSmartContract/USAGE.md
+src/features/bridges/SolanaTankProgram/solana_tank/target
+src/features/bridges/SolanaTankProgram/SOLANA_TANK_PHASES.md
+src/features/bridges/SolanaTankProgram/SOLANA_TANK_SCHEMA.md
+src/features/bridges/SolanaTankProgram/SOLANA_TO_PORT.md
+src/features/bridges/LiquidityTank_UserGuide.md
+src/features/contracts/CONTRACT_PHASES.md
+src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
+temp
+.gitbook-cache.json
+APTOS_INTEGRATION_PLAN.md
+CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
+D402_HTTP_PHASES.md
+STORAGE_PROGRAMS_PHASES.md
+STORAGE_PROGRAMS_SPEC.md
 CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
 .serena/cache/typescript/document_symbols_cache_v23-06-25.pkl
 docs/src/
@@ -149,11 +181,6 @@ docs/src
 src/features/bridges/EVMSmartContract/docs
 src/features/bridges/LiquidityTank_UserGuide.md
 local_tests
-docs/storage_features
-temp
-STORAGE_PROGRAMS_SPEC.md
-local_tests/
-claudedocs
 claudedocs
 docs/storage_features
 temp
@@ -163,13 +190,92 @@ captraf.sh
 http-capture-1762006580.pcap
 http-capture-1762008909.pcap
 http-traffic.json
+PR_PRE_EXISTING_ISSUES.md
+PR_REVIEW.md
+REVIEWER_QUESTIONS_ANSWERED.md
+PR_REVIEW_RAW.md
+PR_REVIEW_FINAL.md
 PR_REVIEW_FINAL.md
 REVIEWER_QUESTIONS_ANSWERED.md
+AGENTS.md
 BUGS_AND_SECURITY_REPORT.md
+CEREMONY_COORDINATION.md
 PR_REVIEW_COMPREHENSIVE.md
 PR_REVIEW_RAW.md
+
+# ZK Ceremony files (SECURITY: must not be committed)
+zk_ceremony/
 ZK_CEREMONY_GIT_WORKFLOW.md
 ZK_CEREMONY_GUIDE.md
-zk_ceremony
 CEREMONY_COORDINATION.md
 attestation_20251204_125424.txt
+prop_agent
+
+TYPE_CHECK_REPORT.md
+qodo-fetch.py
+docs/IPFS_TOKENOMICS_SPEC.md
+ZK_CEREMONY_GIT_WORKFLOW.md
+ZK_CEREMONY_GUIDE.md
+attestation_20251204_125424.txt
+prop_agent
+
+# ===========================================
+# ZK GENERATED ARTIFACTS (Both ZK Identity & L2PS)
+# ===========================================
+# These files are generated during zk:setup and should NOT be committed
+# Only verification_key*.json files should be committed (they are small and required)
+
+# ZK Identity System (src/features/zk/)
+src/features/zk/keys/*.zkey
+src/features/zk/keys/*.ptau
+src/features/zk/circuits/*.r1cs
+src/features/zk/circuits/*.sym
+src/features/zk/circuits/*.wasm
+src/features/zk/circuits/*_js/
+# Allow verification keys (must be committed)
+!src/features/zk/keys/verification_key.json
+!src/features/zk/keys/verification_key_merkle.json
+
+# L2PS ZK System (src/libs/l2ps/zk/)
+src/libs/l2ps/zk/keys/**/*.zkey
+src/libs/l2ps/zk/keys/**/*.r1cs
+src/libs/l2ps/zk/keys/**/*.sym
+src/libs/l2ps/zk/keys/**/*.wasm
+src/libs/l2ps/zk/keys/**/*_js/
+src/libs/l2ps/zk/ptau/
+# Allow verification keys (must be committed)
+!src/libs/l2ps/zk/keys/**/verification_key.json
+
+# Security & Secrets
+mnemonic.txt
+certs/
+*.pem
+
+# Ops junk
+src/libs/network/routines/transactions/*.html
+# Devnet runtime files (generated, not tracked)
+devnet/identities/
+devnet/.env
+devnet/postgres-data/
+ipfs_53550/data_53550/ipfs
+.tlsnotary-key
+src/features/tlsnotary/SDK_INTEGRATION.md
+src/features/tlsnotary/SDK_INTEGRATION.md
+ipfs/data_53550/ipfs
+nohup.out
+*.db
+/.beads/.jsonl.lock
+/.beads/daemon-2026-02-15T16-27-46.352.log.gz
+/.beads/daemon-2026-02-16T14-05-14.370.log.gz
+/.beads/daemon-2026-02-16T17-30-50.885.log.gz
+/.beads/daemon-2026-02-17T18-47-31.076.log.gz
+/.beads/daemon-2026-02-17T21-22-27.436.log.gz
+/.beads/daemon-2026-02-18T22-19-21.387.log.gz
+/.beads/daemon-2026-02-18T22-35-13.404.log.gz
+/.beads/last-touched
+/.taskmaster
+/internal-docs
+/.beads_bak
+/better_testing/runs
+/documentation/internal-docs
+/PR_DUMP.md

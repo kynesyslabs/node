@@ -29,6 +29,9 @@ export class Waiter {
         GREEN_LIGHT: "greenLight",
         SET_WAIT_STATUS: "setWaitStatus",
         WAIT_FOR_SECRETARY_ROUTINE: "waitForSecretaryRoutine",
+        DTR_WAIT_FOR_BLOCK: "dtrWaitForBlock",
+        SYNC_WAIT_FOR_BLOCK: "syncWaitForBlock",
+        STARTUP_HELLO_PEER: "startupHelloPeer",
         // etc
     }
 
@@ -78,7 +81,7 @@ export class Waiter {
                 promise: null,
             })
 
-            log.debug(`[WAITER] 😒😒😒😒😒😒😒😒😒 Created wait entry for ${id}`)
+            log.debug(`[WAITER] Created wait entry for ${id}`)
         })
 
         Waiter.waitList.get(id).promise = promise

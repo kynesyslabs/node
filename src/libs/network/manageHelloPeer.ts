@@ -1,11 +1,12 @@
-import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import _ from "lodash"
+import log from "src/utilities/logger"
+import { SyncData } from "../peer/Peer"
+import { Waiter } from "@/utilities/waiter"
+import { PeerManager, Peer } from "../peer"
 import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
-import { PeerManager, Peer } from "../peer"
-import log from "src/utilities/logger"
-import _ from "lodash"
-import { SyncData } from "../peer/Peer"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
 export interface HelloPeerRequest {
     url: string
@@ -23,7 +24,6 @@ export async function manageHelloPeer(
     content: HelloPeerRequest,
     sender: string,
 ): Promise<RPCResponse> {
-    log.debug("[manageHelloPeer] Content: " + JSON.stringify(content, null, 2))
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
@@ -33,7 +33,7 @@ export async function manageHelloPeer(
     peerObject.identity = content.publicKey
 
     if (peerObject.identity == getSharedState.publicKeyHex) {
-        console.log("[Hello Peer Listener] Peer is us: skipping")
+        log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
         response.extra = {
@@ -87,7 +87,7 @@ export async function manageHelloPeer(
 
     log.debug(
         "[Hello Peer Listener] Sender sync data: " +
-            JSON.stringify(peerObject.sync, null, 2),
+            JSON.stringify(peerObject.sync),
     )
 
     const peerManager = PeerManager.getInstance()
@@ -106,11 +106,28 @@ export async function manageHelloPeer(
         return response
     }
 
+    // INFO: Return a list of all our connected peers
+
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         syncData: peerManager.ourSyncData,
+        peerlist: peerManager
+            .getPeers()
+            .map(peer => ({
+                url: peer.connection.string,
+                publicKey: peer.identity,
+            }))
+            .filter(
+                peer =>
+                    peer.publicKey !== getSharedState.publicKeyHex &&
+                    peer.publicKey !== content.publicKey,
+            ),
+    }
+
+    if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {
+        Waiter.resolve(Waiter.keys.STARTUP_HELLO_PEER, response)
     }
 
     return response

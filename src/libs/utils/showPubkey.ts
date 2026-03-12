@@ -12,7 +12,7 @@
 
 import * as fs from "fs"
 import * as bip39 from "bip39"
-import { wordlist } from "@scure/bip39/wordlists/english"
+import { wordlist } from "@scure/bip39/wordlists/english.js"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import * as dotenv from "dotenv"
@@ -88,7 +88,7 @@ async function main() {
     const identity = await ucrypto.getIdentity(SIGNING_ALGORITHM)
 
     // Get the public key
-    const publicKeyHex = uint8ArrayToHex(identity.publicKey)
+    const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
 
     // Output to file if -o flag provided, otherwise display to console
     if (outputFile) {

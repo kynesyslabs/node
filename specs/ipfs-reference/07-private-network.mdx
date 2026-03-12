@@ -1,0 +1,291 @@
+---
+title: "Private Network"
+description: "Demos IPFS private swarm configuration"
+---
+
+# Private Network
+
+The Demos network operates a private IPFS swarm, isolated from the public IPFS network.
+
+## Overview
+
+By default, all Demos nodes join a private IPFS network defined by a shared swarm key. This provides:
+
+- **Performance isolation** - No traffic from public IPFS network
+- **Dedicated peer discovery** - Only connect to other Demos nodes
+- **Reduced latency** - Smaller, focused network
+
+## Swarm Key
+
+### Official Demos Swarm Key
+
+```
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+```
+
+### File Format
+
+The swarm key is stored in `~/.ipfs/swarm.key`:
+
+```
+/key/swarm/psk/1.0.0/
+/base16/
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+```
+
+### Automatic Configuration
+
+The Demos node automatically configures the swarm key:
+
+```typescript
+import { DEMOS_IPFS_SWARM_KEY_FILE } from "./swarmKey"
+
+// Written to ~/.ipfs/swarm.key on container init
+```
+
+## Security Model
+
+### What the Swarm Key Provides
+
+| Feature | Provided |
+|---------|----------|
+| Performance isolation | Yes |
+| Dedicated peer discovery | Yes |
+| Network membership control | Partial |
+
+### What the Swarm Key Does NOT Provide
+
+| Feature | Provided | Why |
+|---------|----------|-----|
+| Access control | No | Blockchain auth handles this |
+| Content encryption | No | IPFS content is public by design |
+| Write protection | No | Requires DEM tokens via transactions |
+
+### Security Guarantees
+
+Actual security is provided by:
+
+1. **Transaction signing** - All writes require signed Demos transactions
+2. **Token requirement** - Pinning costs DEM tokens
+3. **Consensus validation** - All operations verified by network
+4. **Identity system** - Demos blockchain identity
+
+### Why Public Key?
+
+The swarm key is intentionally public because:
+
+- It only isolates IPFS traffic, not blockchain operations
+- Write access still requires DEM tokens
+- Content on IPFS is inherently public (no encryption)
+- Allows anyone to run a Demos IPFS node
+
+## Private Network Mode
+
+### Environment Variables
+
+```bash
+# Use custom swarm key (optional)
+DEMOS_IPFS_SWARM_KEY=your64characterhexkey
+
+# Force private network (default: enabled)
+LIBP2P_FORCE_PNET=1
+
+# Disable private network (join public IPFS)
+DEMOS_IPFS_PUBLIC_MODE=true
+```
+
+### Checking Mode
+
+```typescript
+import { isPrivateNetworkEnabled, getSwarmKey } from "./swarmKey"
+
+if (isPrivateNetworkEnabled()) {
+  const key = getSwarmKey()
+  console.log(`Private network: ${key.slice(0, 8)}...`)
+} else {
+  console.log("Public IPFS mode")
+}
+```
+
+## Bootstrap Nodes
+
+### Configuration
+
+Bootstrap nodes are used for initial peer discovery:
+
+```bash
+DEMOS_IPFS_BOOTSTRAP_NODES="/ip4/1.2.3.4/tcp/4001/p2p/QmPeer1...,/ip4/5.6.7.8/tcp/4001/p2p/QmPeer2..."
+```
+
+### Multiaddr Format
+
+```
+/ip4/<ip>/tcp/<port>/p2p/<peerid>
+/ip6/<ip>/tcp/<port>/p2p/<peerid>
+/dns4/<domain>/tcp/<port>/p2p/<peerid>
+```
+
+### Default Bootstrap
+
+If no bootstrap nodes configured, the node relies on:
+
+1. Local peer discovery (mDNS)
+2. Peers shared via Demos OmniProtocol
+3. Manual peer connection
+
+## Peer Management
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEMOS_IPFS_MAX_PEERS` | 100 | Maximum peer connections |
+| `DEMOS_IPFS_MIN_PEERS` | 4 | Minimum peers to maintain |
+
+### Peer Discovery
+
+Peers are discovered through:
+
+1. **Bootstrap nodes** - Initial connection points
+2. **DHT** - Distributed hash table (within private network)
+3. **OmniProtocol** - Demos P2P layer shares IPFS addresses
+4. **Manual connection** - Via RPC endpoints
+
+### Managing Peers
+
+```typescript
+// List connected peers
+const peers = await client.ipfsSwarmPeers()
+
+// Connect to specific peer
+await client.ipfsSwarmConnect({
+  multiaddr: "/ip4/1.2.3.4/tcp/4001/p2p/QmPeerId..."
+})
+
+// Disconnect from peer
+await client.ipfsSwarmDisconnect({
+  peerId: "QmPeerId..."
+})
+
+// List Demos network peers
+const demosPeers = await client.ipfsDemosPeers()
+```
+
+## Generating Custom Swarm Key
+
+For test networks or private deployments:
+
+```typescript
+import { generateSwarmKey, formatSwarmKeyFile } from "./swarmKey"
+
+// Generate new 256-bit key
+const key = generateSwarmKey()
+console.log(key)  // 64 hex characters
+
+// Format for swarm.key file
+const fileContent = formatSwarmKeyFile(key)
+```
+
+### CLI Generation
+
+```bash
+# Using go-ipfs-swarm-key-gen
+go install github.com/Kubuxu/go-ipfs-swarm-key-gen/ipfs-swarm-key-gen@latest
+ipfs-swarm-key-gen > swarm.key
+
+# Or using openssl
+echo -e "/key/swarm/psk/1.0.0/\n/base16/\n$(openssl rand -hex 32)"
+```
+
+## Swarm Key Validation
+
+```typescript
+import { isValidSwarmKey, swarmKeysMatch } from "./swarmKey"
+
+// Validate format
+isValidSwarmKey("1d8b2cfa...")  // true
+isValidSwarmKey("invalid")      // false
+
+// Compare keys
+swarmKeysMatch(key1, key2)  // true if identical
+```
+
+## Docker Configuration
+
+The Kubo container is configured for private network:
+
+```yaml
+services:
+  ipfs:
+    image: ipfs/kubo:v0.26.0
+    environment:
+      LIBP2P_FORCE_PNET: "1"
+    volumes:
+      - ./data/ipfs:/data/ipfs
+      # swarm.key is injected during init
+```
+
+### Init Script
+
+```bash
+#!/bin/bash
+# init-ipfs.sh
+
+# Write swarm key
+cat > /data/ipfs/swarm.key << 'EOF'
+/key/swarm/psk/1.0.0/
+/base16/
+1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+EOF
+
+# Remove public bootstrap
+ipfs bootstrap rm --all
+
+# Add private bootstrap (if configured)
+if [ -n "$DEMOS_IPFS_BOOTSTRAP_NODES" ]; then
+  IFS=',' read -ra NODES <<< "$DEMOS_IPFS_BOOTSTRAP_NODES"
+  for node in "${NODES[@]}"; do
+    ipfs bootstrap add "$node"
+  done
+fi
+```
+
+## Troubleshooting
+
+### No Peers Connecting
+
+1. **Check swarm key** - All nodes must have identical keys
+2. **Check firewall** - Port 4001 must be open (TCP/UDP)
+3. **Check bootstrap** - At least one reachable bootstrap node
+4. **Check logs** - Look for connection errors
+
+```bash
+# Check IPFS logs
+docker logs ipfs_53550 2>&1 | grep -i "swarm\|peer"
+```
+
+### Wrong Network
+
+If accidentally connecting to public IPFS:
+
+```bash
+# Verify swarm key exists
+docker exec ipfs_53550 cat /data/ipfs/swarm.key
+
+# Verify LIBP2P_FORCE_PNET
+docker exec ipfs_53550 env | grep LIBP2P
+```
+
+### Key Mismatch
+
+```typescript
+// Parse and compare keys
+import { parseSwarmKeyFile, swarmKeysMatch } from "./swarmKey"
+
+const localKey = parseSwarmKeyFile(localKeyContent)
+const expectedKey = DEMOS_IPFS_SWARM_KEY
+
+if (!swarmKeysMatch(localKey, expectedKey)) {
+  console.error("Swarm key mismatch!")
+}
+```

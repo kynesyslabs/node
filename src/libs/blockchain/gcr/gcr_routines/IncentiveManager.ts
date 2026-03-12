@@ -105,6 +105,21 @@ export class IncentiveManager {
     }
 
     /**
+     * Hook to be called after TLSN Telegram linking
+     */
+    static async telegramTLSNLinked(
+        userId: string,
+        telegramUserId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardTelegramTLSNPoints(
+            userId,
+            telegramUserId,
+            referralCode,
+        )
+    }
+
+    /**
      * Hook to be called after Telegram unlinking
      */
     static async telegramUnlinked(userId: string): Promise<RPCResponse> {
@@ -160,5 +175,87 @@ export class IncentiveManager {
         domain: string,
     ): Promise<RPCResponse> {
         return await this.pointSystem.deductUdDomainPoints(userId, domain)
+    }
+
+    /**
+     * Hook to be called after Nomis score linking
+     */
+    static async nomisLinked(
+        userId: string,
+        chain: string,
+        nomisScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardNomisScorePoints(
+            userId,
+            chain,
+            nomisScore,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Nomis score unlinking
+     */
+    static async nomisUnlinked(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductNomisScorePoints(
+            userId,
+            chain,
+        )
+    }
+
+    /**
+     * Hook to be called after Human Passport linking
+     */
+    static async humanPassportLinked(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardHumanPassportPoints(
+            userId,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Human Passport unlinking
+     */
+    static async humanPassportUnlinked(
+        userId: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductHumanPassportPoints(userId)
+    }
+
+    /**
+     * Hook to be called after Ethos score linking
+     */
+    static async ethosLinked(
+        userId: string,
+        chain: string,
+        ethosScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.awardEthosScorePoints(
+            userId,
+            chain,
+            ethosScore,
+            referralCode,
+        )
+    }
+
+    /**
+     * Hook to be called after Ethos score unlinking
+     */
+    static async ethosUnlinked(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        return await this.pointSystem.deductEthosScorePoints(
+            userId,
+            chain,
+        )
     }
 }

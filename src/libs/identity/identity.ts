@@ -11,7 +11,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import * as fs from "fs"
 import { pki } from "node-forge"
-import terminalkit from "terminal-kit"
 
 import * as bip39 from "bip39"
 import log from "@/utilities/logger"
@@ -24,9 +23,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import { wordlist } from "@scure/bip39/wordlists/english"
-
-const term = terminalkit.terminal
+import { wordlist } from "@scure/bip39/wordlists/english.js"
 
 export default class Identity {
     public masterSeed: Uint8Array
@@ -67,12 +64,12 @@ export default class Identity {
             // Loading the identity
             // TODO Add load with cryptography
             this.ed25519 = await cryptography.load(getSharedState.identityFile)
-            term.yellow("Loaded ecdsa identity")
+            log.info("IDENTITY", "Loaded ecdsa identity")
         } else {
             this.ed25519 = cryptography.new()
             // Writing the identity to disk in binary format
             await cryptography.save(this.ed25519, getSharedState.identityFile)
-            term.yellow("Generated new identity")
+            log.info("IDENTITY", "Generated new identity")
         }
         // Stringifying to hex
         this.ed25519_hex = {

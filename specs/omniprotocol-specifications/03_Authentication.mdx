@@ -1,0 +1,393 @@
+# OmniProtocol Authentication
+
+## Overview
+
+OmniProtocol uses Ed25519 digital signatures for message authentication. The authentication system provides:
+
+- **Identity verification**: Confirm the sender's identity
+- **Message integrity**: Ensure the message hasn't been tampered with
+- **Replay protection**: Prevent replay attacks using timestamps
+
+## Signature Algorithms
+
+```typescript
+enum SignatureAlgorithm {
+    NONE = 0x00,     // No signature (unauthenticated)
+    ED25519 = 0x01,  // Ed25519 (currently implemented)
+    FALCON = 0x02,   // Falcon (post-quantum, reserved)
+    ML_DSA = 0x03    // ML-DSA (post-quantum, reserved)
+}
+```
+
+### Ed25519
+The primary signature algorithm. Uses 32-byte public keys and 64-byte signatures.
+
+| Property | Value |
+|----------|-------|
+| Public Key Size | 32 bytes |
+| Signature Size | 64 bytes |
+| Security Level | 128-bit |
+| Performance | ~10,000 signatures/second |
+
+### Post-Quantum Algorithms (Reserved)
+- **FALCON**: Lattice-based, compact signatures
+- **ML-DSA**: Module lattice digital signature algorithm (NIST standard)
+
+## Signature Modes
+
+Different signature modes determine what data is signed:
+
+```typescript
+enum SignatureMode {
+    SIGN_PUBKEY = 0x01,                  // Sign public key only
+    SIGN_MESSAGE_ID = 0x02,              // Sign message sequence number
+    SIGN_FULL_PAYLOAD = 0x03,            // Sign entire payload
+    SIGN_MESSAGE_ID_PAYLOAD_HASH = 0x04, // Sign sequence + Keccak256(payload)
+    SIGN_MESSAGE_ID_TIMESTAMP = 0x05     // Sign sequence + timestamp
+}
+```
+
+### Mode Details
+
+#### SIGN_PUBKEY (0x01)
+Signs only the public key. Used for HTTP compatibility.
+```typescript
+dataToSign = identity  // 32 bytes
+```
+
+#### SIGN_MESSAGE_ID (0x02)
+Signs only the message sequence number.
+```typescript
+const msgIdBuf = Buffer.allocUnsafe(4)
+msgIdBuf.writeUInt32BE(header.sequence)
+dataToSign = msgIdBuf  // 4 bytes
+```
+
+#### SIGN_FULL_PAYLOAD (0x03)
+Signs the entire payload. Most secure but expensive for large payloads.
+```typescript
+dataToSign = payload  // Variable size
+```
+
+#### SIGN_MESSAGE_ID_PAYLOAD_HASH (0x04) - **Recommended**
+Signs the message ID plus Keccak256 hash of the payload. Best balance of security and performance.
+```typescript
+const msgIdBuf = Buffer.allocUnsafe(4)
+msgIdBuf.writeUInt32BE(header.sequence)
+const payloadHash = Buffer.from(keccak_256(payload))
+dataToSign = Buffer.concat([msgIdBuf, payloadHash])  // 36 bytes
+```
+
+#### SIGN_MESSAGE_ID_TIMESTAMP (0x05)
+Signs the message ID plus timestamp.
+```typescript
+const msgIdBuf = Buffer.allocUnsafe(4)
+msgIdBuf.writeUInt32BE(header.sequence)
+const tsBuf = Buffer.allocUnsafe(8)
+tsBuf.writeBigUInt64BE(BigInt(timestamp))
+dataToSign = Buffer.concat([msgIdBuf, tsBuf])  // 12 bytes
+```
+
+## Authentication Block
+
+The auth block is appended after the message header when `flags & 0x01 === 1`.
+
+### Structure
+
+```typescript
+interface AuthBlock {
+    algorithm: SignatureAlgorithm  // 1 byte
+    signatureMode: SignatureMode   // 1 byte
+    timestamp: number              // 8 bytes (Unix ms)
+    identity: Buffer               // Variable (32 bytes for Ed25519)
+    signature: Buffer              // Variable (64 bytes for Ed25519)
+}
+```
+
+### Binary Layout
+
+```
+Offset │ Size    │ Field           │ Description
+───────┼─────────┼─────────────────┼────────────────────────────
+0      │ 1 byte  │ algorithm       │ Signature algorithm ID
+1      │ 1 byte  │ signatureMode   │ Signature mode ID
+2      │ 8 bytes │ timestamp       │ Unix timestamp (milliseconds)
+10     │ 2 bytes │ identityLength  │ Public key length
+12     │ varies  │ identity        │ Public key bytes
+12+I   │ 2 bytes │ signatureLength │ Signature length
+14+I   │ varies  │ signature       │ Signature bytes
+```
+
+### Ed25519 Auth Block Size
+
+```
+1 (algorithm) + 1 (mode) + 8 (timestamp) +
+2 (identity length) + 32 (public key) +
+2 (signature length) + 64 (signature) = 110 bytes
+```
+
+## Replay Protection
+
+Messages are protected against replay attacks using timestamps.
+
+### Timestamp Validation
+
+```typescript
+// Maximum clock skew: ±5 minutes
+private static readonly MAX_CLOCK_SKEW = 5 * 60 * 1000  // 300,000 ms
+
+static validateTimestamp(timestamp: number): boolean {
+    const now = Date.now()
+    const diff = Math.abs(now - timestamp)
+    return diff <= this.MAX_CLOCK_SKEW
+}
+```
+
+### Why Timestamps?
+
+1. **Simple**: No need to track message nonces
+2. **Stateless**: No server-side nonce storage required
+3. **Efficient**: Single comparison operation
+4. **Network tolerant**: ±5 minute window handles clock drift
+
+## Creating Authenticated Messages
+
+### Client-Side Signing
+
+```typescript
+import forge from "node-forge"
+import { keccak_256 } from "@noble/hashes/sha3.js"
+import { AuthBlock, SignatureAlgorithm, SignatureMode } from "./auth/types"
+
+async function createAuthenticatedMessage(
+    opcode: number,
+    payload: Buffer,
+    privateKey: Buffer,
+    publicKey: Buffer
+): Promise<{ header: OmniMessageHeader, auth: AuthBlock }> {
+    const sequence = nextSequence++
+    const timestamp = Date.now()
+
+    // Build data to sign (mode 0x04)
+    const msgIdBuf = Buffer.allocUnsafe(4)
+    msgIdBuf.writeUInt32BE(sequence)
+    const payloadHash = Buffer.from(keccak_256(payload))
+    const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
+
+    // Sign with Ed25519
+    const signature = forge.pki.ed25519.sign({
+        message: dataToSign,
+        privateKey: privateKey
+    })
+
+    return {
+        header: {
+            version: 1,
+            opcode,
+            sequence,
+            payloadLength: payload.length
+        },
+        auth: {
+            algorithm: SignatureAlgorithm.ED25519,
+            signatureMode: SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
+            timestamp,
+            identity: publicKey,
+            signature: Buffer.from(signature)
+        }
+    }
+}
+```
+
+### Using PeerConnection
+
+```typescript
+import { PeerConnection } from "./transport/PeerConnection"
+
+const connection = new PeerConnection(peerIdentity, "tcp://host:port")
+await connection.connect()
+
+// Send authenticated request
+const response = await connection.sendAuthenticated(
+    0x10,                    // EXECUTE opcode
+    payloadBuffer,           // Request payload
+    nodePrivateKey,          // Ed25519 private key (64 bytes)
+    nodePublicKey,           // Ed25519 public key (32 bytes)
+    { timeout: 30000 }       // Options
+)
+```
+
+## Verifying Authenticated Messages
+
+### Server-Side Verification
+
+```typescript
+import { SignatureVerifier } from "./auth/verifier"
+
+async function handleAuthenticatedMessage(
+    message: ParsedOmniMessage
+): Promise<VerificationResult> {
+    if (!message.auth) {
+        return { valid: false, error: "No auth block present" }
+    }
+
+    const result = await SignatureVerifier.verify(
+        message.auth,
+        message.header,
+        message.payload as Buffer
+    )
+
+    if (result.valid) {
+        // Identity is hex-encoded public key
+        console.log(`Verified identity: ${result.peerIdentity}`)
+    }
+
+    return result
+}
+```
+
+### Verification Result
+
+```typescript
+interface VerificationResult {
+    valid: boolean
+    error?: string
+    peerIdentity?: string  // "0x" + hex(publicKey)
+}
+```
+
+## Handler Authentication Requirements
+
+Each handler specifies whether authentication is required:
+
+```typescript
+interface HandlerDescriptor {
+    opcode: OmniOpcode
+    name: string
+    authRequired: boolean
+    handler: OmniHandler<Buffer>
+}
+```
+
+### Authentication Flow
+
+```
+┌─────────────────┐
+│ Incoming Message│
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐     ┌──────────────────┐
+│ Get Handler     │────▶│ authRequired?    │
+└─────────────────┘     └────────┬─────────┘
+                                 │
+                 ┌───────────────┴───────────────┐
+                 │                               │
+                 ▼                               ▼
+          ┌──────────┐                    ┌──────────┐
+          │   YES    │                    │    NO    │
+          └────┬─────┘                    └────┬─────┘
+               │                               │
+               ▼                               │
+    ┌─────────────────────┐                   │
+    │ Auth block present? │                   │
+    └──────────┬──────────┘                   │
+               │                               │
+     ┌─────────┴─────────┐                    │
+     │                   │                    │
+     ▼                   ▼                    │
+  ┌──────┐           ┌──────┐                │
+  │ YES  │           │  NO  │                │
+  └──┬───┘           └──┬───┘                │
+     │                  │                    │
+     ▼                  ▼                    │
+┌─────────────┐   ┌────────────┐             │
+│ Verify Sig  │   │ Return     │             │
+└──────┬──────┘   │ 0xf401     │             │
+       │          │ Unauthorized│             │
+       │          └────────────┘             │
+       │                                      │
+       ▼                                      │
+┌─────────────────┐                          │
+│ Signature valid?│                          │
+└────────┬────────┘                          │
+         │                                    │
+   ┌─────┴─────┐                             │
+   │           │                             │
+   ▼           ▼                             │
+┌──────┐  ┌────────────┐                     │
+│ YES  │  │    NO      │                     │
+└──┬───┘  └─────┬──────┘                     │
+   │            │                            │
+   │            ▼                            │
+   │      ┌────────────┐                     │
+   │      │ Return     │                     │
+   │      │ 0xf401     │                     │
+   │      └────────────┘                     │
+   │                                         │
+   └───────────────┬─────────────────────────┘
+                   │
+                   ▼
+           ┌──────────────┐
+           │Execute Handler│
+           └──────────────┘
+```
+
+## Identity Derivation
+
+Peer identity is derived from the public key:
+
+```typescript
+// Identity format: "0x" + hex(publicKey)
+function derivePeerIdentity(publicKey: Buffer): string {
+    return "0x" + publicKey.toString("hex")
+}
+
+// Example: 32-byte public key → 66-character identity string
+// 0x + 64 hex chars = 66 total characters
+```
+
+## Error Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| `0xf401` | UNAUTHORIZED | Auth required but missing/invalid |
+| `0xf402` | INVALID_SIGNATURE | Signature verification failed |
+| `0xf403` | TIMESTAMP_EXPIRED | Timestamp outside ±5 minute window |
+| `0xf404` | UNSUPPORTED_ALGORITHM | Unknown signature algorithm |
+
+## Best Practices
+
+### For Clients
+1. **Use mode 0x04** (SIGN_MESSAGE_ID_PAYLOAD_HASH) for best security/performance balance
+2. **Keep timestamps synchronized** with NTP
+3. **Protect private keys** - never log or expose them
+4. **Retry with fresh timestamp** on timestamp errors
+
+### For Servers
+1. **Always verify signatures** before processing authenticated requests
+2. **Log verification failures** for security monitoring
+3. **Consider clock drift** when debugging timestamp issues
+4. **Rate limit** failed authentication attempts
+
+## Security Considerations
+
+### Key Management
+- Private keys should never be transmitted over the network
+- Store keys securely using OS-level key stores
+- Rotate keys periodically
+
+### Replay Attacks
+- The ±5 minute window is a tradeoff between security and usability
+- For high-security operations, consider additional nonce-based protection
+- Monitor for unusual patterns in request timing
+
+### Signature Algorithm Selection
+- Ed25519 is secure for current threat models
+- Post-quantum algorithms are reserved for future upgrades
+- Migration path designed to be backward compatible
+
+## Related Documentation
+
+- [02_Message_Format.mdx](./02_Message_Format.mdx) - Message structure
+- [04_Opcode_Reference.mdx](./04_Opcode_Reference.mdx) - Auth requirements per opcode
+- [05_Transport_Layer.mdx](./05_Transport_Layer.mdx) - Authenticated connections

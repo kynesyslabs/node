@@ -1,5 +1,6 @@
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
+import log from "@/utilities/logger"
 
 import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
@@ -33,7 +34,7 @@ export async function deriveMempoolOperation(
                 typeof v === "bigint" ? v.toString() : v,
             )
         } catch (e) {
-            console.log(e)
+            log.error(e)
             return false
         }
     }
@@ -41,12 +42,12 @@ export async function deriveMempoolOperation(
     // Deriving a transaction
     // TODO Replace with deriveTransaction(data) using data.type
     const derivedTx: Transaction = await createTransaction(data) // A simple tx with data inside
-    console.log("Derived tx:")
-    //console.log(derivedTx)
+    log.debug("Derived tx:")
+    //log.debug(derivedTx)
     // Deriving an operation from the tx
     const derivedOperation: Operation = await createOperation(derivedTx) // An operation witnessing the validity of the data requested
-    console.log("Derived operation:")
-    //console.log(derivedOperation)
+    log.debug("Derived operation:")
+    //log.debug(derivedOperation)
     if (insert) {
         // ANCHOR Inserting the operation in the next mempool session with the proper data
         // Mempool.addTransaction(derivedTx)

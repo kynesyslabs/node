@@ -1,0 +1,160 @@
+---
+title: "IPFS Technical Reference"
+description: "Complete technical reference for IPFS integration in the Demos Network"
+---
+
+# IPFS Technical Reference
+
+Complete technical documentation for the IPFS integration in the Demos Network.
+
+## Quick Navigation
+
+| Section | Description |
+|---------|-------------|
+| [Overview](./01-overview) | Introduction and quick start |
+| [Architecture](./02-architecture) | System design and components |
+| [Transactions](./03-transactions) | Blockchain transaction types |
+| [Pricing](./04-pricing) | Cost calculation and tokenomics |
+| [Quotas](./05-quotas) | Storage limits and enforcement |
+| [Pin Expiration](./06-pin-expiration) | Time-limited pins and cleanup |
+| [Private Network](./07-private-network) | Swarm key and network isolation |
+| [RPC Endpoints](./08-rpc-endpoints) | Complete API reference |
+| [Errors](./09-errors) | Error handling and codes |
+| [Configuration](./10-configuration) | Environment variables and settings |
+| [Public Bridge](./11-public-bridge) | Optional public gateway access |
+
+## Feature Summary
+
+### Core Features
+
+- **Content-addressed storage** - Data identified by cryptographic hash (CID)
+- **Blockchain integration** - Storage operations as consensus transactions
+- **Account-based quotas** - Per-account storage limits
+- **Token payments** - DEM tokens for storage costs
+
+### Storage Options
+
+- **Permanent pins** - Content stored indefinitely
+- **Time-limited pins** - Automatic expiration with pricing discounts
+- **Duration presets** - week, month, quarter, year
+- **Custom durations** - 1 day to 10 years
+
+### Account Tiers
+
+| Tier | Storage | Pins | Free Tier |
+|------|---------|------|-----------|
+| Regular | 1 GB | 1,000 | None |
+| Genesis | 10 GB | 10,000 | 1 GB |
+
+### Pricing
+
+| Account | Rate | Minimum |
+|---------|------|---------|
+| Regular | 1 DEM / 100 MB | 1 DEM |
+| Genesis | 1 DEM / 1 GB (after free tier) | 0 DEM |
+
+## Quick Start
+
+### Add Content
+
+```typescript
+import { DemosClient } from "@anthropic/demos-sdk"
+
+const client = new DemosClient()
+
+// Add and pin content
+const result = await client.ipfsAdd({
+  content: Buffer.from("Hello, Demos!").toString("base64"),
+  duration: "month"
+})
+
+console.log(`CID: ${result.cid}`)
+console.log(`Cost: ${result.cost} DEM`)
+```
+
+### Retrieve Content
+
+```typescript
+const content = await client.ipfsGet({
+  cid: "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"
+})
+
+const data = Buffer.from(content.content, "base64")
+console.log(data.toString())
+```
+
+### Check Quota
+
+```typescript
+const quota = await client.ipfsQuota({
+  address: "your-demos-address"
+})
+
+console.log(`Used: ${quota.usedBytes} / ${quota.maxBytes} bytes`)
+console.log(`Pins: ${quota.usedPins} / ${quota.maxPins}`)
+```
+
+## Key Concepts
+
+### Content Identifier (CID)
+
+Every piece of content has a unique identifier derived from its hash:
+
+```
+CIDv0: QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG
+CIDv1: bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi
+```
+
+### Pinning
+
+Pinning marks content to prevent garbage collection:
+
+1. Content stored on your node
+2. Recorded in your account state
+3. Costs DEM based on size and duration
+4. Counts against your quota
+
+### Private Network
+
+Demos operates a private IPFS swarm:
+
+- Isolated from public IPFS network
+- All Demos nodes share the same swarm key
+- Optimized for network performance
+- Optional public bridge for external access
+
+## File Structure
+
+```
+ipfs-reference/
+├── _index.mdx           # This file
+├── 01-overview.mdx      # Introduction
+├── 02-architecture.mdx  # System design
+├── 03-transactions.mdx  # Transaction types
+├── 04-pricing.mdx       # Cost calculation
+├── 05-quotas.mdx        # Storage limits
+├── 06-pin-expiration.mdx # Expiration system
+├── 07-private-network.mdx # Swarm configuration
+├── 08-rpc-endpoints.mdx # API reference
+├── 09-errors.mdx        # Error handling
+├── 10-configuration.mdx # Settings
+└── 11-public-bridge.mdx # Public gateway
+```
+
+## Source Code
+
+| Component | Path |
+|-----------|------|
+| IPFSManager | `src/features/ipfs/IPFSManager.ts` |
+| ExpirationWorker | `src/features/ipfs/ExpirationWorker.ts` |
+| Types | `src/features/ipfs/types.ts` |
+| Errors | `src/features/ipfs/errors.ts` |
+| Transaction Handlers | `src/libs/blockchain/routines/ipfsOperations.ts` |
+| Tokenomics | `src/libs/blockchain/routines/ipfsTokenomics.ts` |
+| RPC Handlers | `src/libs/network/routines/nodecalls/ipfs/` |
+
+## Related Documentation
+
+- [Demos SDK Documentation](https://docs.demos.network/sdk)
+- [IPFS Protocol Specification](https://specs.ipfs.tech/)
+- [Kubo Documentation](https://docs.ipfs.tech/reference/kubo/)

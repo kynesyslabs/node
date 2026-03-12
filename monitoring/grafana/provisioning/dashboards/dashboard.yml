@@ -1,0 +1,19 @@
+# REVIEW: Grafana dashboard provisioning configuration
+#
+# This file tells Grafana where to find dashboard JSON files
+# and how to organize them.
+
+apiVersion: 1
+
+providers:
+  - name: 'Demos Network Dashboards'
+    orgId: 1
+    folder: 'Demos Network'
+    folderUid: 'demos-network'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: false

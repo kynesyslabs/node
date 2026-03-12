@@ -11,6 +11,13 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
+export class AbortConsensusError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "AbortConsensusError"
+    }
+}
+
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
     private _greenlight_timeout = 30_000 // 15 seconds
@@ -69,6 +76,7 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
+        log.debug("\n\n\n")
         log.debug("INITIALIZED SHARD:")
         log.debug(
             "SHARD: " +
@@ -291,6 +299,15 @@ export default class SecretaryManager {
      */
     public async handleSecretaryGoneOffline() {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
+        if (!this.secretary) {
+            log.error(
+                "[Consensus] Secretary not found, exiting consensus routine",
+            )
+            throw new AbortConsensusError(
+                "Secretary not found, exiting consensus routine",
+            )
+        }
+
         const isOnline = await this.secretary.connect()
         log.debug("Secretary is online: " + isOnline)
 
@@ -542,7 +559,7 @@ export default class SecretaryManager {
             waitingMembers = this.getWaitingMembers()
         }
 
-        log.debug("WAITING MEMBERS: " + JSON.stringify(waitingMembers, null, 2))
+        log.debug("WAITING MEMBERS: " + JSON.stringify(waitingMembers))
         const promises = []
 
         for (const pubKey of waitingMembers) {
@@ -568,14 +585,17 @@ export default class SecretaryManager {
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity}`,
             )
 
-            log.debug(
-                "Peer to receive greenlight: " +
-                    JSON.stringify(member, null, 2),
-            )
+            log.debug("Peer to receive greenlight: " + JSON.stringify(member))
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
-            promises.push(member.longCall(request, true, 250, 4, [400]))
+            promises.push(
+                member.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 4,
+                    allowedCodes: [400],
+                }),
+            )
         }
 
         const results = await Promise.all(promises)
@@ -583,10 +603,7 @@ export default class SecretaryManager {
         for (const [index, result] of results.entries()) {
             const pubKey = waitingMembers[index]
             const member = this.shard.members.find(m => m.identity === pubKey)
-            log.debug(
-                "Peer who received greenlight: " +
-                    JSON.stringify(member, null, 2),
-            )
+            log.debug("Peer who received greenlight: " + JSON.stringify(member))
 
             if (result.result == 400) {
                 log.debug(
@@ -600,14 +617,14 @@ export default class SecretaryManager {
 
             if (result.result == 200) {
                 log.debug("[SECRETARY ROUTINE] Greenlight sent to " + pubKey)
-                log.debug("Response: " + JSON.stringify(result, null, 2))
+                log.debug("Response: " + JSON.stringify(result))
                 continue
             }
 
             log.error(
                 "[SECRETARY ROUTINE] Error sending greenlight to " + pubKey,
             )
-            log.error("Response: " + JSON.stringify(result, null, 2))
+            log.error("Response: " + JSON.stringify(result))
             process.exit(1)
         }
 
@@ -668,7 +685,7 @@ export default class SecretaryManager {
             log.debug("Is Waiting for key: " + Waiter.isWaiting(waiterKey))
             log.debug(
                 "Waitlist keys: " +
-                    JSON.stringify(Array.from(Waiter.waitList.keys()), null, 2),
+                    JSON.stringify(Array.from(Waiter.waitList.keys())),
             )
             Waiter.preHold(waiterKey, secretaryBlockTimestamp)
             return true
@@ -720,7 +737,6 @@ export default class SecretaryManager {
         //     // await this.simulateNormalNodeGoingOffline()
         //     // await this.simulateSecretaryGoingOffline()
         // }
-
         log.debug("Sending our validator phase to the secretary")
         log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
         log.debug("Shard block ref: " + this.shard.blockRef)
@@ -765,7 +781,10 @@ export default class SecretaryManager {
 
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug("Secretary is: " + this.secretary.identity)
-            return await this.secretary.longCall(request, true, 250, retries)
+            return await this.secretary.longCall(request, true, {
+                retries,
+                sleepTime: 250,
+            })
         }
 
         const handleSendStatusRes = async (res: RPCResponse) => {
@@ -774,9 +793,7 @@ export default class SecretaryManager {
                     this.ourValidatorPhase.currentPhase +
                     ") sent to the secretary!",
             )
-            log.debug(
-                "Set validator phase response: " + JSON.stringify(res, null, 2),
-            )
+            log.debug("Set validator phase response: " + JSON.stringify(res))
 
             if (!Waiter.isWaiting(waiterKey)) {
                 // INFO: The secretary sent the green light for the phase before
@@ -791,7 +808,7 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
                 )
-                log.debug("Response: " + JSON.stringify(res, null, 2))
+                log.debug("Response: " + JSON.stringify(res))
 
                 // REVIEW: How should we handle this?
                 // NOTE: A 400 is returned if the block reference is
@@ -802,13 +819,13 @@ export default class SecretaryManager {
 
             if (res.result == 401) {
                 log.debug("received a 401")
-                log.debug(JSON.stringify(res, null, 2))
+                log.debug(JSON.stringify(res))
                 process.exit(1)
             }
 
             log.debug(
                 "[SEND OUR VALIDATOR PHASE] SendStatus callback got response: " +
-                    JSON.stringify(res, null, 2),
+                    JSON.stringify(res),
             )
 
             if (res.extra == 450) {
@@ -816,7 +833,7 @@ export default class SecretaryManager {
                 // process.exit(0)
                 // INFO: Logs parts used to create the current CVSA
                 await getCommonValidatorSeed(null, (message: string) => {
-                    log.only(message)
+                    log.debug(message)
                 })
                 return null
             }
@@ -830,9 +847,7 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] SendStatus callback received greenlight",
                 )
-                log.debug(
-                    "Response.extra: " + JSON.stringify(res.extra, null, 2),
-                )
+                log.debug("Response.extra: " + JSON.stringify(res.extra))
 
                 // INFO: Resolve the waiter with the timestamp
                 return Waiter.resolve<number>(waiterKey, timestamp)
@@ -893,13 +908,14 @@ export default class SecretaryManager {
         log.debug(
             "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
         )
-        log.debug("Waiter keys: " + JSON.stringify(waiterKeys, null, 2))
+        log.debug("Waiter keys: " + JSON.stringify(waiterKeys))
         try {
             await Promise.all(waiters)
         } catch (error) {
-            console.error(error)
+            log.error(
+                "[SECRETARY] Error waiting for hanging greenlights: " + error,
+            )
             process.exit(1)
-            log.error("Error waiting for hanging greenlights: " + error)
         }
 
         // INFO: Delete pre-held keys for ended consensus round
@@ -908,9 +924,7 @@ export default class SecretaryManager {
             .filter(filter)
             .forEach(key => Waiter.preHeld.delete(key))
 
-        log.debug(
-            "😎😎😎😎😎😎😎😎😎😎 HANGING GREENLIGHTS RESOLVED 😎😎😎😎😎😎😎😎😎😎",
-        )
+        log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 
         if (SecretaryManager.getInstance(this.shard.blockRef) === this) {

@@ -1,0 +1,290 @@
+---
+title: "Pin Expiration"
+description: "Time-limited pins and automatic cleanup"
+---
+
+# Pin Expiration
+
+The pin expiration system enables time-limited storage with automatic cleanup.
+
+## Overview
+
+Pins can have an optional expiration time:
+
+- **Permanent pins** - Never expire, stored indefinitely
+- **Time-limited pins** - Expire after specified duration, then cleaned up
+
+Benefits:
+- Lower cost for temporary content (duration pricing)
+- Automatic quota reclamation
+- No manual cleanup required
+
+## Specifying Duration
+
+### Preset Durations
+
+| Name | Duration | Multiplier |
+|------|----------|------------|
+| `permanent` | Forever | 1.00 |
+| `week` | 7 days | 0.10 |
+| `month` | 30 days | 0.25 |
+| `quarter` | 90 days | 0.50 |
+| `year` | 365 days | 0.80 |
+
+### Custom Duration
+
+Specify seconds directly:
+
+```typescript
+// 2 days
+await client.ipfsAdd({
+  content: data,
+  duration: 172800
+})
+
+// 6 months
+await client.ipfsAdd({
+  content: data,
+  duration: 15768000
+})
+```
+
+**Bounds:**
+- Minimum: 86,400 seconds (1 day)
+- Maximum: 315,360,000 seconds (10 years)
+
+## Pin State
+
+Pins with expiration include timestamp fields:
+
+```typescript
+interface PinnedContent {
+  cid: string
+  size: number
+  timestamp: number      // Creation time (Unix ms)
+  expiresAt?: number     // Expiration time (Unix ms)
+  duration?: number      // Original duration (seconds)
+  // ...
+}
+```
+
+## Expiration Worker
+
+A background service manages expired pins:
+
+### Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `checkIntervalMs` | 3,600,000 | Check interval (1 hour) |
+| `gracePeriodMs` | 86,400,000 | Grace period (24 hours) |
+| `batchSize` | 100 | Pins per cleanup cycle |
+| `enableUnpin` | true | Actually unpin content |
+
+### Cleanup Process
+
+```
+1. Worker wakes up (hourly)
+2. Scan all accounts for expired pins
+3. For each expired pin:
+   a. Check if past grace period
+   b. If yes: unpin from IPFS, remove from state
+   c. If no: skip (still in grace period)
+4. Log cleanup statistics
+5. Sleep until next interval
+```
+
+### Grace Period
+
+Content isn't immediately removed upon expiration:
+
+```
+T = expiresAt          → Pin expires
+T + 24h = grace end    → Eligible for cleanup
+T + 25h (next scan)    → Actually removed
+```
+
+This provides buffer for:
+- Users to extend before removal
+- Network clock differences
+- Prevent accidental data loss
+
+## Extending Pins
+
+Use `IPFS_EXTEND_PIN` to add time:
+
+```typescript
+await client.ipfsExtendPin({
+  cid: "Qm...",
+  additionalDuration: "month"
+})
+```
+
+### Extension Rules
+
+- **From current expiration** - If not yet expired, adds to existing expiration
+- **From now** - If already expired, calculates from current time
+- **No free tier** - Extensions always cost DEM
+- **Upgrade to permanent** - Can extend temporary to permanent
+
+### Examples
+
+```typescript
+// Pin expires in 7 days, extend by 1 month
+// New expiration: 7 + 30 = 37 days from now
+
+// Pin expired 2 days ago, extend by 1 week
+// New expiration: 7 days from now (not 7 - 2 = 5)
+```
+
+## Checking Expiration
+
+Query pin status:
+
+```typescript
+const pins = await client.ipfsPins({ address })
+
+for (const pin of pins) {
+  if (pin.expiresAt) {
+    const remaining = pin.expiresAt - Date.now()
+
+    if (remaining < 0) {
+      console.log(`${pin.cid}: EXPIRED (in grace period)`)
+    } else if (remaining < 86400000) {
+      console.log(`${pin.cid}: Expires in < 24h`)
+    } else {
+      const days = Math.floor(remaining / 86400000)
+      console.log(`${pin.cid}: Expires in ${days} days`)
+    }
+  } else {
+    console.log(`${pin.cid}: Permanent`)
+  }
+}
+```
+
+## Expiration Calculation
+
+```typescript
+function calculateExpiration(
+  duration: PinDuration,
+  timestamp: number
+): { expiresAt?: number; durationSeconds: number } {
+
+  if (duration === "permanent") {
+    return { expiresAt: undefined, durationSeconds: 0 }
+  }
+
+  const seconds = typeof duration === "number"
+    ? duration
+    : PIN_DURATION_SECONDS[duration]
+
+  return {
+    expiresAt: timestamp + (seconds * 1000),
+    durationSeconds: seconds
+  }
+}
+```
+
+## Duration Validation
+
+```typescript
+function validateDuration(duration: PinDuration): void {
+  if (duration === "permanent") return
+
+  if (typeof duration === "string") {
+    if (!PIN_DURATION_SECONDS[duration]) {
+      throw new Error(`Invalid duration preset: ${duration}`)
+    }
+    return
+  }
+
+  if (typeof duration === "number") {
+    if (duration < MIN_CUSTOM_DURATION) {
+      throw new Error(`Duration must be at least ${MIN_CUSTOM_DURATION}s (1 day)`)
+    }
+    if (duration > MAX_CUSTOM_DURATION) {
+      throw new Error(`Duration cannot exceed ${MAX_CUSTOM_DURATION}s (10 years)`)
+    }
+    return
+  }
+
+  throw new Error("Invalid duration type")
+}
+```
+
+## Constants
+
+```typescript
+// Duration presets (seconds)
+const PIN_DURATION_SECONDS = {
+  permanent: 0,
+  week: 604_800,
+  month: 2_592_000,
+  quarter: 7_776_000,
+  year: 31_536_000
+}
+
+// Custom duration bounds
+const MIN_CUSTOM_DURATION = 86_400       // 1 day
+const MAX_CUSTOM_DURATION = 315_360_000  // 10 years
+
+// Worker configuration
+const EXPIRATION_CHECK_INTERVAL = 3_600_000   // 1 hour
+const EXPIRATION_GRACE_PERIOD = 86_400_000    // 24 hours
+const EXPIRATION_BATCH_SIZE = 100
+```
+
+## Best Practices
+
+### Choose Appropriate Durations
+
+```typescript
+// Temporary uploads, previews
+duration: "week"
+
+// Monthly reports, invoices
+duration: "month"
+
+// Quarterly archives
+duration: "quarter"
+
+// Annual records
+duration: "year"
+
+// Permanent assets (logos, contracts)
+duration: "permanent"
+```
+
+### Set Up Expiration Alerts
+
+```typescript
+async function checkExpiringPins(address: string) {
+  const pins = await client.ipfsPins({ address })
+  const now = Date.now()
+  const weekMs = 7 * 24 * 60 * 60 * 1000
+
+  const expiringSoon = pins.filter(pin =>
+    pin.expiresAt &&
+    pin.expiresAt - now < weekMs &&
+    pin.expiresAt > now
+  )
+
+  if (expiringSoon.length > 0) {
+    console.warn(`${expiringSoon.length} pins expiring within 1 week`)
+  }
+}
+```
+
+### Extend Before Expiration
+
+Don't wait until the grace period:
+
+```typescript
+// Good: Extend well before expiration
+if (pin.expiresAt - Date.now() < 7 * 86400000) {
+  await client.ipfsExtendPin({ cid: pin.cid, additionalDuration: "month" })
+}
+
+// Risky: Waiting until grace period
+// Content could be cleaned up before you extend
+```

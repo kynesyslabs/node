@@ -3,6 +3,7 @@ import { Repository } from "typeorm"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import log from "src/utilities/logger"
 
 export default class GCRNonceRoutines {
     static async apply(
@@ -19,12 +20,15 @@ export default class GCRNonceRoutines {
                 ? forgeToHex(editOperation.account)
                 : editOperation.account
 
-        console.log(
-            "Applying GCREdit nonce: ",
-            editOperationAccount,
-            editOperation.operation,
-            editOperation.amount,
-            editOperation.isRollback ? "ROLLBACK" : "NORMAL",
+        log.debug(
+            "Applying GCREdit nonce: " +
+                editOperationAccount +
+                " " +
+                editOperation.operation +
+                " " +
+                editOperation.amount +
+                " " +
+                (editOperation.isRollback ? "ROLLBACK" : "NORMAL"),
         )
         // Reversing the operation if it is a rollback
         if (editOperation.isRollback) {

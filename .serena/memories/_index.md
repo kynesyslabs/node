@@ -1,40 +1,31 @@
 # Serena Memory Index - Quick Navigation
 
-## UD Integration (Current Work)
-- **ud_phases_tracking** - Complete phases 1-6 overview (Phase 5 done, Phase 6 pending)
-- **ud_phase5_complete** - Detailed Phase 5 implementation (most comprehensive)
+## Current Work (Start Here)
+- **_continue_here** - Active work streams and next actions
+
+## OmniProtocol Implementation
+- **omniprotocol_complete_2025_11_11** - Comprehensive status (90% complete)
+- **omniprotocol_wave8_tcp_physical_layer** - TCP layer implementation
+- **omniprotocol_wave8.1_complete** - Wave 8.1 completion details
+- **omniprotocol_session_2025-12-01** - Recent session notes
+
+## UD Integration
+- **ud_phases_tracking** - Complete phases 1-6 overview
+- **ud_phase5_complete** - Detailed Phase 5 implementation
 - **ud_integration_complete** - Current status, dependencies, next steps
 - **ud_technical_reference** - Networks, contracts, record keys, test data
 - **ud_architecture_patterns** - Resolution flow, verification, storage patterns
-- **ud_security_patterns** - Ownership verification, security checkpoints, attack prevention
-- **session_ud_points_implementation_2025_01_31** - UD points system implementation session
-- **session_ud_ownership_verification_2025_10_21** - UD ownership verification security fixes
+- **ud_security_patterns** - Ownership verification, security checkpoints
+- **session_ud_ownership_verification_2025_10_21** - Security fixes session
+- **session_ud_points_implementation_2025_01_31** - Points system session
 
 ## Project Core
 - **project_purpose** - Demos Network node software overview
-- **tech_stack** - Languages, frameworks, tools
-- **codebase_structure** - Directory organization
-- **code_style_conventions** - Naming, formatting standards
-- **development_patterns** - Established code patterns
-
-## Development Workflow
-- **suggested_commands** - Common CLI commands
-- **task_completion_guidelines** - Workflow patterns
-
-## Memory Organization
-
-Each memory is atomic and self-contained. Reference specific memories based on domain:
-
-**For UD work**:
-1. Start with `ud_phases_tracking` for phase overview
-2. Check `ud_phase5_complete` for detailed Phase 5 implementation
-3. Use `ud_integration_complete` for current status and next steps
-4. Reference `ud_technical_reference` for configs/contracts
-5. Reference `ud_architecture_patterns` for implementation patterns
-6. Reference `ud_security_patterns` for security verification patterns
-7. Review recent sessions: `session_ud_ownership_verification_2025_10_21`
-
-**For general development**:
-- Project info: `project_purpose`, `tech_stack`, `codebase_structure`
-- Development: `development_patterns`, `code_style_conventions`
-- Commands: `suggested_commands`, `task_completion_guidelines`
+- **Codebase Map** - See `.planning/codebase/` (7 documents, replaces old Serena memories):
+  - `STACK.md` - Runtime, dependencies, frameworks (was: tech_stack)
+  - `STRUCTURE.md` - Directory layout, file purposes (was: codebase_structure)
+  - `CONVENTIONS.md` - Code style, naming, linting (was: code_style_conventions)
+  - `ARCHITECTURE.md` - System layers, data flows, patterns (was: development_patterns)
+  - `INTEGRATIONS.md` - External APIs, blockchain networks, protocols
+  - `TESTING.md` - Jest config, mock patterns, coverage
+  - `CONCERNS.md` - Tech debt, security issues, missing features
