@@ -1,23 +1,6 @@
 import { runTokenScriptBurnLoadgen } from "./token_script_burn_loadgen"
-import { getRunConfig, writeJson } from "./run_io"
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function splitCsv(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
+import { getRunConfig, writeJson } from "./framework/io"
+import { splitCsv, sleep, envInt, logNonCriticalError } from "./testing_utils"
 
 export async function runTokenScriptBurnRamp() {
   const rampConcurrency = splitCsv(process.env.RAMP_CONCURRENCY)
@@ -93,8 +76,8 @@ export async function runTokenScriptBurnRamp() {
           try {
             const parsed = JSON.parse(payload)
             if (parsed?.token_script_burn_summary) stepSummary = parsed.token_script_burn_summary
-          } catch {
-            // ignore
+          } catch (error) {
+            logNonCriticalError("token_script_burn_ramp.captureSummary", error, step)
           }
         } else if (payload?.token_script_burn_summary) {
           stepSummary = payload.token_script_burn_summary
@@ -150,4 +133,3 @@ export async function runTokenScriptBurnRamp() {
   writeJson(artifacts.summaryPath, rampSummary)
   console.log(JSON.stringify({ token_script_burn_ramp_summary: rampSummary }, null, 2))
 }
-

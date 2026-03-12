@@ -36,8 +36,25 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
         ],
     }
 
-    const res = await verifiedPeer.call(request)
-    log.debug("[BOOTSTRAP] Genesis data hash: " + JSON.stringify(res))
+    let res: Awaited<ReturnType<typeof verifiedPeer.call>> = null
+    const maxAttempts = 10
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        res = await verifiedPeer.call(request)
+        log.debug("[BOOTSTRAP] Genesis data hash: " + JSON.stringify(res))
+
+        if (res?.result === 200) {
+            break
+        }
+
+        if (attempt < maxAttempts) {
+            log.warn(
+                `[BOOTSTRAP] Peer ${verifiedPeer.connection.string} is not ready to serve genesis data hash yet ` +
+                    `(attempt ${attempt}/${maxAttempts}, result=${res?.result})`,
+            )
+            await sleep(1000)
+            continue
+        }
+    }
 
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
@@ -112,7 +129,9 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
     } else {
         log.error(
             "[BOOTSTRAP] Failed to get genesis data hash from peer: " +
-                verifiedPeer.connection.string,
+                verifiedPeer.connection.string +
+                " response=" +
+                JSON.stringify(res),
         )
         process.exit(1)
     }

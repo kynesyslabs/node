@@ -14,7 +14,7 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]

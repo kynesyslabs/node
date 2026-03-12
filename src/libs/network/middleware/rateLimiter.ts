@@ -42,7 +42,7 @@ export class RateLimiter {
     public config: RateLimitConfig
     public cleanupInterval: Timer
     private static instance: RateLimiter
-    private local_ips = ["127.0.0.1", "localhost"]
+    private local_ips = ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]
 
     constructor(config: RateLimitConfig) {
         this.config = config

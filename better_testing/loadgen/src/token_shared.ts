@@ -1,168 +1,27 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { Cryptography, Hashing, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { envBool, envInt, logNonCriticalErrorOnce, normalizeHexAddress, normalizeRpcUrl, nowMs, sleep, splitCsv } from "./framework/common"
+import {
+  type CrossNodeHolderPointersReport,
+  type CrossNodeTokenConsistencyReport,
+  type CrossNodeTokenGetConsistencyReport,
+  waitForCrossNodeHolderPointersMatchBalances,
+  waitForCrossNodeTokenConsistency,
+  waitForCrossNodeTokenGetConsistency,
+} from "./framework/consistency"
+import { nodeCall, nodeCallExact } from "./framework/rpc"
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  switch (raw.trim().toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "y":
-    case "on":
-      return true
-    case "0":
-    case "false":
-    case "no":
-    case "n":
-    case "off":
-      return false
-    default:
-      return fallback
-  }
-}
-
-function splitCsv(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-function nowMs(): number {
-  return Date.now()
-}
-
-function normalizeRpcUrl(url: string): string {
-  return url.replace(/\/+$/, "") + "/"
-}
-
-async function rpcPost(rpcUrl: string, body: unknown): Promise<any> {
-  const url = normalizeRpcUrl(rpcUrl)
-  const timeoutMs = envInt("NODECALL_FETCH_TIMEOUT_MS", 8000)
-  const controller = timeoutMs > 0 ? new AbortController() : null
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      ...(controller ? { signal: controller.signal } : {}),
-    })
-    const json = await res.json().catch(() => null)
-    return { ok: res.ok, status: res.status, json }
-  } catch (error: any) {
-    const reason =
-      error?.name === "AbortError"
-        ? `NODECALL_FETCH_TIMEOUT_MS exceeded (${timeoutMs}ms)`
-        : (error instanceof Error ? error.message : String(error))
-    return {
-      ok: false,
-      status: 0,
-      json: {
-        result: 599,
-        response: `rpcPost failed: ${reason}`,
-        require_reply: false,
-        extra: null,
-      },
-    }
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
-
-async function nodeCallExact(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {
-  const payload = { method: "nodeCall", params: [{ message, data, muid }] }
-  const { ok, json } = await rpcPost(rpcUrl, payload)
-  if (!ok) return json
-  return json
-}
-
-export async function nodeCall(rpcUrl: string, message: string, data: any, muid = "loadgen"): Promise<any> {
-  const toCommitted = (m: string) => {
-    switch (m) {
-      case "token.get":
-        return "token.getCommitted"
-      case "token.getBalance":
-        return "token.getBalanceCommitted"
-      case "token.callView":
-        return "token.callViewCommitted"
-      default:
-        return m
-    }
-  }
-
-  const toLegacy = (m: string) => {
-    switch (m) {
-      case "token.getCommitted":
-        return "token.get"
-      case "token.getBalanceCommitted":
-        return "token.getBalance"
-      case "token.callViewCommitted":
-        return "token.callView"
-      default:
-        return m
-    }
-  }
-
-  // Prefer committed-only token reads in the harness, but keep backward compatibility:
-  // older nodes may not have the committed aliases yet and will respond with a 200 + "Unknown message".
-  const primaryMessage = toCommitted(message)
-  const fallbackMessage = toLegacy(primaryMessage)
-
-  async function postOnce(msg: string) {
-    const payload = { method: "nodeCall", params: [{ message: msg, data, muid }] }
-    const { ok, json } = await rpcPost(rpcUrl, payload)
-    if (!ok) return json
-    return json
-  }
-
-  const isCommittedTokenRead =
-    primaryMessage === "token.getCommitted" ||
-    primaryMessage === "token.getBalanceCommitted" ||
-    primaryMessage === "token.callViewCommitted"
-
-  // Keep this short by default to avoid stalling time-series probes; higher-level loops (settle checks, script upgrade)
-  // should do their own waiting if they need longer.
-  const inFluxTimeoutMs = isCommittedTokenRead ? envInt("NODECALL_IN_FLUX_TIMEOUT_MS", 2000) : 0
-
-  async function postWithStateInFluxRetry(msg: string) {
-    if (!isCommittedTokenRead || inFluxTimeoutMs <= 0) return await postOnce(msg)
-    const deadlineMs = nowMs() + inFluxTimeoutMs
-    let attempt = 0
-    while (true) {
-      const res = await postOnce(msg)
-      const inFlux = res?.result === 409 && res?.response?.error === "STATE_IN_FLUX"
-      if (!inFlux) return res
-      if (nowMs() >= deadlineMs) return res
-      attempt++
-      const backoffMs = Math.min(2000, 50 + attempt * 75)
-      await sleep(backoffMs)
-    }
-  }
-
-  const first = await postWithStateInFluxRetry(primaryMessage)
-  const unknown =
-    typeof first?.response === "string" &&
-    (first.response.includes("Unknown message") || first.response.includes("unknown message"))
-
-  if (unknown && fallbackMessage !== primaryMessage) {
-    return await postWithStateInFluxRetry(fallbackMessage)
-  }
-
-  return first
-}
+export { nodeCall, nodeCallExact } from "./framework/rpc"
+export {
+  waitForCrossNodeHolderPointersMatchBalances,
+  waitForCrossNodeTokenConsistency,
+  waitForCrossNodeTokenGetConsistency,
+} from "./framework/consistency"
+export type {
+  CrossNodeHolderPointersReport,
+  CrossNodeTokenConsistencyReport,
+  CrossNodeTokenGetConsistencyReport,
+} from "./framework/consistency"
 
 async function waitForTokenExists(rpcUrl: string, tokenAddress: string, timeoutSec: number): Promise<void> {
   const deadlineMs = nowMs() + Math.max(1, timeoutSec) * 1000
@@ -200,8 +59,13 @@ async function waitForTokenBalanceAtLeast(
       try {
         const bal = BigInt(balRaw)
         if (bal >= minBalance) return
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalErrorOnce("token_shared.waitForTokenBalanceAtLeast.committed", "token_shared.waitForTokenBalanceAtLeast.committed", error, {
+          rpcUrl,
+          tokenAddress,
+          address,
+          balance: balRaw,
+        })
       }
     }
     const live = await nodeCallExact(rpcUrl, "token.getBalance", { tokenAddress, address }, `token.getBalance:liveFallback:${attempt}`)
@@ -210,8 +74,13 @@ async function waitForTokenBalanceAtLeast(
       try {
         const bal = BigInt(liveBalRaw)
         if (bal >= minBalance) return
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalErrorOnce("token_shared.waitForTokenBalanceAtLeast.live", "token_shared.waitForTokenBalanceAtLeast.live", error, {
+          rpcUrl,
+          tokenAddress,
+          address,
+          balance: liveBalRaw,
+        })
       }
     }
     attempt++
@@ -225,13 +94,13 @@ export async function waitForTxReady(rpcUrl: string, timeoutSec: number): Promis
   const deadlineMs = nowMs() + Math.max(1, timeoutSec) * 1000
   let attempt = 0
   while (nowMs() < deadlineMs) {
-    const res = await nodeCall(rpcUrl, "crypto.getIdentity", {}, `crypto.getIdentity:${attempt}`)
-    if (res?.result === 200 && res?.response?.publicKeyHex) return
+    const res = await nodeCall(rpcUrl, "getLastBlockHash", {}, `getLastBlockHash:txReady:${attempt}`)
+    if (res?.result === 200 && typeof res?.response === "string" && res.response.length > 0) return
     attempt++
     const backoffMs = Math.min(2000, 100 + attempt * 100)
     await sleep(backoffMs)
   }
-  throw new Error(`Tx pipeline not ready (crypto.getIdentity) after ${timeoutSec}s at ${rpcUrl}`)
+  throw new Error(`Tx pipeline not ready (getLastBlockHash) after ${timeoutSec}s at ${rpcUrl}`)
 }
 
 async function waitForChainReady(rpcUrl: string, timeoutSec: number): Promise<void> {
@@ -247,394 +116,6 @@ async function waitForChainReady(rpcUrl: string, timeoutSec: number): Promise<vo
   throw new Error(`Chain not ready (getLastBlockHash) after ${timeoutSec}s at ${rpcUrl}`)
 }
 
-export type CrossNodeTokenConsistencyReport = {
-  ok: boolean
-  tokenAddress: string
-  rpcUrls: string[]
-  addresses: string[]
-  attempts: number
-  durationMs: number
-  perNode: Array<{
-    rpcUrl: string
-    ok: boolean
-    snapshot: null | {
-      tokenAddress: string
-      metadata: { name: string | null; ticker: string | null; decimals: number | null }
-      state: { totalSupply: string | null }
-      balances: Record<string, string | null>
-    }
-    error: any
-  }>
-}
-
-export type CrossNodeTokenGetConsistencyReport = {
-  ok: boolean
-  tokenAddress: string
-  rpcUrls: string[]
-  attempts: number
-  durationMs: number
-  perNode: Array<{
-    rpcUrl: string
-    ok: boolean
-    normalized: null | {
-      tokenAddress: string
-      accessControl: {
-        owner: string | null
-        paused: boolean
-        entries: Array<{ address: string; permissions: string[] }>
-      }
-    }
-    error: any
-  }>
-}
-
-export type CrossNodeHolderPointersReport = {
-  ok: boolean
-  tokenAddress: string
-  rpcUrls: string[]
-  expectedPresent: Record<string, boolean>
-  attempts: number
-  durationMs: number
-  perNode: Array<{
-    rpcUrl: string
-    ok: boolean
-    perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }>
-    error: any
-  }>
-}
-
-function normalizeHexAddress(address: string): string {
-  const trimmed = (address ?? "").trim()
-  if (!trimmed) return trimmed
-  return trimmed.startsWith("0x") ? trimmed.toLowerCase() : ("0x" + trimmed).toLowerCase()
-}
-
-function stableBalances(addresses: string[], balances: Record<string, string | null>): Record<string, string | null> {
-  const out: Record<string, string | null> = {}
-  for (const a of addresses.map(normalizeHexAddress).sort()) out[a] = balances[a] ?? null
-  return out
-}
-
-async function fetchTokenSnapshot(rpcUrl: string, tokenAddress: string, addresses: string[]) {
-  const addrNorm = addresses.map(normalizeHexAddress)
-
-  const tokenRes = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${tokenAddress}`)
-  if (tokenRes?.result !== 200) {
-    return { ok: false, snapshot: null, error: tokenRes }
-  }
-
-  const balances: Record<string, string | null> = {}
-  for (const a of addrNorm) {
-    const balRes = await nodeCall(rpcUrl, "token.getBalanceCommitted", { tokenAddress, address: a }, `token.getBalanceCommitted:${a}`)
-    if (balRes?.result === 200) balances[a] = balRes?.response?.balance ?? null
-    else balances[a] = null
-  }
-
-  const snapshot = {
-    tokenAddress,
-    metadata: {
-      name: tokenRes?.response?.metadata?.name ?? null,
-      ticker: tokenRes?.response?.metadata?.ticker ?? null,
-      decimals: typeof tokenRes?.response?.metadata?.decimals === "number" ? tokenRes.response.metadata.decimals : null,
-    },
-    state: {
-      totalSupply: tokenRes?.response?.state?.totalSupply ?? null,
-    },
-    balances: stableBalances(addrNorm, balances),
-  }
-
-  return { ok: true, snapshot, error: null }
-}
-
-function snapshotsEqual(a: any, b: any): boolean {
-  return JSON.stringify(a) === JSON.stringify(b)
-}
-
-function normalizeTokenAclEntries(entries: any): Array<{ address: string; permissions: string[] }> {
-  const list = Array.isArray(entries) ? entries : []
-  const out: Array<{ address: string; permissions: string[] }> = []
-  for (const entry of list) {
-    const address = normalizeHexAddress(entry?.address ?? "")
-    if (!address) continue
-    const permsRaw = Array.isArray(entry?.permissions) ? entry.permissions : []
-    const perms = [...new Set(permsRaw.map((p: any) => String(p)).filter(Boolean))].sort()
-    out.push({ address, permissions: perms })
-  }
-  out.sort((a, b) => a.address.localeCompare(b.address))
-  return out
-}
-
-function normalizeTokenPointerEntry(entry: any): string | null {
-  if (!entry) return null
-  if (typeof entry === "string") return normalizeHexAddress(entry)
-  if (typeof entry === "object" && typeof entry.tokenAddress === "string") return normalizeHexAddress(entry.tokenAddress)
-  return null
-}
-
-async function fetchHolderPointers(rpcUrl: string, address: string) {
-  const res = await nodeCall(rpcUrl, "token.getHolderPointers", { address }, `token.getHolderPointers:${address}`)
-  if (res?.result !== 200) return { ok: false, tokens: [], raw: res }
-  const tokensRaw = res?.response?.tokens
-  const tokensList = Array.isArray(tokensRaw) ? tokensRaw : []
-  const tokens = tokensList.map(normalizeTokenPointerEntry).filter(Boolean) as string[]
-  return { ok: true, tokens, raw: tokensRaw }
-}
-
-export async function waitForCrossNodeHolderPointersMatchBalances(params: {
-  rpcUrls: string[]
-  tokenAddress: string
-  expectedPresent: Record<string, boolean>
-  timeoutSec: number
-  pollMs?: number
-}): Promise<CrossNodeHolderPointersReport> {
-  const pollMs = Math.max(50, Math.floor(params.pollMs ?? 500))
-  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
-  const startedAtMs = nowMs()
-  let attempts = 0
-  const includeRaw = envBool("HOLDER_POINTER_INCLUDE_RAW", false)
-
-  const rpcUrls = (params.rpcUrls ?? []).map(normalizeRpcUrl)
-  const expectedPresent: Record<string, boolean> = {}
-  for (const [addr, exp] of Object.entries(params.expectedPresent ?? {})) {
-    expectedPresent[normalizeHexAddress(addr)] = !!exp
-  }
-
-  const addresses = Object.keys(expectedPresent).sort()
-
-  while (nowMs() < deadlineMs) {
-    attempts++
-    const perNode: CrossNodeHolderPointersReport["perNode"] = []
-
-    for (const rpcUrl of rpcUrls) {
-      const perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }> = {}
-      let nodeOk = true
-      let nodeErr: any = null
-
-      for (const address of addresses) {
-        const holder = await fetchHolderPointers(rpcUrl, address)
-        if (!holder.ok) {
-          nodeOk = false
-          nodeErr = holder.raw
-          perAddress[address] = includeRaw
-            ? { hasPointer: false, tokenCount: null, raw: holder.raw }
-            : { hasPointer: false, tokenCount: null }
-          continue
-        }
-        const hasPointer = holder.tokens.includes(normalizeHexAddress(params.tokenAddress))
-        perAddress[address] = includeRaw
-          ? { hasPointer, tokenCount: holder.tokens.length, raw: holder.raw }
-          : { hasPointer, tokenCount: holder.tokens.length }
-      }
-
-      perNode.push({ rpcUrl, ok: nodeOk, perAddress, error: nodeErr })
-    }
-
-    const allNodesOk = perNode.every(n => n.ok)
-    if (allNodesOk) {
-      let allMatch = true
-      for (const node of perNode) {
-        for (const address of addresses) {
-          const expected = expectedPresent[address] ?? false
-          const actual = node.perAddress[address]?.hasPointer ?? false
-          if (expected !== actual) {
-            allMatch = false
-            break
-          }
-        }
-        if (!allMatch) break
-      }
-
-      if (allMatch) {
-        return {
-          ok: true,
-          tokenAddress: normalizeHexAddress(params.tokenAddress),
-          rpcUrls,
-          expectedPresent,
-          attempts,
-          durationMs: nowMs() - startedAtMs,
-          perNode,
-        }
-      }
-    }
-
-    await sleep(pollMs)
-  }
-
-  const perNode: CrossNodeHolderPointersReport["perNode"] = []
-  for (const rpcUrl of rpcUrls) {
-    const perAddress: Record<string, { hasPointer: boolean; tokenCount: number | null; raw?: any }> = {}
-    let nodeOk = true
-    let nodeErr: any = null
-    for (const address of addresses) {
-      const holder = await fetchHolderPointers(rpcUrl, address)
-      if (!holder.ok) {
-        nodeOk = false
-        nodeErr = holder.raw
-        perAddress[address] = includeRaw
-          ? { hasPointer: false, tokenCount: null, raw: holder.raw }
-          : { hasPointer: false, tokenCount: null }
-        continue
-      }
-      const hasPointer = holder.tokens.includes(normalizeHexAddress(params.tokenAddress))
-      perAddress[address] = includeRaw
-        ? { hasPointer, tokenCount: holder.tokens.length, raw: holder.raw }
-        : { hasPointer, tokenCount: holder.tokens.length }
-    }
-    perNode.push({ rpcUrl, ok: nodeOk, perAddress, error: nodeErr })
-  }
-
-  return {
-    ok: false,
-    tokenAddress: normalizeHexAddress(params.tokenAddress),
-    rpcUrls: (params.rpcUrls ?? []).map(normalizeRpcUrl),
-    expectedPresent,
-    attempts,
-    durationMs: nowMs() - startedAtMs,
-    perNode,
-  }
-}
-
-export async function waitForCrossNodeTokenConsistency(params: {
-  rpcUrls: string[]
-  tokenAddress: string
-  addresses: string[]
-  timeoutSec: number
-  pollMs?: number
-}): Promise<CrossNodeTokenConsistencyReport> {
-  const pollMs = Math.max(50, Math.floor(params.pollMs ?? 500))
-  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
-  const startedAtMs = nowMs()
-  let attempts = 0
-
-  const rpcUrls = (params.rpcUrls ?? []).map(normalizeRpcUrl)
-  const addresses = (params.addresses ?? []).map(normalizeHexAddress).filter(Boolean)
-
-  if (rpcUrls.length === 0) {
-    return {
-      ok: false,
-      tokenAddress: params.tokenAddress,
-      rpcUrls: [],
-      addresses,
-      attempts,
-      durationMs: nowMs() - startedAtMs,
-      perNode: [],
-    }
-  }
-
-  while (nowMs() < deadlineMs) {
-    attempts++
-    const perNode: CrossNodeTokenConsistencyReport["perNode"] = []
-    for (const rpcUrl of rpcUrls) {
-      const one = await fetchTokenSnapshot(rpcUrl, params.tokenAddress, addresses)
-      perNode.push({ rpcUrl, ok: one.ok, snapshot: one.snapshot, error: one.error })
-    }
-
-    const okNodes = perNode.filter(n => n.ok && n.snapshot)
-    if (okNodes.length === perNode.length) {
-      const first = okNodes[0]!.snapshot
-      const allSame = okNodes.every(n => snapshotsEqual(n.snapshot, first))
-      if (allSame) {
-        return {
-          ok: true,
-          tokenAddress: params.tokenAddress,
-          rpcUrls,
-          addresses,
-          attempts,
-          durationMs: nowMs() - startedAtMs,
-          perNode,
-        }
-      }
-    }
-
-    await sleep(pollMs)
-  }
-
-  const perNode: CrossNodeTokenConsistencyReport["perNode"] = []
-  for (const rpcUrl of rpcUrls) {
-    const one = await fetchTokenSnapshot(rpcUrl, params.tokenAddress, addresses)
-    perNode.push({ rpcUrl, ok: one.ok, snapshot: one.snapshot, error: one.error })
-  }
-
-  return {
-    ok: false,
-    tokenAddress: params.tokenAddress,
-    rpcUrls,
-    addresses,
-    attempts,
-    durationMs: nowMs() - startedAtMs,
-    perNode,
-  }
-}
-
-async function fetchTokenGetNormalized(rpcUrl: string, tokenAddress: string) {
-  const tokenRes = await nodeCall(rpcUrl, "token.getCommitted", { tokenAddress }, `token.getCommitted:${tokenAddress}`)
-  if (tokenRes?.result !== 200) {
-    return { ok: false, normalized: null, error: tokenRes }
-  }
-
-  const owner = tokenRes?.response?.accessControl?.owner
-  const paused = !!tokenRes?.response?.accessControl?.paused
-  const entries = normalizeTokenAclEntries(tokenRes?.response?.accessControl?.entries)
-
-  const normalized = {
-    tokenAddress: normalizeHexAddress(tokenAddress),
-    accessControl: {
-      owner: typeof owner === "string" ? normalizeHexAddress(owner) : null,
-      paused,
-      entries,
-    },
-  }
-
-  return { ok: true, normalized, error: null }
-}
-
-export async function waitForCrossNodeTokenGetConsistency(params: {
-  rpcUrls: string[]
-  tokenAddress: string
-  timeoutSec: number
-  pollMs?: number
-}): Promise<CrossNodeTokenGetConsistencyReport> {
-  const pollMs = Math.max(50, Math.floor(params.pollMs ?? 500))
-  const deadlineMs = nowMs() + Math.max(1, params.timeoutSec) * 1000
-  const startedAtMs = nowMs()
-  let attempts = 0
-
-  const rpcUrls = (params.rpcUrls ?? []).map(normalizeRpcUrl)
-  const tokenAddress = normalizeHexAddress(params.tokenAddress)
-
-  if (rpcUrls.length === 0) {
-    return { ok: false, tokenAddress, rpcUrls: [], attempts, durationMs: nowMs() - startedAtMs, perNode: [] }
-  }
-
-  while (nowMs() < deadlineMs) {
-    attempts++
-    const perNode: CrossNodeTokenGetConsistencyReport["perNode"] = []
-    for (const rpcUrl of rpcUrls) {
-      const one = await fetchTokenGetNormalized(rpcUrl, tokenAddress)
-      perNode.push({ rpcUrl, ok: one.ok, normalized: one.normalized, error: one.error })
-    }
-
-    const okNodes = perNode.filter(n => n.ok && n.normalized)
-    if (okNodes.length === perNode.length) {
-      const first = okNodes[0]!.normalized
-      const allSame = okNodes.every(n => snapshotsEqual(n.normalized, first))
-      if (allSame) {
-        return { ok: true, tokenAddress, rpcUrls, attempts, durationMs: nowMs() - startedAtMs, perNode }
-      }
-    }
-
-    await sleep(pollMs)
-  }
-
-  const perNode: CrossNodeTokenGetConsistencyReport["perNode"] = []
-  for (const rpcUrl of rpcUrls) {
-    const one = await fetchTokenGetNormalized(rpcUrl, tokenAddress)
-    perNode.push({ rpcUrl, ok: one.ok, normalized: one.normalized, error: one.error })
-  }
-
-  return { ok: false, tokenAddress, rpcUrls, attempts, durationMs: nowMs() - startedAtMs, perNode }
-}
-
 async function isRpcReady(rpcUrl: string): Promise<boolean> {
   const url = normalizeRpcUrl(rpcUrl)
   try {
@@ -646,7 +127,8 @@ async function isRpcReady(rpcUrl: string): Promise<boolean> {
     if (!res.ok) return false
     const data = (await res.json().catch(() => null)) as any
     return typeof data?.result === "number" && data.result >= 200 && data.result < 300
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce(`token_shared.isRpcReady:${url}`, "token_shared.isRpcReady", error, { rpcUrl: url })
     return false
   }
 }

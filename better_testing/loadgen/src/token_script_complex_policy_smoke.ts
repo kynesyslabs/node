@@ -10,7 +10,7 @@ import {
   withDemosWallet,
 } from "./token_shared"
 import { createHash } from "crypto"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
 import { buildComplexPolicyScript } from "./token_script_complex_policy_shared"
 
 function sleep(ms: number): Promise<void> {

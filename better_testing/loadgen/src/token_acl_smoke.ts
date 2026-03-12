@@ -1,5 +1,5 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
   getTokenTargets,

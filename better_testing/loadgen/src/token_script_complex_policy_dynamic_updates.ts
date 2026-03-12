@@ -11,7 +11,8 @@ import {
   withDemosWallet,
 } from "./token_shared"
 import { createHash } from "crypto"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalErrorOnce } from "./framework/common"
 import { buildComplexPolicyScript } from "./token_script_complex_policy_shared"
 
 function sleep(ms: number): Promise<void> {
@@ -89,8 +90,8 @@ function parseBigintOrZero(value: any): bigint {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     if (typeof value === "string") return BigInt(value)
-  } catch {
-    // ignore
+  } catch (error) {
+    logNonCriticalErrorOnce("token_script_complex_policy_dynamic_updates.parseBigintOrZero", "token_script_complex_policy_dynamic_updates.parseBigintOrZero", error, { value })
   }
   return 0n
 }
@@ -600,4 +601,3 @@ export async function runTokenScriptComplexPolicyDynamicUpdates() {
   writeJson(`${artifactBase}.summary.json`, summary)
   console.log(JSON.stringify({ token_script_complex_policy_dynamic_updates_summary: summary }, null, 2))
 }
-

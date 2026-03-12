@@ -1,4 +1,5 @@
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { normalizeLoadgenError } from "./framework/errors"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
   getTokenTargets,
@@ -16,6 +17,7 @@ import {
 } from "./token_shared"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { sleep, envInt, envBool, normalizeRpcUrl, nowMs } from "./testing_utils"
 
 type Config = {
   targets: string[]
@@ -48,46 +50,6 @@ type TimeseriesPoint = {
   error: number
   tpsOk: number
   timestamp: string
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  switch (raw.trim().toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "y":
-    case "on":
-      return true
-    case "0":
-    case "false":
-    case "no":
-    case "n":
-    case "off":
-      return false
-    default:
-      return fallback
-  }
-}
-
-function nowMs(): number {
-  return Date.now()
-}
-
-function normalizeRpcUrl(url: string): string {
-  return url.replace(/\/+$/, "") + "/"
 }
 
 function stableJson(value: any): string {
@@ -277,7 +239,8 @@ async function worker(
   function launchOne() {
     const p = sendOne().catch((err: any) => {
       counters.error++
-      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      const info = normalizeLoadgenError(err)
+      const key = `${info.code}: ${info.message}`.slice(0, 400)
       counters.errorSamples[key] = (counters.errorSamples[key] ?? 0) + 1
     }).finally(() => {
       active.delete(p)

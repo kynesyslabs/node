@@ -1,6 +1,7 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { normalizeLoadgenError } from "./framework/errors"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
   getTokenTargets,
@@ -14,6 +15,7 @@ import {
   waitForTxReady,
 } from "./token_shared"
 import { maybeUpgradeScript } from "./token_script_perf_shared"
+import { sleep, envInt, envBool, nowMs, unique, percentile, ReservoirSampler } from "./testing_utils"
 
 type LoadgenConfig = {
   targets: string[]
@@ -46,85 +48,6 @@ type TimeseriesPoint = {
   tpsOk: number
   latencyMs: { sampleCount: number; p50: number; p95: number; p99: number }
   timestamp: string
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  switch (raw.trim().toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "y":
-    case "on":
-      return true
-    case "0":
-    case "false":
-    case "no":
-    case "n":
-    case "off":
-      return false
-    default:
-      return fallback
-  }
-}
-
-function nowMs(): number {
-  return Date.now()
-}
-
-function unique(values: string[]): string[] {
-  return Array.from(new Set(values))
-}
-
-function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return NaN
-  const idx = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.floor((p / 100) * (sorted.length - 1))),
-  )
-  return sorted[idx]!
-}
-
-class ReservoirSampler {
-  private seen = 0
-  private readonly max: number
-  private readonly samples: number[] = []
-
-  constructor(maxSamples: number) {
-    this.max = Math.max(1, Math.floor(maxSamples))
-  }
-
-  add(value: number) {
-    this.seen++
-    if (this.samples.length < this.max) {
-      this.samples.push(value)
-      return
-    }
-    const j = Math.floor(Math.random() * this.seen)
-    if (j < this.max) this.samples[j] = value
-  }
-
-  snapshotSorted(): number[] {
-    const copy = this.samples.slice()
-    copy.sort((a, b) => a - b)
-    return copy
-  }
-
-  size(): number {
-    return this.samples.length
-  }
 }
 
 function getConfig(): LoadgenConfig {
@@ -188,7 +111,8 @@ async function worker(params: {
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
       params.counters.error++
-      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      const info = normalizeLoadgenError(err)
+      const key = `${info.code}: ${info.message}`.slice(0, 400)
       params.counters.errorSamples[key] = (params.counters.errorSamples[key] ?? 0) + 1
     }
   }
@@ -421,7 +345,7 @@ export async function runTokenScriptBurnLoadgen() {
   writeJson(artifacts.summaryPath, summary)
   console.log(JSON.stringify({ token_script_burn_summary: summary }, null, 2))
 
-  const strict = envBool("POST_RUN_SETTLE_STRICT", false)
+  const strict = envBool("POST_RUN_SETTLE_STRICT", true)
   if (strict && postRunSettleCheck && postRunSettle && !postRunSettle.ok) {
     throw new Error("Post-run settle check failed (token_script_burn)")
   }

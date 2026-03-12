@@ -1,7 +1,7 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import fs from "fs"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
   getTokenTargets,

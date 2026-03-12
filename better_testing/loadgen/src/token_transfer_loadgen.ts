@@ -1,6 +1,8 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { normalizeLoadgenError } from "./framework/errors"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
+import { startProgressReporter } from "./framework/progress"
 import {
   ensureTokenAndBalances,
   getTokenTargets,
@@ -205,7 +207,8 @@ async function worker(
       sampler.add(elapsed)
       timeseriesSampler.add(elapsed)
       counters.error++
-      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      const info = normalizeLoadgenError(err)
+      const key = `${info.code}: ${info.message}`.slice(0, 400)
       counters.errorSamples[key] = (counters.errorSamples[key] ?? 0) + 1
     }
   }
@@ -262,152 +265,165 @@ export async function runTokenTransferLoadgen() {
 
   const sampler = new ReservoirSampler(cfg.sampleLimit)
   const timeseriesSampler = new ReservoirSampler(50_000)
+  const stopProgress = startProgressReporter({
+    label: "token_transfer",
+    getSnapshot: () => ({
+      startedAtMs: counters.startedAtMs,
+      total: counters.total,
+      ok: counters.ok,
+      error: counters.error,
+    }),
+  })
 
-  const run = getRunConfig()
-  const artifactBase = `${run.runDir}/token_transfer`
-  const artifacts = {
-    runId: run.runId,
-    runDir: run.runDir,
-    summaryPath: `${artifactBase}.summary.json`,
-    timeseriesPath: `${artifactBase}.timeseries.jsonl`,
-  }
-
-  let lastPointAtMs = startedAtMs
-  let lastOk = 0
-  let lastTotal = 0
-  let lastError = 0
-
-  async function timeseriesLoop() {
-    if (!cfg.emitTimeseries) return
-    while (nowMs() < stopAtMs) {
-      await sleep(1000)
-      const now = nowMs()
-      const elapsedSinceLast = Math.max(0.001, (now - lastPointAtMs) / 1000)
-      lastPointAtMs = now
-
-      const okDelta = counters.ok - lastOk
-      const totalDelta = counters.total - lastTotal
-      const errorDelta = counters.error - lastError
-
-      lastOk = counters.ok
-      lastTotal = counters.total
-      lastError = counters.error
-
-      const samples = timeseriesSampler.snapshotSorted()
-      const point: TimeseriesPoint = {
-        tSec: (now - startedAtMs) / 1000,
-        ok: okDelta,
-        total: totalDelta,
-        error: errorDelta,
-        tpsOk: okDelta / elapsedSinceLast,
-        latencyMs: {
-          sampleCount: timeseriesSampler.size(),
-          p50: percentile(samples, 50),
-          p95: percentile(samples, 95),
-          p99: percentile(samples, 99),
-        },
-        timestamp: new Date().toISOString(),
-      }
-
-      appendJsonl(artifacts.timeseriesPath, point)
+  try {
+    const run = getRunConfig()
+    const artifactBase = `${run.runDir}/token_transfer`
+    const artifacts = {
+      runId: run.runId,
+      runDir: run.runDir,
+      summaryPath: `${artifactBase}.summary.json`,
+      timeseriesPath: `${artifactBase}.timeseries.jsonl`,
     }
-  }
 
-  await Promise.all(
-    [
-      ...usedWallets.map((mnemonic, idx) =>
-        worker(cfg, counters, sampler, timeseriesSampler, stopAtMs, mnemonic, idx, tokenAddress, recipients),
-      ),
-      timeseriesLoop(),
-    ],
-  )
+    let lastPointAtMs = startedAtMs
+    let lastOk = 0
+    let lastTotal = 0
+    let lastError = 0
 
-  counters.endedAtMs = nowMs()
+    async function timeseriesLoop() {
+      if (!cfg.emitTimeseries) return
+      while (nowMs() < stopAtMs) {
+        await sleep(1000)
+        const now = nowMs()
+        const elapsedSinceLast = Math.max(0.001, (now - lastPointAtMs) / 1000)
+        lastPointAtMs = now
 
-  const postRunSettleCheck = envBool("POST_RUN_SETTLE_CHECK", true)
-  const settleSample = unique([
-    ...usedWalletAddresses,
-    ...recipients.slice(0, Math.min(4, recipients.length)),
-  ]).slice(0, envInt("POST_RUN_SETTLE_SAMPLE_ADDRESSES", 8))
+        const okDelta = counters.ok - lastOk
+        const totalDelta = counters.total - lastTotal
+        const errorDelta = counters.error - lastError
 
-  const postRunSettle = postRunSettleCheck
-    ? await waitForCrossNodeTokenConsistency({
-      rpcUrls: cfg.targets,
-      tokenAddress,
-      addresses: settleSample,
-      timeoutSec: envInt("POST_RUN_SETTLE_TIMEOUT_SEC", 120),
-      pollMs: envInt("POST_RUN_SETTLE_POLL_MS", 500),
-    })
-    : null
+        lastOk = counters.ok
+        lastTotal = counters.total
+        lastError = counters.error
 
-  const holderPointerSettleCheck = envBool("POST_RUN_HOLDER_POINTER_CHECK", true)
-  const expectedPresent: Record<string, boolean> = {}
-  if (postRunSettle?.ok && postRunSettle.perNode?.[0]?.snapshot?.balances) {
-    const b = postRunSettle.perNode[0].snapshot.balances
-    for (const addr of settleSample) {
-      try {
-        expectedPresent[addr] = BigInt(b[addr] ?? "0") > 0n
-      } catch {
-        expectedPresent[addr] = false
+        const samples = timeseriesSampler.snapshotSorted()
+        const point: TimeseriesPoint = {
+          tSec: (now - startedAtMs) / 1000,
+          ok: okDelta,
+          total: totalDelta,
+          error: errorDelta,
+          tpsOk: okDelta / elapsedSinceLast,
+          latencyMs: {
+            sampleCount: timeseriesSampler.size(),
+            p50: percentile(samples, 50),
+            p95: percentile(samples, 95),
+            p99: percentile(samples, 99),
+          },
+          timestamp: new Date().toISOString(),
+        }
+
+        appendJsonl(artifacts.timeseriesPath, point)
       }
     }
-  }
 
-  const holderPointerSettle =
-    holderPointerSettleCheck && Object.keys(expectedPresent).length > 0
-      ? await waitForCrossNodeHolderPointersMatchBalances({
+    await Promise.all(
+      [
+        ...usedWallets.map((mnemonic, idx) =>
+          worker(cfg, counters, sampler, timeseriesSampler, stopAtMs, mnemonic, idx, tokenAddress, recipients),
+        ),
+        timeseriesLoop(),
+      ],
+    )
+
+    counters.endedAtMs = nowMs()
+
+    const postRunSettleCheck = envBool("POST_RUN_SETTLE_CHECK", true)
+    const settleSample = unique([
+      ...usedWalletAddresses,
+      ...recipients.slice(0, Math.min(4, recipients.length)),
+    ]).slice(0, envInt("POST_RUN_SETTLE_SAMPLE_ADDRESSES", 8))
+
+    const postRunSettle = postRunSettleCheck
+      ? await waitForCrossNodeTokenConsistency({
         rpcUrls: cfg.targets,
         tokenAddress,
-        expectedPresent,
-        timeoutSec: envInt("POST_RUN_HOLDER_POINTER_TIMEOUT_SEC", 120),
-        pollMs: envInt("POST_RUN_HOLDER_POINTER_POLL_MS", 500),
+        addresses: settleSample,
+        timeoutSec: envInt("POST_RUN_SETTLE_TIMEOUT_SEC", 120),
+        pollMs: envInt("POST_RUN_SETTLE_POLL_MS", 500),
       })
       : null
 
-  const durationSec = (counters.endedAtMs - counters.startedAtMs) / 1000
-  const samples = sampler.snapshotSorted()
-  const summary = {
-    scenario: "token_transfer",
-    tokenAddress,
-    ok: counters.ok,
-    total: counters.total,
-    error: counters.error,
-    errorSamples: counters.errorSamples,
-    durationSec,
-    okTps: counters.ok / Math.max(0.001, durationSec),
-    latencyMs: {
-      sampleCount: sampler.size(),
-      p50: percentile(samples, 50),
-      p95: percentile(samples, 95),
-      p99: percentile(samples, 99),
-    },
-    config: {
-      targets: cfg.targets,
-      concurrency: usedWallets.length,
-      inflightPerWallet: cfg.inflightPerWallet,
-      amount: cfg.amount.toString(),
-      waitForRpcSec: envInt("WAIT_FOR_RPC_SEC", 120),
-      tokenBootstrap: envBool("TOKEN_BOOTSTRAP", true),
-      tokenDistribute: envBool("TOKEN_DISTRIBUTE", true),
-    },
-    postRun: {
-      settleSample,
-      settle: postRunSettle,
-      holderPointers: holderPointerSettle,
-    },
-    artifacts,
-    timestamp: new Date().toISOString(),
-  }
+    const holderPointerSettleCheck = envBool("POST_RUN_HOLDER_POINTER_CHECK", true)
+    const expectedPresent: Record<string, boolean> = {}
+    if (postRunSettle?.ok && postRunSettle.perNode?.[0]?.snapshot?.balances) {
+      const b = postRunSettle.perNode[0].snapshot.balances
+      for (const addr of settleSample) {
+        try {
+          expectedPresent[addr] = BigInt(b[addr] ?? "0") > 0n
+        } catch {
+          expectedPresent[addr] = false
+        }
+      }
+    }
 
-  writeJson(artifacts.summaryPath, summary)
-  console.log(JSON.stringify({ token_transfer_summary: summary }, null, 2))
+    const holderPointerSettle =
+      holderPointerSettleCheck && Object.keys(expectedPresent).length > 0
+        ? await waitForCrossNodeHolderPointersMatchBalances({
+          rpcUrls: cfg.targets,
+          tokenAddress,
+          expectedPresent,
+          timeoutSec: envInt("POST_RUN_HOLDER_POINTER_TIMEOUT_SEC", 120),
+          pollMs: envInt("POST_RUN_HOLDER_POINTER_POLL_MS", 500),
+        })
+        : null
 
-  const strict = envBool("POST_RUN_SETTLE_STRICT", false)
-  if (strict && postRunSettleCheck && postRunSettle && !postRunSettle.ok) {
-    throw new Error("Post-run settle check failed (token_transfer)")
-  }
-  const strictPointers = envBool("POST_RUN_HOLDER_POINTER_STRICT", false)
-  if (strictPointers && holderPointerSettleCheck && holderPointerSettle && !holderPointerSettle.ok) {
-    throw new Error("Post-run holder-pointer check failed (token_transfer)")
+    const durationSec = (counters.endedAtMs - counters.startedAtMs) / 1000
+    const samples = sampler.snapshotSorted()
+    const summary = {
+      scenario: "token_transfer",
+      tokenAddress,
+      ok: counters.ok,
+      total: counters.total,
+      error: counters.error,
+      errorSamples: counters.errorSamples,
+      durationSec,
+      okTps: counters.ok / Math.max(0.001, durationSec),
+      latencyMs: {
+        sampleCount: sampler.size(),
+        p50: percentile(samples, 50),
+        p95: percentile(samples, 95),
+        p99: percentile(samples, 99),
+      },
+      config: {
+        targets: cfg.targets,
+        concurrency: usedWallets.length,
+        inflightPerWallet: cfg.inflightPerWallet,
+        amount: cfg.amount.toString(),
+        waitForRpcSec: envInt("WAIT_FOR_RPC_SEC", 120),
+        tokenBootstrap: envBool("TOKEN_BOOTSTRAP", true),
+        tokenDistribute: envBool("TOKEN_DISTRIBUTE", true),
+      },
+      postRun: {
+        settleSample,
+        settle: postRunSettle,
+        holderPointers: holderPointerSettle,
+      },
+      artifacts,
+      timestamp: new Date().toISOString(),
+    }
+
+    writeJson(artifacts.summaryPath, summary)
+    console.log(JSON.stringify({ token_transfer_summary: summary }, null, 2))
+
+    const strict = envBool("POST_RUN_SETTLE_STRICT", true)
+    if (strict && postRunSettleCheck && postRunSettle && !postRunSettle.ok) {
+      throw new Error("Post-run settle check failed (token_transfer)")
+    }
+    const strictPointers = envBool("POST_RUN_HOLDER_POINTER_STRICT", false)
+    if (strictPointers && holderPointerSettleCheck && holderPointerSettle && !holderPointerSettle.ok) {
+      throw new Error("Post-run holder-pointer check failed (token_transfer)")
+    }
+  } finally {
+    stopProgress()
   }
 }

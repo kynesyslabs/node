@@ -663,7 +663,6 @@ async function main() {
         }
 
         // REVIEW: Start TLSNotary service (failsafe - optional HTTPS attestation feature)
-        // Routes are registered in server_rpc.ts via registerTLSNotaryRoutes
         if (indexState.TLSNOTARY_ENABLED) {
             try {
                 const {
@@ -698,7 +697,6 @@ async function main() {
                     log.info(`[TLSNotary] Port: ${indexState.TLSNOTARY_PORT}`)
                 }
 
-                // Initialize without passing BunServer - routes are registered separately in server_rpc.ts
                 const initialized = await initializeTLSNotary()
                 if (initialized) {
                     indexState.tlsnotaryService = getTLSNotaryService()

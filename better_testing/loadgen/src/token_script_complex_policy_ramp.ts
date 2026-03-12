@@ -1,34 +1,13 @@
 import { runTokenScriptTransferLoadgen } from "./token_script_transfer_loadgen"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
 import { buildComplexPolicyScript } from "./token_script_complex_policy_shared"
 import { getTokenTargets, getWalletAddresses, readWalletMnemonics } from "./token_shared"
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function splitCsv(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-function normalizeRpcUrl(url: string): string {
-  return url.replace(/\/+$/, "") + "/"
-}
+import { splitCsv, sleep, envInt, logNonCriticalError, normalizeRpcUrl } from "./testing_utils"
 
 function normalizeHexAddress(address: string): string {
   const trimmed = (address ?? "").trim()
   if (!trimmed) return trimmed
   return trimmed.startsWith("0x") ? trimmed.toLowerCase() : ("0x" + trimmed).toLowerCase()
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 export async function runTokenScriptComplexPolicyRamp() {
@@ -126,8 +105,8 @@ export async function runTokenScriptComplexPolicyRamp() {
           try {
             const parsed = JSON.parse(payload)
             if (parsed?.token_script_transfer_summary) stepSummary = parsed.token_script_transfer_summary
-          } catch {
-            // ignore
+          } catch (error) {
+            logNonCriticalError("token_script_complex_policy_ramp.captureSummary", error, step)
           }
         } else if (payload?.token_script_transfer_summary) {
           stepSummary = payload.token_script_transfer_summary
@@ -182,4 +161,3 @@ export async function runTokenScriptComplexPolicyRamp() {
   writeJson(artifacts.summaryPath, rampSummary)
   console.log(JSON.stringify({ token_script_complex_policy_ramp_summary: rampSummary }, null, 2))
 }
-

@@ -39,7 +39,19 @@
         "zk:compile": "circom2 src/features/zk/circuits/identity.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:compile:merkle": "circom2 src/features/zk/circuits/identity_with_merkle.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:test": "bun test src/features/zk/tests/",
-        "zk:ceremony": "npx tsx src/features/zk/scripts/ceremony.ts"
+        "zk:ceremony": "npx tsx src/features/zk/scripts/ceremony.ts",
+        "sync:br-myc": "bun scripts/sync-br-to-myc.ts",
+        "brx": "bun scripts/brx.ts",
+        "repro:demosdk-multi-instance": "bun scripts/repro-demosdk-multi-instance-identity-bleed.ts",
+        "testenv:doctor": "bun better_testing/scripts/testenv-doctor.ts",
+        "testenv:doctor:verbose": "bun better_testing/scripts/testenv-doctor.ts --verbose",
+        "testenv:latest": "bun better_testing/scripts/show-latest-report.ts",
+        "testenv:sanity": "bun better_testing/scripts/run-suite.ts sanity",
+        "testenv:sanity:local": "bun better_testing/scripts/run-suite.ts sanity --local",
+        "testenv:cluster:local": "bun better_testing/scripts/run-suite.ts cluster-health --local",
+        "testenv:gcr": "bun better_testing/scripts/run-suite.ts gcr-focus",
+        "testenv:gcr:local": "bun better_testing/scripts/run-suite.ts gcr-focus --local",
+        "testenv:gcr-health:local": "bun better_testing/scripts/run-suite.ts gcr-focus --local"
     },
     "devDependencies": {
         "@jest/globals": "^30.2.0",

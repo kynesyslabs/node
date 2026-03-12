@@ -1,4 +1,5 @@
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalError } from "./framework/common"
 import {
   ReservoirSampler,
   decodePerfPayload,
@@ -235,8 +236,11 @@ export async function runImOnlineLoadgen() {
         // Build pong with same id and sentAtMs (sender will measure RTT).
         const pong = buildPayload("pong", payload.id, payload.sentAtMs, payload.sizeBytes)
         pair.receiver.sendRaw({ type: "message", payload: { targetId: fromId, message: pong } })
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalError("im_online.receiver.onmessage", error, {
+          receiverId: pair.receiverId,
+          senderId: pair.senderId,
+        })
       }
     }
   }
@@ -266,8 +270,11 @@ export async function runImOnlineLoadgen() {
         timeseriesSampler.add(elapsed)
         counters.ok++
         logEvent({ phase: "recvPong", senderId: pair.senderId, id: payload.id, rttMs: elapsed })
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalError("im_online.sender.onmessage", error, {
+          senderId: pair.senderId,
+          receiverId: pair.receiverId,
+        })
       }
     }
   }
@@ -292,9 +299,14 @@ export async function runImOnlineLoadgen() {
         const ping = buildPayload("ping", id, sentAtMs, cfg.messageBytes)
         pair.sender.sendRaw({ type: "message", payload: { targetId: pair.receiverId, message: ping } })
         logEvent({ phase: "sendPing", senderId: pair.senderId, receiverId: pair.receiverId, id })
-      } catch {
+      } catch (error) {
         pending.delete(id)
         counters.error++
+        logNonCriticalError("im_online.sendPing", error, {
+          senderId: pair.senderId,
+          receiverId: pair.receiverId,
+          id,
+        })
         return
       }
 
@@ -350,8 +362,12 @@ export async function runImOnlineLoadgen() {
 
   // Clean shutdown
   for (const pair of pairs) {
-    try { pair.sender.close() } catch {}
-    try { pair.receiver.close() } catch {}
+    try { pair.sender.close() } catch (error) {
+      logNonCriticalError("im_online.cleanup.sender", error, { senderId: pair.senderId })
+    }
+    try { pair.receiver.close() } catch (error) {
+      logNonCriticalError("im_online.cleanup.receiver", error, { receiverId: pair.receiverId })
+    }
   }
 
   const durationSec = (counters.endedAtMs - counters.startedAtMs) / 1000

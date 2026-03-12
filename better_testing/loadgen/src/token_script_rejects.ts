@@ -11,7 +11,8 @@ import {
   waitForCrossNodeTokenConsistency,
   withDemosWallet,
 } from "./token_shared"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -39,8 +40,8 @@ function parseBigintOrZero(value: any): bigint {
     if (typeof value === "bigint") return value
     if (typeof value === "number" && Number.isFinite(value)) return BigInt(value)
     if (typeof value === "string") return BigInt(value)
-  } catch {
-    // ignore
+  } catch (error) {
+    logNonCriticalErrorOnce("token_script_rejects.parseBigintOrZero", "token_script_rejects.parseBigintOrZero", error, { value })
   }
   return 0n
 }

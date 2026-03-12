@@ -1,6 +1,7 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { appendJsonl, getRunConfig, writeJson } from "./run_io"
+import { normalizeLoadgenError } from "./framework/errors"
+import { appendJsonl, getRunConfig, writeJson } from "./framework/io"
 import {
   ensureTokenAndBalances,
   getTokenTargets,
@@ -179,7 +180,8 @@ async function worker(params: {
       params.sampler.add(elapsed)
       params.timeseriesSampler.add(elapsed)
       params.counters.error++
-      const key = String(err?.message ?? err ?? "unknown").slice(0, 400)
+      const info = normalizeLoadgenError(err)
+      const key = `${info.code}: ${info.message}`.slice(0, 400)
       params.counters.errorSamples[key] = (params.counters.errorSamples[key] ?? 0) + 1
     }
   }
@@ -391,7 +393,7 @@ export async function runTokenBurnLoadgen() {
   writeJson(artifacts.summaryPath, summary)
   console.log(JSON.stringify({ token_burn_summary: summary }, null, 2))
 
-  const strict = envBool("POST_RUN_SETTLE_STRICT", false)
+  const strict = envBool("POST_RUN_SETTLE_STRICT", true)
   if (strict && postRunSettleCheck && postRunSettle && !postRunSettle.ok) {
     throw new Error("Post-run settle check failed (token_burn)")
   }

@@ -542,6 +542,7 @@ export default class Chain {
             type: getSharedState.signingAlgorithm,
             data: new Uint8Array(Buffer.from("0x0", "hex")),
         }.data.toString()
+        genesisTx.content.from_ed25519_address = "0x0"
 
         genesisTx.signature = {
             type: getSharedState.signingAlgorithm,

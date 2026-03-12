@@ -43,169 +43,121 @@ import { runTokenPauseUnderLoad } from "./token_pause_under_load"
 import { runTokenHoldersExport } from "./token_holders_export"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
+import { runImRegisterDiscoverSmoke } from "./features/im/im_register_discover_smoke"
+import { runImMessageRoundtrip } from "./features/im/im_message_roundtrip"
+import { runFheScalarSmoke } from "./features/fhe/fhe_scalar_smoke"
+import { runFheArithmeticSmoke } from "./features/fhe/fhe_arithmetic_smoke"
+import { runWeb2UrlValidationSmoke } from "./features/web2/web2_url_validation_smoke"
+import { runWeb2SanitizationSmoke } from "./features/web2/web2_sanitization_smoke"
+import { runWeb2DahrRejects } from "./features/web2/web2_dahr_rejects"
+import { runGcrIdentitySmoke } from "./features/gcr/gcr_identity_smoke"
+import { runGcrIdentityRemove } from "./features/gcr/gcr_identity_remove"
+import { runGcrIdentityLoadgen } from "./features/gcr/gcr_identity_loadgen"
+import { runGcrIdentityMatrix } from "./features/gcr/gcr_identity_matrix"
+import { runGcrIdentityXmSmoke } from "./features/gcr/gcr_identity_xm_smoke"
+import { runGcrPointsSmoke } from "./features/gcr/gcr_points_smoke"
+import { runOmniConnectionSmoke } from "./features/omni/omni_connection_smoke"
+import { runOmniMessageRoundtrip } from "./features/omni/omni_message_roundtrip"
+import { runOmniReconnection } from "./features/omni/omni_reconnection"
+import { runOmniThroughput } from "./features/omni/omni_throughput"
+import { runConsensusBlockProduction } from "./features/consensus/consensus_block_production"
+import { runConsensusTxInclusion } from "./features/consensus/consensus_tx_inclusion"
+import { runConsensusSecretaryRotation } from "./features/consensus/consensus_secretary_rotation"
+import { runConsensusRollbackSmoke } from "./features/consensus/consensus_rollback_smoke"
+import { runConsensusPartitionRecovery } from "./features/consensus/consensus_partition_recovery"
+import { runSyncCatchupSmoke } from "./features/peersync/sync_catchup_smoke"
+import { runSyncConsistency } from "./features/peersync/sync_consistency"
+import { runPeerDiscoverySmoke } from "./features/peersync/peer_discovery_smoke"
+import { runSyncUnderLoad } from "./features/peersync/sync_under_load"
+import { runZkCommitmentSmoke } from "./features/zk/zk_commitment_smoke"
+import { runZkAttestationSmoke } from "./features/zk/zk_attestation_smoke"
+import { runZkMerkleInclusion } from "./features/zk/zk_merkle_inclusion"
+import { runZkProofLoadgen } from "./features/zk/zk_proof_loadgen"
+import { runTlsNotaryRoutesSmoke } from "./features/tlsnotary/tlsnotary_routes_smoke"
+import { runTlsNotaryVerifyRejects } from "./features/tlsnotary/tlsnotary_verify_rejects"
+import { installGlobalFetchTimeout } from "./framework/common"
+import { registerScenario, runScenario } from "./framework/scenario"
 
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-const fetchTimeoutMs = Math.max(0, envInt("FETCH_TIMEOUT_MS", 0))
-if (fetchTimeoutMs > 0) {
-  const originalFetch = globalThis.fetch.bind(globalThis)
-  globalThis.fetch = async (input: any, init: any = {}) => {
-    if (init?.signal) return originalFetch(input, init)
-    const controller = new AbortController()
-    const timeout: ReturnType<typeof setTimeout> = setTimeout(() => controller.abort(), fetchTimeoutMs)
-    try {
-      return await originalFetch(input, { ...init, signal: controller.signal })
-    } finally {
-      clearTimeout(timeout)
-    }
-  }
-}
+installGlobalFetchTimeout()
 
 const scenario = (process.env.SCENARIO ?? "rpc").toLowerCase()
 
-switch (scenario) {
-  case "rpc":
-    await runRpcLoadgen()
-    break
-  case "rpc_ramp":
-    await runRpcRamp()
-    break
-  case "transfer":
-    await runTransferLoadgen()
-    break
-  case "transfer_ramp":
-    await runTransferRamp()
-    break
-  case "token_smoke":
-    await runTokenSmoke()
-    break
-  case "token_transfer":
-    await runTokenTransferLoadgen()
-    break
-  case "token_transfer_ramp":
-    await runTokenTransferRamp()
-    break
-  case "token_mint_smoke":
-    await runTokenMintSmoke()
-    break
-  case "token_burn_smoke":
-    await runTokenBurnSmoke()
-    break
-  case "token_mint":
-    await runTokenMintLoadgen()
-    break
-  case "token_burn":
-    await runTokenBurnLoadgen()
-    break
-  case "token_mint_ramp":
-    await runTokenMintRamp()
-    break
-  case "token_burn_ramp":
-    await runTokenBurnRamp()
-    break
-  case "token_acl_smoke":
-    await runTokenAclSmoke()
-    break
-  case "token_acl_matrix":
-    await runTokenAclMatrix()
-    break
-  case "token_consensus_consistency":
-    await runTokenConsensusConsistency()
-    break
-  case "token_query_coverage":
-    await runTokenQueryCoverage()
-    break
-  case "token_edge_cases":
-    await runTokenEdgeCases()
-    break
-  case "token_acl_burn_matrix":
-    await runTokenAclBurnMatrix()
-    break
-  case "token_acl_pause_matrix":
-    await runTokenAclPauseMatrix()
-    break
-  case "token_acl_transfer_ownership_matrix":
-    await runTokenAclTransferOwnershipMatrix()
-    break
-  case "token_acl_multi_permission_matrix":
-    await runTokenAclMultiPermissionMatrix()
-    break
-  case "token_acl_updateacl_compat":
-    await runTokenAclUpdateAclCompat()
-    break
-  case "token_script_smoke":
-    await runTokenScriptSmoke()
-    break
-  case "token_script_hooks_correctness":
-    await runTokenScriptHooksCorrectness()
-    break
-  case "token_script_rejects":
-    await runTokenScriptRejects()
-    break
-  case "token_script_upgrade_mid_load":
-    await runTokenScriptUpgradeMidLoad()
-    break
-  case "token_script_transfer":
-    await runTokenScriptTransferLoadgen()
-    break
-  case "token_script_transfer_ramp":
-    await runTokenScriptTransferRamp()
-    break
-  case "token_script_mint":
-    await runTokenScriptMintLoadgen()
-    break
-  case "token_script_mint_ramp":
-    await runTokenScriptMintRamp()
-    break
-  case "token_script_burn":
-    await runTokenScriptBurnLoadgen()
-    break
-  case "token_script_burn_ramp":
-    await runTokenScriptBurnRamp()
-    break
-  case "token_script_complex_policy_smoke":
-    await runTokenScriptComplexPolicySmoke()
-    break
-  case "token_script_complex_policy_ramp":
-    await runTokenScriptComplexPolicyRamp()
-    break
-  case "token_script_complex_policy_dynamic_updates":
-    await runTokenScriptComplexPolicyDynamicUpdates()
-    break
-  case "token_script_complex_policy_vesting_lockup":
-    await runTokenScriptComplexPolicyVestingLockup()
-    break
-  case "token_script_complex_policy_escrow_state_machine":
-    await runTokenScriptComplexPolicyEscrowStateMachine()
-    break
-  case "token_settle_check":
-    await runTokenSettleCheck()
-    break
-  case "token_observe":
-    await runTokenObserve()
-    break
-  case "token_invariants_known_holders":
-    await runTokenInvariantsKnownHolders()
-    break
-  case "token_pause_under_load":
-    await runTokenPauseUnderLoad()
-    break
-  case "token_holders_export":
-    await runTokenHoldersExport()
-    break
-  case "im_online":
-    await runImOnlineLoadgen()
-    break
-  case "im_online_ramp":
-    await runImOnlineRamp()
-    break
-  default:
-    throw new Error(
-      `Unknown SCENARIO: ${scenario}. Valid: rpc, rpc_ramp, transfer, transfer_ramp, token_smoke, token_transfer, token_transfer_ramp, token_mint_smoke, token_burn_smoke, token_mint, token_burn, token_mint_ramp, token_burn_ramp, token_acl_smoke, token_acl_matrix, token_acl_burn_matrix, token_acl_pause_matrix, token_acl_transfer_ownership_matrix, token_acl_multi_permission_matrix, token_acl_updateacl_compat, token_pause_under_load, token_holders_export, token_script_smoke, token_script_hooks_correctness, token_script_rejects, token_script_upgrade_mid_load, token_script_transfer, token_script_transfer_ramp, token_script_mint, token_script_mint_ramp, token_script_burn, token_script_burn_ramp, token_script_complex_policy_smoke, token_script_complex_policy_ramp, token_script_complex_policy_dynamic_updates, token_script_complex_policy_vesting_lockup, token_script_complex_policy_escrow_state_machine, token_settle_check, token_observe, token_invariants_known_holders, token_consensus_consistency, token_query_coverage, token_edge_cases, im_online, im_online_ramp`,
-    )
-}
+registerScenario("rpc", runRpcLoadgen)
+registerScenario("rpc_ramp", runRpcRamp)
+registerScenario("transfer", runTransferLoadgen)
+registerScenario("transfer_ramp", runTransferRamp)
+registerScenario("token_smoke", runTokenSmoke)
+registerScenario("token_transfer", runTokenTransferLoadgen)
+registerScenario("token_transfer_ramp", runTokenTransferRamp)
+registerScenario("token_mint_smoke", runTokenMintSmoke)
+registerScenario("token_burn_smoke", runTokenBurnSmoke)
+registerScenario("token_mint", runTokenMintLoadgen)
+registerScenario("token_burn", runTokenBurnLoadgen)
+registerScenario("token_mint_ramp", runTokenMintRamp)
+registerScenario("token_burn_ramp", runTokenBurnRamp)
+registerScenario("token_acl_smoke", runTokenAclSmoke)
+registerScenario("token_acl_matrix", runTokenAclMatrix)
+registerScenario("token_consensus_consistency", runTokenConsensusConsistency)
+registerScenario("token_query_coverage", runTokenQueryCoverage)
+registerScenario("token_edge_cases", runTokenEdgeCases)
+registerScenario("token_acl_burn_matrix", runTokenAclBurnMatrix)
+registerScenario("token_acl_pause_matrix", runTokenAclPauseMatrix)
+registerScenario("token_acl_transfer_ownership_matrix", runTokenAclTransferOwnershipMatrix)
+registerScenario("token_acl_multi_permission_matrix", runTokenAclMultiPermissionMatrix)
+registerScenario("token_acl_updateacl_compat", runTokenAclUpdateAclCompat)
+registerScenario("token_script_smoke", runTokenScriptSmoke)
+registerScenario("token_script_hooks_correctness", runTokenScriptHooksCorrectness)
+registerScenario("token_script_rejects", runTokenScriptRejects)
+registerScenario("token_script_upgrade_mid_load", runTokenScriptUpgradeMidLoad)
+registerScenario("token_script_transfer", runTokenScriptTransferLoadgen)
+registerScenario("token_script_transfer_ramp", runTokenScriptTransferRamp)
+registerScenario("token_script_mint", runTokenScriptMintLoadgen)
+registerScenario("token_script_mint_ramp", runTokenScriptMintRamp)
+registerScenario("token_script_burn", runTokenScriptBurnLoadgen)
+registerScenario("token_script_burn_ramp", runTokenScriptBurnRamp)
+registerScenario("token_script_complex_policy_smoke", runTokenScriptComplexPolicySmoke)
+registerScenario("token_script_complex_policy_ramp", runTokenScriptComplexPolicyRamp)
+registerScenario("token_script_complex_policy_dynamic_updates", runTokenScriptComplexPolicyDynamicUpdates)
+registerScenario("token_script_complex_policy_vesting_lockup", runTokenScriptComplexPolicyVestingLockup)
+registerScenario("token_script_complex_policy_escrow_state_machine", runTokenScriptComplexPolicyEscrowStateMachine)
+registerScenario("token_settle_check", runTokenSettleCheck)
+registerScenario("token_observe", runTokenObserve)
+registerScenario("token_invariants_known_holders", runTokenInvariantsKnownHolders)
+registerScenario("token_pause_under_load", runTokenPauseUnderLoad)
+registerScenario("token_holders_export", runTokenHoldersExport)
+registerScenario("im_online", runImOnlineLoadgen)
+registerScenario("im_online_ramp", runImOnlineRamp)
+registerScenario("im_register_discover_smoke", runImRegisterDiscoverSmoke)
+registerScenario("im_message_roundtrip", runImMessageRoundtrip)
+registerScenario("fhe_scalar_smoke", runFheScalarSmoke)
+registerScenario("fhe_arithmetic_smoke", runFheArithmeticSmoke)
+registerScenario("web2_url_validation_smoke", runWeb2UrlValidationSmoke)
+registerScenario("web2_sanitization_smoke", runWeb2SanitizationSmoke)
+registerScenario("web2_dahr_rejects", runWeb2DahrRejects)
+registerScenario("gcr_identity_smoke", runGcrIdentitySmoke)
+registerScenario("gcr_identity_remove", runGcrIdentityRemove)
+registerScenario("gcr_identity_loadgen", runGcrIdentityLoadgen)
+registerScenario("gcr_identity_matrix", runGcrIdentityMatrix)
+registerScenario("gcr_identity_xm_smoke", runGcrIdentityXmSmoke)
+registerScenario("gcr_points_smoke", runGcrPointsSmoke)
+registerScenario("omni_connection_smoke", runOmniConnectionSmoke)
+registerScenario("omni_message_roundtrip", runOmniMessageRoundtrip)
+registerScenario("omni_reconnection", runOmniReconnection)
+registerScenario("omni_throughput", runOmniThroughput)
+registerScenario("consensus_block_production", runConsensusBlockProduction)
+registerScenario("consensus_tx_inclusion", runConsensusTxInclusion)
+registerScenario("consensus_secretary_rotation", runConsensusSecretaryRotation)
+registerScenario("consensus_rollback_smoke", runConsensusRollbackSmoke)
+registerScenario("consensus_partition_recovery", runConsensusPartitionRecovery)
+registerScenario("sync_catchup_smoke", runSyncCatchupSmoke)
+registerScenario("sync_consistency", runSyncConsistency)
+registerScenario("peer_discovery_smoke", runPeerDiscoverySmoke)
+registerScenario("sync_under_load", runSyncUnderLoad)
+registerScenario("zk_commitment_smoke", runZkCommitmentSmoke)
+registerScenario("zk_attestation_smoke", runZkAttestationSmoke)
+registerScenario("zk_merkle_inclusion", runZkMerkleInclusion)
+registerScenario("zk_proof_loadgen", runZkProofLoadgen)
+registerScenario("tlsnotary_routes_smoke", runTlsNotaryRoutesSmoke)
+registerScenario("tlsnotary_verify_rejects", runTlsNotaryVerifyRejects)
+
+await runScenario(scenario)

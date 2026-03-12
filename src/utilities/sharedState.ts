@@ -260,6 +260,8 @@ export default class SharedState {
         // INFO: localhost is always whitelisted
         whitelistedIPs: [
             "127.0.0.1",
+            "::1",
+            "::ffff:127.0.0.1",
             ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
                 []),
         ],

@@ -1,54 +1,10 @@
 import { deserializeUint8Array, serializeUint8Array } from "@kynesyslabs/demosdk/utils"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { envBool, envInt, logNonCriticalError, logNonCriticalErrorOnce, normalizeWsUrl, nowMs, sleep, splitCsv } from "./framework/common"
+import { percentile, ReservoirSampler } from "./framework/metrics"
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
-}
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  const value = Number.parseInt(raw, 10)
-  return Number.isFinite(value) ? value : fallback
-}
-
-function envBool(name: string, fallback: boolean): boolean {
-  const raw = process.env[name]
-  if (!raw) return fallback
-  switch (raw.trim().toLowerCase()) {
-    case "1":
-    case "true":
-    case "yes":
-    case "y":
-    case "on":
-      return true
-    case "0":
-    case "false":
-    case "no":
-    case "n":
-    case "off":
-      return false
-    default:
-      return fallback
-  }
-}
-
-function splitCsv(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(",")
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-export function nowMs(): number {
-  return Date.now()
-}
-
-export function normalizeWsUrl(url: string): string {
-  const trimmed = (url ?? "").trim()
-  if (!trimmed) return trimmed
-  return trimmed.replace(/\/+$/, "")
-}
+export { normalizeWsUrl, nowMs } from "./framework/common"
+export { percentile, ReservoirSampler } from "./framework/metrics"
 
 export function getImTargets(): string[] {
   const explicit = splitCsv(process.env.IM_TARGETS)
@@ -58,14 +14,27 @@ export function getImTargets(): string[] {
   if (fromRpc.length > 0) {
     return fromRpc.map(u => {
       const normalized = u.trim().replace(/\/+$/, "")
-      // http://node-1:53551 -> ws://node-1:3005
-      const noProto = normalized.replace(/^https?:\/\//, "")
-      const host = noProto.replace(/:\d+$/, "")
+      const parsed = new URL(normalized)
+      const host = parsed.hostname
+      const rpcPort = Number.parseInt(parsed.port || (parsed.protocol === "https:" ? "443" : "80"), 10)
+
+      // Local devnet convention:
+      // 53551 -> 3005, 53552 -> 3006, 53553 -> 3007, 53554 -> 3008
+      if ((host === "localhost" || host === "127.0.0.1") && rpcPort >= 53551 && rpcPort <= 53554) {
+        const signalingPort = 3005 + (rpcPort - 53551)
+        return `ws://${host}:${signalingPort}`
+      }
+
       return `ws://${host}:3005`
     })
   }
 
-  return ["ws://node-1:3005"]
+  return [
+    "ws://localhost:3005",
+    "ws://localhost:3006",
+    "ws://localhost:3007",
+    "ws://localhost:3008",
+  ]
 }
 
 export type RegisterClientParams = {
@@ -111,7 +80,8 @@ export function decodePerfPayload(message: any): ImPerfPayload | null {
     if (typeof parsed?.sentAtMs !== "number") return null
     if (typeof parsed?.sizeBytes !== "number") return null
     return parsed as ImPerfPayload
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("im.decodePerfPayload", "im_shared.decodePerfPayload", error)
     return null
   }
 }
@@ -189,8 +159,11 @@ export async function registerClient(params: RegisterClientParams): Promise<Regi
         const details = msg?.payload?.details ?? JSON.stringify(msg?.payload ?? msg)
         registerReject?.(new Error(`IM error: ${details}`))
       }
-    } catch {
-      // ignore
+    } catch (error) {
+      logNonCriticalError("im_shared.registerClient.onmessage", error, {
+        clientId: params.clientId,
+        wsUrl,
+      })
     }
   }
 
@@ -223,7 +196,9 @@ export async function registerClient(params: RegisterClientParams): Promise<Regi
     clientId: params.clientId,
     ws,
     close: () => {
-      try { ws.close() } catch {}
+      try { ws.close() } catch (error) {
+        logNonCriticalError("im_shared.close", error, { clientId: params.clientId, wsUrl })
+      }
     },
     sendRaw: (data: any) => ws.send(typeof data === "string" ? data : JSON.stringify(data)),
   }
@@ -248,40 +223,4 @@ export function maybeSilenceConsole() {
   }
   console.log = filter as any
   console.warn = (...args: any[]) => originalWarn(...args)
-}
-
-export class ReservoirSampler {
-  private seen = 0
-  private readonly max: number
-  private readonly samples: number[] = []
-
-  constructor(maxSamples: number) {
-    this.max = Math.max(1, Math.floor(maxSamples))
-  }
-
-  add(value: number) {
-    this.seen++
-    if (this.samples.length < this.max) {
-      this.samples.push(value)
-      return
-    }
-    const j = Math.floor(Math.random() * this.seen)
-    if (j < this.max) this.samples[j] = value
-  }
-
-  snapshotSorted(): number[] {
-    const copy = this.samples.slice()
-    copy.sort((a, b) => a - b)
-    return copy
-  }
-
-  size(): number {
-    return this.samples.length
-  }
-}
-
-export function percentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return NaN
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor((p / 100) * (sorted.length - 1))))
-  return sorted[idx]!
 }

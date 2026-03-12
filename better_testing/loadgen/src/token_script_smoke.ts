@@ -8,7 +8,7 @@ import {
   sendTokenUpgradeScriptTxWithDemos,
   withDemosWallet,
 } from "./token_shared"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))

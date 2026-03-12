@@ -12,7 +12,8 @@ import {
   waitForRpcReady,
   waitForTxReady,
 } from "./token_shared"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -72,8 +73,13 @@ async function waitForRecipientBalanceDelta(params: {
       try {
         const bal = BigInt(balRaw)
         if (bal >= params.before + params.delta) return bal
-      } catch {
-        // ignore
+      } catch (error) {
+        logNonCriticalErrorOnce("token_smoke.waitForRecipientBalanceDelta", "token_smoke.waitForRecipientBalanceDelta", error, {
+          rpcUrl: params.rpcUrl,
+          tokenAddress: params.tokenAddress,
+          address: params.address,
+          balance: balRaw,
+        })
       }
     }
     attempt++

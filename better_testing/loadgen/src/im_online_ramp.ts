@@ -1,5 +1,6 @@
 import { runImOnlineLoadgen } from "./im_online_loadgen"
-import { getRunConfig, writeJson } from "./run_io"
+import { getRunConfig, writeJson } from "./framework/io"
+import { logNonCriticalError } from "./framework/common"
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -61,8 +62,8 @@ export async function runImOnlineRamp() {
           try {
             const parsed = JSON.parse(payload)
             if (parsed?.im_online_summary) stepSummary = parsed.im_online_summary
-          } catch {
-            // ignore
+          } catch (error) {
+            logNonCriticalError("im_online_ramp.captureSummary", error, { pairs })
           }
         } else if (payload?.im_online_summary) {
           stepSummary = payload.im_online_summary
@@ -110,4 +111,3 @@ export async function runImOnlineRamp() {
   writeJson(artifacts.summaryPath, rampSummary)
   console.log(JSON.stringify({ im_online_ramp_summary: rampSummary }, null, 2))
 }
-

@@ -1,5 +1,6 @@
 import path from "path"
 import { nodeCall } from "./token_shared"
+import { logNonCriticalErrorOnce } from "./framework/common"
 
 function env(name: string, fallback: string): string {
   const raw = process.env[name]
@@ -9,7 +10,8 @@ function env(name: string, fallback: string): string {
 function safeParseJson(text: string): any | null {
   try {
     return JSON.parse(text)
-  } catch {
+  } catch (error) {
+    logNonCriticalErrorOnce("token_names_from_runs.safeParseJson", "token_names_from_runs.safeParseJson", error)
     return null
   }
 }
@@ -71,4 +73,3 @@ export async function runTokenNamesFromRuns() {
 if (import.meta.main) {
   await runTokenNamesFromRuns()
 }
-
