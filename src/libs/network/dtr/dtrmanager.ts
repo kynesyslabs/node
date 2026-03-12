@@ -4,6 +4,7 @@ import getShard from "../../consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "../../consensus/v2/routines/getCommonValidatorSeed"
 import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
+import { handleError } from "../../../errors"
 import { Peer, PeerManager } from "@/libs/peer"
 import {
     RPCRequest,
@@ -109,7 +110,7 @@ export class DTRManager {
     stop() {
         if (!this.isRunning) return
 
-        console.log("[DTR RetryService] Stopping relay service")
+        log.info("[NETWORK] [DTR] Stopping relay service")
         log.info("[DTR RetryService] Service stopped")
         this.isRunning = false
 
@@ -154,22 +155,22 @@ export class DTRManager {
                 return
             }
 
-            console.log(
-                `[DTR RetryService] Processing ${mempool.length} transactions in mempool`,
+            log.info(
+                `[NETWORK] [DTR] Processing ${mempool.length} transactions in mempool`,
             )
 
             // Get validators (only recalculate if block number changed)
             const availableValidators = await this.getValidatorsOptimized()
 
             if (availableValidators.length === 0) {
-                console.log(
-                    "[DTR RetryService] No validators available for relay",
+                log.info(
+                    "[NETWORK] [DTR] No validators available for relay",
                 )
                 return
             }
 
-            console.log(
-                `[DTR RetryService] Found ${availableValidators.length} available validators`,
+            log.info(
+                `[NETWORK] [DTR] Found ${availableValidators.length} available validators`,
             )
 
             // Process each transaction in mempool
@@ -193,8 +194,8 @@ export class DTRManager {
             currentBlockNumber !== this.lastBlockNumber ||
             this.cachedValidators.length === 0
         ) {
-            console.log(
-                `[DTR RetryService] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
+            log.info(
+                `[NETWORK] [DTR] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
             )
 
             try {
@@ -207,8 +208,8 @@ export class DTRManager {
                 )
                 this.lastBlockNumber = currentBlockNumber
 
-                console.log(
-                    `[DTR RetryService] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
+                log.info(
+                    `[NETWORK] [DTR] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
                 )
             } catch (error) {
                 log.error(
@@ -265,10 +266,7 @@ export class DTRManager {
                 },
             }
         } catch (error: any) {
-            console.error(
-                "[DTR] Error relaying transaction to validator: ",
-                error,
-            )
+            handleError(error, "NETWORK", { source: "DTR relay" })
             return {
                 result: 500,
                 response: {
@@ -297,8 +295,8 @@ export class DTRManager {
 
         // Give up after max attempts
         if (currentAttempts >= this.maxRetryAttempts) {
-            console.log(
-                `[DTR RetryService] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
+            log.info(
+                `[NETWORK] [DTR] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
             )
             log.warning(
                 `[DTR RetryService] Transaction ${txHash} abandoned after ${this.maxRetryAttempts} failed relay attempts`,
@@ -312,8 +310,8 @@ export class DTRManager {
         // Check if we have ValidityData in memory
         const validityData = getSharedState.validityDataCache.get(txHash)
         if (!validityData) {
-            console.log(
-                `[DTR RetryService] No ValidityData found for ${txHash}, removing from mempool`,
+            log.info(
+                `[NETWORK] [DTR] No ValidityData found for ${txHash}, removing from mempool`,
             )
             log.error(
                 `[DTR RetryService] Missing ValidityData for transaction ${txHash} - removing from mempool`,
@@ -343,8 +341,8 @@ export class DTRManager {
                 )
 
                 if (result.result === 200) {
-                    console.log(
-                        `[DTR RetryService] Successfully relayed ${txHash} to validator ${validator.identity.substring(
+                    log.info(
+                        `[NETWORK] [DTR] Successfully relayed ${txHash} to validator ${validator.identity.substring(
                             0,
                             8,
                         )}...`,
@@ -362,27 +360,22 @@ export class DTRManager {
                     return // Success!
                 }
 
-                console.log(
-                    `[DTR RetryService] Validator ${validator.identity.substring(
+                log.info(
+                    `[NETWORK] [DTR] Validator ${validator.identity.substring(
                         0,
                         8,
                     )}... rejected ${txHash}: ${result.response}`,
                 )
             } catch (error: any) {
-                console.log(
-                    `[DTR RetryService] Validator ${validator.identity.substring(
-                        0,
-                        8,
-                    )}... error for ${txHash}: ${error.message}`,
-                )
+                handleError(error, "NETWORK", { source: "DTR relay" })
                 continue // Try next validator
             }
         }
 
         // All validators failed, increment attempt count
         this.retryAttempts.set(txHash, currentAttempts + 1)
-        console.log(
-            `[DTR RetryService] Attempt ${currentAttempts + 1}/${
+        log.info(
+            `[NETWORK] [DTR] Attempt ${currentAttempts + 1}/${
                 this.maxRetryAttempts
             } failed for ${txHash}`,
         )

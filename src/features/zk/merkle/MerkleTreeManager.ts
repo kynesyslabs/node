@@ -17,6 +17,8 @@ import { poseidon2 } from "poseidon-lite"
 import { DataSource, Repository, EntityManager } from "typeorm"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment.js"
+import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 
 export class MerkleTreeManager {
     private tree: IncrementalMerkleTree
@@ -76,16 +78,16 @@ export class MerkleTreeManager {
                     )
                 }
 
-                console.log(
-                    `✅ Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,
+                log.info(
+                    `[CORE] Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,
                 )
                 return true
             } else {
-                console.log("🌱 Initialized new Merkle tree")
+                log.info("[CORE] Initialized new Merkle tree")
                 return false
             }
         } catch (error) {
-            console.error("❌ Failed to load Merkle tree from database:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.initialize" })
             throw error
         }
     }
@@ -123,7 +125,7 @@ export class MerkleTreeManager {
             const leafIndex = this.tree.leaves.length - 1
             return leafIndex
         } catch (error) {
-            console.error("❌ Failed to add commitment to tree:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.addCommitment" })
             throw error
         }
     }
@@ -168,7 +170,7 @@ export class MerkleTreeManager {
                 leaf: proof.leaf.toString(),
             }
         } catch (error) {
-            console.error(`❌ Failed to generate proof for leaf ${leafIndex}:`, error)
+            handleError(error, "CORE", { source: `MerkleTreeManager.generateProof(leaf=${leafIndex})` })
             throw error
         }
     }
@@ -193,7 +195,7 @@ export class MerkleTreeManager {
             })
 
             if (!commitment || commitment.leafIndex === -1) {
-                console.warn(`⚠️ Commitment not found: ${commitmentHash.slice(0, 10)}...`)
+                log.info(`[CORE] Commitment not found: ${commitmentHash.slice(0, 10)}...`)
                 return null
             }
 
@@ -203,7 +205,7 @@ export class MerkleTreeManager {
                 leafIndex: commitment.leafIndex,
             }
         } catch (error) {
-            console.error("❌ Failed to get proof for commitment:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.getProofForCommitment" })
             // REVIEW: Throw error instead of returning null to distinguish from "not found"
             throw error
         }
@@ -241,11 +243,11 @@ export class MerkleTreeManager {
                 treeSnapshot: snapshot,
             })
 
-            console.log(
-                `💾 Saved Merkle tree state: ${this.getLeafCount()} leaves at block ${blockNumber}`,
+            log.info(
+                `[CORE] Saved Merkle tree state: ${this.getLeafCount()} leaves at block ${blockNumber}`,
             )
         } catch (error) {
-            console.error("❌ Failed to save Merkle tree to database:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.saveToDatabase" })
             throw error
         }
     }
@@ -268,7 +270,7 @@ export class MerkleTreeManager {
             // Include leaf and root in proof object as required by zk-kit library
             return IncrementalMerkleTree.verifyProof({ ...proof, leaf, root })
         } catch (error) {
-            console.error("❌ Proof verification failed:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.verifyProof" })
             return false
         }
     }

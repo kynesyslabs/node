@@ -39,6 +39,7 @@ import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import HandleGCR from "./gcr/handleGCR"
+import { handleError } from "src/errors"
 
 export default class Chain {
     static blocks: Repository<Blocks>
@@ -466,7 +467,7 @@ export default class Chain {
                                     "Unexpected error while inserting tx: " +
                                         tx.hash,
                                 )
-                                console.error(error)
+                                handleError(error, "CHAIN", { source: "transaction insertion" })
                                 throw error
                             }
                         }
@@ -707,7 +708,7 @@ export default class Chain {
             try {
                 await this.insertTransaction(tx)
             } catch (error) {
-                console.error("[ChainDB] [ ERROR ]")
+                handleError(error, "CHAIN", { source: "ChainDB sync insertion" })
             }
         }
 

@@ -1,5 +1,6 @@
 // REVIEW: PeerConnection - TCP socket wrapper for single peer connection with state management
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { Socket } from "net"
 import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
@@ -401,7 +402,7 @@ export class PeerConnection {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
-            console.error(error)
+            handleError(error, "NETWORK", { source: "OmniProtocol PeerConnection.handleIncomingData" })
             if (error instanceof InvalidAuthBlockFormatError) {
                 return
             }

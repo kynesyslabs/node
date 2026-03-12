@@ -25,6 +25,8 @@ import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 // REVIEW: Bun-compatible verification wrapper (avoids worker thread crashes)
 import { groth16VerifyBun } from "./BunSnarkjsWrapper.js"
+import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 
 export interface ZKProof {
     pi_a: string[]
@@ -73,9 +75,9 @@ export class ProofVerifier {
             const vKeyPath = join(process.cwd(), this.vKeyPath)
             const vKeyJson = await readFile(vKeyPath, "utf-8")
             this.vKey = JSON.parse(vKeyJson)
-            console.log("✅ ZK verification key loaded successfully")
+            log.info("[CORE] ZK verification key loaded successfully")
         } catch (error) {
-            console.error("❌ Failed to load verification key:", error)
+            handleError(error, "CORE", { source: "ProofVerifier.loadVerificationKey" })
             throw new Error(
                 "Verification key not found. Run 'bun run zk:setup-all' to generate keys.",
             )
@@ -103,7 +105,7 @@ export class ProofVerifier {
             const isValid = await groth16VerifyBun(this.vKey, publicSignals, proof)
             return isValid
         } catch (error) {
-            console.error("❌ Cryptographic verification failed:", error)
+            handleError(error, "CORE", { source: "ProofVerifier.verifyCryptographically" })
             // Re-throw to distinguish from invalid proof (which returns false)
             throw new Error("Cryptographic verification system error")
         }
@@ -141,7 +143,7 @@ export class ProofVerifier {
         })
 
         if (!currentState) {
-            console.warn("⚠️ No Merkle tree state found - tree not initialized")
+            log.info("[CORE] No Merkle tree state found - tree not initialized")
             return false
         }
 
@@ -330,7 +332,7 @@ export class ProofVerifier {
                 transactionHash,
             })
 
-            console.log(`✅ Nullifier marked as used: ${nullifierHash.slice(0, 10)}...`)
+            log.info(`[CORE] Nullifier marked as used: ${nullifierHash.slice(0, 10)}...`)
         } catch (error: any) {
             // Handle primary key constraint violation (nullifier already used)
             if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT") {

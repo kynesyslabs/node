@@ -18,6 +18,8 @@
 // (pi_a, pi_b, pi_c, vk_alpha_1, etc. are standard Groth16 protocol names)
 
 import { Scalar, utils, getCurveFromName } from "ffjavascript"
+import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 // REVIEW: HIGH FIX - Use public API instead of internal snarkjs import
 // Previous: import * as curves from "node_modules/snarkjs/src/curves.js"
 // Now using: getCurveFromName from ffjavascript public API
@@ -53,20 +55,20 @@ export async function groth16VerifyBun(
         // REVIEW: Validate verification key structure to prevent cryptic errors
         if (!vk_verifier.curve || !Array.isArray(vk_verifier.IC) || vk_verifier.IC.length === 0 ||
             !vk_verifier.vk_alpha_1 || !vk_verifier.vk_beta_2 || !vk_verifier.vk_gamma_2 || !vk_verifier.vk_delta_2) {
-            console.error("ZK Verify: Invalid verification key structure - missing or invalid IC (must be non-empty array) or other required fields")
+            log.info("[CORE] ZK Verify: Invalid verification key structure - missing or invalid IC (must be non-empty array) or other required fields")
             return false
         }
 
         // REVIEW: Validate curve is supported
         const SUPPORTED_CURVES = ["bn128", "bls12381"]
         if (!SUPPORTED_CURVES.includes(vk_verifier.curve)) {
-            console.error(`ZK Verify: Unsupported curve ${vk_verifier.curve}`)
+            log.info(`[CORE] ZK Verify: Unsupported curve ${vk_verifier.curve}`)
             return false
         }
 
         // REVIEW: Validate proof protocol is groth16
         if (proof.protocol && proof.protocol !== "groth16") {
-            console.error(`ZK Verify: Unsupported protocol ${proof.protocol} (expected groth16)`)
+            log.info(`[CORE] ZK Verify: Unsupported protocol ${proof.protocol} (expected groth16)`)
             return false
         }
 
@@ -76,7 +78,7 @@ export async function groth16VerifyBun(
 
         // REVIEW: Validate curve initialization succeeded
         if (!curve || !curve.G1 || !curve.G2) {
-            console.error(`ZK Verify: Failed to initialize curve ${vk_verifier.curve}`)
+            log.info(`[CORE] ZK Verify: Failed to initialize curve ${vk_verifier.curve}`)
             return false
         }
 
@@ -84,7 +86,7 @@ export async function groth16VerifyBun(
 
         // Validate IC length matches public signals
         if (vk_verifier.IC.length !== publicSignals.length + 1) {
-            console.error("ZK Verify: IC length mismatch with public signals")
+            log.info("[CORE] ZK Verify: IC length mismatch with public signals")
             return false
         }
 
@@ -92,7 +94,7 @@ export async function groth16VerifyBun(
         // Adjust MAX_PUBLIC_SIGNALS based on circuit requirements (typical: 2-10 signals)
         const MAX_PUBLIC_SIGNALS = 1024
         if (!Array.isArray(publicSignals) || publicSignals.length > MAX_PUBLIC_SIGNALS) {
-            console.error(`ZK Verify: Public signals length ${publicSignals.length} exceeds maximum ${MAX_PUBLIC_SIGNALS}`)
+            log.info(`[CORE] ZK Verify: Public signals length ${publicSignals.length} exceeds maximum ${MAX_PUBLIC_SIGNALS}`)
             return false
         }
 
@@ -101,7 +103,7 @@ export async function groth16VerifyBun(
 
         // Validate public inputs
         if (!publicInputsAreValid(curve, publicSignals)) {
-            console.error("ZK Verify: Public inputs are not valid")
+            log.info("[CORE] ZK Verify: Public inputs are not valid")
             return false
         }
 
@@ -120,7 +122,7 @@ export async function groth16VerifyBun(
         const pi_c = curve.G1.fromObject(proof.pi_c)
 
         if (!isWellConstructed(curve, { pi_a, pi_b, pi_c })) {
-            console.error("ZK Verify: Proof commitments are not valid")
+            log.info("[CORE] ZK Verify: Proof commitments are not valid")
             return false
         }
 
@@ -142,13 +144,13 @@ export async function groth16VerifyBun(
         )
 
         if (!res) {
-            console.error("ZK Verify: Invalid proof (pairing check failed)")
+            log.info("[CORE] ZK Verify: Invalid proof (pairing check failed)")
             return false
         }
 
         return true
     } catch (error) {
-        console.error("ZK Verify: Verification error:", error)
+        handleError(error, "CORE", { source: "groth16VerifyBun" })
         return false
     } finally {
         // REVIEW: HIGH FIX - Always terminate curve to prevent memory leaks

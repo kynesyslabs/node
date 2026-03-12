@@ -27,6 +27,7 @@ import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
 import { getAuthContext } from "./authContext"
+import { handleError } from "src/errors"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 // REVIEW: ZK imports for Phase 8
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
@@ -649,7 +650,7 @@ export async function serverRpcBun() {
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
-            console.error("Error in serverRpcBun: " + e)
+            handleError(e, "NETWORK", { source: "serverRpcBun" })
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })

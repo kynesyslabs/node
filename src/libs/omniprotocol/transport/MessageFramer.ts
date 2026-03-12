@@ -1,5 +1,6 @@
 // REVIEW: MessageFramer - Parse TCP stream into complete OmniProtocol messages
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { Buffer } from "buffer"
 import { crc32 } from "crc"
 import type {
@@ -80,7 +81,7 @@ export class MessageFramer {
                 auth = authResult.auth
                 offset += authResult.bytesRead
             } catch (error) {
-                console.error(error)
+                handleError(error, "NETWORK", { source: "OmniProtocol MessageFramer.extractMessage" })
                 log.error("================================================")
                 log.error("BUFFER: " + JSON.stringify(this.buffer, null, 2))
                 log.error("OFFSET: " + offset)

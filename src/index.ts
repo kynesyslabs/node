@@ -44,22 +44,18 @@ import ParallelNetworks from "./libs/l2ps/parallelNetworks"
 
 dotenv.config()
 
-// REVIEW: Global error handlers to prevent crashes on unhandled errors
-// These allow the node to continue operating and serving RPC requests
+// Global error handlers — prevent crashes on unhandled errors.
+// Uses the unified error module for consistent logging and classification.
+import { handleError, ErrorSource } from "src/errors"
+
 process.on("uncaughtException", (error: Error) => {
-    console.error("[FATAL] Uncaught Exception - node will attempt to continue", {
-        error: error.message,
-        stack: error.stack,
-    })
-    // Don't exit - let the node try to continue serving RPC
+    handleError(error, "CORE", { source: ErrorSource.UNCAUGHT_EXCEPTION })
+    // Don't exit — let the node try to continue serving RPC
 })
 
 process.on("unhandledRejection", (reason: unknown) => {
-    console.error("[FATAL] Unhandled Rejection - node will attempt to continue", {
-        reason: reason instanceof Error ? reason.message : String(reason),
-        stack: reason instanceof Error ? reason.stack : undefined,
-    })
-    // Don't exit - let the node try to continue serving RPC
+    handleError(reason, "CORE", { source: ErrorSource.UNHANDLED_REJECTION })
+    // Don't exit — let the node try to continue serving RPC
 })
 
 // NOTE This is a global variable that will be used to store the warmup routine and the index needed variables
@@ -447,10 +443,7 @@ async function main() {
                 gracefulShutdown("TUI_QUIT")
             })
         } catch (error) {
-            console.error(
-                "Failed to start TUI, falling back to standard output:",
-                error,
-            )
+            handleError(error, "CORE", { source: ErrorSource.TUI_STARTUP })
             indexState.TUI_ENABLED = false
         }
     }
@@ -515,9 +508,7 @@ async function main() {
                 },
             })
             indexState.omniServer = omniServer
-            console.log(
-                `[MAIN] ✅ OmniProtocol server started on port ${indexState.OMNI_PORT}`,
-            )
+            log.info(`[CORE] OmniProtocol server started on port ${indexState.OMNI_PORT}`)
 
             // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
             // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
@@ -527,20 +518,13 @@ async function main() {
                     | "OMNI_PREFERRED"
                     | "OMNI_ONLY") || "OMNI_ONLY"
             getSharedState.initOmniProtocol(omniMode)
-            console.log(
-                `[MAIN] ✅ OmniProtocol client adapter initialized with mode: ${omniMode}`,
-            )
+            log.info(`[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`)
         } catch (error) {
-            console.log(
-                "[MAIN] ⚠️  Failed to start OmniProtocol server:",
-                error,
-            )
+            handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
             // Continue without OmniProtocol (failsafe - falls back to HTTP)
         }
     } else {
-        console.log(
-            "[MAIN] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
-        )
+        log.info("[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)")
     }
     // INFO Preparing the main loop
     await preMainLoop()
@@ -839,9 +823,7 @@ async function main() {
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
         if (getSharedState.PROD) {
-            console.log(
-                "[DTR] Initializing relay retry service (will start after sync)",
-            )
+            log.info("[CORE] [DTR] Initializing relay retry service (will start after sync)")
             // Service will check syncStatus internally before processing
             DTRManager.getInstance().start()
         }
@@ -850,7 +832,7 @@ async function main() {
         try {
             await ParallelNetworks.getInstance().loadAllL2PS()
         } catch (error) {
-            console.error("[L2PS] Failed to load L2PS networks:", error)
+            handleError(error, "CORE", { source: ErrorSource.L2PS_NETWORK_LOADING })
         }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
@@ -859,17 +841,17 @@ async function main() {
             try {
                 const l2psHashService = L2PSHashService.getInstance()
                 await l2psHashService.start()
-                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+                log.info(`[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
 
                 // Start L2PS batch aggregator (batches transactions and submits to main mempool)
                 const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
                 await l2psBatchAggregator.start()
-                console.log(`[L2PS] Batch aggregator service started`)
+                log.info("[CORE] [L2PS] Batch aggregator service started")
             } catch (error) {
-                console.error("[L2PS] Failed to start L2PS services:", error)
+                handleError(error, "CORE", { source: ErrorSource.L2PS_SERVICES_STARTUP })
             }
         } else {
-            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
+            log.info("[CORE] [L2PS] No L2PS networks joined, L2PS services not started")
         }
     }
 }
@@ -879,10 +861,7 @@ async function main() {
 
 // INFO Starting the main routine
 main().catch((error: Error) => {
-    console.error("[FATAL] Error in main() - attempting graceful shutdown", {
-        error: error.message,
-        stack: error.stack,
-    })
+    handleError(error, "CORE", { source: ErrorSource.MAIN, fatal: true })
     gracefulShutdown("main_error").catch(() => {
         process.exit(1)
     })
@@ -896,11 +875,11 @@ async function gracefulShutdown(signal: string) {
     getSharedState.isShuttingDown = true
     getSharedState.runMainLoop = false
 
-    console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
+    log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
 
     // Force exit after 10 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
-        console.log("[SHUTDOWN] Timeout exceeded, forcing exit...")
+        log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
         process.exit(0)
     }, 10_000)
     // Don't let this timer itself keep the process alive
@@ -916,83 +895,83 @@ async function gracefulShutdown(signal: string) {
 
         // Stop DTR manager if running (PROD only)
         if (getSharedState.PROD) {
-            console.log("[SHUTDOWN] Stopping DTR manager...")
+            log.info("[CORE] Stopping DTR manager...")
             DTRManager.getInstance().stop()
         }
 
         // Stop L2PS services if running (await so their intervals are cleared)
         try {
-            console.log("[SHUTDOWN] Stopping L2PS services...")
+            log.info("[CORE] Stopping L2PS services...")
             await Promise.allSettled([
                 L2PSHashService.getInstance().stop(3000),
                 L2PSBatchAggregator.getInstance().stop(3000),
             ])
         } catch (error) {
-            console.error("[SHUTDOWN] Error stopping L2PS services:", error)
+            handleError(error, "CORE", { source: ErrorSource.L2PS_SHUTDOWN })
         }
 
         // Stop OmniProtocol server if running
         if (indexState.omniServer) {
-            console.log("[SHUTDOWN] Stopping OmniProtocol server...")
+            log.info("[CORE] Stopping OmniProtocol server...")
             try {
                 await stopOmniProtocolServer()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping OmniProtocol:", error)
+                handleError(error, "NETWORK", { source: ErrorSource.OMNI_SHUTDOWN })
             }
         }
 
         // Stop MCP server if running
         if (indexState.mcpServer) {
-            console.log("[SHUTDOWN] Stopping MCP server...")
+            log.info("[CORE] Stopping MCP server...")
             try {
                 await indexState.mcpServer.stop()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping MCP server:", error)
+                handleError(error, "MCP", { source: ErrorSource.MCP_SHUTDOWN })
             }
         }
 
         // Stop TLSNotary service if running
         if (indexState.tlsnotaryService) {
-            console.log("[SHUTDOWN] Stopping TLSNotary service...")
+            log.info("[CORE] Stopping TLSNotary service...")
             try {
                 const { shutdownTLSNotary } = await import(
                     "./features/tlsnotary"
                 )
                 await shutdownTLSNotary()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
+                handleError(error, "TLSN", { source: ErrorSource.TLSN_SHUTDOWN })
             }
         }
 
         // Stop Metrics collector and server if running
         if (indexState.metricsServer) {
-            console.log("[SHUTDOWN] Stopping Metrics collector and server...")
+            log.info("[CORE] Stopping Metrics collector and server...")
             try {
                 const { getMetricsCollector } = await import("./features/metrics")
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping Metrics:", error)
+                handleError(error, "CORE", { source: ErrorSource.METRICS_SHUTDOWN })
             }
         }
 
         // Stop HTTP RPC server
         if (indexState.rpcServer) {
-            console.log("[SHUTDOWN] Stopping RPC server...")
+            log.info("[CORE] Stopping RPC server...")
             try {
                 indexState.rpcServer.stop()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping RPC server:", error)
+                handleError(error, "NETWORK", { source: ErrorSource.RPC_SHUTDOWN })
             }
         }
 
         // Stop Signaling server
         if (indexState.signalingServer) {
-            console.log("[SHUTDOWN] Stopping Signaling server...")
+            log.info("[CORE] Stopping Signaling server...")
             try {
                 indexState.signalingServer.disconnect()
             } catch (error) {
-                console.error("[SHUTDOWN] Error stopping Signaling server:", error)
+                handleError(error, "NETWORK", { source: ErrorSource.SIGNALING_SHUTDOWN })
             }
         }
 
@@ -1002,11 +981,11 @@ async function gracefulShutdown(signal: string) {
             HttpRateLimiter.getInstance().destroy()
         } catch (_) { /* may not be initialized */ }
 
-        console.log("[SHUTDOWN] Cleanup complete, exiting...")
+        log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
         process.exit(0)
     } catch (error) {
-        console.error("[SHUTDOWN] Error during shutdown:", error)
+        handleError(error, "CORE", { source: ErrorSource.GRACEFUL_SHUTDOWN, fatal: true })
         clearTimeout(forceExitTimeout)
         process.exit(1)
     }
