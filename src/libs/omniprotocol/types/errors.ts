@@ -1,4 +1,5 @@
 import log from "src/utilities/logger"
+import { Config } from "src/config"
 
 export class OmniProtocolError extends Error {
     constructor(message: string, public readonly code: number) {
@@ -6,7 +7,7 @@ export class OmniProtocolError extends Error {
         this.name = "OmniProtocolError"
 
         // REVIEW: OMNI_FATAL mode for testing - exit on any OmniProtocol error
-        if (process.env.OMNI_FATAL === "true") {
+        if (Config.getInstance().omni.fatal) {
             log.error(
                 `[OmniProtocol] OMNI_FATAL: ${
                     this.name

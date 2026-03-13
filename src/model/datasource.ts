@@ -10,6 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { DataSource } from "typeorm"
+import { Config } from "src/config"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
@@ -36,11 +37,11 @@ import { L2PSProof } from "./entities/L2PSProofs.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
-    host: process.env.PG_HOST || "localhost",
-    port: parseInt(process.env.PG_PORT) || 5332,
-    username: process.env.PG_USER || "demosuser",
-    password: process.env.PG_PASSWORD || "demospassword",
-    database: process.env.PG_DATABASE || "demos",
+    host: Config.getInstance().database.host,
+    port: Config.getInstance().database.port,
+    username: Config.getInstance().database.user,
+    password: Config.getInstance().database.password,
+    database: Config.getInstance().database.database,
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,

@@ -38,6 +38,7 @@ import {
     IdentityAttestationPayload,
 } from "@/features/zk/types"
 import Datasource from "@/model/datasource"
+import { Config } from "src/config"
 
 /**
  * Safe wrapper for GCR repository saves.
@@ -981,16 +982,13 @@ export default class GCRIdentityRoutines {
         const verifier = new ProofVerifier(dataSource)
 
         // REVIEW: HIGH FIX - Validate env configuration BEFORE transaction to avoid wasting resources
-        // Get configurable points from environment (default: 10)
-        const zkAttestationPoints = parseInt(
-            process.env.ZK_ATTESTATION_POINTS || "10",
-            10,
-        )
+        // Get configurable points from config (default: 10)
+        const zkAttestationPoints = Config.getInstance().identity.zkAttestationPoints
 
-        // Validate environment variable before starting transaction
+        // Validate configuration before starting transaction
         if (isNaN(zkAttestationPoints) || zkAttestationPoints < 0) {
             log.error(
-                `Invalid ZK_ATTESTATION_POINTS configuration: ${process.env.ZK_ATTESTATION_POINTS}`,
+                `Invalid ZK_ATTESTATION_POINTS configuration: ${zkAttestationPoints}`,
             )
             return {
                 success: false,

@@ -1,4 +1,5 @@
 import log from "src/utilities/logger"
+import { Config } from "src/config"
 import { Server as NetServer, Socket } from "net"
 import { EventEmitter } from "events"
 import { ServerConnectionManager } from "./ServerConnectionManager"
@@ -213,7 +214,6 @@ export class OmniProtocolServer extends EventEmitter {
      */
     private detectNodePort(): number {
         // Try to read from environment or config
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
-        return httpPort
+        return Config.getInstance().server.serverPort
     }
 }

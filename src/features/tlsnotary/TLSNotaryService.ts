@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { randomBytes } from "crypto"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 // ============================================================================
 // Types
@@ -79,13 +80,13 @@ const SIGNING_KEY_FILE = ".tlsnotary-key"
  * @returns 64-character hex string (32-byte key) or null on error
  */
 function resolveSigningKey(): string | null {
-  // Priority 1: Environment variable
-  const envKey = process.env.TLSNOTARY_SIGNING_KEY
+  // Priority 1: Config value
+  const envKey = Config.getInstance().tlsnotary.signingKey
   if (envKey && envKey.length === 64) {
-    log.info("[TLSNotary] Using signing key from environment variable")
+    log.info("[TLSNotary] Using signing key from config")
     return envKey
   } else if (envKey && envKey.length !== 64) {
-    log.warning("[TLSNotary] TLSNOTARY_SIGNING_KEY must be 64 hex characters (32 bytes)")
+    log.warning("[TLSNotary] tlsnotary.signingKey must be 64 hex characters (32 bytes)")
     return null
   }
 
@@ -124,7 +125,7 @@ function resolveSigningKey(): string | null {
  * When TLSNOTARY_FATAL=true, errors will cause process exit
  */
 export function isTLSNotaryFatal(): boolean {
-  return process.env.TLSNOTARY_FATAL?.toLowerCase() === "true"
+  return Config.getInstance().tlsnotary.fatal
 }
 
 /**
@@ -132,7 +133,7 @@ export function isTLSNotaryFatal(): boolean {
  * When TLSNOTARY_DEBUG=true, additional logging is enabled
  */
 export function isTLSNotaryDebug(): boolean {
-  return process.env.TLSNOTARY_DEBUG?.toLowerCase() === "true"
+  return Config.getInstance().tlsnotary.debug
 }
 
 /**
@@ -141,7 +142,7 @@ export function isTLSNotaryDebug(): boolean {
  * before forwarding to the Rust server. Useful for debugging what data is arriving.
  */
 export function isTLSNotaryProxy(): boolean {
-  return process.env.TLSNOTARY_PROXY?.toLowerCase() === "true"
+  return Config.getInstance().tlsnotary.proxy
 }
 
 /**
@@ -167,14 +168,14 @@ export function isTLSNotaryProxy(): boolean {
  * @returns Configuration object or null if service is disabled
  */
 export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
-  const disabled = process.env.TLSNOTARY_DISABLED?.toLowerCase() === "true"
+  const config = Config.getInstance().tlsnotary
 
-  if (disabled) {
+  if (config.disabled) {
     return null
   }
 
   // Determine mode: default to 'docker' as it's more compatible with tlsn-js
-  const mode = (process.env.TLSNOTARY_MODE?.toLowerCase() === "ffi" ? "ffi" : "docker") as TLSNotaryMode
+  const mode = (config.mode === "ffi" ? "ffi" : "docker") as TLSNotaryMode
 
   // Only require signing key for FFI mode
   let signingKey: string | undefined
@@ -187,11 +188,11 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
   }
 
   return {
-    port: Number.parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    port: config.port,
     signingKey,
-    maxSentData: Number.parseInt(process.env.TLSNOTARY_MAX_SENT_DATA ?? "16384", 10),
-    maxRecvData: Number.parseInt(process.env.TLSNOTARY_MAX_RECV_DATA ?? "65536", 10),
-    autoStart: process.env.TLSNOTARY_AUTO_START?.toLowerCase() !== "false",
+    maxSentData: config.maxSentData,
+    maxRecvData: config.maxRecvData,
+    autoStart: config.autoStart,
     mode,
   }
 }

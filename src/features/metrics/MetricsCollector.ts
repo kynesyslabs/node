@@ -12,6 +12,7 @@ import { exec } from "node:child_process"
 import { promisify } from "node:util"
 import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 const execAsync = promisify(exec)
 
@@ -528,8 +529,7 @@ export class MetricsCollector {
      */
     private async collectNodeHttpHealth(): Promise<void> {
         // RPC server uses SERVER_PORT or RPC_PORT, NOT OMNI_PORT (which is WebSocket)
-        const rpcPort =
-            process.env.RPC_PORT || process.env.SERVER_PORT || "53550"
+        const rpcPort = Config.getInstance().server.rpcPort
         const baseUrl = `http://localhost:${rpcPort}`
 
         // Check root endpoint
@@ -645,8 +645,8 @@ export class MetricsCollector {
      */
     private async collectDockerHealth(): Promise<void> {
         // Get ports from env to construct exact container names (matching run script)
-        const pgPort = process.env.PG_PORT || "5332"
-        const tlsnPort = process.env.TLSNOTARY_PORT || "7047"
+        const pgPort = Config.getInstance().database.port
+        const tlsnPort = Config.getInstance().tlsnotary.port
 
         // Container names match exactly what the run script creates
         const containers = [
@@ -682,11 +682,12 @@ export class MetricsCollector {
      */
     private async collectPortHealth(): Promise<void> {
         // Read ports from environment variables (matching run script naming)
-        const postgresPort = process.env.PG_PORT || "5332"
-        const tlsnPort = process.env.TLSNOTARY_PORT || "7047"
-        const omniPort = process.env.OMNI_PORT || "53551"
-        const ipfsSwarmPort = process.env.IPFS_SWARM_PORT || "4001"
-        const ipfsApiPort = process.env.IPFS_API_PORT || "5001"
+        const config = Config.getInstance()
+        const postgresPort = config.database.port
+        const tlsnPort = config.tlsnotary.port
+        const omniPort = config.server.omniPort
+        const ipfsSwarmPort = config.ipfs.swarmPort
+        const ipfsApiPort = config.ipfs.apiPort
 
         const ports = [
             { port: postgresPort, service: "postgres" },

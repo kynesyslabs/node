@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 import { NomisImportOptions } from "../providers/nomisIdentityProvider"
 
 export interface NomisWalletScorePayload {
@@ -45,12 +46,9 @@ interface NomisApiResponse<T> {
     data: T
 }
 
-const DEFAULT_BASE_URL =
-    process.env.NOMIS_API_BASE_URL || "https://api.nomis.cc"
-const DEFAULT_SCORE_TYPE = Number(process.env.NOMIS_DEFAULT_SCORE_TYPE || 0)
-const DEFAULT_DEADLINE_OFFSET_SECONDS = Number(
-    process.env.NOMIS_DEFAULT_DEADLINE_OFFSET_SECONDS || 3600,
-)
+const DEFAULT_BASE_URL = Config.getInstance().identity.nomisApiBaseUrl
+const DEFAULT_SCORE_TYPE = Config.getInstance().identity.nomisDefaultScoreType
+const DEFAULT_DEADLINE_OFFSET_SECONDS = Config.getInstance().identity.nomisDefaultDeadlineOffsetSeconds
 
 export class NomisApiClient {
     private static instance: NomisApiClient
@@ -67,17 +65,19 @@ export class NomisApiClient {
             Accept: "application/json",
         }
 
-        if (process.env.NOMIS_API_KEY) {
-            headers["X-API-Key"] = process.env.NOMIS_API_KEY
+        const identityConfig = Config.getInstance().identity
+
+        if (identityConfig.nomisApiKey) {
+            headers["X-API-Key"] = identityConfig.nomisApiKey
         }
 
-        if (process.env.NOMIS_CLIENT_ID) {
-            headers["X-ClientId"] = process.env.NOMIS_CLIENT_ID
+        if (identityConfig.nomisClientId) {
+            headers["X-ClientId"] = identityConfig.nomisClientId
         }
 
         this.http = axios.create({
             baseURL: DEFAULT_BASE_URL,
-            timeout: Number(process.env.NOMIS_API_TIMEOUT_MS || 10_000),
+            timeout: identityConfig.nomisApiTimeoutMs,
             headers,
         })
     }

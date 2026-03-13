@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios"
 import { URL } from "url"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 export type DiscordMessage = {
     id: string
@@ -33,9 +34,8 @@ export class Discord {
     private static instance: Discord
     private axios: AxiosInstance
 
-    readonly api_url =
-        process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
-    readonly bot_token = process.env.DISCORD_BOT_TOKEN as string
+    readonly api_url = Config.getInstance().identity.discordApiUrl
+    readonly bot_token = Config.getInstance().identity.discordBotToken
 
     private constructor() {
         if (!this.bot_token) {

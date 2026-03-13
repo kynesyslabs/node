@@ -13,9 +13,10 @@ import * as fs from "fs"
 import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
+import { Config } from "src/config"
 
 function getLatestGCRRecoveryData() {
-    if (!process.env.RESTORE) {
+    if (!Config.getInstance().core.restore) {
         return null
     }
 

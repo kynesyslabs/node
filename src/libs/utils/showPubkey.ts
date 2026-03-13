@@ -16,10 +16,11 @@ import { wordlist } from "@scure/bip39/wordlists/english.js"
 import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import * as dotenv from "dotenv"
+import { Config } from "src/config"
 
 dotenv.config()
 
-const IDENTITY_FILE = process.env.IDENTITY_FILE || ".demos_identity"
+const IDENTITY_FILE = Config.getInstance().core.identityFile
 const SIGNING_ALGORITHM: SigningAlgorithm = "ed25519"
 
 /**

@@ -10,6 +10,7 @@ import { ConnectionPool } from "@/libs/omniprotocol/transport/ConnectionPool"
 import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelope"
 import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
 import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
+import { Config } from "src/config"
 
 /**
  * L2PS Hash Generation Service
@@ -42,7 +43,7 @@ export class L2PSHashService {
     private isRunning = false
 
     /** Hash generation interval in milliseconds */
-    private readonly GENERATION_INTERVAL = Number.parseInt(process.env.L2PS_HASH_INTERVAL_MS || "5000", 10)
+    private readonly GENERATION_INTERVAL = Config.getInstance().l2ps.hashIntervalMs
 
     /** Statistics tracking */
     private stats = {
@@ -63,7 +64,7 @@ export class L2PSHashService {
     private connectionPool: ConnectionPool | null = null
 
     /** OmniProtocol enabled flag */
-    private readonly omniEnabled: boolean = process.env.OMNI_ENABLED === "true"
+    private readonly omniEnabled: boolean = Config.getInstance().omni.enabled
 
     /**
      * Get singleton instance of L2PS Hash Service
@@ -398,7 +399,7 @@ export class L2PSHashService {
             }
 
             const url = new URL(httpUrl)
-            const tcpProtocol = process.env.OMNI_TLS_ENABLED === "true" ? "tls" : "tcp"
+            const tcpProtocol = Config.getInstance().omni.tls.enabled ? "tls" : "tcp"
             const peerHttpPort = Number.parseInt(url.port, 10) || 80
             const omniPort = peerHttpPort + 1
             const tcpConnectionString = `${tcpProtocol}://${url.hostname}:${omniPort}`

@@ -15,6 +15,7 @@ import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
+import { Config } from "src/config"
 
 dotenv.config()
 
@@ -22,7 +23,7 @@ export default class SharedState {
     private static instance: SharedState
 
     // !SECTION Constants
-    prod = process.env.PROD == "true" || false
+    prod = Config.getInstance().core.prod
     version = "0.9.8"
     version_name = "Oxlong Michael"
     signingAlgorithm = "ed25519" as SigningAlgorithm
@@ -34,8 +35,8 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-    shardSize = Number.parseInt(process.env.SHARD_SIZE ?? "4", 10)
-    mainLoopSleepTime = Number.parseInt(process.env.MAIN_LOOP_SLEEP_TIME ?? "1000", 10) // 1 second
+    shardSize = Config.getInstance().core.shardSize
+    mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
@@ -162,20 +163,20 @@ export default class SharedState {
     }
 
     // SECTION Configuration
-    rpcFee: number = Number.parseInt(process.env.RPC_FEE_PERCENT ?? "10", 10) // TODO Implement // Percentage of the fee to be charged for the rpc
-    serverPort = 53550
-    identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
-    peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
+    rpcFee: number = Config.getInstance().core.rpcFeePercent
+    serverPort = Config.getInstance().server.serverPort
+    identityFile: string = Config.getInstance().core.identityFile
+    peerListFile: string = Config.getInstance().core.peerListFile
     connectionString: string = "http://localhost:" + this.serverPort
-    exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
-    PROD: boolean = process.env.PROD == "true" || false // ! debug line, set to true to run in prod
-    SUDO_PUBKEY = process.env.SUDO_PUBKEY || null
+    exposedUrl: string = Config.getInstance().core.exposedUrl
+    PROD: boolean = Config.getInstance().core.prod
+    SUDO_PUBKEY = Config.getInstance().core.sudoPubkey
     // ABSTRACTION
     twitterCookieFile = "twitter_cookies.json"
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
-    maxMessageSize = Number.parseInt(process.env.MAX_MESSAGE_SIZE ?? "0", 10) // TODO Implement // 5 GB just for debug purpose
+    maxMessageSize = Config.getInstance().core.maxMessageSize
 
     constructor() {
         this.identity = Identity.getInstance()
@@ -237,14 +238,14 @@ export default class SharedState {
 
     // INFO How many ms for each check of the consensus loop
     public getConsensusCheckStep(): number {
-        return Number(process.env.CONSENSUS_CHECK_INTERVAL)
+        return Config.getInstance().core.consensusCheckInterval
     }
 
     /**
      * @returns The block time in seconds
      */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME) || this.block_time
+        return Config.getInstance().core.consensusTime || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {
@@ -262,13 +263,11 @@ export default class SharedState {
             "127.0.0.1",
             "::1",
             "::ffff:127.0.0.1",
-            ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
-                []),
+            ...Config.getInstance().core.whitelistedIPs,
         ],
         // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
         whitelistedKeys: [
-            ...(process.env.WHITELISTED_KEYS?.split(",").map(key => key.trim()).filter(key => key.length > 0) ||
-                []),
+            ...Config.getInstance().core.whitelistedKeys,
         ],
         methodLimits: {
             // REVIEW: Do we need this?

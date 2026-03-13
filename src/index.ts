@@ -47,6 +47,7 @@ dotenv.config()
 // Global error handlers — prevent crashes on unhandled errors.
 // Uses the unified error module for consistent logging and classification.
 import { handleError, ErrorSource } from "src/errors"
+import { Config } from "src/config"
 
 process.on("uncaughtException", (error: Error) => {
     handleError(error, "CORE", { source: ErrorSource.UNCAUGHT_EXCEPTION })
@@ -111,12 +112,12 @@ const indexState: {
     OMNI_PORT: 0,
     omniServer: null,
     // REVIEW: TLSNotary defaults - disabled by default, requires signing key
-    TLSNOTARY_ENABLED: process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true",
-    TLSNOTARY_PORT: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
+    TLSNOTARY_ENABLED: Config.getInstance().tlsnotary.enabled,
+    TLSNOTARY_PORT: Config.getInstance().tlsnotary.port,
     tlsnotaryService: null,
     // REVIEW: Prometheus Metrics defaults - enabled by default
-    METRICS_ENABLED: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
-    METRICS_PORT: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    METRICS_ENABLED: Config.getInstance().metrics.enabled,
+    METRICS_PORT: Config.getInstance().metrics.port,
     metricsServer: null,
     // Server references for graceful shutdown
     rpcServer: null,
@@ -251,21 +252,15 @@ async function warmup() {
     indexState.COMMANDLINE_MODE = null
 
     /* SECTION Environment variables loading and configuration */
-    indexState.RPC_FEE = parseInt(process.env.RPC_FEE) || 10
+    const cfg = Config.getInstance()
+    indexState.RPC_FEE = cfg.core.rpcFee
     // Allow overriding pg port through RPC_PG_PORT
-    indexState.PG_PORT = parseInt(process.env.RPC_PG_PORT, 10) || 5332
+    indexState.PG_PORT = cfg.database.port
     // Allow overriding server port through RPC_PORT
-    indexState.SERVER_PORT = parseInt(process.env.RPC_PORT, 10) || 0
-    if (indexState.SERVER_PORT == 0) {
-        indexState.SERVER_PORT = parseInt(process.env.SERVER_PORT, 10) || 53550
-    }
+    indexState.SERVER_PORT = cfg.server.rpcPort || cfg.server.serverPort
     // Allow overriding signaling server port through RPC_SIGNALING_PORT
     indexState.SIGNALING_SERVER_PORT =
-        parseInt(process.env.RPC_SIGNALING_PORT, 10) || 0
-    if (indexState.SIGNALING_SERVER_PORT == 0) {
-        indexState.SIGNALING_SERVER_PORT =
-            parseInt(process.env.SIGNALING_SERVER_PORT, 10) || 3005
-    }
+        cfg.server.rpcSignalingPort || cfg.server.signalingServerPort
 
     // Use next available port for the signaling server
     // (useful when we have multiple nodes running the same code on the same machine)
@@ -274,25 +269,17 @@ async function warmup() {
     )
 
     // MCP Server configuration
-    indexState.MCP_SERVER_PORT = parseInt(process.env.RPC_MCP_PORT, 10) || 0
-    if (indexState.MCP_SERVER_PORT == 0) {
-        indexState.MCP_SERVER_PORT =
-            parseInt(process.env.MCP_SERVER_PORT, 10) || 3001
-    }
-    indexState.MCP_ENABLED = process.env.MCP_ENABLED !== "false"
+    indexState.MCP_SERVER_PORT = cfg.server.rpcMcpPort || cfg.server.mcpServerPort
+    indexState.MCP_ENABLED = cfg.core.mcpEnabled
 
     // OmniProtocol TCP Server configuration
-    indexState.OMNI_ENABLED = process.env.OMNI_ENABLED
-        ? process.env.OMNI_ENABLED.toLowerCase() === "true"
-        : true
-    indexState.OMNI_PORT =
-        parseInt(process.env.OMNI_PORT ?? "", 10) || indexState.SERVER_PORT + 1
+    indexState.OMNI_ENABLED = cfg.omni.enabled
+    indexState.OMNI_PORT = cfg.server.omniPort
 
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
-    getSharedState.connectionString =
-        process.env.EXPOSED_URL || "http://localhost:" + indexState.SERVER_PORT
+    getSharedState.connectionString = cfg.core.exposedUrl
     /* !SECTION Environment variables loading and configuration */
 
     log.info("[MAIN] = Configured environment variables =")
@@ -474,37 +461,19 @@ async function main() {
                 connectionTimeout: 600000, // 10 minutes
                 // TLS configuration
                 tls: {
-                    enabled: process.env.OMNI_TLS_ENABLED === "true",
-                    mode:
-                        (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
-                        "self-signed",
-                    certPath:
-                        process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
-                    keyPath:
-                        process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
-                    caPath: process.env.OMNI_CA_PATH,
-                    minVersion:
-                        (process.env.OMNI_TLS_MIN_VERSION as
-                            | "TLSv1.2"
-                            | "TLSv1.3") || "TLSv1.3",
+                    enabled: Config.getInstance().omni.tls.enabled,
+                    mode: (Config.getInstance().omni.tls.mode as "self-signed" | "ca") || "self-signed",
+                    certPath: Config.getInstance().omni.tls.certPath,
+                    keyPath: Config.getInstance().omni.tls.keyPath,
+                    caPath: Config.getInstance().omni.tls.caPath,
+                    minVersion: (Config.getInstance().omni.tls.minVersion as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
                 },
                 // Rate limiting configuration
                 rateLimit: {
-                    enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
-                    maxConnectionsPerIP: parseInt(
-                        process.env.OMNI_MAX_CONNECTIONS_PER_IP || "10",
-                        10,
-                    ),
-                    maxRequestsPerSecondPerIP: parseInt(
-                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP ||
-                        "100",
-                        10,
-                    ),
-                    maxRequestsPerSecondPerIdentity: parseInt(
-                        process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY ||
-                        "200",
-                        10,
-                    ),
+                    enabled: Config.getInstance().omni.rateLimit.enabled,
+                    maxConnectionsPerIP: Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
+                    maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 100,
+                    maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 200,
                 },
             })
             indexState.omniServer = omniServer
@@ -513,7 +482,7 @@ async function main() {
             // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
             // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
             const omniMode =
-                (process.env.OMNI_MODE as
+                (Config.getInstance().omni.mode as
                     | "HTTP_ONLY"
                     | "OMNI_PREFERRED"
                     | "OMNI_ONLY") || "OMNI_ONLY"

@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from "axios"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 /**
  * Human Passport score verification result
@@ -37,9 +38,9 @@ interface CachedScore {
     fetchedAt: number
 }
 
-const DEFAULT_BASE_URL = process.env.HUMAN_PASSPORT_API_URL || "https://api.passport.xyz"
-const DEFAULT_SCORER_ID = process.env.HUMAN_PASSPORT_SCORER_ID || ""
-const DEFAULT_API_KEY = process.env.HUMAN_PASSPORT_API_KEY || ""
+const DEFAULT_BASE_URL = Config.getInstance().identity.humanPassportApiUrl
+const DEFAULT_SCORER_ID = Config.getInstance().identity.humanPassportScorerId
+const DEFAULT_API_KEY = Config.getInstance().identity.humanPassportApiKey
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
 
 /**

@@ -12,6 +12,7 @@ import { initializeTLSCertificates } from "../tls/initialize"
 import type { TLSConfig } from "../tls/types"
 import type { RateLimitConfig } from "../ratelimit/types"
 import log from "src/utilities/logger"
+import { Config } from "src/config"
 
 let serverInstance: OmniProtocolServer | TLSServer | null = null
 
@@ -184,8 +185,7 @@ export function getOmniProtocolServerStats() {
  * Detect default port (HTTP port + 1)
  */
 function detectDefaultPort(): number {
-    const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
-    return httpPort + 1
+    return Config.getInstance().server.serverPort + 1
 }
 
 // Example usage in src/index.ts:

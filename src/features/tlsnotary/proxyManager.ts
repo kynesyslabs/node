@@ -34,6 +34,7 @@ import { spawn, type ChildProcess } from "child_process"
 import { exec } from "child_process"
 import { promisify } from "util"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import {
   PORT_CONFIG,
@@ -190,10 +191,11 @@ export function getPublicUrl(localPort: number, requestOrigin?: string): string 
     }
   }
 
-  // 2. Fall back to EXPOSED_URL
-  if (process.env.EXPOSED_URL) {
+  // 2. Fall back to EXPOSED_URL from config
+  const exposedUrl = Config.getInstance().core.exposedUrl
+  if (exposedUrl) {
     try {
-      return build(process.env.EXPOSED_URL)
+      return build(exposedUrl)
     } catch {
       // Invalid EXPOSED_URL, continue to fallback
     }

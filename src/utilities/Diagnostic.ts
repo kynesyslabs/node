@@ -4,6 +4,7 @@ import fs from "fs"
 import https from "https"
 import nodeDiskInfo from "node-disk-info"
 import os from "os"
+import { Config } from "src/config"
 
 export interface DiagnosticData {
     network: {
@@ -184,21 +185,23 @@ class Diagnostic {
         // Load requirements from .requirements file
         dotenv.config({ path: ".requirements" })
 
+        const diag = Config.getInstance().diagnostics
+
         const minRequirements = {
-            cpu: Number(process.env.MIN_CPU_SPEED),
-            ram: Number(process.env.MIN_RAM),
-            disk: Number(process.env.MIN_DISK_SPACE),
-            networkDownload: Number(process.env.MIN_NETWORK_DOWNLOAD_SPEED),
-            networkUpload: Number(process.env.MIN_NETWORK_UPLOAD_SPEED),
-            networkTestFileSize: Number(process.env.NETWORK_TEST_FILE_SIZE),
+            cpu: diag.minCpuSpeed,
+            ram: diag.minRam,
+            disk: diag.minDiskSpace,
+            networkDownload: diag.minNetworkDownloadSpeed,
+            networkUpload: diag.minNetworkUploadSpeed,
+            networkTestFileSize: diag.networkTestFileSize,
         }
 
         const suggestedRequirements = {
-            cpu: Number(process.env.SUGGESTED_CPU_SPEED) || minRequirements.cpu,
-            ram: Number(process.env.SUGGESTED_RAM) || minRequirements.ram,
-            disk: Number(process.env.SUGGESTED_DISK_SPACE) || minRequirements.disk,
-            networkDownload: Number(process.env.SUGGESTED_NETWORK_DOWNLOAD_SPEED) || minRequirements.networkDownload,
-            networkUpload: Number(process.env.SUGGESTED_NETWORK_UPLOAD_SPEED) || minRequirements.networkUpload,
+            cpu: diag.suggestedCpuSpeed || minRequirements.cpu,
+            ram: diag.suggestedRam || minRequirements.ram,
+            disk: diag.suggestedDiskSpace || minRequirements.disk,
+            networkDownload: diag.suggestedNetworkDownloadSpeed || minRequirements.networkDownload,
+            networkUpload: diag.suggestedNetworkUploadSpeed || minRequirements.networkUpload,
         }
 
         console.log("Checking CPU...")

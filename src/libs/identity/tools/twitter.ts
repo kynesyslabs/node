@@ -6,6 +6,7 @@ import {
     TwitterFollowersResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 class TwitterBotDetector {
     constructor(
@@ -408,8 +409,8 @@ export class Twitter {
     private static instance: Twitter
 
     demos_twitter_username = "demos_network"
-    api_key = process.env.RAPID_API_KEY
-    api_host = process.env.RAPID_API_HOST
+    api_key = Config.getInstance().identity.rapidApiKey
+    api_host = Config.getInstance().identity.rapidApiHost
     api_url = "https://" + this.api_host
 
     /**

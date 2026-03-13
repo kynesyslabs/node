@@ -4,6 +4,7 @@ import {
     EthTransaction,
     SolanaTransactionResponse,
 } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
 
 export class CrossChainTools {
     private static readonly ETHERSCAN_BASE_URL =
@@ -28,9 +29,9 @@ export class CrossChainTools {
         startBlock = 0,
         endBlock = 99999999,
     ): Promise<EthTransactionResponse> {
-        const apiKey = process.env.ETHERSCAN_API_KEY
+        const apiKey = Config.getInstance().identity.etherscanApiKey
         if (!apiKey) {
-            throw new Error("ETHERSCAN_API_KEY environment variable is not set")
+            throw new Error("ETHERSCAN_API_KEY is not configured")
         }
 
         const params = {
@@ -118,9 +119,9 @@ export class CrossChainTools {
         before?: string,
         until?: string,
     ): Promise<SolanaTransactionResponse> {
-        const apiKey = process.env.HELIUS_API_KEY
+        const apiKey = Config.getInstance().identity.heliusApiKey
         if (!apiKey) {
-            throw new Error("HELIUS_API_KEY environment variable is not set")
+            throw new Error("HELIUS_API_KEY is not configured")
         }
 
         const params: any = {

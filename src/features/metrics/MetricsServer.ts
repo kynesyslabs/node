@@ -9,6 +9,7 @@
 
 import { Server } from "bun"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 import { MetricsService } from "./MetricsService"
 
 // REVIEW: Metrics server configuration
@@ -19,9 +20,9 @@ export interface MetricsServerConfig {
 }
 
 const DEFAULT_CONFIG: MetricsServerConfig = {
-    port: parseInt(process.env.METRICS_PORT ?? "9090", 10),
-    hostname: process.env.METRICS_HOST ?? "0.0.0.0",
-    enabled: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
+    port: Config.getInstance().metrics.port,
+    hostname: Config.getInstance().metrics.host,
+    enabled: Config.getInstance().metrics.enabled,
 }
 
 /**

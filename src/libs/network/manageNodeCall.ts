@@ -35,6 +35,7 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { DTRManager } from "./dtr/dtrmanager"
+import { Config } from "src/config"
 
 export interface NodeCall {
     message: string
@@ -643,7 +644,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 const publicKey = service.getPublicKeyHex()
                 const port = service.getPort()
 
-                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+                const proxyPort = Config.getInstance().tlsnotary.proxyPort
 
                 // Extract host and determine WebSocket scheme from exposedUrl
                 // The node's host is used - SDK connects to the same host it's already connected to

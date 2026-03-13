@@ -11,6 +11,7 @@
  */
 
 import log from "src/utilities/logger"
+import { Config } from "src/config"
 import {
     DEFAULT_OMNIPROTOCOL_CONFIG,
     MigrationMode,
@@ -136,8 +137,7 @@ export abstract class BaseOmniAdapter {
      */
     protected getTcpProtocol(): string {
         // REVIEW: Check TLS configuration
-        const tlsEnabled = process.env.OMNI_TLS_ENABLED === "true"
-        return tlsEnabled ? "tls" : "tcp"
+        return Config.getInstance().omni.tls.enabled ? "tls" : "tcp"
     }
 
     /**
@@ -145,12 +145,7 @@ export abstract class BaseOmniAdapter {
      * Uses same logic as server: OMNI_PORT env var, or HTTP port + 1
      */
     protected getOmniPort(): string {
-        if (process.env.OMNI_PORT) {
-            return process.env.OMNI_PORT
-        }
-        // Match server's detectDefaultPort() logic: HTTP port + 1
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
-        return String(httpPort + 1)
+        return String(Config.getInstance().server.omniPort)
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -213,7 +208,7 @@ export abstract class BaseOmniAdapter {
      * Check if OMNI_FATAL mode is enabled
      */
     protected isFatalMode(): boolean {
-        return process.env.OMNI_FATAL === "true"
+        return Config.getInstance().omni.fatal
     }
 
     /**

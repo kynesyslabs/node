@@ -16,6 +16,7 @@ import client, {
     collectDefaultMetrics,
 } from "prom-client"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 // REVIEW: Metrics configuration types
 export interface MetricsConfig {
@@ -28,8 +29,8 @@ export interface MetricsConfig {
 
 // Default configuration
 const DEFAULT_CONFIG: MetricsConfig = {
-    enabled: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
-    port: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    enabled: Config.getInstance().metrics.enabled,
+    port: Config.getInstance().metrics.port,
     prefix: "demos_",
     collectDefaultMetrics: true,
 }

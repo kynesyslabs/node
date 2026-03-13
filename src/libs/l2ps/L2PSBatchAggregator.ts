@@ -10,6 +10,7 @@ import crypto from "crypto"
 import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
 
 /**
  * L2PS Batch Payload Interface
@@ -76,22 +77,22 @@ export class L2PSBatchAggregator {
     private zkProver: L2PSBatchProver | null = null
 
     /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
-    private zkEnabled = process.env.L2PS_ZK_ENABLED !== "false"
+    private zkEnabled = Config.getInstance().l2ps.zkEnabled
 
     /** Batch aggregation interval in milliseconds */
-    private readonly AGGREGATION_INTERVAL = Number.parseInt(process.env.L2PS_AGGREGATION_INTERVAL_MS || "10000", 10)
+    private readonly AGGREGATION_INTERVAL = Config.getInstance().l2ps.aggregationIntervalMs
 
     /** Minimum number of transactions to trigger a batch (can be lower if timeout reached) */
-    private readonly MIN_BATCH_SIZE = Number.parseInt(process.env.L2PS_MIN_BATCH_SIZE || "1", 10)
+    private readonly MIN_BATCH_SIZE = Config.getInstance().l2ps.minBatchSize
 
     /** Maximum number of transactions per batch (limited by ZK circuit size: max 10) */
     private readonly MAX_BATCH_SIZE = Math.min(
-        Number.parseInt(process.env.L2PS_MAX_BATCH_SIZE || "10", 10),
+        Config.getInstance().l2ps.maxBatchSize,
         10 // ZK circuit constraint - cannot exceed 10
     )
 
     /** Cleanup age - remove batched transactions older than this (ms) */
-    private readonly CLEANUP_AGE_MS = Number.parseInt(process.env.L2PS_CLEANUP_AGE_MS || "300000", 10) // 5 minutes default
+    private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
