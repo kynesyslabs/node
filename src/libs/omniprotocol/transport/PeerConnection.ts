@@ -527,8 +527,33 @@ export class PeerConnection extends EventEmitter {
      * @param payload Response payload
      */
     async sendResponse(sequence: number, payload: Buffer): Promise<void> {
-        if (!this.socket?.writable) {
-            throw new ConnectionError("Socket is not writable")
+        let socketId: string | null = null
+        let socket: Socket | null = null
+
+        if (this.socket?.writable) {
+            socket = this.socket
+            socketId = this.socketId
+        } else {
+            // TRY: Find other usable connection to peer
+            const pool = ConnectionPool.getInstance()
+            const connections = pool.getConnections(this._peerIdentity)
+
+            for (const connection of connections) {
+                if (
+                    connection.socketId !== this.socketId &&
+                    connection.socket?.writable
+                ) {
+                    socket = connection.socket
+                    socketId = connection.socketId
+                    break
+                }
+            }
+        }
+
+        if (!socket) {
+            // INFO: We can't find a connection to peer,
+            // RETURN!
+            return
         }
 
         const header: OmniMessageHeader = {
@@ -539,12 +564,16 @@ export class PeerConnection extends EventEmitter {
         }
 
         const messageBuffer = MessageFramer.encodeMessage(header, payload)
-
         return new Promise((resolve, reject) => {
-            this.socket.write(messageBuffer, error => {
+            socket.write(messageBuffer, (error: any) => {
                 if (error) {
                     log.error(
-                        `[PeerConnection] ${this._peerIdentity} write error: ${error}`,
+                        `Error while sending response via [${
+                            socketId === this.socketId ? "primary" : "secondary"
+                        }] socket ID: ${socketId} `,
+                    )
+                    log.error(
+                        `[PeerConnection] Peer: ${this._peerIdentity}, write error: ${error}`,
                     )
                     reject(error)
                 } else {
