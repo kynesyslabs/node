@@ -20,6 +20,7 @@ import {
 import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
+import { DEFAULT_HTTP_PORT, OMNI_PORT_OFFSET } from "../constants"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
@@ -125,8 +126,8 @@ export abstract class BaseOmniAdapter {
         const protocol = this.getTcpProtocol()
         const host = url.hostname
         // Derive OmniProtocol port from peer's HTTP port (HTTP port + 1)
-        const peerHttpPort = parseInt(url.port) || 80
-        const omniPort = peerHttpPort + 1
+        const peerHttpPort = parseInt(url.port) || DEFAULT_HTTP_PORT
+        const omniPort = peerHttpPort + OMNI_PORT_OFFSET
 
         return `${protocol}://${host}:${omniPort}`
     }

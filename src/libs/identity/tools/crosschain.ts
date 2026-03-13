@@ -5,11 +5,15 @@ import {
     SolanaTransactionResponse,
 } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import {
+    ETHERSCAN_BASE_URL,
+    HELIUS_BASE_URL,
+    ETHERSCAN_DEFAULT_END_BLOCK,
+} from "./constants"
 
 export class CrossChainTools {
-    private static readonly ETHERSCAN_BASE_URL =
-        "https://api.etherscan.io/v2/api"
-    private static readonly HELIUS_BASE_URL = "https://api.helius.xyz/v0"
+    private static readonly ETHERSCAN_BASE_URL = ETHERSCAN_BASE_URL
+    private static readonly HELIUS_BASE_URL = HELIUS_BASE_URL
 
     /**
      * Get Ethereum transactions by address using Etherscan API
@@ -27,7 +31,7 @@ export class CrossChainTools {
         page = 1,
         offset = 1,
         startBlock = 0,
-        endBlock = 99999999,
+        endBlock = ETHERSCAN_DEFAULT_END_BLOCK,
     ): Promise<EthTransactionResponse> {
         const apiKey = Config.getInstance().identity.etherscanApiKey
         if (!apiKey) {

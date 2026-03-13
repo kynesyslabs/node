@@ -11,50 +11,14 @@
 import { randomUUID } from "crypto"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
+import { TOKEN_CONFIG } from "./constants"
+import type { AttestationToken, TokenStoreState, TokenValidationResult } from "./types"
+import { TokenStatus } from "./types"
 
-/**
- * Token configuration constants
- */
-export const TOKEN_CONFIG = {
-  EXPIRY_MS: 30 * 60 * 1000, // 30 minutes
-  MAX_RETRIES: 3,
-  CLEANUP_INTERVAL_MS: 60 * 1000, // cleanup every minute
-}
-
-/**
- * Token status enum
- */
-export enum TokenStatus {
-  PENDING = "pending", // Created, not yet used
-  ACTIVE = "active", // Proxy spawned, attestation in progress
-  COMPLETED = "completed", // Attestation successful
-  STORED = "stored", // Proof stored on-chain/IPFS
-  EXHAUSTED = "exhausted", // Max retries reached
-  EXPIRED = "expired", // Time limit exceeded
-}
-
-/**
- * Attestation token structure
- */
-export interface AttestationToken {
-  id: string
-  owner: string // pubkey of the payer
-  domain: string // locked domain (e.g., "api.example.com")
-  status: TokenStatus
-  createdAt: number // timestamp
-  expiresAt: number // timestamp
-  retriesLeft: number
-  txHash: string // original payment tx hash
-  proxyId?: string // linked proxy ID once spawned
-}
-
-/**
- * Token store state (stored in sharedState)
- */
-export interface TokenStoreState {
-  tokens: Map<string, AttestationToken>
-  cleanupTimer?: ReturnType<typeof setInterval>
-}
+// Re-export for backward compatibility
+export { TOKEN_CONFIG } from "./constants"
+export { TokenStatus } from "./types"
+export type { AttestationToken, TokenStoreState } from "./types"
 
 /**
  * Generate a cryptographically secure UUID for token IDs
@@ -138,14 +102,8 @@ export function createToken(
   return token
 }
 
-/**
- * Validation result for token checks
- */
-export interface TokenValidationResult {
-  valid: boolean
-  error?: string
-  token?: AttestationToken
-}
+// Re-export TokenValidationResult for backward compatibility
+export type { TokenValidationResult } from "./types"
 
 /**
  * Validate a token for use

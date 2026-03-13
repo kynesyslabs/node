@@ -16,6 +16,24 @@ import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { Config } from "src/config"
+import {
+    APP_VERSION,
+    APP_VERSION_NAME,
+    DEFAULT_SIGNING_ALGORITHM,
+    DEFAULT_BLOCK_TIME,
+    PEER_RECHECK_INTERVAL_MS,
+    BATCH_SYNC_BLOCK_SIZE,
+    BATCH_SYNC_TX_SIZE,
+    BATCH_SYNC_TX_LIMIT,
+    BATCH_SYNC_BLOCK_LIMIT,
+    RATE_LIMIT_DEFAULT_MAX_REQUESTS,
+    RATE_LIMIT_DEFAULT_WINDOW_MS,
+    RATE_LIMIT_POST_MAX_REQUESTS,
+    RATE_LIMIT_POST_WINDOW_MS,
+    RATE_LIMIT_TX_PER_BLOCK,
+    LOCALHOST_IPS,
+    TWITTER_COOKIE_FILE,
+} from "./constants"
 
 dotenv.config()
 
@@ -24,11 +42,11 @@ export default class SharedState {
 
     // !SECTION Constants
     prod = Config.getInstance().core.prod
-    version = "0.9.8"
-    version_name = "Oxlong Michael"
-    signingAlgorithm = "ed25519" as SigningAlgorithm
+    version = APP_VERSION
+    version_name = APP_VERSION_NAME
+    signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
-    block_time = 10 // TODO Get it from the genesis (or see Consensus module)
+    block_time = DEFAULT_BLOCK_TIME // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp = 0
     currentUTCTime = 0
@@ -50,7 +68,7 @@ export default class SharedState {
     inSyncLoop = false
     inPeerRecheckLoop = false
     lastPeerRecheck = 0
-    peerRecheckSleepTime = 10_000 // 10 seconds
+    peerRecheckSleepTime = PEER_RECHECK_INTERVAL_MS
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false
@@ -90,10 +108,10 @@ export default class SharedState {
     _syncStatus = false
 
     // Batch sync configuration
-    batchSyncBlockSize = 100 // Number of blocks to fetch per batch sync request
-    batchSyncTxSize = 100 // Number of transactions to fetch per batch sync request
-    batchSyncTxLimit = 100 // Maximum number of transactions to send back per batch request
-    batchSyncBlockLimit = 100 // Maximum number of blocks to send back per batch request
+    batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
+    batchSyncTxSize = BATCH_SYNC_TX_SIZE
+    batchSyncTxLimit = BATCH_SYNC_TX_LIMIT
+    batchSyncBlockLimit = BATCH_SYNC_BLOCK_LIMIT
 
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
@@ -172,7 +190,7 @@ export default class SharedState {
     PROD: boolean = Config.getInstance().core.prod
     SUDO_PUBKEY = Config.getInstance().core.sudoPubkey
     // ABSTRACTION
-    twitterCookieFile = "twitter_cookies.json"
+    twitterCookieFile = TWITTER_COOKIE_FILE
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
@@ -256,40 +274,19 @@ export default class SharedState {
     // SECTION Rate limiting configuration
     rateLimitConfig = {
         enabled: true,
-        defaultLimit: { maxRequests: 2000, windowMs: 60000 },
+        defaultLimit: { maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS, windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS },
         blockDurationMs: undefined,
-        // INFO: localhost is always whitelisted
         whitelistedIPs: [
-            "127.0.0.1",
-            "::1",
-            "::ffff:127.0.0.1",
+            ...LOCALHOST_IPS,
             ...Config.getInstance().core.whitelistedIPs,
         ],
-        // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
         whitelistedKeys: [
             ...Config.getInstance().core.whitelistedKeys,
         ],
         methodLimits: {
-            // REVIEW: Do we need this?
-            POST: { maxRequests: 200000, windowMs: 86400000 },
-            // INFO: POST method limits per IP address
-            // "nodeCall": { maxRequests: 200, windowMs: 60000 },
-            // "execute": { maxRequests: 1, windowMs: 86400000 },
-            // "login_request": { maxRequests: 5, windowMs: 60000 },
-            // "auth": { maxRequests: 20, windowMs: 60000 },
-            // "ping": { maxRequests: 100, windowMs: 60000 },
-            // "info": { maxRequests: 100, windowMs: 60000 },
-            // "version": { maxRequests: 200, windowMs: 60000 },
-            // "publickey": { maxRequests: 100, windowMs: 60000 },
-            // "connectionstring": { maxRequests: 100, windowMs: 60000 },
-            // "peerlist": { maxRequests: 50, windowMs: 60000 },
-            // "public_logs": { maxRequests: 30, windowMs: 60000 },
-            // "diagnostics": { maxRequests: 20, windowMs: 60000 },
-            // "genesis": { maxRequests: 100, windowMs: 60000 },
-            // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
-            // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
+            POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
         },
-        txPerBlock: 4,
+        txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server

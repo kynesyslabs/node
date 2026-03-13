@@ -11,6 +11,16 @@ import {
     RateLimitResult,
     RateLimitType,
 } from "./types"
+import {
+    DEFAULT_MAX_CONNECTIONS_PER_IP,
+    DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IP,
+    DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IDENTITY,
+    DEFAULT_RATE_LIMIT_WINDOW_MS,
+    DEFAULT_RATE_LIMIT_ENTRY_TTL_MS,
+    DEFAULT_RATE_LIMIT_CLEANUP_INTERVAL_MS,
+    RATE_LIMIT_BLOCK_DURATION_MS,
+    DEFAULT_MANUAL_BLOCK_DURATION_MS,
+} from "../constants"
 
 export class RateLimiter {
     private config: RateLimitConfig
@@ -21,13 +31,13 @@ export class RateLimiter {
     constructor(config: Partial<RateLimitConfig> = {}) {
         this.config = {
             enabled: config.enabled ?? true,
-            maxConnectionsPerIP: config.maxConnectionsPerIP ?? 10,
-            maxRequestsPerSecondPerIP: config.maxRequestsPerSecondPerIP ?? 100,
+            maxConnectionsPerIP: config.maxConnectionsPerIP ?? DEFAULT_MAX_CONNECTIONS_PER_IP,
+            maxRequestsPerSecondPerIP: config.maxRequestsPerSecondPerIP ?? DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IP,
             maxRequestsPerSecondPerIdentity:
-                config.maxRequestsPerSecondPerIdentity ?? 200,
-            windowMs: config.windowMs ?? 1000,
-            entryTTL: config.entryTTL ?? 60000,
-            cleanupInterval: config.cleanupInterval ?? 10000,
+                config.maxRequestsPerSecondPerIdentity ?? DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IDENTITY,
+            windowMs: config.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
+            entryTTL: config.entryTTL ?? DEFAULT_RATE_LIMIT_ENTRY_TTL_MS,
+            cleanupInterval: config.cleanupInterval ?? DEFAULT_RATE_LIMIT_CLEANUP_INTERVAL_MS,
         }
 
         // Start cleanup timer
@@ -69,16 +79,16 @@ export class RateLimiter {
 
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {
-            // Block IP for 1 minute
+            // Block IP for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
 
             return {
                 allowed: false,
                 reason: `Too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -181,16 +191,16 @@ export class RateLimiter {
 
         // Check if limit exceeded
         if (entry.timestamps.length >= maxRequests) {
-            // Block for 1 minute
+            // Block for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
 
             return {
                 allowed: false,
                 reason: `Rate limit exceeded for ${type} (max ${maxRequests} requests per second)`,
                 currentCount: entry.timestamps.length,
                 limit: maxRequests,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -303,7 +313,7 @@ export class RateLimiter {
     /**
      * Manually block an IP or identity
      */
-    blockKey(key: string, type: RateLimitType, durationMs = 3600000): void {
+    blockKey(key: string, type: RateLimitType, durationMs = DEFAULT_MANUAL_BLOCK_DURATION_MS): void {
         const entry = this.getOrCreateEntry(key, type)
         entry.blocked = true
         entry.blockExpiry = Date.now() + durationMs

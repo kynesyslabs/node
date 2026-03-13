@@ -62,8 +62,8 @@ import log from "@/utilities/logger"
 // Re-export types and classes
 export { TLSNotaryService, getTLSNotaryService, getConfigFromEnv, isTLSNotaryFatal, isTLSNotaryDebug, isTLSNotaryProxy } from "./TLSNotaryService"
 export { TLSNotaryFFI } from "./ffi"
-export type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./ffi"
-export type { TLSNotaryServiceConfig, TLSNotaryServiceStatus } from "./TLSNotaryService"
+export type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./types"
+export type { TLSNotaryServiceConfig, TLSNotaryServiceStatus, TLSNotaryMode } from "./types"
 
 /**
  * Initialize TLSNotary feature

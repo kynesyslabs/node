@@ -3,6 +3,7 @@ import { Socket } from "net"
 import { InboundConnection } from "./InboundConnection"
 import { EventEmitter } from "events"
 import { RateLimiter } from "../ratelimit"
+import { SERVER_CLEANUP_INTERVAL_MS } from "../constants"
 
 export interface ConnectionManagerConfig {
     maxConnections: number
@@ -185,6 +186,6 @@ export class ServerConnectionManager extends EventEmitter {
                     `[ServerConnectionManager] Cleaned up ${toRemove.length} connections`,
                 )
             }
-        }, 60000) // Run every minute
+        }, SERVER_CLEANUP_INTERVAL_MS) // Run every minute
     }
 }

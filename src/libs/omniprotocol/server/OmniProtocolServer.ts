@@ -4,6 +4,15 @@ import { Server as NetServer, Socket } from "net"
 import { EventEmitter } from "events"
 import { ServerConnectionManager } from "./ServerConnectionManager"
 import { RateLimiter, RateLimitConfig } from "../ratelimit"
+import {
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_MAX_CONNECTIONS,
+    DEFAULT_SERVER_CONNECTION_TIMEOUT_MS,
+    DEFAULT_SERVER_AUTH_TIMEOUT_MS,
+    DEFAULT_SERVER_BACKLOG,
+    DEFAULT_SERVER_KEEPALIVE_INITIAL_DELAY_MS,
+    OMNI_PORT_OFFSET,
+} from "../constants"
 
 export interface ServerConfig {
     host: string                    // Listen address (default: "0.0.0.0")
@@ -31,14 +40,14 @@ export class OmniProtocolServer extends EventEmitter {
         super()
 
         this.config = {
-            host: config.host ?? "0.0.0.0",
-            port: config.port ?? this.detectNodePort() + 1,
-            maxConnections: config.maxConnections ?? 1000,
-            connectionTimeout: config.connectionTimeout ?? 10 * 60 * 1000,
-            authTimeout: config.authTimeout ?? 5000,
-            backlog: config.backlog ?? 511,
+            host: config.host ?? DEFAULT_SERVER_HOST,
+            port: config.port ?? this.detectNodePort() + OMNI_PORT_OFFSET,
+            maxConnections: config.maxConnections ?? DEFAULT_SERVER_MAX_CONNECTIONS,
+            connectionTimeout: config.connectionTimeout ?? DEFAULT_SERVER_CONNECTION_TIMEOUT_MS,
+            authTimeout: config.authTimeout ?? DEFAULT_SERVER_AUTH_TIMEOUT_MS,
+            backlog: config.backlog ?? DEFAULT_SERVER_BACKLOG,
             enableKeepalive: config.enableKeepalive ?? true,
-            keepaliveInitialDelay: config.keepaliveInitialDelay ?? 60000,
+            keepaliveInitialDelay: config.keepaliveInitialDelay ?? DEFAULT_SERVER_KEEPALIVE_INITIAL_DELAY_MS,
             rateLimit: config.rateLimit,
         }
 

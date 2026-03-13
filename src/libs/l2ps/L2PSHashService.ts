@@ -11,6 +11,14 @@ import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelop
 import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
 import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
 import { Config } from "src/config"
+import {
+    HASH_RELAY_MAX_TOTAL_CONNECTIONS,
+    HASH_RELAY_MAX_CONNECTIONS_PER_PEER,
+    HASH_RELAY_IDLE_TIMEOUT_MS,
+    HASH_RELAY_CONNECT_TIMEOUT_MS,
+    HASH_RELAY_AUTH_TIMEOUT_MS,
+    HASH_RELAY_OMNI_REQUEST_TIMEOUT_MS,
+} from "./constants"
 
 /**
  * L2PS Hash Generation Service
@@ -113,11 +121,11 @@ export class L2PSHashService {
         // Initialize OmniProtocol connection pool if enabled
         if (this.omniEnabled) {
             this.connectionPool = new ConnectionPool({
-                maxTotalConnections: 50,
-                maxConnectionsPerPeer: 3,
-                idleTimeout: 5 * 60 * 1000, // 5 minutes
-                connectTimeout: 5000,
-                authTimeout: 5000,
+                maxTotalConnections: HASH_RELAY_MAX_TOTAL_CONNECTIONS,
+                maxConnectionsPerPeer: HASH_RELAY_MAX_CONNECTIONS_PER_PEER,
+                idleTimeout: HASH_RELAY_IDLE_TIMEOUT_MS,
+                connectTimeout: HASH_RELAY_CONNECT_TIMEOUT_MS,
+                authTimeout: HASH_RELAY_AUTH_TIMEOUT_MS,
             })
             log.info("[L2PS Hash Service] OmniProtocol enabled for hash relay")
         }
@@ -428,7 +436,7 @@ export class L2PSHashService {
                 payload,
                 privateKey,
                 publicKey,
-                { timeout: 10000 }, // 10 second timeout
+                { timeout: HASH_RELAY_OMNI_REQUEST_TIMEOUT_MS },
             )
 
             // Check response status (first 2 bytes)

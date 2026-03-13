@@ -2,49 +2,17 @@ import axios, { AxiosInstance, AxiosResponse } from "axios"
 import log from "@/utilities/logger"
 import { Config } from "src/config"
 import { NomisImportOptions } from "../providers/nomisIdentityProvider"
+import {
+    NomisWalletScorePayload,
+    NomisApiResponse,
+} from "./types"
+import {
+    NOMIS_SCORED_CHAINS,
+    NOMIS_WALLET_SCORE_TIMEOUT_MS,
+} from "./constants"
 
-export interface NomisWalletScorePayload {
-    address: string
-    score: number
-    scoreType: number
-    referralCode?: string
-    referrerCode?: string
-    mintData?: {
-        mintedScore?: number
-        signature?: string
-        deadline?: number
-        calculationModel?: number
-        chainId?: number
-        metadataUrl?: string
-        onftMetadataUrl?: string
-    }
-    migrationData?: {
-        blockNumber?: string
-        tokenId?: string
-        signature?: string
-        deadline?: number
-    }
-    stats?: {
-        scoredAt?: string
-        walletAge?: number
-        totalTransactions?: number
-        nativeBalanceUSD?: number
-        walletTurnoverUSD?: number
-        tokenBalances?: unknown
-    }
-}
-
-export interface NomisScoreRequestOptions {
-    scoreType?: number
-    nonce?: number
-    deadline?: number
-}
-
-interface NomisApiResponse<T> {
-    succeeded: boolean
-    messages?: string[]
-    data: T
-}
+// backward-compatible re-exports
+export type { NomisWalletScorePayload, NomisScoreRequestOptions } from "./types"
 
 const DEFAULT_BASE_URL = Config.getInstance().identity.nomisApiBaseUrl
 const DEFAULT_SCORE_TYPE = Config.getInstance().identity.nomisDefaultScoreType
@@ -98,7 +66,7 @@ export class NomisApiClient {
             throw new Error("Wallet address is required to fetch Nomis score")
         }
 
-        const timeout = 30000
+        const timeout = NOMIS_WALLET_SCORE_TIMEOUT_MS
         const chain = options.chain ?? "evm"
 
         const normalized =
@@ -109,7 +77,7 @@ export class NomisApiClient {
         let url: string
 
         if (chain === "evm") {
-            const scoredChains = [1, 10, 56, 137, 5000, 8453, 42161, 59144]
+            const scoredChains = NOMIS_SCORED_CHAINS
 
             params.set(
                 "scoreType",

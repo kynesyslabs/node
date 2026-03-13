@@ -13,6 +13,15 @@ import type { TLSConfig } from "../tls/types"
 import type { RateLimitConfig } from "../ratelimit/types"
 import log from "src/utilities/logger"
 import { Config } from "src/config"
+import {
+    DEFAULT_SERVER_HOST,
+    DEFAULT_SERVER_MAX_CONNECTIONS,
+    DEFAULT_SERVER_CONNECTION_TIMEOUT_MS,
+    DEFAULT_SERVER_AUTH_TIMEOUT_MS,
+    DEFAULT_TLS_MODE,
+    DEFAULT_TLS_MIN_VERSION,
+    OMNI_PORT_OFFSET,
+} from "../constants"
 
 let serverInstance: OmniProtocolServer | TLSServer | null = null
 
@@ -50,10 +59,10 @@ export async function startOmniProtocolServer(
 
     try {
         const port = config.port ?? detectDefaultPort()
-        const host = config.host ?? "0.0.0.0"
-        const maxConnections = config.maxConnections ?? 1000
-        const authTimeout = config.authTimeout ?? 5000
-        const connectionTimeout = config.connectionTimeout ?? 600000
+        const host = config.host ?? DEFAULT_SERVER_HOST
+        const maxConnections = config.maxConnections ?? DEFAULT_SERVER_MAX_CONNECTIONS
+        const authTimeout = config.authTimeout ?? DEFAULT_SERVER_AUTH_TIMEOUT_MS
+        const connectionTimeout = config.connectionTimeout ?? DEFAULT_SERVER_CONNECTION_TIMEOUT_MS
 
         // Check if TLS is enabled
         if (config.tls?.enabled) {
@@ -73,12 +82,12 @@ export async function startOmniProtocolServer(
             // Build TLS config
             const tlsConfig: TLSConfig = {
                 enabled: true,
-                mode: config.tls.mode ?? "self-signed",
+                mode: config.tls.mode ?? DEFAULT_TLS_MODE,
                 certPath,
                 keyPath,
                 caPath: config.tls.caPath,
                 rejectUnauthorized: false, // Custom verification
-                minVersion: config.tls.minVersion ?? "TLSv1.3",
+                minVersion: config.tls.minVersion ?? DEFAULT_TLS_MIN_VERSION,
                 requestCert: true,
                 trustedFingerprints: new Map(),
             }
@@ -185,7 +194,7 @@ export function getOmniProtocolServerStats() {
  * Detect default port (HTTP port + 1)
  */
 function detectDefaultPort(): number {
-    return Config.getInstance().server.serverPort + 1
+    return Config.getInstance().server.serverPort + OMNI_PORT_OFFSET
 }
 
 // Example usage in src/index.ts:

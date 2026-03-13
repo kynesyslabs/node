@@ -14,51 +14,7 @@ import { getTLSNotaryService } from "./TLSNotaryService"
 import type { BunServer } from "@/libs/network/bunServer"
 import { jsonResponse } from "@/libs/network/bunServer"
 import log from "@/utilities/logger"
-
-// ============================================================================
-// Request/Response Types
-// ============================================================================
-
-/**
- * Verify attestation request body
- */
-interface VerifyRequestBody {
-  /** Base64-encoded attestation bytes */
-  attestation: string;
-}
-
-/**
- * Health response
- */
-interface HealthResponse {
-  status: "healthy" | "unhealthy" | "disabled";
-  service: string;
-  initialized?: boolean;
-  serverRunning?: boolean;
-  error?: string;
-}
-
-/**
- * Info response
- */
-interface InfoResponse {
-  enabled: boolean;
-  port: number;
-  publicKey?: string;
-  running?: boolean;
-}
-
-/**
- * Verify response
- */
-interface VerifyResponse {
-  success: boolean;
-  serverName?: string;
-  connectionTime?: number;
-  sentLength?: number;
-  recvLength?: number;
-  error?: string;
-}
+import type { VerifyRequestBody, HealthResponse, InfoResponse, VerifyResponse } from "./types"
 
 // ============================================================================
 // Route Handlers

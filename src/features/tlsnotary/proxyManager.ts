@@ -37,66 +37,19 @@ import log from "@/utilities/logger"
 import { Config } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import {
-  PORT_CONFIG,
   initPortPool,
   allocatePort,
   releasePort,
-  type PortPoolState,
 } from "./portAllocator"
+import { PORT_CONFIG } from "./constants"
+import type { ProxyInfo, TLSNotaryState, ProxyRequestSuccess, ProxyRequestError } from "./types"
+import { ProxyError } from "./types"
+
+// Re-export types for backward compatibility
+export { ProxyError } from "./types"
+export type { ProxyInfo, TLSNotaryState, ProxyRequestSuccess, ProxyRequestError } from "./types"
 
 const execAsync = promisify(exec)
-
-/**
- * Error codes for proxy operations
- */
-export enum ProxyError {
-  PROXY_SPAWN_FAILED = "PROXY_SPAWN_FAILED",
-  PORT_EXHAUSTED = "PORT_EXHAUSTED",
-  INVALID_URL = "INVALID_URL",
-  WSTCP_NOT_AVAILABLE = "WSTCP_NOT_AVAILABLE",
-}
-
-/**
- * Information about a running proxy
- */
-export interface ProxyInfo {
-  proxyId: string // uuid
-  domain: string // "api.example.com"
-  targetPort: number // 443
-  port: number // allocated local port (55123)
-  process: ChildProcess // wstcp process handle
-  lastActivity: number // Date.now() timestamp
-  spawnedAt: number // Date.now() timestamp
-  websocketProxyUrl: string // "ws://node.demos.sh:55123"
-}
-
-/**
- * TLSNotary state stored in sharedState
- */
-export interface TLSNotaryState {
-  proxies: Map<string, ProxyInfo> // keyed by "domain:port"
-  portPool: PortPoolState
-}
-
-/**
- * Success response for proxy request
- */
-export interface ProxyRequestSuccess {
-  websocketProxyUrl: string
-  targetDomain: string
-  expiresIn: number
-  proxyId: string
-}
-
-/**
- * Error response for proxy request
- */
-export interface ProxyRequestError {
-  error: ProxyError
-  message: string
-  targetDomain?: string
-  lastError?: string
-}
 
 /**
  * Generate a cryptographically secure UUID

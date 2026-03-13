@@ -9,6 +9,14 @@ import type {
 } from "./types"
 import { PoolCapacityError } from "../types/errors"
 import log from "@/utilities/logger"
+import {
+    DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
+    DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
+    DEFAULT_POOL_IDLE_TIMEOUT_MS,
+    DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+    DEFAULT_POOL_AUTH_TIMEOUT_MS,
+    POOL_CLEANUP_INTERVAL_MS,
+} from "../constants"
 
 /**
  * ConnectionPool manages persistent TCP connections to multiple peer nodes
@@ -34,11 +42,11 @@ export class ConnectionPool {
 
     constructor(config: Partial<PoolConfig> = {}) {
         this.config = {
-            maxTotalConnections: config.maxTotalConnections ?? 100,
-            maxConnectionsPerPeer: config.maxConnectionsPerPeer ?? 1,
-            idleTimeout: config.idleTimeout ?? 10 * 60 * 1000, // 10 minutes
-            connectTimeout: config.connectTimeout ?? 5000, // 5 seconds
-            authTimeout: config.authTimeout ?? 5000, // 5 seconds
+            maxTotalConnections: config.maxTotalConnections ?? DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
+            maxConnectionsPerPeer: config.maxConnectionsPerPeer ?? DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
+            idleTimeout: config.idleTimeout ?? DEFAULT_POOL_IDLE_TIMEOUT_MS,
+            connectTimeout: config.connectTimeout ?? DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+            authTimeout: config.authTimeout ?? DEFAULT_POOL_AUTH_TIMEOUT_MS,
         }
 
         // Start periodic cleanup of idle/dead connections
@@ -358,7 +366,7 @@ export class ConnectionPool {
         // Run cleanup every minute
         this.cleanupTimer = setInterval(() => {
             this.cleanupDeadConnections()
-        }, 60 * 1000)
+        }, POOL_CLEANUP_INTERVAL_MS)
     }
 
     /**

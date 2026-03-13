@@ -12,62 +12,23 @@
  */
 
 // REVIEW: TLSNotaryService - updated to support Docker mode alongside FFI
-import { TLSNotaryFFI, type NotaryConfig, type VerificationResult, type NotaryHealthStatus } from "./ffi"
+import { TLSNotaryFFI } from "./ffi"
+import type { NotaryConfig, VerificationResult, NotaryHealthStatus, TLSNotaryMode, TLSNotaryServiceConfig, TLSNotaryServiceStatus } from "./types"
+import { SIGNING_KEY_FILE, SIGNING_KEY_HEX_LENGTH, SIGNING_KEY_BYTES, DOCKER_HEALTH_TIMEOUT_MS, SIGNING_KEY_FILE_MODE } from "./constants"
 import { existsSync, readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { randomBytes } from "crypto"
 import log from "@/utilities/logger"
 import { Config } from "src/config"
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * TLSNotary operational mode
- */
-export type TLSNotaryMode = "ffi" | "docker";
-
-/**
- * Service configuration options
- */
-export interface TLSNotaryServiceConfig {
-  /** Port to run the notary WebSocket server on */
-  port: number;
-  /** 32-byte secp256k1 private key (hex string or Uint8Array) - only used in FFI mode */
-  signingKey?: string | Uint8Array;
-  /** Maximum bytes the prover can send (default: 16KB) */
-  maxSentData?: number;
-  /** Maximum bytes the prover can receive (default: 64KB) */
-  maxRecvData?: number;
-  /** Whether to auto-start the server on initialization */
-  autoStart?: boolean;
-  /** Operational mode: 'ffi' (Rust FFI) or 'docker' (Docker container) */
-  mode?: TLSNotaryMode;
-}
-
-/**
- * Service status information
- */
-export interface TLSNotaryServiceStatus {
-  /** Whether the service is enabled */
-  enabled: boolean;
-  /** Whether the service is running */
-  running: boolean;
-  /** Port the service is listening on */
-  port: number;
-  /** Health status from the underlying notary */
-  health: NotaryHealthStatus;
-  /** Operating mode: docker or ffi */
-  mode?: TLSNotaryMode;
-}
+// Re-export types for backward compatibility
+export type { TLSNotaryMode, TLSNotaryServiceConfig, TLSNotaryServiceStatus } from "./types"
 
 // ============================================================================
 // Environment Configuration
 // ============================================================================
 
-// REVIEW: Key file path for persistent storage of auto-generated keys
-const SIGNING_KEY_FILE = ".tlsnotary-key"
+// Key file path imported from constants
 
 /**
  * Resolve the TLSNotary signing key with priority: ENV > file > auto-generate
@@ -82,11 +43,11 @@ const SIGNING_KEY_FILE = ".tlsnotary-key"
 function resolveSigningKey(): string | null {
   // Priority 1: Config value
   const envKey = Config.getInstance().tlsnotary.signingKey
-  if (envKey && envKey.length === 64) {
+  if (envKey && envKey.length === SIGNING_KEY_HEX_LENGTH) {
     log.info("[TLSNotary] Using signing key from config")
     return envKey
-  } else if (envKey && envKey.length !== 64) {
-    log.warning("[TLSNotary] tlsnotary.signingKey must be 64 hex characters (32 bytes)")
+  } else if (envKey && envKey.length !== SIGNING_KEY_HEX_LENGTH) {
+    log.warning(`[TLSNotary] tlsnotary.signingKey must be ${SIGNING_KEY_HEX_LENGTH} hex characters (${SIGNING_KEY_BYTES} bytes)`)
     return null
   }
 
@@ -95,11 +56,11 @@ function resolveSigningKey(): string | null {
   if (existsSync(keyFilePath)) {
     try {
       const fileKey = readFileSync(keyFilePath, "utf-8").trim()
-      if (fileKey.length === 64) {
+      if (fileKey.length === SIGNING_KEY_HEX_LENGTH) {
         log.info(`[TLSNotary] Using signing key from ${SIGNING_KEY_FILE}`)
         return fileKey
       } else {
-        log.warning(`[TLSNotary] Invalid key in ${SIGNING_KEY_FILE} (must be 64 hex characters)`)
+        log.warning(`[TLSNotary] Invalid key in ${SIGNING_KEY_FILE} (must be ${SIGNING_KEY_HEX_LENGTH} hex characters)`)
         return null
       }
     } catch (error) {
@@ -110,8 +71,8 @@ function resolveSigningKey(): string | null {
 
   // Priority 3: Auto-generate and save
   try {
-    const generatedKey = randomBytes(32).toString("hex")
-    writeFileSync(keyFilePath, generatedKey, { mode: 0o600 }) // Restrictive permissions
+    const generatedKey = randomBytes(SIGNING_KEY_BYTES).toString("hex")
+    writeFileSync(keyFilePath, generatedKey, { mode: SIGNING_KEY_FILE_MODE }) // Restrictive permissions
     log.info(`[TLSNotary] Auto-generated signing key saved to ${SIGNING_KEY_FILE}`)
     return generatedKey
   } catch (error) {
@@ -345,8 +306,8 @@ export class TLSNotaryService {
       throw error
     }
 
-    if (signingKeyBytes.length !== 32) {
-      const error = new Error("Signing key must be exactly 32 bytes")
+    if (signingKeyBytes.length !== SIGNING_KEY_BYTES) {
+      const error = new Error(`Signing key must be exactly ${SIGNING_KEY_BYTES} bytes`)
       if (fatal) {
         log.error("[TLSNotary] FATAL: " + error.message)
         process.exit(1)
@@ -409,7 +370,7 @@ export class TLSNotaryService {
     try {
       // Try to fetch /info endpoint to verify container is running
       const infoUrl = `http://localhost:${this.config.port}/info`
-      const response = await fetch(infoUrl, { signal: AbortSignal.timeout(5000) })
+      const response = await fetch(infoUrl, { signal: AbortSignal.timeout(DOCKER_HEALTH_TIMEOUT_MS) })
 
       if (!response.ok) {
         throw new Error(`Notary server returned ${response.status}`)

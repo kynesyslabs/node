@@ -7,6 +7,7 @@ import {
 import { getHandler } from "./registry"
 import { OmniOpcode } from "./opcodes"
 import { SignatureVerifier } from "../auth/verifier"
+import { ERROR_CODE_SIGNING, ERROR_CODE_UNAUTHORIZED } from "../constants"
 
 export interface DispatchOptions<TPayload = unknown> {
     message: ParsedOmniMessage<TPayload>
@@ -30,7 +31,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         if (!options.message.auth) {
             throw new OmniProtocolError(
                 `Authentication required for opcode ${descriptor.name} (0x${opcode.toString(16)})`,
-                0xf401, // Unauthorized
+                ERROR_CODE_UNAUTHORIZED,
             )
         }
 
@@ -44,7 +45,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
         if (!verificationResult.valid) {
             throw new OmniProtocolError(
                 `Authentication failed for opcode ${descriptor.name}: ${verificationResult.error}`,
-                0xf401, // Unauthorized
+                ERROR_CODE_UNAUTHORIZED,
             )
         }
 
@@ -68,7 +69,7 @@ export async function dispatchOmniMessage<TPayload = unknown>(
 
         throw new OmniProtocolError(
             `Handler for opcode ${descriptor.name} failed: ${String(error)}`,
-            0xf001,
+            ERROR_CODE_SIGNING,
         )
     }
 }

@@ -5,39 +5,9 @@ import https from "https"
 import nodeDiskInfo from "node-disk-info"
 import os from "os"
 import { Config } from "src/config"
+import { DiagnosticData, DiagnosticResponse } from "./diagnosticTypes"
 
-export interface DiagnosticData {
-    network: {
-        usageHistory: any
-        downloadSpeed?: number
-        uploadSpeed?: number
-    }
-    cpu: {
-        benchmarkUsage: number
-        type: string
-        info: string
-        currentUsage: number
-        averageUsage: number
-    }
-    ram: {
-        type: string
-        info: string
-        currentUsage: number
-        averageUsage: number
-        benchmarkUsage: number // Add this line
-    }
-    disk: {
-        type: string
-        info: string
-        currentUsage: number
-        averageUsage: number
-        benchmarkUsage: number // Add this line
-    }
-}
-
-export interface DiagnosticResponse {
-    diagnostics: DiagnosticData
-}
+export type { DiagnosticData, DiagnosticResponse }
 
 class Diagnostic {
     private static cpuUsageHistory: number[] = []

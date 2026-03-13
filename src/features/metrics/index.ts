@@ -7,20 +7,32 @@
  * @module features/metrics
  */
 
-export {
-    MetricsService,
-    getMetricsService,
-    type MetricsConfig,
-} from "./MetricsService"
+// Types (canonical source)
+export type {
+    MetricsConfig,
+    MetricsCollectorConfig,
+    MetricsServerConfig,
+} from "./types"
 
+// Constants
 export {
-    MetricsServer,
-    getMetricsServer,
-    type MetricsServerConfig,
-} from "./MetricsServer"
+    METRICS_PREFIX,
+    DEFAULT_METRICS_CONFIG,
+    DEFAULT_COLLECTOR_CONFIG,
+    DEFAULT_SERVER_CONFIG,
+    DEFAULT_HISTOGRAM_BUCKETS,
+    DEFAULT_SUMMARY_PERCENTILES,
+    CONSENSUS_ROUND_DURATION_BUCKETS,
+    PEER_LATENCY_BUCKETS,
+    TRANSACTION_PROCESSING_BUCKETS,
+    API_REQUEST_DURATION_BUCKETS,
+    HTTP_HEALTH_CHECK_TIMEOUT_MS,
+    MAX_PEERS_TO_REPORT,
+    METRICS_SERVER_NAME,
+    METRICS_SERVER_VERSION,
+} from "./constants"
 
-export {
-    MetricsCollector,
-    getMetricsCollector,
-    type MetricsCollectorConfig,
-} from "./MetricsCollector"
+// Services
+export { MetricsService, getMetricsService } from "./MetricsService"
+export { MetricsServer, getMetricsServer } from "./MetricsServer"
+export { MetricsCollector, getMetricsCollector } from "./MetricsCollector"

@@ -10,26 +10,12 @@
 // REVIEW: TLSNotary port pool management for wstcp proxy instances
 import * as net from "net"
 import log from "@/utilities/logger"
+import { PORT_CONFIG } from "./constants"
+import type { PortPoolState } from "./types"
 
-/**
- * Configuration constants for port allocation
- */
-export const PORT_CONFIG = {
-  PORT_MIN: 55000,
-  PORT_MAX: 57000,
-  IDLE_TIMEOUT_MS: 30000, // 30 seconds
-  MAX_SPAWN_RETRIES: 3,
-  SPAWN_TIMEOUT_MS: 5000, // 5 seconds to wait for wstcp to start
-}
-
-/**
- * Port pool state interface
- */
-export interface PortPoolState {
-  next: number // next port to try (55000-57000)
-  max: number // 57000
-  recycled: number[] // freed ports available for reuse
-}
+// Re-export for backward compatibility
+export { PORT_CONFIG } from "./constants"
+export type { PortPoolState } from "./types"
 
 /**
  * Initialize a new port pool state

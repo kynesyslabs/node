@@ -16,24 +16,19 @@ import client, {
     collectDefaultMetrics,
 } from "prom-client"
 import log from "@/utilities/logger"
-import { Config } from "src/config"
+import type { MetricsConfig } from "./types"
+import {
+    DEFAULT_METRICS_CONFIG,
+    DEFAULT_HISTOGRAM_BUCKETS,
+    DEFAULT_SUMMARY_PERCENTILES,
+    CONSENSUS_ROUND_DURATION_BUCKETS,
+    PEER_LATENCY_BUCKETS,
+    TRANSACTION_PROCESSING_BUCKETS,
+    API_REQUEST_DURATION_BUCKETS,
+} from "./constants"
 
-// REVIEW: Metrics configuration types
-export interface MetricsConfig {
-    enabled: boolean
-    port: number
-    prefix: string
-    defaultLabels?: Record<string, string>
-    collectDefaultMetrics: boolean
-}
-
-// Default configuration
-const DEFAULT_CONFIG: MetricsConfig = {
-    enabled: Config.getInstance().metrics.enabled,
-    port: Config.getInstance().metrics.port,
-    prefix: "demos_",
-    collectDefaultMetrics: true,
-}
+// Re-export for backward compatibility
+export type { MetricsConfig } from "./types"
 
 /**
  * MetricsService - Singleton service for Prometheus metrics
@@ -60,7 +55,7 @@ export class MetricsService {
     private startTime: number = Date.now()
 
     private constructor(config?: Partial<MetricsConfig>) {
-        this.config = { ...DEFAULT_CONFIG, ...config }
+        this.config = { ...DEFAULT_METRICS_CONFIG, ...config }
         this.registry = new Registry()
 
         if (this.config.defaultLabels) {
@@ -133,7 +128,7 @@ export class MetricsService {
             "consensus_round_duration_seconds",
             "Duration of consensus rounds",
             [],
-            [0.1, 0.5, 1, 2, 5, 10, 30],
+            CONSENSUS_ROUND_DURATION_BUCKETS,
         )
         this.createGauge("block_height", "Current block height", [])
         this.createGauge("mempool_size", "Number of pending transactions", [])
@@ -157,7 +152,7 @@ export class MetricsService {
             "peer_latency_seconds",
             "Peer communication latency (aggregated across all peers)",
             [], // No labels to prevent unbounded cardinality
-            [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+            PEER_LATENCY_BUCKETS,
         )
 
         // === Transaction Metrics ===
@@ -176,7 +171,7 @@ export class MetricsService {
             "transaction_processing_seconds",
             "Transaction processing time",
             ["type"],
-            [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
+            TRANSACTION_PROCESSING_BUCKETS,
         )
 
         // === API Metrics ===
@@ -189,7 +184,7 @@ export class MetricsService {
             "api_request_duration_seconds",
             "API request duration",
             ["method", "endpoint"],
-            [0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+            API_REQUEST_DURATION_BUCKETS,
         )
         this.createCounter(
             "api_errors_total",
@@ -287,7 +282,7 @@ export class MetricsService {
             name: fullName,
             help,
             labelNames,
-            buckets: buckets ?? [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+            buckets: buckets ?? DEFAULT_HISTOGRAM_BUCKETS,
             registers: [this.registry],
         })
         this.histograms.set(fullName, histogram)
@@ -313,7 +308,7 @@ export class MetricsService {
             name: fullName,
             help,
             labelNames,
-            percentiles: percentiles ?? [0.5, 0.9, 0.95, 0.99],
+            percentiles: percentiles ?? DEFAULT_SUMMARY_PERCENTILES,
             registers: [this.registry],
         })
         this.summaries.set(fullName, summary)

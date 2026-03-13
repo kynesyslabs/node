@@ -10,56 +10,18 @@
 // REVIEW: TLSNotary FFI bindings - new feature for HTTPS attestation
 import { dlopen, FFIType, ptr, toArrayBuffer, CString } from "bun:ffi"
 import { join, dirname } from "path"
+import type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./types"
+import {
+  SIGNING_KEY_BYTES,
+  PUBLIC_KEY_BYTES,
+  DEFAULT_NOTARY_PORT,
+  DEFAULT_MAX_SENT_DATA,
+  DEFAULT_MAX_RECV_DATA,
+  FFI_CONFIG_BUFFER_SIZE,
+} from "./constants"
 
-// ============================================================================
-// Types
-// ============================================================================
-
-/**
- * Configuration for the TLSNotary instance
- */
-export interface NotaryConfig {
-  /** 32-byte secp256k1 private key for signing attestations */
-  signingKey: Uint8Array;
-  /** Maximum bytes the prover can send (default: 16KB) */
-  maxSentData?: number;
-  /** Maximum bytes the prover can receive (default: 64KB) */
-  maxRecvData?: number;
-}
-
-/**
- * Result of attestation verification
- */
-export interface VerificationResult {
-  /** Whether verification succeeded */
-  success: boolean;
-  /** Server name from the TLS session */
-  serverName?: string;
-  /** Unix timestamp of the connection */
-  connectionTime?: number;
-  /** Bytes sent by the prover */
-  sentLength?: number;
-  /** Bytes received by the prover */
-  recvLength?: number;
-  /** Error message if verification failed */
-  error?: string;
-}
-
-/**
- * Health check status for the notary service
- */
-export interface NotaryHealthStatus {
-  /** Whether the notary is operational */
-  healthy: boolean;
-  /** Whether the library is initialized */
-  initialized: boolean;
-  /** Whether the server is running */
-  serverRunning: boolean;
-  /** Compressed public key (33 bytes, hex encoded) */
-  publicKey?: string;
-  /** Error message if unhealthy */
-  error?: string;
-}
+// Re-export types for backward compatibility
+export type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./types"
 
 // ============================================================================
 // FFI Bindings
@@ -180,8 +142,8 @@ export class TLSNotaryFFI {
    */
   constructor(config: NotaryConfig) {
     // Validate signing key
-    if (!config.signingKey || config.signingKey.length !== 32) {
-      throw new Error("signingKey must be exactly 32 bytes")
+    if (!config.signingKey || config.signingKey.length !== SIGNING_KEY_BYTES) {
+      throw new Error(`signingKey must be exactly ${SIGNING_KEY_BYTES} bytes`)
     }
 
     this.config = config
@@ -219,7 +181,7 @@ export class TLSNotaryFFI {
     //   max_recv_data: usize (8 bytes)
     //   server_port: u16 (2 bytes + 6 padding)
 
-    const configBuffer = new ArrayBuffer(40)
+    const configBuffer = new ArrayBuffer(FFI_CONFIG_BUFFER_SIZE)
     const configView = new DataView(configBuffer)
 
     // Store strong reference to signing key to prevent GC while native code holds pointer
@@ -228,9 +190,9 @@ export class TLSNotaryFFI {
 
     // Write struct fields (little-endian)
     configView.setBigUint64(0, BigInt(signingKeyPtr), true) // signing_key ptr
-    configView.setBigUint64(8, BigInt(32), true) // signing_key_len
-    configView.setBigUint64(16, BigInt(this.config.maxSentData ?? 16384), true) // max_sent_data
-    configView.setBigUint64(24, BigInt(this.config.maxRecvData ?? 65536), true) // max_recv_data
+    configView.setBigUint64(8, BigInt(SIGNING_KEY_BYTES), true) // signing_key_len
+    configView.setBigUint64(16, BigInt(this.config.maxSentData ?? DEFAULT_MAX_SENT_DATA), true) // max_sent_data
+    configView.setBigUint64(24, BigInt(this.config.maxRecvData ?? DEFAULT_MAX_RECV_DATA), true) // max_recv_data
     configView.setUint16(32, 0, true) // server_port (0 = don't auto-start)
 
     // Store strong reference to config buffer to prevent GC
@@ -250,7 +212,7 @@ export class TLSNotaryFFI {
    * @param port - Port to listen on (default: 7047)
    * @throws Error if notary not initialized or server fails to start
    */
-  async startServer(port = 7047): Promise<void> {
+  async startServer(port = DEFAULT_NOTARY_PORT): Promise<void> {
     if (!this.initialized || !this.handle) {
       throw new Error("Notary not initialized")
     }
@@ -382,14 +344,14 @@ export class TLSNotaryFFI {
       throw new Error("Notary not initialized")
     }
 
-    const keyBuffer = new Uint8Array(33)
+    const keyBuffer = new Uint8Array(PUBLIC_KEY_BYTES)
     const keyPtr = ptr(keyBuffer)
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = this.lib.symbols.tlsn_notary_get_public_key(
       this.handle as any,
       keyPtr,
-      BigInt(33),
+      BigInt(PUBLIC_KEY_BYTES),
     )
 
     if (result < 0) {

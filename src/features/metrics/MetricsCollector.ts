@@ -13,23 +13,17 @@ import { promisify } from "node:util"
 import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
 import { Config } from "src/config"
+import type { MetricsCollectorConfig } from "./types"
+import {
+    DEFAULT_COLLECTOR_CONFIG,
+    HTTP_HEALTH_CHECK_TIMEOUT_MS,
+    MAX_PEERS_TO_REPORT,
+} from "./constants"
+
+// Re-export for backward compatibility
+export type { MetricsCollectorConfig } from "./types"
 
 const execAsync = promisify(exec)
-
-// REVIEW: Configuration for metrics collection
-export interface MetricsCollectorConfig {
-    enabled: boolean
-    collectionIntervalMs: number
-    dockerHealthEnabled: boolean
-    portHealthEnabled: boolean
-}
-
-const DEFAULT_COLLECTOR_CONFIG: MetricsCollectorConfig = {
-    enabled: true,
-    collectionIntervalMs: 2500, // 2.5 seconds - faster updates for real-time monitoring
-    dockerHealthEnabled: true,
-    portHealthEnabled: true,
-}
 
 /**
  * MetricsCollector - Actively collects metrics from node subsystems
@@ -500,8 +494,8 @@ export class MetricsCollector {
             this.metricsService.setGauge("peers_connected", onlinePeers.length)
             this.metricsService.setGauge("peers_total", allPeers.length)
 
-            // Individual peer info (limit to first 20 to avoid explosion)
-            const peersToReport = allPeers.slice(0, 20)
+            // Individual peer info (limit to avoid cardinality explosion)
+            const peersToReport = allPeers.slice(0, MAX_PEERS_TO_REPORT)
             for (const peer of peersToReport) {
                 const status = onlinePeers.some(
                     (p) => p.identity === peer.identity,
@@ -550,7 +544,7 @@ export class MetricsCollector {
         const startTime = Date.now()
         try {
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
+            const timeout = setTimeout(() => controller.abort(), HTTP_HEALTH_CHECK_TIMEOUT_MS)
 
             const response = await fetch(`${baseUrl}${path}`, {
                 method: "GET",
@@ -589,7 +583,7 @@ export class MetricsCollector {
         const startTime = Date.now()
         try {
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
+            const timeout = setTimeout(() => controller.abort(), HTTP_HEALTH_CHECK_TIMEOUT_MS)
 
             const response = await fetch(`${baseUrl}/info`, {
                 method: "GET",

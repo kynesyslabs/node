@@ -11,34 +11,11 @@ import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
+import type { L2PSBatchPayload } from "./types"
+import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN } from "./constants"
 
-/**
- * L2PS Batch Payload Interface
- * 
- * Represents the encrypted batch data submitted to the main mempool
- */
-export interface L2PSBatchPayload {
-    /** L2PS network identifier */
-    l2ps_uid: string
-    /** Base64 encrypted blob containing all transaction data */
-    encrypted_batch: string
-    /** Number of transactions in this batch */
-    transaction_count: number
-    /** Deterministic hash of the batch for integrity verification */
-    batch_hash: string
-    /** Array of original transaction hashes included in this batch */
-    transaction_hashes: string[]
-    /** HMAC-SHA256 authentication tag for tamper detection */
-    authentication_tag: string
-    /** ZK-SNARK PLONK proof for batch validity (optional during transition) */
-    zk_proof?: {
-        proof: any
-        publicSignals: string[]
-        batchSize: number
-        finalStateRoot: string
-        totalVolume: string
-    }
-}
+// Re-export for backward compatibility
+export type { L2PSBatchPayload } from "./types"
 
 /**
  * L2PS Batch Aggregator Service
@@ -85,17 +62,17 @@ export class L2PSBatchAggregator {
     /** Minimum number of transactions to trigger a batch (can be lower if timeout reached) */
     private readonly MIN_BATCH_SIZE = Config.getInstance().l2ps.minBatchSize
 
-    /** Maximum number of transactions per batch (limited by ZK circuit size: max 10) */
+    /** Maximum number of transactions per batch (limited by ZK circuit size) */
     private readonly MAX_BATCH_SIZE = Math.min(
         Config.getInstance().l2ps.maxBatchSize,
-        10 // ZK circuit constraint - cannot exceed 10
+        ZK_CIRCUIT_MAX_BATCH_SIZE,
     )
 
     /** Cleanup age - remove batched transactions older than this (ms) */
     private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
     /** Domain separator for batch transaction signatures */
-    private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
+    private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
 
     /** Statistics tracking */
     private stats = this.createInitialStats()
