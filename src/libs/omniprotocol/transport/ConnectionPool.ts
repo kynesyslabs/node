@@ -700,36 +700,41 @@ export class ConnectionPool extends EventEmitter {
             peerIdentity,
             peerConnections,
         ] of this.connections.entries()) {
-            const remainingConnections = peerConnections.filter(connection => {
+            const terminalConnections: PeerConnection[] = []
+            const idleTimedOutConnections: PeerConnection[] = []
+            const activeConnections: PeerConnection[] = []
+
+            for (const connection of peerConnections) {
                 const state = connection.getState()
                 const info = connection.getInfo()
 
-                // Remove terminal connections
                 if (ConnectionStateUtils.isTerminal(state)) {
-                    connectionsToClose.push(connection)
-                    return false
-                }
-
-                // Close IDLE connections with no in-flight requests after timeout
-                if (
+                    terminalConnections.push(connection)
+                } else if (
                     state === ConnectionState.IDLE &&
-                    info.inFlightCount === 0
+                    info.inFlightCount === 0 &&
+                    now - info.lastActivity > this.config.idleTimeout
                 ) {
-                    const idleTime = now - info.lastActivity
-                    if (idleTime > this.config.idleTimeout) {
-                        connectionsToClose.push(connection)
-                        return false
-                    }
+                    idleTimedOutConnections.push(connection)
+                } else {
+                    activeConnections.push(connection)
                 }
+            }
 
-                return true
-            })
+            connectionsToClose.push(...terminalConnections)
 
-            // Update or remove peer entry
-            if (remainingConnections.length === 0) {
+            // Keep one idle connection per identity to maintain peer presence
+            if (activeConnections.length === 0 && idleTimedOutConnections.length > 0) {
+                connectionsToClose.push(...idleTimedOutConnections.slice(1))
+                activeConnections.push(idleTimedOutConnections[0])
+            } else {
+                connectionsToClose.push(...idleTimedOutConnections)
+            }
+
+            if (activeConnections.length === 0) {
                 this.connections.delete(peerIdentity)
             } else {
-                this.connections.set(peerIdentity, remainingConnections)
+                this.connections.set(peerIdentity, activeConnections)
             }
         }
 

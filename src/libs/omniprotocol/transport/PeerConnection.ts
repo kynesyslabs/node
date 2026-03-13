@@ -657,7 +657,7 @@ export class PeerConnection extends EventEmitter {
                     this.setState(ConnectionState.CLOSED)
                     resolve()
                 })
-                this.socket.end()
+                this.socket.destroy()
             } else {
                 this.setState(ConnectionState.CLOSED)
                 resolve()
