@@ -34,7 +34,7 @@ export class Transactions {
     @Column("varchar", { name: "from" })
     from: string
 
-    @Column("varchar", { name: "from_ed25519_address" })
+    @Column("varchar", { name: "from_ed25519_address", nullable: true })
     from_ed25519_address: string
 
     @Column("varchar", { name: "to" })
