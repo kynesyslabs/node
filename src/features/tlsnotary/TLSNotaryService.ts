@@ -112,6 +112,7 @@ export function isTLSNotaryProxy(): boolean {
  * Environment variables:
  * - TLSNOTARY_DISABLED: Disable the service (default: false, i.e. enabled by default)
  * - TLSNOTARY_MODE: Operational mode - 'docker' (default) or 'ffi'
+ * - TLSNOTARY_HOST: Hostname for docker mode notary server (default: localhost)
  * - TLSNOTARY_PORT: Port for the notary server (default: 7047)
  * - TLSNOTARY_SIGNING_KEY: 32-byte hex-encoded secp256k1 private key (only for FFI mode)
  * - TLSNOTARY_MAX_SENT_DATA: Maximum sent data bytes (default: 16384)
@@ -202,6 +203,7 @@ export class TLSNotaryService {
   constructor(config: TLSNotaryServiceConfig) {
     this.config = {
       ...config,
+      host: config.host ?? "localhost",
       mode: config.mode ?? "docker",  // Default to docker mode
     }
   }
@@ -265,7 +267,7 @@ export class TLSNotaryService {
     const debug = isTLSNotaryDebug()
 
     if (debug) {
-      log.info(`[TLSNotary] Docker mode: expecting container on port ${this.config.port}`)
+      log.info(`[TLSNotary] Docker mode: expecting container on ${this.config.host}:${this.config.port}`)
     }
 
     // In Docker mode, we don't start the container here - that's handled by the run script
@@ -273,8 +275,8 @@ export class TLSNotaryService {
     log.info("[TLSNotary] Docker mode initialized (container managed externally)")
 
     if (debug) {
-      log.info(`[TLSNotary] Config: port=${this.config.port}`)
-      log.info("[TLSNotary] Container should be started via: cd tlsnotary && docker compose up -d")
+      log.info(`[TLSNotary] Config: host=${this.config.host}, port=${this.config.port}`)
+      log.info("[TLSNotary] Container should be started via: cd tlsnotary && TLSNOTARY_PORT=7047 docker compose up -d")
     }
   }
 
@@ -364,8 +366,10 @@ export class TLSNotaryService {
   private async startDockerMode(): Promise<void> {
     const debug = isTLSNotaryDebug()
     const fatal = isTLSNotaryFatal()
+    const dockerHost = this.config.host ?? "localhost"
+    const infoUrl = `http://${dockerHost}:${this.config.port}/info`
 
-    log.info(`[TLSNotary] Docker mode: checking container on port ${this.config.port}...`)
+    log.info(`[TLSNotary] Docker mode: checking container at ${dockerHost}:${this.config.port}...`)
 
     try {
       // Try to fetch /info endpoint to verify container is running
@@ -377,7 +381,10 @@ export class TLSNotaryService {
       }
 
       const info = await response.json() as { publicKey?: string; version?: string }
-      this.dockerPublicKey = info.publicKey ?? null
+      if (!info.publicKey || typeof info.publicKey !== "string") {
+        throw new Error("Notary server did not expose a publicKey")
+      }
+      this.dockerPublicKey = info.publicKey
 
       this.running = true
       log.info("[TLSNotary] Docker container is running and accessible")
@@ -392,9 +399,9 @@ export class TLSNotaryService {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      log.error(`[TLSNotary] Failed to connect to Docker notary on port ${this.config.port}: ${message}`)
+      log.error(`[TLSNotary] Failed to connect to Docker notary at ${dockerHost}:${this.config.port}: ${message}`)
       log.error("[TLSNotary] Make sure the Docker container is running:")
-      log.error("[TLSNotary]   cd tlsnotary && TLSNOTARY_PORT=${TLSNOTARY_PORT} docker compose up -d")
+      log.error("[TLSNotary]   cd tlsnotary && TLSNOTARY_PORT=7047 docker compose up -d")
 
       if (fatal) {
         log.error("[TLSNotary] FATAL: Exiting due to Docker container not available")
@@ -727,7 +734,10 @@ export class TLSNotaryService {
         healthy: this.running && this.dockerPublicKey !== null,
         initialized: this.dockerPublicKey !== null,
         serverRunning: this.running,
-        error: this.running ? undefined : "Docker container not accessible",
+        publicKey: this.dockerPublicKey ?? undefined,
+        error: this.running
+          ? (this.dockerPublicKey ? undefined : "Docker container did not expose a public key")
+          : "Docker container not accessible",
       }
     } else {
       health = this.ffi

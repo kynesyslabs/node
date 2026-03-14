@@ -20,7 +20,7 @@ import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
-import L2PSMempool from "../blockchain/l2ps_mempool"
+import L2PSMempool, { L2PS_STATUS } from "../blockchain/l2ps_mempool"
 import TxUtils from "../blockchain/transaction"
 import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
@@ -801,8 +801,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             }
 
             try {
-                // Get all processed transactions for this L2PS UID
-                const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+                // Get all executed transactions for this L2PS UID
+                const transactions = await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
 
                 response.result = 200
                 response.response = {
@@ -833,8 +833,8 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 // Optional timestamp filter for incremental sync
                 const sinceTimestamp = data.since_timestamp || 0
 
-                // Get all processed transactions for this L2PS UID
-                let transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+                // Get all executed transactions for this L2PS UID
+                let transactions = await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
 
                 // Filter by timestamp if provided (incremental sync)
                 if (sinceTimestamp > 0) {

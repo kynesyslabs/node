@@ -50,6 +50,37 @@ import { runFheArithmeticSmoke } from "./features/fhe/fhe_arithmetic_smoke"
 import { runWeb2UrlValidationSmoke } from "./features/web2/web2_url_validation_smoke"
 import { runWeb2SanitizationSmoke } from "./features/web2/web2_sanitization_smoke"
 import { runWeb2DahrRejects } from "./features/web2/web2_dahr_rejects"
+import { runIncentiveReferralCodeSmoke } from "./features/incentive/incentive_referral_code_smoke"
+import { runIncentiveReferralEligibility } from "./features/incentive/incentive_referral_eligibility"
+import { runIncentivePointScoreMatrix } from "./features/incentive/incentive_point_score_matrix"
+import { runMcpToolFactorySmoke } from "./features/mcp/mcp_tool_factory_smoke"
+import { runMcpServerRegistrySmoke } from "./features/mcp/mcp_server_registry_smoke"
+import { runMcpServerCreationSmoke } from "./features/mcp/mcp_server_creation_smoke"
+import { runMultichainParserRejects } from "./features/multichain/multichain_parser_rejects"
+import { runMultichainParserExecuteSmoke } from "./features/multichain/multichain_parser_execute_smoke"
+import { runMultichainDispatcherAggregation } from "./features/multichain/multichain_dispatcher_aggregation"
+import { runL2psTransactionShapeSmoke } from "./features/l2ps/l2ps_transaction_shape_smoke"
+import { runL2psServiceStatusSmoke } from "./features/l2ps/l2ps_service_status_smoke"
+import { runL2psStatisticsSnapshot } from "./features/l2ps/l2ps_statistics_snapshot"
+import { runL2psRegistryStateSmoke } from "./features/l2ps/l2ps_registry_state_smoke"
+import { runL2psParticipantCacheSmoke } from "./features/l2ps/l2ps_participant_cache_smoke"
+import { runL2psParticipantDiscoveryResilience } from "./features/l2ps/l2ps_participant_discovery_resilience"
+import { runL2psIncrementalSyncSmoke } from "./features/l2ps/l2ps_incremental_sync_smoke"
+import { runL2psExchangeParticipationSmoke } from "./features/l2ps/l2ps_exchange_participation_smoke"
+import { runL2psConsolidatedHashSmoke } from "./features/l2ps/l2ps_consolidated_hash_smoke"
+import { runL2psBatchGroupingSmoke } from "./features/l2ps/l2ps_batch_grouping_smoke"
+import { runL2psBatchPayloadSmoke } from "./features/l2ps/l2ps_batch_payload_smoke"
+import { runL2psHashServiceCycleSmoke } from "./features/l2ps/l2ps_hash_service_cycle_smoke"
+import { runL2psBatchNonceProgressionSmoke } from "./features/l2ps/l2ps_batch_nonce_progression_smoke"
+import { runL2psBatchSubmissionSmoke } from "./features/l2ps/l2ps_batch_submission_smoke"
+import { runL2psBatchSubmissionZkRejects } from "./features/l2ps/l2ps_batch_submission_zk_rejects"
+import { runL2psProcessBatchForUidSmoke } from "./features/l2ps/l2ps_process_batch_for_uid_smoke"
+import { runL2psHashProcessNetworkSmoke } from "./features/l2ps/l2ps_hash_process_network_smoke"
+import { runL2psHashesStoreSmoke } from "./features/l2ps/l2ps_hashes_store_smoke"
+import { runL2psHashUpdateHandlerSmoke } from "./features/l2ps/l2ps_hash_update_handler_smoke"
+import { runL2psNodecallQueriesSmoke } from "./features/l2ps/l2ps_nodecall_queries_smoke"
+import { runL2psLiveParticipationSmoke } from "./features/l2ps/l2ps_live_participation_smoke"
+import { runL2psLiveSubmissionRelaySmoke } from "./features/l2ps/l2ps_live_submission_relay_smoke"
 import { runGcrIdentitySmoke } from "./features/gcr/gcr_identity_smoke"
 import { runGcrIdentityRemove } from "./features/gcr/gcr_identity_remove"
 import { runGcrIdentityLoadgen } from "./features/gcr/gcr_identity_loadgen"
@@ -134,6 +165,37 @@ registerScenario("fhe_arithmetic_smoke", runFheArithmeticSmoke)
 registerScenario("web2_url_validation_smoke", runWeb2UrlValidationSmoke)
 registerScenario("web2_sanitization_smoke", runWeb2SanitizationSmoke)
 registerScenario("web2_dahr_rejects", runWeb2DahrRejects)
+registerScenario("incentive_referral_code_smoke", runIncentiveReferralCodeSmoke)
+registerScenario("incentive_referral_eligibility", runIncentiveReferralEligibility)
+registerScenario("incentive_point_score_matrix", runIncentivePointScoreMatrix)
+registerScenario("mcp_tool_factory_smoke", runMcpToolFactorySmoke)
+registerScenario("mcp_server_registry_smoke", runMcpServerRegistrySmoke)
+registerScenario("mcp_server_creation_smoke", runMcpServerCreationSmoke)
+registerScenario("multichain_parser_rejects", runMultichainParserRejects)
+registerScenario("multichain_parser_execute_smoke", runMultichainParserExecuteSmoke)
+registerScenario("multichain_dispatcher_aggregation", runMultichainDispatcherAggregation)
+registerScenario("l2ps_transaction_shape_smoke", runL2psTransactionShapeSmoke)
+registerScenario("l2ps_service_status_smoke", runL2psServiceStatusSmoke)
+registerScenario("l2ps_statistics_snapshot", runL2psStatisticsSnapshot)
+registerScenario("l2ps_registry_state_smoke", runL2psRegistryStateSmoke)
+registerScenario("l2ps_participant_cache_smoke", runL2psParticipantCacheSmoke)
+registerScenario("l2ps_participant_discovery_resilience", runL2psParticipantDiscoveryResilience)
+registerScenario("l2ps_incremental_sync_smoke", runL2psIncrementalSyncSmoke)
+registerScenario("l2ps_exchange_participation_smoke", runL2psExchangeParticipationSmoke)
+registerScenario("l2ps_consolidated_hash_smoke", runL2psConsolidatedHashSmoke)
+registerScenario("l2ps_batch_grouping_smoke", runL2psBatchGroupingSmoke)
+registerScenario("l2ps_batch_payload_smoke", runL2psBatchPayloadSmoke)
+registerScenario("l2ps_hash_service_cycle_smoke", runL2psHashServiceCycleSmoke)
+registerScenario("l2ps_batch_nonce_progression_smoke", runL2psBatchNonceProgressionSmoke)
+registerScenario("l2ps_batch_submission_smoke", runL2psBatchSubmissionSmoke)
+registerScenario("l2ps_batch_submission_zk_rejects", runL2psBatchSubmissionZkRejects)
+registerScenario("l2ps_process_batch_for_uid_smoke", runL2psProcessBatchForUidSmoke)
+registerScenario("l2ps_hash_process_network_smoke", runL2psHashProcessNetworkSmoke)
+registerScenario("l2ps_hashes_store_smoke", runL2psHashesStoreSmoke)
+registerScenario("l2ps_hash_update_handler_smoke", runL2psHashUpdateHandlerSmoke)
+registerScenario("l2ps_nodecall_queries_smoke", runL2psNodecallQueriesSmoke)
+registerScenario("l2ps_live_participation_smoke", runL2psLiveParticipationSmoke)
+registerScenario("l2ps_live_submission_relay_smoke", runL2psLiveSubmissionRelaySmoke)
 registerScenario("gcr_identity_smoke", runGcrIdentitySmoke)
 registerScenario("gcr_identity_remove", runGcrIdentityRemove)
 registerScenario("gcr_identity_loadgen", runGcrIdentityLoadgen)

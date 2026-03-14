@@ -60,6 +60,7 @@ import {
     SerializedSignedObject,
     ucrypto,
     Cryptography,
+    uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
 
@@ -630,49 +631,55 @@ export class SignalingServer {
         // REVIEW: PR Fix #2 - Use mutex to prevent nonce race conditions
         // Acquire lock before reading/modifying nonce to ensure atomic operation
         return await this.nonceMutex.runExclusive(async () => {
+            const nodeIdentity = getSharedState.publicKeyHex
+            if (!nodeIdentity) {
+                throw new Error("[Signaling Server] Node public key not available for message persistence")
+            }
+
             // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
-            const currentNonce = this.senderNonces.get(senderId) || 0
+            const currentNonce = this.senderNonces.get(nodeIdentity) || 0
             const nonce = currentNonce + 1
             // Don't increment yet - wait for mempool success for better error handling
 
+            const timestamp = Date.now()
             const transaction = new Transaction()
             transaction.content = {
                 type: "instantMessaging",
-                from: senderId,
+                from: nodeIdentity,
                 to: targetId,
-                from_ed25519_address: senderId,
+                from_ed25519_address: nodeIdentity,
                 amount: 0,
-                data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
+                data: ["instantMessaging", { senderId, targetId, message, timestamp }] as any,
                 gcr_edits: [],
                 nonce,
-                timestamp: Date.now(),
+                timestamp,
                 transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
             }
+            transaction.status = ""
 
-            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
-            // Current: Sign with node's private key for integrity (not authentication)
-            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
-            if (!getSharedState.identity?.ed25519?.privateKey) {
-                throw new Error("[Signaling Server] Private key not available for message signing")
-            }
-
-            const signature = Cryptography.sign(
-                JSON.stringify(transaction.content),
-                getSharedState.identity.ed25519.privateKey,
-            )
-            transaction.signature = signature as any
             transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(transaction.hash),
+            )
+            transaction.signature = {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            } as any
 
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
             try {
                 const referenceBlock = await Chain.getLastBlockNumber()
-                await Mempool.addTransaction({
+                const { error } = await Mempool.addTransaction({
                     ...transaction,
                     reference_block: referenceBlock,
                 })
+                if (error) {
+                    throw new Error(error)
+                }
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
-                this.senderNonces.set(senderId, nonce)
+                this.senderNonces.set(nodeIdentity, nonce)
             } catch (error: any) {
                 handleError(error, "NETWORK", { source: "signaling server" })
                 throw error // Rethrow to be caught by caller's error handling

@@ -300,7 +300,7 @@ export const handleL2PSGetBatchStatus: OmniHandler<Buffer> = async ({ message, c
         // Get pending transactions from L2PS mempool
         const L2PSMempool = (await import("../../../blockchain/l2ps_mempool")).default
 
-        const pendingTxs = await L2PSMempool.getByUID(request.l2psUid, "processed")
+        const pendingTxs = await L2PSMempool.getByUID(request.l2psUid, "executed")
 
         return encodeResponse(
             successResponse({

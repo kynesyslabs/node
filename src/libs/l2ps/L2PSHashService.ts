@@ -1,4 +1,4 @@
-import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
+import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
@@ -261,8 +261,8 @@ export class L2PSHashService {
                 return
             }
 
-            // Get transaction count for this UID (only processed transactions)
-            const transactions = await L2PSMempool.getByUID(l2psUid, "processed")
+            // Get transaction count for this UID (only executed transactions awaiting batching)
+            const transactions = await L2PSMempool.getByUID(l2psUid, L2PS_STATUS.EXECUTED)
             const transactionCount = transactions.length
 
             // Only generate hash update if there are transactions
@@ -281,12 +281,16 @@ export class L2PSHashService {
                 transactionCount,
                 this.demos,
             )
+            const validityData = await confirmTransaction(
+                hashUpdateTx as any,
+                hashUpdateTx.content.from,
+            )
 
             this.stats.totalHashesGenerated++
 
             // Relay to validators via DTR infrastructure
             // Note: Self-directed transaction will automatically trigger DTR routing
-            await this.relayToValidators(hashUpdateTx)
+            await this.relayToValidators(hashUpdateTx, validityData)
 
             this.stats.successfulRelays++
 
@@ -308,18 +312,24 @@ export class L2PSHashService {
      *
      * @param hashUpdateTx - Signed L2PS hash update transaction
      */
-    private async relayToValidators(hashUpdateTx: any): Promise<void> {
+    private async relayToValidators(
+        hashUpdateTx: any,
+        validityData: ValidityData,
+    ): Promise<void> {
         try {
-            // Only relay in production mode (same as existing DTR pattern)
-            if (!getSharedState.PROD) {
+            // Allow explicit local-devnet relay coverage without switching the full node into PROD.
+            const allowNonProdRelay = process.env.L2PS_HASH_RELAY_NON_PROD === "true"
+            if (!getSharedState.PROD && !allowNonProdRelay) {
                 log.debug("[L2PS Hash Service] Skipping DTR relay (non-production mode)")
                 return
             }
 
             // Get validators using same logic as DTR RelayRetryService
             const { commonValidatorSeed } = await getCommonValidatorSeed()
+            const localIdentity = getSharedState.publicKeyHex
             const validators = await getShard(commonValidatorSeed)
             const availableValidators = validators
+                .filter(v => v.identity !== localIdentity)
                 .filter(v => v.status.online && v.sync.status)
                 .sort(() => Math.random() - 0.5) // Random order for load balancing
 
@@ -344,13 +354,10 @@ export class L2PSHashService {
                     }
 
                     // HTTP fallback
-                    const result = await validator.call({
-                        method: "nodeCall",
-                        params: [{
-                            type: "RELAY_TX",
-                            data: { transaction: hashUpdateTx },
-                        }],
-                    }, true)
+                    const result = await DTRManager.relayTransactions(
+                        validator,
+                        [validityData],
+                    )
 
                     if (result.result === 200) {
                         log.info(`[L2PS Hash Service] Successfully relayed hash update via HTTP to validator ${validator.identity.substring(0, 8)}...`)

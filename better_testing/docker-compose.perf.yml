@@ -60,6 +60,8 @@ services:
       # Mount devnet mnemonics so loadgen can reuse funded devnet accounts without baking secrets into images.
       # Path is relative to the `devnet/` directory (where we run docker compose from).
       - ./identities:/wallets:ro
+      # Keep containerized loadgen aligned with the locally patched SDK build until the fix is published.
+      - ../node_modules/@kynesyslabs/demosdk:/app/node_modules/@kynesyslabs/demosdk:ro
       # Persist run outputs on the host for dashboarding and comparisons.
       - ../better_testing/runs:/runs
     command:

@@ -20,6 +20,18 @@ services:
     networks:
       - demos-network
 
+  tlsnotary:
+    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+    container_name: demos-devnet-tlsnotary
+    environment:
+      NS_NOTARIZATION__MAX_SENT_DATA: 32768
+    platform: linux/amd64
+    ports:
+      - "7047:7047"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
   # Node 1
   node-1:
     image: demos-devnet-node
@@ -30,8 +42,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tlsnotary:
+        condition: service_started
     environment:
       - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_USER=${POSTGRES_USER:-demosuser}
@@ -41,9 +56,14 @@ services:
       - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
       - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
     volumes:
       - ./identities/node1.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
       - "${NODE1_OMNI_PORT:-53561}:${NODE1_OMNI_PORT:-53561}"
@@ -59,10 +79,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tlsnotary:
+        condition: service_started
       node-1:
         condition: service_started
     environment:
       - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_USER=${POSTGRES_USER:-demosuser}
@@ -72,9 +95,14 @@ services:
       - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
       - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
     volumes:
       - ./identities/node2.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE2_PORT:-53552}:${NODE2_PORT:-53552}"
       - "${NODE2_OMNI_PORT:-53562}:${NODE2_OMNI_PORT:-53562}"
@@ -90,10 +118,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tlsnotary:
+        condition: service_started
       node-1:
         condition: service_started
     environment:
       - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_USER=${POSTGRES_USER:-demosuser}
@@ -103,9 +134,14 @@ services:
       - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
       - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
     volumes:
       - ./identities/node3.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE3_PORT:-53553}:${NODE3_PORT:-53553}"
       - "${NODE3_OMNI_PORT:-53563}:${NODE3_OMNI_PORT:-53563}"
@@ -121,10 +157,13 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tlsnotary:
+        condition: service_started
       node-1:
         condition: service_started
     environment:
       - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
       - PG_HOST=postgres
       - PG_PORT=5432
       - PG_USER=${POSTGRES_USER:-demosuser}
@@ -134,9 +173,14 @@ services:
       - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
       - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
     volumes:
       - ./identities/node4.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE4_PORT:-53554}:${NODE4_PORT:-53554}"
       - "${NODE4_OMNI_PORT:-53564}:${NODE4_OMNI_PORT:-53564}"

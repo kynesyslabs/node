@@ -33,6 +33,7 @@ import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTre
 import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
+import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { Transactions } from "src/model/entities/Transactions"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -479,6 +480,25 @@ export default class Chain {
                                 transactionEntities.map(tx => tx.hash),
                                 transactionalEntityManager,
                             )
+                        }
+
+                        // Mark ZK commitments with the block they were actually confirmed in
+                        // before Merkle insertion scans for this block's pending commitments.
+                        const committedTxHashes = transactionEntities.map(
+                            tx => tx.hash,
+                        )
+                        if (committedTxHashes.length > 0) {
+                            await transactionalEntityManager
+                                .createQueryBuilder()
+                                .update(IdentityCommitment)
+                                .set({ blockNumber: block.number })
+                                .where("transaction_hash IN (:...hashes)", {
+                                    hashes: committedTxHashes,
+                                })
+                                .andWhere("leaf_index = :leafIndex", {
+                                    leafIndex: -1,
+                                })
+                                .execute()
                         }
 
                         // Update ZK Merkle tree within same transaction

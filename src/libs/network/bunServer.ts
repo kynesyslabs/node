@@ -43,6 +43,53 @@ export class BunServer {
         this.routes.get(method)?.set(path, handler)
     }
 
+    private matchRoute(
+        method: string,
+        path: string,
+    ): { handler: Handler; params: Record<string, string> } | null {
+        const methodRoutes = this.routes.get(method)
+        if (!methodRoutes) {
+            return null
+        }
+
+        const exact = methodRoutes.get(path)
+        if (exact) {
+            return { handler: exact, params: {} }
+        }
+
+        const requestedParts = path.split("/").filter(Boolean)
+        for (const [routePath, handler] of methodRoutes.entries()) {
+            const routeParts = routePath.split("/").filter(Boolean)
+            if (routeParts.length !== requestedParts.length) {
+                continue
+            }
+
+            const params: Record<string, string> = {}
+            let matches = true
+
+            for (let i = 0; i < routeParts.length; i++) {
+                const routePart = routeParts[i]
+                const requestedPart = requestedParts[i]
+
+                if (routePart.startsWith(":")) {
+                    params[routePart.slice(1)] = decodeURIComponent(requestedPart)
+                    continue
+                }
+
+                if (routePart !== requestedPart) {
+                    matches = false
+                    break
+                }
+            }
+
+            if (matches) {
+                return { handler, params }
+            }
+        }
+
+        return null
+    }
+
     private async handleRequest(
         req: Request,
         server?: Server,
@@ -53,9 +100,10 @@ export class BunServer {
 
         // Create the final handler (route handler)
         const finalHandler = async (): Promise<Response> => {
-            const routeHandler = this.routes.get(method)?.get(path)
-            if (routeHandler) {
-                return await routeHandler(req)
+            const match = this.matchRoute(method, path)
+            if (match) {
+                ;(req as Request & { params?: Record<string, string> }).params = match.params
+                return await match.handler(req)
             }
             return new Response("Not Found", { status: 404 })
         }
@@ -110,6 +158,8 @@ export const cors = (): Middleware => {
         headers = { ...headers, ...response.headers.toJSON() }
 
         return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
             headers: headers,
         })
     }

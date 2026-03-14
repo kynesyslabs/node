@@ -5,6 +5,8 @@ import type {
   PQCIdentityGCREditData,
   PqcIdentityRemovePayload,
   UdGCRData,
+  ZkAttestationGCRData,
+  ZkCommitmentGCRData,
 } from "@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 
 declare module "@kynesyslabs/demosdk/build/types/blockchain/GCREdit" {
@@ -34,7 +36,8 @@ declare module "@kynesyslabs/demosdk/build/types/blockchain/GCREdit" {
   }
 
   export interface GCREditIdentity {
-    context: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos"
+    context: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos" | "zk"
+    operation: "add" | "remove" | "zk_commitmentadd" | "zk_attestationadd"
     data:
       | Web2GCRData
       | XmGCRIdentityData
@@ -44,5 +47,7 @@ declare module "@kynesyslabs/demosdk/build/types/blockchain/GCREdit" {
       | UdGCRData
       | NomisIdentityGCREditData
       | EthosIdentityGCREditData
+      | ZkCommitmentGCRData[]
+      | ZkAttestationGCRData[]
   }
 }

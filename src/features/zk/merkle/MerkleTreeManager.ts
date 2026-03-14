@@ -20,6 +20,30 @@ import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment.js
 import log from "src/utilities/logger"
 import { handleError } from "src/errors"
 
+function isHexCommitment(value: string): boolean {
+    return /^(0x)?[0-9a-fA-F]{64}$/.test(value)
+}
+
+function normalizeCommitmentKey(value: string): string {
+    return isHexCommitment(value) ? value.toLowerCase().replace(/^0x/, "") : value
+}
+
+function parseCommitmentValue(value: string): bigint {
+    if (!value || typeof value !== "string") {
+        throw new Error("Invalid commitment: must be a non-empty string")
+    }
+
+    if (isHexCommitment(value)) {
+        return BigInt(`0x${normalizeCommitmentKey(value)}`)
+    }
+
+    if (/^\d+$/.test(value)) {
+        return BigInt(value)
+    }
+
+    throw new Error(`Invalid commitment format: ${value}`)
+}
+
 export class MerkleTreeManager {
     private tree: IncrementalMerkleTree
     private dataSource: DataSource
@@ -100,18 +124,7 @@ export class MerkleTreeManager {
      */
     addCommitment(commitment: string): number {
         try {
-            // REVIEW: Validate commitment input
-            if (!commitment || typeof commitment !== "string") {
-                throw new Error("Invalid commitment: must be a non-empty string")
-            }
-
-            // REVIEW: Validate BigInt conversion
-            let commitmentBigInt: bigint
-            try {
-                commitmentBigInt = BigInt(commitment)
-            } catch (e) {
-                throw new Error(`Invalid commitment format: ${commitment}`)
-            }
+            const commitmentBigInt = parseCommitmentValue(commitment)
 
             // Check tree capacity before insertion
             const capacity = Math.pow(2, this.depth)
@@ -189,9 +202,11 @@ export class MerkleTreeManager {
         leafIndex: number
     } | null> {
         try {
+            const normalizedCommitmentHash = normalizeCommitmentKey(commitmentHash)
+
             // Find the commitment in the database to get its leaf index
             const commitment = await this.commitmentRepo.findOne({
-                where: { commitmentHash },
+                where: { commitmentHash: normalizedCommitmentHash },
             })
 
             if (!commitment || commitment.leafIndex === -1) {
@@ -266,9 +281,13 @@ export class MerkleTreeManager {
         root: bigint,
     ): boolean {
         try {
-            // REVIEW: verifyProof accepts only one argument - the MerkleProof object
-            // Include leaf and root in proof object as required by zk-kit library
-            return IncrementalMerkleTree.verifyProof({ ...proof, leaf, root })
+            const verifier = new IncrementalMerkleTree(
+                poseidon2,
+                proof.pathIndices.length,
+                BigInt(0),
+                2,
+            )
+            return verifier.verifyProof({ ...proof, leaf, root })
         } catch (error) {
             handleError(error, "CORE", { source: "MerkleTreeManager.verifyProof" })
             return false

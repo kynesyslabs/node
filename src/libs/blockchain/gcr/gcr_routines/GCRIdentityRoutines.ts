@@ -837,7 +837,9 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const payload = editOperation.data as IdentityCommitmentPayload
+        const payload = Array.isArray(editOperation.data)
+            ? (editOperation.data[0] as IdentityCommitmentPayload | undefined)
+            : (editOperation.data as IdentityCommitmentPayload | undefined)
 
         // REVIEW: HIGH FIX - Strengthen commitment hash format validation
         // Validate commitment format (should be 64-char hex or large number string)
@@ -942,7 +944,9 @@ export default class GCRIdentityRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const payload = editOperation.data as IdentityAttestationPayload
+        const payload = Array.isArray(editOperation.data)
+            ? (editOperation.data[0] as IdentityAttestationPayload | undefined)
+            : (editOperation.data as IdentityAttestationPayload | undefined)
 
         // REVIEW: MEDIUM FIX - Validate payload structure with type and format checks
         if (
@@ -1119,7 +1123,11 @@ export default class GCRIdentityRoutines {
 
         let operation = identityEdit.operation
         if (identityEdit.isRollback) {
-            operation = operation === "add" ? "remove" : "add"
+            if (operation === "add") {
+                operation = "remove"
+            } else if (operation === "remove") {
+                operation = "add"
+            }
         }
 
         let result: GCRResult
@@ -1130,7 +1138,23 @@ export default class GCRIdentityRoutines {
                 ? identityEdit.account
                 : forgeToHex(identityEdit.account)
 
-        switch (identityEdit.context + operation) {
+        switch (operation) {
+            case "zk_commitmentadd":
+                result = await this.applyZkCommitmentAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "zk_attestationadd":
+                result = await this.applyZkAttestationAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            default:
+                switch (identityEdit.context + operation) {
             case "xmadd":
                 result = await this.applyXmIdentityAdd(
                     identityEdit,
@@ -1265,17 +1289,11 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
-            case "zk_attestationadd":
-                result = await this.applyZkAttestationAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
             default:
                 result = {
                     success: false,
                     message: "Unsupported identity operation",
+                }
                 }
         }
 

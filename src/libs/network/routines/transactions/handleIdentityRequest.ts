@@ -1,5 +1,7 @@
 import {
     IdentityPayload,
+    IdentityAttestationPayload,
+    IdentityCommitmentPayload,
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
     UDIdentityAssignPayload,
@@ -13,6 +15,8 @@ import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentity
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
+import Datasource from "@/model/datasource"
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 
 interface IdentityResponse {
     success: boolean
@@ -114,6 +118,42 @@ export default async function handleIdentityRequest(
         case "tlsn_identity_assign":
             // TLSNotary identity verification - verify proof structure
             return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
+        case "zk_commitmentadd": {
+            const commitments = payload.payload as IdentityCommitmentPayload[]
+            if (!Array.isArray(commitments) || commitments.length === 0) {
+                return {
+                    success: false,
+                    message: "Invalid ZK commitment payload",
+                }
+            }
+            return {
+                success: true,
+                message: "ZK commitment accepted",
+            }
+        }
+        case "zk_attestationadd": {
+            const attestations = payload.payload as IdentityAttestationPayload[]
+            const attestation = attestations[0]
+
+            if (!Array.isArray(attestations) || attestations.length === 0 || !attestation) {
+                return {
+                    success: false,
+                    message: "Invalid ZK attestation payload",
+                }
+            }
+
+            const db = await Datasource.getInstance()
+            const verifier = new ProofVerifier(db.getDataSource())
+            const result = await verifier.verifyIdentityAttestation({
+                proof: attestation.proof,
+                publicSignals: attestation.public_signals,
+            })
+
+            return {
+                success: result.valid,
+                message: result.reason ?? (result.valid ? "ZK attestation verified" : "Invalid ZK attestation"),
+            }
+        }
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":

@@ -280,13 +280,13 @@ export default class L2PSMempool {
      * Get all L2PS transactions for a specific UID, optionally filtered by status
      * 
      * @param l2psUid - L2PS network identifier
-     * @param status - Optional status filter ("pending", "processed", "failed")
+     * @param status - Optional status filter ("pending", "processed", "executed", "failed")
      * @returns Promise resolving to array of L2PS mempool transactions
      * 
      * @example
      * ```typescript
-     * // Get all processed transactions for network_1
-     * const txs = await L2PSMempool.getByUID("network_1", "processed")
+     * // Get all executed transactions for network_1
+     * const txs = await L2PSMempool.getByUID("network_1", "executed")
      * ```
      */
     public static async getByUID(l2psUid: string, status?: string): Promise<L2PSMempoolTx[]> {
@@ -360,7 +360,7 @@ export default class L2PSMempool {
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: {
                     l2ps_uid: l2psUid,
-                    status: "processed",  // Only include successfully processed transactions
+                    status: L2PS_STATUS.EXECUTED,  // Only include successfully executed transactions awaiting batching
                 },
                 order: {
                     timestamp: "ASC",
@@ -529,7 +529,7 @@ export default class L2PSMempool {
      * @example
      * ```typescript
      * // Get all processed transactions ready for batching
-     * const readyToBatch = await L2PSMempool.getByStatus(L2PS_STATUS.PROCESSED, 100)
+     * const readyToBatch = await L2PSMempool.getByStatus(L2PS_STATUS.EXECUTED, 100)
      * ```
      */
     public static async getByStatus(status: L2PSStatus, limit?: number): Promise<L2PSMempoolTx[]> {

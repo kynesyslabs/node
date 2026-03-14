@@ -84,6 +84,39 @@ function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     )
 }
 
+function normalizeZkIdentityEdits(edits: GCREdit[], tx: Transaction): GCREdit[] {
+    if (tx.content.type !== "identity") {
+        return edits
+    }
+
+    const identityPayload = tx.content.data?.[1] as IdentityPayload | undefined
+    if (
+        !identityPayload ||
+        identityPayload.context !== "zk" ||
+        (identityPayload.method !== "zk_commitmentadd" &&
+            identityPayload.method !== "zk_attestationadd")
+    ) {
+        return edits
+    }
+
+    const normalizedPayload = Array.isArray(identityPayload.payload)
+        ? structuredClone(identityPayload.payload)
+        : identityPayload.payload
+
+    return edits.map(edit => {
+        if (edit.type !== "identity") {
+            return edit
+        }
+
+        return {
+            ...edit,
+            context: "zk",
+            operation: identityPayload.method,
+            data: normalizedPayload,
+        } as GCREdit
+    })
+}
+
 export default class ServerHandlers {
     // ANCHOR Validate transaction
     static async handleValidateTransaction(
@@ -109,7 +142,14 @@ export default class ServerHandlers {
             // NOTE Nonce assignment is done in the GCR too
             // REVIEW Generating GCREdit on our side and comparing it with the one in the Transaction object
             // See DemosTransactions.ts -> prepare(data) for the details
-            const gcrEdits = await GCRGeneration.generate(tx)
+            const gcrEdits = normalizeZkIdentityEdits(
+                await GCRGeneration.generate(tx),
+                tx,
+            )
+            const normalizedTxGcrEdits = normalizeZkIdentityEdits(
+                _.cloneDeep((tx.content.gcr_edits as GCREdit[]) || []),
+                tx,
+            )
             // TODO This is a workaround, if it works we should make it more elegant
             // Client side the gcredits are created without the tx hash, which is added in the node
             // ! Maybe we should remove the tx hash from the GCREdit object directly which improves consistency
@@ -122,7 +162,7 @@ export default class ServerHandlers {
                 "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
             )
             const txGcrEditsHash = Hashing.sha256(
-                JSON.stringify(tx.content.gcr_edits),
+                JSON.stringify(normalizedTxGcrEdits),
             )
             log.debug(
                 "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
@@ -141,6 +181,7 @@ export default class ServerHandlers {
             } else {
                 throw new Error("GCREdit mismatch")
             }
+
             // REVIEW Recalculate the Transaction hash too
             //tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 

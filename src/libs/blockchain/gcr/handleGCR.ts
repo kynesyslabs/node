@@ -248,6 +248,12 @@ export default class HandleGCR {
         rollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
     ): Promise<GCRResult> {
+        if (!editOperation.txhash || editOperation.txhash.length === 0) {
+            editOperation = {
+                ...editOperation,
+                txhash: tx.hash,
+            }
+        }
         /*if (tx.hash !== editOperation.txhash) {
             return { success: false, message: "Invalid txhash" }
         }*/
@@ -332,17 +338,22 @@ export default class HandleGCR {
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
         for (const edit of tx.content.gcr_edits) {
-            log.debug("[applyToTx] Executing GCREdit: " + edit.type)
+            const effectiveEdit: GCREdit =
+                !edit.txhash || edit.txhash.length === 0
+                    ? { ...edit, txhash: tx.hash }
+                    : edit
+
+            log.debug("[applyToTx] Executing GCREdit: " + effectiveEdit.type)
             try {
                 const result = await HandleGCR.apply(
-                    edit,
+                    effectiveEdit,
                     tx,
                     isRollback,
                     simulate,
                 )
                 log.debug(
                     "[applyToTx] GCREdit executed: " +
-                        edit.type +
+                        effectiveEdit.type +
                         " with result: " +
                         result.success +
                         " and message: " +
@@ -359,7 +370,7 @@ export default class HandleGCR {
                     )
                 }
                 editsResults.push(result)
-                appliedEdits.push(edit) // Keep track of applied edits
+                appliedEdits.push(effectiveEdit) // Keep track of applied edits
             } catch (e) {
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({

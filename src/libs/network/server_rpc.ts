@@ -123,6 +123,36 @@ async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
     }
 }
 
+async function getFreshMerkleTreeManager(): Promise<MerkleTreeManager> {
+    const manager = await getMerkleTreeManager()
+    const db = await Datasource.getInstance()
+    const dataSource = db.getDataSource()
+    const currentState = await getCurrentMerkleTreeState(dataSource)
+
+    if (!currentState) {
+        return manager
+    }
+
+    const stats = manager.getStats()
+    const isStale =
+        stats.root !== currentState.rootHash ||
+        stats.leafCount !== currentState.leafCount
+
+    if (!isStale) {
+        return manager
+    }
+
+    log.warn(
+        `[ZK RPC] Refreshing stale MerkleTreeManager singleton: in-memory leafCount=${stats.leafCount}, db leafCount=${currentState.leafCount}`,
+    )
+
+    globalMerkleManager = null
+    initializationPromise = null
+    lastInitializationError = null
+
+    return await getMerkleTreeManager()
+}
+
 // Reading the port from sharedState
 
 // INFO: Protected endpoints
@@ -504,19 +534,16 @@ export async function serverRpcBun() {
     // Get current Merkle tree root
     server.get("/zk/merkle-root", async () => {
         try {
-            // REVIEW: HIGH FIX - Use singleton MerkleTreeManager for consistency
-            const manager = await getMerkleTreeManager()
+            const manager = await getFreshMerkleTreeManager()
             const stats = manager.getStats()
-
-            // Get current block number from database (required for response)
             const db = await Datasource.getInstance()
             const dataSource = db.getDataSource()
             const currentState = await getCurrentMerkleTreeState(dataSource)
 
             return jsonResponse({
-                rootHash: stats.root, // From in-memory singleton (fast)
-                blockNumber: currentState?.blockNumber || 0, // From database
-                leafCount: stats.leafCount, // From in-memory singleton (fast)
+                rootHash: currentState?.rootHash || stats.root,
+                blockNumber: currentState?.blockNumber || 0,
+                leafCount: currentState?.leafCount ?? stats.leafCount,
             })
         } catch (error) {
             log.error("[ZK RPC] Error getting Merkle root:", error)
@@ -544,8 +571,7 @@ export async function serverRpcBun() {
                 )
             }
 
-            // REVIEW: Use singleton MerkleTreeManager to avoid per-request initialization overhead
-            const merkleManager = await getMerkleTreeManager()
+            const merkleManager = await getFreshMerkleTreeManager()
 
             const proof = await merkleManager.getProofForCommitment(commitment)
 

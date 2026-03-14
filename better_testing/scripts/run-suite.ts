@@ -3,7 +3,7 @@
 import * as fs from "fs"
 import * as path from "path"
 
-type SuiteName = "sanity" | "cluster-health" | "gcr-focus"
+type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "prod-gate" | "l2ps-live"
 
 type ScenarioResult = {
   scenario: string
@@ -34,6 +34,22 @@ const suites: Record<SuiteName, string[]> = {
     "gcr_identity_matrix",
     "gcr_points_smoke",
     "gcr_identity_xm_smoke",
+  ],
+  "prod-gate": [
+    "omni_connection_smoke",
+    "consensus_block_production",
+    "peer_discovery_smoke",
+    "gcr_identity_remove",
+    "gcr_identity_xm_smoke",
+    "zk_proof_loadgen",
+    "im_message_roundtrip",
+    "tlsnotary_routes_smoke",
+    "web2_url_validation_smoke",
+    "multichain_parser_rejects",
+  ],
+  "l2ps-live": [
+    "l2ps_live_participation_smoke",
+    "l2ps_live_submission_relay_smoke",
   ],
 }
 
@@ -150,13 +166,13 @@ async function isHealthyRpcTarget(rpcUrl: string): Promise<boolean> {
 
 async function resolveLocalTargets(suite: string, explicitTargets: string | null): Promise<string | null> {
   if (explicitTargets) return explicitTargets
-  if (suite !== "cluster-health" && suite !== "gcr-focus") return null
+  if (suite !== "cluster-health" && suite !== "gcr-focus" && suite !== "prod-gate") return null
 
   const candidates = splitTargets(process.env.TARGETS ?? defaultLocalTargets)
   const health = await Promise.all(candidates.map(async rpcUrl => ({ rpcUrl, ok: await isHealthyRpcTarget(rpcUrl) })))
   const healthy = health.filter(item => item.ok).map(item => item.rpcUrl)
 
-  const minimumHealthy = suite === "cluster-health" ? 2 : 1
+  const minimumHealthy = suite === "cluster-health" ? 2 : suite === "prod-gate" ? 3 : 1
   if (healthy.length >= minimumHealthy) {
     return healthy.join(",")
   }
