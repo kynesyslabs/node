@@ -96,12 +96,12 @@ export async function manageHelloPeer(
     log.info(
         "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
     )
-    const isAddedToPeerlist = peerManager.addPeer(peerObject)
+    const [isAddedToPeerlist, message] = peerManager.addPeer(peerObject)
     if (!isAddedToPeerlist) {
         response.result = 400
         response.response = false
         response.extra = {
-            msg: "Error while adding peer to peerlist",
+            msg: "Peer not added to peerlist: " + message,
         }
         return response
     }

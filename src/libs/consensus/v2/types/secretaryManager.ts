@@ -11,6 +11,13 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
+export class AbortConsensusError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "AbortConsensusError"
+    }
+}
+
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
     private _greenlight_timeout = 30_000 // 15 seconds
@@ -292,6 +299,15 @@ export default class SecretaryManager {
      */
     public async handleSecretaryGoneOffline() {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
+        if (!this.secretary) {
+            log.error(
+                "[Consensus] Secretary not found, exiting consensus routine",
+            )
+            throw new AbortConsensusError(
+                "Secretary not found, exiting consensus routine",
+            )
+        }
+
         const isOnline = await this.secretary.connect()
         log.debug("Secretary is online: " + isOnline)
 
@@ -721,7 +737,6 @@ export default class SecretaryManager {
         //     // await this.simulateNormalNodeGoingOffline()
         //     // await this.simulateSecretaryGoingOffline()
         // }
-
         log.debug("Sending our validator phase to the secretary")
         log.debug("Our phase: " + this.ourValidatorPhase.currentPhase)
         log.debug("Shard block ref: " + this.shard.blockRef)
