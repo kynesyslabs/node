@@ -69,6 +69,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import Datasource from "@/model/datasource"
 import { OfflineMessage } from "@/model/entities/OfflineMessages"
 
+
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 import log from "@/utilities/logger"
 /**
@@ -120,7 +121,9 @@ export class SignalingServer {
      * @param details - Additional error details
      */
     private sendError(ws: WebSocket, errorType: ImErrorType, details?: string) {
-        log.debug(`[IM] Sending an error message: ${errorType}${details ? ` - ${details}` : ""}`)
+        log.debug(
+            `[IM] Sending an error message: ${errorType}${details ? ` - ${details}` : ""}`,
+        )
         ws.send(
             JSON.stringify({
                 type: "error",

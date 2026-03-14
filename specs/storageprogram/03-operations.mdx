@@ -1,0 +1,399 @@
+---
+title: "StorageProgram Operations"
+description: "Detailed reference for StorageProgram transaction operations"
+---
+
+# StorageProgram Operations
+
+This document provides detailed reference for all StorageProgram operations.
+
+## Operation Types
+
+| Operation | Description | Permission Required |
+|-----------|-------------|---------------------|
+| `CREATE_STORAGE_PROGRAM` | Create a new storage program | None (anyone can create) |
+| `WRITE_STORAGE` | Update data in existing program | Owner or group write permission |
+| `GRANULAR_WRITE` | Field-level data modifications | Owner or group write permission |
+| `UPDATE_ACCESS_CONTROL` | Modify ACL settings | Owner only |
+| `DELETE_STORAGE_PROGRAM` | Soft delete the program | Owner or group delete permission |
+
+## CREATE_STORAGE_PROGRAM
+
+Creates a new storage program at a deterministic address.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "CREATE_STORAGE_PROGRAM" |
+| `owner` | string | Yes | Owner address (e.g., "ed25519:...") |
+| `storageAddress` | string | Yes | Generated `stor-{hash}` address |
+| `programName` | string | Yes | Human-readable name (non-empty) |
+| `encoding` | string | No | "json" (default) or "binary" |
+| `data` | object/string | No | Initial data content |
+| `acl` | object | No | Access control (defaults to owner mode) |
+| `metadata` | object | No | Optional metadata |
+| `salt` | string | No | Optional salt for address uniqueness |
+| `storageLocation` | string | No | "onchain" only (default) |
+
+### Example
+
+```typescript
+import { storage } from "@kynesyslabs/demosdk"
+
+const payload = storage.buildStorageProgramPayload({
+  operation: "CREATE_STORAGE_PROGRAM",
+  owner: "ed25519:abc123...",
+  programName: "user-preferences",
+  encoding: "json",
+  data: {
+    theme: "dark",
+    notifications: true,
+    language: "en"
+  },
+  acl: {
+    mode: "owner"
+  },
+  metadata: {
+    version: "1.0",
+    createdBy: "my-app"
+  }
+})
+```
+
+### Response
+
+```typescript
+{
+  success: true,
+  message: "Storage program created: stor-abc123..."
+}
+```
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Storage program already exists" | Address already taken |
+| "Program name is required" | Empty or missing programName |
+| "Data size exceeds maximum" | Data larger than 1MB |
+| "JSON nesting depth exceeds 64" | Too deeply nested JSON |
+
+## WRITE_STORAGE
+
+Updates the data in an existing storage program.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "WRITE_STORAGE" |
+| `storageAddress` | string | Yes | Target storage address |
+| `data` | object/string | Yes | New data content |
+| `encoding` | string | No | Can change encoding type |
+| `metadata` | object | No | Metadata to merge |
+
+### Example
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "WRITE_STORAGE",
+  storageAddress: "stor-abc123...",
+  data: {
+    theme: "light",
+    notifications: false,
+    language: "fr"
+  },
+  metadata: {
+    lastUpdated: new Date().toISOString()
+  }
+})
+```
+
+### Behavior
+
+- Data is **replaced** entirely, not merged
+- Metadata is **merged** with existing metadata
+- Encoding can be changed between writes
+- Storage fees are calculated on new data size
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Storage program not found" | Invalid address |
+| "Storage program has been deleted" | Program was soft deleted |
+| "Data size exceeds maximum" | New data larger than 1MB |
+
+## UPDATE_ACCESS_CONTROL
+
+Modifies the ACL settings of a storage program.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "UPDATE_ACCESS_CONTROL" |
+| `storageAddress` | string | Yes | Target storage address |
+| `acl` | object | Yes | New ACL configuration |
+
+### Example
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "UPDATE_ACCESS_CONTROL",
+  storageAddress: "stor-abc123...",
+  acl: {
+    mode: "restricted",
+    allowed: [
+      "ed25519:friend1...",
+      "ed25519:friend2..."
+    ],
+    blacklisted: [
+      "ed25519:blocked..."
+    ],
+    groups: {
+      editors: {
+        members: ["ed25519:editor1..."],
+        permissions: ["read", "write"]
+      }
+    }
+  }
+})
+```
+
+### ACL Structure
+
+```typescript
+interface StorageProgramACL {
+  mode: "owner" | "public" | "restricted"
+  allowed?: string[]           // Addresses with read access
+  blacklisted?: string[]       // Addresses denied access
+  groups?: {
+    [groupName: string]: {
+      members: string[]        // Group member addresses
+      permissions: ("read" | "write" | "delete")[]
+    }
+  }
+}
+```
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Only owner can update access control" | Sender is not owner |
+| "ACL mode must be one of: owner, public, restricted" | Invalid mode |
+| "Invalid permission in group" | Permission not in allowed list |
+
+## DELETE_STORAGE_PROGRAM
+
+Soft deletes a storage program. Data is preserved for auditability.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "DELETE_STORAGE_PROGRAM" |
+| `storageAddress` | string | Yes | Target storage address |
+
+### Example
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "DELETE_STORAGE_PROGRAM",
+  storageAddress: "stor-abc123..."
+})
+```
+
+### Behavior
+
+- Sets `isDeleted = true`
+- Records `deletedByTx` transaction hash
+- Data and metadata are preserved
+- Program cannot be read via RPC after deletion
+- Address cannot be reused (hash collision prevention)
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Storage program not found" | Invalid address |
+| "Storage program already deleted" | Already soft deleted |
+| "No permission to delete" | Sender lacks delete permission |
+
+## Granular Write Operations
+
+In addition to full data replacement via `WRITE_STORAGE`, the StorageProgram supports granular field-level operations for more efficient updates.
+
+### GRANULAR_WRITE
+
+Performs field-level modifications to storage program data without replacing the entire dataset.
+
+### Parameters
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `operation` | string | Yes | Must be "GRANULAR_WRITE" |
+| `storageAddress` | string | Yes | Target storage address |
+| `operations` | array | Yes | Array of granular operations |
+
+### Operation Types
+
+| Operation Type | Description | Required Fields |
+|----------------|-------------|-----------------|
+| `SET_FIELD` | Set a top-level field value | `field`, `value` |
+| `SET_ITEM` | Set an item in an array by index | `field`, `index`, `value` |
+| `APPEND_ITEM` | Append an item to an array field | `field`, `value` |
+| `DELETE_FIELD` | Delete a top-level field | `field` |
+| `DELETE_ITEM` | Delete an item from an array by index | `field`, `index` |
+
+### Operation Structure
+
+```typescript
+interface GranularWriteOperation {
+  type: "SET_FIELD" | "SET_ITEM" | "APPEND_ITEM" | "DELETE_FIELD" | "DELETE_ITEM"
+  field: string           // Target field name
+  value?: any             // Value for SET/APPEND operations
+  index?: number          // Array index for SET_ITEM/DELETE_ITEM
+}
+```
+
+### Examples
+
+#### SET_FIELD - Update a single field
+
+```typescript
+import { storage } from "@kynesyslabs/demosdk"
+
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "SET_FIELD", field: "theme", value: "dark" },
+    { type: "SET_FIELD", field: "lastLogin", value: Date.now() }
+  ]
+})
+```
+
+#### SET_ITEM - Update an array element
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "SET_ITEM", field: "posts", index: 0, value: { title: "Updated Post", content: "..." } }
+  ]
+})
+```
+
+#### APPEND_ITEM - Add to an array
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "APPEND_ITEM", field: "posts", value: { title: "New Post", content: "..." } }
+  ]
+})
+```
+
+#### DELETE_FIELD - Remove a field
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "DELETE_FIELD", field: "temporaryData" }
+  ]
+})
+```
+
+#### DELETE_ITEM - Remove from an array
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "GRANULAR_WRITE",
+  storageAddress: "stor-abc123...",
+  operations: [
+    { type: "DELETE_ITEM", field: "posts", index: 2 }
+  ]
+})
+```
+
+### Behavior
+
+- Operations are applied **atomically** in order
+- Field names must be top-level keys (nested paths not supported)
+- Array operations validate index bounds
+- Fees are calculated on the resulting data size difference
+- Multiple operations can be batched in a single transaction
+
+### Errors
+
+| Error | Cause |
+|-------|-------|
+| "Storage program not found" | Invalid address |
+| "Field does not exist" | DELETE_FIELD/SET_ITEM on non-existent field |
+| "Field is not an array" | Array operation on non-array field |
+| "Index out of bounds" | SET_ITEM/DELETE_ITEM with invalid index |
+| "Invalid operation type" | Unrecognized operation type |
+| "Operations array is required" | Missing or empty operations array |
+
+### Comparison: WRITE_STORAGE vs GRANULAR_WRITE
+
+| Aspect | WRITE_STORAGE | GRANULAR_WRITE |
+|--------|---------------|----------------|
+| Data replacement | Full replacement | Field-level updates |
+| Bandwidth | Entire data sent | Only changes sent |
+| Use case | Complete updates | Incremental changes |
+| Atomicity | Single operation | Multiple operations batched |
+| Fee calculation | Based on total size | Based on size difference |
+
+## Fee Calculation
+
+All operations that create or update data incur storage fees:
+
+```typescript
+const CHUNK_SIZE = 10240    // 10KB
+const FEE_PER_CHUNK = 1n    // 1 DEM
+
+const sizeBytes = Buffer.byteLength(JSON.stringify(data), "utf8")
+const chunks = Math.ceil(sizeBytes / CHUNK_SIZE)
+const fee = BigInt(Math.max(1, chunks)) * FEE_PER_CHUNK
+```
+
+### Fee Examples
+
+| Data Size | Calculation | Fee |
+|-----------|-------------|-----|
+| 0 bytes | min(1) × 1 | 1 DEM |
+| 5 KB | ceil(5120/10240) = 1 × 1 | 1 DEM |
+| 10 KB | ceil(10240/10240) = 1 × 1 | 1 DEM |
+| 10.1 KB | ceil(10340/10240) = 2 × 1 | 2 DEM |
+| 100 KB | ceil(102400/10240) = 10 × 1 | 10 DEM |
+| 1 MB | ceil(1048576/10240) = 103 × 1 | 103 DEM |
+
+## Validation Rules
+
+### Data Validation
+
+| Encoding | Validation |
+|----------|------------|
+| json | Valid JSON, max 64 nesting levels |
+| binary | Valid base64 string, length % 4 == 0 |
+
+### Size Limits
+
+- Maximum data size: 1MB (1,048,576 bytes)
+- For binary: decoded size is checked (base64 size × 3/4)
+- For JSON: UTF-8 byte length of stringified data
+
+### Address Format
+
+- Must match pattern: `stor-{hex-hash}`
+- Hash is keccak256 of (owner + programName + salt)
+- Addresses are case-sensitive

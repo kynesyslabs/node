@@ -38,7 +38,11 @@ export class ConnectionFactory {
             log.debug(
                 `[ConnectionFactory] Creating TLS connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,
             )
-            return new TLSConnection(peerIdentity, connectionString, this.tlsConfig)
+            return new TLSConnection(
+                peerIdentity,
+                connectionString,
+                this.tlsConfig,
+            )
         } else {
             log.debug(
                 `[ConnectionFactory] Creating TCP connection to ${peerIdentity} at ${parsed.host}:${parsed.port}`,

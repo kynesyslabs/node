@@ -92,12 +92,9 @@ export class MetricsCollector {
         await this.collectAll()
 
         // Start periodic collection
-        this.collectionInterval = setInterval(
-            async () => {
-                await this.collectAll()
-            },
-            this.config.collectionIntervalMs,
-        )
+        this.collectionInterval = setInterval(async () => {
+            await this.collectAll()
+        }, this.config.collectionIntervalMs)
 
         this.running = true
         log.info("[METRICS COLLECTOR] Started")
@@ -140,16 +137,8 @@ export class MetricsCollector {
 
         // === System Metrics ===
         ms.createGauge("system_cpu_usage_percent", "CPU usage percentage", [])
-        ms.createGauge(
-            "system_memory_used_bytes",
-            "Memory used in bytes",
-            [],
-        )
-        ms.createGauge(
-            "system_memory_total_bytes",
-            "Total memory in bytes",
-            [],
-        )
+        ms.createGauge("system_memory_used_bytes", "Memory used in bytes", [])
+        ms.createGauge("system_memory_total_bytes", "Total memory in bytes", [])
         ms.createGauge(
             "system_memory_usage_percent",
             "Memory usage percentage",
@@ -271,7 +260,8 @@ export class MetricsCollector {
             const lastBlock = await chain.getLastBlock()
             if (lastBlock) {
                 // Transaction count in last block
-                const txCount = lastBlock.content?.ordered_transactions?.length ?? 0
+                const txCount =
+                    lastBlock.content?.ordered_transactions?.length ?? 0
                 this.metricsService.setGauge("last_block_tx_count", txCount)
 
                 // Block timestamp and time since last block
@@ -285,7 +275,10 @@ export class MetricsCollector {
                 // Block timestamp is in SECONDS (Unix epoch), not milliseconds
                 if (blockTimestamp > 0) {
                     const nowSeconds = Math.floor(Date.now() / 1000)
-                    const secondsSinceBlock = Math.max(0, nowSeconds - blockTimestamp)
+                    const secondsSinceBlock = Math.max(
+                        0,
+                        nowSeconds - blockTimestamp,
+                    )
                     this.metricsService.setGauge(
                         "seconds_since_last_block",
                         secondsSinceBlock,
@@ -389,12 +382,20 @@ export class MetricsCollector {
     ): void {
         for (const [name] of Object.entries(interfaces)) {
             if (name !== "lo") {
-                this.metricsService.setGauge("system_network_rx_bytes_total", 0, {
-                    interface: name,
-                })
-                this.metricsService.setGauge("system_network_tx_bytes_total", 0, {
-                    interface: name,
-                })
+                this.metricsService.setGauge(
+                    "system_network_rx_bytes_total",
+                    0,
+                    {
+                        interface: name,
+                    },
+                )
+                this.metricsService.setGauge(
+                    "system_network_tx_bytes_total",
+                    0,
+                    {
+                        interface: name,
+                    },
+                )
             }
         }
     }
@@ -491,7 +492,10 @@ export class MetricsCollector {
             const allPeers = peerManager.getAll()
 
             // Counts
-            this.metricsService.setGauge("peer_online_count", onlinePeers.length)
+            this.metricsService.setGauge(
+                "peer_online_count",
+                onlinePeers.length,
+            )
             this.metricsService.setGauge(
                 "peer_offline_count",
                 offlinePeersCount,
@@ -503,7 +507,7 @@ export class MetricsCollector {
             const peersToReport = allPeers.slice(0, 20)
             for (const peer of peersToReport) {
                 const status = onlinePeers.some(
-                    (p) => p.identity === peer.identity,
+                    p => p.identity === peer.identity,
                 )
                     ? "online"
                     : "offline"
@@ -661,9 +665,13 @@ export class MetricsCollector {
                     `docker ps --filter "name=${name}" --format "{{.Status}}" 2>/dev/null || echo ""`,
                 )
                 const isUp = stdout.trim().toLowerCase().includes("up") ? 1 : 0
-                this.metricsService.setGauge("service_docker_container_up", isUp, {
-                    container: displayName,
-                })
+                this.metricsService.setGauge(
+                    "service_docker_container_up",
+                    isUp,
+                    {
+                        container: displayName,
+                    },
+                )
             } catch {
                 // Docker not available or container not found
                 this.metricsService.setGauge("service_docker_container_up", 0, {

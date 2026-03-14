@@ -1,0 +1,156 @@
+---
+title: "StorageProgram Overview"
+description: "Introduction to unified storage for JSON and binary data on the Demos Network"
+---
+
+# StorageProgram Overview
+
+The StorageProgram feature provides unified on-chain storage for JSON and binary data on the Demos Network, with robust access control and a simple pricing model.
+
+## What is StorageProgram?
+
+StorageProgram is a general-purpose storage system that allows:
+
+- **JSON Storage** - Structured data with up to 64-level nesting depth
+- **Binary Storage** - Base64-encoded files and assets
+- **Access Control** - Owner, public, and restricted modes with groups
+- **Immutable Records** - Content addressed by deterministic storage addresses
+
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Dual Encoding** | Support for JSON objects and binary (base64) data |
+| **Robust ACL** | Owner-only, public, or restricted with allowed/blacklisted addresses and groups |
+| **Max 1MB** | Data size limit of 1MB per storage program |
+| **Simple Pricing** | 1 DEM per 10KB chunk |
+| **Soft Delete** | Programs can be deleted but records are preserved for auditability |
+| **IPFS-Ready** | Storage location field prepared for future IPFS integration |
+
+## Storage Address Format
+
+Each storage program is identified by a unique address:
+
+```
+stor-{keccak256-hash}
+```
+
+The hash is derived from the combination of owner address, program name, and optional salt for uniqueness.
+
+## Quick Start
+
+### Create a Storage Program
+
+```typescript
+import { storage } from "@kynesyslabs/demosdk"
+
+// Create a storage program for JSON data
+const payload = storage.buildStorageProgramPayload({
+  operation: "CREATE_STORAGE_PROGRAM",
+  owner: "your-demos-address",
+  programName: "my-config",
+  encoding: "json",
+  data: {
+    settings: {
+      theme: "dark",
+      language: "en"
+    }
+  },
+  acl: { mode: "owner" }
+})
+
+// The SDK calculates the storage address deterministically
+console.log(payload.storageAddress)  // stor-abc123...
+```
+
+### Write to Storage
+
+```typescript
+// Update the storage program data
+const writePayload = storage.buildStorageProgramPayload({
+  operation: "WRITE_STORAGE",
+  storageAddress: "stor-abc123...",
+  data: {
+    settings: {
+      theme: "light",
+      language: "fr"
+    }
+  }
+})
+```
+
+### Read Storage via RPC
+
+```typescript
+// Read storage program via HTTP
+const response = await fetch(
+  "https://rpc.demos.network/storage-program/stor-abc123...",
+  {
+    headers: {
+      "identity": "ed25519:your-public-key",
+      "signature": "your-signature"
+    }
+  }
+)
+
+const data = await response.json()
+console.log(data.data)  // { settings: { theme: "light", ... } }
+```
+
+## Access Control Modes
+
+StorageProgram supports three ACL modes:
+
+| Mode | Read Access | Write Access |
+|------|-------------|--------------|
+| **owner** | Owner only | Owner only |
+| **public** | Anyone (except blacklisted) | Owner only |
+| **restricted** | Owner + allowed + group members | Owner + group members with "write" permission |
+
+## Pricing Model
+
+Storage costs are calculated based on data size:
+
+- **Chunk Size**: 10KB (10,240 bytes)
+- **Price per Chunk**: 1 DEM
+- **Minimum Fee**: 1 DEM (even for small data)
+- **Maximum Size**: 1MB (1,048,576 bytes)
+
+Example calculations:
+
+| Data Size | Chunks | Fee |
+|-----------|--------|-----|
+| 5 KB | 1 | 1 DEM |
+| 15 KB | 2 | 2 DEM |
+| 100 KB | 10 | 10 DEM |
+| 1 MB | 103 | 103 DEM |
+
+## Operations
+
+StorageProgram supports four operations:
+
+1. **CREATE_STORAGE_PROGRAM** - Create a new storage program
+2. **WRITE_STORAGE** - Update data in an existing storage program
+3. **UPDATE_ACCESS_CONTROL** - Modify ACL settings
+4. **DELETE_STORAGE_PROGRAM** - Soft delete the storage program
+
+## Current Limitations
+
+### On-Chain Only Storage
+
+Currently, all data is stored on-chain. The `storageLocation` field is prepared for future IPFS integration but only "onchain" is supported at this time.
+
+```typescript
+// This will log a warning and fall back to "onchain"
+const payload = storage.buildStorageProgramPayload({
+  // ...
+  storageLocation: "ipfs"  // Not yet implemented
+})
+```
+
+## Next Steps
+
+- [Architecture](/storageprogram/architecture) - System design and data flow
+- [Operations](/storageprogram/operations) - Detailed operation reference
+- [ACL](/storageprogram/acl) - Access control configuration
+- [RPC Reference](/storageprogram/rpc-endpoints) - HTTP API documentation

@@ -23,7 +23,8 @@ import {
 import { errorResponse, encodeResponse } from "./utils"
 
 export const handleGetMempool: OmniHandler<Buffer> = async () => {
-    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const { default: mempoolModule } =
+        await import("src/libs/blockchain/mempool_v2")
     const mempool = await mempoolModule.getMempool()
 
     const serializedTransactions = mempool.map(tx => encodeTransaction(tx))
@@ -39,7 +40,8 @@ export const handleMempoolSync: OmniHandler<Buffer> = async ({ message }) => {
         decodeMempoolSyncRequest(message.payload)
     }
 
-    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const { default: mempoolModule } =
+        await import("src/libs/blockchain/mempool_v2")
     const { default: hashing } = await import("src/libs/crypto/hashing")
 
     const mempool = await mempoolModule.getMempool()
@@ -48,9 +50,7 @@ export const handleMempoolSync: OmniHandler<Buffer> = async ({ message }) => {
         .filter(Boolean)
         .map(hash => hash.replace(/^0x/, ""))
 
-    const mempoolHashHex = hashing.sha256(
-        JSON.stringify(transactionHashesHex),
-    )
+    const mempoolHashHex = hashing.sha256(JSON.stringify(transactionHashesHex))
 
     const transactionBuffers = transactionHashesHex.map(hash =>
         Buffer.from(hash, "hex"),
@@ -85,23 +85,27 @@ function toBlockEntry(block: any): BlockEntryPayload {
             proposer: block?.proposer ?? "",
             nextProposer: block?.next_proposer ?? "",
             status: block?.status ?? "",
-            transactionHashes: Array.isArray(block?.content?.ordered_transactions)
-                ? block.content.ordered_transactions.map((tx: unknown) => String(tx))
+            transactionHashes: Array.isArray(
+                block?.content?.ordered_transactions,
+            )
+                ? block.content.ordered_transactions.map((tx: unknown) =>
+                      String(tx),
+                  )
                 : [],
         }),
     }
 }
 
-export const handleGetBlockByNumber: OmniHandler<Buffer> = async ({ message }) => {
+export const handleGetBlockByNumber: OmniHandler<Buffer> = async ({
+    message,
+}) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeResponse(
             errorResponse(400, "Missing payload for getBlockByNumber"),
         )
     }
 
-    const payload = decodeJsonRequest<GetBlockByNumberRequest>(
-        message.payload,
-    )
+    const payload = decodeJsonRequest<GetBlockByNumberRequest>(message.payload)
 
     if (!payload?.blockNumber && payload?.blockNumber !== 0) {
         return encodeResponse(
@@ -109,9 +113,8 @@ export const handleGetBlockByNumber: OmniHandler<Buffer> = async ({ message }) =
         )
     }
 
-    const { default: getBlockByNumber } = await import(
-        "src/libs/network/routines/nodecalls/getBlockByNumber"
-    )
+    const { default: getBlockByNumber } =
+        await import("src/libs/network/routines/nodecalls/getBlockByNumber")
 
     const response = await getBlockByNumber({
         blockNumber: payload.blockNumber,
@@ -139,7 +142,8 @@ export const handleBlockSync: OmniHandler<Buffer> = async ({ message }) => {
 
     const start = Number(request.startBlock)
     const end = Number(request.endBlock)
-    const max = request.maxBlocks === 0 ? Number.MAX_SAFE_INTEGER : request.maxBlocks
+    const max =
+        request.maxBlocks === 0 ? Number.MAX_SAFE_INTEGER : request.maxBlocks
 
     const range = end >= start ? end - start + 1 : 0
     const limit = Math.min(Math.max(range, 0) || max, max)
@@ -164,7 +168,8 @@ export const handleGetBlocks: OmniHandler<Buffer> = async ({ message }) => {
     const request = decodeBlocksRequest(message.payload)
     const { default: chain } = await import("src/libs/blockchain/chain")
 
-    const startParam = request.startBlock === BigInt(0) ? "latest" : Number(request.startBlock)
+    const startParam =
+        request.startBlock === BigInt(0) ? "latest" : Number(request.startBlock)
     const limit = request.limit === 0 ? 1 : request.limit
 
     const blocks = await chain.getBlocks(startParam as any, limit)
@@ -175,7 +180,9 @@ export const handleGetBlocks: OmniHandler<Buffer> = async ({ message }) => {
     })
 }
 
-export const handleGetBlockByHash: OmniHandler<Buffer> = async ({ message }) => {
+export const handleGetBlockByHash: OmniHandler<Buffer> = async ({
+    message,
+}) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeBlockResponse({
             status: 400,
@@ -186,7 +193,9 @@ export const handleGetBlockByHash: OmniHandler<Buffer> = async ({ message }) => 
     const request = decodeBlockHashRequest(message.payload)
     const { default: chain } = await import("src/libs/blockchain/chain")
 
-    const block = await chain.getBlockByHash(`0x${request.hash.toString("hex")}`)
+    const block = await chain.getBlockByHash(
+        `0x${request.hash.toString("hex")}`,
+    )
     if (!block) {
         return encodeBlockResponse({
             status: 404,
@@ -254,7 +263,8 @@ export const handleMempoolMerge: OmniHandler<Buffer> = async ({ message }) => {
         return encodeMempoolResponse({ status: 400, transactions: [] })
     }
 
-    const { default: mempoolModule } = await import("src/libs/blockchain/mempool_v2")
+    const { default: mempoolModule } =
+        await import("src/libs/blockchain/mempool_v2")
     const result = await mempoolModule.receive(transactions as any)
 
     const serializedResponse = (result.mempool ?? []).map(tx =>

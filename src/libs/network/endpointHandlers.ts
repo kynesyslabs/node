@@ -46,6 +46,8 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
@@ -141,6 +143,40 @@ export default class ServerHandlers {
             } else {
                 throw new Error("GCREdit mismatch")
             }
+
+            // Balance check: sum all "remove" balance edits for the sender
+            const totalFee = gcrEdits
+                .filter(
+                    (edit: GCREdit) =>
+                        edit.type === "balance" &&
+                        edit.operation === "remove" &&
+                        (edit.account === sender ||
+                            (typeof edit.account !== "string" &&
+                                edit.account?.toString() === sender)),
+                )
+                .reduce(
+                    (sum: bigint, edit: GCREdit) => sum + BigInt(edit.amount),
+                    0n,
+                )
+
+            if (totalFee > 0n) {
+                const db = await Datasource.getInstance()
+                const gcrMainRepo = db
+                    .getDataSource()
+                    .getRepository(GCRMain)
+                const account = await gcrMainRepo.findOneBy({
+                    pubkey: sender,
+                })
+                const senderBalance = account
+                    ? BigInt(account.balance)
+                    : 0n
+                if (senderBalance < totalFee) {
+                    throw new Error(
+                        `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
+                    )
+                }
+            }
+
             // REVIEW Recalculate the Transaction hash too
             //tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
@@ -152,7 +188,9 @@ export default class ServerHandlers {
                     valid: false,
                     reference_block: null,
                     message:
-                        "An error occurred while validating the transaction",
+                        e instanceof Error
+                            ? e.message
+                            : "An error occurred while validating the transaction",
                     gas_operation: null,
 
                     transaction: null,
@@ -229,7 +267,10 @@ export default class ServerHandlers {
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
-            log.error("SERVER", fname + "Invalid validityData signature key (not us) 💀")
+            log.error(
+                "SERVER",
+                fname + "Invalid validityData signature key (not us) 💀",
+            )
 
             result.success = false
             result.response = false
@@ -382,9 +423,8 @@ export default class ServerHandlers {
 
             case "web2Request": {
                 payload = tx.content.data[1] as IWeb2Payload
-                const web2Result = await ServerHandlers.handleWeb2Request(
-                    payload,
-                )
+                const web2Result =
+                    await ServerHandlers.handleWeb2Request(payload)
                 result.response = web2Result
                 break
             }
@@ -394,9 +434,8 @@ export default class ServerHandlers {
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
                 try {
-                    const demosWorkResult = await handleDemosWorkRequest(
-                        demosWorkScript,
-                    )
+                    const demosWorkResult =
+                        await handleDemosWorkRequest(demosWorkScript)
                     result.response = demosWorkResult
                 } catch (e) {
                     log.error(

@@ -76,7 +76,11 @@ export class DAHR {
         const validation = validateAndNormalizeHttpUrl(url)
         if (!validation.ok) {
             // Explicit narrowing needed due to strictNullChecks: false
-            const failed = validation as { ok: false; status: 400; message: string }
+            const failed = validation as {
+                ok: false
+                status: 400
+                message: string
+            }
             const err = new Error(failed.message)
             ;(err as any).status = failed.status
             throw err

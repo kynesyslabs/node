@@ -24,7 +24,10 @@ export class DAHRFactory {
             }
         }
         if (cleanedCount > 0) {
-            log.info("DAHR", `[DAHRFactory] Cleaned up ${cleanedCount} expired DAHR instances`)
+            log.info(
+                "DAHR",
+                `[DAHRFactory] Cleaned up ${cleanedCount} expired DAHR instances`,
+            )
         }
     }
 
@@ -49,7 +52,10 @@ export class DAHRFactory {
         await this.cleanupExpired()
         const newDAHR = new DAHR(web2Request)
         const sessionId = newDAHR.sessionId // Get the sessionId from the DAHR instance
-        log.info("DAHR", `[DAHRManager] Creating new DAHR instance with sessionId: ${sessionId}`)
+        log.info(
+            "DAHR",
+            `[DAHRManager] Creating new DAHR instance with sessionId: ${sessionId}`,
+        )
         this._dahrs.set(sessionId, { dahr: newDAHR, lastAccess: Date.now() })
 
         return newDAHR
@@ -67,7 +73,10 @@ export class DAHRFactory {
 
             return dahrEntry.dahr
         }
-        log.info("DAHR", `[DAHRFactory] No DAHR found for sessionId: ${sessionId}`)
+        log.info(
+            "DAHR",
+            `[DAHRFactory] No DAHR found for sessionId: ${sessionId}`,
+        )
 
         return undefined
     }

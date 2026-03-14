@@ -5,14 +5,14 @@ import { ServerConnectionManager } from "./ServerConnectionManager"
 import { RateLimiter, RateLimitConfig } from "../ratelimit"
 
 export interface ServerConfig {
-    host: string                    // Listen address (default: "0.0.0.0")
-    port: number                    // Listen port (default: node.port + 1)
-    maxConnections: number          // Max concurrent connections (default: 1000)
-    connectionTimeout: number       // Idle connection timeout (default: 10 min)
-    authTimeout: number             // Auth handshake timeout (default: 5 sec)
-    backlog: number                 // TCP backlog queue (default: 511)
-    enableKeepalive: boolean        // TCP keepalive (default: true)
-    keepaliveInitialDelay: number   // Keepalive delay (default: 60 sec)
+    host: string // Listen address (default: "0.0.0.0")
+    port: number // Listen port (default: node.port + 1)
+    maxConnections: number // Max concurrent connections (default: 1000)
+    connectionTimeout: number // Idle connection timeout (default: 10 min)
+    authTimeout: number // Auth handshake timeout (default: 5 sec)
+    backlog: number // TCP backlog queue (default: 511)
+    enableKeepalive: boolean // TCP keepalive (default: true)
+    keepaliveInitialDelay: number // Keepalive delay (default: 60 sec)
     rateLimit?: Partial<RateLimitConfig> // Rate limiting configuration
 }
 
@@ -42,7 +42,9 @@ export class OmniProtocolServer extends EventEmitter {
         }
 
         // Initialize rate limiter
-        this.rateLimiter = new RateLimiter(this.config.rateLimit ?? { enabled: true })
+        this.rateLimiter = new RateLimiter(
+            this.config.rateLimit ?? { enabled: true },
+        )
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,
@@ -116,7 +118,7 @@ export class OmniProtocolServer extends EventEmitter {
 
         // Stop accepting new connections
         await new Promise<void>((resolve, reject) => {
-            this.server?.close((err) => {
+            this.server?.close(err => {
                 if (err) reject(err)
                 else resolve()
             })
@@ -156,7 +158,10 @@ export class OmniProtocolServer extends EventEmitter {
         }
 
         // Check if we're at capacity
-        if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
+        if (
+            this.connectionManager.getConnectionCount() >=
+            this.config.maxConnections
+        ) {
             log.warning(
                 `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
@@ -213,7 +218,9 @@ export class OmniProtocolServer extends EventEmitter {
      */
     private detectNodePort(): number {
         // Try to read from environment or config
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
+        const httpPort = parseInt(
+            process.env.NODE_PORT || process.env.PORT || "3000",
+        )
         return httpPort
     }
 }

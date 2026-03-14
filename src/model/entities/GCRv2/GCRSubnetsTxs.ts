@@ -23,6 +23,6 @@ export class GCRSubnetsTxs {
     @Column("integer", { name: "block_number" })
     block_number: number
 
-    @Column("json", { name: "tx_data"})
+    @Column("json", { name: "tx_data" })
     tx_data: L2PSTransaction
 }

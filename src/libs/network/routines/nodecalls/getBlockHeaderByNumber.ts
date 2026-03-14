@@ -14,9 +14,7 @@ export default async function getBlockHeaderByNumber(data: any) {
         return { response, extra }
     }
     response = await Chain.getBlockByNumber(data.blockNumber)
-    log.debug(
-        "[CHAIN.ts] Received reply from the database: extracting header",
-    )
+    log.debug("[CHAIN.ts] Received reply from the database: extracting header")
     // FIXME Implement the extraction of the header
     // response = response.getHeader()
     return { response, extra }

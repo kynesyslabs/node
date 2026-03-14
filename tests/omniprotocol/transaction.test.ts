@@ -98,7 +98,8 @@ describe("Transaction Operations - NativeBridge Request (0x11)", () => {
                 targetChain: "demos",
                 asset: "ETH",
                 amount: "1000000000000000000",
-                recipient: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+                recipient:
+                    "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
             },
         }
 
@@ -176,7 +177,8 @@ describe("Transaction Operations - Bridge Request (0x12)", () => {
             params: [
                 {
                     tradeId: "trade_456",
-                    fromAddress: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+                    fromAddress:
+                        "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
                     slippage: 0.5,
                 },
             ],
@@ -227,7 +229,11 @@ describe("Transaction Operations - Bridge Request (0x12)", () => {
         const decoded = decodeRpcResponse(encoded)
 
         expect(decoded.result).toBe(200)
-        const resp = decoded.response as { txHash: string; status: string; estimatedCompletion: number }
+        const resp = decoded.response as {
+            txHash: string
+            status: string
+            estimatedCompletion: number
+        }
         expect(resp.status).toBe("pending")
     })
 })
@@ -376,7 +382,9 @@ describe("Transaction Operations - Confirm Request (0x15)", () => {
         const decoded = decodeRpcResponse(encoded)
 
         expect(decoded.result).toBe(200)
-        const resp = decoded.response as { data: { valid: boolean; message: string } }
+        const resp = decoded.response as {
+            data: { valid: boolean; message: string }
+        }
         expect(resp.data.valid).toBe(false)
         expect(resp.data.message).toBe("Insufficient balance for gas")
     })

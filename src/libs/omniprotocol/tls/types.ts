@@ -1,13 +1,13 @@
 export interface TLSConfig {
-    enabled: boolean                    // Enable TLS
-    mode: "self-signed" | "ca"         // Certificate mode
-    certPath: string                   // Path to certificate file
-    keyPath: string                    // Path to private key file
-    caPath?: string                    // Path to CA certificate (optional)
-    rejectUnauthorized: boolean        // Verify peer certificates
+    enabled: boolean // Enable TLS
+    mode: "self-signed" | "ca" // Certificate mode
+    certPath: string // Path to certificate file
+    keyPath: string // Path to private key file
+    caPath?: string // Path to CA certificate (optional)
+    rejectUnauthorized: boolean // Verify peer certificates
     minVersion: "TLSv1.2" | "TLSv1.3" // Minimum TLS version
-    ciphers?: string                   // Allowed cipher suites
-    requestCert: boolean               // Require client certificates
+    ciphers?: string // Allowed cipher suites
+    requestCert: boolean // Require client certificates
     trustedFingerprints?: Map<string, string> // Peer identity → cert fingerprint
 }
 

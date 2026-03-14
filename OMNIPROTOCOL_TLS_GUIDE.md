@@ -26,6 +26,7 @@ npm start
 ```
 
 The node will automatically:
+
 - Generate a self-signed certificate (first time)
 - Store it in `./certs/node-cert.pem` and `./certs/node-key.pem`
 - Start TLS server on port 3001
@@ -33,6 +34,7 @@ The node will automatically:
 ### 3. Verify TLS
 
 Check logs for:
+
 ```
 [TLS] Generating self-signed certificate...
 [TLS] Certificate generated successfully
@@ -44,31 +46,31 @@ Check logs for:
 ### Required
 
 - **OMNI_TLS_ENABLED** - Enable TLS encryption
-  - Values: `true` or `false`
-  - Default: `false`
+    - Values: `true` or `false`
+    - Default: `false`
 
 ### Optional
 
 - **OMNI_TLS_MODE** - Certificate mode
-  - Values: `self-signed` or `ca`
-  - Default: `self-signed`
+    - Values: `self-signed` or `ca`
+    - Default: `self-signed`
 
 - **OMNI_CERT_PATH** - Path to certificate file
-  - Default: `./certs/node-cert.pem`
-  - Auto-generated if doesn't exist
+    - Default: `./certs/node-cert.pem`
+    - Auto-generated if doesn't exist
 
 - **OMNI_KEY_PATH** - Path to private key file
-  - Default: `./certs/node-key.pem`
-  - Auto-generated if doesn't exist
+    - Default: `./certs/node-key.pem`
+    - Auto-generated if doesn't exist
 
 - **OMNI_CA_PATH** - Path to CA certificate (for CA mode)
-  - Default: none
-  - Required only for `ca` mode
+    - Default: none
+    - Required only for `ca` mode
 
 - **OMNI_TLS_MIN_VERSION** - Minimum TLS version
-  - Values: `TLSv1.2` or `TLSv1.3`
-  - Default: `TLSv1.3`
-  - Recommendation: Use TLSv1.3 for better security
+    - Values: `TLSv1.2` or `TLSv1.3`
+    - Default: `TLSv1.3`
+    - Recommendation: Use TLSv1.3 for better security
 
 ## Certificate Modes
 
@@ -77,16 +79,19 @@ Check logs for:
 Each node generates its own certificate. Security relies on certificate pinning.
 
 **Pros:**
+
 - No CA infrastructure needed
 - Quick setup
 - Perfect for closed networks
 
 **Cons:**
+
 - Manual certificate management
 - Need to exchange fingerprints
 - Not suitable for public networks
 
 **Setup:**
+
 ```bash
 OMNI_TLS_MODE=self-signed
 ```
@@ -98,15 +103,18 @@ Certificates are auto-generated on first start.
 Use a Certificate Authority to sign certificates.
 
 **Pros:**
+
 - Standard PKI infrastructure
 - Automatic trust chain
 - Suitable for public networks
 
 **Cons:**
+
 - Requires CA setup
 - More complex configuration
 
 **Setup:**
+
 ```bash
 OMNI_TLS_MODE=ca
 OMNI_CERT_PATH=./certs/node-cert.pem
@@ -148,6 +156,7 @@ openssl x509 -in certs/node-cert.pem -noout -fingerprint -sha256
 ```
 
 Output:
+
 ```
 SHA256 Fingerprint=AB:CD:EF:01:23:45:67:89:...
 ```
@@ -161,6 +170,7 @@ openssl x509 -in certs/node-cert.pem -noout -enddate
 ```
 
 The node logs warnings when certificate expires in <30 days:
+
 ```
 [TLS] ⚠️  Certificate expires in 25 days - consider renewal
 ```
@@ -184,15 +194,19 @@ npm restart
 ## Connection Strings
 
 ### Plain TCP
+
 ```
 tcp://host:3001
 ```
 
 ### TLS Encrypted
+
 ```
 tls://host:3001
 ```
+
 or
+
 ```
 tcps://host:3001
 ```
@@ -212,6 +226,7 @@ Both formats work identically.
 ### Cipher Suites (Default)
 
 Only strong, modern ciphers are allowed:
+
 - `ECDHE-ECDSA-AES256-GCM-SHA384`
 - `ECDHE-RSA-AES256-GCM-SHA384`
 - `ECDHE-ECDSA-CHACHA20-POLY1305`
@@ -227,24 +242,28 @@ In self-signed mode, pin peer certificates by fingerprint:
 // In your code
 import { TLSServer } from "./libs/omniprotocol/server/TLSServer"
 
-const server = new TLSServer({ /* config */ })
+const server = new TLSServer({
+    /* config */
+})
 await server.start()
 
 // Add trusted peer fingerprints
 server.addTrustedFingerprint(
     "peer-identity-1",
-    "SHA256:AB:CD:EF:01:23:45:67:89:..."
+    "SHA256:AB:CD:EF:01:23:45:67:89:...",
 )
 ```
 
 ### Security Recommendations
 
 **For Development:**
+
 - Use self-signed mode
 - Test on localhost only
 - Don't expose to public network
 
 **For Production:**
+
 - Use CA mode with valid certificates
 - Enable certificate pinning
 - Monitor certificate expiry
@@ -256,6 +275,7 @@ server.addTrustedFingerprint(
 ### Certificate Not Found
 
 **Error:**
+
 ```
 Certificate not found: ./certs/node-cert.pem
 ```
@@ -266,6 +286,7 @@ Let the node auto-generate, or create manually (see Certificate Generation above
 ### Certificate Verification Failed
 
 **Error:**
+
 ```
 [TLSConnection] Certificate fingerprint mismatch
 ```
@@ -273,6 +294,7 @@ Let the node auto-generate, or create manually (see Certificate Generation above
 **Cause:** Peer's certificate fingerprint doesn't match expected value.
 
 **Solution:**
+
 1. Get peer's actual fingerprint from logs
 2. Update trusted fingerprints list
 3. Verify you're connecting to the correct peer
@@ -280,6 +302,7 @@ Let the node auto-generate, or create manually (see Certificate Generation above
 ### TLS Handshake Failed
 
 **Error:**
+
 ```
 [TLSConnection] Connection error: SSL routines::tlsv1 alert protocol version
 ```
@@ -288,6 +311,7 @@ Let the node auto-generate, or create manually (see Certificate Generation above
 
 **Solution:**
 Ensure both nodes use compatible TLS versions:
+
 ```bash
 OMNI_TLS_MIN_VERSION=TLSv1.2  # More compatible
 ```
@@ -295,17 +319,20 @@ OMNI_TLS_MIN_VERSION=TLSv1.2  # More compatible
 ### Connection Timeout
 
 **Error:**
+
 ```
 TLS connection timeout after 5000ms
 ```
 
 **Possible causes:**
+
 1. Port blocked by firewall
 2. Wrong host/port
 3. Server not running
 4. Network issues
 
 **Solution:**
+
 ```bash
 # Check if port is open
 nc -zv host 3001
@@ -335,6 +362,7 @@ netstat -an | grep 3001
 ## Migration Path
 
 ### Phase 1: Plain TCP (Current)
+
 ```bash
 OMNI_ENABLED=true
 OMNI_TLS_ENABLED=false
@@ -343,6 +371,7 @@ OMNI_TLS_ENABLED=false
 All connections use plain TCP.
 
 ### Phase 2: Optional TLS
+
 ```bash
 OMNI_ENABLED=true
 OMNI_TLS_ENABLED=true
@@ -351,6 +380,7 @@ OMNI_TLS_ENABLED=true
 Server accepts both TCP and TLS connections. Clients choose based on connection string.
 
 ### Phase 3: TLS Only
+
 ```bash
 OMNI_ENABLED=true
 OMNI_TLS_ENABLED=true
@@ -435,6 +465,7 @@ openssl s_client -connect localhost:3001 \
 ### Metrics
 
 Track these metrics:
+
 - TLS handshake time
 - Cipher suite usage
 - Certificate expiry days
@@ -444,6 +475,7 @@ Track these metrics:
 ## Support
 
 For issues:
+
 - Implementation plan: `OmniProtocol/10_TLS_IMPLEMENTATION_PLAN.md`
 - Server implementation: `src/libs/omniprotocol/server/TLSServer.ts`
 - Client implementation: `src/libs/omniprotocol/transport/TLSConnection.ts`

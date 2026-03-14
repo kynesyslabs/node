@@ -9,14 +9,14 @@
  *                    ERROR ←---------┴--------------┘
  */
 export type ConnectionState =
-    | "UNINITIALIZED"  // Not yet connected
-    | "CONNECTING"     // TCP handshake in progress
+    | "UNINITIALIZED" // Not yet connected
+    | "CONNECTING" // TCP handshake in progress
     | "AUTHENTICATING" // hello_peer (0x01) exchange in progress
-    | "READY"          // Connected, authenticated, ready for messages
-    | "IDLE_PENDING"   // Idle timeout reached, will close when in-flight complete
-    | "CLOSING"        // Graceful shutdown in progress
-    | "CLOSED"         // Connection terminated
-    | "ERROR"          // Error state, can retry
+    | "READY" // Connected, authenticated, ready for messages
+    | "IDLE_PENDING" // Idle timeout reached, will close when in-flight complete
+    | "CLOSING" // Graceful shutdown in progress
+    | "CLOSED" // Connection terminated
+    | "ERROR" // Error state, can retry
 
 /**
  * Options for connection acquisition and operations

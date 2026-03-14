@@ -10,6 +10,9 @@ import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityPr
 import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
+import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+import Datasource from "@/model/datasource"
+import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 
 interface GCRRoutinePayload {
     method: string
@@ -134,9 +137,8 @@ export default async function manageGCRRoutines(
 
         case "getNomisIdentities": {
             try {
-                response.response = await NomisIdentityProvider.listIdentities(
-                    sender,
-                )
+                response.response =
+                    await NomisIdentityProvider.listIdentities(sender)
             } catch (error) {
                 response.result = 400
                 response.response = null
@@ -282,6 +284,196 @@ export default async function manageGCRRoutines(
         // }
 
         // SECTION Web2 Identity Management
+
+        // SECTION StorageProgram Query Methods
+
+        // REVIEW: Get storage program by address
+        case "getStorageProgram": {
+            const storageAddress = params[0]
+            const requesterAddress = params[1] // Optional identity for ACL check
+
+            if (!storageAddress) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Storage address is required" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
+
+                const program =
+                    await GCRStorageProgramRoutines.getStorageProgram(
+                        storageAddress,
+                        repository,
+                    )
+
+                if (!program) {
+                    response.result = 404
+                    response.response = null
+                    response.extra = {
+                        error: `Storage program not found: ${storageAddress}`,
+                    }
+                    break
+                }
+
+                // Check read permission
+                const hasReadAccess =
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    )
+
+                if (!hasReadAccess) {
+                    response.result = 403
+                    response.response = null
+                    response.extra = {
+                        error: "Permission denied: You do not have read access to this storage program",
+                    }
+                    break
+                }
+
+                response.response = {
+                    storageAddress: program.storageAddress,
+                    owner: program.owner,
+                    programName: program.programName,
+                    encoding: program.encoding,
+                    data: program.data,
+                    metadata: program.metadata,
+                    storageLocation: program.storageLocation,
+                    sizeBytes: program.sizeBytes,
+                    createdAt: program.createdAt.toISOString(),
+                    updatedAt: program.updatedAt.toISOString(),
+                }
+            } catch (error) {
+                response.result = 500
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        // REVIEW: Get storage programs by owner
+        case "getStorageProgramsByOwner": {
+            const owner = params[0]
+            const requesterAddress = params[1] // Optional identity for ACL filtering
+
+            if (!owner) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Owner address is required" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
+
+                const programs =
+                    await GCRStorageProgramRoutines.getStorageProgramsByOwner(
+                        owner,
+                        repository,
+                    )
+
+                // Filter to only programs the requester can read
+                const accessiblePrograms = programs.filter(program =>
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
+                )
+
+                response.response = accessiblePrograms.map(p => ({
+                    storageAddress: p.storageAddress,
+                    programName: p.programName,
+                    encoding: p.encoding,
+                    sizeBytes: p.sizeBytes,
+                    data: p.data,
+                    acl: p.acl,
+                    storageLocation: p.storageLocation,
+                    createdAt: p.createdAt.toISOString(),
+                    updatedAt: p.updatedAt.toISOString(),
+                }))
+            } catch (error) {
+                response.result = 500
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
+
+        // REVIEW: Search storage programs by name
+        case "searchStoragePrograms": {
+            const query = params[0]
+            const options = params[1] || {} // { limit, offset, exactMatch }
+            const requesterAddress = params[2] // Optional identity for ACL filtering
+
+            if (!query || (typeof query === "string" && query.trim() === "")) {
+                response.result = 400
+                response.response = null
+                response.extra = { error: "Search query is required" }
+                break
+            }
+
+            try {
+                const db = await Datasource.getInstance()
+                const repository = db
+                    .getDataSource()
+                    .getRepository(GCRStorageProgram)
+
+                const programs =
+                    await GCRStorageProgramRoutines.searchStorageProgramsByName(
+                        typeof query === "string"
+                            ? query.trim()
+                            : String(query),
+                        repository,
+                        {
+                            limit: options.limit || 50,
+                            offset: options.offset || 0,
+                            exactMatch: options.exactMatch || false,
+                        },
+                    )
+
+                // Filter to only programs the requester can read
+                const accessiblePrograms = programs.filter(program =>
+                    GCRStorageProgramRoutines.checkReadPermission(
+                        program,
+                        requesterAddress,
+                    ),
+                )
+
+                response.response = accessiblePrograms.map(p => ({
+                    storageAddress: p.storageAddress,
+                    programName: p.programName,
+                    encoding: p.encoding,
+                    sizeBytes: p.sizeBytes,
+                    data: p.data,
+                    acl: p.acl,
+                    storageLocation: p.storageLocation,
+                    createdAt: p.createdAt.toISOString(),
+                    updatedAt: p.updatedAt.toISOString(),
+                }))
+            } catch (error) {
+                response.result = 500
+                response.response = null
+                response.extra = {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                }
+            }
+            break
+        }
 
         default:
             response.response = false

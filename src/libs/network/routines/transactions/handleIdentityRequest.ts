@@ -38,9 +38,8 @@ export default async function handleIdentityRequest(
     const referralCode = payload.payload.referralCode
 
     if (referralCode) {
-        const referrerAccount = await Referrals.findAccountByReferralCode(
-            referralCode,
-        )
+        const referrerAccount =
+            await Referrals.findAccountByReferralCode(referralCode)
 
         if (!referrerAccount) {
             return {
@@ -81,7 +80,9 @@ export default async function handleIdentityRequest(
             // Unlike other handlers that pass payload.payload, UD's verifyPayload expects
             // the full wrapper object with nested .payload property.
             return await UDIdentityManager.verifyPayload(
-                payload as unknown as Parameters<typeof UDIdentityManager.verifyPayload>[0],
+                payload as unknown as Parameters<
+                    typeof UDIdentityManager.verifyPayload
+                >[0],
                 sender,
             )
         case "pqc_identity_assign":

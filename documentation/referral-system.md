@@ -19,6 +19,7 @@ The referral system consists of three main components:
 The main class that handles all referral-related operations.
 
 #### Constants
+
 ```typescript
 static readonly REFERRER_BONUS = 3        // Points awarded to referrer
 static readonly REFERRED_USER_BONUS = 3   // Points awarded to new user
@@ -27,47 +28,53 @@ static readonly REFERRED_USER_BONUS = 3   // Points awarded to new user
 #### Key Methods
 
 ##### `generateReferralCode(publicKey: string, options?: object): string`
+
 - **Purpose**: Creates deterministic referral codes from ed25519 public keys
 - **Algorithm**: SHA-256 hash → Base58 encoding → 12-character code
-- **Features**: 
-  - Collision-resistant (~70 bits entropy)
-  - Human-friendly (no confusing characters)
-  - Optional checksum and prefix support
+- **Features**:
+    - Collision-resistant (~70 bits entropy)
+    - Human-friendly (no confusing characters)
+    - Optional checksum and prefix support
 - **Example**: `generateReferralCode("0x123...abc")` → `"8jKm9Xp2QvR7"`
 
 ##### `findAccountByReferralCode(referralCode: string): Promise<GCRMain | null>`
+
 - **Purpose**: Locates the account that owns a specific referral code
 - **Implementation**: PostgreSQL JSONB query on `referralInfo.referralCode`
 - **Query**: `WHERE gcr.referralInfo ->> 'referralCode' = :referralCode`
 
 ##### `isAlreadyReferred(referrerAccount: GCRMain, newUserPubkey: string): boolean`
+
 - **Purpose**: Prevents duplicate referrals between same user pairs
 - **Logic**: Checks if `newUserPubkey` exists in referrer's `referralInfo.referrals[]` array
 
 ##### `isEligibleForReferral(account: GCRMain): boolean`
+
 - **Purpose**: Determines if an existing account can still be referred
-- **Criteria**: 
-  - User has NOT been referred before (`referralInfo.referredBy` is null)
-  - User has zero existing points (`points.totalPoints === 0`)
+- **Criteria**:
+    - User has NOT been referred before (`referralInfo.referredBy` is null)
+    - User has zero existing points (`points.totalPoints === 0`)
 
 ##### `processReferral(newAccount: GCRMain, referralCode: string, gcrMainRepository): Promise<void>`
+
 - **Purpose**: Main entry point for processing referrals
 - **Validation Steps**:
-  1. Verify referral code exists and is valid
-  2. Prevent self-referrals (referrer !== new user)
-  3. Check for duplicate referrals
+    1. Verify referral code exists and is valid
+    2. Prevent self-referrals (referrer !== new user)
+    3. Check for duplicate referrals
 - **Action**: Calls `awardReferralPoints()` if all validations pass
 
 ##### `awardReferralPoints(referrerAccount: GCRMain, newUserAccount: GCRMain, gcrMainRepository): Promise<void>` (private)
+
 - **Purpose**: Awards points and updates database records for both parties
 - **Referrer Updates**:
-  - Add 3 points to `totalPoints` and `breakdown.referrals`
-  - Increment `referralInfo.totalReferrals` counter
-  - Append referral record to `referralInfo.referrals[]` array
+    - Add 3 points to `totalPoints` and `breakdown.referrals`
+    - Increment `referralInfo.totalReferrals` counter
+    - Append referral record to `referralInfo.referrals[]` array
 - **New User Updates**:
-  - Add 3 points to `totalPoints` and `breakdown.referrals`
-  - Set `referralInfo.referredBy` to referrer's pubkey
-  - Generate referral code if missing
+    - Add 3 points to `totalPoints` and `breakdown.referrals`
+    - Set `referralInfo.referredBy` to referrer's pubkey
+    - Generate referral code if missing
 - **Database**: Saves referrer account (new user saved by PointSystem)
 
 ### 2. PointSystem Integration
@@ -77,21 +84,24 @@ The PointSystem class orchestrates referral processing during point-earning acti
 #### Modified Methods
 
 ##### `addPointsToGCR(userId, points, type, platform, referralCode?)`
+
 - **New Parameter**: `referralCode?: string` - Optional referral code from user
 - **Integration Points**:
-  - **New Accounts**: Always process referral if code provided
-  - **Existing Accounts**: Process only if `Referrals.isEligibleForReferral()` returns true
+    - **New Accounts**: Always process referral if code provided
+    - **Existing Accounts**: Process only if `Referrals.isEligibleForReferral()` returns true
 - **Flow**:
-  1. Award original points for action (wallet link, Twitter, etc.)
-  2. Call `Referrals.processReferral()` if referral code present
-  3. Save account with all updates
+    1. Award original points for action (wallet link, Twitter, etc.)
+    2. Call `Referrals.processReferral()` if referral code present
+    3. Save account with all updates
 
 ##### `getUserPointsInternal(userId)`
+
 - **Enhancement**: Automatic referral code generation for legacy accounts
 - **Fallback Logic**: If account lacks referral code, generates and saves one
 - **Return Value**: Now includes `referralCode` field in response
 
 ##### Point Award Methods
+
 - `awardWeb3WalletPoints()` - Now accepts `referralCode` parameter
 - `awardTwitterPoints()` - Now accepts `referralCode` parameter
 
@@ -126,17 +136,19 @@ Referrals.processReferral(account, referralCode, repository)
 #### Modified Methods
 
 ##### `applyXmIdentityAdd()` (Wallet Linking)
+
 - **Change**: Passes `editOperation.referralCode` to `IncentiveManager.walletLinked()`
 - **Trigger**: Only on first wallet connection (`isFirstConnection()`)
 
 ##### `applyWeb2IdentityAdd()` (Twitter Linking)
+
 - **Change**: Passes `editOperation.referralCode` to `IncentiveManager.twitterLinked()`
 - **Trigger**: Only on first Twitter connection for new accounts
-
 
 ## Testing Scenarios
 
 ### Valid Referral Flow
+
 1. User A gets referral code: `getUserPoints()` returns `referralCode`
 2. User B signs up with User A's code
 3. User B links first wallet/Twitter with `referralCode` in editOperation
@@ -144,6 +156,7 @@ Referrals.processReferral(account, referralCode, repository)
 5. Both accounts updated with referral relationship
 
 ### Edge Cases
+
 1. **Invalid code**: No points awarded, no errors
 2. **Self-referral**: User A tries to use their own code - ignored
 3. **Duplicate referral**: User B already referred by User A - ignored
@@ -153,9 +166,11 @@ Referrals.processReferral(account, referralCode, repository)
 ## File Changes Summary
 
 ### New Files
+
 - `src/features/incentive/referrals.ts` - Core referral logic
 
 ### Modified Files
+
 - `src/features/incentive/PointSystem.ts` - Referral integration
 - `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts` - Identity hooks
 - `src/libs/blockchain/gcr/gcr_routines/IncentiveManager.ts` - Method signatures
