@@ -3,12 +3,14 @@ import { Server } from "bun"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
-import { setAuthContext } from "../authContext"
+import { getAuthContext, setAuthContext } from "../authContext"
 import {
     verifySignature,
     isKeyWhitelisted,
     VerificationResult,
 } from "../verifySignature"
+import { PeerManager } from "@/libs/peer"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 interface RateLimitData {
     count: number
@@ -151,6 +153,35 @@ export class RateLimiter {
         }
 
         return "unknown"
+    }
+
+    public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
+        if (
+            clientIP &&
+            this.config.whitelistedIPs.includes(clientIP)
+        ) {
+            return true
+        }
+
+        const authCtx = getAuthContext(req)
+        if (!authCtx.verified || !authCtx.publicKey) {
+            return false
+        }
+
+        const localNodePublicKey = getSharedState.keypair?.publicKey
+            ? uint8ArrayToHex(
+                  getSharedState.keypair.publicKey as Uint8Array,
+              )
+            : null
+
+        if (
+            localNodePublicKey &&
+            authCtx.publicKey === localNodePublicKey
+        ) {
+            return true
+        }
+
+        return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
     }
 
     private isTrustedProxy(ip: string): boolean {
@@ -301,9 +332,9 @@ export class RateLimiter {
             log.debug(`[Rate Limiter] Client IP: ${clientIP}`)
 
             // Skip rate limiting for whitelisted IPs
-            if (this.config.whitelistedIPs.includes(clientIP)) {
+            if (this.isTrustedInternalRequest(req, clientIP)) {
                 log.debug(
-                    `[Rate Limiter] Whitelisted IP: ${clientIP}, skipping rate limiting`,
+                    `[Rate Limiter] Trusted internal request: ${clientIP}, skipping rate limiting`,
                 )
                 return await next()
             }
@@ -322,11 +353,9 @@ export class RateLimiter {
 
             const isBlocked =
                 ipData.blocked && ipData.blockExpiry && now < ipData.blockExpiry
-            const isBlockedByBlockCount =
-                ipData.lastSeenWithinBlockCount >= this.config.txPerBlock
 
             // Check if IP is currently blocked
-            if (isBlocked || isBlockedByBlockCount) {
+            if (isBlocked) {
                 const remainingTime = Math.ceil(
                     (ipData.blockExpiry - now) / 1000,
                 )

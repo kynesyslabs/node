@@ -414,7 +414,7 @@ async function processPayload(
                 // 2. Verify cryptography only
                 const isValid = await ProofVerifier.verifyProofOnly(
                     attestation.proof,
-                    attestation.publicSignals
+                    attestation.publicSignals,
                 )
 
                 return {
@@ -650,6 +650,7 @@ export async function serverRpcBun() {
             const payload = await req.json()
 
             const rateLimitResponse = handleIdentityTxRateLimit(
+                req,
                 clientIP,
                 payload,
                 rateLimiter,
@@ -704,11 +705,12 @@ export async function serverRpcBun() {
  * @returns Response if rate limit is exceeded, otherwise null
  */
 function handleIdentityTxRateLimit(
+    req: Request,
     ip: string,
     payload: RPCRequest,
     rateLimiter: RateLimiter,
 ) {
-    if (rateLimiter.config.whitelistedIPs.includes(ip)) {
+    if (rateLimiter.isTrustedInternalRequest(req, ip)) {
         return null
     }
 
@@ -742,15 +744,16 @@ function handleIdentityTxRateLimit(
         return null
     }
 
-    if (ipData.lastSeenBlockNumber === getSharedState.lastBlockNumber) {
+    const currentBlockNumber = getSharedState.lastBlockNumber
+
+    if (ipData.lastSeenBlockNumber === currentBlockNumber) {
         ipData.lastSeenWithinBlockCount++
     } else {
         ipData.lastSeenWithinBlockCount = 1
-        ipData.lastSeenBlockNumber = getSharedState.lastBlockNumber
+        ipData.lastSeenBlockNumber = currentBlockNumber
     }
 
-    if (ipData.lastSeenWithinBlockCount >= rateLimiter.config.txPerBlock) {
-        ipData.blocked = true
+    if (ipData.lastSeenWithinBlockCount > rateLimiter.config.txPerBlock) {
         rateLimiter.ipRequests.set(ip, ipData)
 
         return new Response(
