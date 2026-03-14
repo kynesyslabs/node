@@ -264,6 +264,7 @@ export class PeerConnection extends EventEmitter {
             }, timeout)
 
             this.socket = new Socket()
+            this.socket.setKeepAlive(true, 30_000)
 
             this.socket.on("connect", () => {
                 clearTimeout(timeoutTimer)
@@ -657,7 +658,7 @@ export class PeerConnection extends EventEmitter {
                     this.setState(ConnectionState.CLOSED)
                     resolve()
                 })
-                this.socket.destroy()
+                this.socket.end()
             } else {
                 this.setState(ConnectionState.CLOSED)
                 resolve()
@@ -733,31 +734,36 @@ export class PeerConnection extends EventEmitter {
     private async handleMessage(message: ParsedOmniMessage): Promise<void> {
         const { header, payload, auth } = message
 
-        // Check if this is a RESPONSE to our outbound request
-        const pending = this.inFlightRequests.get(header.sequence)
-        if (pending) {
-            // This is a response - resolve the pending request
-            clearTimeout(pending.timer)
-            this.inFlightRequests.delete(header.sequence)
-            pending.resolve(payload as Buffer)
-            return
-        }
+        if (header.opcode === 0xff) {
+            // Check if this is a RESPONSE to our outbound request
+            const pending = this.inFlightRequests.get(header.sequence)
+            if (pending) {
+                // This is a response - resolve the pending request
+                clearTimeout(pending.timer)
+                this.inFlightRequests.delete(header.sequence)
+                pending.resolve(payload as Buffer)
+                return
+            }
 
-        // Fallback: Check sibling connections for cross-connection response routing
-        // This handles the case where request was sent on connection A but response arrives on connection B
-        const crossConnection = findInFlightRequestAcrossConnections(
-            this._peerIdentity,
-            header.sequence,
-            this,
-        )
-        if (crossConnection) {
-            const { connection, pending: crossPending } = crossConnection
-            clearTimeout(crossPending.timer)
-            connection.inFlightRequests.delete(header.sequence)
-            crossPending.resolve(payload as Buffer)
-            log.debug(
-                `[PeerConnection] ${this._peerIdentity} resolved cross-connection response for sequence ${header.sequence}`,
+            // Fallback: Check sibling connections for cross-connection response routing
+            // This handles the case where request was sent on connection A but response arrives on connection B
+            const crossConnection = findInFlightRequestAcrossConnections(
+                this._peerIdentity,
+                header.sequence,
+                this,
             )
+            if (crossConnection) {
+                const { connection, pending: crossPending } = crossConnection
+                clearTimeout(crossPending.timer)
+                this.inFlightRequests.delete(header.sequence)
+                crossPending.resolve(payload as Buffer)
+                log.debug(
+                    `[PeerConnection] ${this._peerIdentity} resolved cross-connection response for sequence ${header.sequence}`,
+                )
+                return
+            }
+
+            // INFO: We can't find a matching in-flight request,
             return
         }
 
