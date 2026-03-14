@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "better_testing/scripts/run-suite.ts",
+    "better_testing/scripts/show-latest-report.ts",
+    "better_testing/scripts/verify-release-gate.ts"
+  ]
+}
