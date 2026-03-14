@@ -105,7 +105,7 @@ export class BunServer {
                 ;(req as Request & { params?: Record<string, string> }).params = match.params
                 return await match.handler(req)
             }
-            return new Response("Not Found", { status: 404 })
+            return jsonResponse({ error: "Not Found" }, 404)
         }
 
         // Build middleware chain from right to left (last to first)
@@ -168,7 +168,9 @@ export const cors = (): Middleware => {
 export const json = (): Middleware => {
     return async (req, next) => {
         const response = await next()
-        response.headers.set("Content-Type", "application/json")
+        if (!response.headers.has("Content-Type")) {
+            response.headers.set("Content-Type", "application/json")
+        }
         return response
     }
 }
