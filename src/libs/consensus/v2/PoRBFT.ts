@@ -15,7 +15,7 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
-import SecretaryManager from "./types/secretaryManager"
+import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
 import {
     BlockInvalidError,
     ForgingEndedError,
@@ -142,12 +142,19 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
         // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-        const l2psResult = await L2PSConsensus.applyPendingProofs(blockRef, false)
+        const l2psResult = await L2PSConsensus.applyPendingProofs(
+            blockRef,
+            false,
+        )
         if (l2psResult.proofsApplied > 0) {
-            log.info(`[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`)
+            log.info(
+                `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+            )
         }
         if (l2psResult.proofsFailed > 0) {
-            log.warning(`[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`)
+            log.warning(
+                `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+            )
         }
 
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
@@ -212,21 +219,19 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7, blockRef)
     } catch (error) {
-        if (error instanceof NotInShardError) {
-            log.info(
-                "[consensusRoutine] We are not in the shard, waiting for the block",
-            )
+        if (
+            error instanceof NotInShardError ||
+            error instanceof ForgingEndedError
+        ) {
+            log.error(error)
+            log.error("[consensusRoutine] Exiting consensus routine")
             return
         }
 
-        if (error instanceof ForgingEndedError) {
-            log.info(
-                "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
-            )
-            return
-        }
-
-        if (error instanceof BlockInvalidError) {
+        if (
+            error instanceof BlockInvalidError ||
+            error instanceof AbortConsensusError
+        ) {
             log.info(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
@@ -240,7 +245,7 @@ export async function consensusRoutine(): Promise<void> {
                 }
             }
             await rollbackGCREditsFromTxs(txsToRollback)
-            await Mempool.removeTransactionsByHashes(successfulTxs)
+            // await Mempool.removeTransactionsByHashes(successfulTxs)
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)
@@ -340,11 +345,13 @@ async function mergeAndOrderMempools(
     log.debug(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool)}`)
     log.info("[CONSENSUS] Our mempool has been retrieved")
 
-    // NOTE: Transactions here should be ordered by timestamp
     await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3, blockRef)
 
-    return await Mempool.getMempool(blockRef)
+    const mempool = await Mempool.getMempool(blockRef)
+    const hashes = mempool.map(tx => tx.hash)
+    const existingHashes = await Chain.getExistingTransactionHashes(hashes)
+    return mempool.filter(tx => !existingHashes.has(tx.hash))
 }
 
 /**
@@ -394,7 +401,11 @@ async function applyGCREditsFromMergedMempool(
 
         const txGCREdits = tx.content.gcr_edits
         // Skip transactions that don't have GCR edits (e.g., l2psBatch)
-        if (!txGCREdits || !Array.isArray(txGCREdits) || txGCREdits.length === 0) {
+        if (
+            !txGCREdits ||
+            !Array.isArray(txGCREdits) ||
+            txGCREdits.length === 0
+        ) {
             // These transactions are valid but don't modify GCR state
             successfulTxs.push(tx.hash)
             continue

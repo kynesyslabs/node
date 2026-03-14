@@ -217,7 +217,7 @@ export default class PeerManager {
         return this.getPeers() // REVIEW is this working?
     }
 
-    addPeer(peer: Peer) {
+    addPeer(peer: Peer): [boolean, string] {
         log.info("[PEERMANAGER] Adding peer: " + JSON.stringify(peer))
         log.info("[PEERMANAGER] Adding peer: " + peer.identity)
         log.info("[PEERMANAGER] Adding peer", false)
@@ -227,7 +227,7 @@ export default class PeerManager {
                 true,
             )
             log.info("[PEERMANAGER] Peer: " + JSON.stringify(peer), false)
-            return false
+            return [false, "No identity detected!"]
         }
 
         if (
@@ -242,7 +242,7 @@ export default class PeerManager {
                     peer.connection.string,
             )
             log.error("[PEERMANAGER] Peer not added: " + peer.identity)
-            return false
+            return [false, "Invalid connection string: " + peer.connection.string]
         }
 
         // REVIEW check for duplicates
@@ -300,7 +300,7 @@ export default class PeerManager {
         if (!peer.connection.string) {
             log.warning("[PEERMANAGER] No connection string detected", true)
         }
-        return true
+        return [true, ""]
     }
 
     /**
