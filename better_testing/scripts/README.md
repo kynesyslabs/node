@@ -1,100 +1,49 @@
 # better_testing/scripts
 
-Small host-side helpers to run `better_testing/loadgen` scenarios against the devnet Docker network.
+This folder contains the **host-side** commands that drive the local devnet test harness.
 
-Notes:
-- The devnet compose files assume you run from `devnet/` so identity mounts resolve correctly.
-- If you change `src/**`, `better_testing/loadgen/src/**`, `devnet/**`, `package.json`, `bun.lock`, or `tsconfig.json`, rebuild the image with `--build` or `--build-first`.
-- The local runners now refuse no-build runs when those image inputs are dirty, so stale devnet images do not generate false failures.
+Read `better_testing/README.md` first. This file is the narrower runner reference.
 
-## Run a scenario
+## Main Commands
 
-```bash
-./better_testing/scripts/run-scenario.sh token_edge_cases
-./better_testing/scripts/run-scenario.sh token_acl_matrix --build
-./better_testing/scripts/run-scenario.sh token_transfer_ramp --env RAMP_CONCURRENCY=1,2,4,8 --env STEP_DURATION_SEC=15
-```
+| Command | What it does |
+|---|---|
+| `bun run testenv:doctor` | checks local RPC/Omni health and prints recommended next commands |
+| `bun run testenv:startup:local -- --build-first` | cold-boots the local devnet and validates startup |
+| `bun run testenv:cluster:local -- --build-first` | runs scheduled cluster-health checks |
+| `bun run testenv:prod-gate:local -- --build-first` | runs the must-pass local release gate |
+| `bun run testenv:gcr:routine:local` | runs deterministic single-wallet GCR routine validation |
+| `bun run testenv:l2ps:local -- --build-first` | runs the L2PS live suite |
+| `bun run testenv:perf:baseline:local -- --build` | records the active-core baseline |
+| `bun run testenv:soak:local -- --build` | runs the mixed active-feature soak |
+| `better_testing/scripts/run-scenario.sh <scenario>` | runs one specific scenario |
 
-Artifacts land in `better_testing/runs/$RUN_ID/`.
+## Rebuild Rule
 
-## Run the cold-boot startup suite
+Rebuild when you changed:
 
-```bash
-bun run testenv:startup:local -- --build-first
-```
+- `src/**`
+- `better_testing/loadgen/src/**`
+- `devnet/**`
+- `package.json`
+- `bun.lock`
+- `tsconfig.json`
 
-This is a host-side suite, not a single loadgen scenario. It:
-- tears down the local devnet with volumes
-- starts it again
-- waits for RPC and tx readiness
-- verifies peer discovery and block production
+The local runners now block unsafe no-build execution when those image inputs are dirty.
 
-Artifacts land in:
-- `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json`
+## Artifacts
+
+Primary report outputs:
+
 - `better_testing/runs/_latest/startup-cold-boot.latest.md`
-
-## Run the routine single-wallet GCR suite
-
-```bash
-bun run testenv:gcr:routine:local
-```
-
-This suite keeps GCR validation on the node-local deterministic path and avoids deferred SDK multi-instance concurrency work.
-
-Artifacts land in:
-- `better_testing/runs/_latest/gcr-routine.latest.md`
-
-## Run the scheduled cluster-health suite
-
-```bash
-bun run testenv:cluster:local -- --build-first
-```
-
-This suite is the regular operational evidence set for local cluster health. It now includes the deeper `consensus_tx_inclusion` scenario because it forces a real on-chain state transition, while `sync_catchup_smoke` can be inconclusive when the cluster starts already converged.
-
-Artifacts land in:
 - `better_testing/runs/_latest/cluster-health.latest.md`
-
-## Token perf baseline
-
-```bash
-./better_testing/scripts/token-perf-baseline.sh --build
-./better_testing/scripts/token-perf-baseline.sh --with-pointers
-```
-
-By default, the baseline runner sets `POST_RUN_HOLDER_POINTER_CHECK=false` to reduce output/noise; use `--with-pointers` to re-enable it.
-
-## Active-core performance baseline
-
-```bash
-bun run testenv:perf:baseline:local -- --build
-```
-
-This host-side runner records a small fixed set of active local baselines:
-- `transfer`
-- `zk_proof_loadgen`
-- `sync_under_load`
-- optional `omni_throughput` with `--with-omni`
-
-If one active step is currently regressed, the runner keeps going and records that step as blocked in the markdown/json summary instead of dropping it from the matrix.
-Token transfer is intentionally excluded from this active-core runner because the current node repo does not expose an implemented token runtime/query path in `src/`; historical token scenarios remain for archaeology and future reactivation only.
-
-Artifacts land in:
-- `better_testing/runs/baseline-active-core-*/active-core-baseline.summary.json`
+- `better_testing/runs/_latest/prod-gate.latest.md`
+- `better_testing/runs/_latest/gcr-routine.latest.md`
+- `better_testing/runs/_latest/l2ps-live.latest.md`
 - `better_testing/runs/_latest/active-core-baseline.latest.md`
-
-## Active-cluster soak
-
-```bash
-bun run testenv:soak:local -- --build
-```
-
-This host-side runner executes one mixed active-feature soak profile:
-- pre-check `cluster-health`
-- sustained `transfer`
-- sustained `zk_proof_loadgen`
-- post-check `cluster-health`
-
-Artifacts land in:
-- `better_testing/runs/cluster-soak-*/cluster-soak.summary.json`
 - `better_testing/runs/_latest/cluster-soak.latest.md`
+
+## Notes
+
+- `run-scenario.sh` is for one-off execution, not for deciding what counts as active feature coverage.
+- Token scenarios are still runnable through the wrapper, but they are historical harness inventory, not current active-feature evidence.

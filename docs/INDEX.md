@@ -19,4 +19,4 @@ author: agent
 
 ## Specs
 
-- [Active Feature Test Addition Proposal](./specs/active-feature-test-addition-proposal.md)
+- [Active Feature Test Addition Proposal](./specs/active-feature-test-addition-proposal.md) `superseded / historical rationale`
