@@ -401,7 +401,7 @@ async function runStartupColdBootBootstrap(
 
   const targets = splitTargets(resolvedTargets ?? defaultLocalTargets)
   const resetCommand = ["down", "-v", "--remove-orphans"]
-  const upCommand = args.buildFirst ? ["up", "-d", "--build"] : ["up", "-d"]
+  const upCommand = args.buildFirst ? ["up", "-d", "--build", "--force-recreate"] : ["up", "-d"]
 
   console.log("\n==> cold boot reset")
   composeCmd(resetCommand, args.verbose)
@@ -439,6 +439,22 @@ async function runStartupColdBootBootstrap(
     throw new Error(`startup-cold-boot bootstrap failed: ${artifactPath}`)
   }
   return { ok: report.ok, artifactPath, report }
+}
+
+async function refreshLocalDevnetIfRequested(
+  args: SuiteArgs,
+  resolvedTargets: string | null,
+): Promise<void> {
+  if (!args.local || !args.buildFirst || args.suite === "startup-cold-boot") {
+    return
+  }
+
+  const targets = splitTargets(resolvedTargets ?? defaultLocalTargets)
+  const upCommand = ["up", "-d", "--build", "--force-recreate"]
+
+  console.log("\n==> refreshing local devnet")
+  composeCmd(upCommand, args.verbose)
+  await waitForConsensusTargets(targets, true)
 }
 
 async function runScenario(
@@ -509,6 +525,8 @@ async function main() {
     const bootstrap = await runStartupColdBootBootstrap(args, runTag, resolvedTargets)
     suiteArtifactPath = bootstrap.artifactPath
     console.log(`Startup bootstrap artifact: ${path.relative(process.cwd(), bootstrap.artifactPath)}`)
+  } else {
+    await refreshLocalDevnetIfRequested(args, resolvedTargets)
   }
 
   for (let index = 0; index < args.scenarios.length; index++) {

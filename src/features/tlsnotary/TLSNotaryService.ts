@@ -150,6 +150,7 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
   }
 
   return {
+    host: config.host,
     port: config.port,
     signingKey,
     maxSentData: config.maxSentData,
@@ -373,7 +374,6 @@ export class TLSNotaryService {
 
     try {
       // Try to fetch /info endpoint to verify container is running
-      const infoUrl = `http://localhost:${this.config.port}/info`
       const response = await fetch(infoUrl, { signal: AbortSignal.timeout(DOCKER_HEALTH_TIMEOUT_MS) })
 
       if (!response.ok) {

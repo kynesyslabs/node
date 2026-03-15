@@ -52,6 +52,7 @@ export interface CoreConfig {
 
 export interface TLSNotaryConfig {
     enabled: boolean
+    host: string
     port: number
     signingKey: string
     fatal: boolean

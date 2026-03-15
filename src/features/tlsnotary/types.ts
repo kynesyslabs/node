@@ -72,6 +72,8 @@ export type TLSNotaryMode = "ffi" | "docker";
  * Service configuration options
  */
 export interface TLSNotaryServiceConfig {
+  /** Hostname for docker mode notary server */
+  host?: string;
   /** Port to run the notary WebSocket server on */
   port: number;
   /** 32-byte secp256k1 private key (hex string or Uint8Array) - only used in FFI mode */
