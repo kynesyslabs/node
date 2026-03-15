@@ -15,6 +15,7 @@ import {
     TON,
     XRPL,
     BTC,
+    APTOS,
 } from "@kynesyslabs/demosdk/xm-localsdk"
 
 // TODO: refactor import to use high level abstraction module
@@ -50,6 +51,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
+    aptos: APTOS,
 }
 
 export default class IdentityManager {
@@ -167,6 +169,15 @@ export default class IdentityManager {
         //         }
         //     }
 
+        // SECTION: APTOS Checks
+        // INFO: Check if the subchain is mainnet
+        if (chain === "aptos" && subchain !== "mainnet") {
+            return {
+                ...response,
+                message: "Failed: Testnet addresses are not supported",
+            }
+        }
+
         return {
             ...response,
             success: true,
@@ -211,7 +222,8 @@ export default class IdentityManager {
                 chainId === "ton" ||
                 chainId === "ibc" ||
                 chainId === "atom" ||
-                chainId === "near"
+                chainId === "near" ||
+                chainId === "aptos"
             ) {
                 messageVerified = await sdk.verifyMessage(
                     signedData,
