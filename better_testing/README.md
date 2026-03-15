@@ -107,7 +107,7 @@ This is the practical human summary. For the canonical contract, use the matrix 
 | Multichain / XM | Yes | `multichain_parser_rejects`, `multichain_parser_execute_smoke`, `multichain_dispatcher_aggregation` | `prod-gate`, one-off |
 | Omni | Yes | `omni_connection_smoke`, `omni_message_roundtrip`, `omni_reconnection`, `omni_throughput` | `prod-gate`, baseline |
 | ZK | Yes | `zk_commitment_smoke`, `zk_attestation_smoke`, `zk_merkle_inclusion`, `zk_proof_loadgen` | `prod-gate`, baseline, soak |
-| TLSNotary | Yes, but local gate still has a bug | `tlsnotary_routes_smoke`, `tlsnotary_verify_rejects` | `prod-gate`, one-off |
+| TLSNotary | Yes | `tlsnotary_routes_smoke`, `tlsnotary_verify_rejects` | `prod-gate`, one-off |
 | Web2 / DAHR | Yes | `web2_url_validation_smoke`, `web2_sanitization_smoke`, `web2_dahr_rejects` | `prod-gate`, one-off |
 | IM / signaling | Yes | `im_register_discover_smoke`, `im_message_roundtrip`, `im_online` | `prod-gate`, one-off |
 | FHE | Yes | `fhe_scalar_smoke`, `fhe_arithmetic_smoke` | one-off |
@@ -190,8 +190,6 @@ Most useful reports:
   - host-side runners and wrappers
 - `better_testing/loadgen/README.md`
   - individual scenario runner details
-- `better_testing/research.md`
-  - deeper investigation notes and non-authoritative history
 
 Archived outdated snapshots:
 
