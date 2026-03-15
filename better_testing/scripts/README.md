@@ -32,6 +32,17 @@ Artifacts land in:
 - `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json`
 - `better_testing/runs/_latest/startup-cold-boot.latest.md`
 
+## Run the routine single-wallet GCR suite
+
+```bash
+bun run testenv:gcr:routine:local
+```
+
+This suite keeps GCR validation on the node-local deterministic path and avoids deferred SDK multi-instance concurrency work.
+
+Artifacts land in:
+- `better_testing/runs/_latest/gcr-routine.latest.md`
+
 ## Token perf baseline
 
 ```bash

@@ -37,6 +37,12 @@ bun run testenv:startup:local
 ```
 This resets the local devnet with `docker compose down -v --remove-orphans`, starts it again, verifies RPC readiness plus peer discovery and block production, and writes a suite bootstrap artifact under `better_testing/runs/`.
 
+Routine single-wallet GCR validation:
+```bash
+bun run testenv:gcr:routine:local
+```
+This runs the stable node-local GCR path without relying on deferred multi-instance SDK behavior: `gcr_identity_smoke` plus `gcr_identity_remove`.
+
 Chaos/resync run (restart a follower mid-load, then verify convergence):
 ```bash
 better_testing/scripts/run-chaos-token-script-transfer.sh --reset --build --duration-sec 30 --delay-sec 8 --env SCRIPT_SET_STORAGE=true
@@ -59,6 +65,7 @@ Verified example RUN_IDs:
 - `better_testing/runs/<RUN_ID>/*.summary.json`
 - `better_testing/runs/<RUN_ID>/*.timeseries.jsonl` (when enabled; good input for future Grafana/Prometheus)
 - `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json` for the cold-boot bootstrap report
+- `better_testing/runs/_latest/gcr-routine.latest.md` for the single-wallet routine GCR report
 
 Notes:
 - In loadgens, `ok` only counts transactions accepted (`result===200`); rejected txs are counted in `error` with `errorSamples`.

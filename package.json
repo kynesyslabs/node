@@ -57,6 +57,7 @@
         "testenv:verify:local": "bun better_testing/scripts/verify-release-gate.ts --local",
         "testenv:gcr": "bun better_testing/scripts/run-suite.ts gcr-focus",
         "testenv:gcr:local": "bun better_testing/scripts/run-suite.ts gcr-focus --local",
+        "testenv:gcr:routine:local": "bun better_testing/scripts/run-suite.ts gcr-routine --local",
         "testenv:gcr-health:local": "bun better_testing/scripts/run-suite.ts gcr-focus --local"
     },
     "devDependencies": {

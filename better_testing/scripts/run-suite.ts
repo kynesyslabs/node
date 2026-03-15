@@ -6,7 +6,7 @@ import { envInt } from "../loadgen/src/framework/common"
 import { waitForConsensusTargets } from "../loadgen/src/features/consensus/shared"
 import { getClusterObservation, waitForClusterConvergence } from "../loadgen/src/features/peersync/shared"
 
-type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "prod-gate" | "l2ps-live" | "startup-cold-boot"
+type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "gcr-routine" | "prod-gate" | "l2ps-live" | "startup-cold-boot"
 
 type ScenarioResult = {
   scenario: string
@@ -50,6 +50,10 @@ const suites: Record<SuiteName, string[]> = {
     "gcr_identity_matrix",
     "gcr_points_smoke",
     "gcr_identity_xm_smoke",
+  ],
+  "gcr-routine": [
+    "gcr_identity_smoke",
+    "gcr_identity_remove",
   ],
   "prod-gate": [
     "omni_connection_smoke",
@@ -212,6 +216,7 @@ async function isHealthyRpcTarget(rpcUrl: string): Promise<boolean> {
 async function resolveLocalTargets(suite: string, explicitTargets: string | null): Promise<string | null> {
   if (explicitTargets) return explicitTargets
   if (suite === "startup-cold-boot") return defaultLocalTargets
+  if (suite === "gcr-routine") return defaultLocalTargets
   if (suite !== "cluster-health" && suite !== "gcr-focus" && suite !== "prod-gate") return null
 
   const candidates = splitTargets(process.env.TARGETS ?? defaultLocalTargets)
