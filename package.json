@@ -48,6 +48,7 @@
         "testenv:latest": "bun better_testing/scripts/show-latest-report.ts",
         "testenv:sanity": "bun better_testing/scripts/run-suite.ts sanity",
         "testenv:sanity:local": "bun better_testing/scripts/run-suite.ts sanity --local",
+        "testenv:startup:local": "bun better_testing/scripts/run-suite.ts startup-cold-boot --local",
         "testenv:cluster:local": "bun better_testing/scripts/run-suite.ts cluster-health --local",
         "testenv:l2ps:local": "bun better_testing/scripts/run-suite.ts l2ps-live --local",
         "testenv:prod-gate": "bun better_testing/scripts/run-suite.ts prod-gate",

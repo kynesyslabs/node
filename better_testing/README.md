@@ -31,6 +31,12 @@ better_testing/scripts/run-scenario.sh token_smoke
 better_testing/scripts/run-scenario.sh token_script_transfer_ramp --env SCRIPT_SET_STORAGE=true --env RAMP_INFLIGHT_PER_WALLET=1,2,4,8
 ```
 
+Cold-boot startup validation:
+```bash
+bun run testenv:startup:local
+```
+This resets the local devnet with `docker compose down -v --remove-orphans`, starts it again, verifies RPC readiness plus peer discovery and block production, and writes a suite bootstrap artifact under `better_testing/runs/`.
+
 Chaos/resync run (restart a follower mid-load, then verify convergence):
 ```bash
 better_testing/scripts/run-chaos-token-script-transfer.sh --reset --build --duration-sec 30 --delay-sec 8 --env SCRIPT_SET_STORAGE=true
@@ -52,6 +58,7 @@ Verified example RUN_IDs:
 3) Inspect artifacts:
 - `better_testing/runs/<RUN_ID>/*.summary.json`
 - `better_testing/runs/<RUN_ID>/*.timeseries.jsonl` (when enabled; good input for future Grafana/Prometheus)
+- `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json` for the cold-boot bootstrap report
 
 Notes:
 - In loadgens, `ok` only counts transactions accepted (`result===200`); rejected txs are counted in `error` with `errorSamples`.

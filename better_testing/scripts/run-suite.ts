@@ -2,8 +2,11 @@
 
 import * as fs from "fs"
 import * as path from "path"
+import { envInt } from "../loadgen/src/framework/common"
+import { waitForConsensusTargets } from "../loadgen/src/features/consensus/shared"
+import { getClusterObservation, waitForClusterConvergence } from "../loadgen/src/features/peersync/shared"
 
-type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "prod-gate" | "l2ps-live"
+type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "prod-gate" | "l2ps-live" | "startup-cold-boot"
 
 type ScenarioResult = {
   scenario: string
@@ -13,6 +16,19 @@ type ScenarioResult = {
   timedOut: boolean
   summaryPath: string | null
   summary: any
+}
+
+type StartupBootstrapReport = {
+  ok: boolean
+  suite: SuiteName
+  runTag: string
+  targets: string[]
+  buildFirst: boolean
+  resetCommand: string[]
+  upCommand: string[]
+  initialObservation: any
+  convergence: any
+  timestamp: string
 }
 
 type SuiteArgs = ReturnType<typeof parseArgs>
@@ -50,6 +66,10 @@ const suites: Record<SuiteName, string[]> = {
   "l2ps-live": [
     "l2ps_live_participation_smoke",
     "l2ps_live_submission_relay_smoke",
+  ],
+  "startup-cold-boot": [
+    "peer_discovery_smoke",
+    "consensus_block_production",
   ],
 }
 
@@ -122,7 +142,7 @@ function parseArgs(argv: string[]) {
       : []
 
   if (scenarios.length === 0) {
-    throw new Error(`No scenarios selected. Use a known suite name or --scenarios.`)
+    throw new Error("No scenarios selected. Use a known suite name or --scenarios.")
   }
 
   return {
@@ -142,6 +162,31 @@ function timestampTag() {
 
 function splitTargets(value: string): string[] {
   return value.split(",").map(item => item.trim()).filter(Boolean)
+}
+
+function composeCmd(args: string[], verbose: boolean): void {
+  const proc = Bun.spawnSync({
+    cmd: ["docker", "compose", ...args],
+    cwd: path.join(process.cwd(), "devnet"),
+    stdout: verbose ? "inherit" : "pipe",
+    stderr: "inherit",
+  })
+  if (proc.exitCode !== 0) {
+    const detail = proc.stdout ? new TextDecoder().decode(proc.stdout).trim() : ""
+    throw new Error(`docker compose ${args.join(" ")} failed${detail ? `: ${detail}` : ""}`)
+  }
+}
+
+function getSuiteRunDir(suite: string, runTag: string): string {
+  return path.join(process.cwd(), "better_testing", "runs", `suite-${suite}-${runTag}`)
+}
+
+function writeSuiteArtifact(suite: string, runTag: string, report: Record<string, unknown>): string {
+  const suiteRunDir = getSuiteRunDir(suite, runTag)
+  const artifactPath = path.join(suiteRunDir, "suite.summary.json")
+  ensureParentDir(artifactPath)
+  fs.writeFileSync(artifactPath, JSON.stringify(report, null, 2) + "\n", "utf8")
+  return artifactPath
 }
 
 async function isHealthyRpcTarget(rpcUrl: string): Promise<boolean> {
@@ -166,6 +211,7 @@ async function isHealthyRpcTarget(rpcUrl: string): Promise<boolean> {
 
 async function resolveLocalTargets(suite: string, explicitTargets: string | null): Promise<string | null> {
   if (explicitTargets) return explicitTargets
+  if (suite === "startup-cold-boot") return defaultLocalTargets
   if (suite !== "cluster-health" && suite !== "gcr-focus" && suite !== "prod-gate") return null
 
   const candidates = splitTargets(process.env.TARGETS ?? defaultLocalTargets)
@@ -222,7 +268,7 @@ function summarizeFailure(summary: any): string {
 
 function summarizeRunFailure(result: ScenarioResult): string {
   if (result.timedOut) {
-    return `timed out (exit 124)`
+    return "timed out (exit 124)"
   }
   if (!result.summaryPath) {
     return `no summary (exit ${result.exitCode})`
@@ -235,6 +281,7 @@ function renderSuiteMarkdown(
   runTag: string,
   resolvedTargets: string | null,
   results: ScenarioResult[],
+  suiteArtifactPath: string | null,
 ): string {
   const lines: string[] = []
   lines.push("# Suite Run Summary")
@@ -256,7 +303,7 @@ function renderSuiteMarkdown(
     lines.push(`- Run ID: \`${result.runId}\``)
     lines.push(`- Exit code: \`${result.exitCode}\``)
     if (result.timedOut) {
-      lines.push(`- Timed out: \`true\``)
+      lines.push("- Timed out: `true`")
     }
     if (result.summaryPath) {
       lines.push(`- Summary artifact: \`${path.relative(process.cwd(), result.summaryPath)}\``)
@@ -270,6 +317,9 @@ function renderSuiteMarkdown(
   }
   lines.push("## Quick Paths")
   lines.push("")
+  if (suiteArtifactPath) {
+    lines.push(`- Suite artifact: \`${path.relative(process.cwd(), suiteArtifactPath)}\``)
+  }
   lines.push(`- Timestamped report: \`better_testing/runs/_latest/${args.suite}-${runTag}.md\``)
   lines.push(`- Latest report pointer: \`better_testing/runs/_latest/${args.suite}.latest.md\``)
   lines.push("")
@@ -281,8 +331,9 @@ function writeSuiteReports(
   runTag: string,
   resolvedTargets: string | null,
   results: ScenarioResult[],
+  suiteArtifactPath: string | null,
 ): { timestampedReportPath: string; latestReportPath: string } {
-  const content = renderSuiteMarkdown(args, runTag, resolvedTargets, results)
+  const content = renderSuiteMarkdown(args, runTag, resolvedTargets, results, suiteArtifactPath)
   const latestDir = path.join(process.cwd(), "better_testing", "runs", "_latest")
   const timestampedReportPath = path.join(latestDir, `${args.suite}-${runTag}.md`)
   const latestReportPath = path.join(latestDir, `${args.suite}.latest.md`)
@@ -290,6 +341,57 @@ function writeSuiteReports(
   fs.writeFileSync(timestampedReportPath, content, "utf8")
   fs.writeFileSync(latestReportPath, content, "utf8")
   return { timestampedReportPath, latestReportPath }
+}
+
+async function runStartupColdBootBootstrap(
+  args: SuiteArgs,
+  runTag: string,
+  resolvedTargets: string | null,
+): Promise<{ ok: boolean; artifactPath: string; report: StartupBootstrapReport }> {
+  if (!args.local) {
+    throw new Error("startup-cold-boot requires --local because it manages the local devnet lifecycle")
+  }
+
+  const targets = splitTargets(resolvedTargets ?? defaultLocalTargets)
+  const resetCommand = ["down", "-v", "--remove-orphans"]
+  const upCommand = args.buildFirst ? ["up", "-d", "--build"] : ["up", "-d"]
+
+  console.log("\n==> cold boot reset")
+  composeCmd(resetCommand, args.verbose)
+  console.log("==> cold boot start")
+  composeCmd(upCommand, args.verbose)
+
+  const rpcTimeoutSec = envInt("WAIT_FOR_RPC_SEC", 120)
+  const txTimeoutSec = envInt("WAIT_FOR_TX_SEC", 120)
+  await waitForConsensusTargets(targets, true)
+
+  const initialObservation = await getClusterObservation(targets)
+  const convergence = await waitForClusterConvergence({
+    rpcUrls: targets,
+    timeoutSec: envInt("STARTUP_CONVERGENCE_TIMEOUT_SEC", Math.max(rpcTimeoutSec, txTimeoutSec, 120)),
+    pollMs: envInt("STARTUP_CONVERGENCE_POLL_MS", 1000),
+    stableRoundsRequired: envInt("STARTUP_STABLE_ROUNDS", 2),
+    minBlockAdvance: envInt("STARTUP_REQUIRED_BLOCK_DELTA", 1),
+    requirePeerDiscovery: true,
+  })
+
+  const report: StartupBootstrapReport = {
+    ok: initialObservation.healthyNodeCount >= 2 && convergence.ok,
+    suite: "startup-cold-boot",
+    runTag,
+    targets,
+    buildFirst: args.buildFirst,
+    resetCommand,
+    upCommand,
+    initialObservation,
+    convergence,
+    timestamp: new Date().toISOString(),
+  }
+  const artifactPath = writeSuiteArtifact(args.suite, runTag, report)
+  if (!report.ok) {
+    throw new Error(`startup-cold-boot bootstrap failed: ${artifactPath}`)
+  }
+  return { ok: report.ok, artifactPath, report }
 }
 
 async function runScenario(
@@ -304,7 +406,7 @@ async function runScenario(
   const innerCmd = local
     ? [
       "env",
-      `RUNS_DIR=better_testing/runs`,
+      "RUNS_DIR=better_testing/runs",
       `RUN_ID=${runId}`,
       `SCENARIO=${scenario}`,
       `QUIET=${verbose ? "false" : "true"}`,
@@ -344,12 +446,19 @@ async function main() {
   const runTag = timestampTag()
   const results: ScenarioResult[] = []
   const resolvedTargets = args.local ? await resolveLocalTargets(args.suite, args.targets) : args.targets
+  let suiteArtifactPath: string | null = null
 
   console.log(`Running suite: ${args.suite}`)
   console.log(`Scenarios: ${args.scenarios.join(", ")}`)
   console.log(`Mode: ${args.local ? "local" : "docker"}`)
   if (args.local && resolvedTargets) {
     console.log(`Targets: ${resolvedTargets}`)
+  }
+
+  if (args.suite === "startup-cold-boot") {
+    const bootstrap = await runStartupColdBootBootstrap(args, runTag, resolvedTargets)
+    suiteArtifactPath = bootstrap.artifactPath
+    console.log(`Startup bootstrap artifact: ${path.relative(process.cwd(), bootstrap.artifactPath)}`)
   }
 
   for (let index = 0; index < args.scenarios.length; index++) {
@@ -369,7 +478,7 @@ async function main() {
   }
 
   const failed = results.filter(item => !item.ok)
-  const reports = writeSuiteReports(args, runTag, resolvedTargets, results)
+  const reports = writeSuiteReports(args, runTag, resolvedTargets, results, suiteArtifactPath)
   console.log("\nSuite summary")
   for (const result of results) {
     const status = result.ok ? "PASS" : "FAIL"

@@ -16,6 +16,22 @@ Notes:
 
 Artifacts land in `better_testing/runs/$RUN_ID/`.
 
+## Run the cold-boot startup suite
+
+```bash
+bun run testenv:startup:local
+```
+
+This is a host-side suite, not a single loadgen scenario. It:
+- tears down the local devnet with volumes
+- starts it again
+- waits for RPC and tx readiness
+- verifies peer discovery and block production
+
+Artifacts land in:
+- `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json`
+- `better_testing/runs/_latest/startup-cold-boot.latest.md`
+
 ## Token perf baseline
 
 ```bash
