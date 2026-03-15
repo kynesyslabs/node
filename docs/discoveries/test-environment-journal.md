@@ -688,3 +688,20 @@ This is the practical feature-coverage snapshot as of 2026-03-14. It is not a st
   - token scenarios remain historical evidence only
   - token throughput no longer belongs in the active-core baseline or soak decisions for this repo
   - the authoritative active-feature matrix was updated to exclude token coverage from current active-feature claims until implementation status changes
+
+## 2026-03-15 - Token runtime scope reconciled for active-feature coverage
+
+- Task completed:
+  - `myc` `#80` `Reconcile token runtime implementation status with historical better_testing scenarios`
+  - Beads `node-3vf`
+- Recheck performed against current source, not historical test inventory:
+  - `src/libs/blockchain/gcr/handleGCR.ts` still has no token apply branch
+  - `src/libs/network/manageNodeCall.ts` still has no node-side token query surface beyond unrelated TLSNotary access tokens
+  - `src/libs/assets/FungibleToken.ts` still contains TODO/stub-level management and transfer logic
+- Decision:
+  - token scenarios in `better_testing/loadgen` remain historical harness inventory only
+  - they do not count toward current active-feature completeness claims for this node repo
+  - no new token test work should be proposed until node-side token runtime/query implementation actually exists
+- Coverage consequence:
+  - with token scope formally excluded, the repo now has at least one dedicated automated scenario for every currently active implemented feature family tracked in the authoritative matrix
+  - remaining open work after this decision is about runtime bugs, local gate health, or maintainability noise, not a missing active-feature test family

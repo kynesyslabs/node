@@ -77,21 +77,24 @@ It does **not** claim exhaustive correctness, exhaustive stress validation, or c
 | Feature smoke coverage across active families | Broad but not exhaustive | Yes | Scenario registry in `better_testing/loadgen/src/main.ts` plus run artifacts | Good breadth |
 | Deterministic release gate | Present | Yes | `better_testing/runs/_latest/prod-gate.latest.md` | Covers a representative subset, not all families |
 | L2PS live gate | Present | Yes | `better_testing/runs/_latest/l2ps-live.latest.md` | Separate from core prod gate |
-| Startup / cold-boot validation | Partial | Partially | Historical fixes and journal entries, plus healthy suite runs imply startup works | No single first-class cold-boot suite document yet |
-| Load / stress validation | Partial | Yes | loadgen, ramp, `sync_under_load`, `zk_proof_loadgen`, token and IM load scenarios | Not every family has a performance baseline or stress gate |
-| Long soak testing | Limited | Ad hoc only | no authoritative always-run soak report | Gap |
+| Startup / cold-boot validation | Present | Yes | `better_testing/runs/_latest/startup-cold-boot.latest.md` and suite bootstrap artifacts | First-class cold-boot suite exists and is runnable |
+| Load / stress validation | Present for active core paths | Yes | active-core baseline runner, loadgen/ramp coverage, `sync_under_load`, `zk_proof_loadgen`, IM load scenarios | Token historical load scenarios remain excluded from active-feature claims |
+| Long soak testing | Present | Yes | `better_testing/runs/_latest/cluster-soak.latest.md` | Mixed active-cluster soak exists; failures found here are runtime bugs, not coverage gaps |
 | Repository-wide TypeScript verification | Partial / noisy | Yes, but not universally green | documented in journal as still noisy outside scoped gate | Do not claim this is fully clean |
 | Documentation and easy run paths | Present | Yes | suite runner, wrapper scripts, README docs | Good, but previously inconsistent before this cleanup |
 
 ## Bottom-Line Statement
 
-The node repo has strong and well-documented automated coverage for many active feature families, with fresh evidence for the current release gate and for the L2PS live suite.
+The node repo has strong and well-documented automated coverage for active implemented feature families, with fresh evidence for the current release gate, the L2PS live suite, cold-boot startup validation, the active-core baseline, and the active-cluster soak profile.
 
 The correct claim is:
 
-- active implemented features are broadly covered
+- active implemented features are covered at the feature-family level
 - many scenarios have already been executed on the local devnet
 - the suites are runnable and documented
+- tokens are intentionally excluded from that claim because the current node repo does not expose an implemented token runtime/query surface
+
+With the token scope reconciled, there is no remaining known active implemented feature family in this repo that lacks at least one dedicated automated scenario. Remaining open items are runtime bugs, gate health issues, or maintenance follow-ups, not uncovered active-feature families.
 
 The incorrect claim is:
 

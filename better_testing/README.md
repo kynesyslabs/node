@@ -16,6 +16,7 @@ Important scope rule:
 
 - coverage claims only apply to active and implemented node features
 - do not treat native bridge paths, `storageProgram` placeholder behavior, or contract-runtime stubs as required active-feature coverage
+- historical token scenarios remain in the harness catalog, but they are not part of current active-feature coverage claims until node-side token runtime/query support exists in `src/`
 
 ## Quick start
 

@@ -2,12 +2,29 @@
 type: spec
 title: Active Feature Test Addition Proposal
 date: 2026-03-14
-status: active
+status: superseded
 tags: [testing, proposal, coverage, better_testing]
 author: agent
 ---
 
 # Active Feature Test Addition Proposal
+
+This proposal has been substantially executed.
+
+Completed from this proposal:
+
+- first-class cold-boot startup suite
+- routine single-wallet GCR validation
+- multichain execute-path routine gating
+- deeper scheduled consensus validation
+- active-core performance baseline
+- active-cluster soak profile
+
+Current interpretation:
+
+- use this document as historical rationale for the hardening work
+- do not treat it as evidence of a remaining active-feature coverage gap
+- the remaining coverage-scope reconciliation item was token runtime status, which is now resolved in favor of exclusion until node-side implementation exists
 
 This proposal is intentionally constrained by one rule:
 
@@ -27,7 +44,7 @@ Do **not** add new coverage right now for:
 - contract runtime / storage contract execution
 - SDK-repo behavior that belongs in `demosdk` rather than this repo
 
-## Highest-Value Additions
+## Historical Highest-Value Additions
 
 ### 1. Add a first-class cold-boot startup suite
 
@@ -177,7 +194,7 @@ Add:
 
 This is a documentation and maintainability improvement, not a runtime feature.
 
-## Recommended Order
+## Historical Recommended Order
 
 1. cold-boot startup suite
 2. one extra GCR single-wallet happy-path suite candidate
@@ -188,10 +205,10 @@ This is a documentation and maintainability improvement, not a runtime feature.
 
 ## Summary
 
-The right next testing work is not “test every code path.”
+The right next testing work was not “test every code path.”
 
 The right next testing work is:
 
 - strengthen startup and operational confidence for the active cluster
 - deepen positive-path coverage for active core features that are already implemented
-- avoid spending effort on bridges, storage-program runtime, or contract runtime until those surfaces are genuinely active
+- avoid spending effort on bridges, storage-program runtime, token runtime, or contract runtime until those surfaces are genuinely active
