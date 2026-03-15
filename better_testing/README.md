@@ -33,7 +33,7 @@ better_testing/scripts/run-scenario.sh token_script_transfer_ramp --env SCRIPT_S
 
 Cold-boot startup validation:
 ```bash
-bun run testenv:startup:local
+bun run testenv:startup:local -- --build-first
 ```
 This resets the local devnet with `docker compose down -v --remove-orphans`, starts it again, verifies RPC readiness plus peer discovery and block production, and writes a suite bootstrap artifact under `better_testing/runs/`.
 
@@ -45,19 +45,19 @@ This runs the stable node-local GCR path without relying on deferred multi-insta
 
 Cluster-health scheduled validation:
 ```bash
-bun run testenv:cluster:local
+bun run testenv:cluster:local -- --build-first
 ```
 This regular node-local suite now covers both baseline consensus liveness and one deeper applied-path check: `consensus_block_production`, `consensus_tx_inclusion`, `gcr_identity_remove`, and `peer_discovery_smoke`.
 
 Active-core performance baseline:
 ```bash
-bun run testenv:perf:baseline:local
+bun run testenv:perf:baseline:local -- --build
 ```
 This host-side runner records fixed local baselines for active core paths: native transfer, `zk_proof_loadgen`, `sync_under_load`, and optional `omni_throughput`. It keeps blocked steps in the output matrix instead of silently skipping them, so active regressions remain visible in the baseline artifact. Token transfer is intentionally excluded from this active-core matrix because the current node repo does not expose an implemented token runtime/query path in `src/`; the historical token scenario family is retained as evidence only until that feature status changes.
 
 Active-cluster soak:
 ```bash
-bun run testenv:soak:local
+bun run testenv:soak:local -- --build
 ```
 This mixed soak profile runs a pre/post `cluster-health` check with sustained native transfer load plus `zk_proof_loadgen`, staying within active implemented features only.
 
@@ -97,8 +97,11 @@ Notes:
 
 The `loadgen` runs **inside Docker** using the same image as devnet (`demos-devnet-node`).
 
-- If you changed `better_testing/loadgen/src/**`, run the scenario with `--build` to rebuild the image:
+- If you changed `src/**`, `better_testing/loadgen/src/**`, `devnet/**`, `package.json`, `bun.lock`, or `tsconfig.json`, rebuild before relying on local devnet evidence.
+- The local runners now refuse no-build runs when those image inputs are dirty, to avoid stale-image false positives.
+- Example:
   - `better_testing/scripts/run-scenario.sh token_edge_cases --build`
+  - `bun run testenv:startup:local -- --build-first`
 
 ## Scenario catalog (what they do)
 

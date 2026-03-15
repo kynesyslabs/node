@@ -4,7 +4,8 @@ Small host-side helpers to run `better_testing/loadgen` scenarios against the de
 
 Notes:
 - The devnet compose files assume you run from `devnet/` so identity mounts resolve correctly.
-- If you change `better_testing/loadgen/src/**`, rebuild the image with `--build` (slow).
+- If you change `src/**`, `better_testing/loadgen/src/**`, `devnet/**`, `package.json`, `bun.lock`, or `tsconfig.json`, rebuild the image with `--build` or `--build-first`.
+- The local runners now refuse no-build runs when those image inputs are dirty, so stale devnet images do not generate false failures.
 
 ## Run a scenario
 
@@ -19,7 +20,7 @@ Artifacts land in `better_testing/runs/$RUN_ID/`.
 ## Run the cold-boot startup suite
 
 ```bash
-bun run testenv:startup:local
+bun run testenv:startup:local -- --build-first
 ```
 
 This is a host-side suite, not a single loadgen scenario. It:
@@ -46,7 +47,7 @@ Artifacts land in:
 ## Run the scheduled cluster-health suite
 
 ```bash
-bun run testenv:cluster:local
+bun run testenv:cluster:local -- --build-first
 ```
 
 This suite is the regular operational evidence set for local cluster health. It now includes the deeper `consensus_tx_inclusion` scenario because it forces a real on-chain state transition, while `sync_catchup_smoke` can be inconclusive when the cluster starts already converged.
@@ -66,7 +67,7 @@ By default, the baseline runner sets `POST_RUN_HOLDER_POINTER_CHECK=false` to re
 ## Active-core performance baseline
 
 ```bash
-bun run testenv:perf:baseline:local
+bun run testenv:perf:baseline:local -- --build
 ```
 
 This host-side runner records a small fixed set of active local baselines:
@@ -85,7 +86,7 @@ Artifacts land in:
 ## Active-cluster soak
 
 ```bash
-bun run testenv:soak:local
+bun run testenv:soak:local -- --build
 ```
 
 This host-side runner executes one mixed active-feature soak profile:

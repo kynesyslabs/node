@@ -29,6 +29,14 @@ BUILD=0
 QUIET=true
 RUN_ID=""
 EXTRA_ENV=()
+IMAGE_INPUT_PATHS=(
+  "src"
+  "better_testing/loadgen/src"
+  "devnet"
+  "package.json"
+  "bun.lock"
+  "tsconfig.json"
+)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,6 +72,15 @@ if [[ -z "$RUN_ID" ]]; then
   RUN_ID="${SCENARIO}-$(date -u +%Y%m%d-%H%M%S)"
 fi
 
+if [[ "$BUILD" -eq 0 ]]; then
+  DIRTY_IMAGE_INPUTS="$(git status --porcelain --untracked-files=all -- "${IMAGE_INPUT_PATHS[@]}")"
+  if [[ -n "$DIRTY_IMAGE_INPUTS" ]]; then
+    echo "Docker image inputs changed but no rebuild was requested. Re-run with --build." >&2
+    echo "$DIRTY_IMAGE_INPUTS" | head -n 8 >&2
+    exit 2
+  fi
+fi
+
 pushd devnet >/dev/null
 
 if [[ "$BUILD" -eq 1 ]]; then
@@ -94,4 +111,3 @@ cmd+=(loadgen)
 popd >/dev/null
 
 echo "Run dir: better_testing/runs/$RUN_ID"
-

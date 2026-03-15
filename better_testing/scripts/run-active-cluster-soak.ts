@@ -8,6 +8,15 @@ type Args = {
   quiet: boolean
 }
 
+const dockerImageInputPaths = [
+  "src",
+  "better_testing/loadgen/src",
+  "devnet",
+  "package.json",
+  "bun.lock",
+  "tsconfig.json",
+]
+
 function usage() {
   console.log(`Usage:
   bun better_testing/scripts/run-active-cluster-soak.ts [--build] [--quiet|--verbose]
@@ -65,6 +74,46 @@ function writeText(filePath: string, value: string) {
 
 function readJson(filePath: string) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"))
+}
+
+function listDirtyDockerImageInputs(): string[] {
+  const proc = Bun.spawnSync({
+    cmd: [
+      "git",
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--",
+      ...dockerImageInputPaths,
+    ],
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  if (proc.exitCode !== 0) {
+    const detail = proc.stderr ? new TextDecoder().decode(proc.stderr).trim() : ""
+    throw new Error(`git status failed while checking docker image inputs${detail ? `: ${detail}` : ""}`)
+  }
+
+  const stdout = proc.stdout ? new TextDecoder().decode(proc.stdout) : ""
+  return stdout
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+}
+
+function assertDockerImageFreshOrThrow(buildRequested: boolean): void {
+  if (buildRequested) return
+
+  const dirtyInputs = listDirtyDockerImageInputs()
+  if (dirtyInputs.length === 0) return
+
+  const preview = dirtyInputs.slice(0, 8).join(", ")
+  const remainder = dirtyInputs.length > 8 ? ` (+${dirtyInputs.length - 8} more)` : ""
+  throw new Error(
+    `Local devnet image inputs changed but no rebuild was requested. Re-run with --build. Changed paths: ${preview}${remainder}`,
+  )
 }
 
 function loadDevnetRecipients(): string {
@@ -129,6 +178,7 @@ function renderMarkdown(summary: {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  assertDockerImageFreshOrThrow(args.build)
   const runTag = timestampTag()
   const rootRunsDir = path.join(process.cwd(), "better_testing", "runs")
   const soakRunDir = path.join(rootRunsDir, `cluster-soak-${runTag}`)

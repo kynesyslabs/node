@@ -34,6 +34,14 @@ type StartupBootstrapReport = {
 type SuiteArgs = ReturnType<typeof parseArgs>
 
 const defaultLocalTargets = "http://localhost:53551,http://localhost:53552,http://localhost:53553,http://localhost:53554"
+const dockerImageInputPaths = [
+  "src",
+  "better_testing/loadgen/src",
+  "devnet",
+  "package.json",
+  "bun.lock",
+  "tsconfig.json",
+]
 
 const suites: Record<SuiteName, string[]> = {
   sanity: [
@@ -170,6 +178,46 @@ function splitTargets(value: string): string[] {
   return value.split(",").map(item => item.trim()).filter(Boolean)
 }
 
+function listDirtyDockerImageInputs(): string[] {
+  const proc = Bun.spawnSync({
+    cmd: [
+      "git",
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--",
+      ...dockerImageInputPaths,
+    ],
+    cwd: process.cwd(),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+
+  if (proc.exitCode !== 0) {
+    const detail = proc.stderr ? new TextDecoder().decode(proc.stderr).trim() : ""
+    throw new Error(`git status failed while checking docker image inputs${detail ? `: ${detail}` : ""}`)
+  }
+
+  const stdout = proc.stdout ? new TextDecoder().decode(proc.stdout) : ""
+  return stdout
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+}
+
+function assertDockerImageFreshOrThrow(buildRequested: boolean, hintFlag: "--build" | "--build-first"): void {
+  if (buildRequested) return
+
+  const dirtyInputs = listDirtyDockerImageInputs()
+  if (dirtyInputs.length === 0) return
+
+  const preview = dirtyInputs.slice(0, 8).join(", ")
+  const remainder = dirtyInputs.length > 8 ? ` (+${dirtyInputs.length - 8} more)` : ""
+  throw new Error(
+    `Local devnet image inputs changed but no rebuild was requested. Re-run with ${hintFlag}. Changed paths: ${preview}${remainder}`,
+  )
+}
+
 function composeCmd(args: string[], verbose: boolean): void {
   const proc = Bun.spawnSync({
     cmd: ["docker", "compose", ...args],
@@ -219,17 +267,9 @@ async function resolveLocalTargets(suite: string, explicitTargets: string | null
   if (explicitTargets) return explicitTargets
   if (suite === "startup-cold-boot") return defaultLocalTargets
   if (suite === "gcr-routine") return defaultLocalTargets
-  if (suite !== "cluster-health" && suite !== "gcr-focus" && suite !== "prod-gate") return null
-
-  const candidates = splitTargets(process.env.TARGETS ?? defaultLocalTargets)
-  const health = await Promise.all(candidates.map(async rpcUrl => ({ rpcUrl, ok: await isHealthyRpcTarget(rpcUrl) })))
-  const healthy = health.filter(item => item.ok).map(item => item.rpcUrl)
-
-  const minimumHealthy = suite === "cluster-health" ? 2 : suite === "prod-gate" ? 3 : 1
-  if (healthy.length >= minimumHealthy) {
-    return healthy.join(",")
+  if (suite === "cluster-health" || suite === "gcr-focus" || suite === "prod-gate") {
+    return process.env.TARGETS ?? defaultLocalTargets
   }
-
   return null
 }
 
@@ -450,6 +490,9 @@ async function runScenario(
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (args.local) {
+    assertDockerImageFreshOrThrow(args.buildFirst, "--build-first")
+  }
   const runTag = timestampTag()
   const results: ScenarioResult[] = []
   const resolvedTargets = args.local ? await resolveLocalTargets(args.suite, args.targets) : args.targets
