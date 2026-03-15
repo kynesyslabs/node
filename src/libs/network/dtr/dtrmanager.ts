@@ -592,6 +592,34 @@ export class DTRManager {
                 }
             }
 
+            if (tx.content?.type === "l2ps_hash_update") {
+                const nextBlockNumber =
+                    tx.blockNumber ?? getSharedState.lastBlockNumber + 1
+                const txForExecution = {
+                    ...tx,
+                    blockNumber: nextBlockNumber,
+                }
+                const { default: ServerHandlers } = await import(
+                    "../endpointHandlers"
+                )
+                const l2psHashResult =
+                    await ServerHandlers.handleL2PSHashUpdate(txForExecution)
+
+                if (l2psHashResult.result !== 200) {
+                    log.error(
+                        "[DTR] Failed to apply relayed L2PS hash update: " +
+                            JSON.stringify(l2psHashResult),
+                    )
+
+                    return {
+                        ...response,
+                        result: l2psHashResult.result,
+                        response: l2psHashResult.response,
+                        extra: l2psHashResult.extra,
+                    }
+                }
+            }
+
             // Add validated transaction to mempool
             const { confirmationBlock, error } = await Mempool.addTransaction(
                 {

@@ -38,7 +38,7 @@ function snapshotChanged(before: Awaited<ReturnType<typeof collectDbSnapshots>>,
     node1Advanced,
     remoteHashChanged,
     remoteBatchChanged,
-    ok: node1Advanced && remoteBatchChanged,
+    ok: node1Advanced && remoteHashChanged && remoteBatchChanged,
   }
 }
 
@@ -155,7 +155,7 @@ export async function runL2psLiveSubmissionRelaySmoke() {
   console.log(JSON.stringify({ l2ps_live_submission_relay_smoke_summary: summary }, null, 2))
 
   if (!ok) {
-    throw new Error("l2ps_live_submission_relay_smoke failed: live submission did not produce deterministic relay evidence")
+    throw new Error("l2ps_live_submission_relay_smoke failed: live submission did not produce deterministic relay and hash-persistence evidence")
   }
 }
 

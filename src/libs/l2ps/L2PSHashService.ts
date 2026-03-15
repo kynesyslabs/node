@@ -4,12 +4,15 @@ import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import getShard from "@/libs/consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
+import { DTRManager } from "@/libs/network/dtr/dtrmanager"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { OmniOpcode } from "@/libs/omniprotocol/protocol/opcodes"
 import { ConnectionPool } from "@/libs/omniprotocol/transport/ConnectionPool"
 import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelope"
 import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
 import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
+import { confirmTransaction } from "@/libs/blockchain/routines/validateTransaction"
 import { Config } from "src/config"
 import {
     HASH_RELAY_MAX_TOTAL_CONNECTIONS,
@@ -281,16 +284,18 @@ export class L2PSHashService {
                 transactionCount,
                 this.demos,
             )
+            const normalizedHashUpdateTx =
+                await this.normalizeHashUpdateTransaction(hashUpdateTx)
             const validityData = await confirmTransaction(
-                hashUpdateTx as any,
-                hashUpdateTx.content.from,
+                normalizedHashUpdateTx as any,
+                normalizedHashUpdateTx.content.from,
             )
 
             this.stats.totalHashesGenerated++
 
             // Relay to validators via DTR infrastructure
             // Note: Self-directed transaction will automatically trigger DTR routing
-            await this.relayToValidators(hashUpdateTx, validityData)
+            await this.relayToValidators(normalizedHashUpdateTx, validityData)
 
             this.stats.successfulRelays++
 
@@ -301,6 +306,52 @@ export class L2PSHashService {
             log.error(`[L2PS Hash Service] Error processing L2PS ${l2psUid}: ${message}`)
             // Continue processing other L2PS networks even if one fails
         }
+    }
+
+    /**
+     * Normalize SDK-produced hash update transactions before relay.
+     *
+     * The published demosdk can return a malformed nonce payload from
+     * `getAddressNonce()` in some environments, which produces values like
+     * `"[object Object]1"`. Re-read the authoritative nonce from RPC and re-sign
+     * locally so relay payloads stay coherent even when the bundled SDK is stale.
+     */
+    private async normalizeHashUpdateTransaction(hashUpdateTx: any): Promise<any> {
+        const nonce = hashUpdateTx?.content?.nonce
+
+        if (
+            (typeof nonce === "number" && Number.isFinite(nonce)) ||
+            (typeof nonce === "string" && /^\d+$/.test(nonce))
+        ) {
+            return hashUpdateTx
+        }
+
+        const address = hashUpdateTx?.content?.from
+        if (!address) {
+            throw new Error("[L2PS Hash Service] Hash update transaction missing sender address")
+        }
+
+        const account = await ensureGCRForUser(address)
+        const rawNonce = account?.details?.content?.nonce
+        const currentNonce =
+            typeof rawNonce === "number"
+                ? rawNonce
+                : Number.parseInt(String(rawNonce ?? "0"), 10)
+
+        if (!Number.isFinite(currentNonce)) {
+            throw new Error(
+                `[L2PS Hash Service] Failed to recover nonce for ${address}: ${String(rawNonce)}`,
+            )
+        }
+
+        const normalizedTx = structuredClone(hashUpdateTx)
+        normalizedTx.content.nonce = currentNonce + 1
+
+        log.debug(
+            `[L2PS Hash Service] Normalized malformed hash-update nonce for ${address} -> ${normalizedTx.content.nonce}`,
+        )
+
+        return await this.demos.sign(normalizedTx)
     }
 
     /**
@@ -420,9 +471,15 @@ export class L2PSHashService {
             const tcpConnectionString = `${tcpProtocol}://${url.hostname}:${omniPort}`
 
             // Prepare L2PS hash update request payload
-            const l2psUid = hashUpdateTx.content?.data?.[0] || hashUpdateTx.l2ps_uid
-            const consolidatedHash = hashUpdateTx.content?.data?.[1] || hashUpdateTx.hash
-            const transactionCount = hashUpdateTx.content?.data?.[2] || 0
+            const hashPayload =
+                hashUpdateTx?.content?.data?.[0] === "l2ps_hash_update"
+                    ? hashUpdateTx.content.data[1]
+                    : undefined
+            const l2psUid = hashPayload?.l2ps_uid || hashUpdateTx.l2ps_uid
+            const consolidatedHash =
+                hashPayload?.consolidated_hash || hashUpdateTx.hash
+            const transactionCount =
+                hashPayload?.transaction_count || hashUpdateTx.transaction_count || 0
 
             const hashUpdateRequest: L2PSHashUpdateRequest = {
                 l2psUid,

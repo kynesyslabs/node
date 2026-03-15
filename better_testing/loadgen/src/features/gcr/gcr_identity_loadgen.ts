@@ -111,7 +111,9 @@ function getConfig(wallets: string[]): LoadgenConfig {
     maxErrorRate: envFloat("MAX_ERROR_RATE", 0.05),
     minLoopDelayMs: Math.max(0, envInt("MIN_LOOP_DELAY_MS", 75)),
     stopOnRateLimit: envBool("STOP_ON_RATE_LIMIT", true),
-    settleTimeoutSec: Math.max(1, envInt("SETTLE_TIMEOUT_SEC", 8)),
+    // PQC add/remove visibility is block-driven. With a 10s default block time,
+    // a serialized add/remove cycle can legitimately span two consensus rounds.
+    settleTimeoutSec: Math.max(1, envInt("SETTLE_TIMEOUT_SEC", 20)),
     settlePollMs: Math.max(50, envInt("SETTLE_POLL_MS", 200)),
     opTimeoutMs: Math.max(1000, envInt("GCR_OP_TIMEOUT_MS", 15000)),
   }

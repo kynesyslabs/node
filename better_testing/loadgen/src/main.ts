@@ -221,5 +221,4 @@ registerScenario("zk_merkle_inclusion", runZkMerkleInclusion)
 registerScenario("zk_proof_loadgen", runZkProofLoadgen)
 registerScenario("tlsnotary_routes_smoke", runTlsNotaryRoutesSmoke)
 registerScenario("tlsnotary_verify_rejects", runTlsNotaryVerifyRejects)
-
 await runScenario(scenario)

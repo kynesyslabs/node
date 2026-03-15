@@ -45,9 +45,9 @@ export default class L2PSHashes {
      * REVIEW: PR Fix - Ensure repository is initialized before use
      * @throws {Error} If repository not initialized
      */
-    private static ensureInitialized(): void {
+    private static async ensureInitialized(): Promise<void> {
         if (!this.repo) {
-            throw new Error("[L2PS Hashes] Repository not initialized. Call init() first.")
+            await this.init()
         }
     }
 
@@ -77,7 +77,7 @@ export default class L2PSHashes {
         txCount: number,
         blockNumber: bigint,
     ): Promise<void> {
-        this.ensureInitialized()
+        await this.ensureInitialized()
         try {
             // REVIEW: PR Fix #11 - Use atomic upsert to prevent race condition
             // Previous code: check-then-act pattern allowed concurrent inserts to cause conflicts
@@ -119,7 +119,7 @@ export default class L2PSHashes {
      * ```
      */
     public static async getHash(l2psUid: string): Promise<L2PSHash | null> {
-        this.ensureInitialized()
+        await this.ensureInitialized()
         try {
             // REVIEW: PR Fix #9 - Add non-null assertion for type safety
             const entry = await this.repo!.findOne({
@@ -155,7 +155,7 @@ export default class L2PSHashes {
         limit?: number,
         offset?: number,
     ): Promise<L2PSHash[]> {
-        this.ensureInitialized()
+        await this.ensureInitialized()
         try {
             // REVIEW: PR Fix #8 - Add pagination support and type safety
             const entries = await this.repo!.find({
@@ -190,7 +190,7 @@ export default class L2PSHashes {
         lastUpdateTime: bigint
         oldestUpdateTime: bigint
     }> {
-        this.ensureInitialized()
+        await this.ensureInitialized()
         try {
             const allEntries = await this.getAll()
 

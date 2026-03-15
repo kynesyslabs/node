@@ -18,6 +18,7 @@ import {
     FindManyOptions,
     Repository,
     QueryFailedError,
+    EntityManager,
 } from "typeorm"
 
 import Block from "./block"
@@ -34,6 +35,7 @@ import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
+import { L2PSHash } from "src/model/entities/L2PSHashes"
 import { Transactions } from "src/model/entities/Transactions"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -41,6 +43,56 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import HandleGCR from "./gcr/handleGCR"
 import { handleError } from "src/errors"
+
+interface L2PSHashUpdatePayload {
+    l2ps_uid: string
+    consolidated_hash: string
+    transaction_count: number
+}
+
+function getL2PSHashUpdatePayload(
+    tx: Transaction,
+): L2PSHashUpdatePayload | null {
+    if (tx.content?.type !== "l2ps_hash_update") {
+        return null
+    }
+
+    const payload = tx.content?.data?.[1]
+    if (
+        !payload ||
+        typeof payload !== "object" ||
+        !("l2ps_uid" in payload) ||
+        !("consolidated_hash" in payload) ||
+        !("transaction_count" in payload)
+    ) {
+        return null
+    }
+
+    return payload as L2PSHashUpdatePayload
+}
+
+async function persistConfirmedTransactionProjection(
+    tx: Transaction,
+    blockNumber: number,
+    transactionalEntityManager: EntityManager,
+): Promise<void> {
+    const l2psHashPayload = getL2PSHashUpdatePayload(tx)
+    if (!l2psHashPayload) {
+        return
+    }
+
+    await transactionalEntityManager.save(L2PSHash, {
+        l2ps_uid: l2psHashPayload.l2ps_uid,
+        hash: l2psHashPayload.consolidated_hash,
+        transaction_count: l2psHashPayload.transaction_count,
+        block_number: blockNumber.toString(),
+        timestamp: Date.now().toString(),
+    })
+
+    log.info(
+        `[ChainDB] [ INFO ]: Materialized l2ps_hash_update for ${l2psHashPayload.l2ps_uid} in block ${blockNumber}`,
+    )
+}
 
 export default class Chain {
     static blocks: Repository<Blocks>
@@ -453,6 +505,11 @@ export default class Chain {
                                 await transactionalEntityManager.save(
                                     this.transactions.target,
                                     rawTransaction,
+                                )
+                                await persistConfirmedTransactionProjection(
+                                    tx,
+                                    block.number,
+                                    transactionalEntityManager,
                                 )
                             } catch (error) {
                                 // INFO: This should never happen
