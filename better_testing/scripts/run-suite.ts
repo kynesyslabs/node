@@ -42,6 +42,7 @@ const suites: Record<SuiteName, string[]> = {
   ],
   "cluster-health": [
     "consensus_block_production",
+    "consensus_tx_inclusion",
     "gcr_identity_remove",
     "peer_discovery_smoke",
   ],

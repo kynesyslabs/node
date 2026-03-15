@@ -653,3 +653,20 @@ This is the practical feature-coverage snapshot as of 2026-03-14. It is not a st
   - follow-up tracking:
     - reopened `myc` `#48` `TLSNotary service stays unhealthy because backing notary container is inaccessible`
     - created Beads bug `node-f7d` `TLSNotary service unhealthy on local prod-gate validation`
+
+## 2026-03-15 - Deeper consensus scenario promoted into scheduled cluster-health validation
+
+- Task completed:
+  - `myc` `#73` `Promote one deeper peer or consensus scheduled scenario`
+  - Beads `node-7v8.4`
+- Decision:
+  - promoted `consensus_tx_inclusion` into the regular `cluster-health` suite
+  - did not choose `sync_catchup_smoke` because it can be operationally useful yet still inconclusive when the cluster starts already converged and no lag is present to recover from
+- Why this candidate won:
+  - it forces a real transaction submission
+  - it verifies nonce advancement, block advancement, and transaction visibility
+  - it gives stronger scheduled evidence than a purely observational health check
+- Validation:
+  - `bun run testenv:cluster:local`
+- Expected artifact:
+  - `better_testing/runs/_latest/cluster-health.latest.md`

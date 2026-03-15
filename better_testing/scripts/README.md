@@ -43,6 +43,17 @@ This suite keeps GCR validation on the node-local deterministic path and avoids 
 Artifacts land in:
 - `better_testing/runs/_latest/gcr-routine.latest.md`
 
+## Run the scheduled cluster-health suite
+
+```bash
+bun run testenv:cluster:local
+```
+
+This suite is the regular operational evidence set for local cluster health. It now includes the deeper `consensus_tx_inclusion` scenario because it forces a real on-chain state transition, while `sync_catchup_smoke` can be inconclusive when the cluster starts already converged.
+
+Artifacts land in:
+- `better_testing/runs/_latest/cluster-health.latest.md`
+
 ## Token perf baseline
 
 ```bash
