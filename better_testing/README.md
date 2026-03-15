@@ -70,6 +70,7 @@ Verified example RUN_IDs:
 Notes:
 - In loadgens, `ok` only counts transactions accepted (`result===200`); rejected txs are counted in `error` with `errorSamples`.
 - Token read probes prefer committed-only endpoints (`token.getCommitted`, `token.getBalanceCommitted`, `token.callViewCommitted`). During sync/consensus the node may respond with `result===409` (`STATE_IN_FLUX`); scenarios treat those samples as transient and retry/skip as appropriate.
+- `prod-gate` now includes both XM parser reject coverage and the execute happy path via `multichain_parser_execute_smoke`.
 
 ## When to rebuild
 

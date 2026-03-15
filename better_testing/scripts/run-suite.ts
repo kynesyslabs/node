@@ -61,6 +61,7 @@ const suites: Record<SuiteName, string[]> = {
     "peer_discovery_smoke",
     "gcr_identity_remove",
     "gcr_identity_xm_smoke",
+    "multichain_parser_execute_smoke",
     "zk_proof_loadgen",
     "im_message_roundtrip",
     "tlsnotary_routes_smoke",

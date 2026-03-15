@@ -629,3 +629,27 @@ This is the practical feature-coverage snapshot as of 2026-03-14. It is not a st
 
 - This journal is for observability and recap.
 - Canonical bug ownership and fix planning still live in `br` / Mycelium.
+
+## 2026-03-15 - XM execute path promoted into prod-gate
+
+- Task completed:
+  - `myc` `#72` `Promote multichain execute-path routine validation`
+  - Beads `node-7v8.3`
+- Decision:
+  - promoted `multichain_parser_execute_smoke` into the must-pass `prod-gate` suite rather than creating a separate XM-only routine
+  - rationale: the scenario is deterministic, active, local, and directly closes the execute-vs-reject imbalance called out in the active-feature matrix
+- Scope guardrails preserved:
+  - no native bridge work
+  - no SDK multi-instance concurrency expansion
+  - no inactive storage-contract or contract-runtime work
+- Validation:
+  - `bun run testenv:prod-gate:local`
+- Expected artifact:
+  - `better_testing/runs/_latest/prod-gate.latest.md`
+- Outcome:
+  - multichain reject semantics and execute happy-path coverage now both live inside the release gate
+  - the promoted execute scenario passed inside the gate run
+  - the overall local `prod-gate` run remained red because `tlsnotary_routes_smoke` still fails with `Docker container not accessible`
+  - follow-up tracking:
+    - reopened `myc` `#48` `TLSNotary service stays unhealthy because backing notary container is inaccessible`
+    - created Beads bug `node-f7d` `TLSNotary service unhealthy on local prod-gate validation`
