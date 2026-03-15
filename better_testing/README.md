@@ -4,6 +4,19 @@ This folder contains the **devnet test/load harness** used to validate correctne
 
 For deeper investigation notes and past runs, see `better_testing/research.md`.
 
+## Current authoritative docs
+
+Use these as the source of truth for current test coverage:
+
+- `docs/references/active-feature-test-coverage-matrix.md`
+- `docs/specs/active-feature-test-addition-proposal.md`
+- `docs/discoveries/test-environment-journal.md` for historical run notes
+
+Important scope rule:
+
+- coverage claims only apply to active and implemented node features
+- do not treat native bridge paths, `storageProgram` placeholder behavior, or contract-runtime stubs as required active-feature coverage
+
 ## Quick start
 
 1) Start devnet (4 nodes + postgres):

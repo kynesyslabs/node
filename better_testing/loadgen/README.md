@@ -2,6 +2,14 @@
 
 Local perf harness scripts intended to run **inside the devnet docker network**.
 
+For the current coverage contract and the active-feature boundary, use:
+
+- `docs/references/active-feature-test-coverage-matrix.md`
+- `docs/specs/active-feature-test-addition-proposal.md`
+- `docs/discoveries/test-environment-journal.md` for historical execution notes
+
+This README explains how to run scenarios. It should not be treated as the authoritative statement that every registered scenario counts toward active feature coverage.
+
 ## RPC baseline loadgen (Phase 1)
 
 Runs a high-throughput RPC client against one or more nodes and reports:
