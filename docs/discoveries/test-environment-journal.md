@@ -670,3 +670,21 @@ This is the practical feature-coverage snapshot as of 2026-03-14. It is not a st
   - `bun run testenv:cluster:local`
 - Expected artifact:
   - `better_testing/runs/_latest/cluster-health.latest.md`
+
+## 2026-03-15 - Active-core baseline narrowed to implemented node features
+
+- Startup blocker `#78` reduced to code fixes and green startup artifacts:
+  - `src/index.ts` now initializes genesis before peer bootstrap on cold boot
+  - `src/libs/network/manageNodeCall.ts` now returns `503 STATE_NOT_READY` for `getGenesisDataHash` before genesis is available
+  - fresh local validation produced a green startup suite:
+    - `better_testing/runs/suite-startup-cold-boot-2026-03-15T15-09-43-586Z/suite.summary.json`
+- During follow-up on the token baseline blocker, the node/source boundary was rechecked against the active-feature rule.
+- Current repo evidence:
+  - `src/libs/blockchain/gcr/handleGCR.ts` has no `token` GCR edit handler
+  - `src/libs/network/manageNodeCall.ts` has no token query handlers
+  - `src/libs/assets/FungibleToken.ts` remains stub-level
+  - SDK-side token transaction types exist, but node-side `src/` does not currently expose a matching implemented runtime/query surface
+- Practical consequence:
+  - token scenarios remain historical evidence only
+  - token throughput no longer belongs in the active-core baseline or soak decisions for this repo
+  - the authoritative active-feature matrix was updated to exclude token coverage from current active-feature claims until implementation status changes

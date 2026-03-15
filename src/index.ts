@@ -353,19 +353,19 @@ async function preMainLoop() {
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
     }
 
-    log.info("[PEER] 🌐 Bootstrapping peers...")
-    log.debug(
-        "[PEER] Peer list: " +
-        JSON.stringify(indexState.PeerList.map(p => p.identity)),
-    )
-    await peerBootstrap(indexState.PeerList)
-
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
+
+    log.info("[PEER] 🌐 Bootstrapping peers...")
+    log.debug(
+        "[PEER] Peer list: " +
+        JSON.stringify(indexState.PeerList.map(p => p.identity)),
+    )
+    await peerBootstrap(indexState.PeerList)
 
     // Loading the peers
     //PeerList.push(ourselves)

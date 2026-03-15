@@ -71,12 +71,12 @@ bun run testenv:perf:baseline:local
 
 This host-side runner records a small fixed set of active local baselines:
 - `transfer`
-- `token_transfer`
 - `zk_proof_loadgen`
 - `sync_under_load`
 - optional `omni_throughput` with `--with-omni`
 
 If one active step is currently regressed, the runner keeps going and records that step as blocked in the markdown/json summary instead of dropping it from the matrix.
+Token transfer is intentionally excluded from this active-core runner because the current node repo does not expose an implemented token runtime/query path in `src/`; historical token scenarios remain for archaeology and future reactivation only.
 
 Artifacts land in:
 - `better_testing/runs/baseline-active-core-*/active-core-baseline.summary.json`

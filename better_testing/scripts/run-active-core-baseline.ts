@@ -34,7 +34,6 @@ function usage() {
 
 Runs a fixed-config active-core performance baseline on local devnet:
   - native transfer throughput
-  - token transfer throughput
   - zk proof verification load
   - peer-sync read pressure
   - optional: omni throughput
@@ -151,15 +150,6 @@ async function runScenario(step: StepConfig, runId: string, args: Args): Promise
           ok: summary.totals?.ok ?? null,
         }
         break
-      case "token-transfer":
-        metrics = {
-          okTps: summary.okTps ?? null,
-          p95LatencyMs: summary.latencyMs?.p95 ?? null,
-          total: summary.total ?? null,
-          ok: summary.ok ?? null,
-          error: summary.error ?? null,
-        }
-        break
       case "zk-proof":
       case "sync-under-load":
       case "omni-throughput":
@@ -223,6 +213,7 @@ function renderMarkdown(summary: {
   lines.push("## Notes")
   lines.push("")
   lines.push("- This is a repo-local active-feature baseline, not a hard SLA.")
+  lines.push("- Token transfer is intentionally excluded from the active-core matrix because the current node repo does not expose an implemented token runtime/query path in `src/`; historical token scenarios remain evidence only until that feature status changes.")
   lines.push("- Optional Omni throughput is excluded unless the runner is invoked with `--with-omni`.")
   lines.push("- Failed steps remain listed in the matrix so active regressions are visible instead of being silently skipped.")
   return lines.join("\n") + "\n"
@@ -246,18 +237,6 @@ async function main() {
         CONCURRENCY: "4",
         INFLIGHT_PER_WALLET: "1",
         DURATION_SEC: "20",
-      },
-    },
-    {
-      key: "token-transfer",
-      title: "Token transfer throughput",
-      scenario: "token_transfer",
-      summaryPath: path.join(process.cwd(), "better_testing", "runs", "{runId}", "token_transfer.summary.json"),
-      env: {
-        CONCURRENCY: "4",
-        INFLIGHT_PER_WALLET: "2",
-        DURATION_SEC: "20",
-        POST_RUN_HOLDER_POINTER_CHECK: "false",
       },
     },
     {

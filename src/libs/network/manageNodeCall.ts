@@ -67,6 +67,14 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getGenesisDataHash": {
             try {
                 const genesisBlock = await Chain.getGenesisBlock()
+                if (!genesisBlock?.content) {
+                    response.result = 503
+                    response.response = {
+                        error: "STATE_NOT_READY",
+                        message: "Genesis block not initialized yet",
+                    }
+                    break
+                }
                 let genesisData =
                     genesisBlock.content.extra?.genesisData || null
 

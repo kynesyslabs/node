@@ -45,7 +45,6 @@ It does **not** claim exhaustive correctness, exhaustive stress validation, or c
 
 | Feature family | Active now | Dedicated scenarios | Latest known evidence | Gate status | Notes |
 |---|---|---|---|---|---|
-| Token runtime and token scripting | Yes | `token_*` family including smoke, load, ramp, ACL, script, settle, observe, invariants | `better_testing/runs/verify-token-smoke-20260225-113925/token_smoke.summary.json` and related token artifacts | Not in `prod-gate` | Broadest scenario family in the repo |
 | Native transactions | Yes | `transfer`, `transfer_ramp`, plus `consensus_block_production` indirectly exercises native tx flow | token/native transfer artifacts under `better_testing/runs/verify-token-transfer-20260225-113956/token_transfer.summary.json` and consensus suite artifacts | Not directly gated as standalone family | Covered, but not summarized in one dedicated modern gate doc |
 | GCR / identity | Yes | `gcr_identity_smoke`, `gcr_identity_remove`, `gcr_identity_loadgen`, `gcr_identity_matrix`, `gcr_identity_xm_smoke`, `gcr_points_smoke` | `better_testing/runs/_latest/prod-gate.latest.md` and GCR artifacts in `better_testing/runs/validate-gcr-*` | `gcr_identity_remove` and `gcr_identity_xm_smoke` are gated | Concurrent SDK contamination is tracked separately and does not invalidate node-local coverage |
 | Consensus | Yes | `consensus_block_production`, `consensus_tx_inclusion`, `consensus_secretary_rotation`, `consensus_rollback_smoke`, `consensus_partition_recovery` | `better_testing/runs/_latest/prod-gate.latest.md` and `better_testing/runs/_latest/cluster-health.latest.md` | `consensus_block_production` is prod-gated and `consensus_tx_inclusion` is in scheduled cluster-health validation | The release gate keeps the lighter liveness proof; scheduled validation now includes one deeper applied transaction path |
@@ -67,6 +66,7 @@ It does **not** claim exhaustive correctness, exhaustive stress validation, or c
 | Surface | Why excluded |
 |---|---|
 | Native bridge / bridge execution | Node has bridge-related code paths, but there is no dedicated active scenario family and parts of the path remain unimplemented or non-production-ready |
+| Token runtime and token scripting | Historical token scenarios exist, but the current node repo does not expose an implemented token runtime/query path in `src/`. `HandleGCR.apply()` has no `token` branch, `manageNodeCall.ts` has no token query handlers, and `FungibleToken.ts` remains stub-level. Do not count token scenarios toward current active-feature coverage until implementation status changes. |
 | `storageProgram` transaction runtime | The existing `storage_program_apply_smoke` deliberately locks in placeholder `Not implemented` semantics; that is not active feature coverage |
 | Contract runtime / storage contracts | The node-side runtime is explicitly documented as unimplemented and should not drive test-expansion claims yet |
 

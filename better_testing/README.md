@@ -53,7 +53,7 @@ Active-core performance baseline:
 ```bash
 bun run testenv:perf:baseline:local
 ```
-This host-side runner records fixed local baselines for active core paths. It keeps blocked steps in the output matrix instead of silently skipping them, so active regressions remain visible in the baseline artifact.
+This host-side runner records fixed local baselines for active core paths: native transfer, `zk_proof_loadgen`, `sync_under_load`, and optional `omni_throughput`. It keeps blocked steps in the output matrix instead of silently skipping them, so active regressions remain visible in the baseline artifact. Token transfer is intentionally excluded from this active-core matrix because the current node repo does not expose an implemented token runtime/query path in `src/`; the historical token scenario family is retained as evidence only until that feature status changes.
 
 Active-cluster soak:
 ```bash

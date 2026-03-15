@@ -126,7 +126,6 @@ Why:
 Add baseline targets for:
 
 - native transfer throughput
-- token transfer throughput
 - `zk_proof_loadgen`
 - `sync_under_load`
 - optionally `omni_throughput`
@@ -134,6 +133,7 @@ Add baseline targets for:
 Do not attempt:
 
 - one baseline per every scenario family
+- token throughput while the node repo still lacks an implemented token runtime/query path in `src/`
 
 ### 8. Add one long-running soak profile for the active cluster path
 
