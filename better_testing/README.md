@@ -49,6 +49,18 @@ bun run testenv:cluster:local
 ```
 This regular node-local suite now covers both baseline consensus liveness and one deeper applied-path check: `consensus_block_production`, `consensus_tx_inclusion`, `gcr_identity_remove`, and `peer_discovery_smoke`.
 
+Active-core performance baseline:
+```bash
+bun run testenv:perf:baseline:local
+```
+This host-side runner records fixed local baselines for active core paths. It keeps blocked steps in the output matrix instead of silently skipping them, so active regressions remain visible in the baseline artifact.
+
+Active-cluster soak:
+```bash
+bun run testenv:soak:local
+```
+This mixed soak profile runs a pre/post `cluster-health` check with sustained native transfer load plus `zk_proof_loadgen`, staying within active implemented features only.
+
 Chaos/resync run (restart a follower mid-load, then verify convergence):
 ```bash
 better_testing/scripts/run-chaos-token-script-transfer.sh --reset --build --duration-sec 30 --delay-sec 8 --env SCRIPT_SET_STORAGE=true
@@ -73,6 +85,8 @@ Verified example RUN_IDs:
 - `better_testing/runs/suite-startup-cold-boot-*/suite.summary.json` for the cold-boot bootstrap report
 - `better_testing/runs/_latest/cluster-health.latest.md` for the scheduled cluster-health report
 - `better_testing/runs/_latest/gcr-routine.latest.md` for the single-wallet routine GCR report
+- `better_testing/runs/_latest/active-core-baseline.latest.md` for the current active-core performance matrix
+- `better_testing/runs/_latest/cluster-soak.latest.md` for the mixed active-cluster soak report
 
 Notes:
 - In loadgens, `ok` only counts transactions accepted (`result===200`); rejected txs are counted in `error` with `errorSamples`.

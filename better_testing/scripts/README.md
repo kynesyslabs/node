@@ -62,3 +62,38 @@ Artifacts land in:
 ```
 
 By default, the baseline runner sets `POST_RUN_HOLDER_POINTER_CHECK=false` to reduce output/noise; use `--with-pointers` to re-enable it.
+
+## Active-core performance baseline
+
+```bash
+bun run testenv:perf:baseline:local
+```
+
+This host-side runner records a small fixed set of active local baselines:
+- `transfer`
+- `token_transfer`
+- `zk_proof_loadgen`
+- `sync_under_load`
+- optional `omni_throughput` with `--with-omni`
+
+If one active step is currently regressed, the runner keeps going and records that step as blocked in the markdown/json summary instead of dropping it from the matrix.
+
+Artifacts land in:
+- `better_testing/runs/baseline-active-core-*/active-core-baseline.summary.json`
+- `better_testing/runs/_latest/active-core-baseline.latest.md`
+
+## Active-cluster soak
+
+```bash
+bun run testenv:soak:local
+```
+
+This host-side runner executes one mixed active-feature soak profile:
+- pre-check `cluster-health`
+- sustained `transfer`
+- sustained `zk_proof_loadgen`
+- post-check `cluster-health`
+
+Artifacts land in:
+- `better_testing/runs/cluster-soak-*/cluster-soak.summary.json`
+- `better_testing/runs/_latest/cluster-soak.latest.md`
