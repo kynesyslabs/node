@@ -53,7 +53,7 @@ export async function runConsensusTxInclusion() {
   await demos.connect(bootstrap)
   await demos.connectWallet(wallets[0]!, { algorithm: "ed25519" })
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const connectedSender = uint8ArrayToHex(publicKey)
+  const connectedSender = uint8ArrayToHex(publicKey as Uint8Array)
   if (connectedSender.toLowerCase() !== senderAddress!.toLowerCase()) {
     throw new Error(`consensus_tx_inclusion wallet/address mismatch: ${connectedSender} != ${senderAddress}`)
   }

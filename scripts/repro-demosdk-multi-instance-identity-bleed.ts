@@ -29,7 +29,7 @@ function defaultArgs() {
 
 async function buildProbe(demos: Demos, label: string): Promise<ProbeResult> {
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const identity = uint8ArrayToHex(publicKey)
+  const identity = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"

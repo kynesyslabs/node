@@ -365,7 +365,7 @@ async function worker(params: {
       params.cfg.opTimeoutMs,
       demos.crypto.getIdentity("ed25519"),
     )
-    ownerAddress = uint8ArrayToHex(publicKey)
+    ownerAddress = uint8ArrayToHex(publicKey as Uint8Array)
   } catch (error) {
     params.counters.total++
     params.counters.networkError++
@@ -483,7 +483,7 @@ async function probeWalletIdentities(params: {
     )
     probes.push({
       mnemonicIndex: idx,
-      ownerAddress: uint8ArrayToHex(publicKey),
+      ownerAddress: uint8ArrayToHex(publicKey as Uint8Array),
     })
   }
   return probes

@@ -63,13 +63,14 @@ export async function runWeb2UrlValidationSmoke() {
 
   const results = cases.map(testCase => {
     const result = validateAndNormalizeHttpUrl(testCase.input)
+    const r = result as any
     const ok = (
       result.ok === testCase.ok
       && (testCase.ok
-        ? result.normalizedUrl === testCase.normalizedUrl
-        : result.status === testCase.status
-          && typeof result.message === "string"
-          && result.message.includes(testCase.messageIncludes ?? ""))
+        ? r.normalizedUrl === testCase.normalizedUrl
+        : r.status === testCase.status
+          && typeof r.message === "string"
+          && r.message.includes(testCase.messageIncludes ?? ""))
     )
 
     return {

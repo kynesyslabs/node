@@ -225,7 +225,7 @@ export async function runTokenBurnLoadgen() {
   await nonceDemos.connect(bootstrapRpc)
   await nonceDemos.connectWallet(ownerMnemonic, { algorithm: "ed25519" })
   const sender = (await nonceDemos.crypto.getIdentity("ed25519")).publicKey
-  const ownerAddress = uint8ArrayToHex(sender)
+  const ownerAddress = uint8ArrayToHex(sender as Uint8Array)
   const currentNonce = await nonceDemos.getAddressNonce(ownerAddress)
   let nextNonce = Number(currentNonce) + 1
   const allocateNonce = () => nextNonce++

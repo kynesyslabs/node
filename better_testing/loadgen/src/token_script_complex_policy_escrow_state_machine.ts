@@ -214,6 +214,7 @@ export async function runTokenScriptComplexPolicyEscrowStateMachine() {
         demos,
         tokenAddress,
         scriptCode,
+        methodNames: [],
         nonce,
       })
     },

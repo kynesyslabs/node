@@ -25,7 +25,7 @@ export async function runWeb2SanitizationSmoke() {
       && originalHeaders.Cookie[0] === "sid=abc",
     metadataPreserved: forStorage.hash === original.hash
       && forStorage.signature === original.signature
-      && forLogging.raw?.body === original.raw?.body,
+      && (forLogging.raw as any)?.body === (original.raw as any)?.body,
   }
 
   const ok = Object.values(checks).every(Boolean)

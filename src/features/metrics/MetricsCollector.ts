@@ -699,12 +699,12 @@ export class MetricsCollector {
                 )
                 const isOpen = stdout.trim().length > 0 ? 1 : 0
                 this.metricsService.setGauge("service_port_open", isOpen, {
-                    port,
+                    port: String(port),
                     service,
                 })
             } catch {
                 this.metricsService.setGauge("service_port_open", 0, {
-                    port,
+                    port: String(port),
                     service,
                 })
             }

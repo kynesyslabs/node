@@ -1,6 +1,6 @@
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { Wallet } from "ethers"
+import { Wallet, HDNodeWallet } from "ethers"
 import { envInt, normalizeHexAddress, normalizeRpcUrl, nowMs, sleep } from "../../framework/common"
 import { getRunConfig, writeJson } from "../../framework/io"
 import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
@@ -100,7 +100,7 @@ async function submitXmIdentityTx(params: {
   chain: "evm"
   subchain: "mainnet"
   chainId: number
-  xmWallet: Wallet
+  xmWallet: Wallet | HDNodeWallet
 }) {
   const demos = new Demos()
   await waitForRpcReady(params.rpcUrl, envInt("WAIT_FOR_RPC_SEC", 120))
@@ -183,7 +183,7 @@ export async function runGcrIdentityXmSmoke() {
   await demos.connect(rpcBootstrap)
   await demos.connectWallet(wallets[0]!, { algorithm: "ed25519" })
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const ownerAddress = uint8ArrayToHex(publicKey)
+  const ownerAddress = uint8ArrayToHex(publicKey as Uint8Array)
 
   const chain = "evm" as const
   const subchain = "mainnet" as const

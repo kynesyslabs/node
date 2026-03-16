@@ -178,7 +178,7 @@ export async function runGcrIdentityRemove() {
   await demo.connect(rpcBootstrap)
   await demo.connectWallet(wallets[0]!, { algorithm: "ed25519" })
   const { publicKey } = await demo.crypto.getIdentity("ed25519")
-  const ownerAddress = uint8ArrayToHex(publicKey)
+  const ownerAddress = uint8ArrayToHex(publicKey as Uint8Array)
 
   const algorithm = "falcon"
   const identityAddress = buildUniqueIdentityAddress()

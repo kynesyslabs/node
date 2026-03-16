@@ -13,6 +13,7 @@ import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelop
 import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
 import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
 import { confirmTransaction } from "@/libs/blockchain/routines/validateTransaction"
+import type { ValidityData } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import {
     HASH_RELAY_MAX_TOTAL_CONNECTIONS,
@@ -332,7 +333,7 @@ export class L2PSHashService {
         }
 
         const account = await ensureGCRForUser(address)
-        const rawNonce = account?.details?.content?.nonce
+        const rawNonce = account?.nonce
         const currentNonce =
             typeof rawNonce === "number"
                 ? rawNonce

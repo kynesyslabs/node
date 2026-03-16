@@ -2,7 +2,8 @@ import { Server } from "bun"
 import { Headers } from "node-fetch"
 import log from "@/utilities/logger"
 
-export type Handler = (req: Request) => Promise<Response> | Response
+export type BunRequest = Request & { params: Record<string, string> }
+export type Handler = (req: BunRequest) => Promise<Response> | Response
 export type Middleware = (
     req: Request,
     next: () => Promise<Response>,
@@ -102,8 +103,9 @@ export class BunServer {
         const finalHandler = async (): Promise<Response> => {
             const match = this.matchRoute(method, path)
             if (match) {
-                ;(req as Request & { params?: Record<string, string> }).params = match.params
-                return await match.handler(req)
+                const bunReq = req as BunRequest
+                bunReq.params = match.params
+                return await match.handler(bunReq)
             }
             return jsonResponse({ error: "Not Found" }, 404)
         }

@@ -54,7 +54,7 @@ export async function runZkCommitmentSmoke() {
   await demos.connect(bootstrapRpc)
   await demos.connectWallet(wallets[0]!, { algorithm: "ed25519" })
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const ownerAddress = uint8ArrayToHex(publicKey)
+  const ownerAddress = uint8ArrayToHex(publicKey as Uint8Array)
   const nonce = Number(await demos.getAddressNonce(ownerAddress)) + 1
   const timestamp = Date.now()
   const commitmentHash = buildUniqueHex64("commit")

@@ -45,7 +45,7 @@ async function maybeBuildSudoHeaders(): Promise<SignedRpcHeaders | null> {
   await demos.connect(rpcUrl)
   await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
   const identity = await demos.crypto.getIdentity("ed25519")
-  const publicKeyHex = uint8ArrayToHex(identity.publicKey)
+  const publicKeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
   const signatureHex = uint8ArrayToHex(
     (await demos.crypto.sign("ed25519", new TextEncoder().encode(publicKeyHex))).signature,
   )

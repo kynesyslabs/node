@@ -252,7 +252,7 @@ async function worker(
   await demos.connectWallet(walletMnemonic, { algorithm: "ed25519" })
 
   const sender = (await demos.crypto.getIdentity("ed25519")).publicKey
-  const senderHex = uint8ArrayToHex(sender)
+  const senderHex = uint8ArrayToHex(sender as Uint8Array)
 
   const recipients = splitCsv(process.env.RECIPIENTS)
   if (recipients.length === 0) {

@@ -219,7 +219,7 @@ async function worker(
   await demos.connectWallet(walletMnemonic, { algorithm: "ed25519" })
 
   const sender = (await demos.crypto.getIdentity("ed25519")).publicKey
-  const senderHex = uint8ArrayToHex(sender)
+  const senderHex = uint8ArrayToHex(sender as Uint8Array)
 
   const currentNonce = await demos.getAddressNonce(senderHex)
   let nextNonce = Number(currentNonce) + 1

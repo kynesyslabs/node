@@ -110,7 +110,7 @@ export function installGlobalFetchTimeout(envName = "FETCH_TIMEOUT_MS"): number 
   if (fetchTimeoutMs <= 0) return 0
 
   const originalFetch = globalThis.fetch.bind(globalThis)
-  globalThis.fetch = async (input: any, init: any = {}) => {
+  globalThis.fetch = (async (input: any, init: any = {}) => {
     if (init?.signal) return originalFetch(input, init)
     const controller = new AbortController()
     const timeout: ReturnType<typeof setTimeout> = setTimeout(() => controller.abort(), fetchTimeoutMs)
@@ -119,7 +119,7 @@ export function installGlobalFetchTimeout(envName = "FETCH_TIMEOUT_MS"): number 
     } finally {
       clearTimeout(timeout)
     }
-  }
+  }) as typeof fetch
 
   return fetchTimeoutMs
 }

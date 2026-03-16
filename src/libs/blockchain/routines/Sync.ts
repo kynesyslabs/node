@@ -828,7 +828,7 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 
         if (newPeerObjects.length > 0) {
             // Run in background, don't block blockchain sync
-            exchangeL2PSParticipation(newPeerObjects, getSharedState.l2psJoinedUids)
+            exchangeL2PSParticipation(newPeerObjects)
                 .catch(error => {
                     log.error("[Sync] L2PS participation exchange failed:", error.message)
                 })

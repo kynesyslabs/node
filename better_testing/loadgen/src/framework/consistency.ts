@@ -73,7 +73,7 @@ function normalizeTokenAclEntries(entries: any): Array<{ address: string; permis
   for (const entry of list) {
     const address = normalizeHexAddress(entry?.address ?? "")
     if (!address) continue
-    const permissions = [...new Set((Array.isArray(entry?.permissions) ? entry.permissions : []).map((value: any) => String(value)).filter(Boolean))].sort()
+    const permissions = [...new Set<string>((Array.isArray(entry?.permissions) ? entry.permissions : []).map((value: any) => String(value)).filter(Boolean))].sort()
     out.push({ address, permissions })
   }
   out.sort((left, right) => left.address.localeCompare(right.address))

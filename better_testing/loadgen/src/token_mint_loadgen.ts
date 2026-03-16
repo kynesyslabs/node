@@ -167,7 +167,7 @@ async function worker(params: {
   await demos.connectWallet(params.ownerMnemonic, { algorithm: "ed25519" })
 
   const sender = (await demos.crypto.getIdentity("ed25519")).publicKey
-  const senderHex = uint8ArrayToHex(sender)
+  const senderHex = uint8ArrayToHex(sender as Uint8Array)
   const to = pickRecipient(params.recipientAddresses, senderHex, params.workerId, cfg.avoidSelfRecipient)
 
   async function sendOne() {
@@ -242,7 +242,7 @@ export async function runTokenMintLoadgen() {
   await nonceDemos.connect(bootstrapRpc)
   await nonceDemos.connectWallet(ownerMnemonic, { algorithm: "ed25519" })
   const sender = (await nonceDemos.crypto.getIdentity("ed25519")).publicKey
-  const senderHex = uint8ArrayToHex(sender)
+  const senderHex = uint8ArrayToHex(sender as Uint8Array)
   const currentNonce = await nonceDemos.getAddressNonce(senderHex)
   let nextNonce = Number(currentNonce) + 1
   const allocateNonce = () => nextNonce++

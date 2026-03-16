@@ -414,7 +414,7 @@ async function worker(params: {
   await demos.connectWallet(params.walletMnemonic, { algorithm: "ed25519" })
 
   const sender = (await demos.crypto.getIdentity("ed25519")).publicKey
-  const senderHex = normalizeHexAddress(uint8ArrayToHex(sender))
+  const senderHex = normalizeHexAddress(uint8ArrayToHex(sender as Uint8Array))
 
   const to = normalizeHexAddress(
     pickRecipient(params.recipientAddresses, senderHex, params.workerId, params.avoidSelfRecipient),

@@ -145,7 +145,7 @@ export async function runGcrIdentityMatrix() {
   await demos.connect(rpcBootstrap)
   await demos.connectWallet(wallets[0]!, { algorithm: "ed25519" })
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const ownerAddress = uint8ArrayToHex(publicKey)
+  const ownerAddress = uint8ArrayToHex(publicKey as Uint8Array)
 
   const timeoutSec = envInt("GCR_IDENTITY_MATRIX_TIMEOUT_SEC", 60)
   const pollMs = envInt("GCR_IDENTITY_MATRIX_POLL_MS", 300)

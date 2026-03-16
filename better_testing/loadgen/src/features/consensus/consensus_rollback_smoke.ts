@@ -33,11 +33,11 @@ export async function runConsensusRollbackSmoke() {
   await demos.connectWallet(wallets[0]!, { algorithm: "ed25519" })
 
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const senderAddress = uint8ArrayToHex(publicKey)
+  const senderAddress = uint8ArrayToHex(publicKey as Uint8Array)
   const recipientDemos = new Demos()
   await recipientDemos.connect(bootstrap)
   await recipientDemos.connectWallet(wallets[1]!, { algorithm: "ed25519" })
-  const recipientAddress = uint8ArrayToHex((await recipientDemos.crypto.getIdentity("ed25519")).publicKey)
+  const recipientAddress = uint8ArrayToHex((await recipientDemos.crypto.getIdentity("ed25519")).publicKey as Uint8Array)
 
   const senderNonceBefore = await getAddressNonceViaRpc(bootstrap, senderAddress, "consensus:rollback:nonce:before")
   if (typeof senderNonceBefore !== "number") {

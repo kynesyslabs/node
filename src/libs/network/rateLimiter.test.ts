@@ -9,14 +9,14 @@ const mockGetAuthContext = mock(() => ({
 const mockGetPeer = mock(() => undefined)
 
 mock.module("./authContext", () => ({
-    getAuthContext: (...args: unknown[]) => mockGetAuthContext(...args),
+    getAuthContext: () => mockGetAuthContext(),
     setAuthContext: mock(() => undefined),
 }))
 
 mock.module("@/libs/peer", () => ({
     PeerManager: {
         getInstance: () => ({
-            getPeer: (...args: unknown[]) => mockGetPeer(...args),
+            getPeer: () => mockGetPeer(),
         }),
     },
 }))

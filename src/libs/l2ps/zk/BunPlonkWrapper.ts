@@ -97,7 +97,7 @@ function logLagrange(logger: any, Fr: any, L: any[]) {
 
 async function initializeCurve(vk_verifier: any) {
     // CRITICAL: Use singleThread to avoid Bun worker crashes
-    return await getCurveFromName(vk_verifier.curve, { singleThread: true })
+    return await getCurveFromName(vk_verifier.curve, true)
 }
 
 function validateInputs(vk_verifier: any, publicSignals: any[], proof: any, curve: any, logger?: any): boolean {

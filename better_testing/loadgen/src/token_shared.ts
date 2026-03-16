@@ -5,6 +5,7 @@ import {
   type CrossNodeHolderPointersReport,
   type CrossNodeTokenConsistencyReport,
   type CrossNodeTokenGetConsistencyReport,
+  normalizeTokenPointerEntry,
   waitForCrossNodeHolderPointersMatchBalances,
   waitForCrossNodeTokenConsistency,
   waitForCrossNodeTokenGetConsistency,
@@ -219,7 +220,7 @@ export async function getWalletAddresses(rpcUrl: string, mnemonics: string[]): P
     await demos.connect(rpcUrl)
     await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
     const sender = (await demos.crypto.getIdentity("ed25519")).publicKey
-    addresses.push(uint8ArrayToHex(sender))
+    addresses.push(uint8ArrayToHex(sender as Uint8Array))
   }
   return addresses
 }
@@ -237,7 +238,7 @@ export async function withDemosWallet<T>(params: {
   await demos.connect(params.rpcUrl)
   await demos.connectWallet(params.mnemonic, { algorithm: "ed25519" })
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const addressHex = uint8ArrayToHex(publicKey)
+  const addressHex = uint8ArrayToHex(publicKey as Uint8Array)
   return params.fn(demos, addressHex)
 }
 
@@ -264,7 +265,7 @@ function buildGasAndNonceEdits(fromEd25519Address: string): GCREdit[] {
 
 async function signTxWithEdits(demos: Demos, tx: any, edits: GCREdit[]): Promise<any> {
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   tx.content.from = fromHex
   tx.content.from_ed25519_address = fromHex
@@ -512,7 +513,7 @@ export async function sendTokenTransferTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -557,7 +558,7 @@ export async function buildSignedTokenTransferTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -599,7 +600,7 @@ export async function sendTokenMintTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -643,7 +644,7 @@ export async function sendTokenGrantPermissionTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -687,7 +688,7 @@ export async function sendTokenRevokePermissionTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -729,7 +730,7 @@ export async function sendTokenPauseTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -763,7 +764,7 @@ export async function sendTokenUnpauseTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -798,7 +799,7 @@ export async function sendTokenTransferOwnershipTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -834,7 +835,7 @@ export async function sendTokenUpgradeScriptTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const code = String(params.scriptCode ?? "")
   const codeHash = Hashing.sha256(code)
@@ -897,7 +898,7 @@ export async function sendTokenUpdateAclTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const fromHex = uint8ArrayToHex(publicKey)
+  const fromHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"
@@ -942,7 +943,7 @@ export async function sendTokenBurnTxWithDemos(params: {
 }) {
   const { demos } = params
   const { publicKey } = await demos.crypto.getIdentity("ed25519")
-  const callerHex = uint8ArrayToHex(publicKey)
+  const callerHex = uint8ArrayToHex(publicKey as Uint8Array)
 
   const tx = (demos as any).tx.empty()
   tx.content.type = "native"

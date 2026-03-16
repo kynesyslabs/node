@@ -108,7 +108,7 @@ async function withWallet<T>(rpcUrl: string, mnemonic: string, fn: (demos: Demos
   await demos.connect(rpcUrl)
   await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
   const identity = await demos.crypto.getIdentity("ed25519")
-  const addressHex = normalizeHexAddress(uint8ArrayToHex(identity.publicKey))
+  const addressHex = normalizeHexAddress(uint8ArrayToHex(identity.publicKey as Uint8Array))
   return await fn(demos, addressHex)
 }
 

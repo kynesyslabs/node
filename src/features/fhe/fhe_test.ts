@@ -27,7 +27,7 @@ async function main() {
     const cipheredAdditionResult = await fhe.math.addNumbers(cipheredData, cipheredAddStep)
     // Decrypt the CipherText
     const decryptedAdditionResult = await fhe.encryption.decryptNumber(cipheredAdditionResult)
-    log.info("plainData: ", plainData, "\naddStep: ", addStep, "\ndecryptedAdditionResult: ", decryptedAdditionResult)
+    log.info(`plainData: ${plainData}\naddStep: ${addStep}\ndecryptedAdditionResult: ${decryptedAdditionResult}`)
 
     let decryptedData = await fhe.encryption.decryptNumber(cipheredData)
 
@@ -42,7 +42,7 @@ async function main() {
     const cipheredMultiplicationResult = await fhe.math.multiplyNumbers(cipheredData, cipheredMultiplyStep)
     // Decrypt the CipherText
     const decryptedMultiplicationResult = await fhe.encryption.decryptNumber(cipheredMultiplicationResult)
-    log.info("plainData: ", plainData, "\nmultiplyStep: ", multiplyStep, "\ndecryptedMultiplyResult: ", decryptedMultiplicationResult)
+    log.info(`plainData: ${plainData}\nmultiplyStep: ${multiplyStep}\ndecryptedMultiplyResult: ${decryptedMultiplicationResult}`)
 
     decryptedData = await fhe.encryption.decryptNumber(cipheredData)
     if (decryptedData !== decryptedMultiplicationResult) {
