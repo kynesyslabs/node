@@ -107,9 +107,7 @@ async function peersGossipProcess(
         // INFO: Filter out failed responses and convert lists to Peer objects
         .filter(response => response.result === 200)
         .map(response => {
-            log.debug(
-                "[peerGossip] response: " + JSON.stringify(response),
-            )
+            log.debug("[peerGossip] response: " + JSON.stringify(response))
             return response.response.map((peer: Peer) => {
                 const peerInstance = new Peer()
 
@@ -226,7 +224,9 @@ async function requestPeerlistHashes(peers: Peer[]): Promise<RPCResponse[]> {
             log.warning(`[peerGossip] Peer has no identity: ${peer}`)
             continue
         }
-        log.debug(`[peerGossip] Sending peerlist hash request to ${peer.identity}`)
+        log.debug(
+            `[peerGossip] Sending peerlist hash request to ${peer.identity}`,
+        )
         promises.push(peer.call(peerlistHashRequest))
     }
     const responses = await Promise.all(promises)

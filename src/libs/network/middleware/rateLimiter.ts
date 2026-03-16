@@ -50,10 +50,13 @@ export class RateLimiter {
         this.config = config
 
         // Clean up expired entries every 15 minutes
-        this.cleanupInterval = setInterval(() => {
-            this.cleanup()
-            this.dumpIPs()
-        }, 15 * 60 * 1000)
+        this.cleanupInterval = setInterval(
+            () => {
+                this.cleanup()
+                this.dumpIPs()
+            },
+            15 * 60 * 1000,
+        )
 
         this.loadIPs()
     }

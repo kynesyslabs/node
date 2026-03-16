@@ -11,7 +11,6 @@
  */
 
 import log from "src/utilities/logger"
-import { Config } from "src/config"
 import {
     DEFAULT_OMNIPROTOCOL_CONFIG,
     MigrationMode,
@@ -20,7 +19,6 @@ import {
 import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
-import { DEFAULT_HTTP_PORT, OMNI_PORT_OFFSET } from "../constants"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
@@ -48,9 +46,7 @@ export abstract class BaseOmniAdapter {
     protected readonly connectionPool: ConnectionPool
 
     constructor(options: BaseAdapterOptions = {}) {
-        this.config = cloneConfig(
-            options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG,
-        )
+        this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
 
         // Initialize ConnectionPool with configuration
         this.connectionPool = new ConnectionPool({
@@ -126,8 +122,8 @@ export abstract class BaseOmniAdapter {
         const protocol = this.getTcpProtocol()
         const host = url.hostname
         // Derive OmniProtocol port from peer's HTTP port (HTTP port + 1)
-        const peerHttpPort = parseInt(url.port) || DEFAULT_HTTP_PORT
-        const omniPort = peerHttpPort + OMNI_PORT_OFFSET
+        const peerHttpPort = parseInt(url.port) || 80
+        const omniPort = peerHttpPort + 1
 
         return `${protocol}://${host}:${omniPort}`
     }
@@ -138,7 +134,8 @@ export abstract class BaseOmniAdapter {
      */
     protected getTcpProtocol(): string {
         // REVIEW: Check TLS configuration
-        return Config.getInstance().omni.tls.enabled ? "tls" : "tcp"
+        const tlsEnabled = process.env.OMNI_TLS_ENABLED === "true"
+        return tlsEnabled ? "tls" : "tcp"
     }
 
     /**
@@ -146,7 +143,14 @@ export abstract class BaseOmniAdapter {
      * Uses same logic as server: OMNI_PORT env var, or HTTP port + 1
      */
     protected getOmniPort(): string {
-        return String(Config.getInstance().server.omniPort)
+        if (process.env.OMNI_PORT) {
+            return process.env.OMNI_PORT
+        }
+        // Match server's detectDefaultPort() logic: HTTP port + 1
+        const httpPort = parseInt(
+            process.env.NODE_PORT || process.env.PORT || "3000",
+        )
+        return String(httpPort + 1)
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -209,7 +213,7 @@ export abstract class BaseOmniAdapter {
      * Check if OMNI_FATAL mode is enabled
      */
     protected isFatalMode(): boolean {
-        return Config.getInstance().omni.fatal
+        return process.env.OMNI_FATAL === "true"
     }
 
     /**
@@ -226,7 +230,8 @@ export abstract class BaseOmniAdapter {
         }
 
         // Format error message
-        const errorMessage = error instanceof Error ? error.message : String(error)
+        const errorMessage =
+            error instanceof Error ? error.message : String(error)
         const errorStack = error instanceof Error ? error.stack : undefined
 
         log.error(`[OmniProtocol] OMNI_FATAL: ${context}`)
@@ -238,11 +243,12 @@ export abstract class BaseOmniAdapter {
         // If it's already an OmniProtocolError, it should have already exited
         // This handles non-OmniProtocolError cases (like plain Error("Connection closed"))
         if (!(error instanceof OmniProtocolError)) {
-            log.error("[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError")
+            log.error(
+                "[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError",
+            )
             process.exit(1)
         }
 
         return true
     }
 }
-

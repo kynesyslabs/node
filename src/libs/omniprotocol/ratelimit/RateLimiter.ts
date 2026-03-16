@@ -187,7 +187,7 @@ export class RateLimiter {
         }
 
         // Remove timestamps outside the current window (sliding window)
-        entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart)
+        entry.timestamps = entry.timestamps.filter(ts => ts > windowStart)
 
         // Check if limit exceeded
         if (entry.timestamps.length >= maxRequests) {
@@ -222,11 +222,9 @@ export class RateLimiter {
     /**
      * Get or create a rate limit entry
      */
-    private getOrCreateEntry(
-        key: string,
-        type: RateLimitType,
-    ): RateLimitEntry {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+    private getOrCreateEntry(key: string, type: RateLimitType): RateLimitEntry {
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
 
         let entry = map.get(key)
         if (!entry) {
@@ -323,7 +321,8 @@ export class RateLimiter {
      * Manually unblock an IP or identity
      */
     unblockKey(key: string, type: RateLimitType): void {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
         const entry = map.get(key)
         if (entry) {
             entry.blocked = false

@@ -46,6 +46,8 @@ import multichainDispatcher from "src/features/multichain/XMDispatcher" // ? Ren
 import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import HandleGCR from "../blockchain/gcr/handleGCR"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Datasource from "@/model/datasource"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
 import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyRequest"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
@@ -84,39 +86,6 @@ function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     )
 }
 
-function normalizeZkIdentityEdits(edits: GCREdit[], tx: Transaction): GCREdit[] {
-    if (tx.content.type !== "identity") {
-        return edits
-    }
-
-    const identityPayload = tx.content.data?.[1] as IdentityPayload | undefined
-    if (
-        !identityPayload ||
-        identityPayload.context !== "zk" ||
-        (identityPayload.method !== "zk_commitmentadd" &&
-            identityPayload.method !== "zk_attestationadd")
-    ) {
-        return edits
-    }
-
-    const normalizedPayload = Array.isArray(identityPayload.payload)
-        ? structuredClone(identityPayload.payload)
-        : identityPayload.payload
-
-    return edits.map(edit => {
-        if (edit.type !== "identity") {
-            return edit
-        }
-
-        return {
-            ...edit,
-            context: "zk",
-            operation: identityPayload.method,
-            data: normalizedPayload,
-        } as GCREdit
-    })
-}
-
 export default class ServerHandlers {
     // ANCHOR Validate transaction
     static async handleValidateTransaction(
@@ -142,14 +111,7 @@ export default class ServerHandlers {
             // NOTE Nonce assignment is done in the GCR too
             // REVIEW Generating GCREdit on our side and comparing it with the one in the Transaction object
             // See DemosTransactions.ts -> prepare(data) for the details
-            const gcrEdits = normalizeZkIdentityEdits(
-                await GCRGeneration.generate(tx),
-                tx,
-            )
-            const normalizedTxGcrEdits = normalizeZkIdentityEdits(
-                _.cloneDeep((tx.content.gcr_edits as GCREdit[]) || []),
-                tx,
-            )
+            const gcrEdits = await GCRGeneration.generate(tx)
             // TODO This is a workaround, if it works we should make it more elegant
             // Client side the gcredits are created without the tx hash, which is added in the node
             // ! Maybe we should remove the tx hash from the GCREdit object directly which improves consistency
@@ -162,7 +124,7 @@ export default class ServerHandlers {
                 "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
             )
             const txGcrEditsHash = Hashing.sha256(
-                JSON.stringify(normalizedTxGcrEdits),
+                JSON.stringify(tx.content.gcr_edits),
             )
             log.debug(
                 "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
@@ -182,6 +144,39 @@ export default class ServerHandlers {
                 throw new Error("GCREdit mismatch")
             }
 
+            // Balance check: sum all "remove" balance edits for the sender
+            const totalFee = gcrEdits
+                .filter(
+                    (edit: GCREdit) =>
+                        edit.type === "balance" &&
+                        edit.operation === "remove" &&
+                        (edit.account === sender ||
+                            (typeof edit.account !== "string" &&
+                                (edit.account as any)?.toString() === sender)),
+                )
+                .reduce(
+                    (sum: bigint, edit: GCREdit) => sum + BigInt((edit as any).amount),
+                    0n,
+                )
+
+            if (totalFee > 0n) {
+                const db = await Datasource.getInstance()
+                const gcrMainRepo = db
+                    .getDataSource()
+                    .getRepository(GCRMain)
+                const account = await gcrMainRepo.findOneBy({
+                    pubkey: sender,
+                })
+                const senderBalance = account
+                    ? BigInt(account.balance)
+                    : 0n
+                if (senderBalance < totalFee) {
+                    throw new Error(
+                        `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
+                    )
+                }
+            }
+
             // REVIEW Recalculate the Transaction hash too
             //tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
@@ -193,7 +188,9 @@ export default class ServerHandlers {
                     valid: false,
                     reference_block: null,
                     message:
-                        "An error occurred while validating the transaction",
+                        e instanceof Error
+                            ? e.message
+                            : "An error occurred while validating the transaction",
                     gas_operation: null,
 
                     transaction: null,
@@ -270,7 +267,10 @@ export default class ServerHandlers {
 
         // We need to have issued the validity data
         if (validatedData.rpc_public_key.data !== hexOurKey) {
-            log.error("SERVER", fname + "Invalid validityData signature key (not us) 💀")
+            log.error(
+                "SERVER",
+                fname + "Invalid validityData signature key (not us) 💀",
+            )
 
             result.success = false
             result.response = false
@@ -423,9 +423,8 @@ export default class ServerHandlers {
 
             case "web2Request": {
                 payload = tx.content.data[1] as IWeb2Payload
-                const web2Result = await ServerHandlers.handleWeb2Request(
-                    payload,
-                )
+                const web2Result =
+                    await ServerHandlers.handleWeb2Request(payload)
                 result.response = web2Result
                 break
             }
@@ -435,9 +434,8 @@ export default class ServerHandlers {
                 var demosWorkPayload = tx.content.data
                 var demosWorkScript = demosWorkPayload[1] as DemoScript
                 try {
-                    const demosWorkResult = await handleDemosWorkRequest(
-                        demosWorkScript,
-                    )
+                    const demosWorkResult =
+                        await handleDemosWorkRequest(demosWorkScript)
                     result.response = demosWorkResult
                 } catch (e) {
                     log.error(

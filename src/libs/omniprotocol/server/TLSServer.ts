@@ -46,7 +46,9 @@ export class TLSServer extends EventEmitter {
         }
 
         // Initialize rate limiter
-        this.rateLimiter = new RateLimiter(this.config.rateLimit ?? { enabled: true })
+        this.rateLimiter = new RateLimiter(
+            this.config.rateLimit ?? { enabled: true },
+        )
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,
@@ -71,7 +73,9 @@ export class TLSServer extends EventEmitter {
 
         // Validate TLS configuration
         if (!fs.existsSync(this.config.tls.certPath)) {
-            throw new Error(`Certificate not found: ${this.config.tls.certPath}`)
+            throw new Error(
+                `Certificate not found: ${this.config.tls.certPath}`,
+            )
         }
         if (!fs.existsSync(this.config.tls.keyPath)) {
             throw new Error(`Private key not found: ${this.config.tls.keyPath}`)
@@ -98,9 +102,12 @@ export class TLSServer extends EventEmitter {
                 ciphers: this.config.tls.ciphers,
             }
 
-            this.server = tls.createServer(tlsOptions, (socket: tls.TLSSocket) => {
-                this.handleSecureConnection(socket)
-            })
+            this.server = tls.createServer(
+                tlsOptions,
+                (socket: tls.TLSSocket) => {
+                    this.handleSecureConnection(socket)
+                },
+            )
 
             // Set max connections
             this.server.maxConnections = this.config.maxConnections
@@ -170,7 +177,10 @@ export class TLSServer extends EventEmitter {
         }
 
         // Verify certificate fingerprint if in self-signed mode
-        if (this.config.tls.mode === "self-signed" && this.config.tls.requestCert) {
+        if (
+            this.config.tls.mode === "self-signed" &&
+            this.config.tls.requestCert
+        ) {
             const peerCert = socket.getPeerCertificate()
             if (!peerCert || !peerCert.fingerprint256) {
                 log.warning(
@@ -184,16 +194,20 @@ export class TLSServer extends EventEmitter {
             // If we have trusted fingerprints, verify against them
             if (this.trustedFingerprints.size > 0) {
                 const fingerprint = peerCert.fingerprint256
-                const isTrusted = Array.from(this.trustedFingerprints.values()).includes(
-                    fingerprint,
-                )
+                const isTrusted = Array.from(
+                    this.trustedFingerprints.values(),
+                ).includes(fingerprint)
 
                 if (!isTrusted) {
                     log.warning(
                         `[TLSServer] Untrusted certificate from ${remoteAddress}: ${fingerprint}`,
                     )
                     socket.destroy()
-                    this.emit("connection_rejected", remoteAddress, "untrusted_cert")
+                    this.emit(
+                        "connection_rejected",
+                        remoteAddress,
+                        "untrusted_cert",
+                    )
                     return
                 }
 
@@ -204,7 +218,10 @@ export class TLSServer extends EventEmitter {
         }
 
         // Check connection limit
-        if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
+        if (
+            this.connectionManager.getConnectionCount() >=
+            this.config.maxConnections
+        ) {
             log.warning(
                 `[TLSServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
@@ -254,7 +271,7 @@ export class TLSServer extends EventEmitter {
 
         // Stop accepting new connections
         await new Promise<void>((resolve, reject) => {
-            this.server?.close((err) => {
+            this.server?.close(err => {
                 if (err) reject(err)
                 else resolve()
             })

@@ -15,7 +15,7 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
-import SecretaryManager from "./types/secretaryManager"
+import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
 import {
     BlockInvalidError,
     ForgingEndedError,
@@ -219,21 +219,19 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7, blockRef)
     } catch (error) {
-        if (error instanceof NotInShardError) {
-            log.info(
-                "[consensusRoutine] We are not in the shard, waiting for the block",
-            )
+        if (
+            error instanceof NotInShardError ||
+            error instanceof ForgingEndedError
+        ) {
+            log.error(error)
+            log.error("[consensusRoutine] Exiting consensus routine")
             return
         }
 
-        if (error instanceof ForgingEndedError) {
-            log.info(
-                "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
-            )
-            return
-        }
-
-        if (error instanceof BlockInvalidError) {
+        if (
+            error instanceof BlockInvalidError ||
+            error instanceof AbortConsensusError
+        ) {
             log.info(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
@@ -247,7 +245,7 @@ export async function consensusRoutine(): Promise<void> {
                 }
             }
             await rollbackGCREditsFromTxs(txsToRollback)
-            await Mempool.removeTransactionsByHashes(successfulTxs)
+            // await Mempool.removeTransactionsByHashes(successfulTxs)
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)

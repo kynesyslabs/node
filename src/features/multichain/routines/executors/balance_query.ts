@@ -7,18 +7,18 @@ export default async function handleBalanceQuery(
     chainID: number,
 ) {
     log.debug("[XM Method] Balance Query - Chain:", operation.chain)
-    
+
     try {
         switch (operation.chain) {
             case "aptos":
                 return await handleAptosBalanceQuery(operation)
-            
+
             // TODO: Add other chains as needed
             // case "evm":
             //     return await handleEvmBalanceQuery(operation)
             // case "solana":
             //     return await handleSolanaBalanceQuery(operation)
-            
+
             default:
                 return {
                     result: "error",

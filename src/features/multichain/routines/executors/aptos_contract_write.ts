@@ -60,10 +60,7 @@ export default async function handleAptosContractWrite(operation: IOperation) {
         const signedTx = operation.task.signedPayloads[0]
         const txResponse = await aptosInstance.sendTransaction(signedTx)
 
-        log.debug(
-            "Aptos contract write transaction result:",
-            txResponse.result,
-        )
+        log.debug("Aptos contract write transaction result:", txResponse.result)
         log.debug("Transaction hash:", txResponse.hash)
 
         return {

@@ -2,24 +2,24 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEVNET_DIR="$(dirname "$SCRIPT_DIR")"
+DEVNET_DIR="$(dirname "${SCRIPT_DIR}")"
 
 echo "🚀 Setting up Demos devnet..."
 echo ""
 
 # Check if .env exists
-if [ ! -f "$DEVNET_DIR/.env" ]; then
-    echo "📋 Creating .env from .env.example..."
-    cp "$DEVNET_DIR/.env.example" "$DEVNET_DIR/.env"
+if [[ ! -f "${DEVNET_DIR}/.env" ]]; then
+	echo "📋 Creating .env from .env.example..."
+	cp "${DEVNET_DIR}/.env.example" "${DEVNET_DIR}/.env"
 fi
 
 # Generate identities
 echo ""
-"$SCRIPT_DIR/generate-identities.sh"
+"${SCRIPT_DIR}/generate-identities.sh"
 
 # Generate peerlist
 echo ""
-"$SCRIPT_DIR/generate-peerlist.sh"
+"${SCRIPT_DIR}/generate-peerlist.sh"
 
 echo ""
 echo "═══════════════════════════════════════════════════════════════"

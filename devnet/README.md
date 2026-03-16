@@ -54,41 +54,46 @@ cp .env.example .env
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE1_PORT` | 53551 | HTTP RPC port for node 1 |
-| `NODE2_PORT` | 53552 | HTTP RPC port for node 2 |
-| `NODE3_PORT` | 53553 | HTTP RPC port for node 3 |
-| `NODE4_PORT` | 53554 | HTTP RPC port for node 4 |
-| `NODE1_OMNI_PORT` | 53561 | OmniProtocol P2P port for node 1 |
-| `POSTGRES_USER` | demosuser | Postgres username |
-| `POSTGRES_PASSWORD` | demospass | Postgres password |
-| `PERSISTENT` | 0 | Set to 1 for persistent volumes |
+| Variable            | Default   | Description                      |
+| ------------------- | --------- | -------------------------------- |
+| `NODE1_PORT`        | 53551     | HTTP RPC port for node 1         |
+| `NODE2_PORT`        | 53552     | HTTP RPC port for node 2         |
+| `NODE3_PORT`        | 53553     | HTTP RPC port for node 3         |
+| `NODE4_PORT`        | 53554     | HTTP RPC port for node 4         |
+| `NODE1_OMNI_PORT`   | 53561     | OmniProtocol P2P port for node 1 |
+| `POSTGRES_USER`     | demosuser | Postgres username                |
+| `POSTGRES_PASSWORD` | demospass | Postgres password                |
+| `PERSISTENT`        | 0         | Set to 1 for persistent volumes  |
 
 ## Usage
 
 ### Start devnet
+
 ```bash
 docker compose up --build
 ```
 
 ### Start in background
+
 ```bash
 docker compose up --build -d
 docker compose logs -f  # follow logs
 ```
 
 ### Stop devnet
+
 ```bash
 docker compose down
 ```
 
 ### Stop and remove volumes (clean state)
+
 ```bash
 docker compose down -v
 ```
 
 ### Rebuild after code changes
+
 ```bash
 docker compose up --build
 ```
@@ -97,8 +102,8 @@ docker compose up --build
 
 Once running, nodes are accessible at:
 
-| Node | HTTP RPC | OmniProtocol |
-|------|----------|--------------|
+| Node   | HTTP RPC               | OmniProtocol    |
+| ------ | ---------------------- | --------------- |
 | node-1 | http://localhost:53551 | localhost:53561 |
 | node-2 | http://localhost:53552 | localhost:53562 |
 | node-3 | http://localhost:53553 | localhost:53563 |
@@ -109,6 +114,7 @@ Once running, nodes are accessible at:
 By default, the devnet runs in **ephemeral mode** - all data is lost when containers stop.
 
 For persistent development:
+
 ```bash
 # In .env
 PERSISTENT=1
@@ -119,6 +125,7 @@ This creates a `postgres-data` volume that survives restarts.
 ## Regenerating Identities
 
 To generate new node identities:
+
 ```bash
 ./scripts/generate-identities.sh
 ./scripts/generate-peerlist.sh
@@ -129,6 +136,7 @@ docker compose up --build
 ## Observability
 
 ### View logs
+
 ```bash
 ./scripts/logs.sh           # All services
 ./scripts/logs.sh nodes     # All 4 nodes
@@ -137,16 +145,20 @@ docker compose up --build
 ```
 
 ### Attach to container
+
 ```bash
 ./scripts/attach.sh node-1  # Interactive shell in node-1
 ./scripts/attach.sh postgres # psql client for database
 ```
 
 ### Tmux multi-view (all 4 nodes)
+
 ```bash
 ./scripts/watch-all.sh
 ```
+
 Opens a tmux session with 4 panes, one per node:
+
 ```
 ┌─────────────┬─────────────┐
 │   node-1    │   node-2    │
@@ -154,20 +166,24 @@ Opens a tmux session with 4 panes, one per node:
 │   node-3    │   node-4    │
 └─────────────┴─────────────┘
 ```
+
 - `Ctrl+B` then `D` to detach
 - `tmux attach -t demos-devnet` to reattach
 
 ## Troubleshooting
 
 ### Nodes can't connect to each other
+
 - Ensure `demos_peerlist.json` was generated after identities
 - Check that Docker networking is working: `docker network inspect demos-devnet_demos-network`
 
 ### Database connection errors
+
 - Wait for PostgreSQL health check to pass
 - Check logs: `docker compose logs postgres`
 
 ### Port already in use
+
 - Change ports in `.env` file
 - Or stop conflicting services
 

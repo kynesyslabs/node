@@ -121,7 +121,10 @@ export default class Wallet {
     }
 
     async save(filename: string) {
-        await fs.promises.writeFile(filename, this.identity.privateKey.toString("hex"))
+        await fs.promises.writeFile(
+            filename,
+            this.identity.privateKey.toString("hex"),
+        )
     }
 
     read(filename: string) {

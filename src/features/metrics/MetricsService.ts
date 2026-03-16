@@ -16,19 +16,23 @@ import client, {
     collectDefaultMetrics,
 } from "prom-client"
 import log from "@/utilities/logger"
-import type { MetricsConfig } from "./types"
-import {
-    DEFAULT_METRICS_CONFIG,
-    DEFAULT_HISTOGRAM_BUCKETS,
-    DEFAULT_SUMMARY_PERCENTILES,
-    CONSENSUS_ROUND_DURATION_BUCKETS,
-    PEER_LATENCY_BUCKETS,
-    TRANSACTION_PROCESSING_BUCKETS,
-    API_REQUEST_DURATION_BUCKETS,
-} from "./constants"
 
-// Re-export for backward compatibility
-export type { MetricsConfig } from "./types"
+// REVIEW: Metrics configuration types
+export interface MetricsConfig {
+    enabled: boolean
+    port: number
+    prefix: string
+    defaultLabels?: Record<string, string>
+    collectDefaultMetrics: boolean
+}
+
+// Default configuration
+const DEFAULT_CONFIG: MetricsConfig = {
+    enabled: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
+    port: parseInt(process.env.METRICS_PORT ?? "9090", 10),
+    prefix: "demos_",
+    collectDefaultMetrics: true,
+}
 
 /**
  * MetricsService - Singleton service for Prometheus metrics
@@ -55,7 +59,7 @@ export class MetricsService {
     private startTime: number = Date.now()
 
     private constructor(config?: Partial<MetricsConfig>) {
-        this.config = { ...DEFAULT_METRICS_CONFIG, ...config }
+        this.config = { ...DEFAULT_CONFIG, ...config }
         this.registry = new Registry()
 
         if (this.config.defaultLabels) {
@@ -128,7 +132,7 @@ export class MetricsService {
             "consensus_round_duration_seconds",
             "Duration of consensus rounds",
             [],
-            CONSENSUS_ROUND_DURATION_BUCKETS,
+            [0.1, 0.5, 1, 2, 5, 10, 30],
         )
         this.createGauge("block_height", "Current block height", [])
         this.createGauge("mempool_size", "Number of pending transactions", [])
@@ -136,11 +140,9 @@ export class MetricsService {
         // === Network Metrics ===
         this.createGauge("peers_connected", "Currently connected peers", [])
         this.createGauge("peers_total", "Total known peers", [])
-        this.createCounter(
-            "messages_sent_total",
-            "Total messages sent",
-            ["type"],
-        )
+        this.createCounter("messages_sent_total", "Total messages sent", [
+            "type",
+        ])
         this.createCounter(
             "messages_received_total",
             "Total messages received",
@@ -152,7 +154,7 @@ export class MetricsService {
             "peer_latency_seconds",
             "Peer communication latency (aggregated across all peers)",
             [], // No labels to prevent unbounded cardinality
-            PEER_LATENCY_BUCKETS,
+            [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
         )
 
         // === Transaction Metrics ===
@@ -171,44 +173,38 @@ export class MetricsService {
             "transaction_processing_seconds",
             "Transaction processing time",
             ["type"],
-            TRANSACTION_PROCESSING_BUCKETS,
+            [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5],
         )
 
         // === API Metrics ===
-        this.createCounter(
-            "api_requests_total",
-            "Total API requests",
-            ["method", "endpoint", "status_code"],
-        )
+        this.createCounter("api_requests_total", "Total API requests", [
+            "method",
+            "endpoint",
+            "status_code",
+        ])
         this.createHistogram(
             "api_request_duration_seconds",
             "API request duration",
             ["method", "endpoint"],
-            API_REQUEST_DURATION_BUCKETS,
+            [0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
         )
-        this.createCounter(
-            "api_errors_total",
-            "Total API errors",
-            ["method", "endpoint", "error_code"],
-        )
+        this.createCounter("api_errors_total", "Total API errors", [
+            "method",
+            "endpoint",
+            "error_code",
+        ])
 
         // === IPFS Metrics ===
         this.createGauge("ipfs_pins_total", "Total pinned content items", [])
         this.createGauge("ipfs_storage_bytes", "Total IPFS storage used", [])
         this.createGauge("ipfs_peers", "Connected IPFS swarm peers", [])
-        this.createCounter(
-            "ipfs_operations_total",
-            "Total IPFS operations",
-            ["operation"],
-        )
+        this.createCounter("ipfs_operations_total", "Total IPFS operations", [
+            "operation",
+        ])
 
         // === GCR Metrics ===
         this.createGauge("gcr_accounts_total", "Total accounts in GCR", [])
-        this.createGauge(
-            "gcr_total_supply",
-            "Total native token supply",
-            [],
-        )
+        this.createGauge("gcr_total_supply", "Total native token supply", [])
 
         log.debug("[METRICS] Core metrics registered")
     }
@@ -282,7 +278,9 @@ export class MetricsService {
             name: fullName,
             help,
             labelNames,
-            buckets: buckets ?? DEFAULT_HISTOGRAM_BUCKETS,
+            buckets: buckets ?? [
+                0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+            ],
             registers: [this.registry],
         })
         this.histograms.set(fullName, histogram)
@@ -308,7 +306,7 @@ export class MetricsService {
             name: fullName,
             help,
             labelNames,
-            percentiles: percentiles ?? DEFAULT_SUMMARY_PERCENTILES,
+            percentiles: percentiles ?? [0.5, 0.9, 0.95, 0.99],
             registers: [this.registry],
         })
         this.summaries.set(fullName, summary)

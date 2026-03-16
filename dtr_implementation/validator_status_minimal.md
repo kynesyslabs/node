@@ -21,16 +21,16 @@ export default async function isValidatorForNextBlock(): Promise<boolean> {
     try {
         // Use existing seed generation (unchanged)
         const { commonValidatorSeed } = await getCommonValidatorSeed()
-        
+
         // Use existing shard selection (unchanged)
         const validators = await getShard(commonValidatorSeed)
-        
+
         // Use existing identity access (unchanged)
-        const ourIdentity = getSharedState.identity.ed25519.publicKey.toString("hex")
-        
+        const ourIdentity =
+            getSharedState.identity.ed25519.publicKey.toString("hex")
+
         // Simple check if we're in the validator list
         return validators.some(peer => peer.identity === ourIdentity)
-        
     } catch (error) {
         // Conservative fallback - assume we're not validator
         return false
@@ -40,11 +40,13 @@ export default async function isValidatorForNextBlock(): Promise<boolean> {
 /**
  * Gets validator list for relay targets (optional helper)
  */
-export async function getValidatorsForRelay(): Promise<import("../../peer/Peer").Peer[]> {
+export async function getValidatorsForRelay(): Promise<
+    import("../../peer/Peer").Peer[]
+> {
     try {
         const { commonValidatorSeed } = await getCommonValidatorSeed()
         const validators = await getShard(commonValidatorSeed)
-        
+
         // Return only online, synced validators for relay
         return validators.filter(v => v.status.online && v.sync.status)
     } catch {
@@ -57,7 +59,9 @@ export async function getValidatorsForRelay(): Promise<import("../../peer/Peer")
 
 ```typescript
 // In manageExecution.ts
-import isValidatorForNextBlock, { getValidatorsForRelay } from "../consensus/v2/routines/isValidator"
+import isValidatorForNextBlock, {
+    getValidatorsForRelay,
+} from "../consensus/v2/routines/isValidator"
 
 // Simple check
 if (await isValidatorForNextBlock()) {

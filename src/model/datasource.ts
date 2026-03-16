@@ -23,6 +23,7 @@ import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
+import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
@@ -56,6 +57,7 @@ export const dataSource = new DataSource({
         GCRTracker,
         GCRMain,
         GCRTLSNotary,
+        GCRStorageProgram,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
@@ -70,7 +72,6 @@ export const dataSource = new DataSource({
     synchronize: true,
     logging: false,
 })
-
 
 class Datasource {
     private static instance: Datasource

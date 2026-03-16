@@ -16,9 +16,8 @@ async function loadPeerlistEntries(): Promise<{
     rawPeers: any[]
     hashBuffer: Buffer
 }> {
-    const { default: getPeerlist } = await import(
-        "src/libs/network/routines/nodecalls/getPeerlist"
-    )
+    const { default: getPeerlist } =
+        await import("src/libs/network/routines/nodecalls/getPeerlist")
     const { default: hashing } = await import("src/libs/crypto/hashing")
 
     const peers = await getPeerlist()
@@ -84,9 +83,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     // These are routed to ServerHandlers directly, not manageNodeCall
     // Format: { method: "mempool", params: [{ data: [...] }] }
     if (request.method === "mempool") {
-        const { default: serverHandlers } = await import(
-            "src/libs/network/endpointHandlers"
-        )
+        const { default: serverHandlers } =
+            await import("src/libs/network/endpointHandlers")
         const log = await import("src/utilities/logger").then(m => m.default)
         log.info(
             `[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`,
@@ -107,9 +105,12 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     // REVIEW: Handle hello_peer - peer handshake/discovery
     // Format: { method: "hello_peer", params: [{ url, publicKey, signature, syncData }] }
     if (request.method === "hello_peer") {
-        const { manageHelloPeer } = await import("src/libs/network/manageHelloPeer")
+        const { manageHelloPeer } =
+            await import("src/libs/network/manageHelloPeer")
 
-        log.debug(`[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`)
+        log.debug(
+            `[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`,
+        )
 
         const params = Array.isArray(request.params) ? request.params : []
         const helloPeerRequest = params[0]
@@ -123,7 +124,10 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         }
 
         // Call manageHelloPeer with sender identity from OmniProtocol auth
-        const response = await manageHelloPeer(helloPeerRequest, context.peerIdentity ?? "")
+        const response = await manageHelloPeer(
+            helloPeerRequest,
+            context.peerIdentity ?? "",
+        )
 
         return encodeNodeCallResponse({
             status: response.result,
@@ -136,12 +140,13 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     // REVIEW: Handle consensus_routine envelope format
     // Format: { method: "consensus_routine", params: [{ method: "setValidatorPhase", params: [...] }] }
     if (request.method === "consensus_routine") {
-        const { default: manageConsensusRoutines } = await import(
-            "src/libs/network/manageConsensusRoutines"
-        )
+        const { default: manageConsensusRoutines } =
+            await import("src/libs/network/manageConsensusRoutines")
 
         // Extract the inner consensus method from params[0]
-        const consensusParams = Array.isArray(request.params) ? request.params : []
+        const consensusParams = Array.isArray(request.params)
+            ? request.params
+            : []
         const consensusPayload = consensusParams[0]
         if (!consensusPayload || typeof consensusPayload !== "object") {
             return encodeNodeCallResponse({
@@ -175,9 +180,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     }
 
     if (request.method === "hello_peer") {
-        const { manageHelloPeer } = await import(
-            "src/libs/network/manageHelloPeer"
-        )
+        const { manageHelloPeer } =
+            await import("src/libs/network/manageHelloPeer")
         const response = await manageHelloPeer(
             request.params[0] as HelloPeerRequest,
             context.peerIdentity ?? "",
@@ -192,9 +196,8 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     }
 
     if (request.method === "gcr_routine") {
-        const { default: manageGCRRoutines } = await import(
-            "src/libs/network/manageGCRRoutines"
-        )
+        const { default: manageGCRRoutines } =
+            await import("src/libs/network/manageGCRRoutines")
 
         const response = await manageGCRRoutines(
             context.peerIdentity ?? "",

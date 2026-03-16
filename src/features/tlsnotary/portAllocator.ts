@@ -10,23 +10,37 @@
 // REVIEW: TLSNotary port pool management for wstcp proxy instances
 import * as net from "net"
 import log from "@/utilities/logger"
-import { PORT_CONFIG } from "./constants"
-import type { PortPoolState } from "./types"
 
-// Re-export for backward compatibility
-export { PORT_CONFIG } from "./constants"
-export type { PortPoolState } from "./types"
+/**
+ * Configuration constants for port allocation
+ */
+export const PORT_CONFIG = {
+    PORT_MIN: 55000,
+    PORT_MAX: 57000,
+    IDLE_TIMEOUT_MS: 30000, // 30 seconds
+    MAX_SPAWN_RETRIES: 3,
+    SPAWN_TIMEOUT_MS: 5000, // 5 seconds to wait for wstcp to start
+}
+
+/**
+ * Port pool state interface
+ */
+export interface PortPoolState {
+    next: number // next port to try (55000-57000)
+    max: number // 57000
+    recycled: number[] // freed ports available for reuse
+}
 
 /**
  * Initialize a new port pool state
  * @returns Fresh port pool state
  */
 export function initPortPool(): PortPoolState {
-  return {
-    next: PORT_CONFIG.PORT_MIN,
-    max: PORT_CONFIG.PORT_MAX,
-    recycled: [],
-  }
+    return {
+        next: PORT_CONFIG.PORT_MIN,
+        max: PORT_CONFIG.PORT_MAX,
+        recycled: [],
+    }
 }
 
 /**
@@ -35,39 +49,39 @@ export function initPortPool(): PortPoolState {
  * @returns True if port is available
  */
 export async function isPortAvailable(port: number): Promise<boolean> {
-  return new Promise(resolve => {
-    const server = net.createServer()
-    let settled = false
+    return new Promise(resolve => {
+        const server = net.createServer()
+        let settled = false
 
-    const timer = setTimeout(() => {
-      try {
-        server.close()
-      } finally {
-        finish(false)
-      }
-    }, PORT_CONFIG.SPAWN_TIMEOUT_MS)
+        const timer = setTimeout(() => {
+            try {
+                server.close()
+            } finally {
+                finish(false)
+            }
+        }, PORT_CONFIG.SPAWN_TIMEOUT_MS)
 
-    const finish = (available: boolean) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(available)
-    }
+        const finish = (available: boolean) => {
+            if (settled) return
+            settled = true
+            clearTimeout(timer)
+            resolve(available)
+        }
 
-    server.once("error", () => {
-      try {
-        server.close()
-      } finally {
-        finish(false)
-      }
+        server.once("error", () => {
+            try {
+                server.close()
+            } finally {
+                finish(false)
+            }
+        })
+
+        server.once("listening", () => {
+            server.close(() => finish(true))
+        })
+
+        server.listen(port, "0.0.0.0")
     })
-
-    server.once("listening", () => {
-      server.close(() => finish(true))
-    })
-
-    server.listen(port, "0.0.0.0")
-  })
 }
 
 /**
@@ -77,37 +91,37 @@ export async function isPortAvailable(port: number): Promise<boolean> {
  * @returns Allocated port number or null if exhausted
  */
 export async function allocatePort(
-  pool: PortPoolState,
+    pool: PortPoolState,
 ): Promise<number | null> {
-  // First try recycled ports
-  while (pool.recycled.length > 0) {
-    const recycledPort = pool.recycled.pop()!
-    if (await isPortAvailable(recycledPort)) {
-      log.debug(`[TLSNotary] Allocated recycled port: ${recycledPort}`)
-      return recycledPort
+    // First try recycled ports
+    while (pool.recycled.length > 0) {
+        const recycledPort = pool.recycled.pop()!
+        if (await isPortAvailable(recycledPort)) {
+            log.debug(`[TLSNotary] Allocated recycled port: ${recycledPort}`)
+            return recycledPort
+        }
+        // Port was recycled but is now in use, skip it
+        log.debug(
+            `[TLSNotary] Recycled port ${recycledPort} is in use, trying next`,
+        )
     }
-    // Port was recycled but is now in use, skip it
-    log.debug(
-      `[TLSNotary] Recycled port ${recycledPort} is in use, trying next`,
-    )
-  }
 
-  // Try sequential allocation
-  while (pool.next <= pool.max) {
-    const port = pool.next
-    pool.next++
+    // Try sequential allocation
+    while (pool.next <= pool.max) {
+        const port = pool.next
+        pool.next++
 
-    if (await isPortAvailable(port)) {
-      log.debug(`[TLSNotary] Allocated sequential port: ${port}`)
-      return port
+        if (await isPortAvailable(port)) {
+            log.debug(`[TLSNotary] Allocated sequential port: ${port}`)
+            return port
+        }
+        // Port in use, try next
+        log.debug(`[TLSNotary] Port ${port} is in use, trying next`)
     }
-    // Port in use, try next
-    log.debug(`[TLSNotary] Port ${port} is in use, trying next`)
-  }
 
-  // All ports exhausted
-  log.warning("[TLSNotary] Port pool exhausted")
-  return null
+    // All ports exhausted
+    log.warning("[TLSNotary] Port pool exhausted")
+    return null
 }
 
 /**
@@ -116,14 +130,14 @@ export async function allocatePort(
  * @param port - Port number to release
  */
 export function releasePort(pool: PortPoolState, port: number): void {
-  // Only recycle valid ports
-  if (port >= PORT_CONFIG.PORT_MIN && port <= PORT_CONFIG.PORT_MAX) {
-    // Avoid duplicates
-    if (!pool.recycled.includes(port)) {
-      pool.recycled.push(port)
-      log.debug(`[TLSNotary] Released port ${port} to recycled pool`)
+    // Only recycle valid ports
+    if (port >= PORT_CONFIG.PORT_MIN && port <= PORT_CONFIG.PORT_MAX) {
+        // Avoid duplicates
+        if (!pool.recycled.includes(port)) {
+            pool.recycled.push(port)
+            log.debug(`[TLSNotary] Released port ${port} to recycled pool`)
+        }
     }
-  }
 }
 
 /**
@@ -132,19 +146,19 @@ export function releasePort(pool: PortPoolState, port: number): void {
  * @returns Pool statistics object
  */
 export function getPoolStats(pool: PortPoolState): {
-  allocated: number
-  recycled: number
-  remaining: number
-  total: number
+    allocated: number
+    recycled: number
+    remaining: number
+    total: number
 } {
-  const total = PORT_CONFIG.PORT_MAX - PORT_CONFIG.PORT_MIN + 1
-  const remaining = pool.max - pool.next + 1 + pool.recycled.length
-  const allocated = total - remaining
+    const total = PORT_CONFIG.PORT_MAX - PORT_CONFIG.PORT_MIN + 1
+    const remaining = pool.max - pool.next + 1 + pool.recycled.length
+    const allocated = total - remaining
 
-  return {
-    allocated,
-    recycled: pool.recycled.length,
-    remaining,
-    total,
-  }
+    return {
+        allocated,
+        recycled: pool.recycled.length,
+        remaining,
+        total,
+    }
 }

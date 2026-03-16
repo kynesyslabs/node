@@ -18,5 +18,4 @@ export default async function getBlockByHash(data: any) {
     // response = JSON.stringify(response)
     //console.log(response)
     return { response, extra }
-
 }

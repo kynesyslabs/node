@@ -4,10 +4,39 @@ import fs from "fs"
 import https from "https"
 import nodeDiskInfo from "node-disk-info"
 import os from "os"
-import { Config } from "src/config"
-import { DiagnosticData, DiagnosticResponse } from "./diagnosticTypes"
 
-export type { DiagnosticData, DiagnosticResponse }
+export interface DiagnosticData {
+    network: {
+        usageHistory: any
+        downloadSpeed?: number
+        uploadSpeed?: number
+    }
+    cpu: {
+        benchmarkUsage: number
+        type: string
+        info: string
+        currentUsage: number
+        averageUsage: number
+    }
+    ram: {
+        type: string
+        info: string
+        currentUsage: number
+        averageUsage: number
+        benchmarkUsage: number // Add this line
+    }
+    disk: {
+        type: string
+        info: string
+        currentUsage: number
+        averageUsage: number
+        benchmarkUsage: number // Add this line
+    }
+}
+
+export interface DiagnosticResponse {
+    diagnostics: DiagnosticData
+}
 
 class Diagnostic {
     private static cpuUsageHistory: number[] = []
@@ -47,7 +76,7 @@ class Diagnostic {
         const totalMem = os.totalmem()
         const freeMem = os.freemem()
         const usedMem = totalMem - freeMem
-        
+
         // On Linux, we can get cached memory from /proc/meminfo
         let cachedMem = 0
         if (process.platform === "linux") {
@@ -61,7 +90,7 @@ class Diagnostic {
                 console.error("Error reading /proc/meminfo:", error)
             }
         }
-        
+
         const actualUsedMem = usedMem - cachedMem
         return (actualUsedMem / totalMem) * 100
     }
@@ -77,14 +106,15 @@ class Diagnostic {
     private static getDiskUsage(): number {
         try {
             const disks = nodeDiskInfo.getDiskInfoSync()
-            const mainDisk = disks.find(disk => disk.mounted === "/") || disks[0]
+            const mainDisk =
+                disks.find(disk => disk.mounted === "/") || disks[0]
             if (mainDisk) {
                 return parseInt(mainDisk.capacity, 10)
             }
         } catch (error) {
             console.error("Error getting disk usage:", error)
         }
-        
+
         // Fallback to placeholder if there's an error
         return 0
     }
@@ -155,36 +185,49 @@ class Diagnostic {
         // Load requirements from .requirements file
         dotenv.config({ path: ".requirements" })
 
-        const diag = Config.getInstance().diagnostics
-
         const minRequirements = {
-            cpu: diag.minCpuSpeed,
-            ram: diag.minRam,
-            disk: diag.minDiskSpace,
-            networkDownload: diag.minNetworkDownloadSpeed,
-            networkUpload: diag.minNetworkUploadSpeed,
-            networkTestFileSize: diag.networkTestFileSize,
+            cpu: Number(process.env.MIN_CPU_SPEED),
+            ram: Number(process.env.MIN_RAM),
+            disk: Number(process.env.MIN_DISK_SPACE),
+            networkDownload: Number(process.env.MIN_NETWORK_DOWNLOAD_SPEED),
+            networkUpload: Number(process.env.MIN_NETWORK_UPLOAD_SPEED),
+            networkTestFileSize: Number(process.env.NETWORK_TEST_FILE_SIZE),
         }
 
         const suggestedRequirements = {
-            cpu: diag.suggestedCpuSpeed || minRequirements.cpu,
-            ram: diag.suggestedRam || minRequirements.ram,
-            disk: diag.suggestedDiskSpace || minRequirements.disk,
-            networkDownload: diag.suggestedNetworkDownloadSpeed || minRequirements.networkDownload,
-            networkUpload: diag.suggestedNetworkUploadSpeed || minRequirements.networkUpload,
+            cpu: Number(process.env.SUGGESTED_CPU_SPEED) || minRequirements.cpu,
+            ram: Number(process.env.SUGGESTED_RAM) || minRequirements.ram,
+            disk:
+                Number(process.env.SUGGESTED_DISK_SPACE) ||
+                minRequirements.disk,
+            networkDownload:
+                Number(process.env.SUGGESTED_NETWORK_DOWNLOAD_SPEED) ||
+                minRequirements.networkDownload,
+            networkUpload:
+                Number(process.env.SUGGESTED_NETWORK_UPLOAD_SPEED) ||
+                minRequirements.networkUpload,
         }
 
         console.log("Checking CPU...")
         progressBar.update(20)
-        const cpuResult = this.checkCPU(minRequirements.cpu, suggestedRequirements.cpu)
+        const cpuResult = this.checkCPU(
+            minRequirements.cpu,
+            suggestedRequirements.cpu,
+        )
 
         console.log("Checking RAM...")
         progressBar.update(40)
-        const ramResult = this.checkRAM(minRequirements.ram, suggestedRequirements.ram)
+        const ramResult = this.checkRAM(
+            minRequirements.ram,
+            suggestedRequirements.ram,
+        )
 
         console.log("Checking Disk...")
         progressBar.update(60)
-        const diskResult = this.checkDisk(minRequirements.disk, suggestedRequirements.disk)
+        const diskResult = this.checkDisk(
+            minRequirements.disk,
+            suggestedRequirements.disk,
+        )
 
         console.log("Checking Network...")
         const networkResult = await this.checkNetwork(
@@ -206,8 +249,12 @@ class Diagnostic {
             network: networkResult,
         }
 
-        const meetsMinimum = Object.values(results).every(result => result.meetsMinimum)
-        const meetsSuggested = Object.values(results).every(result => result.meetsSuggested)
+        const meetsMinimum = Object.values(results).every(
+            result => result.meetsMinimum,
+        )
+        const meetsSuggested = Object.values(results).every(
+            result => result.meetsSuggested,
+        )
 
         return {
             meetsMinimum,
@@ -216,7 +263,10 @@ class Diagnostic {
         }
     }
 
-    private static checkCPU(minSpeed: number, suggestedSpeed: number): {
+    private static checkCPU(
+        minSpeed: number,
+        suggestedSpeed: number,
+    ): {
         meetsMinimum: boolean
         meetsSuggested: boolean
         value: number
@@ -229,7 +279,10 @@ class Diagnostic {
         }
     }
 
-    private static checkRAM(minRAM: number, suggestedRAM: number): {
+    private static checkRAM(
+        minRAM: number,
+        suggestedRAM: number,
+    ): {
         meetsMinimum: boolean
         meetsSuggested: boolean
         value: number
@@ -242,7 +295,10 @@ class Diagnostic {
         }
     }
 
-    private static checkDisk(minSpace: number, suggestedSpace: number): {
+    private static checkDisk(
+        minSpace: number,
+        suggestedSpace: number,
+    ): {
         meetsMinimum: boolean
         meetsSuggested: boolean
         value: number
@@ -277,60 +333,77 @@ class Diagnostic {
         const uploadSpeed = await this.measureUploadSpeed(testFileSizeBytes)
 
         return {
-            meetsMinimum: downloadSpeed >= minDownloadSpeed && uploadSpeed >= minUploadSpeed,
-            meetsSuggested: downloadSpeed >= suggestedDownloadSpeed && uploadSpeed >= suggestedUploadSpeed,
+            meetsMinimum:
+                downloadSpeed >= minDownloadSpeed &&
+                uploadSpeed >= minUploadSpeed,
+            meetsSuggested:
+                downloadSpeed >= suggestedDownloadSpeed &&
+                uploadSpeed >= suggestedUploadSpeed,
             value: { download: downloadSpeed, upload: uploadSpeed },
         }
     }
 
-    private static async measureDownloadSpeed(testFileSizeBytes: number): Promise<number> {
+    private static async measureDownloadSpeed(
+        testFileSizeBytes: number,
+    ): Promise<number> {
         const url = `https://speed.cloudflare.com/__down?bytes=${testFileSizeBytes}`
         const startTime = Date.now()
 
         return new Promise((resolve, reject) => {
-            https.get(url, (res) => {
-                let downloadedBytes = 0
+            https
+                .get(url, res => {
+                    let downloadedBytes = 0
 
-                res.on("data", (chunk) => {
-                    downloadedBytes += chunk.length
-                })
+                    res.on("data", chunk => {
+                        downloadedBytes += chunk.length
+                    })
 
-                res.on("end", () => {
-                    const endTime = Date.now()
-                    const durationSeconds = (endTime - startTime) / 1000
-                    const speedMbps = (downloadedBytes * 8) / (durationSeconds * 1000000)
-                    resolve(this.validateSpeed(speedMbps))
+                    res.on("end", () => {
+                        const endTime = Date.now()
+                        const durationSeconds = (endTime - startTime) / 1000
+                        const speedMbps =
+                            (downloadedBytes * 8) / (durationSeconds * 1000000)
+                        resolve(this.validateSpeed(speedMbps))
+                    })
                 })
-            }).on("error", (err) => {
-                reject(err)
-            })
+                .on("error", err => {
+                    reject(err)
+                })
         })
     }
 
-    private static async measureUploadSpeed(testFileSizeBytes: number): Promise<number> {
+    private static async measureUploadSpeed(
+        testFileSizeBytes: number,
+    ): Promise<number> {
         const url = "https://speed.cloudflare.com/__up"
         const data = Buffer.alloc(testFileSizeBytes)
         const startTime = Date.now()
 
         return new Promise((resolve, reject) => {
-            const req = https.request(url, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/octet-stream",
-                    "Content-Length": testFileSizeBytes,
+            const req = https.request(
+                url,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/octet-stream",
+                        "Content-Length": testFileSizeBytes,
+                    },
                 },
-            }, (res) => {
-                res.on("data", () => {}) // Drain the response
+                res => {
+                    res.on("data", () => {}) // Drain the response
 
-                res.on("end", () => {
-                    const endTime = Date.now()
-                    const durationSeconds = (endTime - startTime) / 1000
-                    const speedMbps = (testFileSizeBytes * 8) / (durationSeconds * 1000000)
-                    resolve(this.validateSpeed(speedMbps))
-                })
-            })
+                    res.on("end", () => {
+                        const endTime = Date.now()
+                        const durationSeconds = (endTime - startTime) / 1000
+                        const speedMbps =
+                            (testFileSizeBytes * 8) /
+                            (durationSeconds * 1000000)
+                        resolve(this.validateSpeed(speedMbps))
+                    })
+                },
+            )
 
-            req.on("error", (err) => {
+            req.on("error", err => {
                 reject(err)
             })
 
@@ -341,7 +414,9 @@ class Diagnostic {
 
     private static validateSpeed(speed: number): number {
         if (!isFinite(speed) || speed < 0) {
-            console.warn(`Invalid speed detected: ${speed}. Retrying measurement...`)
+            console.warn(
+                `Invalid speed detected: ${speed}. Retrying measurement...`,
+            )
             throw new Error("Invalid speed measurement")
         }
         return speed

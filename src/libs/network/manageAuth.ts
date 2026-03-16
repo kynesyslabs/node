@@ -4,7 +4,11 @@ import log from "src/utilities/logger"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Peer, PeerManager } from "../peer"
 
-export type AuthMessage = [string, forge.pki.ed25519.NativeBuffer, forge.pki.ed25519.BinaryBuffer]
+export type AuthMessage = [
+    string,
+    forge.pki.ed25519.NativeBuffer,
+    forge.pki.ed25519.BinaryBuffer,
+]
 
 export async function manageAuth(data: any): Promise<RPCResponse> {
     // REVIEW Auth reply listener should not add a client to the peerlist if is read only
@@ -15,8 +19,10 @@ export async function manageAuth(data: any): Promise<RPCResponse> {
         const authMessage = data as AuthMessage
         log.info("SERVER", "Received auth reply: verifying")
         const originalMessage = authMessage[0] as string
-        const originalSignature = authMessage[1] as forge.pki.ed25519.NativeBuffer
-        const originalIdentity = authMessage[2] as forge.pki.ed25519.BinaryBuffer
+        const originalSignature =
+            authMessage[1] as forge.pki.ed25519.NativeBuffer
+        const originalIdentity =
+            authMessage[2] as forge.pki.ed25519.BinaryBuffer
         const verification = Cryptography.verify(
             originalMessage, // The message that our peer should have signed
             originalSignature, // The signature of the auth message as defined in commonListeners.ts

@@ -12,16 +12,6 @@ import { initializeTLSCertificates } from "../tls/initialize"
 import type { TLSConfig } from "../tls/types"
 import type { RateLimitConfig } from "../ratelimit/types"
 import log from "src/utilities/logger"
-import { Config } from "src/config"
-import {
-    DEFAULT_SERVER_HOST,
-    DEFAULT_SERVER_MAX_CONNECTIONS,
-    DEFAULT_SERVER_CONNECTION_TIMEOUT_MS,
-    DEFAULT_SERVER_AUTH_TIMEOUT_MS,
-    DEFAULT_TLS_MODE,
-    DEFAULT_TLS_MIN_VERSION,
-    OMNI_PORT_OFFSET,
-} from "../constants"
 
 let serverInstance: OmniProtocolServer | TLSServer | null = null
 
@@ -59,10 +49,10 @@ export async function startOmniProtocolServer(
 
     try {
         const port = config.port ?? detectDefaultPort()
-        const host = config.host ?? DEFAULT_SERVER_HOST
-        const maxConnections = config.maxConnections ?? DEFAULT_SERVER_MAX_CONNECTIONS
-        const authTimeout = config.authTimeout ?? DEFAULT_SERVER_AUTH_TIMEOUT_MS
-        const connectionTimeout = config.connectionTimeout ?? DEFAULT_SERVER_CONNECTION_TIMEOUT_MS
+        const host = config.host ?? "0.0.0.0"
+        const maxConnections = config.maxConnections ?? 1000
+        const authTimeout = config.authTimeout ?? 5000
+        const connectionTimeout = config.connectionTimeout ?? 600000
 
         // Check if TLS is enabled
         if (config.tls?.enabled) {
@@ -73,7 +63,9 @@ export async function startOmniProtocolServer(
             let keyPath = config.tls.keyPath
 
             if (!certPath || !keyPath) {
-                log.info("[OmniProtocol] No certificate paths provided, initializing self-signed certificates...")
+                log.info(
+                    "[OmniProtocol] No certificate paths provided, initializing self-signed certificates...",
+                )
                 const certInit = await initializeTLSCertificates()
                 certPath = certInit.certPath
                 keyPath = certInit.keyPath
@@ -82,12 +74,12 @@ export async function startOmniProtocolServer(
             // Build TLS config
             const tlsConfig: TLSConfig = {
                 enabled: true,
-                mode: config.tls.mode ?? DEFAULT_TLS_MODE,
+                mode: config.tls.mode ?? "self-signed",
                 certPath,
                 keyPath,
                 caPath: config.tls.caPath,
                 rejectUnauthorized: false, // Custom verification
-                minVersion: config.tls.minVersion ?? DEFAULT_TLS_MIN_VERSION,
+                minVersion: config.tls.minVersion ?? "TLSv1.3",
                 requestCert: true,
                 trustedFingerprints: new Map(),
             }
@@ -103,7 +95,9 @@ export async function startOmniProtocolServer(
                 rateLimit: config.rateLimit,
             })
 
-            log.info(`[OmniProtocol] TLS server configured (${tlsConfig.mode} mode, ${tlsConfig.minVersion})`)
+            log.info(
+                `[OmniProtocol] TLS server configured (${tlsConfig.mode} mode, ${tlsConfig.minVersion})`,
+            )
         } else {
             // Create plain TCP server
             serverInstance = new OmniProtocolServer({
@@ -115,16 +109,20 @@ export async function startOmniProtocolServer(
                 rateLimit: config.rateLimit,
             })
 
-            log.info("[OmniProtocol] Plain TCP server configured (no encryption)")
+            log.info(
+                "[OmniProtocol] Plain TCP server configured (no encryption)",
+            )
         }
 
         // Setup event listeners
-        serverInstance.on("listening", (port) => {
+        serverInstance.on("listening", port => {
             log.info(`[OmniProtocol] ✅ Server listening on port ${port}`)
         })
 
-        serverInstance.on("connection_accepted", (remoteAddress) => {
-            log.debug(`[OmniProtocol] 📥 Connection accepted from ${remoteAddress}`)
+        serverInstance.on("connection_accepted", remoteAddress => {
+            log.debug(
+                `[OmniProtocol] 📥 Connection accepted from ${remoteAddress}`,
+            )
         })
 
         serverInstance.on("connection_rejected", (remoteAddress, reason) => {
@@ -139,7 +137,7 @@ export async function startOmniProtocolServer(
             )
         })
 
-        serverInstance.on("error", (error) => {
+        serverInstance.on("error", error => {
             log.error("[OmniProtocol] Server error:", error)
         })
 
@@ -194,7 +192,10 @@ export function getOmniProtocolServerStats() {
  * Detect default port (HTTP port + 1)
  */
 function detectDefaultPort(): number {
-    return Config.getInstance().server.serverPort + OMNI_PORT_OFFSET
+    const httpPort = parseInt(
+        process.env.NODE_PORT || process.env.PORT || "3000",
+    )
+    return httpPort + 1
 }
 
 // Example usage in src/index.ts:

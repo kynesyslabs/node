@@ -1,7 +1,9 @@
 # Demos Network Node Software - Essential Commands
 
 ## Development Commands
+
 ### Code Quality & Linting
+
 ```bash
 bun run lint                # Check code style and linting
 bun run lint:fix            # Auto-fix ESLint issues
@@ -10,6 +12,7 @@ bun run prettier-format     # Format specific modules
 ```
 
 ### Node Operations
+
 ```bash
 bun install                 # Install dependencies
 bun run start               # Start the node with tsx
@@ -21,6 +24,7 @@ bun run dev                # Development mode with auto-restart
 ```
 
 ### Database Operations
+
 ```bash
 bun run migration:generate  # Generate TypeORM migration
 bun run migration:run       # Run pending migrations
@@ -28,11 +32,13 @@ bun run migration:revert    # Revert last migration
 ```
 
 ### Testing
+
 ```bash
 bun run test:chains        # Run chain-specific tests
 ```
 
 ### Utilities
+
 ```bash
 bun run keygen             # Generate cryptographic keys
 bun run restore            # Backup and restore utility
@@ -41,7 +47,9 @@ bun run upgrade_deps       # Interactive dependency updates
 ```
 
 ## Production Commands
+
 ### Running the Node
+
 ```bash
 ./run                      # Start database and node (recommended)
 ./run -p <port>           # Custom node port
@@ -52,7 +60,9 @@ bun run upgrade_deps       # Interactive dependency updates
 ```
 
 ## System Commands (macOS/Darwin)
+
 ### Essential Unix Tools
+
 ```bash
 ls -la                     # List files with details
 cd /path/to/dir           # Change directory (use /usr/bin/zoxide if available)
@@ -61,6 +71,7 @@ find . -name "*.ts"       # Find files by pattern
 ```
 
 ### Process Management
+
 ```bash
 lsof -i :53550            # Check if node port is in use
 lsof -i :5332             # Check if database port is in use
@@ -69,6 +80,7 @@ kill -9 <pid>             # Force kill process
 ```
 
 ### Docker Operations
+
 ```bash
 docker info               # Check Docker status
 docker ps                 # List running containers
@@ -77,6 +89,7 @@ docker compose down       # Stop services
 ```
 
 ## Git Workflow
+
 ```bash
 git status                # Check current status
 git branch                # List branches
@@ -86,6 +99,7 @@ git commit -m "message"   # Commit changes
 ```
 
 ## Troubleshooting Commands
+
 ```bash
 # Check system requirements
 node --version            # Should be 20.x+

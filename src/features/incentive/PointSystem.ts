@@ -469,9 +469,8 @@ export class PointSystem {
 
         try {
             // Get current points and identities from GCR
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {
@@ -526,8 +525,8 @@ export class PointSystem {
                     message: walletIsAlreadyLinked
                         ? walletIsAlreadyLinkedMessage
                         : hasExistingWalletOnChain
-                            ? hasExistingWalletOnChainMessage
-                            : "Points awarded for linking wallet",
+                              ? hasExistingWalletOnChainMessage
+                              : "Points awarded for linking wallet",
                 },
                 require_reply: false,
                 extra: {},
@@ -557,9 +556,8 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Twitter points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.twitter > 0) {
@@ -645,9 +643,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has GitHub points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.github > 0) {
@@ -752,9 +749,8 @@ export class PointSystem {
      */
     async deductTwitterPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Twitter points to deduct
             const currentTwitter =
@@ -827,9 +823,8 @@ export class PointSystem {
         githubUserId: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has GitHub points to deduct
             const currentGithub =
@@ -917,9 +912,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Telegram points specifically
             if (
@@ -1089,9 +1083,8 @@ export class PointSystem {
      */
     async deductTelegramPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Telegram points to deduct
             const currentTelegram =
@@ -1172,9 +1165,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Discord points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.discord > 0) {
@@ -1230,9 +1222,8 @@ export class PointSystem {
      */
     async deductDiscordPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Discord points to deduct
             if (
@@ -1307,9 +1298,8 @@ export class PointSystem {
                 : pointValues.LINK_UD_DOMAIN
 
             // Get current points and check for duplicate domain linking
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if this specific domain is already linked
             const account = await ensureGCRForUser(userId)
@@ -1515,9 +1505,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {

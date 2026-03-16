@@ -1,22 +1,26 @@
 ---
-type: reference
-title: Documentation Index
-date: 2026-03-10
+type: index
+title: Demos Network Documentation Index
+date: 2026-02-12
 status: active
-tags: [docs, index]
-author: agent
 ---
 
-# Documentation Index
+# Demos Network Documentation
 
-## Discoveries
+Structured, discoverable documentation for the Demos Network node.
 
-- [Test Environment Journal](./discoveries/test-environment-journal.md)
+## Document Types
 
-## References
+| Directory | Purpose |
+|-----------|---------|
+| `adr/` | Architecture Decision Records |
+| `decisions/` | Lighter design decisions |
+| `specs/` | Technical specifications |
+| `notes/` | Quick observations |
+| `discoveries/` | Learnings during development |
+| `runbooks/` | Operational procedures |
+| `references/` | Domain knowledge |
 
-- [Active Feature Test Coverage Matrix](./references/active-feature-test-coverage-matrix.md)
+## Documents
 
-## Specs
-
-- [Active Feature Test Addition Proposal](./specs/active-feature-test-addition-proposal.md) `superseded / historical rationale`
+_No managed documents yet. Use `/docs:add <type> [title]` to create one._

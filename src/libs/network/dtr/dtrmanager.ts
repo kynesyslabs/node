@@ -4,7 +4,6 @@ import getShard from "../../consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "../../consensus/v2/routines/getCommonValidatorSeed"
 import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
-import { handleError } from "../../../errors"
 import { Peer, PeerManager } from "@/libs/peer"
 import {
     RPCRequest,
@@ -110,8 +109,7 @@ export class DTRManager {
     stop() {
         if (!this.isRunning) return
 
-        log.info("[NETWORK] [DTR] Stopping relay service")
-        log.info("[DTR RetryService] Service stopped")
+        log.info("[DTR RetryService] Stopping relay service")
         this.isRunning = false
 
         if (this.retryInterval) {
@@ -155,22 +153,22 @@ export class DTRManager {
                 return
             }
 
-            log.info(
-                `[NETWORK] [DTR] Processing ${mempool.length} transactions in mempool`,
+            log.debug(
+                `[DTR RetryService] Processing ${mempool.length} transactions in mempool`,
             )
 
             // Get validators (only recalculate if block number changed)
             const availableValidators = await this.getValidatorsOptimized()
 
             if (availableValidators.length === 0) {
-                log.info(
-                    "[NETWORK] [DTR] No validators available for relay",
+                log.debug(
+                    "[DTR RetryService] No validators available for relay",
                 )
                 return
             }
 
-            log.info(
-                `[NETWORK] [DTR] Found ${availableValidators.length} available validators`,
+            log.debug(
+                `[DTR RetryService] Found ${availableValidators.length} available validators`,
             )
 
             // Process each transaction in mempool
@@ -194,8 +192,8 @@ export class DTRManager {
             currentBlockNumber !== this.lastBlockNumber ||
             this.cachedValidators.length === 0
         ) {
-            log.info(
-                `[NETWORK] [DTR] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
+            log.debug(
+                `[DTR RetryService] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
             )
 
             try {
@@ -208,8 +206,8 @@ export class DTRManager {
                 )
                 this.lastBlockNumber = currentBlockNumber
 
-                log.info(
-                    `[NETWORK] [DTR] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
+                log.debug(
+                    `[DTR RetryService] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
                 )
             } catch (error) {
                 log.error(
@@ -266,7 +264,10 @@ export class DTRManager {
                 },
             }
         } catch (error: any) {
-            handleError(error, "NETWORK", { source: "DTR relay" })
+            console.error(
+                "[DTR] Error relaying transaction to validator: ",
+                error,
+            )
             return {
                 result: 500,
                 response: {
@@ -295,11 +296,8 @@ export class DTRManager {
 
         // Give up after max attempts
         if (currentAttempts >= this.maxRetryAttempts) {
-            log.info(
-                `[NETWORK] [DTR] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
-            )
             log.warning(
-                `[DTR RetryService] Transaction ${txHash} abandoned after ${this.maxRetryAttempts} failed relay attempts`,
+                `[DTR RetryService] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
             )
             this.retryAttempts.delete(txHash)
             // Clean up ValidityData from memory
@@ -310,11 +308,8 @@ export class DTRManager {
         // Check if we have ValidityData in memory
         const validityData = getSharedState.validityDataCache.get(txHash)
         if (!validityData) {
-            log.info(
-                `[NETWORK] [DTR] No ValidityData found for ${txHash}, removing from mempool`,
-            )
             log.error(
-                `[DTR RetryService] Missing ValidityData for transaction ${txHash} - removing from mempool`,
+                `[DTR RetryService] No ValidityData found for ${txHash}, removing from mempool`,
             )
             await Mempool.removeTransaction(txHash)
             this.retryAttempts.delete(txHash)
@@ -342,15 +337,10 @@ export class DTRManager {
 
                 if (result.result === 200) {
                     log.info(
-                        `[NETWORK] [DTR] Successfully relayed ${txHash} to validator ${validator.identity.substring(
+                        `[DTR RetryService] Successfully relayed ${txHash} to validator ${validator.identity.substring(
                             0,
                             8,
-                        )}...`,
-                    )
-                    log.info(
-                        `[DTR RetryService] Transaction ${txHash} successfully relayed after ${
-                            currentAttempts + 1
-                        } attempts`,
+                        )}... after ${currentAttempts + 1} attempts`,
                     )
 
                     // Remove from local mempool since it's now in validator's mempool
@@ -360,22 +350,27 @@ export class DTRManager {
                     return // Success!
                 }
 
-                log.info(
-                    `[NETWORK] [DTR] Validator ${validator.identity.substring(
+                log.debug(
+                    `[DTR RetryService] Validator ${validator.identity.substring(
                         0,
                         8,
                     )}... rejected ${txHash}: ${result.response}`,
                 )
             } catch (error: any) {
-                handleError(error, "NETWORK", { source: "DTR relay" })
+                log.debug(
+                    `[DTR RetryService] Validator ${validator.identity.substring(
+                        0,
+                        8,
+                    )}... error for ${txHash}: ${error.message}`,
+                )
                 continue // Try next validator
             }
         }
 
         // All validators failed, increment attempt count
         this.retryAttempts.set(txHash, currentAttempts + 1)
-        log.info(
-            `[NETWORK] [DTR] Attempt ${currentAttempts + 1}/${
+        log.debug(
+            `[DTR RetryService] Attempt ${currentAttempts + 1}/${
                 this.maxRetryAttempts
             } failed for ${txHash}`,
         )
@@ -589,34 +584,6 @@ export class DTRManager {
                         message:
                             "REJECTED: Transaction signature validation failed",
                     },
-                }
-            }
-
-            if (tx.content?.type === "l2ps_hash_update") {
-                const nextBlockNumber =
-                    tx.blockNumber ?? getSharedState.lastBlockNumber + 1
-                const txForExecution = {
-                    ...tx,
-                    blockNumber: nextBlockNumber,
-                }
-                const { default: ServerHandlers } = await import(
-                    "../endpointHandlers"
-                )
-                const l2psHashResult =
-                    await ServerHandlers.handleL2PSHashUpdate(txForExecution)
-
-                if (l2psHashResult.result !== 200) {
-                    log.error(
-                        "[DTR] Failed to apply relayed L2PS hash update: " +
-                            JSON.stringify(l2psHashResult),
-                    )
-
-                    return {
-                        ...response,
-                        result: l2psHashResult.result,
-                        response: l2psHashResult.response,
-                        extra: l2psHashResult.extra,
-                    }
                 }
             }
 

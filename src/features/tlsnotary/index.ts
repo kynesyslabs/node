@@ -50,20 +50,34 @@
 // REVIEW: TLSNotary feature module - entry point for HTTPS attestation feature
 import type { BunServer } from "@/libs/network/bunServer"
 import {
-  TLSNotaryService,
-  getTLSNotaryService,
-  initializeTLSNotaryService,
-  shutdownTLSNotaryService,
-  getConfigFromEnv,
+    TLSNotaryService,
+    getTLSNotaryService,
+    initializeTLSNotaryService,
+    shutdownTLSNotaryService,
+    getConfigFromEnv,
 } from "./TLSNotaryService"
 import { registerTLSNotaryRoutes } from "./routes"
 import log from "@/utilities/logger"
 
 // Re-export types and classes
-export { TLSNotaryService, getTLSNotaryService, getConfigFromEnv, isTLSNotaryFatal, isTLSNotaryDebug, isTLSNotaryProxy } from "./TLSNotaryService"
+export {
+    TLSNotaryService,
+    getTLSNotaryService,
+    getConfigFromEnv,
+    isTLSNotaryFatal,
+    isTLSNotaryDebug,
+    isTLSNotaryProxy,
+} from "./TLSNotaryService"
 export { TLSNotaryFFI } from "./ffi"
-export type { NotaryConfig, VerificationResult, NotaryHealthStatus } from "./types"
-export type { TLSNotaryServiceConfig, TLSNotaryServiceStatus, TLSNotaryMode } from "./types"
+export type {
+    NotaryConfig,
+    VerificationResult,
+    NotaryHealthStatus,
+} from "./ffi"
+export type {
+    TLSNotaryServiceConfig,
+    TLSNotaryServiceStatus,
+} from "./TLSNotaryService"
 
 /**
  * Initialize TLSNotary feature
@@ -74,38 +88,40 @@ export type { TLSNotaryServiceConfig, TLSNotaryServiceStatus, TLSNotaryMode } fr
  * @param server - Optional BunServer instance for route registration
  * @returns True if enabled and initialized successfully
  */
-export async function initializeTLSNotary(server?: BunServer): Promise<boolean> {
-  const config = getConfigFromEnv()
+export async function initializeTLSNotary(
+    server?: BunServer,
+): Promise<boolean> {
+    const config = getConfigFromEnv()
 
-  if (!config) {
-    log.info("[TLSNotary] Feature disabled (TLSNOTARY_DISABLED=true)")
-    return false
-  }
-
-  try {
-    // Initialize the service
-    const service = await initializeTLSNotaryService()
-
-    if (!service) {
-      log.warning("[TLSNotary] Failed to create service instance")
-      return false
+    if (!config) {
+        log.info("[TLSNotary] Feature disabled (TLSNOTARY_DISABLED=true)")
+        return false
     }
 
-    // Register HTTP routes if server is provided
-    if (server) {
-      registerTLSNotaryRoutes(server)
+    try {
+        // Initialize the service
+        const service = await initializeTLSNotaryService()
+
+        if (!service) {
+            log.warning("[TLSNotary] Failed to create service instance")
+            return false
+        }
+
+        // Register HTTP routes if server is provided
+        if (server) {
+            registerTLSNotaryRoutes(server)
+        }
+
+        const publicKeyHex = service.getPublicKeyHex()
+        log.info("[TLSNotary] Feature initialized successfully")
+        log.info(`[TLSNotary] WebSocket server on port: ${service.getPort()}`)
+        log.info(`[TLSNotary] Public key: ${publicKeyHex}`)
+
+        return true
+    } catch (error) {
+        log.error("[TLSNotary] Failed to initialize:", error)
+        return false
     }
-
-    const publicKeyHex = service.getPublicKeyHex()
-    log.info("[TLSNotary] Feature initialized successfully")
-    log.info(`[TLSNotary] WebSocket server on port: ${service.getPort()}`)
-    log.info(`[TLSNotary] Public key: ${publicKeyHex}`)
-
-    return true
-  } catch (error) {
-    log.error("[TLSNotary] Failed to initialize:", error)
-    return false
-  }
 }
 
 /**
@@ -114,12 +130,12 @@ export async function initializeTLSNotary(server?: BunServer): Promise<boolean> 
  * Stops the WebSocket server and releases all resources.
  */
 export async function shutdownTLSNotary(): Promise<void> {
-  try {
-    await shutdownTLSNotaryService()
-    log.info("[TLSNotary] Feature shutdown complete")
-  } catch (error) {
-    log.error("[TLSNotary] Error during shutdown:", error)
-  }
+    try {
+        await shutdownTLSNotaryService()
+        log.info("[TLSNotary] Feature shutdown complete")
+    } catch (error) {
+        log.error("[TLSNotary] Error during shutdown:", error)
+    }
 }
 
 /**
@@ -127,7 +143,7 @@ export async function shutdownTLSNotary(): Promise<void> {
  * @returns True if enabled in environment
  */
 export function isTLSNotaryEnabled(): boolean {
-  return getConfigFromEnv() !== null
+    return getConfigFromEnv() !== null
 }
 
 /**
@@ -135,17 +151,17 @@ export function isTLSNotaryEnabled(): boolean {
  * @returns Service status or null if not enabled
  */
 export function getTLSNotaryStatus() {
-  const service = getTLSNotaryService()
-  if (!service) {
-    return null
-  }
-  return service.getStatus()
+    const service = getTLSNotaryService()
+    if (!service) {
+        return null
+    }
+    return service.getStatus()
 }
 
 export default {
-  initialize: initializeTLSNotary,
-  shutdown: shutdownTLSNotary,
-  isEnabled: isTLSNotaryEnabled,
-  getStatus: getTLSNotaryStatus,
-  getService: getTLSNotaryService,
+    initialize: initializeTLSNotary,
+    shutdown: shutdownTLSNotary,
+    isEnabled: isTLSNotaryEnabled,
+    getStatus: getTLSNotaryStatus,
+    getService: getTLSNotaryService,
 }

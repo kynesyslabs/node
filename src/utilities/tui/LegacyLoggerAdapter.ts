@@ -39,7 +39,10 @@ function stringify(value: unknown): string {
  * - Using {1,50} limit on tag length instead of unbounded +
  * - Ensuring no overlapping quantifiers that cause backtracking
  */
-function extractTag(message: string): { tag: string | null; cleanMessage: string } {
+function extractTag(message: string): {
+    tag: string | null
+    cleanMessage: string
+} {
     // Limit tag to 50 chars max to prevent ReDoS, tags are typically short (e.g., "PEER BOOTSTRAP")
     const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
     if (match) {
@@ -89,7 +92,8 @@ export default class LegacyLoggerAdapter {
         }
 
         try {
-            const identityFile = getSharedState.identityFile?.replace(".", "") ?? ""
+            const identityFile =
+                getSharedState.identityFile?.replace(".", "") ?? ""
             const logsDir = `logs_${port}_${identityFile}`
 
             this.LOGS_DIR = logsDir
@@ -241,7 +245,11 @@ export default class LegacyLoggerAdapter {
         }
 
         // Log to terminal if enabled (but not in TUI mode)
-        if (logToTerminal && this.logToTerminal[logfile] && !this.logger.isTuiMode()) {
+        if (
+            logToTerminal &&
+            this.logToTerminal[logfile] &&
+            !this.logger.isTuiMode()
+        ) {
             console.log(logEntry.trim())
         }
     }

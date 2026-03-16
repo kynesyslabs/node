@@ -484,9 +484,7 @@ export class Twitter {
 
             return { username, tweetId }
         } catch (error) {
-            log.error(
-                `Failed to extract tweet details from URL: ${tweetUrl}`,
-            )
+            log.error(`Failed to extract tweet details from URL: ${tweetUrl}`)
             throw new Error(
                 `Invalid tweet URL: ${
                     error instanceof Error ? error.message : "Unknown error"

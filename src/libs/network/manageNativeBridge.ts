@@ -5,7 +5,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 // TODO Better error handling
 /**
  * Manages the native bridge operation to send back to the client a compiled operation as a RPCResponse
- * @param operation 
+ * @param operation
  * @returns RPCResponse containing the compiled operation
  */
 export async function manageNativeBridge(
@@ -19,7 +19,8 @@ export async function manageNativeBridge(
         extra: null,
     }
     // Parse the operation to get the right compiled operation content
-    const derivedContent: bridge.NativeBridgeOperationCompiled["content"] = parseOperation(operation)
+    const derivedContent: bridge.NativeBridgeOperationCompiled["content"] =
+        parseOperation(operation)
     // eslint-disable-next-line prefer-const
     let compiledOperation: bridge.NativeBridgeOperationCompiled = {
         content: derivedContent,
@@ -37,10 +38,12 @@ export async function manageNativeBridge(
 
 /**
  * Parses the operation to get the right compiled operation content
- * @param operation 
+ * @param operation
  * @returns The compiled operation content
  */
-function parseOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
+function parseOperation(
+    operation: bridge.NativeBridgeOperation,
+): bridge.NativeBridgeOperationCompiled["content"] {
     let derivedContent: bridge.NativeBridgeOperationCompiled["content"]
     if (operation.originChainType === "EVM") {
         derivedContent = parseEVMOperation(operation)
@@ -50,12 +53,16 @@ function parseOperation(operation: bridge.NativeBridgeOperation): bridge.NativeB
     return derivedContent
 }
 
-function parseEVMOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
+function parseEVMOperation(
+    operation: bridge.NativeBridgeOperation,
+): bridge.NativeBridgeOperationCompiled["content"] {
     // TODO Implement the parsing
     return null
 }
 
-function parseSOLANAOperation(operation: bridge.NativeBridgeOperation): bridge.NativeBridgeOperationCompiled["content"] {
+function parseSOLANAOperation(
+    operation: bridge.NativeBridgeOperation,
+): bridge.NativeBridgeOperationCompiled["content"] {
     // TODO Implement the parsing
     return null
 }

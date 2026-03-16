@@ -1,24 +1,28 @@
 version: "3.8"
 
 services:
-  # Shared PostgreSQL instance with 4 databases
-  postgres:
-    image: postgres:16-alpine
-    container_name: demos-devnet-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-demosuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
-      POSTGRES_DB: postgres
-    volumes:
-      - ./postgres-init:/docker-entrypoint-initdb.d:ro
-      - ${PERSISTENT:+postgres-data:/var/lib/postgresql/data}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - demos-network
+    # Shared PostgreSQL instance with 4 databases
+    postgres:
+        image: postgres:16-alpine
+        container_name: demos-devnet-postgres
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-demosuser}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
+            POSTGRES_DB: postgres
+        volumes:
+            - ./postgres-init:/docker-entrypoint-initdb.d:ro
+            - ${PERSISTENT:+postgres-data:/var/lib/postgresql/data}
+        healthcheck:
+            test:
+                [
+                    CMD-SHELL,
+                    "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres",
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        networks:
+            - demos-network
 
   tlsnotary:
     image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
@@ -190,9 +194,9 @@ services:
     restart: unless-stopped
 
 networks:
-  demos-network:
-    driver: bridge
+    demos-network:
+        driver: bridge
 
 volumes:
-  postgres-data:
-    driver: local
+    postgres-data:
+        driver: local

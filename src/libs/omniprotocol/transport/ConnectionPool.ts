@@ -80,10 +80,9 @@ export class ConnectionPool {
             )
         }
 
-        const peerConnections =
-            (this.connections
-                .get(peerIdentity) || [])
-                .filter(conn => conn.getState() === "READY")
+        const peerConnections = (
+            this.connections.get(peerIdentity) || []
+        ).filter(conn => conn.getState() === "READY")
         if (peerConnections.length >= this.config.maxConnectionsPerPeer) {
             throw new PoolCapacityError(
                 `Max connections to peer ${peerIdentity}: ${peerConnections.length}/${this.config.maxConnectionsPerPeer}`,
