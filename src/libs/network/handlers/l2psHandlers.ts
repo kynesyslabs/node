@@ -5,7 +5,7 @@ import type { NodeCallHandler } from "./types"
 
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
-        console.log("[L2PS] Received L2PS participation query")
+        log.debug("[L2PS] Received L2PS participation query")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -32,7 +32,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
     },
 
     getL2PSMempoolInfo: async (data, response) => {
-        console.log("[L2PS] Received L2PS mempool info request")
+        log.debug("[L2PS] Received L2PS mempool info request")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -59,7 +59,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
     },
 
     getL2PSTransactions: async (data, response) => {
-        console.log("[L2PS] Received L2PS transactions sync request")
+        log.debug("[L2PS] Received L2PS transactions sync request")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -98,7 +98,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
     },
 
     getL2PSAccountTransactions: async (data, response) => {
-        console.log("[L2PS] Received account transactions request")
+        log.debug("[L2PS] Received account transactions request")
         if (!data.l2psUid || !data.address) {
             response.result = 400
             response.response = "L2PS UID and address are required"

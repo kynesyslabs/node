@@ -168,7 +168,7 @@ async function verifyChallenge(
 
         return isValid
     } catch (error) {
-        console.error("[PEER AUTHENTICATION] Challenge verification failed:", error)
+        log.error("[PEER AUTHENTICATION] Challenge verification failed: " + error)
         return false
     }
 }

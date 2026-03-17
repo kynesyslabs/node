@@ -188,7 +188,7 @@ async function tryConnectPeer(peer: Peer) {
         await ensureGenesisDataMatch(verifiedPeer)
     } catch (error) {
         log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
-        console.error(error)
+        log.error("[PEER] Bootstrap error: " + error)
         process.exit(1)
     }
 

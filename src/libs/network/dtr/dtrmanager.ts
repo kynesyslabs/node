@@ -264,8 +264,8 @@ export class DTRManager {
                 },
             }
         } catch (error: any) {
-            console.error(
-                "[DTR] Error relaying transaction to validator: ",
+            log.error(
+                "[DTR] Error relaying transaction to validator: " +
                 error,
             )
             return {

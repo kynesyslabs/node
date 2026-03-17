@@ -170,7 +170,7 @@ export async function handleExecuteTransaction(
             break
 
         case "l2psEncryptedTx": {
-            console.log("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
+            log.debug("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
 
             if (!tx.signature?.data) {
                 log.error("[handleExecuteTransaction] L2PS tx rejected: missing signature")
