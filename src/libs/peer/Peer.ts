@@ -236,12 +236,12 @@ export default class Peer {
         isAuthenticated = true,
         options?: CallOptions,
     ): Promise<RPCResponse> {
-        const protocol = options?.protocol ?? "omni"
+        // const protocol = options?.protocol ?? "omni"
 
         // INFO: If is local peer (us), always use httpCall
-        if (this.isLocalNode || protocol === "http") {
-            return await this.httpCall(request, isAuthenticated)
-        }
+        // if (this.isLocalNode || protocol === "http") {
+        //     return await this.httpCall(request, isAuthenticated)
+        // }
 
         // Protocol is 'omni' (default): Check if OmniProtocol should be used for this peer
         if (

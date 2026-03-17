@@ -116,6 +116,11 @@ export default class PeerManager {
         const peer = new Peer()
         peer.identity = identity
         peer.connection.string = ""
+
+        if (identity === getSharedState.publicKeyHex) {
+            peer.status.online = true
+        }
+
         return peer
     }
 

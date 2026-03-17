@@ -16,6 +16,7 @@ import log from "@/utilities/logger"
 import { RateLimiter } from "../ratelimit"
 import { PeerManager } from "@/libs/peer"
 import { DEFAULT_OMNIPROTOCOL_CONFIG } from "../types/config"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * ConnectionPool manages bidirectional TCP connections to multiple peer nodes
@@ -133,7 +134,6 @@ export class ConnectionPool extends EventEmitter {
             `[ConnectionPool] Accepted inbound connection from ${remoteAddress}:${remotePort} 🔴`,
         )
         this.emit("connection_accepted", remoteAddress)
-
         return connection
     }
 
@@ -282,8 +282,10 @@ export class ConnectionPool extends EventEmitter {
         const connection = new PeerConnection(peerIdentity, connectionString)
 
         // Add to pool before connecting (allows tracking)
-        peerConnections.push(connection)
-        this.connections.set(peerIdentity, peerConnections)
+        if (peerIdentity !== getSharedState.publicKeyHex) {
+            peerConnections.push(connection)
+            this.connections.set(peerIdentity, peerConnections)
+        }
 
         // Listen for close
         connection.on("close", () => {
@@ -291,12 +293,17 @@ export class ConnectionPool extends EventEmitter {
         })
 
         const removeConnectionFromPool = (connection: PeerConnection): void => {
+            const peerConnections = this.connections.get(peerIdentity) || []
+
+            if (peerConnections.length === 0) {
+                this.connections.delete(peerIdentity)
+                return
+            }
+
             const index = peerConnections.indexOf(connection)
             if (index !== -1) {
                 peerConnections.splice(index, 1)
-            }
-            if (peerConnections.length === 0) {
-                this.connections.delete(peerIdentity)
+                this.connections.set(peerIdentity, peerConnections)
             }
         }
 
@@ -724,7 +731,10 @@ export class ConnectionPool extends EventEmitter {
             connectionsToClose.push(...terminalConnections)
 
             // Keep one idle connection per identity to maintain peer presence
-            if (activeConnections.length === 0 && idleTimedOutConnections.length > 0) {
+            if (
+                activeConnections.length === 0 &&
+                idleTimedOutConnections.length > 0
+            ) {
                 connectionsToClose.push(...idleTimedOutConnections.slice(1))
                 activeConnections.push(idleTimedOutConnections[0])
             } else {
