@@ -254,7 +254,11 @@ export class PeerConnection extends EventEmitter {
             const timeout = options.timeout ?? this.connectTimeout
 
             const timeoutTimer = setTimeout(() => {
-                this.socket?.destroy()
+                if (this.socket) {
+                    this.socket.removeAllListeners()
+                    this.socket.destroy()
+                }
+
                 this.setState(ConnectionState.ERROR)
                 reject(
                     new ConnectionTimeoutError(
