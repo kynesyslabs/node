@@ -153,7 +153,7 @@ export class DTRManager {
                 return
             }
 
-            log.debug(
+            log.info(
                 `[DTR RetryService] Processing ${mempool.length} transactions in mempool`,
             )
 
@@ -161,7 +161,7 @@ export class DTRManager {
             const availableValidators = await this.getValidatorsOptimized()
 
             if (availableValidators.length === 0) {
-                log.debug(
+                log.warn(
                     "[DTR RetryService] No validators available for relay",
                 )
                 return
@@ -337,10 +337,7 @@ export class DTRManager {
 
                 if (result.result === 200) {
                     log.info(
-                        `[DTR RetryService] Successfully relayed ${txHash} to validator ${validator.identity.substring(
-                            0,
-                            8,
-                        )}... after ${currentAttempts + 1} attempts`,
+                        `[DTR RetryService] Successfully relayed ${txHash} to ${validator.identity.substring(0, 8)}... (attempt ${currentAttempts + 1})`,
                     )
 
                     // Remove from local mempool since it's now in validator's mempool
@@ -351,17 +348,12 @@ export class DTRManager {
                 }
 
                 log.debug(
-                    `[DTR RetryService] Validator ${validator.identity.substring(
-                        0,
-                        8,
-                    )}... rejected ${txHash}: ${result.response}`,
+                    `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... rejected ${txHash}: ${result.response}`,
                 )
-            } catch (error: any) {
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error)
                 log.debug(
-                    `[DTR RetryService] Validator ${validator.identity.substring(
-                        0,
-                        8,
-                    )}... error for ${txHash}: ${error.message}`,
+                    `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... error for ${txHash}: ${errorMsg}`,
                 )
                 continue // Try next validator
             }
@@ -369,10 +361,8 @@ export class DTRManager {
 
         // All validators failed, increment attempt count
         this.retryAttempts.set(txHash, currentAttempts + 1)
-        log.debug(
-            `[DTR RetryService] Attempt ${currentAttempts + 1}/${
-                this.maxRetryAttempts
-            } failed for ${txHash}`,
+        log.warn(
+            `[DTR RetryService] Attempt ${currentAttempts + 1}/${this.maxRetryAttempts} failed for ${txHash}`,
         )
     }
 

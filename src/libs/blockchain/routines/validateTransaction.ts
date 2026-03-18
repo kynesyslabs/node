@@ -147,10 +147,8 @@ async function defineGas(
         }
         log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
-        log.error(
-            "TX",
-            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction",
-        )
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.error("TX", `[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction: ${errorMsg}`)
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
@@ -170,11 +168,8 @@ async function defineGas(
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
-        log.error(
-            "TX",
-            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
-                from,
-        )
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.error("TX", `[Native Tx Validation] [BALANCE ERROR] No balance found for address ${from}: ${errorMsg}`)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +

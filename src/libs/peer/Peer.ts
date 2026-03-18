@@ -82,13 +82,13 @@ export default class Peer {
 
     // Importing a peer from an IPeer
     static fromIPeer(peer: IPeer): Peer {
-        const p = new Peer()
-        p.connection = peer.connection
-        p.identity = peer.identity
-        p.verification = peer.verification
-        p.sync = peer.sync
-        p.status = peer.status
-        return p
+        const peerInstance = new Peer()
+        peerInstance.connection = peer.connection
+        peerInstance.identity = peer.identity
+        peerInstance.verification = peer.verification
+        peerInstance.sync = peer.sync
+        peerInstance.status = peer.status
+        return peerInstance
     }
 
     // REVIEW Method to make the same call with multiple peers

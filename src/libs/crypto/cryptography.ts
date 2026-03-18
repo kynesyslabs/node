@@ -228,11 +228,11 @@ export default class Cryptography {
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
                 log.debug(
                     "CRYPTO",
-                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed",
+                    `[DECRYPTION] Failed to normalize privateKey buffer: ${errorMsg}`,
                 )
-                log.error("CRYPTO", e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one

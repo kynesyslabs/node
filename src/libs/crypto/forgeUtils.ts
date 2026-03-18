@@ -7,7 +7,8 @@ export function forgeToHex(forgeBuffer: any): string {
             forgeBuffer = forgeBuffer.data
         }
     } catch (e) {
-        log.debug("[ForgeToHex] Not a buffer")
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.debug(`[ForgeToHex] Not a buffer: ${errorMsg}`)
     }
     //console.log(forgeBuffer)
     const rebuffer = Buffer.from(forgeBuffer)

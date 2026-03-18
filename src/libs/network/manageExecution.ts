@@ -63,6 +63,8 @@ export async function manageExecution(
                     validityDataPayload = content.data
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
+                log.warn("[manageExecution] Failed to extract validity data payload:", errorMsg)
                 validityDataPayload = content.data
             }
 

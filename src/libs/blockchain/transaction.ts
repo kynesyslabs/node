@@ -547,8 +547,7 @@ export default class Transaction implements ITransaction {
         }
 
         log.debug(
-            "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
-            rawTx.hash,
+            `[fromRawTransaction] Creating transaction from raw with hash: ${rawTx.hash}`,
         )
         const tx = new Transaction()
 
