@@ -1,31 +1,43 @@
-# Serena Memory Index - Quick Navigation
+# Serena Memory Index
 
-## Current Work (Start Here)
-- **_continue_here** - Active work streams and next actions
+## Current Work
+- **_continue_here** - Active session context
+- **stabilisation_branch** - Branch purpose and scope (NEW)
 
-## OmniProtocol Implementation
-- **omniprotocol_complete_2025_11_11** - Comprehensive status (90% complete)
-- **omniprotocol_wave8_tcp_physical_layer** - TCP layer implementation
-- **omniprotocol_wave8.1_complete** - Wave 8.1 completion details
-- **omniprotocol_session_2025-12-01** - Recent session notes
+## Core Documentation
+- **project_purpose** - Demos Network node overview
+- **development_guidelines** - Coding standards
+- **suggested_commands** - Common CLI commands
 
-## UD Integration
-- **ud_phases_tracking** - Complete phases 1-6 overview
-- **ud_phase5_complete** - Detailed Phase 5 implementation
-- **ud_integration_complete** - Current status, dependencies, next steps
-- **ud_technical_reference** - Networks, contracts, record keys, test data
-- **ud_architecture_patterns** - Resolution flow, verification, storage patterns
-- **ud_security_patterns** - Ownership verification, security checkpoints
-- **session_ud_ownership_verification_2025_10_21** - Security fixes session
-- **session_ud_points_implementation_2025_01_31** - Points system session
+## Architecture & Codebase
+- `.planning/codebase/` - 7 detailed documents (STACK, STRUCTURE, CONVENTIONS, etc.)
 
-## Project Core
-- **project_purpose** - Demos Network node software overview
-- **Codebase Map** - See `.planning/codebase/` (7 documents, replaces old Serena memories):
-  - `STACK.md` - Runtime, dependencies, frameworks (was: tech_stack)
-  - `STRUCTURE.md` - Directory layout, file purposes (was: codebase_structure)
-  - `CONVENTIONS.md` - Code style, naming, linting (was: code_style_conventions)
-  - `ARCHITECTURE.md` - System layers, data flows, patterns (was: development_patterns)
-  - `INTEGRATIONS.md` - External APIs, blockchain networks, protocols
-  - `TESTING.md` - Jest config, mock patterns, coverage
-  - `CONCERNS.md` - Tech debt, security issues, missing features
+## Feature Documentation
+### OmniProtocol
+- **omniprotocol_complete_2025_11_11** - Protocol status (~90% complete)
+
+### UD Integration
+- **ud_integration_complete** - Status and dependencies
+- **ud_technical_reference** - Networks, contracts, test data
+- **ud_architecture_patterns** - Resolution flow patterns
+- **ud_security_patterns** - Ownership verification
+- **ud_phase5_complete** - Implementation details
+- **ud_phases_tracking** - Complete phases overview
+
+### L2PS
+- **l2ps_overview** - System overview
+- **l2ps_architecture** - Detailed architecture
+- **l2ps_code_patterns** - Code patterns
+- **l2ps_implementation_status** - Current status
+- **l2ps_onboarding_guide** - Getting started
+
+### ZK Identity
+- **zk_technical_architecture** - System architecture
+- **zk_verify_and_delete_plan** - Future feature plan
+
+### Infrastructure
+- **devnet_docker_setup** - Local development
+- **tlsnotary_integration_context** - TLS verification
+
+## Audit History
+- **typescript_audit_complete_2025_12_17** - TS audit results (0 errors)

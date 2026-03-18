@@ -28,6 +28,7 @@ import {
     PeerUnreachableError,
     TimeoutError,
 } from "src/exceptions"
+import { handleError } from "src/errors"
 import HandleGCR from "../gcr/handleGCR"
 import {
     discoverL2PSParticipants,
@@ -562,7 +563,7 @@ async function waitForNextBlock() {
             return false
         }
 
-        console.error(error)
+        handleError(error, "SYNC")
         return false
     }
 }
@@ -662,7 +663,7 @@ async function requestBlocks(): Promise<boolean> {
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
-            console.error(error)
+            handleError(error, "SYNC", { source: "block download" })
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
                 log.info(
@@ -733,8 +734,7 @@ export async function syncGCRTables(
             log.error(
                 "[syncGCRTables] Error syncing GCR table for tx: " + tx.hash,
             )
-            console.error("[SYNC] [ ERROR ]")
-            console.error(error)
+            handleError(error, "SYNC", { source: "GCR table sync" })
         }
     }
 
@@ -828,7 +828,7 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 
         if (newPeerObjects.length > 0) {
             // Run in background, don't block blockchain sync
-            exchangeL2PSParticipation(newPeerObjects, getSharedState.l2psJoinedUids)
+            exchangeL2PSParticipation(newPeerObjects)
                 .catch(error => {
                     log.error("[Sync] L2PS participation exchange failed:", error.message)
                 })

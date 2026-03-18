@@ -60,6 +60,7 @@ import {
     SerializedSignedObject,
     ucrypto,
     Cryptography,
+    uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
 
@@ -69,8 +70,10 @@ import { getSharedState } from "@/utilities/sharedState"
 import Datasource from "@/model/datasource"
 import { OfflineMessage } from "@/model/entities/OfflineMessages"
 
+
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 import log from "@/utilities/logger"
+import { handleError } from "@/errors"
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -120,7 +123,9 @@ export class SignalingServer {
      * @param details - Additional error details
      */
     private sendError(ws: WebSocket, errorType: ImErrorType, details?: string) {
-        log.debug(`[IM] Sending an error message: ${errorType}${details ? ` - ${details}` : ""}`)
+        log.debug(
+            `[IM] Sending an error message: ${errorType}${details ? ` - ${details}` : ""}`,
+        )
         ws.send(
             JSON.stringify({
                 type: "error",
@@ -410,7 +415,7 @@ export class SignalingServer {
                     // @ts-ignore - We know this returns a string ID now
                     messageId = await this.storeOfflineMessage(senderId, payload.targetId, payload.message) as unknown as string
                 } catch (error: any) {
-                    console.error("Failed to store offline message in DB:", error)
+                    handleError(error, "NETWORK", { source: "signaling server" })
                     // REVIEW: PR Fix #2 - Provide specific error message for rate limit
                     if (error.message?.includes("exceeded offline message limit")) {
                         this.sendError(
@@ -429,7 +434,7 @@ export class SignalingServer {
                 try {
                     await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
                 } catch (error) {
-                    console.error("Failed to store message on blockchain:", error)
+                    handleError(error, "NETWORK", { source: "signaling server" })
                     // Rollback DB storage
                     if (messageId) {
                         await this.rollbackOfflineMessage(messageId, senderId)
@@ -454,7 +459,7 @@ export class SignalingServer {
             try {
                 await this.storeMessageOnBlockchain(senderId, payload.targetId, payload.message)
             } catch (error) {
-                console.error("Failed to store message on blockchain:", error)
+                handleError(error, "NETWORK", { source: "signaling server" })
                 this.sendError(ws, ImErrorType.INTERNAL_ERROR, "Failed to store message")
                 return  // Abort on blockchain failure for audit trail consistency
             }
@@ -629,51 +634,57 @@ export class SignalingServer {
         // REVIEW: PR Fix #2 - Use mutex to prevent nonce race conditions
         // Acquire lock before reading/modifying nonce to ensure atomic operation
         return await this.nonceMutex.runExclusive(async () => {
+            const nodeIdentity = getSharedState.publicKeyHex
+            if (!nodeIdentity) {
+                throw new Error("[Signaling Server] Node public key not available for message persistence")
+            }
+
             // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
-            const currentNonce = this.senderNonces.get(senderId) || 0
+            const currentNonce = this.senderNonces.get(nodeIdentity) || 0
             const nonce = currentNonce + 1
             // Don't increment yet - wait for mempool success for better error handling
 
+            const timestamp = Date.now()
             const transaction = new Transaction()
             transaction.content = {
                 type: "instantMessaging",
-                from: senderId,
+                from: nodeIdentity,
                 to: targetId,
-                from_ed25519_address: senderId,
+                from_ed25519_address: nodeIdentity,
                 amount: 0,
-                data: ["instantMessaging", { message, timestamp: Date.now() }] as any,
+                data: ["instantMessaging", { senderId, targetId, message, timestamp }] as any,
                 gcr_edits: [],
                 nonce,
-                timestamp: Date.now(),
+                timestamp,
                 transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
             }
+            transaction.status = ""
 
-            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
-            // Current: Sign with node's private key for integrity (not authentication)
-            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 1/3)
-            if (!getSharedState.identity?.ed25519?.privateKey) {
-                throw new Error("[Signaling Server] Private key not available for message signing")
-            }
-
-            const signature = Cryptography.sign(
-                JSON.stringify(transaction.content),
-                getSharedState.identity.ed25519.privateKey,
-            )
-            transaction.signature = signature as any
             transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+            const signature = await ucrypto.sign(
+                getSharedState.signingAlgorithm,
+                new TextEncoder().encode(transaction.hash),
+            )
+            transaction.signature = {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature.signature),
+            } as any
 
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
             try {
                 const referenceBlock = await Chain.getLastBlockNumber()
-                await Mempool.addTransaction({
+                const { error } = await Mempool.addTransaction({
                     ...transaction,
                     reference_block: referenceBlock,
                 })
+                if (error) {
+                    throw new Error(error)
+                }
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
-                this.senderNonces.set(senderId, nonce)
+                this.senderNonces.set(nodeIdentity, nonce)
             } catch (error: any) {
-                console.error("[Signaling Server] Failed to add message transaction to mempool:", error.message)
+                handleError(error, "NETWORK", { source: "signaling server" })
                 throw error // Rethrow to be caught by caller's error handling
             }
         })
@@ -804,7 +815,7 @@ export class SignalingServer {
         for (const msg of offlineMessages) {
             // REVIEW: PR Fix #7 - Check WebSocket readyState before sending to prevent silent failures
             if (ws.readyState !== WebSocket.OPEN) {
-                console.log(`WebSocket not open for ${peerId}, stopping delivery`)
+                log.info(`[NETWORK] WebSocket not open for ${peerId}, stopping delivery`)
                 break
             }
 
@@ -831,7 +842,7 @@ export class SignalingServer {
 
             } catch (error) {
                 // WebSocket send failed - stop delivery to prevent out-of-order messages
-                console.error(`Failed to deliver offline message ${msg.id} to ${peerId}:`, error)
+                handleError(error, "NETWORK", { source: "signaling server" })
                 // Break on first failure to maintain message ordering
                 // Undelivered messages will be retried when peer reconnects
                 break
@@ -852,7 +863,7 @@ export class SignalingServer {
                     }
                 })
             }
-            console.log(`Sent ${sentCount} offline messages to ${peerId}`)
+            log.info(`[NETWORK] Sent ${sentCount} offline messages to ${peerId}`)
         }
     }
 

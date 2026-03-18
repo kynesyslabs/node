@@ -10,19 +10,15 @@
 import { Server } from "bun"
 import log from "@/utilities/logger"
 import { MetricsService } from "./MetricsService"
+import type { MetricsServerConfig } from "./types"
+import {
+    DEFAULT_SERVER_CONFIG,
+    METRICS_SERVER_NAME,
+    METRICS_SERVER_VERSION,
+} from "./constants"
 
-// REVIEW: Metrics server configuration
-export interface MetricsServerConfig {
-    port: number
-    hostname: string
-    enabled: boolean
-}
-
-const DEFAULT_CONFIG: MetricsServerConfig = {
-    port: parseInt(process.env.METRICS_PORT ?? "9090", 10),
-    hostname: process.env.METRICS_HOST ?? "0.0.0.0",
-    enabled: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
-}
+// Re-export for backward compatibility
+export type { MetricsServerConfig } from "./types"
 
 /**
  * MetricsServer - Dedicated HTTP server for Prometheus metrics
@@ -40,7 +36,7 @@ export class MetricsServer {
     private metricsService: MetricsService
 
     constructor(config?: Partial<MetricsServerConfig>) {
-        this.config = { ...DEFAULT_CONFIG, ...config }
+        this.config = { ...DEFAULT_SERVER_CONFIG, ...config }
         this.metricsService = MetricsService.getInstance()
     }
 
@@ -64,7 +60,7 @@ export class MetricsServer {
         this.server = Bun.serve({
             port: this.config.port,
             hostname: this.config.hostname,
-            fetch: async (req) => this.handleRequest(req),
+            fetch: async req => this.handleRequest(req),
         })
 
         log.info(
@@ -98,9 +94,7 @@ export class MetricsServer {
                     },
                 })
             } catch (error) {
-                log.error(
-                    `[METRICS SERVER] Error generating metrics: ${error}`,
-                )
+                log.error(`[METRICS SERVER] Error generating metrics: ${error}`)
                 return new Response("Internal Server Error", { status: 500 })
             }
         }
@@ -109,8 +103,8 @@ export class MetricsServer {
         if (path === "/") {
             return new Response(
                 JSON.stringify({
-                    name: "Demos Network Metrics Server",
-                    version: "1.0.0",
+                    name: METRICS_SERVER_NAME,
+                    version: METRICS_SERVER_VERSION,
                     endpoints: {
                         metrics: "/metrics",
                         health: "/health",

@@ -1,5 +1,6 @@
 // REVIEW: PeerConnection - Bidirectional TCP socket wrapper for peer connections
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { Socket } from "net"
 import { EventEmitter } from "events"
 import forge from "node-forge"
@@ -96,8 +97,8 @@ export class PeerConnection extends EventEmitter {
     private framer: MessageFramer = new MessageFramer()
     private _state: ConnectionStateValue
     private _peerIdentity: string
-    private connectionString: string
-    private parsedConnection: ParsedConnectionString | null = null
+    public connectionString: string
+    public parsedConnection: ParsedConnectionString | null = null
 
     /**
      * Connection origin - who initiated the TCP connection
@@ -721,7 +722,7 @@ export class PeerConnection extends EventEmitter {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
-            console.error(error)
+            handleError(error, "NETWORK", { source: "OmniProtocol PeerConnection.handleIncomingData" })
             if (error instanceof InvalidAuthBlockFormatError) {
                 return
             }

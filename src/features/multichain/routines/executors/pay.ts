@@ -349,7 +349,7 @@ async function handleXRPLPay(
             extra: { code: txResult, validated: res.result.validated },
         }
     } catch (error) {
-        console.log("[XMScript Parser] Ripple Pay: error:", error)
+        log.error("[XMScript Parser] Ripple Pay error: " + error)
         return {
             result: "error",
             error: error instanceof Error ? error.message : String(error),

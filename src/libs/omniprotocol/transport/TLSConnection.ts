@@ -168,7 +168,9 @@ export class TLSConnection extends PeerConnection {
             const fingerprint = cert.fingerprint256
 
             // If we have a trusted fingerprint for this peer, verify it
-            const trustedFingerprint = this.trustedFingerprints.get(this.peerIdentity)
+            const trustedFingerprint = this.trustedFingerprints.get(
+                this.peerIdentity,
+            )
             if (trustedFingerprint) {
                 if (trustedFingerprint !== fingerprint) {
                     log.error(
@@ -189,7 +191,9 @@ export class TLSConnection extends PeerConnection {
                     `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`,
                 )
                 log.warning(`  Server certificate fingerprint: ${fingerprint}`)
-                log.warning("  Add to trustedFingerprints to pin this certificate")
+                log.warning(
+                    "  Add to trustedFingerprints to pin this certificate",
+                )
 
                 // In strict mode, reject unknown certificates
                 if (this.tlsConfig.rejectUnauthorized) {
@@ -217,5 +221,28 @@ export class TLSConnection extends PeerConnection {
         log.info(
             `[TLSConnection] Added trusted fingerprint for ${this.peerIdentity}: ${fingerprint.substring(0, 16)}...`,
         )
+    }
+
+    /**
+     * Helper to set socket (parent class has protected socket)
+     */
+    private setSocket(socket: tls.TLSSocket): void {
+        this.socket = socket
+    }
+
+    /**
+     * Helper to get parsed connection
+     */
+    private parseConnectionString() {
+        if (!this.parsedConnection) {
+            // Parse manually
+            const url = new URL(this.connectionString)
+            return {
+                protocol: url.protocol.replace(":", ""),
+                host: url.hostname,
+                port: parseInt(url.port) || 3001,
+            }
+        }
+        return this.parsedConnection
     }
 }

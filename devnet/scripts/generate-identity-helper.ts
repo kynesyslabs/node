@@ -23,7 +23,7 @@ const mnemonic = demos.newMnemonic()
 // Uses raw mnemonic string to match wallet/SDK derivation
 const hashable = mnemonic.trim()
 const seedHash = Hashing.sha3_512(hashable)
-const seedHashHex = uint8ArrayToHex(seedHash).slice(2) // Remove 0x prefix
+const seedHashHex = uint8ArrayToHex(seedHash as Uint8Array).slice(2) // Remove 0x prefix
 const seed = new TextEncoder().encode(seedHashHex)
 
 // Generate all identities from seed
@@ -33,7 +33,7 @@ await ucrypto.generateAllIdentities(seed)
 const identity = await ucrypto.getIdentity("ed25519")
 
 // uint8ArrayToHex already includes 0x prefix
-const pubkeyHex = uint8ArrayToHex(identity.publicKey)
+const pubkeyHex = uint8ArrayToHex(identity.publicKey as Uint8Array)
 
 console.log("MNEMONIC:" + mnemonic)
 console.log("PUBKEY:" + pubkeyHex)

@@ -1,41 +1,19 @@
 import axios, { AxiosInstance, AxiosResponse } from "axios"
 import { URL } from "url"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
+import { DiscordMessage } from "./types"
+import { DISCORD_API_TIMEOUT_MS } from "./constants"
 
-export type DiscordMessage = {
-    id: string
-    channel_id: string
-    guild_id?: string
-    author: {
-        id: string
-        username: string
-        global_name?: string
-        bot?: boolean
-    }
-    content: string
-    timestamp: string
-    edited_timestamp?: string | null
-    mention_everyone: boolean
-    attachments: Array<{
-        id: string
-        filename: string
-        size: number
-        url: string
-        proxy_url: string
-        content_type?: string
-    }>
-    embeds: any[]
-    mentions: Array<{ id: string; username: string }>
-    referenced_message?: DiscordMessage | null
-}
+// backward-compatible re-export
+export type { DiscordMessage } from "./types"
 
 export class Discord {
     private static instance: Discord
     private axios: AxiosInstance
 
-    readonly api_url =
-        process.env.DISCORD_API_URL ?? "https://discord.com/api/v10"
-    readonly bot_token = process.env.DISCORD_BOT_TOKEN as string
+    readonly api_url = Config.getInstance().identity.discordApiUrl
+    readonly bot_token = Config.getInstance().identity.discordBotToken
 
     private constructor() {
         if (!this.bot_token) {
@@ -58,7 +36,7 @@ export class Discord {
                 Authorization: `Bot ${this.bot_token}`,
                 "Content-Type": "application/json",
             },
-            timeout: 10000, // 10s
+            timeout: DISCORD_API_TIMEOUT_MS,
         })
     }
 

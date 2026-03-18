@@ -2,6 +2,7 @@ import { Client } from "pg"
 import * as fs from "fs"
 import * as path from "path"
 import * as dotenv from "dotenv"
+import { Config } from "src/config"
 dotenv.config()
 
 interface UserBalance {
@@ -18,13 +19,14 @@ interface OutputData {
 }
 
 async function dumpUserData(): Promise<void> {
-    console.log("PG_PORT: " + process.env.PG_PORT)
+    const pgPort = Config.getInstance().database.port
+    console.log("PG_PORT: " + pgPort)
     // Database connection configuration
     const dbConfig = {
         user: "demosuser",
         password: "demospassword",
         host: "127.0.0.1",
-        port: process.env.PG_PORT,
+        port: pgPort,
         database: "demos", // Assuming this is the database name
         table: "gcr_main",
     }

@@ -20,7 +20,6 @@ export default async function getBlockByNumber(
 
         let block: Blocks
         if (blockNumber === 0) {
-            // @ts-expect-error Block is not typed
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),

@@ -110,6 +110,7 @@ export function validateAndNormalizeHttpUrl(
             isIPv6Loopback ||
             isIPv6Multicast ||
             isIPv4MappedLoopback ||
+            isIPv4Loopback ||
             isIPv4Private ||
             isMappedPrivate ||
             isIPv6ULAorLL

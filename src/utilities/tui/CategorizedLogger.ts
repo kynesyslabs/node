@@ -8,6 +8,7 @@
 import { EventEmitter } from "events"
 import fs from "fs"
 import path from "path"
+import { Config } from "src/config"
 
 // Capture original console.error at module initialization to avoid TUI interception/recursion
 const originalConsoleError = console.error.bind(console)
@@ -239,7 +240,7 @@ export class CategorizedLogger extends EventEmitter {
             terminalOutput: config.terminalOutput ?? true,
             minLevel:
                 config.minLevel ??
-                (process.env.LOG_LEVEL as LogLevel) ??
+                (Config.getInstance().core.logLevel as LogLevel) ??
                 "info",
             enabledCategories: config.enabledCategories ?? [],
             maxFileSize: config.maxFileSize ?? DEFAULT_MAX_FILE_SIZE,
@@ -839,7 +840,10 @@ export class CategorizedLogger extends EventEmitter {
      */
     getAllEntries(): LogEntry[] {
         // Return cached result if entry counter hasn't changed
-        if (this.allEntriesCache !== null && this.allEntriesCacheLastCounter === this.entryCounter) {
+        if (
+            this.allEntriesCache !== null &&
+            this.allEntriesCacheLastCounter === this.entryCounter
+        ) {
             return this.allEntriesCache
         }
 

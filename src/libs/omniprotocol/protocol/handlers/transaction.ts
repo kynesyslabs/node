@@ -35,8 +35,15 @@ interface ConfirmRequest {
  * Handles transaction execution (both confirmTx and broadcastTx flows).
  * Wraps the existing manageExecution handler with binary encoding.
  */
-export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
+export const handleExecute: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
         return encodeResponse(errorResponse(400, "Missing payload for execute"))
     }
 
@@ -47,10 +54,14 @@ export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) =
             return encodeResponse(errorResponse(400, "content is required"))
         }
 
-        const { manageExecution } = await import("../../../network/manageExecution")
+        const { manageExecution } =
+            await import("../../../network/manageExecution")
 
         // Call existing HTTP handler
-        const httpResponse = await manageExecution(request.content, context.peerIdentity)
+        const httpResponse = await manageExecution(
+            request.content,
+            context.peerIdentity,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
@@ -66,7 +77,11 @@ export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) =
     } catch (error) {
         log.error("[handleExecute] Error: " + error)
         return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }
@@ -77,9 +92,18 @@ export const handleExecute: OmniHandler<Buffer> = async ({ message, context }) =
  * Handles native bridge operations for cross-chain transactions.
  * Wraps the existing manageNativeBridge handler with binary encoding.
  */
-export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for nativeBridge"))
+export const handleNativeBridge: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for nativeBridge"),
+        )
     }
 
     try {
@@ -89,10 +113,13 @@ export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context
             return encodeResponse(errorResponse(400, "operation is required"))
         }
 
-        const { manageNativeBridge } = await import("../../../network/manageNativeBridge")
+        const { manageNativeBridge } =
+            await import("../../../network/manageNativeBridge")
 
         // Call existing HTTP handler
-        const httpResponse = await manageNativeBridge(request.operation as bridge.NativeBridgeOperation)
+        const httpResponse = await manageNativeBridge(
+            request.operation as bridge.NativeBridgeOperation,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
@@ -108,7 +135,11 @@ export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context
     } catch (error) {
         log.error("[handleNativeBridge] Error: " + error)
         return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }
@@ -119,8 +150,15 @@ export const handleNativeBridge: OmniHandler<Buffer> = async ({ message, context
  * Handles bridge operations (get_trade, execute_trade via Rubic).
  * Wraps the existing manageBridges handler with binary encoding.
  */
-export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
+export const handleBridge: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
         return encodeResponse(errorResponse(400, "Missing payload for bridge"))
     }
 
@@ -135,7 +173,8 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
             return encodeResponse(errorResponse(400, "chain is required"))
         }
 
-        const { default: manageBridges } = await import("../../../network/manageBridge")
+        const { default: manageBridges } =
+            await import("../../../network/manageBridge")
 
         const bridgePayload = {
             method: request.method,
@@ -144,7 +183,10 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
         }
 
         // Call existing HTTP handler
-        const httpResponse = await manageBridges(context.peerIdentity, bridgePayload)
+        const httpResponse = await manageBridges(
+            context.peerIdentity,
+            bridgePayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
@@ -160,7 +202,11 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
     } catch (error) {
         log.error("[handleBridge] Error: " + error)
         return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }
@@ -172,9 +218,18 @@ export const handleBridge: OmniHandler<Buffer> = async ({ message, context }) =>
  * This is specifically for the broadcastTx flow after validation.
  * Wraps the existing manageExecution handler with binary encoding.
  */
-export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for broadcast"))
+export const handleBroadcast: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for broadcast"),
+        )
     }
 
     try {
@@ -190,10 +245,14 @@ export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context })
             extra: "broadcastTx",
         }
 
-        const { manageExecution } = await import("../../../network/manageExecution")
+        const { manageExecution } =
+            await import("../../../network/manageExecution")
 
         // Call existing HTTP handler with broadcastTx mode
-        const httpResponse = await manageExecution(broadcastContent, context.peerIdentity)
+        const httpResponse = await manageExecution(
+            broadcastContent,
+            context.peerIdentity,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
@@ -209,7 +268,11 @@ export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context })
     } catch (error) {
         log.error("[handleBroadcast] Error: " + error)
         return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }
@@ -221,8 +284,15 @@ export const handleBroadcast: OmniHandler<Buffer> = async ({ message, context })
  * Takes a Transaction directly and returns ValidityData with gas calculation.
  * This is the clean validation-only endpoint for basic transaction flows.
  */
-export const handleConfirm: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
+export const handleConfirm: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
         return encodeResponse(errorResponse(400, "Missing payload for confirm"))
     }
 
@@ -233,7 +303,8 @@ export const handleConfirm: OmniHandler<Buffer> = async ({ message, context }) =
             return encodeResponse(errorResponse(400, "transaction is required"))
         }
 
-        const { default: serverHandlers } = await import("../../../network/endpointHandlers")
+        const { default: serverHandlers } =
+            await import("../../../network/endpointHandlers")
 
         // Call validation handler directly (confirmTx flow)
         const validityData = await serverHandlers.handleValidateTransaction(
@@ -246,7 +317,11 @@ export const handleConfirm: OmniHandler<Buffer> = async ({ message, context }) =
     } catch (error) {
         log.error("[handleConfirm] Error: " + error)
         return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }

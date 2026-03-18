@@ -4,15 +4,15 @@
 
 ## Phase Status Overview
 
-| Phase | Status | Commit | Description |
-|-------|--------|--------|-------------|
-| Phase 1 | ✅ Complete | `ce3c32a8` | Signature detection utility |
-| Phase 2 | ✅ Complete | `7b9826d8` | EVM records fetching |
-| Phase 3 | ✅ Complete | `10460e41` | Solana integration + UnifiedDomainResolution |
-| Phase 4 | ✅ Complete | `10460e41` | Multi-signature verification (EVM + Solana) |
-| Phase 5 | ✅ Complete | `eff3af6c` | IdentityTypes updates (breaking changes) |
-| **Points** | ✅ Complete | `c833679d` | **UD domain points system implementation** |
-| Phase 6 | ⏸️ Pending | - | SDK client method updates |
+| Phase      | Status      | Commit     | Description                                  |
+| ---------- | ----------- | ---------- | -------------------------------------------- |
+| Phase 1    | ✅ Complete | `ce3c32a8` | Signature detection utility                  |
+| Phase 2    | ✅ Complete | `7b9826d8` | EVM records fetching                         |
+| Phase 3    | ✅ Complete | `10460e41` | Solana integration + UnifiedDomainResolution |
+| Phase 4    | ✅ Complete | `10460e41` | Multi-signature verification (EVM + Solana)  |
+| Phase 5    | ✅ Complete | `eff3af6c` | IdentityTypes updates (breaking changes)     |
+| **Points** | ✅ Complete | `c833679d` | **UD domain points system implementation**   |
+| Phase 6    | ⏸️ Pending  | -          | SDK client method updates                    |
 
 ---
 
@@ -22,11 +22,13 @@
 **File**: `src/libs/blockchain/gcr/gcr_routines/signatureDetector.ts`
 
 **Created**:
+
 - `detectSignatureType(address)` - Auto-detect EVM vs Solana from address format
 - `validateAddressType(address, expectedType)` - Validate address matches type
 - `isSignableAddress(address)` - Check if address is recognized format
 
 **Patterns**:
+
 - EVM: `/^0x[0-9a-fA-F]{40}$/` (secp256k1)
 - Solana: `/^[1-9A-HJ-NP-Za-km-z]{32,44}$/` (ed25519)
 
@@ -38,6 +40,7 @@
 **File**: `src/libs/blockchain/gcr/gcr_routines/udIdentityManager.ts`
 
 **Changes**:
+
 - `resolveUDDomain()` return type: simple object → `EVMDomainResolution`
 - Added resolver ABI with `get()` method
 - Defined `UD_RECORD_KEYS` array (8 common crypto address records)
@@ -46,6 +49,7 @@
 - Applied to all 5 EVM networks: Polygon, Base, Sonic, Ethereum UNS, Ethereum CNS
 
 **Record Keys**:
+
 ```typescript
 const UD_RECORD_KEYS = [
     "crypto.ETH.address",
@@ -67,6 +71,7 @@ const UD_RECORD_KEYS = [
 **File**: `src/libs/blockchain/gcr/gcr_routines/udIdentityManager.ts`
 
 **Changes**:
+
 - Added imports: `UnifiedDomainResolution`, `SolanaDomainResolver`
 - Created `evmToUnified()` - Converts `EVMDomainResolution` → `UnifiedDomainResolution`
 - Created `solanaToUnified()` - Converts Solana helper result → `UnifiedDomainResolution`
@@ -74,6 +79,7 @@ const UD_RECORD_KEYS = [
 - Added Solana fallback after all EVM networks fail
 
 **Resolution Cascade**:
+
 1. Polygon L2 UNS → unified format
 2. Base L2 UNS → unified format
 3. Sonic UNS → unified format
@@ -83,6 +89,7 @@ const UD_RECORD_KEYS = [
 7. Throw if domain not found on any network
 
 **Temporary Phase 3 Limitation**:
+
 - `verifyPayload()` only supports EVM domains
 - Solana domains fail with "Phase 3 limitation" message
 - Phase 4 implements full multi-address verification
@@ -95,15 +102,18 @@ const UD_RECORD_KEYS = [
 **File**: `src/libs/blockchain/gcr/gcr_routines/udIdentityManager.ts`
 
 **Dependencies Added**:
+
 - `tweetnacl@1.0.3` - Solana signature verification
 - `bs58@6.0.0` - Base58 encoding/decoding
 
 **Changes**:
+
 - Completely rewrote `verifyPayload()` for multi-address support
 - Added `verifySignature()` helper method for dual signature type support
 - Enhanced error messages with authorized address lists
 
 **Verification Flow**:
+
 ```typescript
 1. Resolve domain → get UnifiedDomainResolution with authorizedAddresses
 2. Check domain has authorized addresses (fail if empty)
@@ -114,12 +124,14 @@ const UD_RECORD_KEYS = [
 ```
 
 **EVM Signature**:
+
 ```typescript
 const recoveredAddress = ethers.verifyMessage(signedData, signature)
 if (recoveredAddress !== authorizedAddress.address) fail
 ```
 
 **Solana Signature**:
+
 ```typescript
 const signatureBytes = bs58.decode(signature)
 const messageBytes = new TextEncoder().encode(signedData)
@@ -128,7 +140,7 @@ const publicKeyBytes = bs58.decode(authorizedAddress.address)
 const isValid = nacl.sign.detached.verify(
     messageBytes,
     signatureBytes,
-    publicKeyBytes
+    publicKeyBytes,
 )
 ```
 
@@ -139,22 +151,24 @@ const isValid = nacl.sign.detached.verify(
 ## Phase 5: Update IdentityTypes ✅
 
 **Commit**: `eff3af6c`  
-**Files**: 
+**Files**:
+
 - `src/model/entities/types/IdentityTypes.ts`
 - `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts`
 
 **Breaking Changes**:
+
 ```typescript
 // OLD (Phase 4)
 interface SavedUdIdentity {
-    resolvedAddress: string  // ❌ REMOVED
+    resolvedAddress: string // ❌ REMOVED
     // ...
 }
 
 // NEW (Phase 5)
 interface SavedUdIdentity {
     domain: string
-    signingAddress: string      // ✅ CHANGED from resolvedAddress
+    signingAddress: string // ✅ CHANGED from resolvedAddress
     signatureType: SignatureType // ✅ NEW: "evm" | "solana"
     signature: string
     publicKey: string
@@ -166,6 +180,7 @@ interface SavedUdIdentity {
 ```
 
 **Changes in GCRIdentityRoutines**:
+
 - Updated `applyUdIdentityAdd()` to extract `signingAddress` and `signatureType`
 - Added field validation for new required fields
 - Updated storage logic to use new field names
@@ -180,22 +195,26 @@ interface SavedUdIdentity {
 
 **Commit**: `c833679d`  
 **Date**: 2025-01-31  
-**Files**: 
+**Files**:
+
 - `src/features/incentive/PointSystem.ts`
 - `src/model/entities/GCRv2/GCR_Main.ts`
 
 **Purpose**: Incentivize UD domain linking with TLD-based rewards
 
 ### Point Values
+
 - `.demos` TLD domains: **3 points**
 - Other UD domains: **1 point**
 
 ### Methods Implemented
 
 #### awardUdDomainPoints(userId, domain, referralCode?)
+
 **Location**: PointSystem.ts:866-934
 
 **Features**:
+
 - Automatic TLD detection (`domain.toLowerCase().endsWith(".demos")`)
 - Duplicate domain linking prevention
 - Referral code support
@@ -203,6 +222,7 @@ interface SavedUdIdentity {
 - Returns `RPCResponse` with points awarded and updated total
 
 **Logic Flow**:
+
 ```typescript
 1. Determine point value based on TLD
 2. Check for duplicate domain in GCR breakdown.udDomains
@@ -211,15 +231,18 @@ interface SavedUdIdentity {
 ```
 
 #### deductUdDomainPoints(userId, domain)
+
 **Location**: PointSystem.ts:942-1001
 
 **Features**:
+
 - TLD-based point calculation (matching award logic)
 - Domain-specific point tracking verification
 - Safe deduction (checks if points exist first)
 - Returns `RPCResponse` with points deducted and updated total
 
 **Logic Flow**:
+
 ```typescript
 1. Determine point value based on TLD
 2. Verify domain exists in GCR breakdown.udDomains
@@ -230,6 +253,7 @@ interface SavedUdIdentity {
 ### Infrastructure Updates
 
 #### GCR Entity Extensions (GCR_Main.ts)
+
 ```typescript
 // Added to points.breakdown
 udDomains: { [domain: string]: number }  // Track points per domain
@@ -237,21 +261,23 @@ telegram: number                          // Added to socialAccounts
 ```
 
 #### PointSystem Type Updates
+
 ```typescript
 // Extended addPointsToGCR() type parameter
 type: "web3Wallets" | "socialAccounts" | "udDomains"
 
 // Added udDomains handling in addPointsToGCR()
 if (type === "udDomains") {
-    account.points.breakdown.udDomains = 
+    account.points.breakdown.udDomains =
         account.points.breakdown.udDomains || {}
-    account.points.breakdown.udDomains[platform] = 
-        oldDomainPoints + points
+    account.points.breakdown.udDomains[platform] = oldDomainPoints + points
 }
 ```
 
 #### Local UserPoints Interface
+
 Created local interface matching GCR structure to avoid SDK circular dependencies:
+
 ```typescript
 interface UserPoints {
     // ... existing fields
@@ -259,11 +285,11 @@ interface UserPoints {
         web3Wallets: { [chain: string]: number }
         socialAccounts: {
             twitter: number
-            github: number  
+            github: number
             discord: number
-            telegram: number  // ✅ NEW
+            telegram: number // ✅ NEW
         }
-        udDomains: { [domain: string]: number }  // ✅ NEW
+        udDomains: { [domain: string]: number } // ✅ NEW
         referrals: number
         demosFollow: number
     }
@@ -274,6 +300,7 @@ interface UserPoints {
 ### Integration with IncentiveManager
 
 **Existing Hooks** (IncentiveManager.ts:117-137):
+
 ```typescript
 static async udDomainLinked(
     userId: string,
@@ -298,6 +325,7 @@ static async udDomainUnlinked(
 These hooks are called automatically when UD identities are added/removed via `udIdentityManager`.
 
 ### Testing & Validation
+
 - ✅ TypeScript compilation: All errors resolved
 - ✅ ESLint: All files pass linting
 - ✅ Pattern consistency: Matches web3Wallets/socialAccounts implementation
@@ -306,17 +334,20 @@ These hooks are called automatically when UD identities are added/removed via `u
 ### Design Decisions
 
 **Why TLD-based rewards?**
+
 - `.demos` domains directly promote Demos Network branding
 - Higher reward incentivizes ecosystem adoption
 - Simple rule: easy for users to understand
 
 **Why local UserPoints interface?**
+
 - Avoid SDK circular dependencies during rapid iteration
 - Ensure type consistency with GCR entity structure
 - Enable development without rebuilding SDK
 - FIXME comment added for future SDK migration
 
 **Why domain-level tracking in breakdown?**
+
 - Prevents duplicate point awards for same domain
 - Enables accurate point deduction on unlink
 - Matches existing pattern (web3Wallets per chain, socialAccounts per platform)
@@ -338,11 +369,12 @@ These hooks are called automatically when UD identities are added/removed via `u
 ### Required Changes
 
 #### 1. Update Types (`src/types/abstraction/index.ts`)
+
 ```typescript
 // REMOVE old format
 export interface UDIdentityPayload {
     domain: string
-    resolvedAddress: string  // ❌ DELETE
+    resolvedAddress: string // ❌ DELETE
     signature: string
     publicKey: string
     signedData: string
@@ -351,7 +383,7 @@ export interface UDIdentityPayload {
 // ADD new format
 export interface UDIdentityPayload {
     domain: string
-    signingAddress: string      // ✅ NEW
+    signingAddress: string // ✅ NEW
     signatureType: SignatureType // ✅ NEW
     signature: string
     publicKey: string
@@ -362,6 +394,7 @@ export interface UDIdentityPayload {
 #### 2. Update Methods (`src/abstraction/Identities.ts`)
 
 **Update `generateUDChallenge()`**:
+
 ```typescript
 // OLD
 generateUDChallenge(demosPublicKey: string): string
@@ -376,6 +409,7 @@ generateUDChallenge(
 ```
 
 **Update `addUnstoppableDomainIdentity()`**:
+
 ```typescript
 // OLD
 async addUnstoppableDomainIdentity(
@@ -397,7 +431,7 @@ async addUnstoppableDomainIdentity(
 ) {
     // Detect signature type from address format
     const signatureType = detectAddressType(signingAddress)
-    
+
     const payload: UDIdentityAssignPayload = {
         method: "ud_identity_assign",
         payload: {
@@ -414,6 +448,7 @@ async addUnstoppableDomainIdentity(
 ```
 
 #### 3. Add Helper Method (NEW)
+
 ```typescript
 /**
  * Get all signable addresses for a UD domain
@@ -430,11 +465,13 @@ async getUDSignableAddresses(
 ### Phase 6 Testing Requirements
 
 **Unit Tests**:
+
 - Challenge generation with signing address
 - Signature type auto-detection
 - Multi-address payload creation
 
 **Integration Tests**:
+
 - End-to-end UD identity verification flow
 - EVM domain + EVM signature
 - Solana domain + Solana signature
@@ -449,7 +486,7 @@ async getUDSignableAddresses(
 **Phase 3 → Phase 4**: UnifiedDomainResolution provides authorizedAddresses  
 **Phase 4 → Phase 5**: Verification logic expects new type structure  
 **Phase 5 → Points**: Identity storage structure enables points tracking  
-**Points → Phase 6**: SDK must match node implementation for client usage  
+**Points → Phase 6**: SDK must match node implementation for client usage
 
 ---
 
@@ -459,8 +496,9 @@ async getUDSignableAddresses(
 **Latest Commit**: `c833679d` (UD points system)  
 **Next Action**: Update SDK client methods in `../sdks/` repository  
 **Breaking Changes**: Phases 4, 5, 6 all introduce breaking changes  
-**Testing**: End-to-end testing blocked until Phase 6 complete  
+**Testing**: End-to-end testing blocked until Phase 6 complete
 
 For detailed implementation sessions:
+
 - Phase 5 details: See `ud_phase5_complete` memory
 - Points implementation: See `session_ud_points_implementation_2025_01_31` memory

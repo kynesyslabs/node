@@ -49,7 +49,9 @@ export function encodeJsonRequest(payload: unknown): Buffer {
 
 export function decodeJsonRequest<T = unknown>(buffer: Buffer): T {
     const length = PrimitiveDecoder.decodeUInt32(buffer, 0)
-    const json = buffer.subarray(length.bytesRead, length.bytesRead + length.value)
+    const json = buffer.subarray(
+        length.bytesRead,
+        length.bytesRead + length.value,
+    )
     return JSON.parse(json.toString("utf8")) as T
 }
-

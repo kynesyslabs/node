@@ -109,8 +109,7 @@ export class DTRManager {
     stop() {
         if (!this.isRunning) return
 
-        console.log("[DTR RetryService] Stopping relay service")
-        log.info("[DTR RetryService] Service stopped")
+        log.info("[DTR RetryService] Stopping relay service")
         this.isRunning = false
 
         if (this.retryInterval) {
@@ -154,7 +153,7 @@ export class DTRManager {
                 return
             }
 
-            console.log(
+            log.debug(
                 `[DTR RetryService] Processing ${mempool.length} transactions in mempool`,
             )
 
@@ -162,13 +161,13 @@ export class DTRManager {
             const availableValidators = await this.getValidatorsOptimized()
 
             if (availableValidators.length === 0) {
-                console.log(
+                log.debug(
                     "[DTR RetryService] No validators available for relay",
                 )
                 return
             }
 
-            console.log(
+            log.debug(
                 `[DTR RetryService] Found ${availableValidators.length} available validators`,
             )
 
@@ -193,7 +192,7 @@ export class DTRManager {
             currentBlockNumber !== this.lastBlockNumber ||
             this.cachedValidators.length === 0
         ) {
-            console.log(
+            log.debug(
                 `[DTR RetryService] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
             )
 
@@ -207,7 +206,7 @@ export class DTRManager {
                 )
                 this.lastBlockNumber = currentBlockNumber
 
-                console.log(
+                log.debug(
                     `[DTR RetryService] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
                 )
             } catch (error) {
@@ -265,8 +264,8 @@ export class DTRManager {
                 },
             }
         } catch (error: any) {
-            console.error(
-                "[DTR] Error relaying transaction to validator: ",
+            log.error(
+                "[DTR] Error relaying transaction to validator: " +
                 error,
             )
             return {
@@ -297,11 +296,8 @@ export class DTRManager {
 
         // Give up after max attempts
         if (currentAttempts >= this.maxRetryAttempts) {
-            console.log(
-                `[DTR RetryService] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
-            )
             log.warning(
-                `[DTR RetryService] Transaction ${txHash} abandoned after ${this.maxRetryAttempts} failed relay attempts`,
+                `[DTR RetryService] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
             )
             this.retryAttempts.delete(txHash)
             // Clean up ValidityData from memory
@@ -312,11 +308,8 @@ export class DTRManager {
         // Check if we have ValidityData in memory
         const validityData = getSharedState.validityDataCache.get(txHash)
         if (!validityData) {
-            console.log(
-                `[DTR RetryService] No ValidityData found for ${txHash}, removing from mempool`,
-            )
             log.error(
-                `[DTR RetryService] Missing ValidityData for transaction ${txHash} - removing from mempool`,
+                `[DTR RetryService] No ValidityData found for ${txHash}, removing from mempool`,
             )
             await Mempool.removeTransaction(txHash)
             this.retryAttempts.delete(txHash)
@@ -343,16 +336,11 @@ export class DTRManager {
                 )
 
                 if (result.result === 200) {
-                    console.log(
+                    log.info(
                         `[DTR RetryService] Successfully relayed ${txHash} to validator ${validator.identity.substring(
                             0,
                             8,
-                        )}...`,
-                    )
-                    log.info(
-                        `[DTR RetryService] Transaction ${txHash} successfully relayed after ${
-                            currentAttempts + 1
-                        } attempts`,
+                        )}... after ${currentAttempts + 1} attempts`,
                     )
 
                     // Remove from local mempool since it's now in validator's mempool
@@ -362,14 +350,14 @@ export class DTRManager {
                     return // Success!
                 }
 
-                console.log(
+                log.debug(
                     `[DTR RetryService] Validator ${validator.identity.substring(
                         0,
                         8,
                     )}... rejected ${txHash}: ${result.response}`,
                 )
             } catch (error: any) {
-                console.log(
+                log.debug(
                     `[DTR RetryService] Validator ${validator.identity.substring(
                         0,
                         8,
@@ -381,7 +369,7 @@ export class DTRManager {
 
         // All validators failed, increment attempt count
         this.retryAttempts.set(txHash, currentAttempts + 1)
-        console.log(
+        log.debug(
             `[DTR RetryService] Attempt ${currentAttempts + 1}/${
                 this.maxRetryAttempts
             } failed for ${txHash}`,

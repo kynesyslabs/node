@@ -3,7 +3,12 @@ import { GCREdit } from "node_modules/@kynesyslabs/demosdk/build/types/blockchai
 import { Transaction } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/Transaction"
 import { INativePayload } from "node_modules/@kynesyslabs/demosdk/build/types/native"
 import log from "src/utilities/logger"
-import { extractDomain, getToken, markStored, TokenStatus } from "@/features/tlsnotary/tokenManager"
+import {
+    extractDomain,
+    getToken,
+    markStored,
+    TokenStatus,
+} from "@/features/tlsnotary/tokenManager"
 
 // REVIEW: TLSNotary native operation pricing (1 DEM = 1 unit, no decimals)
 const TLSN_REQUEST_FEE = 1
@@ -12,11 +17,15 @@ const TLSN_STORE_PER_KB_FEE = 1
 
 // NOTE This class is responsible for handling native operations such as sending native tokens, etc.
 export class HandleNativeOperations {
-    static async handle(tx: Transaction, isRollback = false): Promise<GCREdit[]> {
+    static async handle(
+        tx: Transaction,
+        isRollback = false,
+    ): Promise<GCREdit[]> {
         // TODO Implement this
         const edits: GCREdit[] = []
         log.debug("handleNativeOperations: " + tx.content.type)
-        const nativePayloadData: ["native", INativePayload] = tx.content.data as ["native", INativePayload] // ? Is this typization correct and safe?
+        const nativePayloadData: ["native", INativePayload] = tx.content
+            .data as ["native", INativePayload] // ? Is this typization correct and safe?
         const nativePayload: INativePayload = nativePayloadData[1]
         log.debug("nativePayload: " + JSON.stringify(nativePayload))
         log.debug("nativeOperation: " + nativePayload.nativeOperation)
@@ -52,14 +61,18 @@ export class HandleNativeOperations {
             // REVIEW: TLSNotary attestation request - burns 1 DEM fee, creates token
             case "tlsn_request": {
                 const [targetUrl] = nativePayload.args as [string]
-                log.info(`[TLSNotary] Processing tlsn_request for ${targetUrl} from ${tx.content.from}`)
+                log.info(
+                    `[TLSNotary] Processing tlsn_request for ${targetUrl} from ${tx.content.from}`,
+                )
 
                 // Validate URL format
                 try {
                     extractDomain(targetUrl) // Validates URL format
                     log.debug(`[TLSNotary] URL validated: ${targetUrl}`)
                 } catch {
-                    log.error(`[TLSNotary] Invalid URL in tlsn_request: ${targetUrl}`)
+                    log.error(
+                        `[TLSNotary] Invalid URL in tlsn_request: ${targetUrl}`,
+                    )
                     throw new Error("Invalid URL in tlsn_request")
                 }
 
@@ -82,7 +95,9 @@ export class HandleNativeOperations {
             // REVIEW: TLSNotary proof storage - burns fee based on size, stores proof
             case "tlsn_store": {
                 const [tokenId, proof, storageType] = nativePayload.args
-                log.info(`[TLSNotary] Processing tlsn_store for token ${tokenId}, storage: ${storageType}`)
+                log.info(
+                    `[TLSNotary] Processing tlsn_store for token ${tokenId}, storage: ${storageType}`,
+                )
 
                 // Validate token exists and belongs to sender
                 const token = getToken(tokenId)
@@ -91,12 +106,19 @@ export class HandleNativeOperations {
                     throw new Error("Token not found")
                 }
                 if (token.owner !== tx.content.from) {
-                    log.error(`[TLSNotary] Token owner mismatch: ${token.owner} !== ${tx.content.from}`)
+                    log.error(
+                        `[TLSNotary] Token owner mismatch: ${token.owner} !== ${tx.content.from}`,
+                    )
                     throw new Error("Token owner mismatch")
                 }
                 // Token should be completed (attestation done) or active (in progress)
-                if (token.status !== TokenStatus.COMPLETED && token.status !== TokenStatus.ACTIVE) {
-                    log.error(`[TLSNotary] Token not ready for storage: ${token.status}`)
+                if (
+                    token.status !== TokenStatus.COMPLETED &&
+                    token.status !== TokenStatus.ACTIVE
+                ) {
+                    log.error(
+                        `[TLSNotary] Token not ready for storage: ${token.status}`,
+                    )
                     throw new Error("Token not ready for storage")
                 }
 
@@ -107,8 +129,11 @@ export class HandleNativeOperations {
                         : (proof as Uint8Array).byteLength
 
                 const proofSizeKB = Math.ceil(proofBytes / 1024)
-                const storageFee = TLSN_STORE_BASE_FEE + (proofSizeKB * TLSN_STORE_PER_KB_FEE)
-                log.info(`[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} DEM`)
+                const storageFee =
+                    TLSN_STORE_BASE_FEE + proofSizeKB * TLSN_STORE_PER_KB_FEE
+                log.info(
+                    `[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} DEM`,
+                )
 
                 // Burn the storage fee
                 const burnStorageFeeEdit: GCREdit = {
@@ -150,7 +175,10 @@ export class HandleNativeOperations {
             default: {
                 // Log unknown operations - INativePayload may have more operations than handled here
                 // Cast needed because TypeScript narrows to never after exhaustive switch
-                log.warning("Unknown native operation: " + (nativePayload as INativePayload).nativeOperation)
+                log.warning(
+                    "Unknown native operation: " +
+                        (nativePayload as INativePayload).nativeOperation,
+                )
                 break
             }
         }
@@ -158,4 +186,3 @@ export class HandleNativeOperations {
         return edits
     }
 }
-

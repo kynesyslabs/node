@@ -1,46 +1,25 @@
 import axios, { AxiosInstance } from "axios"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
+import {
+    HumanPassportVerification,
+    RawScoreResponse,
+    CachedScore,
+} from "./types"
+import {
+    HUMAN_PASSPORT_CACHE_TTL_MS,
+    HUMAN_PASSPORT_API_TIMEOUT_MS,
+    HUMAN_PASSPORT_DEFAULT_HUMAN_THRESHOLD,
+    HUMAN_PASSPORT_DEFAULT_SCORE,
+    HUMAN_PASSPORT_DEFAULT_THRESHOLD,
+} from "./constants"
 
-/**
- * Human Passport score verification result
- */
-export interface HumanPassportVerification {
-    address: string
-    score: number
-    passingScore: boolean
-    threshold: number
-    stamps: string[]
-    lastScoreTimestamp: string
-    expirationTimestamp: string | null
-    verifiedAt: number
-}
+// backward-compatible re-export
+export type { HumanPassportVerification } from "./types"
 
-/**
- * Raw API response from Human Passport
- */
-interface RawScoreResponse {
-    address: string
-    score: string
-    passing_score: boolean
-    last_score_timestamp: string
-    expiration_timestamp: string | null
-    threshold: string
-    error: string | null
-    stamps: Record<string, any>
-}
-
-/**
- * Cache entry for passport scores
- */
-interface CachedScore {
-    data: HumanPassportVerification
-    fetchedAt: number
-}
-
-const DEFAULT_BASE_URL = process.env.HUMAN_PASSPORT_API_URL || "https://api.passport.xyz"
-const DEFAULT_SCORER_ID = process.env.HUMAN_PASSPORT_SCORER_ID || ""
-const DEFAULT_API_KEY = process.env.HUMAN_PASSPORT_API_KEY || ""
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+const DEFAULT_BASE_URL = Config.getInstance().identity.humanPassportApiUrl
+const DEFAULT_SCORER_ID = Config.getInstance().identity.humanPassportScorerId
+const DEFAULT_API_KEY = Config.getInstance().identity.humanPassportApiKey
 
 /**
  * Human Passport API Client for Node
@@ -67,7 +46,7 @@ export class HumanPassportProvider {
 
         this.http = axios.create({
             baseURL: DEFAULT_BASE_URL,
-            timeout: 30000,
+            timeout: HUMAN_PASSPORT_API_TIMEOUT_MS,
             headers: {
                 "X-API-KEY": DEFAULT_API_KEY,
                 "Content-Type": "application/json",
@@ -151,7 +130,7 @@ export class HumanPassportProvider {
     /**
      * Check if an address is considered human (score >= threshold)
      */
-    async isHuman(address: string, threshold = 20): Promise<boolean> {
+    async isHuman(address: string, threshold = HUMAN_PASSPORT_DEFAULT_HUMAN_THRESHOLD): Promise<boolean> {
         try {
             const verification = await this.verifyAddress(address)
             return verification.score >= threshold
@@ -194,7 +173,7 @@ export class HumanPassportProvider {
         if (!cached) return null
 
         // Check if expired
-        if (Date.now() - cached.fetchedAt > CACHE_TTL_MS) {
+        if (Date.now() - cached.fetchedAt > HUMAN_PASSPORT_CACHE_TTL_MS) {
             this.cache.delete(address)
             return null
         }
@@ -218,9 +197,9 @@ export class HumanPassportProvider {
     private transformResponse(data: RawScoreResponse): HumanPassportVerification {
         return {
             address: data.address,
-            score: parseFloat(data.score) || 0,
+            score: parseFloat(data.score) || HUMAN_PASSPORT_DEFAULT_SCORE,
             passingScore: data.passing_score,
-            threshold: parseFloat(data.threshold) || 20,
+            threshold: parseFloat(data.threshold) || HUMAN_PASSPORT_DEFAULT_THRESHOLD,
             stamps: Object.keys(data.stamps || {}),
             lastScoreTimestamp: data.last_score_timestamp,
             expirationTimestamp: data.expiration_timestamp,

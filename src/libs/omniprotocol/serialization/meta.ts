@@ -11,7 +11,9 @@ export interface VersionNegotiateResponse {
     negotiatedVersion: number
 }
 
-export function decodeVersionNegotiateRequest(buffer: Buffer): VersionNegotiateRequest {
+export function decodeVersionNegotiateRequest(
+    buffer: Buffer,
+): VersionNegotiateRequest {
     let offset = 0
     const min = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += min.bytesRead
@@ -36,7 +38,9 @@ export function decodeVersionNegotiateRequest(buffer: Buffer): VersionNegotiateR
     }
 }
 
-export function encodeVersionNegotiateResponse(payload: VersionNegotiateResponse): Buffer {
+export function encodeVersionNegotiateResponse(
+    payload: VersionNegotiateResponse,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeUInt16(payload.negotiatedVersion),
@@ -58,7 +62,9 @@ export interface CapabilityExchangeResponse {
     features: CapabilityDescriptor[]
 }
 
-export function decodeCapabilityExchangeRequest(buffer: Buffer): CapabilityExchangeRequest {
+export function decodeCapabilityExchangeRequest(
+    buffer: Buffer,
+): CapabilityExchangeRequest {
     let offset = 0
     const count = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += count.bytesRead
@@ -84,7 +90,9 @@ export function decodeCapabilityExchangeRequest(buffer: Buffer): CapabilityExcha
     return { features }
 }
 
-export function encodeCapabilityExchangeResponse(payload: CapabilityExchangeResponse): Buffer {
+export function encodeCapabilityExchangeResponse(
+    payload: CapabilityExchangeResponse,
+): Buffer {
     const parts: Buffer[] = []
     parts.push(PrimitiveEncoder.encodeUInt16(payload.status))
     parts.push(PrimitiveEncoder.encodeUInt16(payload.features.length))
@@ -138,7 +146,9 @@ export interface ProtocolPingResponse {
     timestamp: bigint
 }
 
-export function encodeProtocolPingResponse(payload: ProtocolPingResponse): Buffer {
+export function encodeProtocolPingResponse(
+    payload: ProtocolPingResponse,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeUInt64(payload.timestamp),
@@ -150,7 +160,9 @@ export interface ProtocolDisconnectPayload {
     message: string
 }
 
-export function decodeProtocolDisconnect(buffer: Buffer): ProtocolDisconnectPayload {
+export function decodeProtocolDisconnect(
+    buffer: Buffer,
+): ProtocolDisconnectPayload {
     let offset = 0
     const reason = PrimitiveDecoder.decodeUInt8(buffer, offset)
     offset += reason.bytesRead
@@ -164,7 +176,9 @@ export function decodeProtocolDisconnect(buffer: Buffer): ProtocolDisconnectPayl
     }
 }
 
-export function encodeProtocolDisconnect(payload: ProtocolDisconnectPayload): Buffer {
+export function encodeProtocolDisconnect(
+    payload: ProtocolDisconnectPayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt8(payload.reason),
         PrimitiveEncoder.encodeString(payload.message ?? ""),

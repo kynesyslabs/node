@@ -42,13 +42,15 @@ export default async function executeNativeTransaction(
     if (transaction.content.amount > 0) {
         let operation: Operation
         // Handle both string and Buffer types for from/to fields
-        const sender = typeof transaction.content.from === "string"
-            ? transaction.content.from
-            : forgeToHex(transaction.content.from)
+        const sender =
+            typeof transaction.content.from === "string"
+                ? transaction.content.from
+                : forgeToHex(transaction.content.from)
         const senderBalance = await GCR.getGCRNativeBalance(sender)
-        const receiver = typeof transaction.content.to === "string"
-            ? transaction.content.to
-            : forgeToHex(transaction.content.to)
+        const receiver =
+            typeof transaction.content.to === "string"
+                ? transaction.content.to
+                : forgeToHex(transaction.content.to)
         const receiverBalance = await GCR.getGCRNativeBalance(receiver)
         // Refuse transaction if GCR is not in shape
         if (senderBalance < transaction.content.amount) {

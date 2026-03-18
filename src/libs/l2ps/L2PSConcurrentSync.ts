@@ -59,12 +59,14 @@ export async function discoverL2PSParticipants(peers: Peer[], l2psUids?: string[
                         log.debug(`[L2PS-SYNC] Discovered participant for ${uid}: ${peer.identity}`)
 
                         // Opportunistic sync after discovery
-                        syncL2PSWithPeer(peer, uid).catch(() => {
+                        syncL2PSWithPeer(peer, uid).catch((err) => {
                             // Non-critical: sync will be retried later
+                            log.debug(`[L2PS-SYNC] Opportunistic sync failed for ${uid}: ${err instanceof Error ? err.message : String(err)}`)
                         })
                     }
-                }).catch(() => {
-                    // Ignore errors during discovery
+                }).catch((err) => {
+                    // Discovery errors are non-critical, peer may be unreachable
+                    log.debug(`[L2PS-SYNC] Discovery failed for peer: ${err instanceof Error ? err.message : String(err)}`)
                 })
 
                 discoveryPromises.push(promise)

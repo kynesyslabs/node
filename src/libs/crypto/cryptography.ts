@@ -193,7 +193,10 @@ export default class Cryptography {
             const seed = md.digest().toHex()
             const pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
-            const keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
+            const keys = forge.pki.rsa.generateKeyPair({
+                bits: 4096,
+                prng: pnrg,
+            })
             return keys
         },
 

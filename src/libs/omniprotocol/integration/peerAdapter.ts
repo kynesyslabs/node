@@ -6,6 +6,7 @@
  */
 
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Peer, { CallOptions } from "src/libs/peer/Peer"
 
@@ -99,6 +100,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
+            handleError(error, "NETWORK", { source: "OmniProtocol PeerAdapter.adaptCall" })
             // Check for fatal mode - will exit if OMNI_FATAL=true
             this.handleFatalError(
                 error,

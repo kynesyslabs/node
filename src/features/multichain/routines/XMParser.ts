@@ -106,7 +106,15 @@ class XMParser {
 
             chainID = parseInt(operation.subchain, 10)
             if (isNaN(chainID)) {
-                chainID = chainIds[operation.chain][operation.subchain]
+                const chainConfig = chainIds[operation.chain]
+                if (!chainConfig) {
+                    return {
+                        result: "error",
+                        error: "Invalid chain or subchain",
+                    }
+                }
+
+                chainID = chainConfig[operation.subchain]
                 if (isNaN(chainID)) {
                     return {
                         result: "error",

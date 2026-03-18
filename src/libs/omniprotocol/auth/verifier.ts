@@ -1,6 +1,11 @@
 import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
-import { AuthBlock, SignatureAlgorithm, SignatureMode, VerificationResult } from "./types"
+import {
+    AuthBlock,
+    SignatureAlgorithm,
+    SignatureMode,
+    VerificationResult,
+} from "./types"
 import type { OmniMessageHeader } from "../types/message"
 import log from "src/utilities/logger"
 
@@ -73,7 +78,9 @@ export class SignatureVerifier {
     /**
      * Check if algorithm is supported
      */
-    private static isSupportedAlgorithm(algorithm: SignatureAlgorithm): boolean {
+    private static isSupportedAlgorithm(
+        algorithm: SignatureAlgorithm,
+    ): boolean {
         // Currently only Ed25519 is fully implemented
         return algorithm === SignatureAlgorithm.ED25519
     }
@@ -150,11 +157,15 @@ export class SignatureVerifier {
                 return await this.verifyEd25519(publicKey, data, signature)
 
             case SignatureAlgorithm.FALCON:
-                log.warning("[SignatureVerifier] Falcon signature verification not yet implemented")
+                log.warning(
+                    "[SignatureVerifier] Falcon signature verification not yet implemented",
+                )
                 return false
 
             case SignatureAlgorithm.ML_DSA:
-                log.warning("[SignatureVerifier] ML-DSA signature verification not yet implemented")
+                log.warning(
+                    "[SignatureVerifier] ML-DSA signature verification not yet implemented",
+                )
                 return false
 
             default:
@@ -173,12 +184,16 @@ export class SignatureVerifier {
         try {
             // Validate key and signature lengths
             if (publicKey.length !== 32) {
-                log.error(`[SignatureVerifier] Invalid Ed25519 public key length: ${publicKey.length}`)
+                log.error(
+                    `[SignatureVerifier] Invalid Ed25519 public key length: ${publicKey.length}`,
+                )
                 return false
             }
 
             if (signature.length !== 64) {
-                log.error(`[SignatureVerifier] Invalid Ed25519 signature length: ${signature.length}`)
+                log.error(
+                    `[SignatureVerifier] Invalid Ed25519 signature length: ${signature.length}`,
+                )
                 return false
             }
 
@@ -190,7 +205,9 @@ export class SignatureVerifier {
             })
             return valid
         } catch (error) {
-            log.error("[SignatureVerifier] Ed25519 verification error: " + error)
+            log.error(
+                "[SignatureVerifier] Ed25519 verification error: " + error,
+            )
             return false
         }
     }

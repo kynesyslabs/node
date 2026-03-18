@@ -140,11 +140,9 @@ export class MetricsService {
         // === Network Metrics ===
         this.createGauge("peers_connected", "Currently connected peers", [])
         this.createGauge("peers_total", "Total known peers", [])
-        this.createCounter(
-            "messages_sent_total",
-            "Total messages sent",
-            ["type"],
-        )
+        this.createCounter("messages_sent_total", "Total messages sent", [
+            "type",
+        ])
         this.createCounter(
             "messages_received_total",
             "Total messages received",
@@ -179,40 +177,34 @@ export class MetricsService {
         )
 
         // === API Metrics ===
-        this.createCounter(
-            "api_requests_total",
-            "Total API requests",
-            ["method", "endpoint", "status_code"],
-        )
+        this.createCounter("api_requests_total", "Total API requests", [
+            "method",
+            "endpoint",
+            "status_code",
+        ])
         this.createHistogram(
             "api_request_duration_seconds",
             "API request duration",
             ["method", "endpoint"],
             [0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
         )
-        this.createCounter(
-            "api_errors_total",
-            "Total API errors",
-            ["method", "endpoint", "error_code"],
-        )
+        this.createCounter("api_errors_total", "Total API errors", [
+            "method",
+            "endpoint",
+            "error_code",
+        ])
 
         // === IPFS Metrics ===
         this.createGauge("ipfs_pins_total", "Total pinned content items", [])
         this.createGauge("ipfs_storage_bytes", "Total IPFS storage used", [])
         this.createGauge("ipfs_peers", "Connected IPFS swarm peers", [])
-        this.createCounter(
-            "ipfs_operations_total",
-            "Total IPFS operations",
-            ["operation"],
-        )
+        this.createCounter("ipfs_operations_total", "Total IPFS operations", [
+            "operation",
+        ])
 
         // === GCR Metrics ===
         this.createGauge("gcr_accounts_total", "Total accounts in GCR", [])
-        this.createGauge(
-            "gcr_total_supply",
-            "Total native token supply",
-            [],
-        )
+        this.createGauge("gcr_total_supply", "Total native token supply", [])
 
         log.debug("[METRICS] Core metrics registered")
     }
@@ -286,7 +278,9 @@ export class MetricsService {
             name: fullName,
             help,
             labelNames,
-            buckets: buckets ?? [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
+            buckets: buckets ?? [
+                0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10,
+            ],
             registers: [this.registry],
         })
         this.histograms.set(fullName, histogram)

@@ -9,6 +9,13 @@ devnet/identities
 devnet/.env
 devnet/demos_peerlist.json
 devnet/postgres-data
+ipfs
+ipfs_53550
+docker_data
+postgres_*
+logs
+logs_*
+blocked_ips.json
 
 # Exclude unnecessary files
 *.log

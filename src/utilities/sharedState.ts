@@ -16,6 +16,25 @@ import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
+import { Config } from "src/config"
+import {
+    APP_VERSION,
+    APP_VERSION_NAME,
+    DEFAULT_SIGNING_ALGORITHM,
+    DEFAULT_BLOCK_TIME,
+    PEER_RECHECK_INTERVAL_MS,
+    BATCH_SYNC_BLOCK_SIZE,
+    BATCH_SYNC_TX_SIZE,
+    BATCH_SYNC_TX_LIMIT,
+    BATCH_SYNC_BLOCK_LIMIT,
+    RATE_LIMIT_DEFAULT_MAX_REQUESTS,
+    RATE_LIMIT_DEFAULT_WINDOW_MS,
+    RATE_LIMIT_POST_MAX_REQUESTS,
+    RATE_LIMIT_POST_WINDOW_MS,
+    RATE_LIMIT_TX_PER_BLOCK,
+    LOCALHOST_IPS,
+    TWITTER_COOKIE_FILE,
+} from "./constants"
 
 dotenv.config()
 
@@ -23,23 +42,20 @@ export default class SharedState {
     private static instance: SharedState
 
     // !SECTION Constants
-    prod = process.env.PROD == "true" || false
-    version = "0.9.8"
-    version_name = "Oxlong Michael"
-    signingAlgorithm = "ed25519" as SigningAlgorithm
+    prod = Config.getInstance().core.prod
+    version = APP_VERSION
+    version_name = APP_VERSION_NAME
+    signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
-    block_time = 10 // TODO Get it from the genesis (or see Consensus module)
+    block_time = DEFAULT_BLOCK_TIME // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp = 0
     currentUTCTime = 0
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-    shardSize = Number.parseInt(process.env.SHARD_SIZE ?? "4", 10)
-    mainLoopSleepTime = Number.parseInt(
-        process.env.MAIN_LOOP_SLEEP_TIME ?? "1000",
-        10,
-    ) // 1 second
+    shardSize = Config.getInstance().core.shardSize
+    mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
     // NOTE See calibrateTime.ts for this value
     timestampCorrection = 0
@@ -53,7 +69,7 @@ export default class SharedState {
     inSyncLoop = false
     inPeerRecheckLoop = false
     lastPeerRecheck = 0
-    peerRecheckSleepTime = 10_000 // 10 seconds
+    peerRecheckSleepTime = PEER_RECHECK_INTERVAL_MS
     inPeerGossip = false
     startingConsensus = false
     isSignalingServerStarted = false
@@ -68,32 +84,19 @@ export default class SharedState {
         connectionTimeout: 600000, // 10 minutes
         // TLS configuration
         tls: {
-            enabled: process.env.OMNI_TLS_ENABLED === "true",
-            mode:
-                (process.env.OMNI_TLS_MODE as "self-signed" | "ca") ||
-                "self-signed",
-            certPath: process.env.OMNI_CERT_PATH || "./certs/node-cert.pem",
-            keyPath: process.env.OMNI_KEY_PATH || "./certs/node-key.pem",
-            caPath: process.env.OMNI_CA_PATH,
-            minVersion:
-                (process.env.OMNI_TLS_MIN_VERSION as "TLSv1.2" | "TLSv1.3") ||
-                "TLSv1.3",
+            enabled: Config.getInstance().omni.tls.enabled,
+            mode: (Config.getInstance().omni.tls.mode as "self-signed" | "ca") || "self-signed",
+            certPath: Config.getInstance().omni.tls.certPath,
+            keyPath: Config.getInstance().omni.tls.keyPath,
+            caPath: Config.getInstance().omni.tls.caPath,
+            minVersion: (Config.getInstance().omni.tls.minVersion as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
         },
         // Rate limiting configuration
         rateLimit: {
-            enabled: process.env.OMNI_RATE_LIMIT_ENABLED !== "false", // Default true
-            maxConnectionsPerIP: parseInt(
-                process.env.OMNI_MAX_CONNECTIONS_PER_IP || "3",
-                10,
-            ),
-            maxRequestsPerSecondPerIP: parseInt(
-                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP || "200",
-                10,
-            ),
-            maxRequestsPerSecondPerIdentity: parseInt(
-                process.env.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY || "200",
-                10,
-            ),
+            enabled: Config.getInstance().omni.rateLimit.enabled,
+            maxConnectionsPerIP: Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
+            maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 100,
+            maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 200,
             windowMs: 1000,
             entryTTL: 60000,
             cleanupInterval: 10000,
@@ -133,10 +136,10 @@ export default class SharedState {
     _syncStatus = false
 
     // Batch sync configuration
-    batchSyncBlockSize = 100 // Number of blocks to fetch per batch sync request
-    batchSyncTxSize = 100 // Number of transactions to fetch per batch sync request
-    batchSyncTxLimit = 100 // Maximum number of transactions to send back per batch request
-    batchSyncBlockLimit = 100 // Maximum number of blocks to send back per batch request
+    batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
+    batchSyncTxSize = BATCH_SYNC_TX_SIZE
+    batchSyncTxLimit = BATCH_SYNC_TX_LIMIT
+    batchSyncBlockLimit = BATCH_SYNC_BLOCK_LIMIT
 
     set syncStatus(synced: boolean) {
         this._syncStatus = synced
@@ -206,20 +209,20 @@ export default class SharedState {
     }
 
     // SECTION Configuration
-    rpcFee: number = Number.parseInt(process.env.RPC_FEE_PERCENT ?? "10", 10) // TODO Implement // Percentage of the fee to be charged for the rpc
-    serverPort = 53550
-    identityFile: string = process.env.IDENTITY_FILE || ".demos_identity"
-    peerListFile: string = process.env.PEER_LIST_FILE || "demos_peerlist.json"
+    rpcFee: number = Config.getInstance().core.rpcFeePercent
+    serverPort = Config.getInstance().server.serverPort
+    identityFile: string = Config.getInstance().core.identityFile
+    peerListFile: string = Config.getInstance().core.peerListFile
     connectionString: string = "http://localhost:" + this.serverPort
-    exposedUrl: string = process.env.EXPOSED_URL || this.connectionString
-    PROD: boolean = process.env.PROD == "true" || false // ! debug line, set to true to run in prod
-    SUDO_PUBKEY = process.env.SUDO_PUBKEY || null
+    exposedUrl: string = Config.getInstance().core.exposedUrl
+    PROD: boolean = Config.getInstance().core.prod
+    SUDO_PUBKEY = Config.getInstance().core.sudoPubkey
     // ABSTRACTION
-    twitterCookieFile = "twitter_cookies.json"
+    twitterCookieFile = TWITTER_COOKIE_FILE
     // !SECTION Configuration
 
     // TODO The following variables should be in the genesis
-    maxMessageSize = Number.parseInt(process.env.MAX_MESSAGE_SIZE ?? "0", 10) // TODO Implement // 5 GB just for debug purpose
+    maxMessageSize = Config.getInstance().core.maxMessageSize
 
     constructor() {
         this.identity = Identity.getInstance()
@@ -281,14 +284,14 @@ export default class SharedState {
 
     // INFO How many ms for each check of the consensus loop
     public getConsensusCheckStep(): number {
-        return Number(process.env.CONSENSUS_CHECK_INTERVAL)
+        return Config.getInstance().core.consensusCheckInterval
     }
 
     /**
      * @returns The block time in seconds
      */
     public getConsensusTime(): number {
-        return Number(process.env.CONSENSUS_TIME) || this.block_time
+        return Config.getInstance().core.consensusTime || this.block_time
     }
 
     public async getConnectionString(): Promise<string> {
@@ -299,41 +302,19 @@ export default class SharedState {
     // SECTION Rate limiting configuration
     rateLimitConfig = {
         enabled: true,
-        defaultLimit: { maxRequests: 2000, windowMs: 60000 },
+        defaultLimit: { maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS, windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS },
         blockDurationMs: undefined,
-        // INFO: localhost is always whitelisted
         whitelistedIPs: [
-            "127.0.0.1",
-            ...(process.env.WHITELISTED_IPS?.split(",").map(ip => ip.trim()) ||
-                []),
+            ...LOCALHOST_IPS,
+            ...Config.getInstance().core.whitelistedIPs,
         ],
-        // INFO: Public keys that bypass rate limiting (hex format, without algorithm prefix)
         whitelistedKeys: [
-            ...(process.env.WHITELISTED_KEYS?.split(",")
-                .map(key => key.trim())
-                .filter(key => key.length > 0) || []),
+            ...Config.getInstance().core.whitelistedKeys,
         ],
         methodLimits: {
-            // REVIEW: Do we need this?
-            POST: { maxRequests: 200000, windowMs: 86400000 },
-            // INFO: POST method limits per IP address
-            // "nodeCall": { maxRequests: 200, windowMs: 60000 },
-            // "execute": { maxRequests: 1, windowMs: 86400000 },
-            // "login_request": { maxRequests: 5, windowMs: 60000 },
-            // "auth": { maxRequests: 20, windowMs: 60000 },
-            // "ping": { maxRequests: 100, windowMs: 60000 },
-            // "info": { maxRequests: 100, windowMs: 60000 },
-            // "version": { maxRequests: 200, windowMs: 60000 },
-            // "publickey": { maxRequests: 100, windowMs: 60000 },
-            // "connectionstring": { maxRequests: 100, windowMs: 60000 },
-            // "peerlist": { maxRequests: 50, windowMs: 60000 },
-            // "public_logs": { maxRequests: 30, windowMs: 60000 },
-            // "diagnostics": { maxRequests: 20, windowMs: 60000 },
-            // "genesis": { maxRequests: 100, windowMs: 60000 },
-            // "rate_limit_stats": { maxRequests: 50, windowMs: 60000 },
-            // "rate_limit_unblock": { maxRequests: 5, windowMs: 60000 },
+            POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
         },
-        txPerBlock: 4,
+        txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server

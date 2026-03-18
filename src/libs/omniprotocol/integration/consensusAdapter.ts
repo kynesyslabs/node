@@ -22,7 +22,10 @@ import {
     GreenlightResponsePayload,
     ProposeBlockHashResponsePayload,
 } from "../serialization/consensus"
-import { encodeNodeCallRequest, decodeNodeCallResponse } from "../serialization/control"
+import {
+    encodeNodeCallRequest,
+    decodeNodeCallResponse,
+} from "../serialization/control"
 
 export type ConsensusAdapterOptions = BaseAdapterOptions
 

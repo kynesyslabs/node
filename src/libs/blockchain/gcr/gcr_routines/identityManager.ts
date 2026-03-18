@@ -24,6 +24,11 @@ import { CrossChainTools } from "@/libs/identity/tools/crosschain"
 import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
+import { verifyMessage as verifyEvmMessage } from "ethers"
+
+function normalizeComparableAddress(address: string | undefined | null): string {
+    return (address || "").trim().toLowerCase()
+}
 
 /*
  * Example of a payload for the gcr_routine method
@@ -218,6 +223,14 @@ export default class IdentityManager {
                     signature,
                     publicKey,
                 )
+            } else if (chainId === "evm") {
+                const recoveredAddress = verifyEvmMessage(
+                    signedData,
+                    signature,
+                )
+                messageVerified =
+                    normalizeComparableAddress(recoveredAddress) ===
+                    normalizeComparableAddress(targetAddress)
             } else {
                 messageVerified = await sdk.verifyMessage(
                     signedData,

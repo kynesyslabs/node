@@ -63,16 +63,16 @@ export class RateLimiter {
 
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {
-            // Block IP for 1 minute
+            // Block IP for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
 
             return {
                 allowed: false,
                 reason: `[${callerName}] too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -175,16 +175,16 @@ export class RateLimiter {
 
         // Check if limit exceeded
         if (entry.timestamps.length >= maxRequests) {
-            // Block for 1 minute
+            // Block for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
 
             return {
                 allowed: false,
                 reason: `Rate limit exceeded for ${type} (max ${maxRequests} requests per second)`,
                 currentCount: entry.timestamps.length,
                 limit: maxRequests,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -295,7 +295,7 @@ export class RateLimiter {
     /**
      * Manually block an IP or identity
      */
-    blockKey(key: string, type: RateLimitType, durationMs = 3600000): void {
+    blockKey(key: string, type: RateLimitType, durationMs = DEFAULT_MANUAL_BLOCK_DURATION_MS): void {
         const entry = this.getOrCreateEntry(key, type)
         entry.blocked = true
         entry.blockExpiry = Date.now() + durationMs
