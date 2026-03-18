@@ -37,7 +37,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
     }
 
     const res = await verifiedPeer.call(request)
-    log.only("[BOOTSTRAP] Genesis data hash: " + JSON.stringify(res))
+    log.debug("[BOOTSTRAP] Our Genesis data hash: " + JSON.stringify(res))
 
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
@@ -50,7 +50,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     " Got: " +
                     peerGenesisDataHash,
             )
-            log.only(
+            log.debug(
                 "[BOOTSTRAP] Fetching new genesis data from peer: " +
                     verifiedPeer.connection.string,
             )
@@ -80,13 +80,8 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     process.exit(1)
                 }
 
-                log.only(
+                log.debug(
                     "[BOOTSTRAP] Downloaded genesis data with hash: " +
-                        ourNewGenesisDataHash,
-                )
-
-                log.only(
-                    "[BOOTSTRAP] Updated genesis data to match peer's hash: " +
                         ourNewGenesisDataHash,
                 )
 
@@ -123,12 +118,12 @@ async function tryConnectPeer(peer: Peer) {
         return
     }
 
-    log.only("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
+    log.debug("[BOOTSTRAP] Attempting connection to: " + peer.connection.string)
     // ANCHOR Extract peer info from the string
     // If there is a : in the url, we assume it's a address + port
     const currentPeerUrl: string = peer.connection.string
     const currentPublicKey: string = peer.identity
-    log.only(
+    log.debug(
         "[BOOTSTRAP] Testing " +
             currentPeerUrl +
             " with id " +
@@ -137,7 +132,7 @@ async function tryConnectPeer(peer: Peer) {
     // ANCHOR Connection test and hello_peer routine
     const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
     // Adding identity if any
-    log.only("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
+    log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
     // After this, the peer object will have an identity and thus will be verified
     const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
     if (!verifiedPeer) {
@@ -149,9 +144,6 @@ async function tryConnectPeer(peer: Peer) {
         return
     }
 
-    log.only("[BOOTSTRAP] Overriding connection string: " + currentPeerUrl)
-    log.only("[BOOTSTRAP] Verified peer: " + JSON.stringify(verifiedPeer))
-
     try {
         verifiedPeer.connection.string = currentPeerUrl // Adding this step
     } catch (error) {
@@ -160,10 +152,6 @@ async function tryConnectPeer(peer: Peer) {
         return
     }
     log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
-
-    log.only(
-        "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
-    )
 
     try {
         await ensureGenesisDataMatch(verifiedPeer)
@@ -210,7 +198,6 @@ export default async function peerBootstrap(
     const genesisFile = "data/genesis.json"
     const genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
     ourGenesisDataHash = Hashing.sha256(JSON.stringify(genesisData))
-    log.only("[BOOTSTRAP] Our genesis data hash: " + ourGenesisDataHash)
 
     // Validity check
     for (const peer of localList) {

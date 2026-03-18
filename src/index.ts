@@ -808,22 +808,22 @@ async function main() {
 
         // Start L2PS hash generation service (for L2PS participating nodes)
         // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        // if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
-        //     try {
-        //         const l2psHashService = L2PSHashService.getInstance()
-        //         await l2psHashService.start()
-        //         console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+            try {
+                const l2psHashService = L2PSHashService.getInstance()
+                await l2psHashService.start()
+                console.log(`[L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
 
-        //         // Start L2PS batch aggregator (batches transactions and submits to main mempool)
-        //         const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
-        //         await l2psBatchAggregator.start()
-        //         console.log("[L2PS] Batch aggregator service started")
-        //     } catch (error) {
-        //         console.error("[L2PS] Failed to start L2PS services:", error)
-        //     }
-        // } else {
-        //     console.log("[L2PS] No L2PS networks joined, L2PS services not started")
-        // }
+                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+                await l2psBatchAggregator.start()
+                console.log("[L2PS] Batch aggregator service started")
+            } catch (error) {
+                console.error("[L2PS] Failed to start L2PS services:", error)
+            }
+        } else {
+            console.log("[L2PS] No L2PS networks joined, L2PS services not started")
+        }
     }
 }
 
