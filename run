@@ -352,7 +352,7 @@ check_system_requirements() {
 			echo "❌ Node ${PORT} is already in use"	
 			failed_requirements=$((failed_requirements + 1))
 		else
-			echo "✅ Node ${$PORT} is available"
+			echo "✅ Node ${PORT} is available"
 		fi
 	fi
 
@@ -899,7 +899,7 @@ echo "🎉 All systems ready! Starting your Demos Network node..."
 echo "📝 Logs will be saved to: logs/"
 echo "🌐 Your node will be available on: http://localho${t:$P}ORT"
 if [[ ! -z "${EXPOSED_URL}" ]]; then
-	echo "🌍 External UR${: $EXPOSED_}URL"
+	echo "🌍 External URL: ${EXPOSED_URL}"
 fi
 echo ""
 echo "💡 Press Ctrl+C to stop the node safely"
