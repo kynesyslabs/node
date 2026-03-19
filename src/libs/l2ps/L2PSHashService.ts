@@ -124,13 +124,7 @@ export class L2PSHashService {
 
         // Initialize OmniProtocol connection pool if enabled
         if (this.omniEnabled) {
-            this.connectionPool = new ConnectionPool({
-                maxTotalConnections: HASH_RELAY_MAX_TOTAL_CONNECTIONS,
-                maxConnectionsPerPeer: HASH_RELAY_MAX_CONNECTIONS_PER_PEER,
-                idleTimeout: HASH_RELAY_IDLE_TIMEOUT_MS,
-                connectTimeout: HASH_RELAY_CONNECT_TIMEOUT_MS,
-                authTimeout: HASH_RELAY_AUTH_TIMEOUT_MS,
-            })
+            this.connectionPool = ConnectionPool.getInstance()
             log.info("[L2PS Hash Service] OmniProtocol enabled for hash relay")
         }
 

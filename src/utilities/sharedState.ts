@@ -15,6 +15,7 @@ import type { MigrationMode } from "src/libs/omniprotocol/types/config"
 import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
+import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
 import { Config } from "src/config"
 import {
     APP_VERSION,
@@ -75,6 +76,33 @@ export default class SharedState {
     isMCPServerStarted = false
     isOmniProtocolEnabled = true
 
+    omniConfig: OmniServerConfig = {
+        enabled: true,
+        port: 0, // Will be from indexState during startup
+        maxConnections: 1000,
+        authTimeout: 5000,
+        connectionTimeout: 600000, // 10 minutes
+        // TLS configuration
+        tls: {
+            enabled: Config.getInstance().omni.tls.enabled,
+            mode: (Config.getInstance().omni.tls.mode as "self-signed" | "ca") || "self-signed",
+            certPath: Config.getInstance().omni.tls.certPath,
+            keyPath: Config.getInstance().omni.tls.keyPath,
+            caPath: Config.getInstance().omni.tls.caPath,
+            minVersion: (Config.getInstance().omni.tls.minVersion as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
+        },
+        // Rate limiting configuration
+        rateLimit: {
+            enabled: Config.getInstance().omni.rateLimit.enabled,
+            maxConnectionsPerIP: Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
+            maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 100,
+            maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 200,
+            windowMs: 1000,
+            entryTTL: 60000,
+            cleanupInterval: 10000,
+        },
+    }
+
     // OmniProtocol adapter for peer communication
     private _omniAdapter: PeerOmniAdapter | null = null
 
@@ -131,7 +159,7 @@ export default class SharedState {
 
     // SECTION L2PS
     l2psJoinedUids: string[] = [] // UIDs of the L2PS networks that are joined to the node (loaded from the data directory)
-    l2psBatchNonce: number = 0 // Persistent nonce for L2PS batch transactions
+    l2psBatchNonce = 0 // Persistent nonce for L2PS batch transactions
 
     // SECTION shared state variables
     shard: Peer[]
@@ -139,13 +167,13 @@ export default class SharedState {
     identity: Identity
     keypair: {
         publicKey:
-        | Uint8Array
-        | forge.pki.rsa.PublicKey
-        | forge.pki.ed25519.NativeBuffer
+            | Uint8Array
+            | forge.pki.rsa.PublicKey
+            | forge.pki.ed25519.NativeBuffer
         privateKey:
-        | Uint8Array
-        | forge.pki.rsa.PrivateKey
-        | forge.pki.ed25519.NativeBuffer
+            | Uint8Array
+            | forge.pki.rsa.PrivateKey
+            | forge.pki.ed25519.NativeBuffer
         genKey?: Uint8Array
     }
     get publicKeyHex(): string {

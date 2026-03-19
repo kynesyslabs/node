@@ -153,9 +153,10 @@ export class TLSServer extends EventEmitter {
         const ipAddress = socket.remoteAddress || "unknown"
 
         log.debug(`[TLSServer] New TLS connection from ${remoteAddress}`)
-
-        // Check rate limits for IP
-        const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
+        const rateLimitResult = this.rateLimiter.checkConnection(
+            ipAddress,
+            "TLSServer",
+        )
         if (!rateLimitResult.allowed) {
             log.warning(
                 `[TLSServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
@@ -212,7 +213,10 @@ export class TLSServer extends EventEmitter {
                 }
 
                 log.debug(
-                    `[TLSServer] Verified trusted certificate: ${fingerprint.substring(0, 16)}...`,
+                    `[TLSServer] Verified trusted certificate: ${fingerprint.substring(
+                        0,
+                        16,
+                    )}...`,
                 )
             }
         }
@@ -238,7 +242,9 @@ export class TLSServer extends EventEmitter {
         const protocol = socket.getProtocol()
         const cipher = socket.getCipher()
         log.debug(
-            `[TLSServer] TLS ${protocol} with ${cipher?.name || "unknown cipher"}`,
+            `[TLSServer] TLS ${protocol} with ${
+                cipher?.name || "unknown cipher"
+            }`,
         )
 
         // Register connection with rate limiter
@@ -295,7 +301,10 @@ export class TLSServer extends EventEmitter {
     addTrustedFingerprint(peerIdentity: string, fingerprint: string): void {
         this.trustedFingerprints.set(peerIdentity, fingerprint)
         log.debug(
-            `[TLSServer] Added trusted fingerprint for ${peerIdentity}: ${fingerprint.substring(0, 16)}...`,
+            `[TLSServer] Added trusted fingerprint for ${peerIdentity}: ${fingerprint.substring(
+                0,
+                16,
+            )}...`,
         )
     }
 

@@ -13,7 +13,6 @@ export interface ServerConfig {
     rpcSignalingPort: number
     mcpServerPort: number
     rpcMcpPort: number
-    omniPort: number
 }
 
 // --- Database (PostgreSQL) ---

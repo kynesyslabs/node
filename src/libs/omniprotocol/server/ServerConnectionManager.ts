@@ -13,10 +13,17 @@ export interface ConnectionManagerConfig {
 }
 
 /**
+ * @deprecated ServerConnectionManager is deprecated and will be removed in a future version.
+ * Use ConnectionPool from ../transport/ConnectionPool instead, which provides unified
+ * management for both inbound and outbound connections with bidirectional support.
+ *
+ * Migration: OmniProtocolServer now uses ConnectionPool.handleInboundSocket() directly.
+ * The ConnectionPool serves as the single source of truth for all peer connections.
+ *
  * ServerConnectionManager manages lifecycle of all inbound connections
  */
 export class ServerConnectionManager extends EventEmitter {
-    private connections: Map<string, InboundConnection> = new Map()
+    public connections: Map<string, InboundConnection> = new Map()
     private config: ConnectionManagerConfig
     private cleanupTimer: NodeJS.Timeout | null = null
     private rateLimiter?: RateLimiter
@@ -129,6 +136,17 @@ export class ServerConnectionManager extends EventEmitter {
 
         this.connections.delete(connectionId)
         this.emit("connection_removed", connectionId)
+    }
+
+    /**
+     * Get authenticated connection count by IP address
+     */
+    public getConnectionCountByIp(address: string) {
+        return Array.from(this.connections.values()).filter(
+            conn =>
+                conn.socket.remoteAddress === address &&
+                conn.getState() === "AUTHENTICATED",
+        ).length
     }
 
     /**

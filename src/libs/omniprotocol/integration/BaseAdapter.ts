@@ -19,6 +19,7 @@ import {
 import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
+import { RateLimiter } from "../ratelimit"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
@@ -48,14 +49,10 @@ export abstract class BaseOmniAdapter {
     constructor(options: BaseAdapterOptions = {}) {
         this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
 
-        // Initialize ConnectionPool with configuration
-        this.connectionPool = new ConnectionPool({
-            maxTotalConnections: this.config.pool.maxTotalConnections,
-            maxConnectionsPerPeer: this.config.pool.maxConnectionsPerPeer,
-            idleTimeout: this.config.pool.idleTimeout,
-            connectTimeout: this.config.pool.connectTimeout,
-            authTimeout: this.config.pool.authTimeout,
-        })
+        // Initialize ConnectionPool with RateLimiter
+        this.connectionPool = ConnectionPool.getInstance(
+            RateLimiter.getInstance(),
+        )
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -182,12 +179,12 @@ export abstract class BaseOmniAdapter {
     // Connection Pool Access
     // ─────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Get the underlying connection pool for direct access
-     */
-    protected getConnectionPool(): ConnectionPool {
-        return this.connectionPool
-    }
+    // /**
+    //  * Get the underlying connection pool for direct access
+    //  */
+    // protected getConnectionPool(): ConnectionPool {
+    //     return this.connectionPool
+    // }
 
     /**
      * Get connection pool statistics

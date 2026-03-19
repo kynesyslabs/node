@@ -7,8 +7,8 @@ NO_TUI=false
 EXTERNAL_DB=false
 
 GIT_PULL=true
-TLSNOTARY_DISABLED=false
-MONITORING_DISABLED=false
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -343,7 +343,7 @@ check_system_requirements() {
 					echo "✅ PostgreSQL ${PG_PORT} is now available (stopped leftover container)"
 				fi
 			else
-				echo "✅ PostgreSQL ${$PG_PORT} is available"
+				echo "✅ PostgreSQL ${PG_PORT} is available"
 			fi
 		fi
 
