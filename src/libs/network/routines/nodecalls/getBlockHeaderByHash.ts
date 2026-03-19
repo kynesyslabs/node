@@ -12,6 +12,5 @@ export default async function getBlockHeaderByHash(data: any) {
     log.debug("[CHAIN.ts] Received reply from the database: extracting header")
     // FIXME Implement the extraction of the header
     // response = response.getHeader()
-    //console.log(response)
     return { response, extra }
 }

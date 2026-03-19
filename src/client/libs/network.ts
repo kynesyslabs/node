@@ -1,4 +1,5 @@
 import * as socket_client from "socket.io-client"
+import log from "@/utilities/logger"
 
 export default class Network {
     static async rpcConnect(
@@ -9,20 +10,21 @@ export default class Network {
             socket = socket_client.connect(rpcUrl)
             let timeout = 5000
             socket.on("connect", () => {
-                console.log("Connected to RPC server")
+                log.info("[Client] Connected to RPC server")
                 return socket
             })
             while (timeout > 0) {
                 if (socket.connected) {
                     return socket
                 }
-                console.log("Waiting for socket connection...")
+                log.debug("[Client] Waiting for socket connection...")
                 await new Promise(resolve => setTimeout(resolve, 1000))
                 timeout -= 1000
             }
             return null
-        } catch (e) {
-            console.log(e)
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error("[Client] RPC connection failed:", errorMsg)
             return null
         }
     }

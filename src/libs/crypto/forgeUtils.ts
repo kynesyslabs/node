@@ -10,7 +10,6 @@ export function forgeToHex(forgeBuffer: any): string {
         const errorMsg = e instanceof Error ? e.message : String(e)
         log.debug(`[ForgeToHex] Not a buffer: ${errorMsg}`)
     }
-    //console.log(forgeBuffer)
     const rebuffer = Buffer.from(forgeBuffer)
     forgeBuffer = rebuffer.toString("hex")
     return forgeBuffer
@@ -19,12 +18,7 @@ export function forgeToHex(forgeBuffer: any): string {
 // INFO finalArray must come out as an acceptable input for forge methods
 // NOTE The above and the below must be revertible with each other
 export function hexToForge(forgeString: string): Uint8Array {
-    /*if (forgeString.startsWith("0x")) {
-        forgeString = forgeString.slice(2)
-    }*/
     const finalArray = new Uint8Array(64)
-    //console.log("[string to forge encoded]")
-    //console.log(forgeString)
     for (let i = 0; i < forgeString.length; i += 2) {
         const hexValue = forgeString.substr(i, 2)
         const decimalValue = parseInt(hexValue, 16)
@@ -45,7 +39,5 @@ export function hexToForge(forgeString: string): Uint8Array {
         }
         trimmedArray = finalArray
     }
-    //console.log("[HexToForge] Encoded into an Uint8Array of lenght: " + finalArray.length)
-    //console.log(trimmedArray)
     return trimmedArray
 }

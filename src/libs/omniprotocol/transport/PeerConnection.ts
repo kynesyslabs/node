@@ -869,8 +869,6 @@ export class PeerConnection extends EventEmitter {
             // Send response
             await this.sendResponse(header.sequence, responsePayload)
         } catch (error) {
-            console.error(error)
-
             if (error instanceof ConnectionError) {
                 log.error(
                     `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,

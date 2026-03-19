@@ -270,13 +270,5 @@ export async function broadcastVerifiedNativeTransaction(
     //console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
     //GCR.getInstance().operations.push(validityData.data.gas_operation)
 
-    // Finally, we add all the derived operations to the GCR
-    // NOTE Deprecated in favor of GCREdit
-    /*for (let i = 0; i < execution[2].length; i++) {
-        console.log("[TX RECEIVED] Operation derived")
-        //console.log(execution[2][i])
-        GCR.getInstance().operations.push(execution[2][i])
-        console.log("[TX RECEIVED] Operation added to the GCR\n")
-    }*/
     return execution
 }
