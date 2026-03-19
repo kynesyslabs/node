@@ -102,10 +102,10 @@ export async function handleWeb2ProxyRequest({
                 )
             }
         }
-    } catch (error: any) {
+    } catch (error) {
         log.error("Error in handleWeb2ProxyRequest: " + error)
-
-        return createRPCResponse(500, error, error.message)
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        return createRPCResponse(500, error, errorMsg)
     }
 }
 

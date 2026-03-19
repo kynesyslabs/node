@@ -99,10 +99,11 @@ export async function applyZkCommitmentAdd(
             log.info(
                 `✅ ZK commitment stored: ${normalizedCommitment.slice(0, 10)}... (provider: ${payload.provider})`,
             )
-        } catch (error: any) {
+        } catch (error) {
             // Handle primary key constraint violation (commitment already exists)
             // REVIEW: Use startsWith for SQLite constraint codes (handles all variants)
-            if (error.code === "23505" || error.code?.startsWith("SQLITE_CONSTRAINT")) {
+            const errCode = (error as { code?: string })?.code
+            if (errCode === "23505" || errCode?.startsWith("SQLITE_CONSTRAINT")) {
                 return {
                     success: false,
                     message: "Commitment already exists",

@@ -263,7 +263,7 @@ export class DTRManager {
                     peer: validator.identity,
                 },
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error(
                 "[DTR] Error relaying transaction to validator: " +
                 error,

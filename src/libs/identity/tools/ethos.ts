@@ -58,18 +58,20 @@ export class EthosApiClient {
             }
 
             return result
-        } catch (error: any) {
+        } catch (error) {
+            const axiosError = error as { response?: { status?: number }; code?: string }
+
             // Check if it's a 404 - wallet has no Ethos profile
-            if (error?.response?.status === 404) {
+            if (axiosError.response?.status === 404) {
                 throw new Error(
                     "This wallet does not have an Ethos profile. Please create one at ethos.network first.",
                 )
             }
 
-            const statusCode = error?.response?.status ?? "unknown"
-            const errorType = error?.code === "ECONNREFUSED"
+            const statusCode = axiosError.response?.status ?? "unknown"
+            const errorType = axiosError.code === "ECONNREFUSED"
                 ? "connection_refused"
-                : error?.code === "ETIMEDOUT"
+                : axiosError.code === "ETIMEDOUT"
                     ? "timeout"
                     : "api_error"
             log.error(

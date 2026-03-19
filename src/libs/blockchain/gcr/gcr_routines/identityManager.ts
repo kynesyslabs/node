@@ -491,11 +491,12 @@ export default class IdentityManager {
                 message: `Human Passport identity verified with score ${verification.score}`,
                 data: savedIdentity,
             }
-        } catch (error: any) {
-            log.error(`[IdentityManager] Human Passport verification failed: ${error.message}`)
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[IdentityManager] Human Passport verification failed: ${errorMsg}`)
             return {
                 success: false,
-                message: error.message || "Failed to verify Human Passport identity",
+                message: errorMsg || "Failed to verify Human Passport identity",
             }
         }
     }

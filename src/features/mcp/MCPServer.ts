@@ -150,7 +150,7 @@ export class MCPServerManager {
                         },
                     ],
                 }
-            } catch (error: any) {
+            } catch (error) {
                 log.error(
                     `[MCP] Tool '${name}' execution failed: ${String(error)}`,
                 )

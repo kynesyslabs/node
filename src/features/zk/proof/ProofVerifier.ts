@@ -333,9 +333,10 @@ export class ProofVerifier {
             })
 
             log.info(`[CORE] Nullifier marked as used: ${nullifierHash.slice(0, 10)}...`)
-        } catch (error: any) {
+        } catch (error) {
             // Handle primary key constraint violation (nullifier already used)
-            if (error.code === "23505" || error.code === "SQLITE_CONSTRAINT") {
+            const errCode = (error as { code?: string })?.code
+            if (errCode === "23505" || errCode === "SQLITE_CONSTRAINT") {
                 throw new Error(
                     `Double-attestation attempt: Nullifier ${nullifierHash.slice(0, 10)}... already used`,
                 )

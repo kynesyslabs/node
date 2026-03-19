@@ -82,11 +82,12 @@ export async function handleL2PSHashUpdate(tx: Transaction): Promise<RPCResponse
         }
         return response
 
-    } catch (error: any) {
+    } catch (error) {
         log.error("[L2PS Hash Update] Error processing hash update:", error)
+        const errorMsg = error instanceof Error ? error.message : String(error)
         response.result = 500
         response.response = "Internal error processing L2PS hash update"
-        response.extra = error.message || "Unknown error"
+        response.extra = errorMsg || "Unknown error"
         return response
     }
 }

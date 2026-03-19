@@ -49,11 +49,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
                 oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS mempool info"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },
@@ -88,11 +89,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 })),
                 count: transactions.length,
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS transactions"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },
@@ -190,11 +192,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 count: transactions.length,
                 hasMore: transactions.length === limit
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS account transactions"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },

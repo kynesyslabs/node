@@ -110,16 +110,18 @@ export class HumanPassportProvider {
             this.setInCache(normalizedAddress, verification)
 
             return verification
-        } catch (error: any) {
-            log.error(`[HumanPassportProvider] API error for ${normalizedAddress}: ${error.message}`)
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[HumanPassportProvider] API error for ${normalizedAddress}: ${errorMsg}`)
 
-            if (error.response?.status === 404) {
+            const httpStatus = (error as { response?: { status?: number } }).response?.status
+            if (httpStatus === 404) {
                 throw new Error(
                     "User has not created a Human Passport. Direct them to https://app.passport.xyz/",
                 )
             }
 
-            if (error.response?.status === 429) {
+            if (httpStatus === 429) {
                 throw new Error("Human Passport API rate limit exceeded. Try again later.")
             }
 
