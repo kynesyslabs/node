@@ -343,7 +343,7 @@ check_system_requirements() {
 					echo "✅ PostgreSQL ${PG_PORT} is now available (stopped leftover container)"
 				fi
 			else
-				echo "✅ PostgreSQL ${$PG_PORT} is available"
+				echo "✅ PostgreSQL ${PG_PORT} is available"
 			fi
 		fi
 
