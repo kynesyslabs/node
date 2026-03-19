@@ -257,7 +257,7 @@ async function warmup() {
     // Allow overriding pg port through RPC_PG_PORT
     indexState.PG_PORT = cfg.database.port
     // Allow overriding server port through RPC_PORT
-    indexState.SERVER_PORT = cfg.server.rpcPort || cfg.server.serverPort
+    indexState.SERVER_PORT = cfg.server.rpcPort
     // Allow overriding signaling server port through RPC_SIGNALING_PORT
     indexState.SIGNALING_SERVER_PORT =
         cfg.server.rpcSignalingPort || cfg.server.signalingServerPort
@@ -269,12 +269,13 @@ async function warmup() {
     )
 
     // MCP Server configuration
-    indexState.MCP_SERVER_PORT = cfg.server.rpcMcpPort || cfg.server.mcpServerPort
+    indexState.MCP_SERVER_PORT =
+        cfg.server.rpcMcpPort || cfg.server.mcpServerPort
     indexState.MCP_ENABLED = cfg.core.mcpEnabled
 
     // OmniProtocol TCP Server configuration
     indexState.OMNI_ENABLED = cfg.omni.enabled
-    indexState.OMNI_PORT = cfg.server.omniPort
+    indexState.OMNI_PORT = await getNextAvailablePort(cfg.omni.port)
 
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
@@ -305,6 +306,7 @@ async function warmup() {
     // Digest the arguments
     await digestArguments()
 }
+
 // ANCHOR Preparing the main loop
 // ! Simplify this too
 async function preMainLoop() {
@@ -356,6 +358,7 @@ async function preMainLoop() {
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
     // INFO Now ensuring we have an initialized chain or initializing the genesis block
+    await peerBootstrap(indexState.PeerList)
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
@@ -363,9 +366,8 @@ async function preMainLoop() {
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
         "[PEER] Peer list: " +
-        JSON.stringify(indexState.PeerList.map(p => p.identity)),
+            JSON.stringify(indexState.PeerList.map(p => p.identity)),
     )
-    await peerBootstrap(indexState.PeerList)
 
     // Loading the peers
     //PeerList.push(ourselves)
@@ -472,6 +474,11 @@ async function main() {
         } catch (error) {
             handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
             // Continue without OmniProtocol (failsafe - falls back to HTTP)
+        }
+
+        if (!getSharedState.omniAdapter) {
+            log.error("[CORE] Failed to start OmniProtocol server")
+            process.exit(1)
         }
     } else {
         log.info("[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)")
@@ -777,7 +784,9 @@ async function main() {
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
         if (getSharedState.PROD) {
-            log.info("[CORE] [DTR] Initializing relay retry service (will start after sync)")
+            log.info(
+                "[CORE] [DTR] Initializing relay retry service (will start after sync)",
+            )
             // Service will check syncStatus internally before processing
             DTRManager.getInstance().start()
         }
@@ -786,26 +795,37 @@ async function main() {
         try {
             await ParallelNetworks.getInstance().loadAllL2PS()
         } catch (error) {
-            handleError(error, "CORE", { source: ErrorSource.L2PS_NETWORK_LOADING })
+            handleError(error, "CORE", {
+                source: ErrorSource.L2PS_NETWORK_LOADING,
+            })
         }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
         // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        if (getSharedState.l2psJoinedUids && getSharedState.l2psJoinedUids.length > 0) {
+        if (
+            getSharedState.l2psJoinedUids &&
+            getSharedState.l2psJoinedUids.length > 0
+        ) {
             try {
                 const l2psHashService = L2PSHashService.getInstance()
                 await l2psHashService.start()
-                log.info(`[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`)
+                log.info(
+                    `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
+                )
 
                 // Start L2PS batch aggregator (batches transactions and submits to main mempool)
                 const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
                 await l2psBatchAggregator.start()
                 log.info("[CORE] [L2PS] Batch aggregator service started")
             } catch (error) {
-                handleError(error, "CORE", { source: ErrorSource.L2PS_SERVICES_STARTUP })
+                handleError(error, "CORE", {
+                    source: ErrorSource.L2PS_SERVICES_STARTUP,
+                })
             }
         } else {
-            log.info("[CORE] [L2PS] No L2PS networks joined, L2PS services not started")
+            log.info(
+                "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+            )
         }
     }
 }
@@ -835,7 +855,7 @@ async function gracefulShutdown(signal: string) {
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
         process.exit(0)
-    }, 5_000)
+    }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
 
@@ -844,7 +864,9 @@ async function gracefulShutdown(signal: string) {
         if (indexState.tuiManager) {
             try {
                 indexState.tuiManager.stop()
-            } catch (_) { /* ignore TUI errors during shutdown */ }
+            } catch (_) {
+                /* ignore TUI errors during shutdown */
+            }
         }
 
         // Stop DTR manager if running (PROD only)
@@ -870,7 +892,9 @@ async function gracefulShutdown(signal: string) {
             try {
                 await stopOmniProtocolServer()
             } catch (error) {
-                handleError(error, "NETWORK", { source: ErrorSource.OMNI_SHUTDOWN })
+                handleError(error, "NETWORK", {
+                    source: ErrorSource.OMNI_SHUTDOWN,
+                })
             }
         }
 
@@ -892,7 +916,9 @@ async function gracefulShutdown(signal: string) {
                     await import("./features/tlsnotary")
                 await shutdownTLSNotary()
             } catch (error) {
-                handleError(error, "TLSN", { source: ErrorSource.TLSN_SHUTDOWN })
+                handleError(error, "TLSN", {
+                    source: ErrorSource.TLSN_SHUTDOWN,
+                })
             }
         }
 
@@ -900,13 +926,14 @@ async function gracefulShutdown(signal: string) {
         if (indexState.metricsServer) {
             log.info("[CORE] Stopping Metrics collector and server...")
             try {
-                const { getMetricsCollector } = await import(
-                    "./features/metrics"
-                )
+                const { getMetricsCollector } =
+                    await import("./features/metrics")
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {
-                handleError(error, "CORE", { source: ErrorSource.METRICS_SHUTDOWN })
+                handleError(error, "CORE", {
+                    source: ErrorSource.METRICS_SHUTDOWN,
+                })
             }
         }
 
@@ -916,7 +943,9 @@ async function gracefulShutdown(signal: string) {
             try {
                 indexState.rpcServer.stop()
             } catch (error) {
-                handleError(error, "NETWORK", { source: ErrorSource.RPC_SHUTDOWN })
+                handleError(error, "NETWORK", {
+                    source: ErrorSource.RPC_SHUTDOWN,
+                })
             }
         }
 
@@ -926,21 +955,29 @@ async function gracefulShutdown(signal: string) {
             try {
                 indexState.signalingServer.disconnect()
             } catch (error) {
-                handleError(error, "NETWORK", { source: ErrorSource.SIGNALING_SHUTDOWN })
+                handleError(error, "NETWORK", {
+                    source: ErrorSource.SIGNALING_SHUTDOWN,
+                })
             }
         }
 
         // Stop HTTP rate limiter cleanup interval
         try {
-            const { RateLimiter: HttpRateLimiter } = await import("./libs/network/middleware/rateLimiter")
+            const { RateLimiter: HttpRateLimiter } =
+                await import("./libs/network/middleware/rateLimiter")
             HttpRateLimiter.getInstance().destroy()
-        } catch (_) { /* may not be initialized */ }
+        } catch (_) {
+            /* may not be initialized */
+        }
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
         process.exit(0)
     } catch (error) {
-        handleError(error, "CORE", { source: ErrorSource.GRACEFUL_SHUTDOWN, fatal: true })
+        handleError(error, "CORE", {
+            source: ErrorSource.GRACEFUL_SHUTDOWN,
+            fatal: true,
+        })
         clearTimeout(forceExitTimeout)
         process.exit(1)
     }
