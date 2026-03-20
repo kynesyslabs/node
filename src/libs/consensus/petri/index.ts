@@ -10,6 +10,12 @@
  * Gated by getSharedState.petriConsensus feature flag.
  */
 
+import type { Peer } from "@/libs/peer"
+import { getSharedState } from "@/utilities/sharedState"
+import { ContinuousForge } from "./forge/continuousForge"
+import { setPetriForgeInstance } from "./forge/forgeInstance"
+import log from "@/utilities/logger"
+
 // Re-export types
 export { TransactionClassification } from "./types/classificationTypes"
 export type { ClassifiedTransaction } from "./types/classificationTypes"
@@ -26,8 +32,32 @@ export type {
     RoundDeltaResult,
 } from "./types/deltaComparison"
 
-// REVIEW: Stub — Phase 1+ will implement the actual consensus routine
-// eslint-disable-next-line @typescript-eslint/no-empty-function
-export async function petriConsensusRoutine(): Promise<void> {
-    // Will be implemented in Phase 2 (Continuous Forge)
+// Re-export Phase 2 components
+export { ContinuousForge } from "./forge/continuousForge"
+export { DeltaAgreementTracker } from "./forge/deltaAgreementTracker"
+
+/**
+ * Start the Petri Consensus routine for a given shard.
+ * Creates and starts the ContinuousForge loop.
+ * Called from the consensus dispatch when petriConsensus flag is on.
+ *
+ * @param shard - The shard members for this consensus round
+ */
+export async function petriConsensusRoutine(shard: Peer[]): Promise<void> {
+    if (!getSharedState.petriConsensus) {
+        log.warn("[Petri] petriConsensusRoutine called but flag is off")
+        return
+    }
+
+    const config = getSharedState.petriConfig
+    const forge = new ContinuousForge(config)
+
+    // Register the forge instance so the RPC handler can access it
+    setPetriForgeInstance(forge)
+
+    log.info("[Petri] Starting Continuous Forge for shard")
+    forge.start(shard)
+
+    // REVIEW: Phase 3 will add block finalization logic here.
+    // For now, the forge runs until stopped externally.
 }

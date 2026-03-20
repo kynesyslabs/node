@@ -31,6 +31,8 @@ export interface ConsensusMethod {
         | "getValidatorPhase"
         | "greenlight"
         | "getBlockTimestamp"
+        // REVIEW: Petri Consensus (Phase 2)
+        | "petri_exchangeDeltas"
     params: any[]
 }
 
@@ -414,6 +416,44 @@ export default async function manageConsensusRoutines(
 
             response.result = 200
             response.response = [manager.blockTimestamp]
+            break
+        }
+
+        // REVIEW: Petri Consensus — delta exchange handler (Phase 2)
+        case "petri_exchangeDeltas": {
+            if (!getSharedState.petriConsensus) {
+                response.result = 400
+                response.response = "Petri consensus not enabled"
+                break
+            }
+
+            try {
+                const [deltaData] = payload.params
+                const { petriForgeInstance } = await import(
+                    "@/libs/consensus/petri/forge/forgeInstance"
+                )
+
+                if (!petriForgeInstance) {
+                    response.result = 503
+                    response.response = "Forge not running"
+                    break
+                }
+
+                // Return our local deltas in exchange
+                const ourDeltas = petriForgeInstance.getCurrentDeltas()
+                response.result = 200
+                response.response = {
+                    roundNumber: deltaData?.roundNumber ?? 0,
+                    deltas: ourDeltas,
+                }
+            } catch (error) {
+                log.error(
+                    "[manageConsensusRoutines] petri_exchangeDeltas error: " +
+                    error,
+                )
+                response.result = 500
+                response.response = "Error processing delta exchange"
+            }
             break
         }
     }
