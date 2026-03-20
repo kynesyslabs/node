@@ -355,6 +355,37 @@ src/libs/consensus/petri/
 
 ---
 
+## Phase 8: Soft Finality SDK Endpoint
+
+**Goal**: Expose soft finality (~2s PRE_APPROVED status) to SDK consumers via a new RPC method and SDK integration.
+
+> **WARNING — SDK work required**: This phase touches `../sdks/` (the `@kynesyslabs/demosdk` source).
+> Before starting this phase, **ask the user for specific instructions** on SDK modification workflow,
+> versioning, and publishing. Do not proceed autonomously with SDK changes.
+
+### Tasks
+
+1. **Define RPC method** `getTransactionSoftFinality` in `src/libs/network/rpcDispatch.ts`
+   - Input: `{ hash: string }`
+   - Output: `{ classification: "PRE_APPROVED" | "TO_APPROVE" | "PROBLEMATIC" | "UNKNOWN", softFinalityAt: number | null, hardFinalityAt: number | null }`
+2. **Add WebSocket/subscription variant** for real-time soft finality notifications
+   - Clients can subscribe to a tx hash and get notified when it reaches PRE_APPROVED
+3. **SDK integration** (requires `../sdks/` changes — **ask user first**):
+   - Add `client.getTransactionSoftFinality(hash)` method
+   - Add `client.onSoftFinality(hash, callback)` subscription helper
+   - Update SDK types for the new response shape
+4. **Write tests** in `better_testing/petri/softFinalityEndpoint.test.ts`
+5. **SDK tests** in `../sdks/` test suite (coordinate with user)
+
+### Acceptance Criteria
+- SDK consumers can query soft finality status for any tx
+- Subscription delivers PRE_APPROVED event within 2s of classification
+- Backward-compatible: old SDK versions ignore the new method gracefully
+
+### Risk: Low (node side) / Medium (SDK coordination)
+
+---
+
 ## File Structure (Final)
 
 ```
@@ -392,6 +423,7 @@ better_testing/petri/
     blockCompiler.test.ts           # Block compilation tests
     routing.test.ts                 # Routing tests
     finality.test.ts                # Finality API tests
+    softFinalityEndpoint.test.ts    # Phase 8: SDK endpoint tests
     integration/
       happyPath.test.ts
       conflictPath.test.ts
@@ -428,4 +460,7 @@ Phase 6 (Integration Testing)
     │
     ▼
 Phase 7 (Secretary Deprecation)
+    │
+    ▼
+Phase 8 (Soft Finality SDK Endpoint)  ←── touches ../sdks/, ask user before starting
 ```
