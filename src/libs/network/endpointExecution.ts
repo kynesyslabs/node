@@ -311,7 +311,10 @@ export async function handleExecuteTransaction(
 
         log.debug("PROD: " + getSharedState.PROD)
 
-        // REVIEW: Petri Consensus routing — relay to 2 shard members instead of DTR
+        // REVIEW: Petri Consensus routing — relay to 2 shard members instead of DTR.
+        // Note: This early-returns before mempool addition. The originating node does NOT
+        // add the tx to its own mempool — shard members receive it via RELAY_TX and add it
+        // to theirs. Verify this flow works end-to-end in Phase 6 integration testing.
         if (getSharedState.petriConsensus) {
             const { success: relaySuccess } = await petriRelay(validatedData)
             return {

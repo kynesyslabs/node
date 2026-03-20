@@ -79,6 +79,10 @@ export async function arbitrate(
             const ourDelta = specResult.delta.hash
 
             // Step 2: Request fresh delta from each shard member
+            // REVIEW: Reuses petri_exchangeDeltas RPC with roundNumber: -1 as sentinel
+            // to indicate this is a BFT arbitration request, not a regular forge exchange.
+            // The handler returns local deltas regardless of roundNumber, so this works
+            // correctly. Consider a dedicated RPC method if arbitration logic diverges.
             let agreeCount = 1 // We agree with ourselves
 
             const deltaRequests = peers.map(async peer => {
