@@ -51,6 +51,10 @@ export { compileBlock } from "./block/petriBlockCompiler"
 export { finalizeBlock } from "./block/petriBlockFinalizer"
 export { arbitrate } from "./arbitration/bftArbitrator"
 
+// Re-export Phase 4 components
+export { getShardForAddress } from "./routing/shardMapper"
+export { selectMembers, relay, getCurrentShard } from "./routing/petriRouter"
+
 /**
  * Helper: sleep for a given duration in ms.
  */

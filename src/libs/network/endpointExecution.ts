@@ -30,6 +30,7 @@ import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
+import { relay as petriRelay } from "@/libs/consensus/petri/routing/petriRouter"
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -309,6 +310,25 @@ export async function handleExecuteTransaction(
         }
 
         log.debug("PROD: " + getSharedState.PROD)
+
+        // REVIEW: Petri Consensus routing — relay to 2 shard members instead of DTR
+        if (getSharedState.petriConsensus) {
+            const { success: relaySuccess } = await petriRelay(validatedData)
+            return {
+                success: true,
+                response: {
+                    message: relaySuccess
+                        ? "Transaction routed to shard members"
+                        : "Transaction accepted locally (relay pending)",
+                },
+                extra: {
+                    confirmationBlock: getSharedState.lastBlockNumber + 1,
+                    routing: "petri",
+                },
+                require_reply: false,
+            }
+        }
+
         const { isValidator, validators } = await isValidatorForNextBlock()
 
         if (!isValidator) {
