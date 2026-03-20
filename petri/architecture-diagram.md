@@ -1,14 +1,14 @@
 # Petri Consensus — Living Architecture Diagram
 
-**Last updated:** 2026-03-20 (Phase 5 — Finality & Status API)
+**Last updated:** 2026-03-20 (Phase 6 — Integration Testing & Hardening)
 
 ---
 
 ## Architecture Diagram
 
 ```
-                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4 + PHASE 5
-                      ============================================================================
+                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4 + PHASE 5 + PHASE 6
+                      =======================================================================================
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ENTRY POINT                                                                    │
@@ -23,7 +23,7 @@
                                    │
     ┌──────────────────────────────▼───────────────────────────────────────────────────────────────┐
     │  BARREL / ENTRY POINT                                                                        │
-    │  src/libs/consensus/petri/index.ts                                                 [P0→P5]  │
+    │  src/libs/consensus/petri/index.ts                                                 [P0→P6]  │
     │                                                                                              │
     │    Re-exports all types from ./types/*                                                       │
     │    Re-exports ContinuousForge, DeltaAgreementTracker from ./forge/*              ── NEW P2  │
@@ -789,6 +789,119 @@
                                             status: "confirmed" | "pending" | "unknown"
                                             softFinality?: Date    (PRE_APPROVED timestamp)
                                             hardFinality?: Date    (block confirmation)
+
+
+    ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║  PHASE 6 — INTEGRATION TESTING & HARDENING (186 tests, 0 failures, 14 test files)           ║
+    ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+    TEST SUITE OVERVIEW — better_testing/petri/
+    ────────────────────────────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  HAPPY PATH TESTS                                                                      [P6] │
+    │  better_testing/petri/happyPath.test.ts                                        (16 tests)   │
+    │                                                                                              │
+    │    Full lifecycle coverage: classify → agree → compile → finalize                           │
+    │      - Transaction classification (PRE_APPROVED / TO_APPROVE)                               │
+    │      - Speculative execution & delta hash generation                                        │
+    │      - Delta agreement across shard members                                                 │
+    │      - Block compilation with ordered transactions                                          │
+    │      - Block finalization & chain persistence                                               │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  CONFLICT PATH TESTS                                                                   [P6] │
+    │  better_testing/petri/conflictPath.test.ts                                     (15 tests)   │
+    │                                                                                              │
+    │    Double-spend → PROBLEMATIC → BFT resolution/rejection                                   │
+    │      - Conflicting transactions flagged as PROBLEMATIC                                      │
+    │      - BFT arbitration resolves or rejects disputed txs                                     │
+    │      - Rejected txs cleaned from mempool                                                    │
+    │      - Resolved txs included in compiled block                                              │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  BYZANTINE FAULT TESTS                                                                 [P6] │
+    │  better_testing/petri/byzantineFault.test.ts                                   (16 tests)   │
+    │                                                                                              │
+    │    Byzantine minority tolerance f < n/3                                                     │
+    │      - Coordinated Byzantine attacks (minority cannot override majority)                    │
+    │      - Omission faults (silent validators don't stall consensus)                            │
+    │      - Correct nodes reach agreement despite faulty peers                                   │
+    │      - Threshold-based promotion resilient to adversarial deltas                            │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  LIVENESS TESTS                                                                        [P6] │
+    │  better_testing/petri/liveness.test.ts                                         (14 tests)   │
+    │                                                                                              │
+    │    Chain never stalls                                                                       │
+    │      - Empty blocks produced when no txs pending                                            │
+    │      - Bounded PROBLEMATIC TTL prevents indefinite dispute                                  │
+    │      - Mixed classification states handled without deadlock                                 │
+    │      - Forge loop continues after edge-case rounds                                         │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  FEATURE FLAG ROLLBACK TESTS                                                           [P6] │
+    │  better_testing/petri/featureFlagRollback.test.ts                               (15 tests)  │
+    │                                                                                              │
+    │    Clean ON/OFF/ON toggle                                                                   │
+    │      - Forge instance lifecycle (created on enable, destroyed on disable)                   │
+    │      - State isolation between toggle cycles                                                │
+    │      - No leaked state when switching back to PoRBFTv2                                     │
+    │      - getPetriForgeInstance() getter validates singleton lifecycle          ── NEW P6      │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  BENCHMARK TESTS                                                                       [P6] │
+    │  better_testing/petri/benchmark.test.ts                                         (8 tests)   │
+    │                                                                                              │
+    │    Performance & scalability validation                                                     │
+    │      - DeltaTracker throughput: 5K txs recorded efficiently                                │
+    │      - selectMembers routing: 10K calls deterministic & fast                               │
+    │      - BFT evaluate: O(1) per-tx amortized cost                                           │
+    │      - Memory efficiency: no leaks after reset cycles                                      │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    MODULE MODIFICATION — forgeInstance.ts
+    ──────────────────────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  FORGE INSTANCE (MODIFIED)                                                          [P2→P6] │
+    │  src/libs/consensus/petri/forge/forgeInstance.ts                                            │
+    │                                                                                              │
+    │    petriForgeInstance        (global singleton, ContinuousForge | null)                     │
+    │    setPetriForgeInstance()   called by petriConsensusRoutine                                │
+    │    + getPetriForgeInstance() ── getter for singleton                              ── NEW P6 │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    TEST COVERAGE MAP — PHASES EXERCISED BY EACH TEST FILE
+    ───────────────────────────────────────────────────────
+
+    ┌─────────────────────────┬─────┬─────┬─────┬─────┬─────┬─────┐
+    │  Test File              │ P0  │ P1  │ P2  │ P3  │ P4  │ P5  │
+    ├─────────────────────────┼─────┼─────┼─────┼─────┼─────┼─────┤
+    │  happyPath              │  x  │  x  │  x  │  x  │     │  x  │
+    │  conflictPath           │  x  │  x  │  x  │  x  │     │     │
+    │  byzantineFault         │  x  │     │  x  │  x  │     │     │
+    │  liveness               │  x  │     │  x  │  x  │     │     │
+    │  featureFlagRollback    │  x  │     │  x  │     │     │     │
+    │  benchmark              │     │     │  x  │  x  │  x  │     │
+    └─────────────────────────┴─────┴─────┴─────┴─────┴─────┴─────┘
+
+    Total: 186 tests across 14 files, 0 failures
 ```
 
 ### Legend
@@ -819,11 +932,15 @@
     └──────────┘
 
     ┌──────────┐
+    │  [P6]    │    Box with phase annotation — implemented in Phase 6
+    └──────────┘
+
+    ┌──────────┐
     │  [v2]    │    Reused from PoRBFT v2 consensus (existing infrastructure)
     └──────────┘
 
     ┌──────────────┐
-    │  [P0→P5]     │    Modified across multiple phases
+    │  [P0→P6]     │    Modified across multiple phases
     └──────────────┘
 
     ╔══════════╗
@@ -851,6 +968,8 @@
 
     ── UPD P5       Inline note — updated in Phase 5
 
+    ── NEW P6       Inline note — added in Phase 6
+
     (external dep)  Dependency outside this repository (SDK package)
 
     ┌── if (flag) ──── FEATURE FLAG GATE ──┐
@@ -865,7 +984,7 @@
 | File | Phase | Status | Key Exports |
 |---|---|---|---|
 | `src/utilities/sharedState.ts` | P0 | Modified | `petriConsensus: boolean`, `petriConfig: PetriConfig` (feature flag + config instance) |
-| `src/libs/consensus/petri/index.ts` | P0→P5 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, arbitration, routing, and finality modules. |
+| `src/libs/consensus/petri/index.ts` | P0→P6 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, arbitration, routing, and finality modules. |
 | `src/libs/consensus/petri/types/classificationTypes.ts` | P0 | Complete | `TransactionClassification` (enum: PRE_APPROVED, TO_APPROVE, PROBLEMATIC), `ClassifiedTransaction` (interface) |
 | `src/libs/consensus/petri/types/stateDelta.ts` | P0 | Complete | `StateDelta` (interface, uses `GCREdit` from SDK), `PeerDelta` (interface) |
 | `src/libs/consensus/petri/types/continuousForgeTypes.ts` | P0 | Complete | `ContinuousForgeRound` (interface), `ForgeConfig` (interface), `ForgeState` (interface) |
@@ -879,7 +998,7 @@
 | `src/libs/network/endpointValidation.ts` | P1 | Modified | Wired classifier + speculative executor after validation, gated by `petriConsensus` flag. Fire-and-forget `updateClassification` call. |
 | `src/libs/consensus/petri/forge/continuousForge.ts` | P2 | Complete | `ContinuousForge` class: `start(shard)`, `stop()`, `pause()`, `resume()`, `reset()`, `getCurrentDeltas()`, `getState()`. Private: `runForgeRound()` (7-step cycle), `exchangeDeltas()` (all-to-all RPC), `scheduleNextRound()` (2s timer loop). |
 | `src/libs/consensus/petri/forge/deltaAgreementTracker.ts` | P2 | Complete | `DeltaAgreementTracker` class: `recordDelta(txHash, deltaHash, memberKey, round)`, `evaluate(shardSize, round)` returns `{promoted[], flagged[]}`, `getComparison()` for diagnostics, `reset()`, `trackedCount`. |
-| `src/libs/consensus/petri/forge/forgeInstance.ts` | P2 | Complete | `petriForgeInstance` (global singleton, `ContinuousForge | null`), `setPetriForgeInstance()`. Bridges forge loop and RPC handler. |
+| `src/libs/consensus/petri/forge/forgeInstance.ts` | P2→P6 | Complete | `petriForgeInstance` (global singleton, `ContinuousForge | null`), `setPetriForgeInstance()`, `getPetriForgeInstance()` (P6). Bridges forge loop and RPC handler. |
 | `src/libs/network/manageConsensusRoutines.ts` | P2→P3 | Modified | Added `petri_exchangeDeltas` RPC case (P2). Consensus dispatch switching: routes to Petri or PoRBFTv2 handlers based on `petriConsensus` flag (P3). |
 | `src/libs/consensus/petri/arbitration/bftArbitrator.ts` | P3 | Complete | `arbitrate(shard)` gets PROBLEMATIC txs from mempool, runs BFT round among shard validators, returns `{ resolved: ClassifiedTransaction[], rejectedHashes: string[] }`. |
 | `src/libs/consensus/petri/block/petriBlockCompiler.ts` | P3 | Complete | `compileBlock(shard, resolvedTxs)` merges PRE_APPROVED + resolved txs, calls `orderTransactions()` and `createBlock()` (reused PoRBFTv2), returns `CompilationResult { block, txCount }`. `cleanRejectedFromMempool(rejectedHashes)` removes rejected txs. |
@@ -892,10 +1011,18 @@
 | `src/libs/consensus/petri/finality/transactionFinality.ts` | P5 | Complete | `getTransactionFinality(txHash)` checks chain first (confirmed with hard finality), then mempool (pending with soft finality if PRE_APPROVED), returns `TransactionFinalityResult { status, softFinality?, hardFinality?, classification?, blockHash?, blockNumber? }`. |
 | `src/libs/network/rpcDispatch.ts` | P4→P5 | Modified | Added `getTransactionFinality` RPC endpoint (P5). Extracts txHash from params, calls `getTransactionFinality(txHash)`, returns `TransactionFinalityResult`. |
 
+| `better_testing/petri/happyPath.test.ts` | P6 | Complete | Full lifecycle integration tests: classify → agree → compile → finalize (16 tests). |
+| `better_testing/petri/conflictPath.test.ts` | P6 | Complete | Double-spend → PROBLEMATIC → BFT resolution/rejection (15 tests). |
+| `better_testing/petri/byzantineFault.test.ts` | P6 | Complete | Byzantine minority tolerance f < n/3, coordinated attacks, omission faults (16 tests). |
+| `better_testing/petri/liveness.test.ts` | P6 | Complete | Chain never stalls: empty blocks, bounded PROBLEMATIC TTL, mixed states (14 tests). |
+| `better_testing/petri/featureFlagRollback.test.ts` | P6 | Complete | Clean ON/OFF/ON toggle, forge instance lifecycle, state isolation (15 tests). |
+| `better_testing/petri/benchmark.test.ts` | P6 | Complete | DeltaTracker throughput (5K txs), selectMembers routing (10K calls), BFT O(1), memory efficiency (8 tests). |
+
 ### Notes
 
 - All type files are **complete for Phase 0** — they define the full type surface that later phases consume.
 - The sole external dependency is `GCREdit` from `@kynesyslabs/demosdk/types`, imported by `stateDelta.ts`.
+- **Phase 6** added 84 new tests across 6 test files, bringing the total to 186 tests across 14 files with 0 failures.
 - `PetriConfig` extends `ForgeConfig`, adding `enabled`, `blockIntervalMs`, and `shardSize` on top of the forge-specific fields (`forgeIntervalMs`, `agreementThreshold`, `problematicTTLRounds`).
 - `DEFAULT_PETRI_CONFIG` ships with `enabled: false` — the feature is off by default.
 - **Phase 1 data flow:** `endpointValidation` calls `classifyTransaction` with pre-computed GCR edits. If the result is `TO_APPROVE`, it calls `executeSpeculatively` which runs GCR routines in simulate mode (no DB mutation), serializes edits via `canonicalJson`, and hashes them with `Hashing.sha256` to produce a deterministic `deltaHash`. The classification and delta hash are then persisted to the mempool entity via `Mempool.updateClassification`.
