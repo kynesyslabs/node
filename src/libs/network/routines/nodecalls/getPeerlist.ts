@@ -21,7 +21,7 @@ export default async function getPeerlist(): Promise<Peer[]> {
         ) {
             log.debug("Was returning local connection string")
             log.debug(JSON.stringify(peer))
-            log.debug("getSharedState.exposedUrl: " + getSharedState.exposedUrl)
+            log.debug(`getSharedState.exposedUrl: ${getSharedState.exposedUrl}`)
 
             peer.connection.string = getSharedState.exposedUrl
             log.debug(JSON.stringify(peer))

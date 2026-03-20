@@ -181,7 +181,7 @@ export default class Transaction implements ITransaction {
         if (
             sender &&
             (tx.content.from != sender ||
-                (tx.signature.type == "ed25519" &&
+                (tx.signature.type === "ed25519" &&
                     tx.content.from_ed25519_address != sender))
         ) {
             return {
@@ -268,9 +268,9 @@ export default class Transaction implements ITransaction {
         log.debug(`[TX] isCoherent - Checking coherence of tx hash: ${tx.hash}`)
         const derivedHash = Hashing.sha256(JSON.stringify(tx.content))
         log.debug(
-            `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash == tx.hash}`,
+            `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash === tx.hash}`,
         )
-        const coherence = derivedHash == tx.hash
+        const coherence = derivedHash === tx.hash
         return coherence
     }
     /**

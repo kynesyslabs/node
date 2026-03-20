@@ -88,17 +88,17 @@ export default async function manageConsensusRoutines(
     let isInShard = false
 
     for (const peer of shard) {
-        if (peer.identity == ourId) {
+        if (peer.identity === ourId) {
             isInShard = true
             break
         }
     }
 
-    log.debug("isInShard: " + isInShard)
+    log.debug(`isInShard: ${isInShard}`)
 
     inShardCheck: if (!isInShard) {
         // INFO: If is a greenlight request, return 200
-        if (payload.method == "greenlight") {
+        if (payload.method === "greenlight") {
             // response.result = 200
             // response.response = "Greenlight received too late, ignoring"
 
@@ -106,7 +106,7 @@ export default async function manageConsensusRoutines(
             break inShardCheck
         }
 
-        if (payload.method == "setValidatorPhase") {
+        if (payload.method === "setValidatorPhase") {
             // response.result = 200
             // response.response =
             //     "Set validator phase received too late, ignoring"
@@ -248,7 +248,7 @@ export default async function manageConsensusRoutines(
 
                 // INFO: Seed check
                 if (
-                    manager.shard?.blockRef == blockRef &&
+                    manager.shard?.blockRef === blockRef &&
                     seed !== manager.shard?.CVSA
                 ) {
                     // TODO: Remove this block after testing!

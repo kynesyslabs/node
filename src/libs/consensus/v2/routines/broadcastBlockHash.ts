@@ -75,9 +75,9 @@ export async function broadcastBlockHash(
                     }
 
                     log.error(
-                        "Found invalid incoming signature by: " + identity,
+                        `Found invalid incoming signature by: ${identity}`,
                     )
-                    log.error("Proposed signature: " + signature)
+                    log.error(`Proposed signature: ${signature}`)
                     log.error("Candidate block hash: " + block.hash)
                     log.error(
                         "Signature verification failed. Signature not added.",

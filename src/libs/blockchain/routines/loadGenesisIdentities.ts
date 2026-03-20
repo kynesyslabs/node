@@ -14,6 +14,6 @@ export default async function loadGenesisIdentities() {
         }
     }
 
-    log.info("Genesis identities loaded: " + identities.size)
+    log.info(`Genesis identities loaded: ${identities.size}`)
     getSharedState.genesisIdentities = identities
 }

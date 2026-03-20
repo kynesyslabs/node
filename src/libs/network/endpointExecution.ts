@@ -151,7 +151,7 @@ export async function handleExecuteTransaction(
                 "[handleExecuteTransaction] Included XM Chainscript: " +
                 JSON.stringify(payload[1]),
             )
-            var xmResult = await multichainDispatcher.digest(payload[1] as XMScript)
+            const xmResult = await multichainDispatcher.digest(payload[1] as XMScript)
             result.success = xmResult.success
             result.response = {
                 message: xmResult.message,
@@ -165,7 +165,7 @@ export async function handleExecuteTransaction(
                 "[handleExecuteTransaction] Subnet payload: " +
                 JSON.stringify(payload[1]),
             )
-            var subnetResult = await handleL2PS(tx as L2PSTransaction)
+            const subnetResult = await handleL2PS(tx as L2PSTransaction)
             result.response = subnetResult
             break
 
@@ -215,8 +215,8 @@ export async function handleExecuteTransaction(
         }
 
         case "demoswork":
-            var demosWorkPayload = tx.content.data
-            var demosWorkScript = demosWorkPayload[1] as DemoScript
+            const demosWorkPayload = tx.content.data
+            const demosWorkScript = demosWorkPayload[1] as DemoScript
             try {
                 const demosWorkResult =
                     await handleDemosWorkRequest(demosWorkScript)
@@ -267,7 +267,7 @@ export async function handleExecuteTransaction(
 
         case "nativeBridge":
             payload = tx.content.data
-            var nativeBridgeResult = await handleNativeBridgeTx(
+            const nativeBridgeResult = await handleNativeBridgeTx(
                 payload[1] as NativeBridgeOperationCompiled,
             )
             if (nativeBridgeResult === null) {
@@ -334,7 +334,7 @@ export async function handleExecuteTransaction(
             for (const result of results) {
                 if (result.status === "fulfilled") {
                     const response = result.value
-                    if (response.result == 200) {
+                    if (response.result === 200) {
                         continue
                     }
                     DTRManager.validityDataCache.set(

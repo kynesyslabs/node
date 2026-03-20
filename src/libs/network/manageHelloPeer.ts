@@ -32,7 +32,7 @@ export async function manageHelloPeer(
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
-    if (peerObject.identity == getSharedState.publicKeyHex) {
+    if (peerObject.identity === getSharedState.publicKeyHex) {
         log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true

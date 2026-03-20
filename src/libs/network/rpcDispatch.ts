@@ -102,7 +102,7 @@ export async function processPayload(
                 payload.params[0] as bridge.NativeBridgeOperation,
             )
         case "hello_peer": {
-            var helloPeerRequest = payload.params[0] as HelloPeerRequest
+            const helloPeerRequest = payload.params[0] as HelloPeerRequest
             return await manageHelloPeer(
                 helloPeerRequest as HelloPeerRequest,
                 sender,
@@ -110,10 +110,10 @@ export async function processPayload(
         }
         case "mempool": {
             log.info(
-                "[RPC Call] Received mempool merge request from: " + sender,
+                `[RPC Call] Received mempool merge request from: ${sender}`,
             )
-            var res = await ServerHandlers.handleMempool(payload.params)
-            log.info("[RPC Call] Merged mempool from: " + sender)
+            const res = await ServerHandlers.handleMempool(payload.params)
+            log.info(`[RPC Call] Merged mempool from: ${sender}`)
             log.info(JSON.stringify(res))
             return res
         }
@@ -125,7 +125,7 @@ export async function processPayload(
             try {
                 return await manageNodeCall(payload.params[0] as NodeCall)
             } catch (error) {
-                log.error("[RPC Call] Error in nodeCall: " + error)
+                log.error(`[RPC Call] Error in nodeCall: ${error}`)
                 return {
                     result: 500,
                     response: "Error in nodeCall: ",

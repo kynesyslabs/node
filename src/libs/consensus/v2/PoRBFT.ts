@@ -82,7 +82,7 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.debug("Forgin block: " + manager.shard.blockRef)
+        log.debug(`Forgin block: ${manager.shard.blockRef}`)
         log.debug("[consensusRoutine] We are in the shard, creating the block")
         log.info(
             `[consensusRoutine] shard: ${JSON.stringify(
@@ -126,8 +126,8 @@ export async function consensusRoutine(): Promise<void> {
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
-        log.info("[consensusRoutine] Successful Txs: " + successfulTxs.length)
-        log.info("[consensusRoutine] Failed Txs: " + failedTxs.length)
+        log.info(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
+        log.info(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
         if (failedTxs.length > 0) {
             log.debug(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -135,7 +135,7 @@ export async function consensusRoutine(): Promise<void> {
             //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
             for (const tx of failedTxs) {
-                log.debug("Failed tx: " + tx)
+                log.debug(`Failed tx: ${tx}`)
                 await Mempool.removeTransactionsByHashes([tx])
             }
         }
@@ -253,7 +253,7 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        log.error("[CONSENSUS] " + error)
+        log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release

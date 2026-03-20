@@ -26,7 +26,7 @@ export async function readSql(sqlQuery: string): Promise<any> {
         const db = await Datasource.getInstance()
         return await db.getDataSource().query(sqlQuery)
     } catch (err) {
-        log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+        log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(err)}`)
         throw err
     }
 }
@@ -36,7 +36,7 @@ export async function writeSql(sqlQuery: string) {
         const db = await Datasource.getInstance()
         return await db.getDataSource().query(sqlQuery)
     } catch (err) {
-        log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
+        log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(err)}`)
         throw err
     }
 }

@@ -57,7 +57,7 @@ export async function createBlock(
     const { commonValidatorSeed: nextProposer } = await getCommonValidatorSeed(
         block as any,
     )
-    log.debug("nextProposer: " + nextProposer)
+    log.debug(`nextProposer: ${nextProposer}`)
     block.next_proposer = nextProposer
     // Add the candidate to the shared state
     getSharedState.candidateBlock = block

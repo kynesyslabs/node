@@ -227,7 +227,7 @@ export default class GCR {
             })
             return response ? response.details.content.balance : 0
         } catch (e) {
-            log.debug("[GET BALANCE] No balance for: " + address)
+            log.debug(`[GET BALANCE] No balance for: ${address}`)
             return 0
         }
     }
@@ -247,7 +247,7 @@ export default class GCR {
                 ? gcrExtendedData.tokens[tokenAddress]
                 : 0
         } catch (e) {
-            log.error("[GCR] Error fetching GCR token balance: " + e)
+            log.error(`[GCR] Error fetching GCR token balance: ${e}`)
         }
     }
 
@@ -266,7 +266,7 @@ export default class GCR {
                 ? gcrExtendedData.nfts[nftAddress]
                 : 0
         } catch (e) {
-            log.error("[GCR] Error fetching GCR NFT balance: " + e)
+            log.error(`[GCR] Error fetching GCR NFT balance: ${e}`)
         }
     }
 
@@ -294,7 +294,7 @@ export default class GCR {
             return gcrExtendedData && gcrExtendedData.other
         } catch (e) {
             // Handle the error appropriately
-            log.error("Error fetching GCR chain properties: " + e)
+            log.error(`Error fetching GCR chain properties: ${e}`)
         }
     }
 
@@ -325,7 +325,7 @@ export default class GCR {
 
             return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
         } catch (e) {
-            log.error("Error fetching GCR hashed stakes: " + e)
+            log.error(`Error fetching GCR hashed stakes: ${e}`)
         }
     }
 
@@ -342,7 +342,7 @@ export default class GCR {
             log.debug("No block number provided, getting the last one")
             blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
         }
-        log.debug("blockNumber: " + blockNumber)
+        log.debug(`blockNumber: ${blockNumber}`)
 
         try {
             const blockNodes = await validatorsRepository.find({
@@ -355,7 +355,7 @@ export default class GCR {
 
             return blockNodes || []
         } catch (e) {
-            log.error("Error fetching GCR validators at block: " + e)
+            log.error(`Error fetching GCR validators at block: ${e}`)
             return [] // or handle the error as needed
         }
     }
@@ -385,7 +385,7 @@ export default class GCR {
 
             return info || null
         } catch (e) {
-            log.error("Error fetching validator status: " + e)
+            log.error(`Error fetching validator status: ${e}`)
             return null // or handle the error as needed
         }
     }
@@ -502,7 +502,7 @@ export default class GCR {
             message: "",
         }
         // TODO Add stuff after loading the IMPData
-        if (address == "demos") {
+        if (address === "demos") {
             // TODO Assigning to the blockchain
         }
         return result
