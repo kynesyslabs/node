@@ -1,14 +1,14 @@
 # Petri Consensus — Living Architecture Diagram
 
-**Last updated:** 2026-03-20 (Phase 3 — Block Finalization)
+**Last updated:** 2026-03-20 (Phase 4 — RPC Routing Refactor)
 
 ---
 
 ## Architecture Diagram
 
 ```
-                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3
-                      ==============================================================
+                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4
+                      ====================================================================
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ENTRY POINT                                                                    │
@@ -23,11 +23,12 @@
                                    │
     ┌──────────────────────────────▼───────────────────────────────────────────────────────────────┐
     │  BARREL / ENTRY POINT                                                                        │
-    │  src/libs/consensus/petri/index.ts                                                 [P0→P3]  │
+    │  src/libs/consensus/petri/index.ts                                                 [P0→P4]  │
     │                                                                                              │
     │    Re-exports all types from ./types/*                                                       │
     │    Re-exports ContinuousForge, DeltaAgreementTracker from ./forge/*              ── NEW P2  │
     │    Re-exports block/* and arbitration/* modules                                   ── NEW P3  │
+    │    Re-exports routing/* (petriRouter, shardMapper)                                ── NEW P4  │
     │    petriConsensusRoutine(shard): Promise<void>  ── full block lifecycle           ── UPD P3  │
     │      1. forge.start(shard)                                                                   │
     │      2. sleep(blockIntervalMs)                                                               │
@@ -570,6 +571,102 @@
                    │ insert →    │
                    │ broadcast   │
                    └─────────────┘
+
+
+    ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║  PHASE 4 — RPC ROUTING REFACTOR (Shard Mapping & Petri Relay)                               ║
+    ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+    CLIENT TX SUBMISSION — PETRI RELAY FLOW
+    ────────────────────────────────────────
+
+    ┌──── Step 1 ──────────────────────────────────────────────────────────────────────────────────┐
+    │  CLIENT SENDS TRANSACTION                                                                    │
+    │  → src/libs/network/endpointHandlers.ts                        (existing, unmodified)        │
+    │  → src/libs/network/endpointValidation.ts                      (existing, validates tx)      │
+    └──────────────────────────┬───────────────────────────────────────────────────────────────────┘
+                               │
+                               │ validityData (validated tx + GCR edits)
+                               ▼
+    ┌──── Step 2 ──────────────────────────────────────────────────────────────────────────────────┐
+    │  ENDPOINT EXECUTION (MODIFIED)                                                         [P4]  │
+    │  src/libs/network/endpointExecution.ts                                                       │
+    │                                                                                              │
+    │    ┌──── if (getSharedState.petriConsensus) ────────────── FEATURE FLAG GATE ────────┐       │
+    │    │                                                                                  │       │
+    │    │  petriRelay(validityData)                                                   [P4] │       │
+    │    │  EARLY RETURN — skips validator check + existing DTR flow                        │       │
+    │    │  Returns: { success, routing: "petri" }                                         │       │
+    │    │                                                                                  │       │
+    │    └──────────────────────────────────────────────────────────────────────────────────┘       │
+    │                                                                                              │
+    │    else → existing DTR flow (unchanged)                                                     │
+    │                                                                                              │
+    └──────────────────────────┬───────────────────────────────────────────────────────────────────┘
+                               │
+                               │ calls petriRouter.relay(validityData)
+                               ▼
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  PETRI ROUTER                                                                          [P4]  │
+    │  src/libs/consensus/petri/routing/petriRouter.ts                                            │
+    │                                                                                              │
+    │    relay(validityData)                                                                       │
+    │      1. getCurrentShard()               ── returns 'default' (single-shard testnet)        │
+    │      2. selectMembers(txHash, shard, 2) ── picks 2 members via Alea PRNG                  │
+    │      3. For each selected member:                                                           │
+    │           peer.longCall({                                                                   │
+    │             method: "nodeCall",                                                              │
+    │             params: [{ message: "RELAY_TX", data: [validityData] }]                        │
+    │           })                                                                                │
+    │      Returns: { success, routing: "petri" }                                                │
+    │                                                                                              │
+    │    selectMembers(txHash, shard, membersPerTx=2) → peerKey[]                                │
+    │      └── deterministic selection using Alea PRNG seeded with txHash                        │
+    │                                                                                              │
+    │    getCurrentShard() → string                                                               │
+    │      └── delegates to shardMapper.getShardForAddress()                                     │
+    │                                                                                              │
+    └──────────────────────────┬───────────────────────────────────────────────────────────────────┘
+                               │
+                               │ delegates shard lookup
+                               ▼
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  SHARD MAPPER                                                                          [P4]  │
+    │  src/libs/consensus/petri/routing/shardMapper.ts                                            │
+    │                                                                                              │
+    │    getShardForAddress(address?) → string                                                    │
+    │      └── single-shard testnet: always returns 'default'                                    │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    COMPLETE DATA FLOW — PETRI RELAY (summary, P4)
+    ───────────────────────────────────────────────
+
+    ┌──────────┐  validate  ┌──────────────┐  petriConsensus?  ┌──────────────┐
+    │  Client  │───────────►│ endpointValid│─────────────────►│ endpointExec │
+    │          │            │  ation (P1)  │                   │  ution (P4)  │
+    └──────────┘            └──────────────┘                   └──────┬───────┘
+                                                                      │
+                                        ┌─────────────────────────────┘
+                                        │ petriRelay()
+                                        ▼
+                                 ┌─────────────┐  getCurrentShard()  ┌─────────────┐
+                                 │ petriRouter  │◄──────────────────►│ shardMapper  │
+                                 │    (P4)      │                    │    (P4)      │
+                                 └──────┬───────┘                    └──────────────┘
+                                        │
+                                        │ selectMembers(txHash, shard, 2)
+                                        │ via Alea PRNG
+                                        ▼
+                              ┌───────────────────┐
+                              │  2 shard members  │
+                              │  (peer.longCall)  │
+                              │                   │
+                              │  method: nodeCall │
+                              │  msg: RELAY_TX    │
+                              └───────────────────┘
 ```
 
 ### Legend
@@ -592,11 +689,15 @@
     └──────────┘
 
     ┌──────────┐
+    │  [P4]    │    Box with phase annotation — implemented in Phase 4
+    └──────────┘
+
+    ┌──────────┐
     │  [v2]    │    Reused from PoRBFT v2 consensus (existing infrastructure)
     └──────────┘
 
     ┌──────────────┐
-    │  [P0→P3]     │    Modified across multiple phases
+    │  [P0→P4]     │    Modified across multiple phases
     └──────────────┘
 
     ╔══════════╗
@@ -614,7 +715,11 @@
 
     ── NEW P3       Inline note — added in Phase 3
 
+    ── NEW P4       Inline note — added in Phase 4
+
     ── UPD P3       Inline note — updated in Phase 3
+
+    ── UPD P4       Inline note — updated in Phase 4
 
     (external dep)  Dependency outside this repository (SDK package)
 
@@ -630,7 +735,7 @@
 | File | Phase | Status | Key Exports |
 |---|---|---|---|
 | `src/utilities/sharedState.ts` | P0 | Modified | `petriConsensus: boolean`, `petriConfig: PetriConfig` (feature flag + config instance) |
-| `src/libs/consensus/petri/index.ts` | P0→P3 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, and arbitration modules. |
+| `src/libs/consensus/petri/index.ts` | P0→P4 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, arbitration, and routing modules. |
 | `src/libs/consensus/petri/types/classificationTypes.ts` | P0 | Complete | `TransactionClassification` (enum: PRE_APPROVED, TO_APPROVE, PROBLEMATIC), `ClassifiedTransaction` (interface) |
 | `src/libs/consensus/petri/types/stateDelta.ts` | P0 | Complete | `StateDelta` (interface, uses `GCREdit` from SDK), `PeerDelta` (interface) |
 | `src/libs/consensus/petri/types/continuousForgeTypes.ts` | P0 | Complete | `ContinuousForgeRound` (interface), `ForgeConfig` (interface), `ForgeState` (interface) |
@@ -650,6 +755,9 @@
 | `src/libs/consensus/petri/block/petriBlockCompiler.ts` | P3 | Complete | `compileBlock(shard, resolvedTxs)` merges PRE_APPROVED + resolved txs, calls `orderTransactions()` and `createBlock()` (reused PoRBFTv2), returns `CompilationResult { block, txCount }`. `cleanRejectedFromMempool(rejectedHashes)` removes rejected txs. |
 | `src/libs/consensus/petri/block/petriBlockFinalizer.ts` | P3 | Complete | `finalizeBlock(block, shard)` calls `broadcastBlockHash()`, `isBlockValid()` (BFT validity), `insertBlock()`, `BroadcastManager.broadcastNewBlock()`. Returns `FinalizationResult { success, blockHash }`. |
 | `src/utilities/mainLoop.ts` | P3 | Modified | Consensus dispatch switching: if `petriConsensus` flag is set, calls `petriConsensusRoutine(shard)` instead of PoRBFTv2 routine. |
+| `src/libs/consensus/petri/routing/shardMapper.ts` | P4 | Complete | `getShardForAddress(address?)` returns shard identifier. Single-shard testnet: always returns `'default'`. |
+| `src/libs/consensus/petri/routing/petriRouter.ts` | P4 | Complete | `selectMembers(txHash, shard, membersPerTx=2)` deterministic member selection via Alea PRNG. `getCurrentShard()` delegates to shardMapper. `relay(validityData)` routes validated tx to 2 selected shard members via `peer.longCall({ method: "nodeCall", params: [{ message: "RELAY_TX", data: [validityData] }] })`. |
+| `src/libs/network/endpointExecution.ts` | P4 | Modified | When `petriConsensus` flag is on, calls `petriRelay(validityData)` instead of existing DTR flow. Early return before validator check. Returns `{ success, routing: "petri" }`. |
 
 ### Notes
 
@@ -665,3 +773,7 @@
 - **Phase 3 block lifecycle:** `petriConsensusRoutine` now implements the full block lifecycle: (1) start forge, (2) sleep for `blockIntervalMs` (default 10s) while txs accumulate, (3) pause forge, (4) arbitrate PROBLEMATIC txs via BFT, (5) compile block from PRE_APPROVED + resolved txs, (6) finalize block (broadcast hash → validate → insert → broadcast block), (7) clean rejected txs from mempool, (8) reset and resume forge for the next block cycle.
 - **Reused PoRBFT v2 infrastructure:** Phase 3 reuses `createBlock()`, `orderTransactions()`, `broadcastBlockHash()`, `getCommonValidatorSeed()`, and `getShard()` from `src/libs/consensus/v2/routines/`, plus `insertBlock()` from `src/libs/blockchain/chainBlocks.ts` and `BroadcastManager.broadcastNewBlock()` from `src/libs/communications/broadcastManager.ts`. This avoids duplicating battle-tested block assembly and broadcast logic.
 - **Consensus dispatch switching:** Both `mainLoop.ts` and `manageConsensusRoutines.ts` now check the `petriConsensus` flag to route consensus operations to either the Petri pipeline or the existing PoRBFTv2 routine.
+- **Phase 4 RPC routing refactor:** `endpointExecution.ts` now checks the `petriConsensus` flag early. When enabled, it calls `petriRelay(validityData)` and returns immediately, bypassing the validator check and existing DTR flow entirely. When disabled, the existing DTR flow is unchanged.
+- **Shard mapping:** `shardMapper.ts` provides `getShardForAddress()` which currently returns `'default'` for single-shard testnet. This is the extension point for future multi-shard support.
+- **Deterministic member selection:** `petriRouter.selectMembers()` uses Alea PRNG seeded with the transaction hash to deterministically select `membersPerTx` (default 2) shard members for relay. This ensures any node given the same txHash and shard membership list will select the same members.
+- **Relay transport:** Selected members receive the validated transaction via `peer.longCall()` with `method: "nodeCall"` and `message: "RELAY_TX"`, reusing the existing node call infrastructure.
