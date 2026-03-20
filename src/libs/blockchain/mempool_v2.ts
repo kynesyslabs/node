@@ -324,6 +324,10 @@ export default class Mempool {
         if (deltaHash !== undefined) {
             update.delta_hash = deltaHash
         }
+        // REVIEW: Petri Phase 5 — record soft finality timestamp when PRE_APPROVED
+        if (classification === TransactionClassification.PRE_APPROVED) {
+            update.soft_finality_at = Date.now()
+        }
         await this.repo.update({ hash: txHash }, update)
     }
 }

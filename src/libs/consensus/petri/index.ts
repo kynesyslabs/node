@@ -55,6 +55,10 @@ export { arbitrate } from "./arbitration/bftArbitrator"
 export { getShardForAddress } from "./routing/shardMapper"
 export { selectMembers, relay, getCurrentShard } from "./routing/petriRouter"
 
+// Re-export Phase 5 components
+export { getTransactionFinality } from "./finality/transactionFinality"
+export type { TransactionFinalityResult } from "./finality/transactionFinality"
+
 /**
  * Helper: sleep for a given duration in ms.
  */

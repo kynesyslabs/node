@@ -45,4 +45,8 @@ export class MempoolTx implements Transaction {
 
     @Column("text", { name: "delta_hash", nullable: true })
     delta_hash: string | null
+
+    // REVIEW: Petri Consensus soft finality timestamp (Phase 5)
+    @Column("bigint", { name: "soft_finality_at", nullable: true })
+    soft_finality_at: number | null
 }
