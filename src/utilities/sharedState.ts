@@ -16,6 +16,7 @@ import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
+import { DEFAULT_PETRI_CONFIG } from "@/libs/consensus/petri/types/petriConfig"
 import { Config } from "src/config"
 import {
     APP_VERSION,
@@ -130,6 +131,10 @@ export default class SharedState {
     runMainLoop = true
     mainLoopPaused = false
     consensusMode = false
+
+    // Petri Consensus feature flag
+    petriConsensus = false
+    petriConfig = { ...DEFAULT_PETRI_CONFIG }
 
     // Sync
     fastSyncCount = 0

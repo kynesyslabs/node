@@ -57,6 +57,8 @@ Follow existing `better_testing/` patterns:
 | P4 | Router determinism (same tx → same 2 members); Routing flag gating |
 | P5 | Finality timestamps; RPC method response format |
 | P6 | Full integration suite (happy, conflict, Byzantine, liveness, rollback, benchmark) |
+| P7 | Secretary deprecation verified; feature flag removal clean |
+| P8 | Soft finality SDK endpoint; subscription delivery; backward compat (SDK work — ask user first) |
 
 ### How to run tests
 
@@ -209,7 +211,45 @@ src/libs/crypto/hashing.ts                 # SHA-256
 
 ---
 
-## 8. Phase Execution Checklist
+## 8. Architecture Diagram Agent
+
+After **every phase completion**, dispatch a dedicated agent to update the Petri architecture diagram.
+
+### File: `petri/architecture-diagram.md`
+
+This diagram is the living map of Petri Consensus. It must be updated after each phase to reflect:
+- All implemented modules and their relationships
+- Source file references (`src/libs/consensus/petri/...`)
+- Data flow between components (arrows with labels)
+- Phase number annotations showing when each part was built
+
+### Agent instructions (dispatch after each phase)
+
+```
+@senior OBJECTIVE: Update petri/architecture-diagram.md
+SCOPE: petri/architecture-diagram.md + all src/libs/consensus/petri/ files built so far
+CONTEXT: Phase N just completed. The diagram must reflect the current state of the Petri
+  implementation — modules, data flow, file paths, and which phase introduced each component.
+APPROACH: Read all implemented Petri source files. Build/update an ASCII/Unicode block diagram
+  showing modules, connections, data flow arrows. Each block must include:
+  - Module name
+  - Source file path
+  - Phase number (Pn)
+  - Key method names
+  Connections must show data types flowing between modules.
+  Include a legend. Keep it readable at 120 columns width.
+ACCEPTANCE: Diagram compiles the full current state. No future/unbuilt modules shown.
+  Every source file in src/libs/consensus/petri/ is represented.
+```
+
+### Why this matters
+
+The diagram is the fastest way to onboard, debug, or reason about the system.
+It prevents "where does X happen?" questions by making flow visible at a glance.
+
+---
+
+## 9. Phase Execution Checklist
 
 For every phase:
 
@@ -221,5 +261,6 @@ For every phase:
 6. Run `bun run lint:fix`
 7. Run tests
 8. Close myc task
-9. Report to user: what was done, what tests pass
-10. Wait for confirmation before starting next phase
+9. **Dispatch diagram agent** to update `petri/architecture-diagram.md`
+10. Report to user: what was done, what tests pass
+11. Wait for confirmation before starting next phase
