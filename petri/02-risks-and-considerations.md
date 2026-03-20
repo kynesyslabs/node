@@ -133,10 +133,14 @@
 
 ---
 
-## 11. Open Questions for Discussion
+## 11. Design Decisions (Finalized)
 
-1. **Forge interval**: Start at 1s, 1.5s, or 2s? Trade-off between latency and network overhead.
-2. **Delta exchange topology**: All-to-all within shard, or gossip-style? 10 nodes is small enough for all-to-all.
-3. **PROBLEMATIC TTL**: How many forge rounds before a PROBLEMATIC tx is auto-rejected? Proposal: 3 rounds (4.5–6s).
-4. **Speculative execution depth**: Should we speculatively execute txs that depend on other TO-APPROVE txs? Proposal: No, only execute against confirmed state.
-5. **Read-only detection**: How to reliably detect read-only transactions? By `tx.content.type` + `tx.content.amount == 0`? Need to enumerate all read-only patterns.
+All questions from the design phase have been resolved. These decisions are locked unless explicitly revisited.
+
+| # | Decision | Value | Rationale |
+|---|----------|-------|-----------|
+| 1 | **Forge interval** | 2 seconds | Conservative start. Gives ample time for delta exchange even on high-latency networks. Can be optimized to 1s later once benchmarked. |
+| 2 | **Delta exchange topology** | All-to-all (primary), gossip tested too | 10 nodes is small enough for all-to-all. Both topologies will be tested; all-to-all is the default. |
+| 3 | **PROBLEMATIC TTL** | 5 forge rounds (10s) | Generous window aligned with block boundary. A PROBLEMATIC tx gets 5 chances to reach agreement before auto-rejection. |
+| 4 | **Speculative execution depth** | Confirmed state only | No chained speculation. Txs are only executed against the last confirmed block's state. Simplicity and correctness over throughput. |
+| 5 | **Read-only detection** | GCR edits check via `GCRGeneration.generate(tx)` | If the SDK's GCR generation returns an empty edit array, the tx is read-only (PRE-APPROVED immediately). Known read-only types: `dahr`, `tlsn`, identity attestation. |

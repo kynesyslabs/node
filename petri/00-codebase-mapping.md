@@ -1,7 +1,8 @@
-# Petri Consensus — Codebase Mapping
+# Petri Consensus — Codebase Mapping (v2)
 
 > Maps existing PoRBFT v2 code to Petri Consensus concepts.
 > Generated from deep codebase research. Reference for implementation phases.
+> **Updated**: corrected after stabilisation merge (chain.ts split, endpoint decomposition).
 
 ---
 
@@ -11,6 +12,38 @@
 - **REFACTOR** — Existing code needs modification
 - **NEW** — No existing code; must be built
 - **REPLACE** — Existing code is superseded by Petri
+
+---
+
+## 0. Post-Stabilisation File Map
+
+The stabilisation branch refactored several key files. This section documents the new layout.
+
+### Network Layer (was monolithic, now modular)
+
+| File | Purpose | Key Exports |
+|------|---------|-------------|
+| `src/libs/network/server_rpc.ts` | HTTP server init only | `serverRpcBun()` (~150 lines) |
+| `src/libs/network/rpcDispatch.ts` | **RPC routing** | `processPayload()`, `isRPCRequest()` (~800 lines) |
+| `src/libs/network/endpointValidation.ts` | **Tx validation** | `handleValidateTransaction()` (~150 lines) |
+| `src/libs/network/endpointExecution.ts` | **Tx execution** | `handleExecuteTransaction()` (~412 lines) |
+| `src/libs/network/endpointConsensus.ts` | Consensus requests | `handleConsensusRequest()` (~68 lines) |
+| `src/libs/network/endpointL2PSHash.ts` | L2PS hash updates | `handleL2PSHashUpdate()` (~94 lines) |
+| `src/libs/network/endpointHandlers.ts` | **Facade** | Delegates to above modules (~150 lines) |
+| `src/libs/network/rpcRateLimit.ts` | Identity rate limit | `handleIdentityTxRateLimit()` (~71 lines) |
+| `src/libs/network/zkMerkle.ts` | ZK Merkle tree | `registerZkRoutes()` (~208 lines) |
+
+### Blockchain Layer (chain.ts split)
+
+| File | Purpose | Key Exports |
+|------|---------|-------------|
+| `src/libs/blockchain/chain.ts` | Singleton, core | Chain class (~196 lines) |
+| `src/libs/blockchain/chainBlocks.ts` | Block operations | `getLastBlock()`, `insertBlock()`, etc (~343 lines) |
+| `src/libs/blockchain/chainTransactions.ts` | Tx operations | `getTxByHash()`, `insertTransaction()` (~200 lines) |
+| `src/libs/blockchain/chainGenesis.ts` | Genesis logic | `generateGenesisBlock()` (~142 lines) |
+| `src/libs/blockchain/chainStatus.ts` | Status queries | `statusOf()`, `statusHashAt()` (~42 lines) |
+| `src/libs/blockchain/chainDb.ts` | DB layer | `getBlocksRepo()`, `setupChainDb()` (~43 lines) |
+| `src/libs/blockchain/chainTypes.ts` | Types | `L2PSHashUpdatePayload` (~6 lines) |
 
 ---
 
@@ -32,23 +65,25 @@
 
 | Component | Status | Current File | Notes |
 |-----------|--------|-------------|-------|
-| HTTP server | KEEP | `src/libs/network/server_rpc.ts` | Bun-based, stateless |
+| HTTP server | KEEP | `src/libs/network/server_rpc.ts` | Bun-based, stateless (~150 lines) |
+| RPC dispatch | KEEP | `src/libs/network/rpcDispatch.ts` | `processPayload()` routes RPC methods |
+| Transaction validation | KEEP | `src/libs/network/endpointValidation.ts` | `handleValidateTransaction()` |
+| Transaction execution | REFACTOR | `src/libs/network/endpointExecution.ts` | `handleExecuteTransaction()` — Petri routing goes here |
 | Signature verification | KEEP | `src/libs/network/verifySignature.ts` | ed25519, falcon, ml-dsa |
-| Transaction validation | KEEP | `src/libs/blockchain/routines/validateTransaction.ts` | `confirmTransaction()` |
-| GCR edit validation | KEEP | `src/libs/network/endpointHandlers.ts` | Hash comparison + balance check |
-| Rate limiting | KEEP | `src/libs/network/middleware/rateLimiter.ts` | IP + identity rate limits |
+| GCR edit validation | KEEP | `src/libs/network/endpointValidation.ts` | Hash comparison + balance check |
+| Rate limiting | KEEP | `src/libs/network/middleware/rateLimiter.ts` + `rpcRateLimit.ts` | IP + identity rate limits |
 | Auth context | KEEP | `src/libs/network/authContext.ts` | WeakMap per request |
 | **Routing to 2 shard members** | NEW | — | RPC must route to exactly 2 shard members (not all validators) |
 | **Address-space shard assignment** | NEW | — | Derive shard from tx address space, not just block-based |
-| **Transaction classification** | NEW | — | PRE-APPROVED (read-only) vs TO-APPROVE (state-changing) |
+| **Transaction classification** | NEW | — | Via GCRGeneration: empty edits = read-only |
 | DTR relay | REPLACE | `src/libs/network/dtr/dtrmanager.ts` | Petri Phase 1 routing supersedes DTR for validators |
 
 ### Key Refactoring Notes
 
-- `handleValidateTransaction()` in `endpointHandlers.ts` currently validates then either relays (DTR) or executes locally
-- Petri replaces this with: validate → classify → route to 2 shard members
+- `handleValidateTransaction()` in `endpointValidation.ts` validates txs — Petri classification hooks in here
+- `handleExecuteTransaction()` in `endpointExecution.ts` handles DTR relay / local execution — Petri routing replaces this path
+- `processPayload()` in `rpcDispatch.ts` (method="execute") dispatches to the above — consensus flag switch goes here
 - DTR still needed for non-validator nodes relaying to the network, but shard routing is different
-- The `processPayload()` switch in `server_rpc.ts` (method="execute") needs a new flow
 
 ---
 
@@ -103,7 +138,7 @@ No existing code. Must create:
 | Vote handler | REFACTOR | `src/libs/consensus/v2/routines/manageProposeBlockHash.ts` | Verify block of PRE-APPROVED txs |
 | BFT threshold | KEEP | `PoRBFT.ts:isBlockValid()` | `floor(2n/3) + 1` — already correct |
 | Block entity | KEEP | `src/model/entities/Blocks.ts` | Schema works for Petri blocks |
-| Chain insertion | KEEP | `src/libs/blockchain/chain.ts` | `insertBlock()` with finality |
+| Chain insertion | KEEP | `src/libs/blockchain/chainBlocks.ts` | `insertBlock()` with finality |
 | **BFT arbitration for PROBLEMATIC** | NEW | — | Separate BFT round for conflicting txs only |
 | **Block compilation from PRE-APPROVED** | NEW | — | Gather all PRE-APPROVED txs at 10s mark |
 | **Rejection of unresolvable conflicts** | NEW | — | PROBLEMATIC txs that fail BFT → rejected, never stall |
