@@ -17,3 +17,7 @@ export let petriForgeInstance: ContinuousForge | null = null
 export function setPetriForgeInstance(instance: ContinuousForge | null): void {
     petriForgeInstance = instance
 }
+
+export function getPetriForgeInstance(): ContinuousForge | null {
+    return petriForgeInstance
+}
