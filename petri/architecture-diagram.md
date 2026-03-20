@@ -1,14 +1,14 @@
 # Petri Consensus — Living Architecture Diagram
 
-**Last updated:** 2026-03-20 (Phase 4 — RPC Routing Refactor)
+**Last updated:** 2026-03-20 (Phase 5 — Finality & Status API)
 
 ---
 
 ## Architecture Diagram
 
 ```
-                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4
-                      ====================================================================
+                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4 + PHASE 5
+                      ============================================================================
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ENTRY POINT                                                                    │
@@ -23,12 +23,13 @@
                                    │
     ┌──────────────────────────────▼───────────────────────────────────────────────────────────────┐
     │  BARREL / ENTRY POINT                                                                        │
-    │  src/libs/consensus/petri/index.ts                                                 [P0→P4]  │
+    │  src/libs/consensus/petri/index.ts                                                 [P0→P5]  │
     │                                                                                              │
     │    Re-exports all types from ./types/*                                                       │
     │    Re-exports ContinuousForge, DeltaAgreementTracker from ./forge/*              ── NEW P2  │
     │    Re-exports block/* and arbitration/* modules                                   ── NEW P3  │
     │    Re-exports routing/* (petriRouter, shardMapper)                                ── NEW P4  │
+    │    Re-exports finality/* (getTransactionFinality)                                 ── NEW P5  │
     │    petriConsensusRoutine(shard): Promise<void>  ── full block lifecycle           ── UPD P3  │
     │      1. forge.start(shard)                                                                   │
     │      2. sleep(blockIntervalMs)                                                               │
@@ -176,13 +177,14 @@
                                    │ persists to
                                    ▼
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
-    │  MEMPOOL ENTITY (MODIFIED)                                                             [P1]  │
+    │  MEMPOOL ENTITY (MODIFIED)                                                          [P1→P5]  │
     │  src/model/entities/Mempool.ts                                                               │
     │                                                                                              │
-    │    MempoolTx entity — existing columns + 2 new:                                             │
+    │    MempoolTx entity — existing columns + 3 new:                                             │
     │                                                                                              │
     │    + classification: text (nullable)    ── PRE_APPROVED | TO_APPROVE | PROBLEMATIC          │
     │    + delta_hash: text (nullable)        ── sha256 of canonical GCR edits                    │
+    │    + soft_finality_at: datetime (nullable) ── when tx first reached PRE_APPROVED   ── P5   │
     │                                                                                              │
     │    + idx_mempooltx_classification       ── new index for classification queries              │
     │                                                                                              │
@@ -667,6 +669,126 @@
                               │  method: nodeCall │
                               │  msg: RELAY_TX    │
                               └───────────────────┘
+
+
+    ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║  PHASE 5 — FINALITY & STATUS API (Soft/Hard Finality + RPC Endpoint)                        ║
+    ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+    DUAL FINALITY MODEL
+    ────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  FINALITY TIMELINE                                                                     [P5]  │
+    │                                                                                              │
+    │    tx submitted ──► classified ──► forge rounds ──► PRE_APPROVED ──► block finalized         │
+    │         t=0           t≈0            ~2s rounds       SOFT FINALITY     HARD FINALITY        │
+    │                                                       (~2s)             (~12s)               │
+    │                                                                                              │
+    │    Soft finality:  tx reaches PRE_APPROVED via forge delta agreement                        │
+    │                    recorded as soft_finality_at timestamp on MempoolTx + Transactions        │
+    │                                                                                              │
+    │    Hard finality:  tx confirmed in a finalized block on chain                               │
+    │                    determined by chain lookup (block inclusion)                              │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    ENTITY MODIFICATIONS
+    ─────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  MEMPOOL ENTITY (MODIFIED)                                                        [P1→P5]   │
+    │  src/model/entities/Mempool.ts                                                               │
+    │                                                                                              │
+    │    + soft_finality_at: datetime (nullable)    ── when tx first reached PRE_APPROVED  [P5]   │
+    │      Set when forge promotes tx to PRE_APPROVED (updateClassification)                      │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  TRANSACTIONS ENTITY (MODIFIED)                                                        [P5]  │
+    │  src/model/entities/Transactions.ts                                                          │
+    │                                                                                              │
+    │    + soft_finality_at: datetime (nullable)    ── preserved from mempool on block insert [P5]│
+    │      Carries soft finality timestamp into permanent chain record                            │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    FINALITY SERVICE
+    ─────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  TRANSACTION FINALITY                                                                  [P5]  │
+    │  src/libs/consensus/petri/finality/transactionFinality.ts                                   │
+    │                                                                                              │
+    │    getTransactionFinality(txHash) → TransactionFinalityResult                              │
+    │                                                                                              │
+    │      1. Check chain (Transactions entity) first                                             │
+    │         └── found → status: "confirmed"                                                     │
+    │                     hardFinality: block timestamp                                           │
+    │                     softFinality: soft_finality_at (if recorded)                            │
+    │                     blockHash, blockNumber                                                  │
+    │                                                                                              │
+    │      2. Check mempool (MempoolTx entity) if not on chain                                   │
+    │         └── found → status: "pending"                                                       │
+    │                     classification: PRE_APPROVED | TO_APPROVE | PROBLEMATIC                 │
+    │                     softFinality: soft_finality_at (if PRE_APPROVED)                        │
+    │                                                                                              │
+    │      3. Not found anywhere                                                                  │
+    │         └── status: "unknown"                                                               │
+    │                                                                                              │
+    │    Returns: TransactionFinalityResult                                                      │
+    │      { status, softFinality?, hardFinality?,                                               │
+    │        classification?, blockHash?, blockNumber? }                                         │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    RPC ENDPOINT
+    ─────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  RPC DISPATCH (MODIFIED)                                                            [P4→P5] │
+    │  src/libs/network/rpcDispatch.ts                                                            │
+    │                                                                                              │
+    │    case "getTransactionFinality":                                                   [P5]    │
+    │      1. Extract txHash from params                                                          │
+    │      2. getTransactionFinality(txHash)                                                     │
+    │      3. Return TransactionFinalityResult                                                   │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    COMPLETE DATA FLOW — FINALITY QUERY (summary, P5)
+    ──────────────────────────────────────────────────
+
+    ┌──────────┐  getTransactionFinality  ┌──────────────┐  chain lookup  ┌──────────────────┐
+    │  Client  │─────────────────────────►│ rpcDispatch  │──────────────►│ Transactions     │
+    │  (RPC)   │                          │    (P4→P5)   │               │ entity (chain)   │
+    └──────────┘                          └──────┬───────┘               └────────┬─────────┘
+                                                 │                                │
+                                                 │ if not on chain                │ found?
+                                                 ▼                                │
+                                          ┌─────────────┐                         │
+                                          │ transaction  │                         │
+                                          │ Finality.ts  │◄────────────────────────┘
+                                          │    (P5)      │
+                                          └──────┬───────┘
+                                                 │ mempool fallback
+                                                 ▼
+                                          ┌─────────────┐
+                                          │  MempoolTx  │
+                                          │  entity     │
+                                          │  (P1→P5)    │
+                                          └─────────────┘
+
+                                          Returns: TransactionFinalityResult
+                                            status: "confirmed" | "pending" | "unknown"
+                                            softFinality?: Date    (PRE_APPROVED timestamp)
+                                            hardFinality?: Date    (block confirmation)
 ```
 
 ### Legend
@@ -693,11 +815,15 @@
     └──────────┘
 
     ┌──────────┐
+    │  [P5]    │    Box with phase annotation — implemented in Phase 5
+    └──────────┘
+
+    ┌──────────┐
     │  [v2]    │    Reused from PoRBFT v2 consensus (existing infrastructure)
     └──────────┘
 
     ┌──────────────┐
-    │  [P0→P4]     │    Modified across multiple phases
+    │  [P0→P5]     │    Modified across multiple phases
     └──────────────┘
 
     ╔══════════╗
@@ -717,9 +843,13 @@
 
     ── NEW P4       Inline note — added in Phase 4
 
+    ── NEW P5       Inline note — added in Phase 5
+
     ── UPD P3       Inline note — updated in Phase 3
 
     ── UPD P4       Inline note — updated in Phase 4
+
+    ── UPD P5       Inline note — updated in Phase 5
 
     (external dep)  Dependency outside this repository (SDK package)
 
@@ -735,7 +865,7 @@
 | File | Phase | Status | Key Exports |
 |---|---|---|---|
 | `src/utilities/sharedState.ts` | P0 | Modified | `petriConsensus: boolean`, `petriConfig: PetriConfig` (feature flag + config instance) |
-| `src/libs/consensus/petri/index.ts` | P0→P4 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, arbitration, and routing modules. |
+| `src/libs/consensus/petri/index.ts` | P0→P5 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, arbitration, routing, and finality modules. |
 | `src/libs/consensus/petri/types/classificationTypes.ts` | P0 | Complete | `TransactionClassification` (enum: PRE_APPROVED, TO_APPROVE, PROBLEMATIC), `ClassifiedTransaction` (interface) |
 | `src/libs/consensus/petri/types/stateDelta.ts` | P0 | Complete | `StateDelta` (interface, uses `GCREdit` from SDK), `PeerDelta` (interface) |
 | `src/libs/consensus/petri/types/continuousForgeTypes.ts` | P0 | Complete | `ContinuousForgeRound` (interface), `ForgeConfig` (interface), `ForgeState` (interface) |
@@ -744,7 +874,7 @@
 | `src/libs/consensus/petri/classifier/transactionClassifier.ts` | P1 | Complete | `classifyTransaction(tx, precomputedEdits?)` returns `ClassificationResult` (classification + gcrEdits). Filters fee/nonce-only edits to distinguish PRE_APPROVED vs TO_APPROVE. |
 | `src/libs/consensus/petri/execution/speculativeExecutor.ts` | P1 | Complete | `executeSpeculatively(tx, gcrEdits)` returns `SpeculativeResult` (success + delta). Runs GCR edits in simulate mode via Balance/Nonce/Identity routines, then hashes with `canonicalJson` + `Hashing.sha256`. |
 | `src/libs/consensus/petri/utils/canonicalJson.ts` | P1 | Complete | `canonicalJson(value)` deterministic JSON serialization with sorted keys, BigInt/Map/Set handling. |
-| `src/model/entities/Mempool.ts` | P1 | Modified | Added `classification: text` and `delta_hash: text` nullable columns + `idx_mempooltx_classification` index. |
+| `src/model/entities/Mempool.ts` | P1→P5 | Modified | Added `classification: text` and `delta_hash: text` nullable columns + `idx_mempooltx_classification` index (P1). Added `soft_finality_at: datetime` nullable column — records when tx first reaches PRE_APPROVED (P5). |
 | `src/libs/blockchain/mempool_v2.ts` | P1 | Modified | Added `getByClassification()`, `getPreApproved()`, `updateClassification()` methods for Petri classification queries. |
 | `src/libs/network/endpointValidation.ts` | P1 | Modified | Wired classifier + speculative executor after validation, gated by `petriConsensus` flag. Fire-and-forget `updateClassification` call. |
 | `src/libs/consensus/petri/forge/continuousForge.ts` | P2 | Complete | `ContinuousForge` class: `start(shard)`, `stop()`, `pause()`, `resume()`, `reset()`, `getCurrentDeltas()`, `getState()`. Private: `runForgeRound()` (7-step cycle), `exchangeDeltas()` (all-to-all RPC), `scheduleNextRound()` (2s timer loop). |
@@ -758,6 +888,9 @@
 | `src/libs/consensus/petri/routing/shardMapper.ts` | P4 | Complete | `getShardForAddress(address?)` returns shard identifier. Single-shard testnet: always returns `'default'`. |
 | `src/libs/consensus/petri/routing/petriRouter.ts` | P4 | Complete | `selectMembers(txHash, shard, membersPerTx=2)` deterministic member selection via Alea PRNG. `getCurrentShard()` delegates to shardMapper. `relay(validityData)` routes validated tx to 2 selected shard members via `peer.longCall({ method: "nodeCall", params: [{ message: "RELAY_TX", data: [validityData] }] })`. |
 | `src/libs/network/endpointExecution.ts` | P4 | Modified | When `petriConsensus` flag is on, calls `petriRelay(validityData)` instead of existing DTR flow. Early return before validator check. Returns `{ success, routing: "petri" }`. |
+| `src/model/entities/Transactions.ts` | P5 | Modified | Added `soft_finality_at: datetime` nullable column — preserves soft finality timestamp from mempool when tx is included in a block. |
+| `src/libs/consensus/petri/finality/transactionFinality.ts` | P5 | Complete | `getTransactionFinality(txHash)` checks chain first (confirmed with hard finality), then mempool (pending with soft finality if PRE_APPROVED), returns `TransactionFinalityResult { status, softFinality?, hardFinality?, classification?, blockHash?, blockNumber? }`. |
+| `src/libs/network/rpcDispatch.ts` | P4→P5 | Modified | Added `getTransactionFinality` RPC endpoint (P5). Extracts txHash from params, calls `getTransactionFinality(txHash)`, returns `TransactionFinalityResult`. |
 
 ### Notes
 
@@ -777,3 +910,7 @@
 - **Shard mapping:** `shardMapper.ts` provides `getShardForAddress()` which currently returns `'default'` for single-shard testnet. This is the extension point for future multi-shard support.
 - **Deterministic member selection:** `petriRouter.selectMembers()` uses Alea PRNG seeded with the transaction hash to deterministically select `membersPerTx` (default 2) shard members for relay. This ensures any node given the same txHash and shard membership list will select the same members.
 - **Relay transport:** Selected members receive the validated transaction via `peer.longCall()` with `method: "nodeCall"` and `message: "RELAY_TX"`, reusing the existing node call infrastructure.
+- **Dual finality model (P5):** Petri consensus introduces two finality tiers. **Soft finality** (~2s) occurs when a transaction reaches `PRE_APPROVED` status via forge delta agreement — the `soft_finality_at` timestamp is recorded on both `MempoolTx` and `Transactions` entities. **Hard finality** (~12s) occurs when the transaction is confirmed in a finalized block on chain, determined by block inclusion lookup.
+- **`soft_finality_at` column (P5):** Added to both `MempoolTx` (mempool entity) and `Transactions` (chain entity) as a nullable datetime. On `MempoolTx`, it is set when the forge promotes a tx to `PRE_APPROVED` via `updateClassification`. On `Transactions`, the value is preserved from the mempool record when the tx is inserted into a block.
+- **Transaction finality service (P5):** `getTransactionFinality(txHash)` in `finality/transactionFinality.ts` implements a chain-first lookup strategy: (1) check the `Transactions` entity — if found, the tx is `"confirmed"` with hard finality from the block timestamp and optional soft finality from `soft_finality_at`; (2) check `MempoolTx` — if found, the tx is `"pending"` with classification and optional soft finality; (3) if neither, return `"unknown"`.
+- **Finality RPC endpoint (P5):** The `getTransactionFinality` method is exposed as an RPC endpoint in `rpcDispatch.ts`, allowing clients to query the finality status of any transaction by hash.
