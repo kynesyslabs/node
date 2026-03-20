@@ -13,6 +13,10 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import { classifyTransaction } from "@/libs/consensus/petri/classifier/transactionClassifier"
+import { executeSpeculatively } from "@/libs/consensus/petri/execution/speculativeExecutor"
+import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"
+import Mempool from "@/libs/blockchain/mempool_v2"
 
 export async function handleValidateTransaction(
     tx: Transaction,
@@ -84,6 +88,34 @@ export async function handleValidateTransaction(
                     `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
                 )
             }
+        }
+
+        // REVIEW: Petri Consensus — classify transaction after validation passes
+        if (getSharedState.petriConsensus) {
+            const { classification, gcrEdits: classifiedEdits } =
+                await classifyTransaction(tx, gcrEdits)
+
+            let deltaHash: string | undefined
+            if (classification === TransactionClassification.TO_APPROVE) {
+                const specResult = await executeSpeculatively(
+                    tx,
+                    classifiedEdits,
+                )
+                if (specResult.success && specResult.delta) {
+                    deltaHash = specResult.delta.hash
+                }
+            }
+
+            // Store classification in mempool (fire-and-forget, non-blocking)
+            Mempool.updateClassification(
+                tx.hash,
+                classification,
+                deltaHash,
+            ).catch(err => {
+                log.warn(
+                    `[PetriClassifier] Failed to update classification for ${tx.hash}: ${err}`,
+                )
+            })
         }
     } catch (e) {
         log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)

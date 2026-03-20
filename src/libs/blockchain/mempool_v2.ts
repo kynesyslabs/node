@@ -2,7 +2,9 @@ import {
     EntityManager,
     FindManyOptions,
     In,
+    IsNull,
     LessThanOrEqual,
+    Not,
     QueryFailedError,
     Repository,
 } from "typeorm"
@@ -15,6 +17,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
+import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -251,6 +254,52 @@ export default class Mempool {
             )
             throw error
         }
+    }
+
+    // REVIEW: Petri Consensus classification queries (Phase 1)
+
+    /**
+     * Get mempool transactions filtered by Petri classification.
+     */
+    public static async getByClassification(
+        classification: TransactionClassification,
+        blockNumber?: number,
+    ): Promise<MempoolTx[]> {
+        const where: Record<string, unknown> = { classification }
+        if (blockNumber) {
+            where.blockNumber = LessThanOrEqual(blockNumber)
+        }
+        return await this.repo.find({
+            where,
+            order: { timestamp: "ASC" },
+        })
+    }
+
+    /**
+     * Get all PRE_APPROVED transactions, optionally filtered by block number.
+     */
+    public static async getPreApproved(
+        blockNumber?: number,
+    ): Promise<MempoolTx[]> {
+        return this.getByClassification(
+            TransactionClassification.PRE_APPROVED,
+            blockNumber,
+        )
+    }
+
+    /**
+     * Update classification and optional delta hash for a transaction.
+     */
+    public static async updateClassification(
+        txHash: string,
+        classification: TransactionClassification,
+        deltaHash?: string,
+    ): Promise<void> {
+        const update: Record<string, unknown> = { classification }
+        if (deltaHash !== undefined) {
+            update.delta_hash = deltaHash
+        }
+        await this.repo.update({ hash: txHash }, update)
     }
 }
 

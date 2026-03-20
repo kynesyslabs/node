@@ -6,6 +6,7 @@ import { Column, Entity, Index, PrimaryColumn } from "typeorm"
 @Entity("mempooltx")
 @Index("idx_mempooltx_hash", ["hash"])
 @Index("idx_mempooltx_reference_block", ["reference_block"])
+@Index("idx_mempooltx_classification", ["classification"])
 export class MempoolTx implements Transaction {
     @Index()
     @PrimaryColumn("text", { name: "hash", unique: true })
@@ -37,4 +38,11 @@ export class MempoolTx implements Transaction {
 
     @Column("integer", { name: "reference_block" })
     reference_block: number
+
+    // REVIEW: Petri Consensus classification columns (Phase 1)
+    @Column("text", { name: "classification", nullable: true })
+    classification: string | null
+
+    @Column("text", { name: "delta_hash", nullable: true })
+    delta_hash: string | null
 }
