@@ -1,14 +1,14 @@
 # Petri Consensus — Living Architecture Diagram
 
-**Last updated:** 2026-03-20 (Phase 2 — Continuous Forge & Delta Agreement)
+**Last updated:** 2026-03-20 (Phase 3 — Block Finalization)
 
 ---
 
 ## Architecture Diagram
 
 ```
-                                PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2
-                                ================================================
+                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3
+                      ==============================================================
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ENTRY POINT                                                                    │
@@ -23,11 +23,20 @@
                                    │
     ┌──────────────────────────────▼───────────────────────────────────────────────────────────────┐
     │  BARREL / ENTRY POINT                                                                        │
-    │  src/libs/consensus/petri/index.ts                                                 [P0→P2]  │
+    │  src/libs/consensus/petri/index.ts                                                 [P0→P3]  │
     │                                                                                              │
     │    Re-exports all types from ./types/*                                                       │
     │    Re-exports ContinuousForge, DeltaAgreementTracker from ./forge/*              ── NEW P2  │
-    │    petriConsensusRoutine(shard): Promise<void>  ── creates & starts forge         ── NEW P2  │
+    │    Re-exports block/* and arbitration/* modules                                   ── NEW P3  │
+    │    petriConsensusRoutine(shard): Promise<void>  ── full block lifecycle           ── UPD P3  │
+    │      1. forge.start(shard)                                                                   │
+    │      2. sleep(blockIntervalMs)                                                               │
+    │      3. forge.pause()                                                                        │
+    │      4. arbitrate(shard)                                                                     │
+    │      5. compileBlock(shard, resolved)                                                        │
+    │      6. finalizeBlock(block, shard)                                                          │
+    │      7. cleanRejectedFromMempool(rejectedHashes)                                            │
+    │      8. forge.reset() → forge.resume()                                                      │
     │                                                                                              │
     └──┬──────────────┬──────────────┬──────────────┬──────────────────────────────────────────────┘
        │              │              │              │
@@ -323,8 +332,8 @@
     └─────────────────────┘              └───────────────────────────────────┘
 
 
-    COMPLETE DATA FLOW — FORGE ROUND (summary)
-    ───────────────────────────────────────────
+    COMPLETE DATA FLOW — FORGE ROUND (summary, P2)
+    ───────────────────────────────────────────────
 
     ┌──────────┐    merge     ┌──────────┐  TO_APPROVE  ┌──────────────┐  specExec  ┌────────────┐
     │  Shard   │─────────────►│  Mempool │─────────────►│ ContinuousF. │──────────►│ Speculative │
@@ -341,6 +350,226 @@
          └─────────────────────────────────────────────│  recordDelta │
                                                        │  evaluate    │
                                                        └──────────────┘
+
+
+    ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║  PHASE 3 — BLOCK FINALIZATION (Arbitration → Compilation → Finalization)                     ║
+    ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+    FULL BLOCK LIFECYCLE — petriConsensusRoutine(shard)
+    ───────────────────────────────────────────────────
+
+    ┌──── Step 1 (P2) ───────────────────────────────────────────────────────────────────────────┐
+    │  forge.start(shard)        ── begins ContinuousForge loop (2s rounds)                     │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+    ┌──── Step 2 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  sleep(blockIntervalMs)    ── default 10s, txs accumulate in mempool                      │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+    ┌──── Step 3 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  forge.pause()             ── stops forge rounds, no new delta exchange                    │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+    ┌──── Step 4 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  ARBITRATE                                                                                 │
+    │  arbitrate(shard) → { resolved: ClassifiedTransaction[], rejectedHashes: string[] }       │
+    │    - Gets PROBLEMATIC txs from mempool                                                     │
+    │    - Runs BFT round to resolve disputes                                                    │
+    │    - Returns resolved txs (reclassified) + rejected hashes                                 │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ resolved[], rejectedHashes[]
+                                  ▼
+    ┌──── Step 5 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  COMPILE BLOCK                                                                             │
+    │  compileBlock(shard, resolved) → CompilationResult                                        │
+    │    1. Mempool.getPreApproved()        ── get PRE_APPROVED txs from mempool                │
+    │    2. Merge PRE_APPROVED + resolved   ── combine into candidate list                      │
+    │    3. orderTransactions()             ── deterministic ordering (reused PoRBFTv2)          │
+    │    4. createBlock()                   ── assemble block structure (reused PoRBFTv2)        │
+    │    Returns: { block, txCount }                                                            │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  │ block
+                                  ▼
+    ┌──── Step 6 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  FINALIZE BLOCK                                                                            │
+    │  finalizeBlock(block, shard) → FinalizationResult                                         │
+    │    1. broadcastBlockHash()            ── announce hash to shard   (reused PoRBFTv2)       │
+    │    2. isBlockValid()                  ── BFT validity check                               │
+    │    3. insertBlock()                   ── persist to chain         (reused chainBlocks)     │
+    │    4. BroadcastManager.broadcastNewBlock()  ── full block to network (reused)              │
+    │    Returns: { success, blockHash }                                                        │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+    ┌──── Step 7 (P3) ───────────────────────────────────────────────────────────────────────────┐
+    │  CLEANUP & RESUME                                                                          │
+    │  cleanRejectedFromMempool(rejectedHashes)   ── remove rejected txs                        │
+    │  forge.reset()                               ── clear delta tracker state                  │
+    │  forge.resume()                              ── restart forge rounds for next block        │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    PHASE 3 MODULES — DETAIL
+    ─────────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  BFT ARBITRATOR                                                                        [P3]  │
+    │  src/libs/consensus/petri/arbitration/bftArbitrator.ts                                       │
+    │                                                                                              │
+    │    arbitrate(shard)                                                                          │
+    │      1. Mempool.getByClassification(PROBLEMATIC)    ── get disputed txs                    │
+    │      2. BFT round among shard validators            ── consensus on resolution              │
+    │      3. Returns: { resolved: ClassifiedTransaction[],                                      │
+    │                     rejectedHashes: string[] }                                              │
+    │                                                                                              │
+    │    resolved txs  → forwarded to compileBlock()                                              │
+    │    rejectedHashes → forwarded to cleanRejectedFromMempool()                                 │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  BLOCK COMPILER                                                                        [P3]  │
+    │  src/libs/consensus/petri/block/petriBlockCompiler.ts                                       │
+    │                                                                                              │
+    │    compileBlock(shard, resolvedTxs) → CompilationResult                                    │
+    │      1. Mempool.getPreApproved()              ── PRE_APPROVED txs                          │
+    │      2. Merge PRE_APPROVED + resolvedTxs      ── full candidate set                       │
+    │      3. orderTransactions(candidates)          ── deterministic sort (reused PoRBFTv2)     │
+    │      4. createBlock(ordered, shard)            ── block assembly     (reused PoRBFTv2)     │
+    │      Returns: CompilationResult { block, txCount }                                        │
+    │                                                                                              │
+    │    cleanRejectedFromMempool(rejectedHashes)                                                │
+    │      └── Mempool.removeTransactionsByHashes(rejectedHashes)                                │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  BLOCK FINALIZER                                                                       [P3]  │
+    │  src/libs/consensus/petri/block/petriBlockFinalizer.ts                                      │
+    │                                                                                              │
+    │    finalizeBlock(block, shard) → FinalizationResult                                        │
+    │      1. broadcastBlockHash(block, shard)      ── hash announcement   (reused PoRBFTv2)    │
+    │      2. isBlockValid(block, shard)            ── BFT validity check                       │
+    │      3. insertBlock(block)                    ── chain persistence    (reused chainBlocks)  │
+    │      4. BroadcastManager.broadcastNewBlock(block)  ── network broadcast (reused)           │
+    │      Returns: FinalizationResult { success, blockHash }                                   │
+    │                                                                                              │
+    │    isBlockValid(block, shard) → boolean                                                    │
+    │      └── BFT round: validators vote on block validity                                     │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    REUSED PoRBFT v2 INFRASTRUCTURE                                                          [P3]
+    ───────────────────────────────
+
+    ┌──────────────────────────────────┐    ┌──────────────────────────────────┐
+    │  createBlock()             [v2]  │    │  orderTransactions()       [v2]  │
+    │  src/libs/consensus/v2/          │    │  src/libs/consensus/v2/          │
+    │   routines/createBlock.ts        │    │   routines/orderTransactions.ts  │
+    └──────────────────────────────────┘    └──────────────────────────────────┘
+
+    ┌──────────────────────────────────┐    ┌──────────────────────────────────┐
+    │  broadcastBlockHash()      [v2]  │    │  getCommonValidatorSeed()  [v2]  │
+    │  src/libs/consensus/v2/          │    │  src/libs/consensus/v2/          │
+    │   routines/broadcastBlockHash.ts │    │   routines/getCommonValidator-   │
+    └──────────────────────────────────┘    │   Seed.ts                        │
+                                            └──────────────────────────────────┘
+    ┌──────────────────────────────────┐    ┌──────────────────────────────────┐
+    │  insertBlock()        [existing] │    │  BroadcastManager        [exist] │
+    │  src/libs/blockchain/            │    │  src/libs/communications/        │
+    │   chainBlocks.ts                 │    │   broadcastManager.ts            │
+    │                                  │    │                                  │
+    │  Persists block to DB            │    │  broadcastNewBlock(block)        │
+    └──────────────────────────────────┘    └──────────────────────────────────┘
+
+    ┌──────────────────────────────────┐
+    │  getShard()              [v2]    │
+    │  src/libs/consensus/v2/          │
+    │   routines/getShard.ts           │
+    └──────────────────────────────────┘
+
+
+    CONSENSUS DISPATCH SWITCHING                                                             [P3]
+    ────────────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  MAIN LOOP (MODIFIED)                                                                  [P3]  │
+    │  src/utilities/mainLoop.ts                                                                   │
+    │                                                                                              │
+    │    if (petriConsensus) → petriConsensusRoutine(shard)                                       │
+    │    else                → existing PoRBFTv2 consensus routine                                │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  RPC CONSENSUS HANDLER (MODIFIED)                                                    [P2→P3] │
+    │  src/libs/network/manageConsensusRoutines.ts                                                 │
+    │                                                                                              │
+    │    case "petri_exchangeDeltas":                                                     [P2]    │
+    │      1. Check petriConsensus flag                                                           │
+    │      2. petriForgeInstance.getCurrentDeltas()                                                │
+    │      3. Return { deltas: ourDeltas }                                                        │
+    │                                                                                              │
+    │    Consensus dispatch switching:                                                    [P3]    │
+    │      if (petriConsensus) → route to Petri handlers                                         │
+    │      else                → route to PoRBFTv2 handlers                                      │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    COMPLETE DATA FLOW — FULL BLOCK LIFECYCLE (summary, P0–P3)
+    ──────────────────────────────────────────────────────────
+
+                                    ┌─────────────┐
+                                    │  mainLoop   │
+                                    │    (P3)     │
+                                    └──────┬──────┘
+                                           │ petriConsensus?
+                                           ▼
+                                    ┌─────────────┐
+                                    │  petriCon-  │
+                                    │  sensus-    │
+                                    │  Routine    │
+                                    │  (P0→P3)   │
+                                    └──────┬──────┘
+                          ┌────────────────┼─────────────────────┐
+                          │                │                      │
+                          ▼                ▼                      ▼
+                   ┌────────────┐  ┌─────────────┐       ┌─────────────┐
+                   │ Continuous │  │  sleep(10s) │       │ forge.reset │
+                   │ Forge (P2) │  │  then pause │       │ forge.resume│
+                   │ start/     │  └──────┬──────┘       └─────────────┘
+                   │ pause/     │         │                      ▲
+                   │ resume/    │         ▼                      │
+                   │ reset      │  ┌─────────────┐              │
+                   └────────────┘  │  arbitrate  │              │
+                                   │    (P3)     │              │
+                                   └──┬───────┬──┘              │
+                        resolved[]    │       │ rejectedHashes  │
+                          ┌───────────┘       └────────┐        │
+                          ▼                            ▼        │
+                   ┌─────────────┐          ┌──────────────┐    │
+                   │ compileBlock│          │ cleanRejected│    │
+                   │    (P3)     │          │ FromMempool  │    │
+                   └──────┬──────┘          │    (P3)      │    │
+                          │ block           └──────────────┘    │
+                          ▼                                     │
+                   ┌─────────────┐                              │
+                   │ finalizeBlk │                              │
+                   │    (P3)     │──────────────────────────────┘
+                   │ broadcast → │
+                   │ validate →  │
+                   │ insert →    │
+                   │ broadcast   │
+                   └─────────────┘
 ```
 
 ### Legend
@@ -358,8 +587,16 @@
     │  [P2]    │    Box with phase annotation — implemented in Phase 2
     └──────────┘
 
+    ┌──────────┐
+    │  [P3]    │    Box with phase annotation — implemented in Phase 3
+    └──────────┘
+
+    ┌──────────┐
+    │  [v2]    │    Reused from PoRBFT v2 consensus (existing infrastructure)
+    └──────────┘
+
     ┌──────────────┐
-    │  [P0→P2]     │    Modified across multiple phases
+    │  [P0→P3]     │    Modified across multiple phases
     └──────────────┘
 
     ╔══════════╗
@@ -375,6 +612,10 @@
 
     ── NEW P2       Inline note — added/changed in Phase 2
 
+    ── NEW P3       Inline note — added in Phase 3
+
+    ── UPD P3       Inline note — updated in Phase 3
+
     (external dep)  Dependency outside this repository (SDK package)
 
     ┌── if (flag) ──── FEATURE FLAG GATE ──┐
@@ -389,7 +630,7 @@
 | File | Phase | Status | Key Exports |
 |---|---|---|---|
 | `src/utilities/sharedState.ts` | P0 | Modified | `petriConsensus: boolean`, `petriConfig: PetriConfig` (feature flag + config instance) |
-| `src/libs/consensus/petri/index.ts` | P0→P2 | Active | `petriConsensusRoutine(shard)` creates ContinuousForge, registers singleton, starts loop. Re-exports all types + forge classes. |
+| `src/libs/consensus/petri/index.ts` | P0→P3 | Active | `petriConsensusRoutine(shard)` full block lifecycle: start forge → sleep → pause → arbitrate → compile → finalize → cleanup → reset → resume. Re-exports all types, forge, block, and arbitration modules. |
 | `src/libs/consensus/petri/types/classificationTypes.ts` | P0 | Complete | `TransactionClassification` (enum: PRE_APPROVED, TO_APPROVE, PROBLEMATIC), `ClassifiedTransaction` (interface) |
 | `src/libs/consensus/petri/types/stateDelta.ts` | P0 | Complete | `StateDelta` (interface, uses `GCREdit` from SDK), `PeerDelta` (interface) |
 | `src/libs/consensus/petri/types/continuousForgeTypes.ts` | P0 | Complete | `ContinuousForgeRound` (interface), `ForgeConfig` (interface), `ForgeState` (interface) |
@@ -404,7 +645,11 @@
 | `src/libs/consensus/petri/forge/continuousForge.ts` | P2 | Complete | `ContinuousForge` class: `start(shard)`, `stop()`, `pause()`, `resume()`, `reset()`, `getCurrentDeltas()`, `getState()`. Private: `runForgeRound()` (7-step cycle), `exchangeDeltas()` (all-to-all RPC), `scheduleNextRound()` (2s timer loop). |
 | `src/libs/consensus/petri/forge/deltaAgreementTracker.ts` | P2 | Complete | `DeltaAgreementTracker` class: `recordDelta(txHash, deltaHash, memberKey, round)`, `evaluate(shardSize, round)` returns `{promoted[], flagged[]}`, `getComparison()` for diagnostics, `reset()`, `trackedCount`. |
 | `src/libs/consensus/petri/forge/forgeInstance.ts` | P2 | Complete | `petriForgeInstance` (global singleton, `ContinuousForge | null`), `setPetriForgeInstance()`. Bridges forge loop and RPC handler. |
-| `src/libs/network/manageConsensusRoutines.ts` | P2 | Modified | Added `petri_exchangeDeltas` RPC case: receives peer deltas, returns local deltas via `petriForgeInstance.getCurrentDeltas()`. Gated by `petriConsensus` flag. |
+| `src/libs/network/manageConsensusRoutines.ts` | P2→P3 | Modified | Added `petri_exchangeDeltas` RPC case (P2). Consensus dispatch switching: routes to Petri or PoRBFTv2 handlers based on `petriConsensus` flag (P3). |
+| `src/libs/consensus/petri/arbitration/bftArbitrator.ts` | P3 | Complete | `arbitrate(shard)` gets PROBLEMATIC txs from mempool, runs BFT round among shard validators, returns `{ resolved: ClassifiedTransaction[], rejectedHashes: string[] }`. |
+| `src/libs/consensus/petri/block/petriBlockCompiler.ts` | P3 | Complete | `compileBlock(shard, resolvedTxs)` merges PRE_APPROVED + resolved txs, calls `orderTransactions()` and `createBlock()` (reused PoRBFTv2), returns `CompilationResult { block, txCount }`. `cleanRejectedFromMempool(rejectedHashes)` removes rejected txs. |
+| `src/libs/consensus/petri/block/petriBlockFinalizer.ts` | P3 | Complete | `finalizeBlock(block, shard)` calls `broadcastBlockHash()`, `isBlockValid()` (BFT validity), `insertBlock()`, `BroadcastManager.broadcastNewBlock()`. Returns `FinalizationResult { success, blockHash }`. |
+| `src/utilities/mainLoop.ts` | P3 | Modified | Consensus dispatch switching: if `petriConsensus` flag is set, calls `petriConsensusRoutine(shard)` instead of PoRBFTv2 routine. |
 
 ### Notes
 
@@ -417,4 +662,6 @@
 - **Mempool columns:** `classification` and `delta_hash` are nullable to maintain backward compatibility — existing transactions without classification continue to work normally.
 - **Phase 2 forge loop:** `petriConsensusRoutine(shard)` creates a `ContinuousForge`, registers it as a global singleton via `setPetriForgeInstance`, and starts the 2-second interval loop. Each `runForgeRound` syncs mempools, speculatively executes TO_APPROVE transactions, exchanges delta hashes with shard peers via `petri_exchangeDeltas` RPC, feeds results into `DeltaAgreementTracker`, and promotes or flags transactions based on agreement threshold / TTL expiry.
 - **RPC bridge:** The `petri_exchangeDeltas` handler in `manageConsensusRoutines.ts` reads the global `petriForgeInstance` singleton to call `getCurrentDeltas()`, returning local delta hashes to the requesting peer. This decouples the RPC layer from the forge loop lifecycle.
-- **Phase 3 placeholder:** `petriConsensusRoutine` includes a `// REVIEW:` comment noting that Phase 3 will add block finalization logic.
+- **Phase 3 block lifecycle:** `petriConsensusRoutine` now implements the full block lifecycle: (1) start forge, (2) sleep for `blockIntervalMs` (default 10s) while txs accumulate, (3) pause forge, (4) arbitrate PROBLEMATIC txs via BFT, (5) compile block from PRE_APPROVED + resolved txs, (6) finalize block (broadcast hash → validate → insert → broadcast block), (7) clean rejected txs from mempool, (8) reset and resume forge for the next block cycle.
+- **Reused PoRBFT v2 infrastructure:** Phase 3 reuses `createBlock()`, `orderTransactions()`, `broadcastBlockHash()`, `getCommonValidatorSeed()`, and `getShard()` from `src/libs/consensus/v2/routines/`, plus `insertBlock()` from `src/libs/blockchain/chainBlocks.ts` and `BroadcastManager.broadcastNewBlock()` from `src/libs/communications/broadcastManager.ts`. This avoids duplicating battle-tested block assembly and broadcast logic.
+- **Consensus dispatch switching:** Both `mainLoop.ts` and `manageConsensusRoutines.ts` now check the `petriConsensus` flag to route consensus operations to either the Petri pipeline or the existing PoRBFTv2 routine.
