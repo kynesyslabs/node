@@ -1,6 +1,9 @@
 import Chain from "src/libs/blockchain/chain"
 import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { consensusRoutine } from "src/libs/consensus/v2/PoRBFT"
+import { petriConsensusRoutine } from "@/libs/consensus/petri"
+import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
+import getShard from "src/libs/consensus/v2/routines/getShard"
 import { Peer, PeerManager } from "src/libs/peer"
 import checkOfflinePeers from "src/libs/peer/routines/checkOfflinePeers"
 import Diagnostic, {
@@ -124,7 +127,14 @@ async function mainLoopCycle() {
         // }
         await yieldToEventLoop()
         // ANCHOR Calling the consensus routine if is time for it
-        await consensusRoutine()
+        if (getSharedState.petriConsensus) {
+            // REVIEW: Petri Consensus dispatch — get shard and run Petri routine
+            const { commonValidatorSeed } = await getCommonValidatorSeed()
+            const shard = await getShard(commonValidatorSeed)
+            await petriConsensusRoutine(shard)
+        } else {
+            await consensusRoutine()
+        }
         await yieldToEventLoop()
     } else if (!getSharedState.syncStatus) {
         // ? This is a bit redundant, isn't it?

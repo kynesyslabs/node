@@ -1,0 +1,121 @@
+/**
+ * PetriBlockCompiler — Petri Consensus Phase 3
+ *
+ * Compiles PRE_APPROVED transactions into a candidate block at the 10s boundary.
+ * Reuses existing block creation infrastructure:
+ *   - orderTransactions() for deterministic ordering
+ *   - createBlock() for block assembly, signing, and next-proposer calculation
+ *
+ * Also handles PROBLEMATIC transactions via BFT arbitration before block finalization.
+ */
+
+import type { Peer } from "@/libs/peer"
+import type Block from "@/libs/blockchain/block"
+import { Transaction } from "@kynesyslabs/demosdk/types"
+import Mempool from "@/libs/blockchain/mempool_v2"
+import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"
+import { orderTransactions } from "@/libs/consensus/v2/routines/orderTransactions"
+import { createBlock } from "@/libs/consensus/v2/routines/createBlock"
+import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
+import Chain from "@/libs/blockchain/chain"
+import { getSharedState } from "@/utilities/sharedState"
+import log from "@/utilities/logger"
+
+export interface CompilationResult {
+    block: Block | null
+    /** Transaction hashes included in the block */
+    includedTxHashes: string[]
+    /** Whether the block has any transactions (empty blocks are valid) */
+    isEmpty: boolean
+}
+
+/**
+ * Compile all PRE_APPROVED transactions into a candidate block.
+ *
+ * @param shard - The current shard members
+ * @param resolvedTxs - Additional transactions resolved from BFT arbitration
+ * @returns CompilationResult with the candidate block
+ */
+export async function compileBlock(
+    shard: Peer[],
+    resolvedTxs: Transaction[] = [],
+): Promise<CompilationResult> {
+    log.info("[PetriBlockCompiler] Starting block compilation")
+
+    // Step 1: Get all PRE_APPROVED transactions from mempool
+    const preApprovedMempoolTxs = await Mempool.getPreApproved()
+
+    // Combine PRE_APPROVED with resolved PROBLEMATIC txs
+    const allTxs: Transaction[] = [
+        ...(preApprovedMempoolTxs as unknown as Transaction[]),
+        ...resolvedTxs,
+    ]
+
+    const includedTxHashes = allTxs.map(tx => tx.hash)
+
+    if (allTxs.length === 0) {
+        log.info("[PetriBlockCompiler] No transactions to include — empty block")
+        // Empty blocks are valid in Petri — block production continues on schedule
+    }
+
+    // Step 2: Order transactions deterministically (by timestamp)
+    const ordered = await orderTransactions({ transactions: allTxs })
+
+    // Step 3: Get block metadata
+    const lastBlock = await Chain.getLastBlock()
+    const { commonValidatorSeed } = await getCommonValidatorSeed(lastBlock)
+    const previousBlockHash = lastBlock.hash
+    const blockNumber = lastBlock.number + 1
+
+    // Step 4: Set consensus timestamp for block creation
+    getSharedState.lastConsensusTime = getSharedState.currentUTCTime
+
+    // Step 5: Clear any stale candidate block before creating new one
+    getSharedState.candidateBlock = null
+
+    // Step 6: Create the block (signs it, calculates next proposer)
+    const block = await createBlock(
+        ordered,
+        commonValidatorSeed,
+        previousBlockHash,
+        blockNumber,
+        [], // Peerlist — empty per existing convention
+    )
+
+    log.info(
+        `[PetriBlockCompiler] Block #${blockNumber} compiled: ` +
+        `${ordered.length} txs, hash=${block.hash.substring(0, 16)}...`,
+    )
+
+    return {
+        block,
+        includedTxHashes,
+        isEmpty: ordered.length === 0,
+    }
+}
+
+/**
+ * Clean up mempool after block finalization.
+ * Removes PROBLEMATIC transactions that were rejected by BFT.
+ *
+ * @param rejectedTxHashes - Hashes of rejected PROBLEMATIC transactions
+ */
+export async function cleanRejectedFromMempool(
+    rejectedTxHashes: string[],
+): Promise<void> {
+    for (const hash of rejectedTxHashes) {
+        try {
+            await Mempool.removeTransaction(hash)
+        } catch (error) {
+            log.warn(
+                `[PetriBlockCompiler] Failed to remove rejected tx ${hash.substring(0, 16)}...: ${error}`,
+            )
+        }
+    }
+
+    if (rejectedTxHashes.length > 0) {
+        log.info(
+            `[PetriBlockCompiler] Cleaned ${rejectedTxHashes.length} rejected txs from mempool`,
+        )
+    }
+}

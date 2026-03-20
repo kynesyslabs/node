@@ -11,6 +11,7 @@ import {
     consensusRoutine,
     isConsensusAlreadyRunning,
 } from "../consensus/v2/PoRBFT"
+import { petriConsensusRoutine } from "@/libs/consensus/petri"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -76,7 +77,14 @@ export default async function manageConsensusRoutines(
             log.debug(
                 "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
             )
-            consensusRoutine() // Asynchronous function     to avoid blocking the main thread
+            // REVIEW: Petri Consensus dispatch
+            if (getSharedState.petriConsensus) {
+                const { commonValidatorSeed: petriSeed } = await getCommonValidatorSeed()
+                const petriShard = await getShard(petriSeed)
+                petriConsensusRoutine(petriShard) // Async — same pattern as PoRBFT
+            } else {
+                consensusRoutine() // Asynchronous function to avoid blocking the main thread
+            }
         }
         log.info(
             "[manageConsensusRoutines] We are within the consensus time window",
