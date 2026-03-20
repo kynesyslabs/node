@@ -5,40 +5,24 @@
  * Tracks both IP-based and identity-based rate limits.
  */
 
+import { getSharedState } from "@/utilities/sharedState"
 import {
     RateLimitConfig,
     RateLimitEntry,
     RateLimitResult,
     RateLimitType,
 } from "./types"
-import {
-    DEFAULT_MAX_CONNECTIONS_PER_IP,
-    DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IP,
-    DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IDENTITY,
-    DEFAULT_RATE_LIMIT_WINDOW_MS,
-    DEFAULT_RATE_LIMIT_ENTRY_TTL_MS,
-    DEFAULT_RATE_LIMIT_CLEANUP_INTERVAL_MS,
-    RATE_LIMIT_BLOCK_DURATION_MS,
-    DEFAULT_MANUAL_BLOCK_DURATION_MS,
-} from "../constants"
+import log from "@/utilities/tui/LegacyLoggerAdapter"
 
 export class RateLimiter {
+    private static instance: RateLimiter | null = null
     private config: RateLimitConfig
     private ipLimits: Map<string, RateLimitEntry> = new Map()
     private identityLimits: Map<string, RateLimitEntry> = new Map()
     private cleanupTimer?: NodeJS.Timeout
 
-    constructor(config: Partial<RateLimitConfig> = {}) {
-        this.config = {
-            enabled: config.enabled ?? true,
-            maxConnectionsPerIP: config.maxConnectionsPerIP ?? DEFAULT_MAX_CONNECTIONS_PER_IP,
-            maxRequestsPerSecondPerIP: config.maxRequestsPerSecondPerIP ?? DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IP,
-            maxRequestsPerSecondPerIdentity:
-                config.maxRequestsPerSecondPerIdentity ?? DEFAULT_MAX_REQUESTS_PER_SECOND_PER_IDENTITY,
-            windowMs: config.windowMs ?? DEFAULT_RATE_LIMIT_WINDOW_MS,
-            entryTTL: config.entryTTL ?? DEFAULT_RATE_LIMIT_ENTRY_TTL_MS,
-            cleanupInterval: config.cleanupInterval ?? DEFAULT_RATE_LIMIT_CLEANUP_INTERVAL_MS,
-        }
+    constructor() {
+        this.config = structuredClone(getSharedState.omniConfig.rateLimit)
 
         // Start cleanup timer
         if (this.config.enabled) {
@@ -49,7 +33,7 @@ export class RateLimiter {
     /**
      * Check if a connection from an IP is allowed
      */
-    checkConnection(ipAddress: string): RateLimitResult {
+    checkConnection(ipAddress: string, callerName: string): RateLimitResult {
         if (!this.config.enabled) {
             return { allowed: true, currentCount: 0, limit: Infinity }
         }
@@ -64,7 +48,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: "IP temporarily blocked",
+                reason: `[${callerName}] IP temporarily blocked`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: entry.blockExpiry - now,
@@ -85,7 +69,7 @@ export class RateLimiter {
 
             return {
                 allowed: false,
-                reason: `Too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
+                reason: `[${callerName}] too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
@@ -336,5 +320,13 @@ export class RateLimiter {
     clear(): void {
         this.ipLimits.clear()
         this.identityLimits.clear()
+    }
+
+    static getInstance(): RateLimiter {
+        if (!this.instance) {
+            this.instance = new RateLimiter()
+        }
+
+        return this.instance
     }
 }

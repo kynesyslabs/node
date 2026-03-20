@@ -67,19 +67,18 @@ export function loadConfig(): Readonly<AppConfig> {
     const d = DEFAULT_CONFIG
 
     const serverPort = envInt(EnvKey.SERVER_PORT, d.server.serverPort)
+    const serverConfig = {
+        serverPort,
+        rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
+        rpcPgPort: envInt(EnvKey.RPC_PG_PORT, d.server.rpcPgPort),
+        signalingServerPort: envInt(EnvKey.SIGNALING_SERVER_PORT, d.server.signalingServerPort),
+        rpcSignalingPort: envInt(EnvKey.RPC_SIGNALING_PORT, d.server.rpcSignalingPort),
+        mcpServerPort: envInt(EnvKey.MCP_SERVER_PORT, d.server.mcpServerPort),
+        rpcMcpPort: envInt(EnvKey.RPC_MCP_PORT, d.server.rpcMcpPort),
+    }
 
     const config: AppConfig = {
-        server: {
-            serverPort,
-            rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
-            rpcPgPort: envInt(EnvKey.RPC_PG_PORT, d.server.rpcPgPort),
-            signalingServerPort: envInt(EnvKey.SIGNALING_SERVER_PORT, d.server.signalingServerPort),
-            rpcSignalingPort: envInt(EnvKey.RPC_SIGNALING_PORT, d.server.rpcSignalingPort),
-            mcpServerPort: envInt(EnvKey.MCP_SERVER_PORT, d.server.mcpServerPort),
-            rpcMcpPort: envInt(EnvKey.RPC_MCP_PORT, d.server.rpcMcpPort),
-            omniPort: envInt(EnvKey.OMNI_PORT, d.server.omniPort) || serverPort + 1,
-        },
-
+        server: serverConfig,
         database: {
             host: envStr(EnvKey.PG_HOST, d.database.host),
             port: envInt(EnvKey.PG_PORT, d.database.port),
@@ -126,7 +125,7 @@ export function loadConfig(): Readonly<AppConfig> {
 
         omni: {
             enabled: envBool(EnvKey.OMNI_ENABLED, d.omni.enabled),
-            port: envInt(EnvKey.OMNI_PORT, d.omni.port),
+            port: envInt(EnvKey.OMNI_PORT, d.omni.port) || serverConfig.rpcPort + 1,
             fatal: envBool(EnvKey.OMNI_FATAL, d.omni.fatal),
             mode: envStr(EnvKey.OMNI_MODE, d.omni.mode),
             tls: {

@@ -55,9 +55,9 @@ export default class Transaction implements ITransaction {
         // Initialize with defaults or provided data
         Object.assign(this, {
             content: {
-                from_ed25519_address: null,
                 type: null,
                 from: "",
+                from_ed25519_address: "",
                 to: "",
                 amount: null,
                 data: [null, null],
@@ -546,9 +546,8 @@ export default class Transaction implements ITransaction {
             return null
         }
 
-        console.log(
-            "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
-            rawTx.hash,
+        log.debug(
+            `[fromRawTransaction] Creating transaction from raw with hash: ${rawTx.hash}`,
         )
         const tx = new Transaction()
 

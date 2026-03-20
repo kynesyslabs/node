@@ -435,6 +435,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to get user points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error getting user points",
@@ -532,6 +534,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -595,6 +599,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -681,6 +687,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -729,6 +737,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -800,6 +810,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -862,6 +874,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -974,6 +988,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1063,6 +1079,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram TLSN points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1122,6 +1140,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1203,6 +1223,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1261,6 +1283,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1383,6 +1407,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding UD domain points",
@@ -1465,6 +1491,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting UD domain points",
@@ -1595,6 +1623,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Nomis score points",
@@ -1673,6 +1703,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Nomis score points",
@@ -1752,6 +1784,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Human Passport points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Human Passport points",
@@ -1810,6 +1844,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Human Passport points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Human Passport points",
@@ -1936,6 +1972,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Ethos score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Ethos score points",
@@ -2017,6 +2055,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Ethos score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Ethos score points",

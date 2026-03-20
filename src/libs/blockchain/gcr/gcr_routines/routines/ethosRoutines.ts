@@ -42,7 +42,7 @@ export async function applyEthosIdentityUpsert(
             displayName: ethosData.displayName,
             username: ethosData.username,
         }
-    } catch (error: any) {
+    } catch (error) {
         log.error(`[GCRIdentityRoutines] Failed to fetch Ethos score from API`)
         return { success: false, message: "Failed to fetch Ethos score" }
     }

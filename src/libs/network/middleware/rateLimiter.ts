@@ -125,9 +125,10 @@ export class RateLimiter {
                     Object.keys(data).length
                 } blocked IPs from ${filePath}`,
             )
-        } catch (error: any) {
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
             log.warning(
-                `[Rate Limiter] Failed to load blocked IPs from ${filePath}: ${error.message}`,
+                `[Rate Limiter] Failed to load blocked IPs from ${filePath}: ${errorMsg}`,
             )
         }
     }

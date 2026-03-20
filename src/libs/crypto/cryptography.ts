@@ -42,7 +42,6 @@ export default class Cryptography {
 
     static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
         log.debug("[forge to string encoded]")
-        //console.log(forgeBuffer) // REVIEW if it is like this
         const stringBuffer = forgeBuffer.toString("hex")
         log.debug("DECODED INTO:")
         log.debug("0x" + stringBuffer)
@@ -76,7 +75,6 @@ export default class Cryptography {
             finalArray[i / 2] = decimalValue
         }
         log.debug("ENCODED INTO:")
-        //console.log(finalArray)
         // Condensing
         log.debug("That means:")
         keypair.privateKey = Buffer.from(finalArray)
@@ -121,11 +119,6 @@ export default class Cryptography {
         signature: string | forge.pki.ed25519.BinaryBuffer,
         publicKey: string | forge.pki.ed25519.BinaryBuffer,
     ) {
-        /*
-        console.log("signature.type: " + typeof signature)
-        console.log("signature: " + signature)
-        console.log("publicKey.type: " + typeof publicKey)
-        console.log("publicKey: " + publicKey) */
         // REVIEW Test HexToForge support
         if (typeof signature == "string") {
             log.debug(
@@ -143,17 +136,12 @@ export default class Cryptography {
 
         // Also, we have to sanitize buffers so that they are forge compatible
         if (signature.length == 64) {
-            //console.log("[*] Normalizing signature...")
             signature = Buffer.from(signature as Uint8Array) // REVIEW Does not work in bun
         }
-        //console.log(signature)
 
         if (publicKey.length == 64) {
-            //console.log("[*] Normalizing publicKey...")
             publicKey = Buffer.from(publicKey as Uint8Array) // REVIEW Does not work in bun
         }
-
-        //console.log(publicKey)
 
         log.debug(
             "[Cryptography] Verifying the signature of: (" +
@@ -173,7 +161,6 @@ export default class Cryptography {
                 ") " +
                 forgeToHex(publicKey),
         )
-        //console.log(publicKey)
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",
@@ -207,7 +194,6 @@ export default class Cryptography {
         ): [boolean, any] => {
             // NOTE Supporting "fake buffers" from web browsers
             if (publicKey.type == "Buffer") {
-                //console.log("[ENCRYPTION] Normalizing publicKey...")
                 publicKey = Buffer.from(publicKey)
             }
             // Converting the message and decrypting it
@@ -224,15 +210,14 @@ export default class Cryptography {
             // NOTE Supporting "fake buffers" from web browsers
             try {
                 if (privateKey.type == "Buffer") {
-                    //term.yellow("[DECRYPTION] Normalizing privateKey...\n")
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
                 log.debug(
                     "CRYPTO",
-                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed",
+                    `[DECRYPTION] Failed to normalize privateKey buffer: ${errorMsg}`,
                 )
-                log.error("CRYPTO", e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one

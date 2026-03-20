@@ -414,10 +414,11 @@ export class SignalingServer {
                 try {
                     // @ts-ignore - We know this returns a string ID now
                     messageId = await this.storeOfflineMessage(senderId, payload.targetId, payload.message) as unknown as string
-                } catch (error: any) {
+                } catch (error) {
                     handleError(error, "NETWORK", { source: "signaling server" })
                     // REVIEW: PR Fix #2 - Provide specific error message for rate limit
-                    if (error.message?.includes("exceeded offline message limit")) {
+                    const errorMsg = error instanceof Error ? error.message : String(error)
+                    if (errorMsg?.includes("exceeded offline message limit")) {
                         this.sendError(
                             ws,
                             ImErrorType.INTERNAL_ERROR,
@@ -683,7 +684,7 @@ export class SignalingServer {
                 }
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
                 this.senderNonces.set(nodeIdentity, nonce)
-            } catch (error: any) {
+            } catch (error) {
                 handleError(error, "NETWORK", { source: "signaling server" })
                 throw error // Rethrow to be caught by caller's error handling
             }

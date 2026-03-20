@@ -35,7 +35,7 @@ export default class L2PSHashes {
             const db = await Datasource.getInstance()
             this.repo = db.getDataSource().getRepository(L2PSHash)
             log.info("[L2PS Hashes] Initialized successfully")
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Hashes] Failed to initialize:", error)
             throw error
         }
@@ -97,7 +97,7 @@ export default class L2PSHashes {
             await this.repo!.save(hashEntry)
 
             log.debug(`[L2PS Hashes] Upserted hash for L2PS ${l2psUid}: ${hash.substring(0, 16)}... (${txCount} txs)`)
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Hashes] Failed to update hash for ${l2psUid}:`, error)
             throw error
         }
@@ -127,7 +127,7 @@ export default class L2PSHashes {
             })
             // REVIEW: PR Fix - TypeORM returns undefined, explicitly convert to null
             return entry ?? null
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Hashes] Failed to get hash for ${l2psUid}:`, error)
             throw error
         }
@@ -164,7 +164,7 @@ export default class L2PSHashes {
                 ...(offset && { skip: offset }),
             })
             return entries
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Hashes] Failed to get all hashes:", error)
             throw error
         }
@@ -226,7 +226,7 @@ export default class L2PSHashes {
                 lastUpdateTime,
                 oldestUpdateTime,
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Hashes] Failed to get statistics:", error)
             throw error
         }

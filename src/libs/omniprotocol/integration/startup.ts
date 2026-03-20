@@ -30,7 +30,7 @@ export interface OmniServerConfig {
         caPath?: string
         minVersion?: "TLSv1.2" | "TLSv1.3"
     }
-    rateLimit?: Partial<RateLimitConfig>
+    rateLimit?: RateLimitConfig
 }
 
 /**

@@ -12,10 +12,7 @@ export { BaseOmniAdapter, type BaseAdapterOptions } from "./BaseAdapter"
 export { PeerOmniAdapter, type AdapterOptions } from "./peerAdapter"
 
 // Consensus adapter for dedicated consensus opcodes
-export {
-    ConsensusOmniAdapter,
-    type ConsensusAdapterOptions,
-} from "./consensusAdapter"
+// export { ConsensusOmniAdapter, type ConsensusAdapterOptions } from "./consensusAdapter"
 
 // Key management utilities
 export {

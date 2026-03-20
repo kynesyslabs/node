@@ -253,8 +253,7 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        console.error(error)
-        log.error(`[CONSENSUS] Fatal consensus error: ${error}`)
+        log.error("[CONSENSUS] " + error)
         process.exit(1)
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release

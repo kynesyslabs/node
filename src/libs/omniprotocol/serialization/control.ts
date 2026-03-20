@@ -100,11 +100,9 @@ function deserializePeerEntry(
     let metadata: Record<string, unknown> | undefined
     if (metadataBytes.value.length > 0) {
         try {
-            metadata = JSON.parse(
-                metadataBytes.value.toString("utf8"),
-            ) as Record<string, unknown>
-        } catch {
-            // Malformed metadata, leave as undefined
+            metadata = JSON.parse(metadataBytes.value.toString("utf8")) as Record<string, unknown>
+        } catch (error) {
+            // Malformed metadata JSON — leave as undefined (non-critical for peer entry parsing)
             metadata = undefined
         }
     }
@@ -212,6 +210,7 @@ function toBigInt(value: unknown): bigint {
         try {
             return BigInt(trimmed)
         } catch {
+            // Non-numeric string — fallback to 0n
             return 0n
         }
     }
@@ -252,6 +251,7 @@ function decodeNodeCallParam(
                     bytesRead: cursor - offset,
                 }
             } catch {
+                // Malformed JSON in Object param — return empty object
                 return { value: {}, bytesRead: cursor - offset }
             }
         }

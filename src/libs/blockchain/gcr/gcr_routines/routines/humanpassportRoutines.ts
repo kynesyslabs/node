@@ -80,9 +80,10 @@ export async function applyHumanPassportIdentityAdd(
         }
 
         return { success: true, message: "Human Passport identity added" }
-    } catch (error: any) {
-        log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${error.message}`)
-        return { success: false, message: error.message || "Failed to add Human Passport identity" }
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${errorMsg}`)
+        return { success: false, message: errorMsg || "Failed to add Human Passport identity" }
     }
 }
 

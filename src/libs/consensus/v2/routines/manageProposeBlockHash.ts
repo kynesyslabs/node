@@ -83,7 +83,8 @@ export default async function manageProposeBlockHash(
                     publicKey: hexToUint8Array(identity),
                 })
             } catch (e) {
-                log.error("Signature verification failed. Signature not added.")
+                const errorMsg = e instanceof Error ? e.message : String(e)
+                log.error(`[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`)
                 continue
             }
 

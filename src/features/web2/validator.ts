@@ -73,10 +73,10 @@ export function validateAndNormalizeHttpUrl(
             /^10\./.test(hostLower) ||
             (/^172\.(\d{1,3})\./.test(hostLower) &&
                 (() => {
-                    const m = hostLower.match(/^172\.(\d{1,3})\./)
-                    if (!m) return false
-                    const o = Number(m[1])
-                    return o >= 16 && o <= 31
+                    const ipMatch = hostLower.match(/^172\.(\d{1,3})\./)
+                    if (!ipMatch) return false
+                    const secondOctet = Number(ipMatch[1])
+                    return secondOctet >= 16 && secondOctet <= 31
                 })()) ||
             /^192\.168\./.test(hostLower) ||
             /^169\.254\./.test(hostLower) ||
@@ -96,8 +96,8 @@ export function validateAndNormalizeHttpUrl(
             if (/^10\./.test(v4)) isMappedPrivate = true
             const m172 = v4.match(/^172\.(\d{1,3})\./)
             if (m172) {
-                const o = Number(m172[1])
-                if (o >= 16 && o <= 31) isMappedPrivate = true
+                const secondOctet = Number(m172[1])
+                if (secondOctet >= 16 && secondOctet <= 31) isMappedPrivate = true
             }
             if (/^192\.168\./.test(v4)) isMappedPrivate = true
             if (/^169\.254\./.test(v4)) isMappedPrivate = true

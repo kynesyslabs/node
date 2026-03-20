@@ -63,6 +63,8 @@ export async function manageExecution(
                     validityDataPayload = content.data
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
+                log.warn("[manageExecution] Failed to extract validity data payload:", errorMsg)
                 validityDataPayload = content.data
             }
 
@@ -99,9 +101,6 @@ export async function manageExecution(
             returnValue.require_reply = false
             break
     }
-    //console.log("content.message: " + content.message)
-    //console.log("content.message.action: " + content.message.action)
-
     // ANCHOR Reply logic
 
     // TODO & REVIEW Call security module for send limiting messages
@@ -113,6 +112,5 @@ export async function manageExecution(
 
     // Sending back the response
     log.debug("[SERVER] Sending back a response")
-    //console.log(return_value)
     return returnValue
 }

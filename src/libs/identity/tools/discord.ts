@@ -104,10 +104,11 @@ export class Discord {
 
         try {
             return await this.axios.get<T>(url)
-        } catch (e: any) {
-            if (e?.response?.status === 429) {
+        } catch (e) {
+            const axiosErr = e as { response?: { status?: number; headers?: Record<string, string> } }
+            if (axiosErr.response?.status === 429) {
                 const retryAfter = Number(
-                    e.response.headers["retry-after"] ?? 1,
+                    axiosErr.response.headers?.["retry-after"] ?? 1,
                 )
                 await new Promise(r =>
                     setTimeout(r, Math.ceil(retryAfter * 1000)),

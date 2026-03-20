@@ -102,11 +102,6 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                         ourNewGenesisDataHash,
                 )
 
-                log.debug(
-                    "[BOOTSTRAP] Updated genesis data to match peer's hash: " +
-                        ourNewGenesisDataHash,
-                )
-
                 if (ourNewGenesisDataHash !== peerGenesisDataHash) {
                     log.error(
                         "[BOOTSTRAP] New genesis data hash still does not match: " +
@@ -168,9 +163,6 @@ async function tryConnectPeer(peer: Peer) {
         return
     }
 
-    log.debug("[BOOTSTRAP] Overriding connection string: " + currentPeerUrl)
-    log.debug("[BOOTSTRAP] Verified peer: " + JSON.stringify(verifiedPeer))
-
     try {
         verifiedPeer.connection.string = currentPeerUrl // Adding this step
     } catch (error) {
@@ -180,15 +172,11 @@ async function tryConnectPeer(peer: Peer) {
     }
     log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
 
-    log.debug(
-        "[BOOTSTRAP] Current peer object: " + JSON.stringify(verifiedPeer),
-    )
-
     try {
         await ensureGenesisDataMatch(verifiedPeer)
     } catch (error) {
         log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
-        console.error(error)
+        log.error("[PEER] Bootstrap error: " + error)
         process.exit(1)
     }
 
@@ -229,7 +217,6 @@ export default async function peerBootstrap(
     const genesisFile = "data/genesis.json"
     const genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
     ourGenesisDataHash = Hashing.sha256(JSON.stringify(genesisData))
-    log.debug("[BOOTSTRAP] Our genesis data hash: " + ourGenesisDataHash)
 
     // Validity check
     for (const peer of localList) {

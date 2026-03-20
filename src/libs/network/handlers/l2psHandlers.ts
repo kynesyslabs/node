@@ -5,7 +5,7 @@ import type { NodeCallHandler } from "./types"
 
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
-        console.log("[L2PS] Received L2PS participation query")
+        log.debug("[L2PS] Received L2PS participation query")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -32,7 +32,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
     },
 
     getL2PSMempoolInfo: async (data, response) => {
-        console.log("[L2PS] Received L2PS mempool info request")
+        log.debug("[L2PS] Received L2PS mempool info request")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -49,17 +49,18 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
                 oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get mempool info:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS mempool info"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },
 
     getL2PSTransactions: async (data, response) => {
-        console.log("[L2PS] Received L2PS transactions sync request")
+        log.debug("[L2PS] Received L2PS transactions sync request")
         if (!data.l2psUid) {
             response.result = 400
             response.response = "No L2PS UID specified"
@@ -88,17 +89,18 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 })),
                 count: transactions.length,
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS transactions"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },
 
     getL2PSAccountTransactions: async (data, response) => {
-        console.log("[L2PS] Received account transactions request")
+        log.debug("[L2PS] Received account transactions request")
         if (!data.l2psUid || !data.address) {
             response.result = 400
             response.response = "L2PS UID and address are required"
@@ -190,11 +192,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 count: transactions.length,
                 hasMore: transactions.length === limit
             }
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
+            const errorMsg = error instanceof Error ? error.message : String(error)
             response.result = 500
             response.response = "Failed to get L2PS account transactions"
-            response.extra = error.message || "Internal error"
+            response.extra = errorMsg || "Internal error"
         }
         return response
     },
