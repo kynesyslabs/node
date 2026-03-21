@@ -205,6 +205,15 @@ export class MetricsCollector {
             ["version", "version_name", "identity"],
         )
 
+        // === Petri Consensus Metrics ===
+        // REVIEW: Petri Phase TR6 — consensus observability
+        ms.createGauge("petri_enabled", "Whether Petri consensus is enabled (1=yes, 0=no)", [])
+        ms.createGauge("petri_forge_running", "Whether the Petri forge is running (1=yes, 0=no)", [])
+        ms.createGauge("petri_forge_paused", "Whether the Petri forge is paused for block compilation (1=yes, 0=no)", [])
+        ms.createGauge("petri_forge_round", "Current Petri forge round number", [])
+        ms.createGauge("petri_pending_tx_count", "Number of pending transactions in Petri forge", [])
+        ms.createGauge("petri_tracker_tx_count", "Number of transactions tracked by Petri delta agreement tracker", [])
+
         log.debug("[METRICS COLLECTOR] Additional metrics registered")
     }
 
@@ -225,6 +234,7 @@ export class MetricsCollector {
                 this.config.portHealthEnabled
                     ? this.collectPortHealth()
                     : Promise.resolve(),
+                this.collectPetriMetrics(),
             ])
         } catch (error) {
             log.error(
@@ -716,6 +726,49 @@ export class MetricsCollector {
                     service,
                 })
             }
+        }
+    }
+
+    /**
+     * Collect Petri consensus metrics (forge state, pending TXs, tracker count)
+     * REVIEW: Petri Phase TR6 — consensus observability
+     */
+    private async collectPetriMetrics(): Promise<void> {
+        try {
+            const { getSharedState } = await import("@/utilities/sharedState")
+            const petriEnabled = getSharedState.petriConsensus ? 1 : 0
+            this.metricsService.setGauge("petri_enabled", petriEnabled)
+
+            if (!petriEnabled) return
+
+            const { getPetriForgeInstance } = await import(
+                "@/libs/consensus/petri/forge/forgeInstance"
+            )
+            const forge = getPetriForgeInstance()
+            if (!forge) {
+                this.metricsService.setGauge("petri_forge_running", 0)
+                this.metricsService.setGauge("petri_forge_paused", 0)
+                this.metricsService.setGauge("petri_forge_round", 0)
+                this.metricsService.setGauge("petri_pending_tx_count", 0)
+                this.metricsService.setGauge("petri_tracker_tx_count", 0)
+                return
+            }
+
+            const state = forge.getState()
+            this.metricsService.setGauge("petri_forge_running", state.isRunning ? 1 : 0)
+            this.metricsService.setGauge("petri_forge_paused", state.isPaused ? 1 : 0)
+            this.metricsService.setGauge("petri_forge_round", state.currentRound)
+            this.metricsService.setGauge("petri_pending_tx_count", state.pendingTransactions.size)
+
+            // Tracker count via the forge's internal tracker
+            const tracker = (forge as any).tracker
+            if (tracker && typeof tracker.trackedCount === "function") {
+                this.metricsService.setGauge("petri_tracker_tx_count", tracker.trackedCount())
+            }
+        } catch (error) {
+            log.debug(
+                `[METRICS COLLECTOR] Petri metrics error: ${error instanceof Error ? error.message : String(error)}`,
+            )
         }
     }
 
