@@ -1,14 +1,14 @@
 # Petri Consensus — Living Architecture Diagram
 
-**Last updated:** 2026-03-20 (Phase 6 — Integration Testing & Hardening)
+**Last updated:** 2026-03-21 (Phase 7 — Secretary Deprecation)
 
 ---
 
 ## Architecture Diagram
 
 ```
-                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4 + PHASE 5 + PHASE 6
-                      =======================================================================================
+                      PETRI CONSENSUS — PHASE 0 + PHASE 1 + PHASE 2 + PHASE 3 + PHASE 4 + PHASE 5 + PHASE 6 + PHASE 7
+                      ==========================================================================================================
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ENTRY POINT                                                                    │
@@ -513,7 +513,7 @@
     └───────────────────────────────────────────────────────────────────────────────────────────────┘
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
-    │  RPC CONSENSUS HANDLER (MODIFIED)                                                    [P2→P3] │
+    │  RPC CONSENSUS HANDLER (MODIFIED)                                                    [P2→P7] │
     │  src/libs/network/manageConsensusRoutines.ts                                                 │
     │                                                                                              │
     │    case "petri_exchangeDeltas":                                                     [P2]    │
@@ -524,6 +524,9 @@
     │    Consensus dispatch switching:                                                    [P3]    │
     │      if (petriConsensus) → route to Petri handlers                                         │
     │      else                → route to PoRBFTv2 handlers                                      │
+    │                                                                                              │
+    │    @deprecated secretary handlers (still functional for v2 fallback):               [P7]    │
+    │      setValidatorPhase, greenlight, getValidatorPhase, getBlockTimestamp            DEP P7  │
     │                                                                                              │
     └───────────────────────────────────────────────────────────────────────────────────────────────┘
 
@@ -902,6 +905,120 @@
     └─────────────────────────┴─────┴─────┴─────┴─────┴─────┴─────┘
 
     Total: 186 tests across 14 files, 0 failures
+
+
+    ╔═══════════════════════════════════════════════════════════════════════════════════════════════╗
+    ║  PHASE 7 — SECRETARY DEPRECATION (@deprecated markers, no deletions)                        ║
+    ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
+
+
+    DEPRECATION STRATEGY
+    ─────────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  APPROACH                                                                               [P7] │
+    │                                                                                              │
+    │    All Secretary-era consensus code receives @deprecated JSDoc markers.                      │
+    │    NO CODE IS DELETED — preserved intact for PoRBFT v2 fallback.                            │
+    │                                                                                              │
+    │    Full removal deferred to Task #119 (post-testnet validation):                            │
+    │      - Delete deprecated classes, handlers, types                                           │
+    │      - Remove petriConsensus feature flag                                                   │
+    │      - Petri becomes the sole consensus path                                                │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    DEPRECATED MODULES
+    ───────────────────
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  SECRETARY MANAGER (DEPRECATED)                                                         [P7] │
+    │  src/libs/consensus/v2/types/secretaryManager.ts                              (1018 lines)  │
+    │                                                                                              │
+    │    @deprecated — Superseded by Petri Consensus (ContinuousForge + DeltaAgreementTracker).   │
+    │    Retained for PoRBFT v2 fallback until Task #119.                                        │
+    │                                                                                              │
+    │    SecretaryManager class                                                                   │
+    │      - Secretary-based validation phase orchestration                                       │
+    │      - Phase transitions (setValidatorPhase, greenlight)                                    │
+    │      - Block timestamp coordination                                                        │
+    │                                                                                              │
+    │    Petri replacement:                                                                       │
+    │      ContinuousForge (forge loop)  ─── replaces phase orchestration                        │
+    │      DeltaAgreementTracker         ─── replaces secretary agreement                        │
+    │      petriConsensusRoutine         ─── replaces block lifecycle                             │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  SECRETARY RPC HANDLERS (DEPRECATED)                                                    [P7] │
+    │  src/libs/network/manageConsensusRoutines.ts                                                 │
+    │                                                                                              │
+    │    @deprecated handlers (gated behind !petriConsensus):                                     │
+    │                                                                                              │
+    │      setValidatorPhase      ── secretary phase transition                                   │
+    │      greenlight             ── secretary block greenlight                                   │
+    │      getValidatorPhase      ── query current secretary phase                                │
+    │      getBlockTimestamp      ── secretary block timestamp                                    │
+    │                                                                                              │
+    │    These handlers remain functional when petriConsensus = false (PoRBFT v2 fallback).      │
+    │    When petriConsensus = true, consensus routes to Petri handlers instead (P3).             │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  OMNIPROTOCOL CONSENSUS HANDLERS (DEPRECATED)                                           [P7] │
+    │  src/libs/omniprotocol/protocol/handlers/consensus.ts                                       │
+    │                                                                                              │
+    │    @deprecated opcodes (secretary-era consensus wire protocol):                             │
+    │                                                                                              │
+    │      0x35  ── setValidatorPhase                                                             │
+    │      0x36  ── greenlight                                                                    │
+    │      0x37  ── getValidatorPhase                                                             │
+    │      0x38  ── getBlockTimestamp                                                             │
+    │                                                                                              │
+    │    Petri consensus uses petri_exchangeDeltas RPC (P2) instead of these opcodes.             │
+    │    Opcodes retained for PoRBFT v2 fallback compatibility.                                  │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+    ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
+    │  VALIDATION PHASE TYPES (DEPRECATED)                                                    [P7] │
+    │  src/libs/consensus/v2/types/validationStatusTypes.ts                                       │
+    │                                                                                              │
+    │    @deprecated — Secretary-era validation phase types:                                      │
+    │                                                                                              │
+    │      ValidationPhase (enum/type)     ── secretary phase states                              │
+    │      Related interfaces/types        ── phase transition payloads                           │
+    │                                                                                              │
+    │    Petri replacement:                                                                       │
+    │      TransactionClassification       ─── PRE_APPROVED / TO_APPROVE / PROBLEMATIC (P0)      │
+    │      ForgeState                      ─── forge lifecycle states (P0)                        │
+    │                                                                                              │
+    └───────────────────────────────────────────────────────────────────────────────────────────────┘
+
+
+    DEPRECATION MAP — SECRETARY → PETRI REPLACEMENTS
+    ──────────────────────────────────────────────────
+
+    ┌──────────────────────────────────┐         ┌──────────────────────────────────┐
+    │  DEPRECATED (Secretary)    [v2]  │         │  REPLACEMENT (Petri)      [P0+]  │
+    ├──────────────────────────────────┤         ├──────────────────────────────────┤
+    │  SecretaryManager                │ ──────► │  ContinuousForge (P2)            │
+    │    phase orchestration           │         │  DeltaAgreementTracker (P2)      │
+    │    secretary agreement           │         │  petriConsensusRoutine (P0→P6)   │
+    ├──────────────────────────────────┤         ├──────────────────────────────────┤
+    │  setValidatorPhase (RPC)         │ ──────► │  petri_exchangeDeltas (P2)       │
+    │  greenlight (RPC)                │         │  forge.pause/resume (P2)         │
+    │  getValidatorPhase (RPC)         │         │  forge.getState() (P2)           │
+    │  getBlockTimestamp (RPC)         │         │  block.timestamp (P3)            │
+    ├──────────────────────────────────┤         ├──────────────────────────────────┤
+    │  OmniProtocol 0x35–0x38         │ ──────► │  petri_exchangeDeltas RPC (P2)   │
+    ├──────────────────────────────────┤         ├──────────────────────────────────┤
+    │  ValidationPhase types           │ ──────► │  TransactionClassification (P0)  │
+    │                                  │         │  ForgeState (P0)                 │
+    └──────────────────────────────────┘         └──────────────────────────────────┘
 ```
 
 ### Legend
@@ -933,6 +1050,10 @@
 
     ┌──────────┐
     │  [P6]    │    Box with phase annotation — implemented in Phase 6
+    └──────────┘
+
+    ┌──────────┐
+    │  [P7]    │    Box with phase annotation — implemented in Phase 7 (deprecation markers)
     └──────────┘
 
     ┌──────────┐
@@ -970,6 +1091,8 @@
 
     ── NEW P6       Inline note — added in Phase 6
 
+    ── DEP P7       Inline note — deprecated in Phase 7 (no deletion)
+
     (external dep)  Dependency outside this repository (SDK package)
 
     ┌── if (flag) ──── FEATURE FLAG GATE ──┐
@@ -999,7 +1122,7 @@
 | `src/libs/consensus/petri/forge/continuousForge.ts` | P2 | Complete | `ContinuousForge` class: `start(shard)`, `stop()`, `pause()`, `resume()`, `reset()`, `getCurrentDeltas()`, `getState()`. Private: `runForgeRound()` (7-step cycle), `exchangeDeltas()` (all-to-all RPC), `scheduleNextRound()` (2s timer loop). |
 | `src/libs/consensus/petri/forge/deltaAgreementTracker.ts` | P2 | Complete | `DeltaAgreementTracker` class: `recordDelta(txHash, deltaHash, memberKey, round)`, `evaluate(shardSize, round)` returns `{promoted[], flagged[]}`, `getComparison()` for diagnostics, `reset()`, `trackedCount`. |
 | `src/libs/consensus/petri/forge/forgeInstance.ts` | P2→P6 | Complete | `petriForgeInstance` (global singleton, `ContinuousForge | null`), `setPetriForgeInstance()`, `getPetriForgeInstance()` (P6). Bridges forge loop and RPC handler. |
-| `src/libs/network/manageConsensusRoutines.ts` | P2→P3 | Modified | Added `petri_exchangeDeltas` RPC case (P2). Consensus dispatch switching: routes to Petri or PoRBFTv2 handlers based on `petriConsensus` flag (P3). |
+| `src/libs/network/manageConsensusRoutines.ts` | P2→P7 | Modified | Added `petri_exchangeDeltas` RPC case (P2). Consensus dispatch switching: routes to Petri or PoRBFTv2 handlers based on `petriConsensus` flag (P3). Secretary RPC handlers (`setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`) marked `@deprecated` (P7). |
 | `src/libs/consensus/petri/arbitration/bftArbitrator.ts` | P3 | Complete | `arbitrate(shard)` gets PROBLEMATIC txs from mempool, runs BFT round among shard validators, returns `{ resolved: ClassifiedTransaction[], rejectedHashes: string[] }`. |
 | `src/libs/consensus/petri/block/petriBlockCompiler.ts` | P3 | Complete | `compileBlock(shard, resolvedTxs)` merges PRE_APPROVED + resolved txs, calls `orderTransactions()` and `createBlock()` (reused PoRBFTv2), returns `CompilationResult { block, txCount }`. `cleanRejectedFromMempool(rejectedHashes)` removes rejected txs. |
 | `src/libs/consensus/petri/block/petriBlockFinalizer.ts` | P3 | Complete | `finalizeBlock(block, shard)` calls `broadcastBlockHash()`, `isBlockValid()` (BFT validity), `insertBlock()`, `BroadcastManager.broadcastNewBlock()`. Returns `FinalizationResult { success, blockHash }`. |
@@ -1017,6 +1140,10 @@
 | `better_testing/petri/liveness.test.ts` | P6 | Complete | Chain never stalls: empty blocks, bounded PROBLEMATIC TTL, mixed states (14 tests). |
 | `better_testing/petri/featureFlagRollback.test.ts` | P6 | Complete | Clean ON/OFF/ON toggle, forge instance lifecycle, state isolation (15 tests). |
 | `better_testing/petri/benchmark.test.ts` | P6 | Complete | DeltaTracker throughput (5K txs), selectMembers routing (10K calls), BFT O(1), memory efficiency (8 tests). |
+| `src/libs/consensus/v2/types/secretaryManager.ts` | P7 | @deprecated | `SecretaryManager` class (1018 lines) — secretary-based validation phase orchestration. Superseded by ContinuousForge + DeltaAgreementTracker. Retained for PoRBFT v2 fallback. |
+| `src/libs/network/manageConsensusRoutines.ts` | P2→P7 | Modified | Added `@deprecated` markers to secretary RPC handlers: `setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`. Handlers still functional when `petriConsensus = false`. |
+| `src/libs/omniprotocol/protocol/handlers/consensus.ts` | P7 | @deprecated | OmniProtocol consensus opcodes 0x35–0x38 (`setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`) marked `@deprecated`. Retained for PoRBFT v2 fallback. |
+| `src/libs/consensus/v2/types/validationStatusTypes.ts` | P7 | @deprecated | `ValidationPhase` and related secretary-era types marked `@deprecated`. Replaced by `TransactionClassification` (P0) and `ForgeState` (P0). |
 
 ### Notes
 
@@ -1041,3 +1168,5 @@
 - **`soft_finality_at` column (P5):** Added to both `MempoolTx` (mempool entity) and `Transactions` (chain entity) as a nullable datetime. On `MempoolTx`, it is set when the forge promotes a tx to `PRE_APPROVED` via `updateClassification`. On `Transactions`, the value is preserved from the mempool record when the tx is inserted into a block.
 - **Transaction finality service (P5):** `getTransactionFinality(txHash)` in `finality/transactionFinality.ts` implements a chain-first lookup strategy: (1) check the `Transactions` entity — if found, the tx is `"confirmed"` with hard finality from the block timestamp and optional soft finality from `soft_finality_at`; (2) check `MempoolTx` — if found, the tx is `"pending"` with classification and optional soft finality; (3) if neither, return `"unknown"`.
 - **Finality RPC endpoint (P5):** The `getTransactionFinality` method is exposed as an RPC endpoint in `rpcDispatch.ts`, allowing clients to query the finality status of any transaction by hash.
+- **Secretary deprecation (P7):** All secretary-era consensus code has been marked with `@deprecated` JSDoc markers. No code was deleted — the entire Secretary infrastructure is preserved intact to allow PoRBFT v2 fallback if `petriConsensus` is set to `false`. The deprecated surface includes: `SecretaryManager` class (1018 lines in `secretaryManager.ts`), four RPC handlers in `manageConsensusRoutines.ts` (`setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`), four OmniProtocol consensus opcodes (0x35–0x38) in `consensus.ts`, and `ValidationPhase` types in `validationStatusTypes.ts`.
+- **Deferred deletion (Task #119):** Full removal of deprecated Secretary code and the `petriConsensus` feature flag is deferred to post-testnet validation. Once Petri consensus is proven stable on testnet, Task #119 will delete all deprecated code and make Petri the sole consensus path.
