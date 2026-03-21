@@ -88,6 +88,7 @@ const suites: Record<SuiteName, string[]> = {
   petri: [
     "petri_block_production",
     "petri_tx_inclusion",
+    "petri_relay_flow",
   ],
 }
 
