@@ -6,7 +6,7 @@ import { envInt } from "../loadgen/src/framework/common"
 import { waitForConsensusTargets } from "../loadgen/src/features/consensus/shared"
 import { getClusterObservation, waitForClusterConvergence } from "../loadgen/src/features/peersync/shared"
 
-type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "gcr-routine" | "prod-gate" | "l2ps-live" | "startup-cold-boot"
+type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "gcr-routine" | "prod-gate" | "l2ps-live" | "startup-cold-boot" | "petri"
 
 type ScenarioResult = {
   scenario: string
@@ -84,6 +84,10 @@ const suites: Record<SuiteName, string[]> = {
   "startup-cold-boot": [
     "peer_discovery_smoke",
     "consensus_block_production",
+  ],
+  petri: [
+    "petri_block_production",
+    "petri_tx_inclusion",
   ],
 }
 
