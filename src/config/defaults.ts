@@ -144,4 +144,13 @@ export const DEFAULT_CONFIG: AppConfig = {
         swarmPort: 4001,
         apiPort: 5001,
     },
+
+    petri: {
+        enabled: false,
+        forgeIntervalMs: 2000,
+        blockIntervalMs: 10000,
+        agreementThreshold: 7,
+        problematicTTLRounds: 5,
+        shardSize: 10,
+    },
 }

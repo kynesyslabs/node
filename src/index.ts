@@ -277,6 +277,17 @@ async function warmup() {
     indexState.OMNI_ENABLED = cfg.omni.enabled
     indexState.OMNI_PORT = await getNextAvailablePort(cfg.omni.port)
 
+    // Petri Consensus configuration
+    getSharedState.petriConsensus = cfg.petri.enabled
+    getSharedState.petriConfig = {
+        enabled: cfg.petri.enabled,
+        forgeIntervalMs: cfg.petri.forgeIntervalMs,
+        blockIntervalMs: cfg.petri.blockIntervalMs,
+        agreementThreshold: cfg.petri.agreementThreshold,
+        problematicTTLRounds: cfg.petri.problematicTTLRounds,
+        shardSize: cfg.petri.shardSize,
+    }
+
     // Setting the server port to the shared state
     getSharedState.serverPort = indexState.SERVER_PORT
     // Exposed URL
