@@ -124,7 +124,7 @@ export async function runPetriSoak() {
     const samples: TxSample[] = []
 
     // Record initial block height
-    const initialBlockRes = await nodeCall(bootstrap, "getBlockNumber", {}, "petri:soak:initialBlock", NO_FALLBACKS)
+    const initialBlockRes = await nodeCall(bootstrap, "getLastBlockNumber", {}, "petri:soak:initialBlock", NO_FALLBACKS)
     const initialBlockHeight = initialBlockRes?.response ?? 0
 
     for (let round = 0; round < soakRounds; round++) {
@@ -200,7 +200,7 @@ export async function runPetriSoak() {
     const soakDurationMs = soakEndedAt - soakStartedAt
 
     // Final block height
-    const finalBlockRes = await nodeCall(bootstrap, "getBlockNumber", {}, "petri:soak:finalBlock", NO_FALLBACKS)
+    const finalBlockRes = await nodeCall(bootstrap, "getLastBlockNumber", {}, "petri:soak:finalBlock", NO_FALLBACKS)
     const finalBlockHeight = finalBlockRes?.response ?? 0
     const blocksProduced = (typeof finalBlockHeight === "number" && typeof initialBlockHeight === "number")
         ? finalBlockHeight - initialBlockHeight
