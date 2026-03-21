@@ -142,6 +142,16 @@ export async function petriConsensusRoutine(shard: Peer[]): Promise<void> {
         return
     }
 
+    // REVIEW: Set inConsensusLoop to prevent concurrent launches.
+    // The consensus handler fires on every peer hello — without this guard,
+    // multiple Petri routines run concurrently, each compiling blocks with
+    // different timestamps, causing BFT vote disagreements.
+    if (getSharedState.inConsensusLoop) {
+        log.debug("[Petri] Consensus loop already running — skipping")
+        return
+    }
+    getSharedState.inConsensusLoop = true
+
     const config = getSharedState.petriConfig
     const forge = new ContinuousForge(config)
 
@@ -162,6 +172,7 @@ export async function petriConsensusRoutine(shard: Peer[]): Promise<void> {
         // Stop forge and deregister instance
         forge.stop()
         setPetriForgeInstance(null)
+        getSharedState.inConsensusLoop = false
         log.info("[Petri] Petri Consensus routine ended")
     }
 }

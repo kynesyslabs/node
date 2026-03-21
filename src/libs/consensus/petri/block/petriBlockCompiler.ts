@@ -1,19 +1,21 @@
 /**
  * PetriBlockCompiler — Petri Consensus Phase 3
  *
- * Compiles PRE_APPROVED transactions into a candidate block at the 10s boundary.
+ * Compiles mempool transactions into a candidate block at the 10s boundary.
  * Reuses existing block creation infrastructure:
  *   - orderTransactions() for deterministic ordering
  *   - createBlock() for block assembly, signing, and next-proposer calculation
  *
- * Also handles PROBLEMATIC transactions via BFT arbitration before block finalization.
+ * REVIEW: Petri classifications (PRE_APPROVED, PROBLEMATIC) are informational —
+ * they drive soft finality reporting but do NOT gate block inclusion. All mempool
+ * transactions are included to ensure deterministic block contents across nodes,
+ * preventing BFT vote disagreements caused by per-node delta agreement divergence.
  */
 
 import type { Peer } from "@/libs/peer"
 import type Block from "@/libs/blockchain/block"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import Mempool from "@/libs/blockchain/mempool_v2"
-import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"
 import { orderTransactions } from "@/libs/consensus/v2/routines/orderTransactions"
 import { createBlock } from "@/libs/consensus/v2/routines/createBlock"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
@@ -30,7 +32,11 @@ export interface CompilationResult {
 }
 
 /**
- * Compile all PRE_APPROVED transactions into a candidate block.
+ * Compile all mempool transactions into a candidate block.
+ *
+ * All transactions are included regardless of Petri classification to ensure
+ * deterministic block contents across nodes. Classification remains informational
+ * for soft finality tracking.
  *
  * @param shard - The current shard members
  * @param resolvedTxs - Additional transactions resolved from BFT arbitration
@@ -42,12 +48,12 @@ export async function compileBlock(
 ): Promise<CompilationResult> {
     log.info("[PetriBlockCompiler] Starting block compilation")
 
-    // Step 1: Get all PRE_APPROVED transactions from mempool
-    const preApprovedMempoolTxs = await Mempool.getPreApproved()
+    // Step 1: Get ALL mempool transactions (classification is informational only)
+    const mempoolTxs = await Mempool.getMempool()
 
-    // Combine PRE_APPROVED with resolved PROBLEMATIC txs
+    // Combine mempool txs with any resolved txs from arbitration
     const allTxs: Transaction[] = [
-        ...(preApprovedMempoolTxs as unknown as Transaction[]),
+        ...(mempoolTxs as unknown as Transaction[]),
         ...resolvedTxs,
     ]
 
