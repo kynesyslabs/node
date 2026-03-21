@@ -241,7 +241,16 @@ export default async function manageConsensusRoutines(
         // SECTION: New Secretary Manager class handlers
         // @deprecated — Secretary RPCs (setValidatorPhase, greenlight, getValidatorPhase, getBlockTimestamp)
         // replaced by Petri Consensus leaderless coordination. Kept for PoRBFT v2 fallback.
+
+        // REVIEW: When Petri is active, Secretary RPCs are no-ops — Petri uses its own
+        // block compiler and finalizer. The Secretary flow must not interfere.
         case "setValidatorPhase": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = "Petri active — Secretary RPC ignored"
+                response.extra = { greenlight: true }
+                return response
+            }
             try {
                 const [phase, seed, blockRef] = payload.params
                 const manager = SecretaryManager.getInstance(blockRef)
@@ -357,8 +366,11 @@ export default async function manageConsensusRoutines(
 
         // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "greenlight": {
-            // TODO: Check if the sender is the secretary (without verifying the signature
-            // as we have already done that) in validateHeaders
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = "Petri active — greenlight ignored"
+                return response
+            }
             const [blockRef, timestamp, validatorPhase] = payload.params as [
                 number, // blockRef
                 number, // timestamp
@@ -401,6 +413,12 @@ export default async function manageConsensusRoutines(
         // SECTION: Getter handlers
         // @deprecated — Secretary RPCs (getValidatorPhase, getBlockTimestamp), replaced by Petri Consensus.
         case "getValidatorPhase": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = [null]
+                response.extra = { petri: true }
+                return response
+            }
             const manager = SecretaryManager.getInstance()
 
             if (!manager) {
@@ -417,6 +435,11 @@ export default async function manageConsensusRoutines(
 
         // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "getBlockTimestamp": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = [getSharedState.currentUTCTime]
+                return response
+            }
             const manager = SecretaryManager.getInstance()
 
             if (!manager) {
