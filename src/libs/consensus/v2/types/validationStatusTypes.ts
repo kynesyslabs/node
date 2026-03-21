@@ -1,5 +1,8 @@
 
 /**
+ * @deprecated Replaced by Petri Consensus classification types (TransactionClassification).
+ * Kept for PoRBFT v2 fallback via feature flag.
+ *
  * Example of the validation phase object
  * {
  *  waitStatus: true,

@@ -239,6 +239,8 @@ export default async function manageConsensusRoutines(
             break
 
         // SECTION: New Secretary Manager class handlers
+        // @deprecated — Secretary RPCs (setValidatorPhase, greenlight, getValidatorPhase, getBlockTimestamp)
+        // replaced by Petri Consensus leaderless coordination. Kept for PoRBFT v2 fallback.
         case "setValidatorPhase": {
             try {
                 const [phase, seed, blockRef] = payload.params
@@ -353,6 +355,7 @@ export default async function manageConsensusRoutines(
             break
         }
 
+        // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "greenlight": {
             // TODO: Check if the sender is the secretary (without verifying the signature
             // as we have already done that) in validateHeaders
@@ -396,7 +399,7 @@ export default async function manageConsensusRoutines(
         }
 
         // SECTION: Getter handlers
-        // NOTE: Ideally, we should never need to use these methods
+        // @deprecated — Secretary RPCs (getValidatorPhase, getBlockTimestamp), replaced by Petri Consensus.
         case "getValidatorPhase": {
             const manager = SecretaryManager.getInstance()
 
