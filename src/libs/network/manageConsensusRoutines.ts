@@ -415,6 +415,7 @@ export default async function manageConsensusRoutines(
             break
         }
 
+        // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "getBlockTimestamp": {
             const manager = SecretaryManager.getInstance()
 
