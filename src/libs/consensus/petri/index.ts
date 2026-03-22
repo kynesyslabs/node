@@ -173,6 +173,8 @@ export async function petriConsensusRoutine(shard: Peer[]): Promise<void> {
         forge.stop()
         setPetriForgeInstance(null)
         getSharedState.inConsensusLoop = false
+        // Reset startingConsensus so the main loop can trigger the next round
+        getSharedState.startingConsensus = false
         log.info("[Petri] Petri Consensus routine ended")
     }
 }

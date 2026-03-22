@@ -12,6 +12,7 @@ import {
     isConsensusAlreadyRunning,
 } from "../consensus/v2/PoRBFT"
 import { petriConsensusRoutine } from "@/libs/consensus/petri"
+import { receiveBlockHashSubmission } from "@/libs/consensus/petri/coordination/petriSecretary"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -34,6 +35,8 @@ export interface ConsensusMethod {
         | "getBlockTimestamp"
         // REVIEW: Petri Consensus (Phase 2)
         | "petri_exchangeDeltas"
+        // REVIEW: Petri Consensus (Phase 9) — Secretary-Coordinated Block Signing
+        | "petri_submitBlockHash"
     params: any[]
 }
 
@@ -488,6 +491,42 @@ export default async function manageConsensusRoutines(
                 )
                 response.result = 500
                 response.response = "Error processing delta exchange"
+            }
+            break
+        }
+
+        // REVIEW: Petri Consensus — Secretary-Coordinated Block Signing (Phase 9)
+        // Members submit their signed block hash to the secretary for collection.
+        case "petri_submitBlockHash": {
+            if (!getSharedState.petriConsensus) {
+                response.result = 400
+                response.response = "Petri consensus not enabled"
+                break
+            }
+
+            try {
+                const [blockHash, signature, blockNumber] = payload.params as [
+                    string,
+                    string,
+                    number,
+                ]
+
+                const result = receiveBlockHashSubmission(
+                    sender,
+                    blockHash,
+                    signature,
+                    blockNumber,
+                )
+
+                response.result = 200
+                response.response = result
+            } catch (error) {
+                log.error(
+                    "[manageConsensusRoutines] petri_submitBlockHash error: " +
+                    error,
+                )
+                response.result = 500
+                response.response = "Error processing block hash submission"
             }
             break
         }

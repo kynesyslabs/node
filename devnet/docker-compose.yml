@@ -57,21 +57,25 @@ services:
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node1_db
       - PORT=${NODE1_PORT:-53551}
-      - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
+      # REVIEW: OMNI_PORT = HTTP+1 inside the container so peers can derive it
+      # from EXPOSED_URL. Host mapping 53561→53552 avoids host port collisions.
+      - OMNI_PORT=53552
       - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
-      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-false}
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node1.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
-      - "${NODE1_OMNI_PORT:-53561}:${NODE1_OMNI_PORT:-53561}"
+      - "${NODE1_OMNI_PORT:-53561}:53552"
       - "${NODE1_SIGNALING_PORT:-3005}:3005"
     networks:
       - demos-network
@@ -97,21 +101,23 @@ services:
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node2_db
       - PORT=${NODE2_PORT:-53552}
-      - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
+      - OMNI_PORT=53553
       - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
-      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-false}
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node2.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE2_PORT:-53552}:${NODE2_PORT:-53552}"
-      - "${NODE2_OMNI_PORT:-53562}:${NODE2_OMNI_PORT:-53562}"
+      - "${NODE2_OMNI_PORT:-53562}:53553"
       - "${NODE2_SIGNALING_PORT:-3006}:3005"
     networks:
       - demos-network
@@ -137,21 +143,23 @@ services:
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node3_db
       - PORT=${NODE3_PORT:-53553}
-      - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
+      - OMNI_PORT=53554
       - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
-      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-false}
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node3.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE3_PORT:-53553}:${NODE3_PORT:-53553}"
-      - "${NODE3_OMNI_PORT:-53563}:${NODE3_OMNI_PORT:-53563}"
+      - "${NODE3_OMNI_PORT:-53563}:53554"
       - "${NODE3_SIGNALING_PORT:-3007}:3005"
     networks:
       - demos-network
@@ -177,21 +185,23 @@ services:
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node4_db
       - PORT=${NODE4_PORT:-53554}
-      - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
+      - OMNI_PORT=53555
       - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
-      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-false}
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node4.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE4_PORT:-53554}:${NODE4_PORT:-53554}"
-      - "${NODE4_OMNI_PORT:-53564}:${NODE4_OMNI_PORT:-53564}"
+      - "${NODE4_OMNI_PORT:-53564}:53555"
       - "${NODE4_SIGNALING_PORT:-3008}:3005"
     networks:
       - demos-network

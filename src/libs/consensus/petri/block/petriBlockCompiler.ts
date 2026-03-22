@@ -51,9 +51,28 @@ export async function compileBlock(
     // Step 1: Get ALL mempool transactions (classification is informational only)
     const mempoolTxs = await Mempool.getMempool()
 
+    // REVIEW: Apply a deterministic timestamp cutoff so all nodes compile the
+    // same TX set. TXs arriving in the last forge interval (2s) may not have
+    // propagated to all nodes yet — defer them to the next block.
+    const blockIntervalMs = getSharedState.petriConfig?.blockIntervalMs ?? 10000
+    const forgeIntervalMs = getSharedState.petriConfig?.forgeIntervalMs ?? 2000
+    const blockIntervalSec = Math.floor(blockIntervalMs / 1000)
+    // currentUTCTime is in seconds; block boundary and cutoff in ms for TX comparison
+    const blockBoundaryMs =
+        Math.floor(getSharedState.currentUTCTime / blockIntervalSec) * blockIntervalSec * 1000
+    const txCutoffMs = blockBoundaryMs - forgeIntervalMs
+
+    const filteredMempoolTxs = mempoolTxs.filter(tx => Number(tx.timestamp) <= txCutoffMs)
+    if (filteredMempoolTxs.length < mempoolTxs.length) {
+        log.info(
+            `[PetriBlockCompiler] Deferred ${mempoolTxs.length - filteredMempoolTxs.length} ` +
+            `late TXs (cutoff=${txCutoffMs})`,
+        )
+    }
+
     // Combine mempool txs with any resolved txs from arbitration
     const allTxs: Transaction[] = [
-        ...(mempoolTxs as unknown as Transaction[]),
+        ...(filteredMempoolTxs as unknown as Transaction[]),
         ...resolvedTxs,
     ]
 
@@ -73,8 +92,13 @@ export async function compileBlock(
     const previousBlockHash = lastBlock.hash
     const blockNumber = lastBlock.number + 1
 
-    // Step 4: Set consensus timestamp for block creation
-    getSharedState.lastConsensusTime = getSharedState.currentUTCTime
+    // Step 4: Set consensus timestamp for block creation.
+    // REVIEW: Quantize to the blockInterval boundary so all nodes produce the
+    // same timestamp regardless of minor wall-clock drift. This is critical for
+    // deterministic block hashes across the shard.
+    const now = getSharedState.currentUTCTime
+    getSharedState.lastConsensusTime =
+        Math.floor(now / blockIntervalSec) * blockIntervalSec
 
     // Step 5: Clear any stale candidate block before creating new one
     getSharedState.candidateBlock = null

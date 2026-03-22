@@ -5,6 +5,31 @@
 > Phases are sequential — each builds on the previous.
 > **Updated**: file paths corrected after stabilisation merge; design decisions finalized.
 
+## Implementation Status (2026-03-22)
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| P0 | DONE | Types, config, feature flag |
+| P1 | DONE | Classifier, speculative executor |
+| P2 | DONE | Continuous forge, delta tracker |
+| P3 | DONE | Block compiler, finalizer, BFT arbitrator |
+| P4 | DONE | Petri router, shard mapper |
+| P5 | DONE | Finality API (RPC exists, wiring pending) |
+| P6 | DONE | Integration tests, benchmarks, soak test passing |
+| P7 | DONE | Petri is default consensus, PoRBFT v2 fallback via flag |
+| P8 | NOT STARTED | SDK soft finality endpoint (requires SDK changes) |
+| P9 | NOT STARTED | Secretary-coordinated signing (verify-then-sign upgrade) |
+
+### Additional fixes applied during soak testing
+- **chainBlocks.ts**: Savepoint-based error isolation for TX inserts (prevents DB transaction poisoning)
+- **petriBlockCompiler.ts**: TX cutoff uses milliseconds (was comparing ms timestamps against second-granularity cutoff)
+- **broadcastBlockHash.ts**: Promise.allSettled + sequential signature verification
+- **orderTransactions.ts**: Hash tiebreaker for deterministic ordering
+- **broadcastManager.ts**: Removed signer filter so members receive finalized block
+- **petriSecretary.ts**: Fixed election to include self in sorted identity list
+- **petri/index.ts**: Fixed startingConsensus flag reset in finally block
+- **docker-compose.yml**: OMNI_MODE=OMNI_PREFERRED (OMNI_ONLY blocks HTTP fallback during genesis)
+
 ---
 
 ## Design Decisions (Finalized)
@@ -51,7 +76,7 @@ The stabilisation merge refactored key files. This plan uses the **current** pat
 
 ## Guiding Principles
 
-1. **Feature-flagged**: Petri runs alongside PoRBFT v2 via config flag. No breaking changes until validated.
+1. **Feature-flagged**: Petri is the default consensus (`PETRI_CONSENSUS=true`). Set to `false` to fall back to PoRBFT v2.
 2. **Incremental**: Each phase produces testable, deployable code.
 3. **Test-as-you-build**: Every phase includes tests in `better_testing/` style before moving on.
 4. **Minimal blast radius**: Reuse existing infrastructure wherever possible.
@@ -78,7 +103,7 @@ The stabilisation merge refactored key files. This plan uses the **current** pat
 ### Acceptance Criteria
 - All types compile with `bun run lint:fix`
 - No runtime changes
-- Feature flag defaults to `false`
+- Feature flag defaults to `true` (changed in Phase 7)
 
 ### Files Created
 ```
@@ -341,17 +366,20 @@ src/libs/consensus/petri/
 
 ---
 
-## Phase 7: Secretary Deprecation & Cleanup
+## Phase 7: Secretary Deprecation & Cleanup — DONE
 
-**Goal**: Remove PoRBFT v2 Secretary-based coordination once Petri is validated.
+**Goal**: Make Petri the default consensus. PoRBFT v2 remains as fallback.
 
-### Tasks
-1. Deprecate `SecretaryManager` (mark with @deprecated)
-2. Remove Secretary RPC methods (greenlight, setValidatorPhase, etc.)
-3. Remove feature flag — Petri becomes sole consensus
-4. Clean dead code paths
+### Completed
+1. Deprecated `SecretaryManager` (marked with @deprecated)
+2. Removed Secretary RPC methods (greenlight, setValidatorPhase, etc.)
+3. Petri is now the default (`PETRI_CONSENSUS=true` in defaults.ts)
+4. PoRBFT v2 remains available via `PETRI_CONSENSUS=false` for rollback
+5. OmniProtocol enabled by default (`OMNI_ENABLED=true`, `OMNI_MODE=OMNI_PREFERRED`)
+6. Soak test passing: 10/10 TXs, blocks advancing, hard finality observed
 
-### Risk: Medium (only after extensive testnet validation)
+### Note
+Full removal of PoRBFT v2 code deferred until after testnet validation period.
 
 ---
 

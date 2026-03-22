@@ -104,10 +104,10 @@ myc task close <task-id>
 
 ## 4. How You Stay Safe: Guardrails
 
-### Feature flag is sacred
+### Feature flag
 - All Petri code paths gated by `getSharedState.petriConsensus`
-- Default: `false` — existing PoRBFT v2 is untouched
-- Never remove the flag until Phase 7 (after testnet validation)
+- Default: `true` — Petri is the default consensus as of Phase 7
+- Set `PETRI_CONSENSUS=false` to fall back to PoRBFT v2
 
 ### Delta determinism is critical
 - Same transaction MUST produce identical `deltaHash` on every node
@@ -160,6 +160,7 @@ src/libs/consensus/petri/
   arbitration/bftArbitrator.ts
   routing/petriRouter.ts
   routing/shardMapper.ts
+  coordination/petriSecretary.ts      # Secretary election + accept-and-sign
 ```
 
 ### Existing Code We Touch
@@ -174,16 +175,22 @@ src/libs/network/manageConsensusRoutines.ts  # Delta exchange RPC
 src/libs/consensus/v2/routines/mergeMempools.ts  # Adapt for repeated calls
 ```
 
-### Existing Code We Reuse (Don't Touch)
+### Existing Code Modified for Petri
+```
+src/libs/consensus/v2/routines/orderTransactions.ts    # Hash tiebreaker for deterministic ordering
+src/libs/consensus/v2/routines/broadcastBlockHash.ts   # Promise.allSettled + sequential sig verification
+src/libs/consensus/v2/routines/manageProposeBlockHash.ts # Accept-and-sign model for Petri
+src/libs/communications/broadcastManager.ts            # Removed signer filter so members receive finalized block
+src/libs/blockchain/chainBlocks.ts                     # Savepoint-based error isolation for TX inserts
+src/libs/network/manageConsensusRoutines.ts            # Petri consensus gate
+```
+
+### Existing Code Reused (Not Modified)
 ```
 src/libs/consensus/v2/routines/getShard.ts
 src/libs/consensus/v2/routines/getCommonValidatorSeed.ts
-src/libs/consensus/v2/routines/orderTransactions.ts
 src/libs/consensus/v2/routines/createBlock.ts
-src/libs/consensus/v2/routines/broadcastBlockHash.ts
 src/libs/consensus/v2/PoRBFT.ts           # isBlockValid() reused
-src/libs/blockchain/chainBlocks.ts         # insertBlock()
-src/libs/communications/broadcastManager.ts # broadcastNewBlock()
 src/libs/peer/Peer.ts                      # RPC calls
 src/libs/peer/PeerManager.ts               # Peer management
 src/libs/crypto/hashing.ts                 # SHA-256

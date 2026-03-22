@@ -19,11 +19,11 @@ export class BroadcastManager {
     static async broadcastNewBlock(block: Block) {
         const peerlist = PeerManager.getInstance().getPeers()
 
-        // filter by block signers
-        const peers = peerlist.filter(
-            peer =>
-                block.validation_data.signatures[peer.identity] == undefined,
-        )
+        // REVIEW: In Petri consensus, shard members sign the block hash during
+        // broadcastBlockHash but never insert it — they need the finalized block
+        // with all signatures. Broadcast to ALL peers; the receiving side
+        // deduplicates via Chain.getBlockByHash.
+        const peers = peerlist
 
         const promises = peers.map(async peer => {
             const request: RPCRequest = {

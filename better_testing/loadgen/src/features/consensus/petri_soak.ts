@@ -18,7 +18,7 @@ import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { envInt, sleep } from "../../framework/common"
 import { getRunConfig, writeJson } from "../../framework/io"
-import { nodeCall, NO_FALLBACKS } from "../../framework/rpc"
+import { nodeCall, rpcPost, NO_FALLBACKS } from "../../framework/rpc"
 import { getWalletAddresses, maybeSilenceConsole, readWalletMnemonics } from "../../token_shared"
 import {
     getAddressNonceViaRpc,
@@ -66,8 +66,9 @@ async function pollFinality(
 
     while (Date.now() < deadline) {
         try {
-            const res = await nodeCall(rpcUrl, "getTransactionFinality", { params: [txHash] }, "petri:soak:poll", NO_FALLBACKS)
-            const finality = res?.response
+            // REVIEW: getTransactionFinality is a direct RPC method, not a nodeCall message
+            const res = await rpcPost(rpcUrl, { method: "getTransactionFinality", params: [txHash] })
+            const finality = res?.json?.response
             if (finality) {
                 if (finality.softFinalityAt && !softFinalityAt) {
                     softFinalityAt = finality.softFinalityAt

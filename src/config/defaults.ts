@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         enabled: true,
         port: 0, // uses NODE_PORT or PORT fallback
         fatal: false,
-        mode: "",
+        mode: "OMNI_PREFERRED",
         tls: {
             enabled: false,
             mode: "self-signed",
@@ -146,7 +146,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     petri: {
-        enabled: false,
+        enabled: true,
         forgeIntervalMs: 2000,
         blockIntervalMs: 10000,
         agreementThreshold: 7,

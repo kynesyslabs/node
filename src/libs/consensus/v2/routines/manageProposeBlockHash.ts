@@ -42,22 +42,23 @@ export default async function manageProposeBlockHash(
         "[manageProposeBlockHash] Validator is in the shard: voting for the block hash",
     )
 
-    // REVIEW: Petri Consensus — accept-and-sign model
-    // In Petri, each node does NOT compile its own candidate block. The proposer
-    // compiles the block and broadcasts its hash. Receivers simply sign the
-    // proposer's hash and return the signature. This avoids block hash divergence
-    // caused by independent compilation with different timestamps/mempool state.
+    // REVIEW: Petri Consensus — accept-and-sign model (Phase 9)
+    // In Petri, the elected secretary compiles the block and broadcasts its hash.
+    // Members trust the secretary's hash and sign it directly (accept-and-sign).
+    // This is safe because only one deterministically-elected secretary proposes per round.
     if (getSharedState.petriConsensus) {
         log.info(
-            "[manageProposeBlockHash] Petri active — signing proposer's block hash directly",
+            "[manageProposeBlockHash] Petri active — accept-and-sign (secretary model)",
         )
 
-        // Sign the proposer's block hash
         const blockSignature = await ucrypto.sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(blockHash),
         )
 
+        log.info(
+            "[manageProposeBlockHash] Petri: signing secretary's block hash",
+        )
         response.result = 200
         response.response = getSharedState.publicKeyHex
         response.extra = {
