@@ -11,7 +11,7 @@ export default async function getBlockByHash(data: any) {
         extra = "Missing hash"
         return { response, extra }
     }
-    log.debug("[SERVER] Received getBlockByHash: " + data.hash)
+    log.debug(`[SERVER] Received getBlockByHash: ${data.hash}`)
     response = await Chain.getBlockByHash(data.hash)
     return { response, extra }
 }

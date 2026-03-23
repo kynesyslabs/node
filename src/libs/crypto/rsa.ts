@@ -11,53 +11,45 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import forge from "node-forge"
 
+const RSA_KEY_BITS = 4096
+
 export default class RSA {
-    // INFO Generates a new RSA keypair from a given ecdsa private key
-    static async new(ecdsaPrivateKey: string) {
+    static new(ecdsaPrivateKey: string) {
         const md = forge.md.sha256.create()
         md.update(ecdsaPrivateKey)
         const seed = md.digest().toHex()
         const prng = forge.random.createInstance()
         prng.seedFileSync = () => seed
-        const keypair = forge.pki.rsa.generateKeyPair({
-            bits: 4096,
+        return forge.pki.rsa.generateKeyPair({
+            bits: RSA_KEY_BITS,
             prng,
         })
-        return keypair
     }
 
-    // INFO signing method
-    static async sign(message: string, privateKey: forge.pki.rsa.PrivateKey) {
+    static sign(message: string, privateKey: forge.pki.rsa.PrivateKey) {
         const md = forge.md.sha256.create()
         md.update(message)
-        const signature = privateKey.sign(md)
-        return signature
+        return privateKey.sign(md)
     }
 
-    // INFO verifying method
-    static async verify(
+    static verify(
         message: string,
         signature: string,
         publicKey: forge.pki.rsa.PublicKey,
     ) {
         const md = forge.md.sha256.create()
         md.update(message)
-        const verified = publicKey.verify(md.digest().bytes(), signature)
-        return verified
+        return publicKey.verify(md.digest().bytes(), signature)
     }
 
-    // INFO encrypting method
-    static async encrypt(message: string, publicKey: forge.pki.rsa.PublicKey) {
-        const encrypted = publicKey.encrypt(message)
-        return encrypted
+    static encrypt(message: string, publicKey: forge.pki.rsa.PublicKey) {
+        return publicKey.encrypt(message)
     }
 
-    // INFO decrypting method
-    static async decrypt(
+    static decrypt(
         message: string,
         privateKey: forge.pki.rsa.PrivateKey,
     ) {
-        const decrypted = privateKey.decrypt(message)
-        return decrypted
+        return privateKey.decrypt(message)
     }
 }

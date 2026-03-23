@@ -700,7 +700,7 @@ export class DTRManager {
 
             if (result.result === 200) {
                 for (const txres of result.response) {
-                    if (txres.result == 200) {
+                    if (txres.result === 200) {
                         log.debug("deleting tx: " + txres.extra.txhash)
                         DTRManager.validityDataCache.delete(txres.extra.txhash)
                     }

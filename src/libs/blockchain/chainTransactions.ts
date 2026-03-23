@@ -64,7 +64,7 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
 
         return Transaction.fromRawTransaction(rawTx)
     } catch (error) {
-        log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
+        log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(error)}`)
         throw error
     }
 }

@@ -330,21 +330,18 @@ export default class PeerManager {
 
         let peer = this.peerList[pubkey]
 
-        offlineCheck: if (!peer) {
-            // check if peer is in offlinePeers
+        if (!peer) {
+            // Check if peer is in offlinePeers — if so, move back to active list
             if (this.offlinePeers[pubkey]) {
                 log.warn(
                     "[PEERMANAGER] Peer is in offlinePeers: removing from offlinePeers and adding to peer list",
                 )
-
                 this.addPeer(this.offlinePeers[pubkey])
                 this.removeOfflinePeer(pubkey)
                 peer = this.peerList[pubkey]
-
-                break offlineCheck
+            } else {
+                return
             }
-
-            return
         }
 
         peer.status.online = true

@@ -19,26 +19,26 @@ export async function checkConsensusTime(
     // Using the average timestamp set in the last block
     //let lastTimestamp = await getSharedState.getLastConsensusTime() // ? Should we check it from the blockchain each time?
     const lastBlock = await Chain.getLastBlock()
-    log.debug("LAST BLOCK NUMBER: " + lastBlock.number)
+    log.debug(`LAST BLOCK NUMBER: ${lastBlock.number}`)
     log.debug("--------------------------------")
-    log.debug("LAST BLOCK: " + lastBlock.hash)
+    log.debug(`LAST BLOCK: ${lastBlock.hash}`)
     log.debug("--------------------------------")
     const lastTimestamp = lastBlock.content.timestamp
     // REVIEW Using the UTC timestamp as per mainLoop.ts settings
     const currentTimestamp = getNetworkTimestamp() // Date.now()
     const delta = currentTimestamp - lastTimestamp
     const consensusIntervalTime = getSharedState.getConsensusTime()
-    log.debug("[CONSENSUS TIME] lastTimestamp: " + lastTimestamp, true)
-    log.debug("[CONSENSUS TIME] currentTimestamp: " + currentTimestamp, true)
-    log.debug("[CONSENSUS TIME] delta: " + delta)
+    log.debug(`[CONSENSUS TIME] lastTimestamp: ${lastTimestamp}`, true)
+    log.debug(`[CONSENSUS TIME] currentTimestamp: ${currentTimestamp}`, true)
+    log.debug(`[CONSENSUS TIME] delta: ${delta}`)
     log.debug(
-        "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
+        `[CONSENSUS TIME] consensusIntervalTime: ${consensusIntervalTime}`,
         true,
     )
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     log.info(
-        "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
+        `[CONSENSUS TIME] consensusIntervalTime: ${consensusIntervalTime}`,
         false,
     )
     if (delta >= consensusIntervalTime) {

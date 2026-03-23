@@ -271,18 +271,11 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated = true,
     ): Promise<RPCResponse> {
-        log.info(
-            "[RPC Call] [" +
-                request.method +
-                "] [" +
-                new Date(Date.now()).toISOString() +
-                "] Making RPC call to: " +
-                this.connection.string,
-        )
+        const timestamp = new Date().toISOString()
+        log.info(`[RPC Call] [${request.method}] [${timestamp}] Making RPC call to: ${this.connection.string}`)
 
-        // Get some informations
         const method = request.method
-        const currentTimestampReadable = new Date(Date.now()).toISOString()
+        const currentTimestampReadable = timestamp
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""
@@ -314,9 +307,10 @@ export default class Peer {
         try {
             // Create AbortController for connection timeout (covers TCP handshake + HTTP request)
             const abortController = new AbortController()
+            const RPC_TIMEOUT_MS = 3000
             timeoutId = setTimeout(() => {
                 abortController.abort()
-            }, 3000)
+            }, RPC_TIMEOUT_MS)
 
             const response = await axios.post<RPCResponse>(
                 connectionUrl,
@@ -325,35 +319,21 @@ export default class Peer {
                     headers: {
                         "Content-Type": "application/json",
                         identity: pubkey,
-                        signature: signature,
+                        signature,
                     },
-                    timeout: 3000,
+                    timeout: RPC_TIMEOUT_MS,
                     signal: abortController.signal,
                 },
             )
 
             clearTimeout(timeoutId)
-            log.info(
-                "[RPC Call] [" +
-                    method +
-                    "] [" +
-                    currentTimestampReadable +
-                    "] Response received ",
-            )
-            if (response.data.result == 200) {
-                log.info(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Response OK: " +
-                        response.data.result,
-                )
+            log.info(`[RPC Call] [${method}] [${currentTimestampReadable}] Response received`)
+            if (response.data.result === 200) {
+                log.info(`[RPC Call] [${method}] [${currentTimestampReadable}] Response OK: ${response.data.result}`)
             }
 
             return response.data
         } catch (error) {
-            // Clear timeout if request completed (error or success)
             if (timeoutId) {
                 clearTimeout(timeoutId)
             }
@@ -366,15 +346,7 @@ export default class Peer {
                     error.name === "AbortError" ||
                     error.code === "ETIMEDOUT")
             ) {
-                log.warn(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Request timeout/aborted to: " +
-                        connectionUrl,
-                )
-
+                log.warn(`[RPC Call] [${method}] [${currentTimestampReadable}] Request timeout/aborted to: ${connectionUrl}`)
                 PeerManager.markPeerOffline(this)
 
                 return {
@@ -387,20 +359,9 @@ export default class Peer {
                     },
                 }
             }
-            // Handle ECONNREFUSED error
-            else if (
-                axios.isAxiosError(error) &&
-                error.code === "ECONNREFUSED"
-            ) {
-                log.warn(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Connection refused to: " +
-                        connectionUrl,
-                )
 
+            if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
+                log.warn(`[RPC Call] [${method}] [${currentTimestampReadable}] Connection refused to: ${connectionUrl}`)
                 PeerManager.markPeerOffline(this)
 
                 return {
@@ -412,24 +373,17 @@ export default class Peer {
                         url: connectionUrl,
                     },
                 }
-            } else {
-                log.error(
-                    "[RPC Call] [" +
-                        method +
-                        "] [" +
-                        currentTimestampReadable +
-                        "] Error making RPC call:" +
-                        error,
-                )
-                log.error("CONNECTION URL: " + connectionUrl)
-                log.error("REQUEST PAYLOAD: " + JSON.stringify(request))
+            }
 
-                return {
-                    result: 500,
-                    response: error,
-                    require_reply: false,
-                    extra: null,
-                }
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[RPC Call] [${method}] [${currentTimestampReadable}] Error making RPC call: ${errorMsg}`)
+            log.error(`[RPC Call] CONNECTION URL: ${connectionUrl}`)
+
+            return {
+                result: 500,
+                response: error,
+                require_reply: false,
+                extra: null,
             }
         }
     }

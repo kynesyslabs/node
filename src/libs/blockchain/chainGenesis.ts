@@ -105,7 +105,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     }
 
     const userAccounts: Record<string, any>[] = Object.values(users)
-    log.debug("total users: " + userAccounts.length)
+    log.debug(`total users: ${userAccounts.length}`)
 
     const batchSize = 100
     for (let i = 0; i < userAccounts.length; i += batchSize) {

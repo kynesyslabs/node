@@ -1,0 +1,170 @@
+#!/bin/bash
+# Devnet runner - simplified version of ./run for Docker containers
+# Removes: git pull, bun install, postgres management (handled by docker-compose)
+
+PEER_LIST_FILE="demos_peerlist.json"
+VERBOSE=false
+NO_TUI=true  # Always no-tui in containers for cleaner logs
+
+# Detect platform
+PLATFORM=$(uname -s)
+case ${PLATFORM} in
+    "Darwin") PLATFORM_NAME="macOS" ;;
+    "Linux") PLATFORM_NAME="Linux" ;;
+    *) PLATFORM_NAME="Unknown" ;;
+esac
+
+# trap ctrl-c
+trap ctrl_c INT
+HAS_BEEN_INTERRUPTED=false
+
+log_verbose() {
+    if [[ "${VERBOSE}" = true ]]; then
+        echo "[VERBOSE] $1"
+    fi
+}
+
+function ctrl_c() {
+    HAS_BEEN_INTERRUPTED=true
+}
+
+# Simplified system check (no port checks since docker-compose handles networking)
+check_system_requirements() {
+    echo "🔍 Checking system requirements..."
+    local warnings=0
+
+    # Check RAM
+    if [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+        ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+        ram_gb=$((ram_kb / 1024 / 1024))
+        if [[ "${ram_gb}" -lt 4 ]]; then
+            echo "⚠️  RAM below minimum: ${ram_gb}GB (minimum: 4GB)"
+            warnings=$((warnings + 1))
+        elif [[ "${ram_gb}" -lt 8 ]]; then
+            echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: 8GB)"
+            warnings=$((warnings + 1))
+        else
+            echo "✅ RAM: ${ram_gb}GB"
+        fi
+    fi
+
+    # Check CPU
+    if [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+        cpu_cores=$(nproc)
+        if [[ "${cpu_cores}" -lt 4 ]]; then
+            echo "⚠️  CPU cores below minimum: ${cpu_cores} (minimum: 4)"
+            warnings=$((warnings + 1))
+        else
+            echo "✅ CPU cores: ${cpu_cores}"
+        fi
+    fi
+
+    if [[ "${warnings}" -gt 0 ]]; then
+        echo ""
+        echo "⚠️  System check passed with ${warnings} warning(s)"
+        echo "   The node will run but performance may be limited."
+        echo ""
+    else
+        echo ""
+        echo "✅ System requirements met!"
+        echo ""
+    fi
+}
+
+PORT=${PORT:-53550}
+CLEAN="false"
+
+# Handle long options
+for arg in "$@"; do
+    case ${arg} in
+        --external-db) ;; # Ignored, always external in devnet
+        --no-tui) NO_TUI=true ;;
+    esac
+done
+
+# Parse arguments
+while getopts "p:c:i:u:l:b:tvh" opt; do
+    case ${opt} in
+        p) PORT=${OPTARG};;
+        c) CLEAN=${OPTARG};;
+        i) IDENTITY_FILE=${OPTARG};;
+        l) PEER_LIST_FILE=${OPTARG};;
+        u) EXPOSED_URL=${OPTARG};;
+        b) RESTORE=${OPTARG};;
+        t) NO_TUI=true;;
+        v) VERBOSE=true;;
+        h) echo "Devnet runner - use docker-compose for configuration"; exit 0;;
+        *) ;;
+    esac
+done
+
+# Run simplified system check
+check_system_requirements
+
+echo ""
+echo "🚀 Welcome to Demos Network (Devnet Mode)!"
+echo "⚙️  Node Configuration:"
+echo "   🌐 Node Port: ${PORT}"
+echo "   🔗 Mode: External database (DATABASE_URL)"
+if [[ ! -z "${IDENTITY_FILE}" ]]; then
+    echo "   🔑 Identity File: ${IDENTITY_FILE}"
+fi
+if [[ ! -z "${EXPOSED_URL}" ]]; then
+    echo "   📡 Exposed URL: ${EXPOSED_URL}"
+fi
+echo "   👥 Peer List: ${PEER_LIST_FILE}"
+echo "   📜 Display: Legacy logs (TUI disabled)"
+echo ""
+
+# Check bun is available
+if ! command -v bun &> /dev/null; then
+    echo "❌ Error: Bun is not installed"
+    exit 1
+fi
+
+START_COMMAND="bun start:bun"
+
+echo "🚀 Starting your Demos Network node..."
+log_verbose "Using command: ${START_COMMAND}"
+sleep 1
+
+# Export environment variables
+export IDENTITY_FILE=${IDENTITY_FILE}
+export EXPOSED_URL=${EXPOSED_URL}
+export PEER_LIST_FILE=${PEER_LIST_FILE}
+export RESTORE=${RESTORE}
+
+# Ensure logs folder exists
+mkdir -p logs
+
+echo ""
+echo "🎉 All systems ready! Starting Demos Network node..."
+echo "📝 Logs will be saved to: logs/"
+echo "🌐 Your node will be available on port ${PORT}"
+echo ""
+echo "💡 Press Ctrl+C to stop the node safely"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Build command with --no-tui
+FINAL_COMMAND="${START_COMMAND} -- --no-tui"
+
+# Start the node
+log_verbose "Starting node with: RPC_PORT=${PORT}"
+log_verbose "Command: ${FINAL_COMMAND}"
+
+if ! RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
+    if [[ "${HAS_BEEN_INTERRUPTED}" == "true" ]]; then
+        echo ""
+        echo "✅ Demos Network node stopped successfully"
+    else
+        echo "❌ Error: Node failed to start or crashed"
+        exit 1
+    fi
+else
+    echo ""
+    echo "✅ Demos Network node exited successfully"
+fi
+
+echo ""
+echo "🏁 Demos Network node session completed"

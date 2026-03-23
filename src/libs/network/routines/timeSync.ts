@@ -29,8 +29,8 @@ export default async function getPeerTime(
     }
 
     log.warning("[PEER TIMESYNC] Getting peer time delta")
-    log.debug("[PEER TIMESYNC] Peer: " + JSON.stringify(peer))
-    log.debug("[PEER TIMESYNC] ID: " + id)
+    log.debug(`[PEER TIMESYNC] Peer: ${JSON.stringify(peer)}`)
+    log.debug(`[PEER TIMESYNC] ID: ${id}`)
 
     const nodeCall: NodeCall = {
         message: "getPeerTime",

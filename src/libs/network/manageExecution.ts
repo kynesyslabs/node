@@ -14,8 +14,8 @@ export async function manageExecution(
 ): Promise<RPCResponse> {
     const returnValue = _.cloneDeep(emptyResponse)
 
-    log.debug("[serverListeners] content.type: " + content.type)
-    log.debug("[serverListeners] content.extra: " + content.extra)
+    log.debug(`[serverListeners] content.type: ${content.type}`)
+    log.debug(`[serverListeners] content.extra: ${content.extra}`)
 
     log.info(`[serverListeners] Received execution request for type: ${content.type}`)
 
@@ -39,8 +39,7 @@ export async function manageExecution(
         // Then we send the validation data to the client that can use it to execute the tx
         case "confirmTx":
             log.info("SERVER", "Received confirmTx")
-            // eslint-disable-next-line no-var
-            var validityData = await ServerHandlers.handleValidateTransaction(
+            const validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
                 sender,
             )
@@ -54,7 +53,7 @@ export async function manageExecution(
             log.info("SERVER", "Received broadcastTx")
             // REVIEW This method needs to actually verify if the transaction is valid
 
-            var validityDataPayload: ValidityData
+            let validityDataPayload: ValidityData
             // If content.data.response.rpc_public_key exists, we assign validityDataPayload to response
             try {
                 if (content.data.response.rpc_public_key) {

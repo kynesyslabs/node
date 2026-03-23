@@ -22,8 +22,8 @@ async function readMnemonic(path: string): Promise<string> {
 
 function defaultArgs() {
   const rpcUrl = process.argv[2] ?? "http://localhost:53554"
-  const walletA = process.argv[3] ?? "devnet/identities/node1.identity"
-  const walletB = process.argv[4] ?? "devnet/identities/node2.identity"
+  const walletA = process.argv[3] ?? "testing/devnet/identities/node1.identity"
+  const walletB = process.argv[4] ?? "testing/devnet/identities/node2.identity"
   return { rpcUrl, walletA, walletB }
 }
 

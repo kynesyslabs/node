@@ -236,7 +236,7 @@ docker-compose down          # Stop the network
 | node-3 | 53553    | 53563     |
 | node-4 | 53554    | 53564     |
 
-For detailed devnet documentation, see [devnet/README.md](devnet/README.md).
+For detailed devnet documentation, see [testing/devnet/README.md](testing/devnet/README.md).
 
 ## Developer's Guide
 

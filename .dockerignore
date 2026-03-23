@@ -5,10 +5,10 @@
 node_modules
 
 # Exclude devnet runtime files
-devnet/identities
-devnet/.env
-devnet/demos_peerlist.json
-devnet/postgres-data
+testing/devnet/identities
+testing/devnet/.env
+testing/devnet/demos_peerlist.json
+testing/devnet/postgres-data
 ipfs
 ipfs_53550
 docker_data

@@ -39,7 +39,7 @@ export async function handleValidateTransaction(
         log.debug(
             "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
         )
-        const comparison = txGcrEditsHash == gcrEditsHash
+        const comparison = txGcrEditsHash === gcrEditsHash
         if (!comparison) {
             log.error(
                 "[handleValidateTransaction] GCREdit mismatch: " +

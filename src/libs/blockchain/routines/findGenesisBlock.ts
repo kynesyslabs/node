@@ -44,7 +44,7 @@ export default async function findGenesisBlock() {
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
-        log.info("[GENESIS] Genesis block found. Hash: " + genesisBlockHash)
+        log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
         return
     }
 

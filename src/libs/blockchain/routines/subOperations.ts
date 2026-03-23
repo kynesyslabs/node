@@ -106,7 +106,7 @@ export default class SubOperations {
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
-        if (amount == 0) {
+        if (amount === 0) {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -136,7 +136,7 @@ export default class SubOperations {
         const amount: string = operation.params.amount
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
-        if (amount == "0") {
+        if (amount === "0") {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -155,7 +155,7 @@ export default class SubOperations {
         const amount: string = operation.params.amount
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
-        if (amount == "0") {
+        if (amount === "0") {
             return {
                 success: false,
                 message: "Amount cannot be 0",

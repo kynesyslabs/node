@@ -99,7 +99,7 @@
     { "file": "tsconfig.json", "purpose": "TypeScript compiler settings" },
     { "file": "ormconfig.json", "purpose": "TypeORM/database config" },
     { "file": "knip.json", "purpose": "unused code/dependency analysis" },
-    { "file": "devnet/docker-compose.yml", "purpose": "local multi-node network" },
+    { "file": "testing/devnet/docker-compose.yml", "purpose": "local multi-node network" },
     { "file": "tlsnotary/docker-compose.yml", "purpose": "TLSNotary stack" },
     { "file": "monitoring/prometheus/prometheus.yml", "purpose": "metrics scraping" },
     { "file": "monitoring/grafana/provisioning/dashboards/dashboard.yml", "purpose": "Grafana dashboard provisioning" }
@@ -109,7 +109,7 @@
     { "file": "INSTALL.md", "topic": "installation guide" },
     { "file": "CONTRIBUTING.md", "topic": "contribution workflow" },
     { "file": "monitoring/README.md", "topic": "observability stack" },
-    { "file": "devnet/README.md", "topic": "local devnet" },
+    { "file": "testing/devnet/README.md", "topic": "local devnet" },
     { "file": "OMNIPROTOCOL_SETUP.md", "topic": "omni protocol setup" },
     { "file": "L2PS_TESTING.md", "topic": "L2PS testing" }
   ],

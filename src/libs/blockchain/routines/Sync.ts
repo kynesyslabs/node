@@ -75,10 +75,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     const ourLastBlockHash = lastBlock.hash
 
     log.info(
-        "[fastSync] Our last block number is " +
-        ourLastBlockNumber +
-        " and our last block hash is " +
-        ourLastBlockHash,
+        `[fastSync] Our last block number is ${ourLastBlockNumber} and our last block hash is ${ourLastBlockHash}`,
     )
 
     // REVIEW: With the peer gossip working, can we replace getLastBlockNumber
@@ -160,7 +157,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
             peerLastBlockNumbers.push(0)
         }
     }
-    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
+    log.info(`[fastSync] Peer last block numbers: ${peerLastBlockNumbers}`)
     log.custom(
         "fastsync_blocknumbers",
         "Request block numbers: " + JSON.stringify(requestBlockNumbers),
@@ -262,8 +259,8 @@ async function verifyLastBlockIntegrity(
 
     if (genesisBlock.hash !== ourGenesisHash) {
         log.error("[fastSync] Genesis hash is not coherent")
-        log.error("[fastSync] Our hash: " + ourGenesisHash)
-        log.error("[fastSync] Peer hash: " + genesisBlock.hash)
+        log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
+        log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
         process.exit(1)
     }
 
@@ -290,21 +287,18 @@ export async function syncBlock(block: Block, peer: Peer) {
     await Chain.insertBlock(block, [], null, false)
     log.debug("Block inserted successfully")
     log.debug(
-        "Last block number: " +
-        getSharedState.lastBlockNumber +
-        " Last block hash: " +
-        getSharedState.lastBlockHash,
+        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
     )
     log.info("[fastSync] Block inserted successfully at the head of the chain!")
 
     // REVIEW Merge the peerlist
-    log.info("[fastSync] Merging peers from block: " + block.hash)
+    log.info(`[fastSync] Merging peers from block: ${block.hash}`)
     const mergedPeerlist = await mergePeerlist(block)
-    log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
+    log.info(`[fastSync] Merged peers from block: ${mergedPeerlist}`)
     // REVIEW Parse the txs hashes in the block
     log.info("[fastSync] Asking for transactions in the block", true)
     const txs = await askTxsForBlock(block, peer)
-    log.info("[fastSync] Transactions received: " + txs.length, true)
+    log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
     // ! Sync the native tables
     await syncGCRTables(txs)
@@ -845,7 +839,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         return true
     }
 
-    if (getSharedState.fastSyncCount == 0) {
+    if (getSharedState.fastSyncCount === 0) {
         // INFO: Only run integrity checks on first sync
         const verified = await verifyLastBlockIntegrity(
             highestBlockPeer(),

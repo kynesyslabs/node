@@ -147,7 +147,7 @@ export default class Mempool {
             let message = "Error: Failed to add transaction to mempool"
 
             if (error instanceof QueryFailedError) {
-                log.error("Error saving tx: " + transaction.hash)
+                log.error(`Error saving tx: ${transaction.hash}`)
                 log.error(error.message)
                 message = "Error: Transaction already in mempool"
             }
@@ -213,7 +213,7 @@ export default class Mempool {
             if (!existingHashes[tx.hash]) {
                 incomingSet[tx.hash] = true
             } else {
-                log.error("tx already exists: " + tx.hash)
+                log.error(`tx already exists: ${tx.hash}`)
             }
         }
 
@@ -224,7 +224,7 @@ export default class Mempool {
                 await this.repo.save(tx)
             } catch (error) {
                 if (error instanceof QueryFailedError) {
-                    log.error("Error saving tx: " + tx.hash)
+                    log.error(`Error saving tx: ${tx.hash}`)
                     log.error(error.message)
                 }
             }

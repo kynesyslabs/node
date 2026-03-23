@@ -17,9 +17,9 @@ export default async function manageProposeBlockHash(
 ): Promise<RPCResponse> {
     const response = _.cloneDeep(emptyResponse)
     log.info("[Consensus Message Received] Propose Block Hash")
-    log.info("Block Hash: " + blockHash)
-    log.debug("Validation Data: " + JSON.stringify(validationData))
-    log.info("Peer ID: " + peerId)
+    log.info(`Block Hash: ${blockHash}`)
+    log.debug(`Validation Data: ${JSON.stringify(validationData)}`)
+    log.info(`Peer ID: ${peerId}`)
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
@@ -127,8 +127,8 @@ export default async function manageProposeBlockHash(
                 continue
             }
 
-            log.error("Found invalid incoming signature by: " + identity)
-            log.error("Proposed signature: " + signature)
+            log.error(`Found invalid incoming signature by: ${identity}`)
+            log.error(`Proposed signature: ${signature}`)
             log.error(
                 "Candidate block hash: " + getSharedState.candidateBlock.hash,
             )
