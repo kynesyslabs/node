@@ -178,6 +178,7 @@ export async function runPetriTxInclusion() {
     const ok = nonceWait.ok
         && blockAdvance.ok
         && (!txHash || !!txByHash?.ok)
+        && (finalityResult?.softFinalityObserved ?? false)
         && (finalityResult?.hardFinalityObserved ?? false)
 
     const run = getRunConfig()
