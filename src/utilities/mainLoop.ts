@@ -127,13 +127,17 @@ async function mainLoopCycle() {
         // }
         await yieldToEventLoop()
         // ANCHOR Calling the consensus routine if is time for it
-        if (getSharedState.petriConsensus) {
-            // REVIEW: Petri Consensus dispatch — get shard and run Petri routine
-            const { commonValidatorSeed } = await getCommonValidatorSeed()
-            const shard = await getShard(commonValidatorSeed)
-            await petriConsensusRoutine(shard)
-        } else {
-            await consensusRoutine()
+        try {
+            if (getSharedState.petriConsensus) {
+                // REVIEW: Petri Consensus dispatch — get shard and run Petri routine
+                const { commonValidatorSeed } = await getCommonValidatorSeed()
+                const shard = await getShard(commonValidatorSeed)
+                await petriConsensusRoutine(shard)
+            } else {
+                await consensusRoutine()
+            }
+        } finally {
+            getSharedState.startingConsensus = false
         }
         await yieldToEventLoop()
     } else if (!getSharedState.syncStatus) {
