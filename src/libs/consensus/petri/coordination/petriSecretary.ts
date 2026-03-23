@@ -161,6 +161,7 @@ export async function collectBlockHashes(
     const signatures: Record<string, string> = {
         [ourPubkey]: uint8ArrayToHex(ourSignature.signature),
     }
+    const processedPubkeys = new Set<string>([ourPubkey])
     let matchCount = 1 // counting ourselves
     let mismatchCount = 0
 
@@ -175,7 +176,7 @@ export async function collectBlockHashes(
     while (Date.now() < deadline && matchCount < totalMembers) {
         // Check all pending submissions
         for (const [pubkey, submission] of pendingSubmissions) {
-            if (signatures[pubkey]) continue // Already processed
+            if (processedPubkeys.has(pubkey)) continue // Already processed
 
             if (submission.blockNumber !== block.number) {
                 log.warn(
@@ -197,6 +198,7 @@ export async function collectBlockHashes(
                 if (isValid) {
                     signatures[pubkey] = submission.signature
                     matchCount++
+                    processedPubkeys.add(pubkey)
                     log.debug(
                         `[PetriSecretary] Valid matching hash from ${pubkey.substring(0, 16)}... ` +
                         `(${matchCount}/${threshold} needed)`,
@@ -206,6 +208,7 @@ export async function collectBlockHashes(
                         `[PetriSecretary] Invalid signature from ${pubkey.substring(0, 16)}...`,
                     )
                     mismatchCount++
+                    processedPubkeys.add(pubkey)
                 }
             } else {
                 log.warn(
@@ -214,6 +217,7 @@ export async function collectBlockHashes(
                     `ours: ${expectedHash.substring(0, 16)}...)`,
                 )
                 mismatchCount++
+                processedPubkeys.add(pubkey)
             }
         }
 
