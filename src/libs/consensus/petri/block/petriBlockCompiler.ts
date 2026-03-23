@@ -70,11 +70,15 @@ export async function compileBlock(
         )
     }
 
-    // Combine mempool txs with any resolved txs from arbitration
-    const allTxs: Transaction[] = [
-        ...(filteredMempoolTxs as unknown as Transaction[]),
-        ...resolvedTxs,
-    ]
+    // Combine mempool txs with any resolved txs from arbitration, deduplicating by hash
+    const txByHash = new Map<string, Transaction>()
+    for (const tx of filteredMempoolTxs as unknown as Transaction[]) {
+        txByHash.set(tx.hash, tx)
+    }
+    for (const tx of resolvedTxs) {
+        txByHash.set(tx.hash, tx)
+    }
+    const allTxs: Transaction[] = Array.from(txByHash.values())
 
     const includedTxHashes = allTxs.map(tx => tx.hash)
 
