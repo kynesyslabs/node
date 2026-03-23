@@ -1,0 +1,45 @@
+{
+  "scenario": "petri_soak",
+  "ok": true,
+  "config": {
+    "soakRounds": 20,
+    "roundDelayMs": 1500,
+    "finalityTimeoutMs": 30000,
+    "transferAmount": 1
+  },
+  "duration": {
+    "totalMs": 612752,
+    "totalSec": 613
+  },
+  "throughput": {
+    "totalSubmitted": 20,
+    "totalFailed": 0,
+    "errorRate": 0,
+    "txPerSecond": 0.03263963234718124
+  },
+  "blocks": {
+    "initialHeight": 351,
+    "finalHeight": 401,
+    "blocksProduced": 50,
+    "blockRate": 0.0815990808679531
+  },
+  "softFinality": {
+    "observed": 0,
+    "avgMs": null,
+    "p50Ms": null,
+    "p95Ms": null,
+    "p99Ms": null,
+    "minMs": null,
+    "maxMs": null
+  },
+  "hardFinality": {
+    "observed": 5,
+    "avgMs": -334.6,
+    "p50Ms": -167,
+    "p95Ms": -161,
+    "p99Ms": -161,
+    "minMs": -965,
+    "maxMs": -161
+  },
+  "timestamp": "2026-03-22T19:39:14.313Z"
+}
