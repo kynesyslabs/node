@@ -291,12 +291,22 @@ export async function processPayload(
                     extra: null,
                 }
             }
-            const finality = await getTransactionFinality(txHash)
-            return {
-                result: 200,
-                response: finality,
-                require_reply: false,
-                extra: null,
+            try {
+                const finality = await getTransactionFinality(txHash)
+                return {
+                    result: 200,
+                    response: finality,
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error(`[RPC] getTransactionFinality error: ${error instanceof Error ? error.message : String(error)}`)
+                return {
+                    result: 500,
+                    response: "Internal server error",
+                    require_reply: false,
+                    extra: null,
+                }
             }
         }
 
