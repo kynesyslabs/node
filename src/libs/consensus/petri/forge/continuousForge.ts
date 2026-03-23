@@ -154,6 +154,7 @@ export class ContinuousForge {
     async runForgeRound(): Promise<void> {
         this.state.currentRound++
         this.state.lastRoundStartedAt = Date.now()
+        this.currentRoundDeltas = {}
         const round = this.state.currentRound
 
         log.debug(`[ContinuousForge] Round ${round} starting`)
