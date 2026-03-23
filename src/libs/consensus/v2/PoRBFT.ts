@@ -350,6 +350,9 @@ async function mergeAndOrderMempools(
     const mempool = await Mempool.getMempool(blockRef)
     const hashes = mempool.map(tx => tx.hash)
     const existingHashes = await Chain.getExistingTransactionHashes(hashes)
+
+    // INFO: Remove existing txs from mempool
+    await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
     return mempool.filter(tx => !existingHashes.has(tx.hash))
 }
 
