@@ -317,6 +317,18 @@ export async function handleExecuteTransaction(
         // to theirs. Verify this flow works end-to-end in Phase 6 integration testing.
         if (getSharedState.petriConsensus) {
             const { success: relaySuccess } = await petriRelay(validatedData)
+
+            if (!relaySuccess) {
+                // Fallback: add to local mempool so the TX is not lost
+                log.warn(
+                    `[handleExecuteTransaction] Petri relay failed for ${queriedTx.hash}, adding to local mempool`,
+                )
+                await Mempool.addTransaction({
+                    ...queriedTx,
+                    reference_block: validatedData.data.reference_block,
+                })
+            }
+
             return {
                 success: true,
                 response: {
