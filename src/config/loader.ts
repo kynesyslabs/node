@@ -220,5 +220,21 @@ export function loadConfig(): Readonly<AppConfig> {
         },
     }
 
+    // Validate Petri config invariants
+    if (config.petri.enabled) {
+        if (config.petri.forgeIntervalMs <= 0 || config.petri.blockIntervalMs <= 0) {
+            throw new Error("Petri intervals must be positive")
+        }
+        if (config.petri.shardSize <= 0) {
+            throw new Error("Petri shardSize must be positive")
+        }
+        if (config.petri.agreementThreshold <= 0 || config.petri.agreementThreshold > config.petri.shardSize) {
+            throw new Error("Petri agreementThreshold must be between 1 and shardSize")
+        }
+        if (config.petri.problematicTTLRounds < 0) {
+            throw new Error("Petri problematicTTLRounds cannot be negative")
+        }
+    }
+
     return deepFreeze(config)
 }
