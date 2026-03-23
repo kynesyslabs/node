@@ -30,12 +30,12 @@ function replacer(_key: string, value: unknown): unknown {
     }
 
     if (value instanceof Set) {
-        return Array.from(value).sort()
+        return Array.from(value).sort((a, b) => String(a).localeCompare(String(b)))
     }
 
     if (value !== null && typeof value === "object" && !Array.isArray(value)) {
         const sorted: Record<string, unknown> = {}
-        for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+        for (const k of Object.keys(value as Record<string, unknown>).sort((a, b) => a.localeCompare(b))) {
             sorted[k] = (value as Record<string, unknown>)[k]
         }
         return sorted

@@ -100,7 +100,7 @@ function getSecretaryIdentity(shard: Peer[]): string {
     const allIdentities = [
         ...shard.map(p => p.identity),
         getSharedState.publicKeyHex,
-    ].sort()
+    ].sort((a, b) => a.localeCompare(b))
     return allIdentities[0]
 }
 
