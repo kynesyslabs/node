@@ -11,7 +11,7 @@ import type { GCREdit } from "@kynesyslabs/demosdk/types"
 export interface StateDelta {
     txHash: string
     edits: GCREdit[]
-    hash: string // SHA-256 of canonicalJson(edits)
+    hash: string // SHA-256 of canonicalJson(normalized edits — {type, operation, account, amount} per edit)
     executedAt: number // timestamp of speculative execution
     blockRef: number // block number of the confirmed state used for execution
 }
