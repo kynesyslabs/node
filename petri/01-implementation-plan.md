@@ -78,7 +78,7 @@ The stabilisation merge refactored key files. This plan uses the **current** pat
 
 1. **Feature-flagged**: Petri is the default consensus (`PETRI_CONSENSUS=true`). Set to `false` to fall back to PoRBFT v2.
 2. **Incremental**: Each phase produces testable, deployable code.
-3. **Test-as-you-build**: Every phase includes tests in `better_testing/` style before moving on.
+3. **Test-as-you-build**: Every phase includes tests in `testing/` style before moving on.
 4. **Minimal blast radius**: Reuse existing infrastructure wherever possible.
 5. **Safety first**: BFT guarantees are never weakened, even during migration.
 6. **No over-engineering**: Build the minimum viable Petri, then iterate.
@@ -162,7 +162,7 @@ src/libs/consensus/petri/
    - Store classification + delta_hash in mempool entry
    - Gated by `getSharedState.petriConsensus`
 
-6. **Write tests** in `better_testing/petri/` for classifier and speculative executor
+6. **Write tests** in `testing/petri/` for classifier and speculative executor
    - Test each tx type classification
    - Test delta determinism (same tx → same deltaHash)
 
@@ -226,7 +226,7 @@ src/libs/consensus/petri/
    - `getCurrentDeltas()` — return current round's delta map (for RPC handler)
    - `reset()` — clear tracker, restart round counter
 
-6. **Write tests** in `better_testing/petri/` for forge components
+6. **Write tests** in `testing/petri/` for forge components
    - Canonical JSON determinism tests
    - DeltaAgreementTracker promotion/flagging logic
    - ContinuousForge round lifecycle
@@ -294,7 +294,7 @@ src/libs/consensus/petri/
    - When `petriConsensus` flag is on: call `petriConsensusRoutine()`
    - When off: call existing `consensusRoutine()` (PoRBFT v2)
 
-6. **Write tests** in `better_testing/petri/` for block compilation and finalization
+6. **Write tests** in `testing/petri/` for block compilation and finalization
 
 ### Risk: Medium
 
@@ -322,7 +322,7 @@ src/libs/consensus/petri/
    - Return pending for state-changing txs
    - When flag is off: existing DTR flow unchanged
 
-4. **Write tests** in `better_testing/petri/` for routing logic
+4. **Write tests** in `testing/petri/` for routing logic
 
 ### Risk: Medium
 
@@ -337,7 +337,7 @@ src/libs/consensus/petri/
 1. **Add `soft_finality_at` field** to `MempoolTx` and `Transactions` entities
 2. **Add `getTransactionFinality` RPC method** in `src/libs/network/rpcDispatch.ts`
    - Returns `{ soft: timestamp | null, hard: timestamp | null, classification }`
-3. **Write tests** in `better_testing/petri/`
+3. **Write tests** in `testing/petri/`
 
 ### Risk: Low
 
@@ -402,7 +402,7 @@ Full removal of PoRBFT v2 code deferred until after testnet validation period.
    - Add `client.getTransactionSoftFinality(hash)` method
    - Add `client.onSoftFinality(hash, callback)` subscription helper
    - Update SDK types for the new response shape
-4. **Write tests** in `better_testing/petri/softFinalityEndpoint.test.ts`
+4. **Write tests** in `testing/petri/softFinalityEndpoint.test.ts`
 5. **SDK tests** in `../sdks/` test suite (coordinate with user)
 
 ### Acceptance Criteria
@@ -442,7 +442,7 @@ src/libs/consensus/petri/
     petriRouter.ts                  # Route txs to 2 shard members
     shardMapper.ts                  # Address → shard mapping
 
-better_testing/petri/
+testing/petri/
     classifier.test.ts              # Classification tests
     speculativeExecutor.test.ts     # Delta determinism tests
     canonicalJson.test.ts           # Serialization tests

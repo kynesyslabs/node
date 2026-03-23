@@ -799,12 +799,12 @@
     ╚═══════════════════════════════════════════════════════════════════════════════════════════════╝
 
 
-    TEST SUITE OVERVIEW — better_testing/petri/
+    TEST SUITE OVERVIEW — testing/petri/
     ────────────────────────────────────────────
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  HAPPY PATH TESTS                                                                      [P6] │
-    │  better_testing/petri/happyPath.test.ts                                        (16 tests)   │
+    │  testing/petri/happyPath.test.ts                                        (16 tests)   │
     │                                                                                              │
     │    Full lifecycle coverage: classify → agree → compile → finalize                           │
     │      - Transaction classification (PRE_APPROVED / TO_APPROVE)                               │
@@ -817,7 +817,7 @@
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  CONFLICT PATH TESTS                                                                   [P6] │
-    │  better_testing/petri/conflictPath.test.ts                                     (15 tests)   │
+    │  testing/petri/conflictPath.test.ts                                     (15 tests)   │
     │                                                                                              │
     │    Double-spend → PROBLEMATIC → BFT resolution/rejection                                   │
     │      - Conflicting transactions flagged as PROBLEMATIC                                      │
@@ -829,7 +829,7 @@
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  BYZANTINE FAULT TESTS                                                                 [P6] │
-    │  better_testing/petri/byzantineFault.test.ts                                   (16 tests)   │
+    │  testing/petri/byzantineFault.test.ts                                   (16 tests)   │
     │                                                                                              │
     │    Byzantine minority tolerance f < n/3                                                     │
     │      - Coordinated Byzantine attacks (minority cannot override majority)                    │
@@ -841,7 +841,7 @@
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  LIVENESS TESTS                                                                        [P6] │
-    │  better_testing/petri/liveness.test.ts                                         (14 tests)   │
+    │  testing/petri/liveness.test.ts                                         (14 tests)   │
     │                                                                                              │
     │    Chain never stalls                                                                       │
     │      - Empty blocks produced when no txs pending                                            │
@@ -853,7 +853,7 @@
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  FEATURE FLAG ROLLBACK TESTS                                                           [P6] │
-    │  better_testing/petri/featureFlagRollback.test.ts                               (15 tests)  │
+    │  testing/petri/featureFlagRollback.test.ts                               (15 tests)  │
     │                                                                                              │
     │    Clean ON/OFF/ON toggle                                                                   │
     │      - Forge instance lifecycle (created on enable, destroyed on disable)                   │
@@ -865,7 +865,7 @@
 
     ┌───────────────────────────────────────────────────────────────────────────────────────────────┐
     │  BENCHMARK TESTS                                                                       [P6] │
-    │  better_testing/petri/benchmark.test.ts                                         (8 tests)   │
+    │  testing/petri/benchmark.test.ts                                         (8 tests)   │
     │                                                                                              │
     │    Performance & scalability validation                                                     │
     │      - DeltaTracker throughput: 5K txs recorded efficiently                                │
@@ -1134,12 +1134,12 @@
 | `src/libs/consensus/petri/finality/transactionFinality.ts` | P5 | Complete | `getTransactionFinality(txHash)` checks chain first (confirmed with hard finality), then mempool (pending with soft finality if PRE_APPROVED), returns `TransactionFinalityResult { status, softFinality?, hardFinality?, classification?, blockHash?, blockNumber? }`. |
 | `src/libs/network/rpcDispatch.ts` | P4→P5 | Modified | Added `getTransactionFinality` RPC endpoint (P5). Extracts txHash from params, calls `getTransactionFinality(txHash)`, returns `TransactionFinalityResult`. |
 
-| `better_testing/petri/happyPath.test.ts` | P6 | Complete | Full lifecycle integration tests: classify → agree → compile → finalize (16 tests). |
-| `better_testing/petri/conflictPath.test.ts` | P6 | Complete | Double-spend → PROBLEMATIC → BFT resolution/rejection (15 tests). |
-| `better_testing/petri/byzantineFault.test.ts` | P6 | Complete | Byzantine minority tolerance f < n/3, coordinated attacks, omission faults (16 tests). |
-| `better_testing/petri/liveness.test.ts` | P6 | Complete | Chain never stalls: empty blocks, bounded PROBLEMATIC TTL, mixed states (14 tests). |
-| `better_testing/petri/featureFlagRollback.test.ts` | P6 | Complete | Clean ON/OFF/ON toggle, forge instance lifecycle, state isolation (15 tests). |
-| `better_testing/petri/benchmark.test.ts` | P6 | Complete | DeltaTracker throughput (5K txs), selectMembers routing (10K calls), BFT O(1), memory efficiency (8 tests). |
+| `testing/petri/happyPath.test.ts` | P6 | Complete | Full lifecycle integration tests: classify → agree → compile → finalize (16 tests). |
+| `testing/petri/conflictPath.test.ts` | P6 | Complete | Double-spend → PROBLEMATIC → BFT resolution/rejection (15 tests). |
+| `testing/petri/byzantineFault.test.ts` | P6 | Complete | Byzantine minority tolerance f < n/3, coordinated attacks, omission faults (16 tests). |
+| `testing/petri/liveness.test.ts` | P6 | Complete | Chain never stalls: empty blocks, bounded PROBLEMATIC TTL, mixed states (14 tests). |
+| `testing/petri/featureFlagRollback.test.ts` | P6 | Complete | Clean ON/OFF/ON toggle, forge instance lifecycle, state isolation (15 tests). |
+| `testing/petri/benchmark.test.ts` | P6 | Complete | DeltaTracker throughput (5K txs), selectMembers routing (10K calls), BFT O(1), memory efficiency (8 tests). |
 | `src/libs/consensus/v2/types/secretaryManager.ts` | P7 | @deprecated | `SecretaryManager` class (1018 lines) — secretary-based validation phase orchestration. Superseded by ContinuousForge + DeltaAgreementTracker. Retained for PoRBFT v2 fallback. |
 | `src/libs/network/manageConsensusRoutines.ts` | P2→P7 | Modified | Added `@deprecated` markers to secretary RPC handlers: `setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`. Handlers still functional when `petriConsensus = false`. |
 | `src/libs/omniprotocol/protocol/handlers/consensus.ts` | P7 | @deprecated | OmniProtocol consensus opcodes 0x35–0x38 (`setValidatorPhase`, `greenlight`, `getValidatorPhase`, `getBlockTimestamp`) marked `@deprecated`. Retained for PoRBFT v2 fallback. |

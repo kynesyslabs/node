@@ -25,17 +25,17 @@ You are operating in **Team Mode** (see `TEAM.md`). You are the Tech Lead.
 
 ---
 
-## 2. How You Test: better_testing Style
+## 2. How You Test: testing Style
 
 Every phase produces tests **before** moving to the next phase. Tests go in:
 
 ```
-better_testing/petri/
+testing/petri/
 ```
 
 ### Test naming convention
 
-Follow existing `better_testing/` patterns:
+Follow existing `testing/` patterns:
 - `classifier.test.ts` — unit tests for TransactionClassifier
 - `speculativeExecutor.test.ts` — delta determinism tests
 - `canonicalJson.test.ts` — serialization edge cases
@@ -67,7 +67,7 @@ Follow existing `better_testing/` patterns:
 bun run lint:fix
 
 # Run specific test file
-bun test better_testing/petri/classifier.test.ts
+bun test testing/petri/classifier.test.ts
 
 # NEVER start the node directly during development
 ```
@@ -264,7 +264,7 @@ For every phase:
 2. Check `myc task list --epic 9` for the specific tasks
 3. Mark task in-progress
 4. Implement
-5. Write tests in `better_testing/petri/`
+5. Write tests in `testing/petri/`
 6. Run `bun run lint:fix`
 7. Run tests
 8. Close myc task

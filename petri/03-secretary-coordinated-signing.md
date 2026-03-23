@@ -77,7 +77,7 @@ Secretary broadcasts finalized block using existing `BroadcastManager.broadcastN
 
 | File | Purpose |
 |------|---------|
-| `better_testing/petri/secretaryCoordination.test.ts` | Unit tests for secretary election, hash collection, retry, offline fallback |
+| `testing/petri/secretaryCoordination.test.ts` | Unit tests for secretary election, hash collection, retry, offline fallback |
 
 ---
 
