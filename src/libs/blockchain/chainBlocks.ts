@@ -271,9 +271,9 @@ export async function insertBlock(
                     }
                 }
 
-                if (cleanMempool) {
+                if (cleanMempool && committedTxHashes.length > 0) {
                     await Mempool.removeTransactionsByHashes(
-                        transactionEntities.map(tx => tx.hash),
+                        committedTxHashes,
                         queryRunner.manager,
                     )
                 }
