@@ -41,7 +41,7 @@ export default class Mempool {
             },
         }
 
-        if (blockNumber) {
+        if (blockNumber !== undefined) {
             options.where = {
                 blockNumber: LessThanOrEqual(blockNumber),
             }
@@ -291,7 +291,7 @@ export default class Mempool {
         blockNumber?: number,
     ): Promise<MempoolTx[]> {
         const where: Record<string, unknown> = { classification }
-        if (blockNumber) {
+        if (blockNumber !== undefined) {
             where.blockNumber = LessThanOrEqual(blockNumber)
         }
         return await this.repo.find({
