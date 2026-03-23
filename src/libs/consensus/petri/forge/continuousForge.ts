@@ -128,6 +128,13 @@ export class ContinuousForge {
         return { ...this.state }
     }
 
+    /**
+     * Number of transactions currently tracked by the delta agreement tracker.
+     */
+    getTrackerCount(): number {
+        return this.tracker.trackedCount
+    }
+
     // --- Private ---
 
     private scheduleNextRound(): void {

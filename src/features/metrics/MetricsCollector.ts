@@ -760,11 +760,8 @@ export class MetricsCollector {
             this.metricsService.setGauge("petri_forge_round", state.currentRound)
             this.metricsService.setGauge("petri_pending_tx_count", state.pendingTransactions.size)
 
-            // Tracker count via the forge's internal tracker
-            const tracker = (forge as any).tracker
-            if (tracker && typeof tracker.trackedCount === "function") {
-                this.metricsService.setGauge("petri_tracker_tx_count", tracker.trackedCount())
-            }
+            // Tracker count via public accessor
+            this.metricsService.setGauge("petri_tracker_tx_count", forge.getTrackerCount())
         } catch (error) {
             log.debug(
                 `[METRICS COLLECTOR] Petri metrics error: ${error instanceof Error ? error.message : String(error)}`,
