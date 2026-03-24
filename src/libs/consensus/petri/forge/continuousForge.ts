@@ -102,7 +102,7 @@ export class ContinuousForge {
      */
     async drain(): Promise<void> {
         this.state.isPaused = true
-        if (this.currentRoundPromise) {
+        if (this.currentRoundPromise !== null) {
             log.debug("[ContinuousForge] Draining in-flight round...")
             await this.currentRoundPromise
         }
