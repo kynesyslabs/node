@@ -26,9 +26,9 @@ function simulateRound(
     byzantineCount: number,
     txHash: string,
     correctDelta: string,
-    ttlRounds: number = 5,
-    currentRound: number = 1,
-): { promoted: string[]; flagged: string[] } {
+    ttlRounds = 5,
+    currentRound = 1,
+) {
     const threshold = bftThreshold(shardSize)
     const tracker = new DeltaAgreementTracker(threshold, ttlRounds)
 

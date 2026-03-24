@@ -8,7 +8,7 @@
  * Mocks: Mempool, Chain, broadcastBlockHash, insertBlock, BroadcastManager, peer RPCs
  * Real: DeltaAgreementTracker, ContinuousForge state machine, isBlockValid logic
  */
-import { describe, expect, test, mock, beforeEach } from "bun:test"
+import { describe, expect, test, mock } from "bun:test"
 import { DeltaAgreementTracker } from "@/libs/consensus/petri/forge/deltaAgreementTracker"
 import { ContinuousForge } from "@/libs/consensus/petri/forge/continuousForge"
 import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"

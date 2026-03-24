@@ -323,10 +323,16 @@ export async function handleExecuteTransaction(
                 log.warn(
                     `[handleExecuteTransaction] Petri relay failed for ${queriedTx.hash}, adding to local mempool`,
                 )
-                await Mempool.addTransaction({
-                    ...queriedTx,
-                    reference_block: validatedData.data.reference_block,
-                })
+                try {
+                    await Mempool.addTransaction({
+                        ...queriedTx,
+                        reference_block: validatedData.data.reference_block,
+                    })
+                } catch (mempoolError) {
+                    log.error(
+                        `[handleExecuteTransaction] Fallback mempool insertion also failed for ${queriedTx.hash}: ${mempoolError instanceof Error ? mempoolError.message : String(mempoolError)}`,
+                    )
+                }
             }
 
             return {
