@@ -218,6 +218,7 @@ export async function runPetriTxInclusion() {
         if (!nonceWait.ok) reasons.push("nonce did not advance")
         if (!blockAdvance.ok) reasons.push("block height did not advance")
         if (txHash && !txByHash?.ok) reasons.push("tx not found by hash")
+        if (!finalityResult?.softFinalityObserved) reasons.push("soft finality not observed (PRE_APPROVED timestamp missing)")
         if (!finalityResult?.hardFinalityObserved) reasons.push("hard finality not observed via getTransactionFinality RPC")
         throw new Error(`petri_tx_inclusion failed: ${reasons.join("; ")}`)
     }
