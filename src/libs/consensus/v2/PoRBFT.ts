@@ -405,11 +405,20 @@ async function applyGCREditsFromMergedMempool(
     const successfulTxs: string[] = []
     const failedTxs: string[] = []
 
+    const successSet = new Set<string>()
+    const failedSet = new Set<string>()
+
     // 1. Parse the mempool txs to get the GCREdits
-    for (const tx of mempool) {
+    txloop: for (const tx of mempool) {
+        if (successSet.has(tx.hash) || failedSet.has(tx.hash)) {
+            log.error(`[applyGCREditsFromMergedMempool] Transaction ${tx.hash} already processed`)
+            process.exit(1)
+        }
+
         const txExists = await Chain.checkTxExists(tx.hash)
         if (txExists) {
             failedTxs.push(tx.hash)
+            failedSet.add(tx.hash)
             continue
         }
 
@@ -422,20 +431,26 @@ async function applyGCREditsFromMergedMempool(
         ) {
             // These transactions are valid but don't modify GCR state
             successfulTxs.push(tx.hash)
+            successSet.add(tx.hash)
             continue
         }
+
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
             const applyResult = await HandleGCR.apply(gcrEdit, tx)
-            if (applyResult.success) {
+            if (!applyResult.success) {
                 // If the apply succeeds, add the tx to the successfulTxs array
-                successfulTxs.push(tx.hash)
-            } else {
-                // If the apply fails, add the tx to the failedTxs array
                 failedTxs.push(tx.hash)
+                failedSet.add(tx.hash)
+                continue txloop
             }
         }
+
+        successfulTxs.push(tx.hash)
+        successSet.add(tx.hash)
+        continue
     }
+
     // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
     return [successfulTxs, failedTxs]
 }
