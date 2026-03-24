@@ -9,7 +9,6 @@ Semantic map: see `repository-semantic-map/`.
 ## Issue Tracking with br (beads_rust)
 
 **IMPORTANT**: This project uses **br (beads_rust)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
-
 ### Why br?
 
 - Dependency-aware: Track blockers and relationships between issues

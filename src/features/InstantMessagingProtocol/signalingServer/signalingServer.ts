@@ -58,6 +58,7 @@ import Chain from "@/libs/blockchain/chain"
 import {
     signedObject,
     SerializedSignedObject,
+    Cryptography,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
@@ -644,18 +645,18 @@ export class SignalingServer {
             const nonce = currentNonce + 1
             // Don't increment yet - wait for mempool success for better error handling
 
+            const timestamp = Date.now()
             const transaction = new Transaction()
-            const now = Date.now()
             transaction.content = {
                 type: "instantMessaging",
                 from: signerPublicKeyHex,
                 to: targetId,
                 from_ed25519_address: signerPublicKeyHex,
                 amount: 0,
-                data: ["instantMessaging", { senderId, targetId, message, timestamp: now }] as any,
+                data: ["instantMessaging", { senderId, targetId, message, timestamp }] as any,
                 gcr_edits: [],
                 nonce,
-                timestamp: now,
+                timestamp,
                 transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
             }
             transaction.status = ""
@@ -683,7 +684,6 @@ export class SignalingServer {
                 }
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
                 this.senderNonces.set(signerPublicKeyHex, nonce)
-                handleError(error, "NETWORK", { source: "signaling server" })
             } catch (error) {
                 handleError(error, "NETWORK", { source: "signaling server" })
                 throw error // Rethrow to be caught by caller's error handling
@@ -724,9 +724,13 @@ export class SignalingServer {
             })
             const messageHash = Hashing.sha256(messageContent)
 
-            const signature = await ucrypto.sign(
-                getSharedState.signingAlgorithm,
-                new TextEncoder().encode(messageHash),
+            if (!getSharedState.identity?.ed25519?.privateKey) {
+                throw new Error("[Signaling Server] Private key not available for offline message signing")
+            }
+
+            const signature = Cryptography.sign(
+                messageHash,
+                getSharedState.identity.ed25519.privateKey,
             )
 
             const offlineMessage = offlineMessageRepository.create({
@@ -734,7 +738,7 @@ export class SignalingServer {
                 senderPublicKey: senderId,
                 messageHash,
                 encryptedContent: message,
-                signature: Buffer.from(signature.signature).toString("base64"),
+                signature: Buffer.from(signature).toString("base64"),
                 // REVIEW: PR Fix #9 - timestamp is string type to match TypeORM bigint behavior
                 timestamp: Date.now().toString(),
                 status: "pending",
