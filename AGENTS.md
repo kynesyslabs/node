@@ -131,5 +131,5 @@ When working on this project:
 3. Create tasks for new work: `myc task create --title "..." --epic N`
 4. Mark tasks complete when done: `myc task close N`
 5. Use `--format json` for machine-readable output: `myc task list --format json`
-6. For mutating `br` operations, prefer `bun run brx -- <br command...>` so `br` stays synced into Mycelium automatically
-7. Use `bun run sync:br-myc` for a manual resync if tracker state drifts or after repair work
+6. Prefer committing `.mycelium/` updates together with the code changes they describe
+7. If `br` is used locally for interoperability, mirror any durable task state back into `myc`
