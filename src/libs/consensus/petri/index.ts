@@ -86,9 +86,9 @@ async function runBlockPeriod(
     const remaining = Math.max(0, blockIntervalMs - elapsed)
     await sleep(remaining)
 
-    // Pause forge during block compilation
-    forge.pause()
-    log.info("[Petri] Block boundary reached — pausing forge for compilation")
+    // Drain forge: pause and wait for any in-flight round to finish
+    await forge.drain()
+    log.info("[Petri] Block boundary reached — forge drained for compilation")
 
     try {
         // Step 1: Arbitrate PROBLEMATIC transactions

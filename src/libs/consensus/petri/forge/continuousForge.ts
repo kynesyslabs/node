@@ -39,6 +39,7 @@ export class ContinuousForge {
     private config: PetriConfig
     private shard: Peer[] = []
     private timer: ReturnType<typeof setTimeout> | null = null
+    private currentRoundPromise: Promise<void> | null = null
 
     /** Our local delta hashes for the current round — exposed for RPC handler */
     private currentRoundDeltas: Record<string, string> = {}
@@ -96,6 +97,19 @@ export class ContinuousForge {
     }
 
     /**
+     * Pause and wait for any in-flight forge round to complete.
+     * Ensures no round is mutating state when the caller proceeds.
+     */
+    async drain(): Promise<void> {
+        this.state.isPaused = true
+        if (this.currentRoundPromise) {
+            log.debug("[ContinuousForge] Draining in-flight round...")
+            await this.currentRoundPromise
+        }
+        log.debug("[ContinuousForge] Drained")
+    }
+
+    /**
      * Resume after pause.
      */
     resume(): void {
@@ -142,7 +156,9 @@ export class ContinuousForge {
 
         this.timer = setTimeout(async () => {
             if (this.state.isRunning && !this.state.isPaused) {
-                await this.runForgeRound()
+                this.currentRoundPromise = this.runForgeRound()
+                await this.currentRoundPromise
+                this.currentRoundPromise = null
             }
             this.scheduleNextRound()
         }, this.config.forgeIntervalMs)
