@@ -13,9 +13,22 @@
 import { describe, expect, test } from "bun:test"
 
 // ---- Secretary Election Logic ----
+// Mirrors production logic from petriSecretary.ts:
+// Sort all identities (shard members + our own) alphabetically, pick first.
+// In tests, ourPubkey defaults to a high-value string so it doesn't interfere.
 
-function electSecretary<T>(shard: T[]): T {
-    return shard[0]
+function getSecretaryIdentity(shard: { identity: string }[], ourPubkey = "zzz_test_local"): string {
+    const allIdentities = [
+        ...shard.map(p => p.identity),
+        ourPubkey,
+    ].sort((a, b) => a.localeCompare(b))
+    return allIdentities[0]
+}
+
+function electSecretary<T extends { identity: string }>(shard: T[], ourPubkey = "zzz_test_local"): T {
+    const secretaryId = getSecretaryIdentity(shard, ourPubkey)
+    const found = shard.find(p => p.identity === secretaryId)
+    return found ?? shard[0]
 }
 
 describe("Secretary election", () => {
@@ -242,35 +255,37 @@ describe("Submission receipt", () => {
 
 describe("Secretary failover", () => {
     test("removing offline secretary promotes next peer", () => {
+        // Sorted: aaa_secretary, bbb_peer, ccc_peer, zzz_test_local → secretary is aaa_secretary
         const shard = [
-            { identity: "secretary_peer" },
-            { identity: "peer_b" },
-            { identity: "peer_c" },
+            { identity: "aaa_secretary" },
+            { identity: "bbb_peer" },
+            { identity: "ccc_peer" },
         ]
         const secretary = electSecretary(shard)
-        expect(secretary.identity).toBe("secretary_peer")
+        expect(secretary.identity).toBe("aaa_secretary")
 
-        // Simulate offline: remove secretary
+        // Simulate offline: remove secretary → next alphabetically is bbb_peer
         const newShard = shard.filter(p => p.identity !== secretary.identity)
         const newSecretary = electSecretary(newShard)
-        expect(newSecretary.identity).toBe("peer_b")
+        expect(newSecretary.identity).toBe("bbb_peer")
     })
 
     test("two consecutive failovers promote third peer", () => {
+        // Sorted: aaa_1, bbb_2, ccc_3, ddd_4, zzz_test_local
         let shard = [
-            { identity: "peer_1" },
-            { identity: "peer_2" },
-            { identity: "peer_3" },
-            { identity: "peer_4" },
+            { identity: "aaa_1" },
+            { identity: "bbb_2" },
+            { identity: "ccc_3" },
+            { identity: "ddd_4" },
         ]
 
-        // First failover
+        // First failover: remove aaa_1 → secretary becomes bbb_2
         shard = shard.filter(p => p.identity !== electSecretary(shard).identity)
-        expect(electSecretary(shard).identity).toBe("peer_2")
+        expect(electSecretary(shard).identity).toBe("bbb_2")
 
-        // Second failover
+        // Second failover: remove bbb_2 → secretary becomes ccc_3
         shard = shard.filter(p => p.identity !== electSecretary(shard).identity)
-        expect(electSecretary(shard).identity).toBe("peer_3")
+        expect(electSecretary(shard).identity).toBe("ccc_3")
     })
 
     test("single peer shard: no failover possible", () => {
