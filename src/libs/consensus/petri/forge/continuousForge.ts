@@ -180,6 +180,36 @@ export class ContinuousForge {
             const ourMempool = await Mempool.getMempool()
             await mergeMempools(ourMempool, this.shard)
 
+            // Step 1b: Classify any unclassified TXs (arrived via mempool merge)
+            const unclassified = await Mempool.getUnclassified()
+            if (unclassified.length > 0) {
+                log.debug(`[ContinuousForge] Round ${round}: classifying ${unclassified.length} unclassified txs`)
+                for (const mempoolTx of unclassified) {
+                    const tx = mempoolTx as unknown as import("@kynesyslabs/demosdk/types").Transaction
+                    const classResult = await classifyTransaction(tx)
+                    if (classResult.classification === TransactionClassification.TO_APPROVE) {
+                        const specResult = await executeSpeculatively(tx, classResult.gcrEdits)
+                        if (specResult.success && specResult.delta) {
+                            await Mempool.updateClassification(
+                                mempoolTx.hash,
+                                TransactionClassification.TO_APPROVE,
+                                specResult.delta.hash,
+                            )
+                        } else {
+                            await Mempool.updateClassification(
+                                mempoolTx.hash,
+                                TransactionClassification.FAILED,
+                            )
+                        }
+                    } else {
+                        await Mempool.updateClassification(
+                            mempoolTx.hash,
+                            classResult.classification,
+                        )
+                    }
+                }
+            }
+
             // Step 2: Get TO_APPROVE transactions
             const toApproveTxs = await Mempool.getByClassification(
                 TransactionClassification.TO_APPROVE,

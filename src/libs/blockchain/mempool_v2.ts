@@ -2,6 +2,7 @@ import {
     EntityManager,
     FindManyOptions,
     In,
+    IsNull,
     LessThanOrEqual,
     QueryFailedError,
     Repository,
@@ -301,6 +302,16 @@ export default class Mempool {
         }
         return await this.repo.find({
             where,
+            order: { timestamp: "ASC" },
+        })
+    }
+
+    /**
+     * Get mempool transactions that have no classification (arrived via merge).
+     */
+    public static async getUnclassified(): Promise<MempoolTx[]> {
+        return await this.repo.find({
+            where: { classification: IsNull() },
             order: { timestamp: "ASC" },
         })
     }
