@@ -72,15 +72,19 @@ function sleep(ms: number): Promise<void> {
  * @param forge - The active ContinuousForge instance
  * @param shard - The current shard members
  * @param blockIntervalMs - Time in ms to run forge before block boundary
+ * @param forgeStartedAt - Timestamp when the forge was started
  * @returns true if block was finalized, false if block was invalid
  */
 async function runBlockPeriod(
     forge: ContinuousForge,
     shard: Peer[],
     blockIntervalMs: number,
+    forgeStartedAt: number,
 ): Promise<boolean> {
-    // Wait for the block interval (forge is running in background via setTimeout)
-    await sleep(blockIntervalMs)
+    // Align to block boundary: sleep only the remainder after forge startup overhead
+    const elapsed = Date.now() - forgeStartedAt
+    const remaining = Math.max(0, blockIntervalMs - elapsed)
+    await sleep(remaining)
 
     // Pause forge during block compilation
     forge.pause()
@@ -159,13 +163,14 @@ export async function petriConsensusRoutine(shard: Peer[]): Promise<void> {
     setPetriForgeInstance(forge)
 
     log.info("[Petri] Starting Petri Consensus routine")
+    const forgeStartedAt = Date.now()
     forge.start(shard)
 
     try {
         // Run one block period (forge → compile → finalize)
         // REVIEW: In the future this could loop for multiple blocks,
         // but for now we match PoRBFT v2's one-block-per-consensus-call pattern.
-        await runBlockPeriod(forge, shard, config.blockIntervalMs)
+        await runBlockPeriod(forge, shard, config.blockIntervalMs, forgeStartedAt)
     } catch (error) {
         log.error(`[Petri] Consensus routine error: ${error}`)
     } finally {
