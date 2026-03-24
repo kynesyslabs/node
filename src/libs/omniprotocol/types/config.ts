@@ -1,3 +1,20 @@
+import {
+    DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
+    DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
+    DEFAULT_POOL_IDLE_TIMEOUT_MS,
+    DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+    DEFAULT_POOL_AUTH_TIMEOUT_MS,
+    DEFAULT_MAX_CONCURRENT_REQUESTS,
+    DEFAULT_MAX_TOTAL_CONCURRENT_REQUESTS,
+    DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
+    DEFAULT_CIRCUIT_BREAKER_TIMEOUT_MS,
+    DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS,
+    OMNI_PROTOCOL_VERSION,
+    DEFAULT_PROTOCOL_TIMEOUT_MS,
+    DEFAULT_PROTOCOL_LONG_CALL_TIMEOUT_MS,
+    DEFAULT_MAX_PAYLOAD_SIZE,
+} from "../constants"
+
 export type MigrationMode = "HTTP_ONLY" | "OMNI_PREFERRED" | "OMNI_ONLY"
 
 export interface ConnectionPoolConfig {
@@ -34,26 +51,26 @@ export interface OmniProtocolConfig {
 
 export const DEFAULT_OMNIPROTOCOL_CONFIG: OmniProtocolConfig = {
     pool: {
-        maxTotalConnections: 100, // Wave 8.1: TCP connection pool limit
-        maxConnectionsPerPeer: 1,
-        idleTimeout: 10 * 60 * 1000,
-        connectTimeout: 5_000,
-        authTimeout: 5_000,
-        maxConcurrentRequests: 100,
-        maxTotalConcurrentRequests: 1_000,
-        circuitBreakerThreshold: 5,
-        circuitBreakerTimeout: 30_000,
+        maxTotalConnections: DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
+        maxConnectionsPerPeer: DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
+        idleTimeout: DEFAULT_POOL_IDLE_TIMEOUT_MS,
+        connectTimeout: DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+        authTimeout: DEFAULT_POOL_AUTH_TIMEOUT_MS,
+        maxConcurrentRequests: DEFAULT_MAX_CONCURRENT_REQUESTS,
+        maxTotalConcurrentRequests: DEFAULT_MAX_TOTAL_CONCURRENT_REQUESTS,
+        circuitBreakerThreshold: DEFAULT_CIRCUIT_BREAKER_THRESHOLD,
+        circuitBreakerTimeout: DEFAULT_CIRCUIT_BREAKER_TIMEOUT_MS,
     },
     migration: {
         mode: "HTTP_ONLY",
         omniPeers: new Set<string>(),
         autoDetect: true,
-        fallbackTimeout: 1_000,
+        fallbackTimeout: DEFAULT_MIGRATION_FALLBACK_TIMEOUT_MS,
     },
     protocol: {
-        version: 0x01,
-        defaultTimeout: 3_000,
-        longCallTimeout: 10_000,
-        maxPayloadSize: 10 * 1024 * 1024,
+        version: OMNI_PROTOCOL_VERSION,
+        defaultTimeout: DEFAULT_PROTOCOL_TIMEOUT_MS,
+        longCallTimeout: DEFAULT_PROTOCOL_LONG_CALL_TIMEOUT_MS,
+        maxPayloadSize: DEFAULT_MAX_PAYLOAD_SIZE,
     },
 }

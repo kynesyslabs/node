@@ -26,3 +26,31 @@ export interface SubnetPayload {
     uid: string
     data: string
 }
+
+/**
+ * L2PS Batch Payload Interface
+ *
+ * Represents the encrypted batch data submitted to the main mempool
+ */
+export interface L2PSBatchPayload {
+    /** L2PS network identifier */
+    l2ps_uid: string
+    /** Base64 encrypted blob containing all transaction data */
+    encrypted_batch: string
+    /** Number of transactions in this batch */
+    transaction_count: number
+    /** Deterministic hash of the batch for integrity verification */
+    batch_hash: string
+    /** Array of original transaction hashes included in this batch */
+    transaction_hashes: string[]
+    /** HMAC-SHA256 authentication tag for tamper detection */
+    authentication_tag: string
+    /** ZK-SNARK PLONK proof for batch validity (optional during transition) */
+    zk_proof?: {
+        proof: any
+        publicSignals: string[]
+        batchSize: number
+        finalStateRoot: string
+        totalVolume: string
+    }
+}

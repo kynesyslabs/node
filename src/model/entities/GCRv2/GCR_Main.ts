@@ -52,6 +52,8 @@ export class GCRMain {
                 points: number
             }>
             nomisScores: { [chain: string]: number }
+            humanPassport?: number
+            ethosScores?: { [chain: string]: number }
             zkAttestation?: Array<{
                 date: string
                 points: number

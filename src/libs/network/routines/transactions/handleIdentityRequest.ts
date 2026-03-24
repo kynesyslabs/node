@@ -1,17 +1,22 @@
 import {
     IdentityPayload,
+    IdentityAttestationPayload,
+    IdentityCommitmentPayload,
     InferFromSignaturePayload,
     Web2CoreTargetIdentityPayload,
     UDIdentityAssignPayload,
+    HumanPassportIdentityData,
 } from "@kynesyslabs/demosdk/abstraction"
 import { verifyWeb2Proof } from "@/libs/abstraction"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { PqcIdentityAssignPayload } from "@kynesyslabs/demosdk/abstraction"
 import IdentityManager from "@/libs/blockchain/gcr/gcr_routines/identityManager"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { Referrals } from "@/features/incentive/referrals"
 import { verifyTLSNProof, TLSNIdentityPayload } from "@/libs/tlsnotary"
+import Datasource from "@/model/datasource"
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 
 interface IdentityResponse {
     success: boolean
@@ -37,9 +42,8 @@ export default async function handleIdentityRequest(
     const referralCode = payload.payload.referralCode
 
     if (referralCode) {
-        const referrerAccount = await Referrals.findAccountByReferralCode(
-            referralCode,
-        )
+        const referrerAccount =
+            await Referrals.findAccountByReferralCode(referralCode)
 
         if (!referrerAccount) {
             return {
@@ -80,7 +84,9 @@ export default async function handleIdentityRequest(
             // Unlike other handlers that pass payload.payload, UD's verifyPayload expects
             // the full wrapper object with nested .payload property.
             return await UDIdentityManager.verifyPayload(
-                payload as unknown as Parameters<typeof UDIdentityManager.verifyPayload>[0],
+                payload as unknown as Parameters<
+                    typeof UDIdentityManager.verifyPayload
+                >[0],
                 sender,
             )
         case "pqc_identity_assign":
@@ -99,14 +105,63 @@ export default async function handleIdentityRequest(
             return await IdentityManager.verifyNomisPayload(
                 payload.payload as NomisWalletIdentity,
             )
+        case "humanpassport_identity_assign": {
+            const hpPayload = payload.payload as HumanPassportIdentityData
+            return await IdentityManager.verifyHumanPassportPayload(
+                hpPayload,
+                sender,
+            )
+        }
+        case "ethos_identity_assign":
+            return await IdentityManager.verifyEthosPayload(
+                payload.payload as EthosWalletIdentity,
+            )
         case "tlsn_identity_assign":
             // TLSNotary identity verification - verify proof structure
             return await verifyTLSNProof(payload.payload as TLSNIdentityPayload)
+        case "zk_commitmentadd": {
+            const commitments = payload.payload as IdentityCommitmentPayload[]
+            if (!Array.isArray(commitments) || commitments.length === 0) {
+                return {
+                    success: false,
+                    message: "Invalid ZK commitment payload",
+                }
+            }
+            return {
+                success: true,
+                message: "ZK commitment accepted",
+            }
+        }
+        case "zk_attestationadd": {
+            const attestations = payload.payload as IdentityAttestationPayload[]
+            const attestation = attestations[0]
+
+            if (!Array.isArray(attestations) || attestations.length === 0 || !attestation) {
+                return {
+                    success: false,
+                    message: "Invalid ZK attestation payload",
+                }
+            }
+
+            const db = await Datasource.getInstance()
+            const verifier = new ProofVerifier(db.getDataSource())
+            const result = await verifier.verifyIdentityAttestation({
+                proof: attestation.proof,
+                publicSignals: attestation.public_signals,
+            })
+
+            return {
+                success: result.valid,
+                message: result.reason ?? (result.valid ? "ZK attestation verified" : "Invalid ZK attestation"),
+            }
+        }
         case "xm_identity_remove":
         case "pqc_identity_remove":
         case "web2_identity_remove":
         case "nomis_identity_remove":
+        case "ethos_identity_remove":
         case "ud_identity_remove":
+        case "humanpassport_identity_remove":
         case "tlsn_identity_remove":
             return {
                 success: true,

@@ -16,7 +16,7 @@ export default async function getBlockByNumber(
         }
     } else {
         const blockNumber = parseInt(data.blockNumber)
-        log.debug("[SERVER] Received getBlockByNumber: " + blockNumber)
+        log.debug(`[SERVER] Received getBlockByNumber: ${blockNumber}`)
 
         let block: Blocks
         if (blockNumber === 0) {

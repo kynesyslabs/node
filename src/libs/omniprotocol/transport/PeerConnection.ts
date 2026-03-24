@@ -1,89 +1,266 @@
-// REVIEW: PeerConnection - TCP socket wrapper for single peer connection with state management
+// REVIEW: PeerConnection - Bidirectional TCP socket wrapper for peer connections
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { Socket } from "net"
+import { EventEmitter } from "events"
 import forge from "node-forge"
 import { keccak_256 } from "@noble/hashes/sha3.js"
 import { MessageFramer } from "./MessageFramer"
-import type { OmniMessageHeader } from "../types/message"
+import type { OmniMessageHeader, ParsedOmniMessage } from "../types/message"
 import type { AuthBlock } from "../auth/types"
 import { SignatureAlgorithm, SignatureMode } from "../auth/types"
-import type {
+import {
     ConnectionState,
-    ConnectionOptions,
-    PendingRequest,
-    ConnectionInfo,
-    ParsedConnectionString,
+    ConnectionStateValue,
+    ConnectionStateUtils,
+    SequenceIdRange,
+    type ConnectionOrigin,
+    type ConnectionOptions,
+    type PendingRequest,
+    type ConnectionInfo,
+    type ParsedConnectionString,
+    parseConnectionString,
 } from "./types"
-import { parseConnectionString } from "./types"
 import {
     ConnectionTimeoutError,
-    AuthenticationError,
     SigningError,
     InvalidAuthBlockFormatError,
+    ConnectionError,
 } from "../types/errors"
-import { getSharedState } from "@/utilities/sharedState"
+import { dispatchOmniMessage } from "../protocol/dispatcher"
+import { RateLimiter } from "../ratelimit"
+import { ConnectionPool } from "./ConnectionPool"
 
 /**
- * PeerConnection manages a single TCP connection to a peer node
+ * Global sequence ID manager for the node.
+ * Ensures unique sequence IDs across all connections,
+ * enabling cross-connection response routing.
+ * Wraps around when range is exhausted.
+ */
+class SequenceManager {
+    private static outboundSequence: number = SequenceIdRange.OUTBOUND_START
+
+    static next(): number {
+        const seq = this.outboundSequence++
+        if (this.outboundSequence > SequenceIdRange.OUTBOUND_END) {
+            this.outboundSequence = SequenceIdRange.OUTBOUND_START
+        }
+        return seq
+    }
+}
+
+/**
+ * Search sibling connections for an in-flight request.
+ * Used when response arrives on different connection than request was sent.
+ */
+function findInFlightRequestAcrossConnections(
+    peerIdentity: string,
+    sequence: number,
+    excludeConnection: PeerConnection,
+): { connection: PeerConnection; pending: PendingRequest } | undefined {
+    const pool = ConnectionPool.getInstance()
+    const connections = pool.getConnections(peerIdentity)
+
+    for (const conn of connections) {
+        if (conn === excludeConnection) continue
+        const pending = conn.inFlightRequests.get(sequence)
+        if (pending) {
+            return { connection: conn, pending }
+        }
+    }
+
+    return undefined
+}
+
+/**
+ * PeerConnection manages a single bidirectional TCP connection to a peer node
  *
- * State machine:
- * UNINITIALIZED → CONNECTING → AUTHENTICATING → READY → IDLE_PENDING → CLOSING → CLOSED
- *                      ↓             ↓              ↓
- *                    ERROR ←---------┴--------------┘
+ * Supports both:
+ * - OUTBOUND connections: We initiate TCP connect to remote peer
+ * - INBOUND connections: Remote peer connects to us (socket passed to constructor)
+ *
+ * State machine (numeric scale):
+ * - Negative: Terminal states (ERROR, CLOSED, CLOSING)
+ * - Zero: UNINITIALIZED (outbound only)
+ * - 1-9: Connecting states (CONNECTING, CONNECTED, PENDING_AUTH)
+ * - 10+: Usable states (AUTHENTICATED, READY, IDLE)
  *
  * Features:
- * - Persistent TCP socket with automatic reconnection capability
+ * - Bidirectional message handling (can send AND receive requests)
  * - Message framing using MessageFramer for parsing TCP stream
- * - Request-response correlation via sequence IDs
- * - Idle timeout with graceful transition to IDLE_PENDING
+ * - Request-response correlation via sequence IDs (partitioned by origin)
+ * - Idle timeout with graceful transition
  * - In-flight request tracking with timeout handling
  */
-export class PeerConnection {
-    protected socket: Socket | null = null
+export class PeerConnection extends EventEmitter {
+    public socket: Socket | null = null
     private framer: MessageFramer = new MessageFramer()
-    protected state: ConnectionState = "UNINITIALIZED"
-    protected peerIdentity: string
-    protected connectionString: string
-    protected parsedConnection: ParsedConnectionString | null = null
+    private _state: ConnectionStateValue
+    private _peerIdentity: string
+    public connectionString: string
+    public parsedConnection: ParsedConnectionString | null = null
 
-    // Request tracking
-    private inFlightRequests: Map<number, PendingRequest> = new Map()
-    private nextSequence = 1
+    /**
+     * Connection origin - who initiated the TCP connection
+     * 'outbound': We connected to the peer
+     * 'inbound': Peer connected to us
+     */
+    public readonly origin: ConnectionOrigin
+
+    // Request tracking for outbound requests we send
+    // Public for cross-connection response routing (fallback lookup)
+    public readonly inFlightRequests: Map<number, PendingRequest> = new Map()
 
     // Timing and lifecycle
     private idleTimer: NodeJS.Timeout | null = null
+    private authTimer: NodeJS.Timeout | null = null
     private idleTimeout: number = 10 * 60 * 1000 // 10 minutes default
     private connectTimeout = 5000 // 5 seconds
     private authTimeout = 5000 // 5 seconds
     private connectedAt: number | null = null
+    private createdAt: number = Date.now()
     private lastActivity: number = Date.now()
 
-    constructor(peerIdentity: string, connectionString: string) {
-        this.peerIdentity = peerIdentity
+    // Rate limiting (for inbound connections)
+    private rateLimiter?: RateLimiter
+
+    /**
+     * Create a new PeerConnection
+     *
+     * @param peerIdentity Peer public key or identifier (can be temporary for inbound until auth)
+     * @param connectionString Connection string (e.g., "tcp://ip:port") - empty for inbound
+     * @param socket Optional existing socket for inbound connections
+     * @param rateLimiter Optional rate limiter for inbound request throttling
+     */
+    constructor(
+        peerIdentity: string,
+        connectionString: string,
+        socket?: Socket,
+        rateLimiter?: RateLimiter,
+    ) {
+        super()
+        this._peerIdentity = peerIdentity
         this.connectionString = connectionString
+        this.rateLimiter = rateLimiter
+
+        if (socket) {
+            // INBOUND connection - socket already connected
+            this.origin = "inbound"
+            this.socket = socket
+            this._state = ConnectionState.PENDING_AUTH
+            this.connectedAt = Date.now()
+            this.setupSocketHandlers()
+            this.startAuthTimeout()
+        } else {
+            // OUTBOUND connection - will connect later
+            this.origin = "outbound"
+            this._state = ConnectionState.UNINITIALIZED
+        }
     }
 
     /**
-     * Establish TCP connection to peer
+     * Get current peer identity
+     */
+    get peerIdentity(): string {
+        return this._peerIdentity
+    }
+
+    /**
+     * Update peer identity (used after authentication for inbound connections)
+     */
+    setPeerIdentity(identity: string): void {
+        const oldIdentity = this._peerIdentity
+        this._peerIdentity = identity
+        if (oldIdentity !== identity) {
+            this.emit("identityChanged", { from: oldIdentity, to: identity })
+        }
+    }
+
+    /**
+     * Get current connection state
+     */
+    getState(): ConnectionStateValue {
+        return this._state
+    }
+
+    /**
+     * Get unique socket identifier that is reproducible on both sides of the connection.
+     *
+     * The ID is a keccak256 hash of the sorted endpoints (ip:port pairs), ensuring
+     * both the client and server compute the same identifier for the same connection.
+     *
+     * @returns Hex string hash of the socket endpoints, or null if socket not connected
+     */
+    get socketId(): string | null {
+        if (
+            !this.socket ||
+            !this.socket.localAddress ||
+            !this.socket.remoteAddress
+        ) {
+            return null
+        }
+
+        const localEndpoint = `${this.socket.localAddress}:${this.socket.localPort}`
+        const remoteEndpoint = `${this.socket.remoteAddress}:${this.socket.remotePort}`
+
+        // Sort endpoints so both sides produce the same hash
+        const endpoints = [localEndpoint, remoteEndpoint].sort()
+        const data = endpoints.join("|")
+
+        // Hash with keccak256 for a compact, unique identifier
+        const hash = keccak_256(Buffer.from(data, "utf8"))
+        return Buffer.from(hash).toString("hex")
+    }
+
+    /**
+     * Check if connection can be used for messaging
+     */
+    isUsable(): boolean {
+        return ConnectionStateUtils.isUsable(this._state)
+    }
+
+    /**
+     * Check if connection is ready for requests
+     */
+    isReady(): boolean {
+        return this._state === ConnectionState.READY
+    }
+
+    /**
+     * Establish TCP connection to peer (OUTBOUND only)
+     *
      * @param options Connection options (timeout, retries)
      * @returns Promise that resolves when connection is READY
      */
     async connect(options: ConnectionOptions = {}): Promise<void> {
-        if (this.state !== "UNINITIALIZED" && this.state !== "CLOSED") {
+        if (this.origin === "inbound") {
+            throw new Error("Cannot call connect() on inbound connection")
+        }
+
+        if (
+            this._state !== ConnectionState.UNINITIALIZED &&
+            this._state !== ConnectionState.CLOSED
+        ) {
             throw new Error(
-                `Cannot connect from state ${this.state}, must be UNINITIALIZED or CLOSED`,
+                `Cannot connect from state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be UNINITIALIZED or CLOSED`,
             )
         }
 
         this.parsedConnection = parseConnectionString(this.connectionString)
-        this.setState("CONNECTING")
+        this.setState(ConnectionState.CONNECTING)
 
         return new Promise((resolve, reject) => {
             const timeout = options.timeout ?? this.connectTimeout
 
             const timeoutTimer = setTimeout(() => {
-                this.socket?.destroy()
-                this.setState("ERROR")
+                if (this.socket) {
+                    this.socket.removeAllListeners()
+                    this.socket.destroy()
+                }
+
+                this.setState(ConnectionState.ERROR)
                 reject(
                     new ConnectionTimeoutError(
                         `Connection timeout after ${timeout}ms`,
@@ -92,43 +269,78 @@ export class PeerConnection {
             }, timeout)
 
             this.socket = new Socket()
+            this.socket.setKeepAlive(true, 30_000)
 
-            // Setup socket event handlers
             this.socket.on("connect", () => {
                 clearTimeout(timeoutTimer)
                 this.connectedAt = Date.now()
                 this.resetIdleTimer()
 
-                // Move to AUTHENTICATING state
-                // Wave 8.1: Skip authentication for now, will be added in Wave 8.3
-                this.setState("READY")
+                // For outbound, move directly to READY (peer is in our peerlist)
+                this.setState(ConnectionState.READY)
                 resolve()
             })
 
-            this.socket.on("data", (chunk: Buffer) => {
-                this.handleIncomingData(chunk)
-            })
+            this.setupSocketHandlers()
 
             this.socket.on("error", (error: Error) => {
                 clearTimeout(timeoutTimer)
-                this.setState("ERROR")
+                this.setState(ConnectionState.ERROR)
                 reject(error)
-            })
-
-            this.socket.on("close", () => {
-                this.handleSocketClose()
             })
 
             // Initiate connection
             this.socket.connect(
-                this.parsedConnection!.port,
-                this.parsedConnection!.host,
+                this.parsedConnection.port,
+                this.parsedConnection.host,
             )
         })
     }
 
     /**
+     * Setup socket event handlers
+     */
+    private setupSocketHandlers(): void {
+        if (!this.socket) return
+
+        this.socket.on("data", (chunk: Buffer) => {
+            this.handleIncomingData(chunk)
+        })
+
+        this.socket.on("close", () => {
+            this.handleSocketClose()
+        })
+
+        this.socket.on("error", (error: Error) => {
+            log.error(
+                `[PeerConnection] ${this._peerIdentity} socket error: ${error}`,
+            )
+            this.emit("error", error)
+        })
+
+        // Configure socket options
+        this.socket.setNoDelay(true) // Disable Nagle's algorithm for low latency
+    }
+
+    /**
+     * Start authentication timeout for inbound connections
+     */
+    private startAuthTimeout(): void {
+        if (this.origin !== "inbound") return
+
+        this.authTimer = setTimeout(() => {
+            if (this._state === ConnectionState.PENDING_AUTH) {
+                log.warning(
+                    `[PeerConnection] ${this._peerIdentity} authentication timeout`,
+                )
+                this.close()
+            }
+        }, this.authTimeout)
+    }
+
+    /**
      * Send request and await response (request-response pattern)
+     *
      * @param opcode OmniProtocol opcode
      * @param payload Message payload
      * @param options Request options (timeout)
@@ -139,13 +351,15 @@ export class PeerConnection {
         payload: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
-        if (this.state !== "READY") {
+        if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${this.state}, must be READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
         const timeout = options.timeout ?? 30000 // 30 second default
 
         return new Promise((resolve, reject) => {
@@ -175,7 +389,7 @@ export class PeerConnection {
             }
 
             const messageBuffer = MessageFramer.encodeMessage(header, payload)
-            this.socket!.write(messageBuffer)
+            this.socket.write(messageBuffer)
 
             this.lastActivity = Date.now()
             this.resetIdleTimer()
@@ -184,6 +398,7 @@ export class PeerConnection {
 
     /**
      * Send authenticated request and await response
+     *
      * @param opcode OmniProtocol opcode
      * @param payload Message payload
      * @param privateKey Ed25519 private key for signing
@@ -198,13 +413,15 @@ export class PeerConnection {
         publicKey: Buffer,
         options: ConnectionOptions = {},
     ): Promise<Buffer> {
-        if (this.state !== "READY") {
+        if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${this.state}, must be READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
         const timeout = options.timeout ?? 30000 // 30 second default
         const timestamp = Date.now()
 
@@ -214,10 +431,9 @@ export class PeerConnection {
         const payloadHash = Buffer.from(keccak_256(payload))
         const dataToSign = Buffer.concat([msgIdBuf, payloadHash])
 
-        // Sign with Ed25519 using node-forge (same as SDK)
+        // Sign with Ed25519 using node-forge
         let signature: Uint8Array
         try {
-            // node-forge expects the message as a string and privateKey as NativeBuffer
             const signatureBuffer = forge.pki.ed25519.sign({
                 message: dataToSign,
                 privateKey: privateKey as forge.pki.ed25519.NativeBuffer,
@@ -225,7 +441,8 @@ export class PeerConnection {
             signature = new Uint8Array(signatureBuffer)
         } catch (error) {
             throw new SigningError(
-                `Ed25519 signing failed (privateKey length: ${privateKey.length
+                `Ed25519 signing failed (privateKey length: ${
+                    privateKey.length
                 } bytes): ${error instanceof Error ? error.message : error}`,
                 error instanceof Error ? error : undefined,
             )
@@ -271,7 +488,7 @@ export class PeerConnection {
                 payload,
                 auth,
             )
-            this.socket!.write(messageBuffer)
+            this.socket.write(messageBuffer)
 
             this.lastActivity = Date.now()
             this.resetIdleTimer()
@@ -280,17 +497,20 @@ export class PeerConnection {
 
     /**
      * Send one-way message (fire-and-forget, no response expected)
+     *
      * @param opcode OmniProtocol opcode
      * @param payload Message payload
      */
     sendOneWay(opcode: number, payload: Buffer): void {
-        if (this.state !== "READY") {
+        if (!this.isUsable()) {
             throw new Error(
-                `Cannot send message in state ${this.state}, must be READY`,
+                `Cannot send message in state ${ConnectionStateUtils.getName(
+                    this._state,
+                )}, must be AUTHENTICATED or READY`,
             )
         }
 
-        const sequence = this.nextSequence++
+        const sequence = SequenceManager.next()
 
         const header: OmniMessageHeader = {
             version: 1,
@@ -300,10 +520,100 @@ export class PeerConnection {
         }
 
         const messageBuffer = MessageFramer.encodeMessage(header, payload)
-        this.socket!.write(messageBuffer)
+        this.socket.write(messageBuffer)
 
         this.lastActivity = Date.now()
         this.resetIdleTimer()
+    }
+
+    /**
+     * Send response to an incoming request
+     *
+     * @param sequence Original request sequence ID
+     * @param payload Response payload
+     */
+    async sendResponse(sequence: number, payload: Buffer): Promise<void> {
+        let socketId: string | null = null
+        let socket: Socket | null = null
+
+        if (this.socket?.writable) {
+            socket = this.socket
+            socketId = this.socketId
+        } else {
+            // TRY: Find other usable connection to peer
+            const pool = ConnectionPool.getInstance()
+            const connections = pool.getConnections(this._peerIdentity)
+
+            for (const connection of connections) {
+                if (
+                    connection.socketId !== this.socketId &&
+                    connection.socket?.writable
+                ) {
+                    socket = connection.socket
+                    socketId = connection.socketId
+                    break
+                }
+            }
+        }
+
+        if (!socket) {
+            // INFO: We can't find a connection to peer,
+            // RETURN!
+            return
+        }
+
+        const header: OmniMessageHeader = {
+            version: 1,
+            opcode: 0xff, // Generic response opcode
+            sequence,
+            payloadLength: payload.length,
+        }
+
+        const messageBuffer = MessageFramer.encodeMessage(header, payload)
+        return new Promise((resolve, reject) => {
+            socket.write(messageBuffer, (error: any) => {
+                if (error) {
+                    log.error(
+                        `Error while sending response via [${
+                            socketId === this.socketId ? "primary" : "secondary"
+                        }] socket ID: ${socketId} `,
+                    )
+                    log.error(
+                        `[PeerConnection] Peer: ${this._peerIdentity}, write error: ${error}`,
+                    )
+                    reject(error)
+                } else {
+                    resolve()
+                }
+            })
+        })
+    }
+
+    /**
+     * Send error response to an incoming request
+     *
+     * @param sequence Original request sequence ID
+     * @param errorCode Error code (2 bytes)
+     * @param errorMessage Error message string
+     */
+    async sendErrorResponse(
+        sequence: number,
+        errorCode: number,
+        errorMessage: string,
+    ): Promise<void> {
+        if (!this.socket.writable) {
+            log.error(
+                "Attempted to send error response to a closed connection, returning!",
+            )
+            return
+        }
+
+        const messageBuffer = Buffer.from(errorMessage, "utf8")
+        const payload = Buffer.allocUnsafe(2 + messageBuffer.length)
+        payload.writeUInt16BE(errorCode, 0)
+        messageBuffer.copy(payload, 2)
+
+        return this.sendResponse(sequence, payload)
     }
 
     /**
@@ -311,29 +621,36 @@ export class PeerConnection {
      * Sends proto_disconnect (0xF4) before closing socket
      */
     async close(): Promise<void> {
-        if (this.state === "CLOSED" || this.state === "CLOSING") {
+        if (
+            this._state === ConnectionState.CLOSED ||
+            this._state === ConnectionState.CLOSING
+        ) {
             return
         }
 
-        this.setState("CLOSING")
+        this.setState(ConnectionState.CLOSING)
 
-        // Clear idle timer
+        // Clear timers
         if (this.idleTimer) {
             clearTimeout(this.idleTimer)
             this.idleTimer = null
         }
+        if (this.authTimer) {
+            clearTimeout(this.authTimer)
+            this.authTimer = null
+        }
 
         // Reject all pending requests
-        for (const [sequence, pending] of this.inFlightRequests) {
+        for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
             pending.reject(new Error("Connection closing"))
         }
         this.inFlightRequests.clear()
 
-        // Send proto_disconnect (0xF4) if socket is available
-        if (this.socket) {
+        // Send proto_disconnect (0xF4) if socket is available and usable
+        if (this.socket && this.isUsable()) {
             try {
-                this.sendOneWay(0xf4, Buffer.alloc(0)) // 0xF4 = proto_disconnect
+                this.sendOneWay(0xf4, Buffer.alloc(0))
             } catch {
                 // Ignore errors during disconnect
             }
@@ -343,48 +660,52 @@ export class PeerConnection {
         return new Promise(resolve => {
             if (this.socket) {
                 this.socket.once("close", () => {
-                    this.setState("CLOSED")
+                    this.setState(ConnectionState.CLOSED)
                     resolve()
                 })
                 this.socket.end()
             } else {
-                this.setState("CLOSED")
+                this.setState(ConnectionState.CLOSED)
                 resolve()
             }
         })
     }
 
     /**
-     * Get current connection state
-     */
-    getState(): ConnectionState {
-        return this.state
-    }
-
-    /**
      * Get connection information for monitoring
      */
-    getInfo(): ConnectionInfo {
+    getInfo(): ConnectionInfo & {
+        origin: ConnectionOrigin
+        createdAt: number
+    } {
         return {
-            peerIdentity: this.peerIdentity,
+            peerIdentity: this._peerIdentity,
             connectionString: this.connectionString,
-            state: this.state,
+            state: this._state,
             connectedAt: this.connectedAt,
             lastActivity: this.lastActivity,
             inFlightCount: this.inFlightRequests.size,
+            origin: this.origin,
+            createdAt: this.createdAt,
         }
     }
 
     /**
-     * Check if connection is ready for requests
+     * Get last activity timestamp
      */
-    isReady(): boolean {
-        return this.state === "READY"
+    getLastActivity(): number {
+        return this.lastActivity
+    }
+
+    /**
+     * Get created at timestamp
+     */
+    getCreatedAt(): number {
+        return this.createdAt
     }
 
     /**
      * Handle incoming TCP data
-     * @private
      */
     private handleIncomingData(chunk: Buffer): void {
         this.lastActivity = Date.now()
@@ -397,11 +718,11 @@ export class PeerConnection {
             // Extract all complete messages
             let message = this.framer.extractMessage()
             while (message) {
-                this.handleMessage(message.header, message.payload as Buffer)
+                this.handleMessage(message)
                 message = this.framer.extractMessage()
             }
         } catch (error) {
-            console.error(error)
+            handleError(error, "NETWORK", { source: "OmniProtocol PeerConnection.handleIncomingData" })
             if (error instanceof InvalidAuthBlockFormatError) {
                 return
             }
@@ -409,54 +730,197 @@ export class PeerConnection {
     }
 
     /**
-     * Handle a complete decoded message
-     * @private
+     * Handle a complete decoded message - bidirectional demultiplexing
+     *
+     * Determines if message is:
+     * 1. A RESPONSE to our outbound request (resolve pending promise)
+     * 2. An incoming REQUEST from peer (dispatch to handler)
      */
-    private handleMessage(header: OmniMessageHeader, payload: Buffer): void {
-        // Check if this is a response to a pending request
-        const pending = this.inFlightRequests.get(header.sequence)
+    private async handleMessage(message: ParsedOmniMessage): Promise<void> {
+        const { header, payload, auth } = message
 
-        if (pending) {
-            // This is a response - resolve the pending request
-            clearTimeout(pending.timer)
-            this.inFlightRequests.delete(header.sequence)
-            pending.resolve(payload)
-        } else {
-            // This is an unsolicited message (e.g., broadcast, push notification)
-            // Wave 8.1: Log for now, will handle in Wave 8.4 (push message support)
-            log.warning(
-                `[PeerConnection] Received unsolicited message: opcode=0x${header.opcode.toString(
-                    16,
-                )}, sequence=${header.sequence}`,
+        if (header.opcode === 0xff) {
+            // Check if this is a RESPONSE to our outbound request
+            const pending = this.inFlightRequests.get(header.sequence)
+            if (pending) {
+                // This is a response - resolve the pending request
+                clearTimeout(pending.timer)
+                this.inFlightRequests.delete(header.sequence)
+                pending.resolve(payload as Buffer)
+                return
+            }
+
+            // Fallback: Check sibling connections for cross-connection response routing
+            // This handles the case where request was sent on connection A but response arrives on connection B
+            const crossConnection = findInFlightRequestAcrossConnections(
+                this._peerIdentity,
+                header.sequence,
+                this,
             )
+            if (crossConnection) {
+                const { connection, pending: crossPending } = crossConnection
+                clearTimeout(crossPending.timer)
+                this.inFlightRequests.delete(header.sequence)
+                crossPending.resolve(payload as Buffer)
+                log.debug(
+                    `[PeerConnection] ${this._peerIdentity} resolved cross-connection response for sequence ${header.sequence}`,
+                )
+                return
+            }
+
+            // INFO: We can't find a matching in-flight request,
+            return
+        }
+
+        // Otherwise, it's an incoming REQUEST - dispatch to handler
+        await this.handleIncomingRequest(header, payload as Buffer, auth)
+    }
+
+    /**
+     * Handle an incoming request from peer
+     * Performs authentication, rate limiting, and dispatches to appropriate handler
+     */
+    private async handleIncomingRequest(
+        header: OmniMessageHeader,
+        payload: Buffer,
+        auth: AuthBlock | null,
+    ): Promise<void> {
+        log.debug(
+            `[PeerConnection] ${
+                this._peerIdentity
+            } received request opcode 0x${header.opcode.toString(16)}`,
+        )
+
+        // Extract peer identity from auth block for ANY authenticated message
+        if (
+            auth &&
+            auth.identity &&
+            this._state === ConnectionState.PENDING_AUTH
+        ) {
+            const newIdentity = "0x" + auth.identity.toString("hex")
+            this.setPeerIdentity(newIdentity)
+            this.setState(ConnectionState.READY)
+
+            if (this.authTimer) {
+                clearTimeout(this.authTimer)
+                this.authTimer = null
+            }
+
+            this.emit("authenticated", newIdentity)
+            log.info(
+                `[PeerConnection] ${this._peerIdentity} authenticated via auth block`,
+            )
+        }
+
+        // Check rate limits (for inbound connections)
+        if (this.rateLimiter) {
+            const ipAddress = this.socket?.remoteAddress || "unknown"
+
+            // Check IP-based rate limit
+            const ipResult = this.rateLimiter.checkIPRequest(ipAddress)
+            if (!ipResult.allowed) {
+                log.warning(
+                    `[PeerConnection] ${this._peerIdentity} IP rate limit exceeded: ${ipResult.reason}`,
+                )
+                await this.sendErrorResponse(
+                    header.sequence,
+                    0xf429, // Too Many Requests
+                    ipResult.reason || "Rate limit exceeded",
+                )
+                return
+            }
+
+            // Check identity-based rate limit
+            if (this.isUsable()) {
+                const identityResult = this.rateLimiter.checkIdentityRequest(
+                    this._peerIdentity,
+                )
+                if (!identityResult.allowed) {
+                    log.warning(
+                        `[PeerConnection] ${this._peerIdentity} identity rate limit exceeded: ${identityResult.reason}`,
+                    )
+                    await this.sendErrorResponse(
+                        header.sequence,
+                        0xf429,
+                        identityResult.reason || "Rate limit exceeded",
+                    )
+                    return
+                }
+            }
+        }
+
+        try {
+            // Dispatch to handler
+            const responsePayload = await dispatchOmniMessage({
+                message: { header, payload, auth },
+                context: {
+                    peerIdentity: this._peerIdentity,
+                    connectionId: `${this.socket?.remoteAddress}:${this.socket?.remotePort}`,
+                    remoteAddress: this.socket?.remoteAddress || "unknown",
+                    isAuthenticated: this.isUsable(),
+                },
+                fallbackToHttp: async () => {
+                    throw new Error(
+                        "HTTP fallback not available on server side",
+                    )
+                },
+            })
+
+            // Send response
+            await this.sendResponse(header.sequence, responsePayload)
+        } catch (error) {
+            if (error instanceof ConnectionError) {
+                log.error(
+                    `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,
+                )
+                this.emit("error", error)
+                return
+            }
+
+            log.error(
+                `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,
+            )
+
+            // Send error response
+            const errorPayload = Buffer.from(
+                JSON.stringify({ error: String(error) }),
+            )
+            await this.sendResponse(header.sequence, errorPayload)
         }
     }
 
     /**
      * Handle socket close event
-     * @private
      */
     private handleSocketClose(): void {
         if (this.idleTimer) {
             clearTimeout(this.idleTimer)
             this.idleTimer = null
         }
+        if (this.authTimer) {
+            clearTimeout(this.authTimer)
+            this.authTimer = null
+        }
 
         // Reject all pending requests
-        for (const [sequence, pending] of this.inFlightRequests) {
+        for (const [, pending] of this.inFlightRequests) {
             clearTimeout(pending.timer)
             pending.reject(new Error("Connection closed"))
         }
         this.inFlightRequests.clear()
 
-        if (this.state !== "CLOSING" && this.state !== "CLOSED") {
-            this.setState("CLOSED")
+        if (
+            this._state !== ConnectionState.CLOSING &&
+            this._state !== ConnectionState.CLOSED
+        ) {
+            this.setState(ConnectionState.CLOSED)
         }
+
+        this.emit("close")
     }
 
     /**
      * Reset idle timeout timer
-     * @private
      */
     private resetIdleTimer(): void {
         if (this.idleTimer) {
@@ -464,28 +928,39 @@ export class PeerConnection {
         }
 
         this.idleTimer = setTimeout(() => {
-            if (this.state === "READY" && this.inFlightRequests.size === 0) {
-                this.setState("IDLE_PENDING")
-                // Wave 8.2: ConnectionPool will close idle connections
-                // For now, just transition state
+            if (this.isUsable() && this.inFlightRequests.size === 0) {
+                this.setState(ConnectionState.IDLE)
+                this.emit("idle")
             }
         }, this.idleTimeout)
     }
 
     /**
-     * Transition to new state
-     * @protected
+     * Transition to new state with validation
      */
-    protected setState(newState: ConnectionState): void {
-        const oldState = this.state
-        this.state = newState
+    private setState(newState: ConnectionStateValue): void {
+        const oldState = this._state
 
-        // Wave 8.4: Emit state change events for ConnectionPool to monitor
-        // For now, just log
+        if (!ConnectionStateUtils.canTransition(oldState, newState)) {
+            log.warning(
+                `[PeerConnection] Invalid state transition: ${ConnectionStateUtils.getName(
+                    oldState,
+                )} → ${ConnectionStateUtils.getName(newState)}`,
+            )
+            return
+        }
+
+        this._state = newState
+
         if (oldState !== newState) {
             log.debug(
-                `[PeerConnection] ${this.peerIdentity} state: ${oldState} → ${newState}`,
+                `[PeerConnection] ${
+                    this._peerIdentity
+                } state: ${ConnectionStateUtils.getName(
+                    oldState,
+                )} → ${ConnectionStateUtils.getName(newState)}`,
             )
+            this.emit("stateChange", { from: oldState, to: newState })
         }
     }
 }

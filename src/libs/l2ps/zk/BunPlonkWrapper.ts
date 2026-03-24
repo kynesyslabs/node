@@ -7,6 +7,7 @@
  * Based on: https://github.com/iden3/snarkjs/blob/master/src/plonk_verify.js
  * Paper: https://eprint.iacr.org/2019/953.pdf
  */
+import log from "src/utilities/logger"
 
 /* eslint-disable @typescript-eslint/naming-convention */
 /* eslint-disable @typescript-eslint/ban-ts-comment */
@@ -97,7 +98,7 @@ function logLagrange(logger: any, Fr: any, L: any[]) {
 
 async function initializeCurve(vk_verifier: any) {
     // CRITICAL: Use singleThread to avoid Bun worker crashes
-    return await getCurveFromName(vk_verifier.curve, { singleThread: true })
+    return await getCurveFromName(vk_verifier.curve, true)
 }
 
 function validateInputs(vk_verifier: any, publicSignals: any[], proof: any, curve: any, logger?: any): boolean {
@@ -186,7 +187,7 @@ export async function plonkVerifyBun(
 
     } catch (error) {
         const message = getErrorMessage(error)
-        console.error("PLONK Verify error:", message)
+        log.error("[ZK] PLONK Verify error: " + message)
         return false
     } finally {
         // Terminate curve to prevent memory leaks

@@ -42,7 +42,9 @@ export interface MempoolSyncRequestPayload {
     blockReference: bigint
 }
 
-export function encodeMempoolSyncRequest(payload: MempoolSyncRequestPayload): Buffer {
+export function encodeMempoolSyncRequest(
+    payload: MempoolSyncRequestPayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.txCount),
         PrimitiveEncoder.encodeBytes(payload.mempoolHash),
@@ -50,7 +52,9 @@ export function encodeMempoolSyncRequest(payload: MempoolSyncRequestPayload): Bu
     ])
 }
 
-export function decodeMempoolSyncRequest(buffer: Buffer): MempoolSyncRequestPayload {
+export function decodeMempoolSyncRequest(
+    buffer: Buffer,
+): MempoolSyncRequestPayload {
     let offset = 0
     const count = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += count.bytesRead
@@ -75,7 +79,9 @@ export interface MempoolSyncResponsePayload {
     transactionHashes: Buffer[]
 }
 
-export function encodeMempoolSyncResponse(payload: MempoolSyncResponsePayload): Buffer {
+export function encodeMempoolSyncResponse(
+    payload: MempoolSyncResponsePayload,
+): Buffer {
     const parts: Buffer[] = []
 
     parts.push(PrimitiveEncoder.encodeUInt16(payload.status))
@@ -94,7 +100,9 @@ export interface MempoolMergeRequestPayload {
     transactions: Buffer[]
 }
 
-export function decodeMempoolMergeRequest(buffer: Buffer): MempoolMergeRequestPayload {
+export function decodeMempoolMergeRequest(
+    buffer: Buffer,
+): MempoolMergeRequestPayload {
     let offset = 0
     const count = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += count.bytesRead
@@ -109,7 +117,9 @@ export function decodeMempoolMergeRequest(buffer: Buffer): MempoolMergeRequestPa
     return { transactions }
 }
 
-export function encodeMempoolMergeRequest(payload: MempoolMergeRequestPayload): Buffer {
+export function encodeMempoolMergeRequest(
+    payload: MempoolMergeRequestPayload,
+): Buffer {
     const parts: Buffer[] = []
     parts.push(PrimitiveEncoder.encodeUInt16(payload.transactions.length))
 
@@ -120,7 +130,9 @@ export function encodeMempoolMergeRequest(payload: MempoolMergeRequestPayload): 
     return Buffer.concat(parts)
 }
 
-export function decodeMempoolSyncResponse(buffer: Buffer): MempoolSyncResponsePayload {
+export function decodeMempoolSyncResponse(
+    buffer: Buffer,
+): MempoolSyncResponsePayload {
     let offset = 0
     const status = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += status.bytesRead
@@ -172,7 +184,10 @@ function encodeStringArray(values: string[]): Buffer {
     return Buffer.concat(parts)
 }
 
-function decodeStringArray(buffer: Buffer, offset: number): {
+function decodeStringArray(
+    buffer: Buffer,
+    offset: number,
+): {
     values: string[]
     bytesRead: number
 } {
@@ -234,7 +249,10 @@ function encodeBlockEntry(entry: BlockEntryPayload): Buffer {
     ])
 }
 
-function decodeBlockEntry(buffer: Buffer, offset: number): { entry: BlockEntryPayload; bytesRead: number } {
+function decodeBlockEntry(
+    buffer: Buffer,
+    offset: number,
+): { entry: BlockEntryPayload; bytesRead: number } {
     let cursor = offset
 
     const blockNumber = PrimitiveDecoder.decodeUInt64(buffer, cursor)
@@ -330,7 +348,9 @@ export interface BlockSyncRequestPayload {
     maxBlocks: number
 }
 
-export function decodeBlockSyncRequest(buffer: Buffer): BlockSyncRequestPayload {
+export function decodeBlockSyncRequest(
+    buffer: Buffer,
+): BlockSyncRequestPayload {
     let offset = 0
     const start = PrimitiveDecoder.decodeUInt64(buffer, offset)
     offset += start.bytesRead
@@ -348,7 +368,9 @@ export function decodeBlockSyncRequest(buffer: Buffer): BlockSyncRequestPayload 
     }
 }
 
-export function encodeBlockSyncRequest(payload: BlockSyncRequestPayload): Buffer {
+export function encodeBlockSyncRequest(
+    payload: BlockSyncRequestPayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt64(payload.startBlock),
         PrimitiveEncoder.encodeUInt64(payload.endBlock),
@@ -361,7 +383,9 @@ export interface BlockSyncResponsePayload {
     blocks: BlockEntryPayload[]
 }
 
-export function encodeBlockSyncResponse(payload: BlockSyncResponsePayload): Buffer {
+export function encodeBlockSyncResponse(
+    payload: BlockSyncResponsePayload,
+): Buffer {
     return encodeBlocksResponse({
         status: payload.status,
         blocks: payload.blocks,
@@ -398,7 +422,9 @@ export interface BlockHashRequestPayload {
     hash: Buffer
 }
 
-export function decodeBlockHashRequest(buffer: Buffer): BlockHashRequestPayload {
+export function decodeBlockHashRequest(
+    buffer: Buffer,
+): BlockHashRequestPayload {
     const hash = PrimitiveDecoder.decodeBytes(buffer, 0)
     return { hash: hash.value }
 }
@@ -407,7 +433,9 @@ export interface TransactionHashRequestPayload {
     hash: Buffer
 }
 
-export function decodeTransactionHashRequest(buffer: Buffer): TransactionHashRequestPayload {
+export function decodeTransactionHashRequest(
+    buffer: Buffer,
+): TransactionHashRequestPayload {
     const hash = PrimitiveDecoder.decodeBytes(buffer, 0)
     return { hash: hash.value }
 }
@@ -417,7 +445,9 @@ export interface TransactionResponsePayload {
     transaction: Buffer
 }
 
-export function encodeTransactionResponse(payload: TransactionResponsePayload): Buffer {
+export function encodeTransactionResponse(
+    payload: TransactionResponsePayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.status),
         PrimitiveEncoder.encodeVarBytes(payload.transaction),

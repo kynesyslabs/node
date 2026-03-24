@@ -8,7 +8,7 @@ Generated: 2026-02-18T13:55:45Z
 - `tests/` - OmniProtocol and fixture-driven tests
 - `scripts/` - Operational scripts (ZK setup, load tests, wallet/proof helpers)
 - `docs/`, `documentation/`, `monitoring/` - User and operator docs
-- `devnet/` - Local 4-node Docker dev network
+- `testing/devnet/` - Local 4-node Docker dev network
 - `tlsnotary/`, `postgres/`, `monitoring/` - Infra/service compose stacks
 
 ## 🚀 Entry Points
@@ -64,7 +64,7 @@ Generated: 2026-02-18T13:55:45Z
 - `knip.json` - unused export/dependency analysis
 - `monitoring/prometheus/prometheus.yml` - Prometheus scrape config
 - `monitoring/grafana/provisioning/**/*.yml` - Grafana dashboard/datasource provisioning
-- `devnet/docker-compose.yml` - local multi-node devnet orchestration
+- `testing/devnet/docker-compose.yml` - local multi-node devnet orchestration
 - `tlsnotary/docker-compose.yml` - TLSNotary service stack
 
 ## 📚 Documentation
@@ -74,7 +74,7 @@ Generated: 2026-02-18T13:55:45Z
 - `CONTRIBUTING.md` - contribution workflow
 - `L2PS_TESTING.md` - L2PS test guidance
 - `monitoring/README.md` - metrics/Grafana setup
-- `devnet/README.md` - local devnet lifecycle
+- `testing/devnet/README.md` - local devnet lifecycle
 - `OMNIPROTOCOL_SETUP.md` - OmniProtocol setup
 
 ## 🧪 Test Coverage

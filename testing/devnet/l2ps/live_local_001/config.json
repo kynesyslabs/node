@@ -1,0 +1,17 @@
+{
+  "uid": "live_local_001",
+  "enabled": true,
+  "config": {
+    "created_at_block": 0,
+    "known_rpcs": [
+      "http://node-1:53551",
+      "http://node-2:53552",
+      "http://node-3:53553",
+      "http://node-4:53554"
+    ]
+  },
+  "keys": {
+    "private_key_path": "data/l2ps/live_local_001/private_key.txt",
+    "iv_path": "data/l2ps/live_local_001/iv.txt"
+  }
+}

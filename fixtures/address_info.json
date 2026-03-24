@@ -1,1 +1,47 @@
-{"result":200,"response":{"pubkey":"0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329","assignedTxs":[],"nonce":96,"balance":"7","identities":{"xm":{},"pqc":{},"web2":{"twitter":[{"proof":"https://twitter.com/tcookingsenpai/status/1951269575707807789","userId":"1781036248972378112","username":"tcookingsenpai","proofHash":"673c670d36e77d28c618c984f3fa9b8c9e4a8d54274c32315eb148d401b14cf4","timestamp":1754053916058}]}},"points":{"breakdown":{"referrals":0,"demosFollow":0,"web3Wallets":{},"socialAccounts":{"github":0,"discord":0,"twitter":0}},"lastUpdated":"2025-08-01T13:10:56.386Z","totalPoints":0},"referralInfo":{"referrals":[],"referredBy":null,"referralCode":"D9XEA43u9N66","totalReferrals":0},"flagged":false,"flaggedReason":"","reviewed":false,"createdAt":"2025-08-01T11:10:56.375Z","updatedAt":"2025-10-28T08:56:21.789Z"},"require_reply":false,"extra":null}
+{
+    "result": 200,
+    "response": {
+        "pubkey": "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+        "assignedTxs": [],
+        "nonce": 96,
+        "balance": "7",
+        "identities": {
+            "xm": {},
+            "pqc": {},
+            "web2": {
+                "twitter": [
+                    {
+                        "proof": "https://twitter.com/tcookingsenpai/status/1951269575707807789",
+                        "userId": "1781036248972378112",
+                        "username": "tcookingsenpai",
+                        "proofHash": "673c670d36e77d28c618c984f3fa9b8c9e4a8d54274c32315eb148d401b14cf4",
+                        "timestamp": 1754053916058
+                    }
+                ]
+            }
+        },
+        "points": {
+            "breakdown": {
+                "referrals": 0,
+                "demosFollow": 0,
+                "web3Wallets": {},
+                "socialAccounts": { "github": 0, "discord": 0, "twitter": 0 }
+            },
+            "lastUpdated": "2025-08-01T13:10:56.386Z",
+            "totalPoints": 0
+        },
+        "referralInfo": {
+            "referrals": [],
+            "referredBy": null,
+            "referralCode": "D9XEA43u9N66",
+            "totalReferrals": 0
+        },
+        "flagged": false,
+        "flaggedReason": "",
+        "reviewed": false,
+        "createdAt": "2025-08-01T11:10:56.375Z",
+        "updatedAt": "2025-10-28T08:56:21.789Z"
+    },
+    "require_reply": false,
+    "extra": null
+}

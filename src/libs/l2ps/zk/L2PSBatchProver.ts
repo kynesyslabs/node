@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn, ChildProcess } from 'node:child_process';
 import { plonkVerifyBun } from './BunPlonkWrapper.js';
 import log from '@/utilities/logger';
+import { Config } from 'src/config';
 
 // ESM compatibility
 const __filename = fileURLToPath(import.meta.url);
@@ -82,8 +83,8 @@ export class L2PSBatchProver {
     constructor(keysDir?: string) {
         this.keysDir = keysDir || path.join(__dirname, 'keys');
 
-        // Check environment variable to disable subprocess
-        if (process.env.L2PS_ZK_USE_MAIN_THREAD === 'true') {
+        // Check config to disable subprocess
+        if (Config.getInstance().l2ps.zkUseMainThread) {
             this.useSubprocess = false;
             log.info('[L2PSBatchProver] Subprocess disabled by L2PS_ZK_USE_MAIN_THREAD');
         }

@@ -10,25 +10,25 @@
 # - TLSNOTARY_PORT: Port to expose (default: 7047)
 
 services:
-  notary:
-    container_name: tlsn-notary-${TLSNOTARY_PORT:-7047}
-    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
-    environment:
-      NS_NOTARIZATION__MAX_SENT_DATA: 32768
-    platform: linux/amd64
-    ports:
-      - "${TLSNOTARY_PORT:-7047}:7047"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:7047/info"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    # Note: The Docker notary-server uses its own internal signing key
-    # Attestations are cryptographically bound to this notary's public key
-    # which can be retrieved via GET /info endpoint
+    notary:
+        container_name: tlsn-notary-${TLSNOTARY_PORT:-7047}
+        image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+        environment:
+            NS_NOTARIZATION__MAX_SENT_DATA: 32768
+        platform: linux/amd64
+        ports:
+            - "${TLSNOTARY_PORT:-7047}:7047"
+        restart: unless-stopped
+        healthcheck:
+            test: [CMD, curl, -f, http://localhost:7047/info]
+            interval: 10s
+            timeout: 5s
+            retries: 3
+            start_period: 10s
+        # Note: The Docker notary-server uses its own internal signing key
+        # Attestations are cryptographically bound to this notary's public key
+        # which can be retrieved via GET /info endpoint
 
 networks:
-  default:
-    driver: bridge
+    default:
+        driver: bridge

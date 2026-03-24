@@ -1,50 +1,42 @@
 import log from "@/utilities/logger"
 
 // INFO forgeBuffer comes in as the raw result of forge methods
-export function forgeToHex(forgeBuffer: any): string {
+export function forgeToHex(forgeBuffer: Uint8Array | Buffer | { type: string; data: number[] }): string {
     try {
-        if (forgeBuffer.type == "Buffer") {
-            forgeBuffer = forgeBuffer.data
+        if ((forgeBuffer as { type?: string }).type === "Buffer") {
+            forgeBuffer = (forgeBuffer as { data: number[] }).data as unknown as Uint8Array
         }
     } catch (e) {
-        log.debug("[ForgeToHex] Not a buffer")
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.debug(`[ForgeToHex] Not a buffer: ${errorMsg}`)
     }
-    //console.log(forgeBuffer)
-    const rebuffer = Buffer.from(forgeBuffer)
-    forgeBuffer = rebuffer.toString("hex")
-    return forgeBuffer
+    return Buffer.from(forgeBuffer as Uint8Array).toString("hex")
 }
 
 // INFO finalArray must come out as an acceptable input for forge methods
 // NOTE The above and the below must be revertible with each other
 export function hexToForge(forgeString: string): Uint8Array {
-    /*if (forgeString.startsWith("0x")) {
-        forgeString = forgeString.slice(2)
-    }*/
-    const finalArray = new Uint8Array(64)
-    //console.log("[string to forge encoded]")
-    //console.log(forgeString)
+    const ED25519_KEY_SIZE = 64
+    const ED25519_HALF_KEY = 32
+    const keyBytes = new Uint8Array(ED25519_KEY_SIZE)
     for (let i = 0; i < forgeString.length; i += 2) {
-        const hexValue = forgeString.substr(i, 2)
-        const decimalValue = parseInt(hexValue, 16)
-        finalArray[i / 2] = decimalValue
+        const hexValue = forgeString.substring(i, i + 2)
+        keyBytes[i / 2] = parseInt(hexValue, 16)
     }
     // Remove trailing zeroes
     // TODO Find a better solution as this trims also the last byte(s) if it's 0
-    let trimmedArray = finalArray
-    while (trimmedArray[trimmedArray.length - 1] == 0) {
+    let trimmedArray = keyBytes.slice()
+    while (trimmedArray[trimmedArray.length - 1] === 0) {
         trimmedArray = trimmedArray.slice(0, -1)
     }
-    // NOTE This is an horrible, yet working solution to the above problem
-    if (trimmedArray.length == 63 || trimmedArray.length == 31) {
-        log.warning("[HexToForge] Suspicious length: " + trimmedArray.length)
-        const finalArray = new Uint8Array(trimmedArray.length + 1)
-        for (let i = 0; i < trimmedArray.length; i++) {
-            finalArray[i] = trimmedArray[i]
-        }
-        trimmedArray = finalArray
+    // Pad back if trimming removed a legitimate zero byte
+    const expectedLength = ED25519_KEY_SIZE - 1
+    const expectedHalfLength = ED25519_HALF_KEY - 1
+    if (trimmedArray.length === expectedLength || trimmedArray.length === expectedHalfLength) {
+        log.warning(`[HexToForge] Suspicious length: ${trimmedArray.length}`)
+        const paddedArray = new Uint8Array(trimmedArray.length + 1)
+        paddedArray.set(trimmedArray)
+        trimmedArray = paddedArray
     }
-    //console.log("[HexToForge] Encoded into an Uint8Array of lenght: " + finalArray.length)
-    //console.log(trimmedArray)
     return trimmedArray
 }

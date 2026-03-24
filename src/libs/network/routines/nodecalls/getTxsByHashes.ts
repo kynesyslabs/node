@@ -1,6 +1,8 @@
 import { getSharedState } from "@/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { handleError } from "src/errors"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
 
 interface InterfaceGetTxsByHashesData {
     hashes: string[]
@@ -28,8 +30,8 @@ export default async function getTxsByHashes(
         }
     }
 
-    console.log(
-        `[SERVER] Received getTxsByHashes request for ${data.hashes.length} transactions`,
+    log.info(
+        `[NETWORK] Received getTxsByHashes request for ${data.hashes.length} transactions`,
     )
 
     try {
@@ -56,7 +58,7 @@ export default async function getTxsByHashes(
             require_reply: false,
         }
     } catch (error) {
-        console.error("[getTxsByHashes] Error fetching transactions:", error)
+        handleError(error, "NETWORK", { source: "getTxsByHashes" })
         return {
             result: 500,
             response: [],

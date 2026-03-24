@@ -41,15 +41,11 @@ export default class Cryptography {
     }
 
     static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
-        log.debug("[forge to string encoded]")
-        //console.log(forgeBuffer) // REVIEW if it is like this
         const stringBuffer = forgeBuffer.toString("hex")
-        log.debug("DECODED INTO:")
-        log.debug("0x" + stringBuffer)
         return "0x" + stringBuffer
     }
 
-    static async load(path) {
+    static async load(path: string) {
         let keypair: forge.pki.KeyPair = {
             privateKey: null,
             publicKey: null,
@@ -67,25 +63,16 @@ export default class Cryptography {
     static loadFromHex(content: string): forge.pki.KeyPair {
         const keypair = { publicKey: null, privateKey: null }
         content = content.slice(2)
-        const finalArray = new Uint8Array(64)
-        log.debug("[string to forge encoded]")
-        log.debug(content)
+        const ED25519_KEY_SIZE = 64
+        const keyBytes = new Uint8Array(ED25519_KEY_SIZE)
         for (let i = 0; i < content.length; i += 2) {
-            const hexValue = content.substr(i, 2)
-            const decimalValue = parseInt(hexValue, 16)
-            finalArray[i / 2] = decimalValue
+            const hexValue = content.substring(i, i + 2)
+            keyBytes[i / 2] = parseInt(hexValue, 16)
         }
-        log.debug("ENCODED INTO:")
-        //console.log(finalArray)
-        // Condensing
-        log.debug("That means:")
-        keypair.privateKey = Buffer.from(finalArray)
-        log.debug(keypair.privateKey)
-        log.debug("And the public key is:")
+        keypair.privateKey = Buffer.from(keyBytes)
         keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
         })
-        log.debug(keypair.publicKey)
         return keypair
     }
 
@@ -100,12 +87,9 @@ export default class Cryptography {
 
     static sign(
         message: string,
-        privateKey: forge.pki.ed25519.BinaryBuffer | any,
+        privateKey: forge.pki.ed25519.BinaryBuffer | string,
     ) {
-        // REVIEW Test HexToForge support
-        if (privateKey.type == "string") {
-            log.debug("[HexToForge] Deriving a buffer from privateKey...")
-            // privateKey = HexToForge(privateKey)
+        if (typeof privateKey === "string") {
             privateKey = forge.util.binary.hex.decode(privateKey)
         }
 
@@ -121,64 +105,30 @@ export default class Cryptography {
         signature: string | forge.pki.ed25519.BinaryBuffer,
         publicKey: string | forge.pki.ed25519.BinaryBuffer,
     ) {
-        /*
-        console.log("signature.type: " + typeof signature)
-        console.log("signature: " + signature)
-        console.log("publicKey.type: " + typeof publicKey)
-        console.log("publicKey: " + publicKey) */
-        // REVIEW Test HexToForge support
-        if (typeof signature == "string") {
-            log.debug(
-                "[HexToForge] Deriving a buffer from signature: " + signature,
-            )
-            // signature = HexToForge(signature)
+        if (typeof signature === "string") {
             signature = forge.util.binary.hex.decode(signature)
         }
 
-        if (typeof publicKey == "string") {
-            log.debug("[HexToForge] Deriving a buffer from publicKey...")
-            // publicKey = HexToForge(publicKey)
+        if (typeof publicKey === "string") {
             publicKey = forge.util.binary.hex.decode(publicKey)
         }
 
-        // Also, we have to sanitize buffers so that they are forge compatible
-        if (signature.length == 64) {
-            //console.log("[*] Normalizing signature...")
-            signature = Buffer.from(signature as Uint8Array) // REVIEW Does not work in bun
-        }
-        //console.log(signature)
-
-        if (publicKey.length == 64) {
-            //console.log("[*] Normalizing publicKey...")
-            publicKey = Buffer.from(publicKey as Uint8Array) // REVIEW Does not work in bun
+        // Sanitize buffers for forge compatibility
+        const ED25519_SIGNATURE_SIZE = 64
+        if (signature.length === ED25519_SIGNATURE_SIZE) {
+            signature = Buffer.from(signature as Uint8Array)
         }
 
-        //console.log(publicKey)
+        if (publicKey.length === ED25519_SIGNATURE_SIZE) {
+            publicKey = Buffer.from(publicKey as Uint8Array)
+        }
 
-        log.debug(
-            "[Cryptography] Verifying the signature of: (" +
-                typeof signed +
-                ") " +
-                signed,
-        )
-        log.debug(
-            "[Cryptography] Using the signature: (" +
-                typeof signature +
-                ") " +
-                forgeToHex(signature),
-        )
-        log.debug(
-            "[Cryptography] And the public key: (" +
-                typeof publicKey +
-                ") " +
-                forgeToHex(publicKey),
-        )
-        //console.log(publicKey)
+        log.debug(`[Cryptography] Verifying signature for: (${typeof signed}) ${signed}`)
         return forge.pki.ed25519.verify({
             message: signed,
             encoding: "utf8",
-            signature: signature,
-            publicKey: publicKey,
+            signature,
+            publicKey,
         })
     }
 
@@ -193,43 +143,39 @@ export default class Cryptography {
             const seed = md.digest().toHex()
             const pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
-            const keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
+            const RSA_KEY_BITS = 4096
+            const keys = forge.pki.rsa.generateKeyPair({
+                bits: RSA_KEY_BITS,
+                prng: pnrg,
+            })
             return keys
         },
 
         // INFO Encryption method using the public key
-        encrypt: (
-            message: string,
-            publicKey: any | forge.pki.rsa.PublicKey,
-        ): [boolean, any] => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- forge RSA types are incomplete
+        encrypt: (message: string, publicKey: any): [boolean, string] => {
             // NOTE Supporting "fake buffers" from web browsers
-            if (publicKey.type == "Buffer") {
-                //console.log("[ENCRYPTION] Normalizing publicKey...")
+            if (publicKey?.type === "Buffer") {
                 publicKey = Buffer.from(publicKey)
             }
-            // Converting the message and decrypting it
             const based = forge.util.encode64(message)
             const encrypted = publicKey.encrypt(based)
             return [true, encrypted]
         },
 
-        // INFO Decryption method using the private key
-        decrypt: (
-            message: string,
-            privateKey: any | forge.pki.rsa.PrivateKey = null,
-        ): [boolean, any] => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- forge RSA types are incomplete
+        decrypt: (message: string, privateKey: any = null): [boolean, string] => {
             // NOTE Supporting "fake buffers" from web browsers
             try {
-                if (privateKey.type == "Buffer") {
-                    //term.yellow("[DECRYPTION] Normalizing privateKey...\n")
+                if (privateKey?.type === "Buffer") {
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
                 log.debug(
                     "CRYPTO",
-                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed",
+                    `[DECRYPTION] Failed to normalize privateKey buffer: ${errorMsg}`,
                 )
-                log.error("CRYPTO", e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one

@@ -33,7 +33,9 @@ export default class SubOperations {
         }
         // NOTE Insert blindly stuff into the GCR if no genesis is present
         // Using the genesis schema it is easy to follow the structure of the genesis file
-        log.debug("Genesis operation params: " + JSON.stringify(operation.params))
+        log.debug(
+            "Genesis operation params: " + JSON.stringify(operation.params),
+        )
         const genesisContent: Genesis = operation.params
         // Let's extract the genesis transaction from the genesis block
         const genesisTx = await Chain.getTransactionFromHash(
@@ -50,12 +52,22 @@ export default class SubOperations {
         transaction.hash = genesisTx.hash
         transaction.content = genesisTx.content
         transaction.signature = "genesis"
-        transaction.status = "someStatus"
+        transaction.status = genesisTx.status ?? "confirmed"
         transaction.type = "genesis"
         transaction.blockNumber = 0
+        transaction.from = genesisTx.content.from ?? "0x0"
+        transaction.from_ed25519_address =
+            genesisTx.content.from_ed25519_address ?? "0x0"
+        transaction.to = genesisTx.content.to ?? "0x0"
         transaction.amount = 0 // TODO: Maybe store the amount as defined in balances below here?
         transaction.nonce = 0
-        transaction.timestamp = Date.now()
+        transaction.timestamp = genesisTx.content.timestamp ?? Date.now()
+        transaction.ed25519_signature = genesisTx.ed25519_signature
+        transaction.networkFee =
+            genesisTx.content.transaction_fee?.network_fee ?? 0
+        transaction.rpcFee = genesisTx.content.transaction_fee?.rpc_fee ?? 0
+        transaction.additionalFee =
+            genesisTx.content.transaction_fee?.additional_fee ?? 0
 
         // Save the new transaction
         await transactionRepository.save(transaction)
@@ -94,7 +106,7 @@ export default class SubOperations {
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
-        if (amount == 0) {
+        if (amount === 0) {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -124,7 +136,7 @@ export default class SubOperations {
         const amount: string = operation.params.amount
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
-        if (amount == "0") {
+        if (amount === "0") {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -143,7 +155,7 @@ export default class SubOperations {
         const amount: string = operation.params.amount
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
-        if (amount == "0") {
+        if (amount === "0") {
             return {
                 success: false,
                 message: "Amount cannot be 0",

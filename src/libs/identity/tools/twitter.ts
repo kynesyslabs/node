@@ -6,6 +6,39 @@ import {
     TwitterFollowersResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
+import {
+    TWITTER_BOT_SCORE_THRESHOLD,
+    TWITTER_VERIFICATION_SCORE,
+    TWITTER_USERNAME_PATTERN_SCORE,
+    TWITTER_NAME_PREFIX_LENGTH,
+    TWITTER_USERNAME_TRAILING_DIGITS,
+    TWITTER_BIO_KEYWORD_SCORE,
+    TWITTER_SUSPICIOUS_BIO_KEYWORDS,
+    TWITTER_DEFAULT_AVATAR_SCORE,
+    TWITTER_FOLLOWER_RATIO_SCORE,
+    TWITTER_FOLLOWER_RATIO_FRIENDS_MIN,
+    TWITTER_FOLLOWER_RATIO_SUB_MAX,
+    TWITTER_SUSPICIOUS_FOLLOWERS_FRACTION,
+    TWITTER_SUSPICIOUS_FOLLOWERS_SCORE,
+    TWITTER_TIMING_VARIANCE_RATIO,
+    TWITTER_TIMING_REGULARITY_SCORE,
+    TWITTER_ACTIVE_HOURS_THRESHOLD,
+    TWITTER_ACTIVE_HOURS_SCORE,
+    TWITTER_RETWEET_RATIO_THRESHOLD,
+    TWITTER_RETWEET_SCORE,
+    TWITTER_EXCESSIVE_HASHTAG_COUNT,
+    TWITTER_EXCESSIVE_HASHTAG_RATIO,
+    TWITTER_HASHTAG_SPAM_SCORE,
+    TWITTER_NEW_ACCOUNT_MONTHS,
+    TWITTER_NEW_ACCOUNT_HIGH_ACTIVITY,
+    TWITTER_NEW_ACCOUNT_SCORE,
+    TWITTER_FEW_TWEETS_THRESHOLD,
+    TWITTER_MANY_FOLLOWERS_THRESHOLD,
+    TWITTER_FEW_TWEETS_MANY_FOLLOWERS_SCORE,
+    TWITTER_QUOTA_BOT_SCORE,
+    TWITTER_MS_PER_MONTH,
+} from "./constants"
 
 class TwitterBotDetector {
     constructor(
@@ -59,11 +92,11 @@ class TwitterBotDetector {
         userScore += quotaLimitMessagesScore
         log.info(`Bot score: ${userScore}`)
 
-        return userScore >= 15 // Likely Bot threshold
+        return userScore >= TWITTER_BOT_SCORE_THRESHOLD // Likely Bot threshold
     }
 
     private checkVerification(): number {
-        return this.timelineData.user.blue_verified ? -8 : 0
+        return this.timelineData.user.blue_verified ? TWITTER_VERIFICATION_SCORE : 0
     }
 
     private checkUsernamePattern(): number {
@@ -128,8 +161,8 @@ class TwitterBotDetector {
         const suspiciousPercentage = suspiciousFollowers / followers.length
 
         // If N% or more followers are suspicious, add 6 points
-        if (suspiciousPercentage >= 0.6) {
-            return 10
+        if (suspiciousPercentage >= TWITTER_SUSPICIOUS_FOLLOWERS_FRACTION) {
+            return TWITTER_SUSPICIOUS_FOLLOWERS_SCORE
         }
 
         return 0
@@ -150,24 +183,24 @@ class TwitterBotDetector {
             const firstName = nameParts[0]
             const lastName = nameParts[1]
 
-            // Get first 3 characters of each name (case sensitive)
-            if (firstName.length >= 3 && lastName.length >= 3) {
-                const firstThree = firstName.substring(0, 3)
-                const lastThree = lastName.substring(0, 3)
+            // Get first N characters of each name (case sensitive)
+            if (firstName.length >= TWITTER_NAME_PREFIX_LENGTH && lastName.length >= TWITTER_NAME_PREFIX_LENGTH) {
+                const firstThree = firstName.substring(0, TWITTER_NAME_PREFIX_LENGTH)
+                const lastThree = lastName.substring(0, TWITTER_NAME_PREFIX_LENGTH)
 
-                // Check if both 3-character prefixes are in username (case sensitive)
+                // Check if both character prefixes are in username (case sensitive)
                 if (
                     cleanUsername.includes(firstThree) &&
                     cleanUsername.includes(lastThree)
                 ) {
-                    score = 6
+                    score = TWITTER_USERNAME_PATTERN_SCORE
                 }
             }
         }
 
-        // Check if username ends with 4 digits
-        if (cleanUsername.match(/[0-9]{5}$/)) {
-            score = 6
+        // Check if username ends with trailing digits
+        if (cleanUsername.match(new RegExp(`[0-9]{${TWITTER_USERNAME_TRAILING_DIGITS}}$`))) {
+            score = TWITTER_USERNAME_PATTERN_SCORE
         }
 
         return score
@@ -180,11 +213,9 @@ class TwitterBotDetector {
         let score = 0
 
         // Check for suspicious keywords
-        const suspiciousKeywords = ["nexyai.io", "$fan", "maxi"]
-
-        for (const keyword of suspiciousKeywords) {
+        for (const keyword of TWITTER_SUSPICIOUS_BIO_KEYWORDS) {
             if (normalizedBio.includes(keyword)) {
-                score += 5
+                score += TWITTER_BIO_KEYWORD_SCORE
                 break // Only count once
             }
         }
@@ -214,7 +245,7 @@ class TwitterBotDetector {
             profile.avatar.includes("default") ||
             profile.avatar.includes("placeholder")
         ) {
-            score += 4
+            score += TWITTER_DEFAULT_AVATAR_SCORE
         }
 
         // Check for missing header image (only if provided)
@@ -228,8 +259,8 @@ class TwitterBotDetector {
         // }
 
         // Check follower/following ratio (high following, low followers)
-        if (profile.friends > 1000 && profile.sub_count < 100) {
-            score = 4
+        if (profile.friends > TWITTER_FOLLOWER_RATIO_FRIENDS_MIN && profile.sub_count < TWITTER_FOLLOWER_RATIO_SUB_MAX) {
+            score = TWITTER_FOLLOWER_RATIO_SCORE
         }
 
         return score
@@ -261,8 +292,8 @@ class TwitterBotDetector {
                 ) / intervals.length
 
             // Low variance indicates regular posting
-            if (variance < avgInterval * 0.1) {
-                score += 5
+            if (variance < avgInterval * TWITTER_TIMING_VARIANCE_RATIO) {
+                score += TWITTER_TIMING_REGULARITY_SCORE
             }
         }
 
@@ -271,9 +302,9 @@ class TwitterBotDetector {
             new Date(tweet.created_at).getHours(),
         )
         const uniqueHours = new Set(hours)
-        if (uniqueHours.size > 20) {
-            // Active in more than 20 hours
-            score += 5
+        if (uniqueHours.size > TWITTER_ACTIVE_HOURS_THRESHOLD) {
+            // Active in more than threshold hours
+            score += TWITTER_ACTIVE_HOURS_SCORE
         }
 
         return score
@@ -287,9 +318,9 @@ class TwitterBotDetector {
         const retweetCount = timeline.filter(
             tweet => tweet.retweeted_tweet,
         ).length
-        if (retweetCount > timeline.length * 0.65) {
+        if (retweetCount > timeline.length * TWITTER_RETWEET_RATIO_THRESHOLD) {
             log.debug("Retweet count is too high")
-            score += 7
+            score += TWITTER_RETWEET_SCORE
         }
 
         // Check for repetitive text
@@ -311,12 +342,12 @@ class TwitterBotDetector {
         const hashtagPattern = /#\w+/g
         const excessiveHashtags = timeline.filter(tweet => {
             const hashtags = tweet.text.match(hashtagPattern)
-            return hashtags && hashtags.length > 5
+            return hashtags && hashtags.length > TWITTER_EXCESSIVE_HASHTAG_COUNT
         })
 
-        if (excessiveHashtags.length > timeline.length * 0.3) {
+        if (excessiveHashtags.length > timeline.length * TWITTER_EXCESSIVE_HASHTAG_RATIO) {
             log.debug("Excessive hashtags found")
-            score += 7
+            score += TWITTER_HASHTAG_SPAM_SCORE
         }
 
         return score
@@ -327,18 +358,18 @@ class TwitterBotDetector {
         const createdAt = new Date(user.created_at)
         const now = new Date()
         const accountAgeMonths =
-            (now.getTime() - createdAt.getTime()) / (1000 * 60 * 60 * 24 * 30)
+            (now.getTime() - createdAt.getTime()) / TWITTER_MS_PER_MONTH
 
         let score = 0
 
         // New account with high activity
-        if (accountAgeMonths < 3 && user.statuses_count > 1000) {
-            score += 4
+        if (accountAgeMonths < TWITTER_NEW_ACCOUNT_MONTHS && user.statuses_count > TWITTER_NEW_ACCOUNT_HIGH_ACTIVITY) {
+            score += TWITTER_NEW_ACCOUNT_SCORE
         }
 
         // Few tweets but many followers (or vice versa)
-        if (user.statuses_count < 50 && user.sub_count > 1000) {
-            score += 4
+        if (user.statuses_count < TWITTER_FEW_TWEETS_THRESHOLD && user.sub_count > TWITTER_MANY_FOLLOWERS_THRESHOLD) {
+            score += TWITTER_FEW_TWEETS_MANY_FOLLOWERS_SCORE
         }
 
         return score
@@ -397,7 +428,7 @@ class TwitterBotDetector {
         for (const tweet of this.timelineData.timeline) {
             const text = tweet.text.toLowerCase()
             if (quotaPatterns.some(pattern => pattern.test(text))) {
-                return 1000 // Definitive bot
+                return TWITTER_QUOTA_BOT_SCORE // Definitive bot
             }
         }
         return 0
@@ -408,8 +439,8 @@ export class Twitter {
     private static instance: Twitter
 
     demos_twitter_username = "demos_network"
-    api_key = process.env.RAPID_API_KEY
-    api_host = process.env.RAPID_API_HOST
+    api_key = Config.getInstance().identity.rapidApiKey
+    api_host = Config.getInstance().identity.rapidApiHost
     api_url = "https://" + this.api_host
 
     /**
@@ -453,9 +484,7 @@ export class Twitter {
 
             return { username, tweetId }
         } catch (error) {
-            log.error(
-                `Failed to extract tweet details from URL: ${tweetUrl}`,
-            )
+            log.error(`Failed to extract tweet details from URL: ${tweetUrl}`)
             throw new Error(
                 `Invalid tweet URL: ${
                     error instanceof Error ? error.message : "Unknown error"

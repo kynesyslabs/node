@@ -4,11 +4,16 @@ import {
     EthTransaction,
     SolanaTransactionResponse,
 } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
+import {
+    ETHERSCAN_BASE_URL,
+    HELIUS_BASE_URL,
+    ETHERSCAN_DEFAULT_END_BLOCK,
+} from "./constants"
 
 export class CrossChainTools {
-    private static readonly ETHERSCAN_BASE_URL =
-        "https://api.etherscan.io/v2/api"
-    private static readonly HELIUS_BASE_URL = "https://api.helius.xyz/v0"
+    private static readonly ETHERSCAN_BASE_URL = ETHERSCAN_BASE_URL
+    private static readonly HELIUS_BASE_URL = HELIUS_BASE_URL
 
     /**
      * Get Ethereum transactions by address using Etherscan API
@@ -26,11 +31,11 @@ export class CrossChainTools {
         page = 1,
         offset = 1,
         startBlock = 0,
-        endBlock = 99999999,
+        endBlock = ETHERSCAN_DEFAULT_END_BLOCK,
     ): Promise<EthTransactionResponse> {
-        const apiKey = process.env.ETHERSCAN_API_KEY
+        const apiKey = Config.getInstance().identity.etherscanApiKey
         if (!apiKey) {
-            throw new Error("ETHERSCAN_API_KEY environment variable is not set")
+            throw new Error("ETHERSCAN_API_KEY is not configured")
         }
 
         const params = {
@@ -118,9 +123,9 @@ export class CrossChainTools {
         before?: string,
         until?: string,
     ): Promise<SolanaTransactionResponse> {
-        const apiKey = process.env.HELIUS_API_KEY
+        const apiKey = Config.getInstance().identity.heliusApiKey
         if (!apiKey) {
-            throw new Error("HELIUS_API_KEY environment variable is not set")
+            throw new Error("HELIUS_API_KEY is not configured")
         }
 
         const params: any = {

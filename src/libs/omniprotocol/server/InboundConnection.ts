@@ -1,4 +1,5 @@
 import log from "src/utilities/logger"
+import { handleError } from "src/errors"
 import { Socket } from "net"
 import { EventEmitter } from "events"
 import { MessageFramer } from "../transport/MessageFramer"
@@ -21,6 +22,14 @@ export interface InboundConnectionConfig {
 }
 
 /**
+ * @deprecated InboundConnection is deprecated and will be removed in a future version.
+ * Use PeerConnection from ../transport/PeerConnection instead, which provides unified
+ * bidirectional connection handling for both inbound and outbound connections.
+ *
+ * Migration: Pass an existing socket to PeerConnection constructor to create an inbound connection.
+ * PeerConnection supports both receiving messages (via 'request' event) and sending messages
+ * (via send/sendAuthenticated methods) on the same connection.
+ *
  * InboundConnection handles a single inbound connection from a peer
  * Manages message parsing, dispatching, and response sending
  */
@@ -103,7 +112,7 @@ export class InboundConnection extends EventEmitter {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
-            console.error(error)
+            handleError(error, "NETWORK", { source: "OmniProtocol InboundConnection.handleIncomingData" })
             if (error instanceof InvalidAuthBlockFormatError) {
                 return
             }
@@ -216,7 +225,7 @@ export class InboundConnection extends EventEmitter {
             // Note: Authentication is now handled at the top of this method
             // for ANY message with a valid auth block, not just hello_peer
         } catch (error) {
-            console.error(error)
+            handleError(error, "NETWORK", { source: "OmniProtocol InboundConnection.handleMessage" })
 
             if (error instanceof ConnectionError) {
                 log.error(

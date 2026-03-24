@@ -23,7 +23,7 @@ async function adaptGasToCongestion(): Promise<number> {
     // TODO Get last block and previous last block timestamps
     const lastBlockNumber = await Chain.getLastBlockNumber()
     // Support for genesis block
-    if (lastBlockNumber == 0) {
+    if (lastBlockNumber === 0) {
         return 0
     }
     const previousLastBlockNumber = lastBlockNumber - 1

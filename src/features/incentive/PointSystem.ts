@@ -10,7 +10,7 @@ import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
 import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
-import { NomisWalletIdentity } from "@/model/entities/types/IdentityTypes"
+import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
@@ -21,12 +21,13 @@ const pointValues = {
     LINK_DISCORD: 1,
     LINK_UD_DOMAIN_DEMOS: 3,
     LINK_UD_DOMAIN: 1,
+    LINK_HUMAN_PASSPORT: 1,
 }
 
 export class PointSystem {
     private static instance: PointSystem
 
-    private constructor() {}
+    private constructor() { }
 
     public static getInstance(): PointSystem {
         if (!PointSystem.instance) {
@@ -45,6 +46,8 @@ export class PointSystem {
             [network: string]: string[]
         }
         linkedNomis: NomisWalletIdentity[]
+        linkedHumanPassport: { address: string; score: number; passingScore: boolean }[]
+        linkedEthos: EthosWalletIdentity[]
     }> {
         const identities = await IdentityManager.getIdentities(userId)
         const twitterIdentities = await IdentityManager.getWeb2Identities(
@@ -119,6 +122,31 @@ export class PointSystem {
             }
         }
 
+        const linkedEthos: EthosWalletIdentity[] = []
+
+        if (identities?.ethos) {
+            const ethosChains = Object.keys(identities.ethos)
+
+            for (const chain of ethosChains) {
+                const subChains = identities.ethos[chain]
+                const subChainKeys = Object.keys(subChains)
+
+                for (const subChain of subChainKeys) {
+                    const ethosIdentities = subChains[subChain]
+
+                    if (Array.isArray(ethosIdentities)) {
+                        const mapped = ethosIdentities.map(ethosIdentity => ({
+                            chain,
+                            subchain: subChain,
+                            ...ethosIdentity,
+                        }))
+
+                        linkedEthos.push(...mapped)
+                    }
+                }
+            }
+        }
+
         const linkedSocials: {
             twitter?: string
             github?: string
@@ -159,7 +187,14 @@ export class PointSystem {
             }
         }
 
-        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis }
+        const humanPassportIdentities: any[] = (await IdentityManager.getIdentities(userId, "humanpassport")) || []
+        const linkedHumanPassport = humanPassportIdentities.map(hp => ({
+            address: hp.address,
+            score: hp.score || 0,
+            passingScore: hp.passingScore || false,
+        }))
+
+        return { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos }
     }
 
     /**
@@ -175,7 +210,7 @@ export class PointSystem {
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         let account = await gcrMainRepository.findOneBy({ pubkey: userIdStr })
 
-        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis } =
+        const { linkedWallets, linkedSocials, linkedUDDomains, linkedNomis, linkedHumanPassport, linkedEthos } =
             await this.getUserIdentitiesFromGCR(userIdStr)
 
         if (!account) {
@@ -212,6 +247,8 @@ export class PointSystem {
                 },
                 udDomains: account.points.breakdown?.udDomains || {},
                 nomisScores: account.points.breakdown?.nomisScores || {},
+                humanPassport: account.points.breakdown?.humanPassport || 0,
+                ethosScores: account.points.breakdown?.ethosScores || {},
                 referrals: account.points.breakdown?.referrals || 0,
                 demosFollow: account.points.breakdown?.demosFollow || 0,
             },
@@ -219,6 +256,8 @@ export class PointSystem {
             linkedSocials,
             linkedUDDomains,
             linkedNomisIdentities: linkedNomis,
+            linkedHumanPassport,
+            linkedEthosIdentities: linkedEthos,
             lastUpdated: account.points.lastUpdated || new Date(),
             flagged: account.flagged || null,
             flaggedReason: account.flaggedReason || null,
@@ -236,7 +275,9 @@ export class PointSystem {
             | "socialAccounts"
             | "udDomains"
             | "nomisScores"
-            | "demosFollow",
+            | "ethosScores"
+            | "demosFollow"
+            | "humanPassport",
         platform: string,
         referralCode?: string,
         twitterUserId?: string,
@@ -253,6 +294,7 @@ export class PointSystem {
             referrals: 0,
             demosFollow: 0,
             nomisScores: {},
+            ethosScores: {},
         }
 
         const oldTotal = account.points.totalPoints || 0
@@ -302,6 +344,15 @@ export class PointSystem {
             const newChainPoints = Math.max(0, oldChainPoints + points)
             appliedDelta = newChainPoints - oldChainPoints
             account.points.breakdown.nomisScores[platform] = newChainPoints
+        } else if (type === "ethosScores") {
+            account.points.breakdown.ethosScores =
+                account.points.breakdown.ethosScores || {}
+            const oldChainPoints =
+                account.points.breakdown.ethosScores[platform] || 0
+
+            const newChainPoints = Math.max(0, oldChainPoints + points)
+            appliedDelta = newChainPoints - oldChainPoints
+            account.points.breakdown.ethosScores[platform] = newChainPoints
         } else if (type === "demosFollow") {
             const oldDemosFollowPoints =
                 account.points.breakdown.demosFollow || 0
@@ -311,6 +362,15 @@ export class PointSystem {
             )
             appliedDelta = newDemosFollowPoints - oldDemosFollowPoints
             account.points.breakdown.demosFollow = newDemosFollowPoints
+        } else if (type === "humanPassport") {
+            const oldHumanPassportPoints =
+                account.points.breakdown.humanPassport || 0
+            const newHumanPassportPoints = Math.max(
+                0,
+                oldHumanPassportPoints + points,
+            )
+            appliedDelta = newHumanPassportPoints - oldHumanPassportPoints
+            account.points.breakdown.humanPassport = newHumanPassportPoints
         }
 
         if (appliedDelta !== 0) {
@@ -375,6 +435,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to get user points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error getting user points",
@@ -409,9 +471,8 @@ export class PointSystem {
 
         try {
             // Get current points and identities from GCR
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {
@@ -466,13 +527,15 @@ export class PointSystem {
                     message: walletIsAlreadyLinked
                         ? walletIsAlreadyLinkedMessage
                         : hasExistingWalletOnChain
-                        ? hasExistingWalletOnChainMessage
-                        : "Points awarded for linking wallet",
+                              ? hasExistingWalletOnChainMessage
+                              : "Points awarded for linking wallet",
                 },
                 require_reply: false,
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -497,9 +560,8 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Twitter points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.twitter > 0) {
@@ -537,6 +599,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -585,9 +649,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has GitHub points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.github > 0) {
@@ -624,6 +687,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -672,6 +737,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -692,9 +759,8 @@ export class PointSystem {
      */
     async deductTwitterPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Twitter points to deduct
             const currentTwitter =
@@ -744,6 +810,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -767,9 +835,8 @@ export class PointSystem {
         githubUserId: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has GitHub points to deduct
             const currentGithub =
@@ -807,6 +874,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -857,9 +926,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Telegram points specifically
             if (
@@ -920,6 +988,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1009,6 +1079,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram TLSN points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1029,9 +1101,8 @@ export class PointSystem {
      */
     async deductTelegramPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Telegram points to deduct
             const currentTelegram =
@@ -1069,6 +1140,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1112,9 +1185,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Discord points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.discord > 0) {
@@ -1151,6 +1223,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1170,9 +1244,8 @@ export class PointSystem {
      */
     async deductDiscordPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Discord points to deduct
             if (
@@ -1210,6 +1283,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1247,9 +1322,8 @@ export class PointSystem {
                 : pointValues.LINK_UD_DOMAIN
 
             // Get current points and check for duplicate domain linking
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if this specific domain is already linked
             const account = await ensureGCRForUser(userId)
@@ -1326,14 +1400,15 @@ export class PointSystem {
                 response: {
                     pointsAwarded: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points awarded for linking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points awarded for linking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding UD domain points",
@@ -1409,14 +1484,15 @@ export class PointSystem {
                 response: {
                     pointsDeducted: pointValue,
                     totalPoints: updatedPoints.totalPoints,
-                    message: `Points deducted for unlinking ${
-                        isDemosDomain ? ".demos" : "UD"
-                    } domain`,
+                    message: `Points deducted for unlinking ${isDemosDomain ? ".demos" : "UD"
+                        } domain`,
                 },
                 require_reply: false,
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting UD domain points",
@@ -1457,9 +1533,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {
@@ -1548,6 +1623,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Nomis score points",
@@ -1626,9 +1703,152 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Nomis score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Award points for linking a Human Passport
+     * @param userId The user's Demos address
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardHumanPassportPoints(
+        userId: string,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Verify the Human Passport identity is actually linked
+            const account = await ensureGCRForUser(userId)
+            const hpIdentities = account.identities.humanpassport || []
+
+            if (hpIdentities.length === 0) {
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: account.points.totalPoints || 0,
+                        message: "Human Passport not linked",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            // Check if user already has Human Passport points
+            if ((userPointsWithIdentities.breakdown.humanPassport || 0) > 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "Human Passport points already awarded",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                pointValues.LINK_HUMAN_PASSPORT,
+                "humanPassport",
+                "humanPassport",
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointValues.LINK_HUMAN_PASSPORT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points awarded for linking Human Passport",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Human Passport points: ${errorMsg}`)
+            return {
+                result: 500,
+                response: "Error awarding Human Passport points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking a Human Passport
+     * @param userId The user's Demos address
+     * @returns RPCResponse
+     */
+    async deductHumanPassportPoints(userId: string): Promise<RPCResponse> {
+        try {
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            const currentHumanPassport =
+                userPointsWithIdentities.breakdown.humanPassport || 0
+            if (currentHumanPassport <= 0) {
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: "No Human Passport points to deduct",
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            await this.addPointsToGCR(
+                userId,
+                -pointValues.LINK_HUMAN_PASSPORT,
+                "humanPassport",
+                "humanPassport",
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointValues.LINK_HUMAN_PASSPORT,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: "Points deducted for unlinking Human Passport",
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Human Passport points: ${errorMsg}`)
+            return {
+                result: 500,
+                response: "Error deducting Human Passport points",
                 require_reply: false,
                 extra: {
                     error:
@@ -1644,6 +1864,216 @@ export class PointSystem {
         if (formattedScore >= 60) return 4
         if (formattedScore >= 40) return 3
         if (formattedScore >= 20) return 2
+        return 1
+    }
+
+    /**
+     * Award points for linking an Ethos score
+     * @param userId The user's Demos address
+     * @param chain The chain type (must be "evm")
+     * @param ethosScore The Ethos reputation score (0-2800)
+     * @param referralCode Optional referral code
+     * @returns RPCResponse
+     */
+    async awardEthosScorePoints(
+        userId: string,
+        chain: string,
+        ethosScore: number,
+        referralCode?: string,
+    ): Promise<RPCResponse> {
+        const validChains = ["evm"]
+        const invalidChainMessage =
+            "Invalid Ethos chain. Allowed values are 'evm'."
+        const ethosScoreAlreadyLinkedMessage = `An Ethos score for ${chain} is already linked.`
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const userPointsWithIdentities = await this.getUserPointsInternal(
+                userId,
+            )
+
+            if (!userPointsWithIdentities.linkedSocials.twitter) {
+                return {
+                    result: 400,
+                    response: "Twitter account not linked. Not awarding points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const hasEvmWallet =
+                userPointsWithIdentities.linkedWallets.some(w =>
+                    w.startsWith("evm:"),
+                )
+
+            if (!hasEvmWallet) {
+                return {
+                    result: 400,
+                    response:
+                        "EVM wallet not linked. Cannot award Ethos points",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const existingEthosScoreOnChain =
+                userPointsWithIdentities.breakdown.ethosScores?.[chain]
+
+            if (
+                existingEthosScoreOnChain != null &&
+                existingEthosScoreOnChain > 0
+            ) {
+                const updatedPoints = await this.getUserPointsInternal(userId)
+
+                return {
+                    result: 400,
+                    response: {
+                        pointsAwarded: 0,
+                        totalPoints: updatedPoints.totalPoints,
+                        message: ethosScoreAlreadyLinkedMessage,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const pointsToAward = this.getEthosPointsByScore(ethosScore)
+
+            await this.addPointsToGCR(
+                userId,
+                pointsToAward,
+                "ethosScores",
+                chain,
+                referralCode,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            log.info(
+                `[EthosPoints] AWARDED: account=${userId.substring(0, 16)}..., chain=${chain}, ethosScore=${ethosScore}, pointsAwarded=${pointsToAward}, totalPoints=${updatedPoints.totalPoints}`,
+            )
+
+            return {
+                result: 200,
+                response: {
+                    pointsAwarded: pointsToAward,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points awarded for linking Ethos score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Ethos score points: ${errorMsg}`)
+            return {
+                result: 500,
+                response: "Error awarding Ethos score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    /**
+     * Deduct points for unlinking an Ethos score
+     * @param userId The user's Demos address
+     * @param chain The chain type (must be "evm")
+     * @returns RPCResponse
+     */
+    async deductEthosScorePoints(
+        userId: string,
+        chain: string,
+    ): Promise<RPCResponse> {
+        const validChains = ["evm"]
+        const invalidChainMessage =
+            "Invalid Ethos chain. Allowed values are 'evm'."
+
+        try {
+            if (!validChains.includes(chain)) {
+                return {
+                    result: 400,
+                    response: invalidChainMessage,
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            const account = await ensureGCRForUser(userId)
+            const currentEthosForChain =
+                account.points.breakdown?.ethosScores?.[chain] ?? 0
+
+            if (currentEthosForChain <= 0) {
+                const userPointsWithIdentities =
+                    await this.getUserPointsInternal(userId)
+                return {
+                    result: 200,
+                    response: {
+                        pointsDeducted: 0,
+                        totalPoints: userPointsWithIdentities.totalPoints,
+                        message: `No Ethos points to deduct for ${chain}`,
+                    },
+                    require_reply: false,
+                    extra: {},
+                }
+            }
+
+            const pointsToDeduct = currentEthosForChain
+
+            await this.addPointsToGCR(
+                userId,
+                -pointsToDeduct,
+                "ethosScores",
+                chain,
+            )
+
+            const updatedPoints = await this.getUserPointsInternal(userId)
+
+            log.info(
+                `[EthosPoints] DEDUCTED: account=${userId.substring(0, 16)}..., chain=${chain}, pointsDeducted=${pointsToDeduct}, totalPoints=${updatedPoints.totalPoints}`,
+            )
+
+            return {
+                result: 200,
+                response: {
+                    pointsDeducted: pointsToDeduct,
+                    totalPoints: updatedPoints.totalPoints,
+                    message: `Points deducted for unlinking Ethos score on ${chain}`,
+                },
+                require_reply: false,
+                extra: {},
+            }
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Ethos score points: ${errorMsg}`)
+            return {
+                result: 500,
+                response: "Error deducting Ethos score points",
+                require_reply: false,
+                extra: {
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+            }
+        }
+    }
+
+    private getEthosPointsByScore(score: number): number {
+        if (score >= 2000) return 5
+        if (score >= 1600) return 4
+        if (score >= 1200) return 3
+        if (score >= 800) return 2
         return 1
     }
 }

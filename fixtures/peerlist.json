@@ -1,1 +1,45 @@
-{"result":200,"response":[{"connection":{"string":"https://node3.demos.sh"},"identity":"0x2311108251341346e3722eb7e09d61db81006765e3d0115d031af4dea8486ea2","verification":{"status":false,"message":null,"timestamp":null},"sync":{"status":true,"block":734997,"block_hash":"aa232bea97711212fed84c7a2f3c905709d06978a9a47c64702b733454ffd73a"},"status":{"online":true,"timestamp":1761919898360,"ready":true}},{"connection":{"string":"http://node2.demos.sh:53550"},"identity":"0xddaef8084292795f4afac9b239b5c72d4e38ab80b71d792ab87a3aef196597b5","verification":{"status":false,"message":null,"timestamp":null},"sync":{"status":true,"block":734997,"block_hash":"aa232bea97711212fed84c7a2f3c905709d06978a9a47c64702b733454ffd73a"},"status":{"online":true,"timestamp":1761919908183,"ready":true}}],"require_reply":false,"extra":null}
+{
+    "result": 200,
+    "response": [
+        {
+            "connection": { "string": "https://node3.demos.sh" },
+            "identity": "0x2311108251341346e3722eb7e09d61db81006765e3d0115d031af4dea8486ea2",
+            "verification": {
+                "status": false,
+                "message": null,
+                "timestamp": null
+            },
+            "sync": {
+                "status": true,
+                "block": 734997,
+                "block_hash": "aa232bea97711212fed84c7a2f3c905709d06978a9a47c64702b733454ffd73a"
+            },
+            "status": {
+                "online": true,
+                "timestamp": 1761919898360,
+                "ready": true
+            }
+        },
+        {
+            "connection": { "string": "http://node2.demos.sh:53550" },
+            "identity": "0xddaef8084292795f4afac9b239b5c72d4e38ab80b71d792ab87a3aef196597b5",
+            "verification": {
+                "status": false,
+                "message": null,
+                "timestamp": null
+            },
+            "sync": {
+                "status": true,
+                "block": 734997,
+                "block_hash": "aa232bea97711212fed84c7a2f3c905709d06978a9a47c64702b733454ffd73a"
+            },
+            "status": {
+                "online": true,
+                "timestamp": 1761919908183,
+                "ready": true
+            }
+        }
+    ],
+    "require_reply": false,
+    "extra": null
+}

@@ -7,21 +7,21 @@ NO_TUI=false
 EXTERNAL_DB=false
 
 GIT_PULL=true
-TLSNOTARY_DISABLED=false
-MONITORING_DISABLED=false
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
-case $PLATFORM in
-    "Darwin")
-        PLATFORM_NAME="macOS"
-        ;;
-    "Linux")
-        PLATFORM_NAME="Linux"
-        ;;
-    *)
-        PLATFORM_NAME="Unknown"
-        ;;
+case ${PLATFORM} in
+"Darwin")
+	PLATFORM_NAME="macOS"
+	;;
+"Linux")
+	PLATFORM_NAME="Linux"
+	;;
+*)
+	PLATFORM_NAME="Unknown"
+	;;
 esac
 
 # trap ctrl-c and call ctrl_c()
@@ -31,9 +31,9 @@ HAS_BEEN_INTERRUPTED=false
 
 # Verbose logging function
 log_verbose() {
-    if [ "$VERBOSE" = true ]; then
-        echo "[VERBOSE] $1"
-    fi
+	if [[ "${VERBOSE}" = true ]]; then
+		echo "[VERBOSE] $1"
+	fi
 }
 
 # Patch falcon-sign module to properly log uncaught exceptions
@@ -66,7 +66,7 @@ patch_falcon_sign() {
 
 # Help documentation function
 show_help() {
-    cat << EOF
+	cat <<EOF
 🚀 Demos Network Node Runner
 
 USAGE:
@@ -118,344 +118,343 @@ EOF
 
 # Git origin validation - ensures origin points to official repo
 check_git_origin() {
-    log_verbose "Checking git origin configuration..."
+	log_verbose "Checking git origin configuration..."
 
-    # Get current origin URL
-    local origin_url=$(git remote get-url origin 2>/dev/null)
+	# Get current origin URL
+	local origin_url=$(git remote get-url origin 2>/dev/null)
 
-    if [ -z "$origin_url" ]; then
-        echo "⚠️  No git origin configured"
-        return 0
-    fi
+	if [[ -z "${origin_url}" ]]; then
+		echo "⚠️  No git origin configured"
+		return 0
+	fi
 
-    # Define valid official origins (both HTTPS and SSH)
-    local valid_https="https://github.com/kynesyslabs/node"
-    local valid_https_git="https://github.com/kynesyslabs/node.git"
-    local valid_ssh="git@github.com:kynesyslabs/node.git"
-    local valid_ssh_alt="git@github.com:kynesyslabs/node"
+	# Define valid official origins (both HTTPS and SSH)
+	local valid_https="https://github.com/kynesyslabs/node"
+	local valid_https_git="https://github.com/kynesyslabs/node.git"
+	local valid_ssh="git@github.com:kynesyslabs/node.git"
+	local valid_ssh_alt="git@github.com:kynesyslabs/node"
 
-    # Check if origin is the official repo
-    if [ "$origin_url" = "$valid_https" ] || [ "$origin_url" = "$valid_https_git" ] || \
-       [ "$origin_url" = "$valid_ssh" ] || [ "$origin_url" = "$valid_ssh_alt" ]; then
-        log_verbose "Git origin is correctly set to official repository"
-        return 0
-    fi
+	# Check if origin is the official repo
+	if [[ "${origin_url}" = "${valid_https}" ]] || [[ "${origin_url}" = "${valid_https_git}" ]] ||
+		[[ "${origin_url}" = "${valid_ssh}" ]] || [[ "${origin_url}" = "${valid_ssh_alt}" ]]; then
+		log_verbose "Git origin is correctly set to official repository"
+		return 0
+	fi
 
-    # Origin is not official - likely a fork
-    echo ""
-    echo "⚠️  Git origin mismatch detected!"
-    echo "   Current origin: $origin_url"
-    echo "   Expected origin: $valid_https"
-    echo ""
-    echo "   This can cause 'git pull' to fail if your fork doesn't have the 'testnet' branch."
-    echo ""
+	# Origin is not official - likely a fork
+	echo ""
+	echo "⚠️  Git origin mismatch detected!"
+	echo "   Current origin: ${origin_url}"
+	echo "   Expected origin: ${valid_https}"
+	echo ""
+	echo "   This can cause 'git pull' to fail if your fork doesn't have the 'testnet' branch."
+	echo ""
 
-    # Check if this is likely a fork (contains github.com and /node)
-    if echo "$origin_url" | grep -qE "github\.com.*node"; then
-        echo "   It looks like you're using a fork of the repository."
-        echo ""
-        read -p "   Would you like to fix the origin to point to the official repo? [Y/n] " -n 1 -r
-        echo ""
+	# Check if this is likely a fork (contains github.com and /node)
+	if echo "${origin_url}" | grep -qE "github\.com.*node"; then
+		echo "   It looks like you're using a fork of the repository."
+		echo ""
+		read -p "   Would you like to fix the origin to point to the official repo? [Y/n] " -n 1 -r
+		echo ""
 
-        if [[ $REPLY =~ ^[Nn]$ ]]; then
-            echo "   Skipping git pull for this run (origin unchanged)."
-            echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
-            GIT_PULL=false
-            return 0
-        else
-            echo "   🔧 Updating origin to official repository..."
+		if [[ ${REPLY} =~ ^[Nn]$ ]]; then
+			echo "   Skipping git pull for this run (origin unchanged)."
+			echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+			GIT_PULL=false
+			return 0
+		else
+			echo "   🔧 Updating origin to official repository..."
 
-            # Save the old origin as 'fork' remote if it doesn't exist
-            if ! git remote get-url fork &>/dev/null; then
-                git remote add fork "$origin_url"
-                echo "   💾 Your fork saved as remote 'fork'"
-            fi
+			# Save the old origin as 'fork' remote if it doesn't exist
+			if ! git remote get-url fork &>/dev/null; then
+				git remote add fork "${origin_url}"
+				echo "   💾 Your fork saved as remote 'fork'"
+			fi
 
-            # Update origin to official repo
-            git remote set-url origin "$valid_https"
-            echo "   ✅ Origin updated to: $valid_https"
+			# Update origin to official repo
+			git remote set-url origin "${valid_https}"
+			echo "   ✅ Origin updated to ${valid_https}"
 
-            # Fetch from new origin
-            echo "   🔄 Fetching from official repository..."
-            git fetch origin
+			# Fetch from new origin
+			echo "   🔄 Fetching from official repository..."
+			git fetch origin
 
-            return 0
-        fi
-    else
-        echo "   Origin doesn't appear to be a GitHub repository."
-        echo "   Skipping git pull for this run."
-        echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
-        GIT_PULL=false
-        return 0
-    fi
+			return 0
+		fi
+	else
+		echo "   Origin doesn't appear to be a GitHub repository."
+		echo "   Skipping git pull for this run."
+		echo "   💡 Tip: Use './run -n true' to always skip git pull on custom setups."
+		GIT_PULL=false
+		return 0
+	fi
 }
 
 # System requirements validation
 check_system_requirements() {
-    echo "🔍 Checking system requirements..."
-    log_verbose "Platform detected: $PLATFORM_NAME"
+	echo "🔍 Checking system requirements..."
+	log_verbose "Platform detected: ${PLATFORM_NAME}"
 
-    local failed_requirements=0
-    local warnings=0
+	local failed_requirements=0
+	local warnings=0
 
-    # Load requirements from .requirements file if it exists
-    local MIN_RAM=4
-    local SUGGESTED_RAM=8
-    if [ -f ".requirements" ]; then
-        log_verbose "Loading requirements from .requirements file"
-        # Source the file to get the values
-        while IFS='=' read -r key value; do
-            # Skip comments and empty lines
-            [[ "$key" =~ ^#.*$ ]] && continue
-            [[ -z "$key" ]] && continue
-            # Remove any whitespace
-            key=$(echo "$key" | tr -d ' ')
-            value=$(echo "$value" | tr -d ' ')
-            case "$key" in
-                "MIN_RAM") MIN_RAM=$value ;;
-                "SUGGESTED_RAM") SUGGESTED_RAM=$value ;;
-            esac
-        done < .requirements
-        log_verbose "Loaded MIN_RAM=$MIN_RAM, SUGGESTED_RAM=$SUGGESTED_RAM"
-    fi
+	# Load requirements from .requirements file if it exists
+	local MIN_RAM=4
+	local SUGGESTED_RAM=8
+	if [[ -f ".requirements" ]]; then
+		log_verbose "Loading requirements from .requirements file"
+		# Source the file to get the values
+		while IFS='=' read -r key value; do
+			# Skip comments and empty lines
+			[[ ${key} =~ ^#.*$ ]] && continue
+			[[ -z ${key} ]] && continue
+			# Remove any whitespace
+			key=$(echo "${key}" | tr -d ' ')
+			value=$(echo "${value}" | tr -d ' ')
+			case "${key}" in
+			"MIN_RAM") MIN_RAM=${value} ;;
+			"SUGGESTED_RAM") SUGGESTED_RAM=${value} ;;
+			esac
+		done <.requirements
+		log_verbose "Loaded MIN_RAM=${MIN_RAM}, SUGGESTED_RAM=${SUGGESTED_RAM}"
+	fi
 
-    # Check RAM
-    log_verbose "Checking RAM requirements"
-    if [ "$PLATFORM_NAME" = "macOS" ]; then
-        # macOS: Get RAM in bytes, convert to GB
-        ram_bytes=$(sysctl -n hw.memsize)
-        ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
-    elif [ "$PLATFORM_NAME" = "Linux" ]; then
-        # Linux: Get RAM from /proc/meminfo in kB, convert to GB
-        ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-        ram_gb=$((ram_kb / 1024 / 1024))
-    else
-        echo "⚠️  Unknown platform - cannot check RAM"
-        ram_gb=0
-        warnings=$((warnings + 1))
-    fi
+	# Check RAM
+	log_verbose "Checking RAM requirements"
+	if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+		# macOS: Get RAM in bytes, convert to GB
+		ram_bytes=$(sysctl -n hw.memsize)
+		ram_gb=$((ram_bytes / 1024 / 1024 / 1024))
+	elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+		# Linux: Get RAM from /proc/meminfo in kB, convert to GB
+		ram_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+		ram_gb=$((ram_kb / 1024 / 1024))
+	else
+		echo "⚠️  Unknown platform - cannot check RAM"
+		ram_gb=0
+		warnings=$((warnings + 1))
+	fi
 
-    if [ $ram_gb -lt $MIN_RAM ]; then
-        echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: ${MIN_RAM}GB)"
-        failed_requirements=$((failed_requirements + 1))
-    elif [ $ram_gb -lt $SUGGESTED_RAM ]; then
-        echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: ${SUGGESTED_RAM}GB)"
-        warnings=$((warnings + 1))
-    else
-        echo "✅ RAM: ${ram_gb}GB"
-    fi
+	if [[ "$ram_gb" -lt "$MIN_RAM" ]]; then
+		echo "❌ Insufficient RAM: ${ram_gb}GB (minimum: ${MIN_RAM}GB)"
+		failed_requirements=$((failed_requirements + 1))
+	elif [[ "$ram_gb" -lt "$SUGGESTED_RAM" ]]; then
+		echo "⚠️  RAM below recommended: ${ram_gb}GB (recommended: ${SUGGESTED_RAM}GB)"
+		warnings=$((warnings + 1))
+	else
+		echo "✅ RAM: ${ram_gb}GB"
+	fi
 
-    # Check CPU cores
-    log_verbose "Checking CPU requirements"
-    if [ "$PLATFORM_NAME" = "macOS" ]; then
-        cpu_cores=$(sysctl -n hw.ncpu)
-    elif [ "$PLATFORM_NAME" = "Linux" ]; then
-        cpu_cores=$(nproc)
-    else
-        echo "⚠️  Unknown platform - cannot check CPU"
-        cpu_cores=0
-        warnings=$((warnings + 1))
-    fi
+	# Check CPU cores
+	log_verbose "Checking CPU requirements"
+	if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+		cpu_cores=$(sysctl -n hw.ncpu)
+	elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+		cpu_cores=$(nproc)
+	else
+		echo "⚠️  Unknown platform - cannot check CPU"
+		cpu_cores=0
+		warnings=$((warnings + 1))
+	fi
 
-    if [ $cpu_cores -lt 4 ]; then
-        echo "❌ Insufficient CPU cores: ${cpu_cores} (minimum: 4)"
-        failed_requirements=$((failed_requirements + 1))
-    else
-        echo "✅ CPU cores: ${cpu_cores}"
-    fi
+	if [[ "$cpu_cores" -lt 4 ]]; then
+		echo "❌ Insufficient CPU cores: ${cpu_cores} (minimum: 4)"
+		failed_requirements=$((failed_requirements + 1))
+	else
+		echo "✅ CPU cores: ${cpu_cores}"
+	fi
 
-    # Check network connectivity (ping 1.1.1.1)
-    log_verbose "Checking network connectivity"
-    if command -v ping > /dev/null; then
-        if [ "$PLATFORM_NAME" = "macOS" ]; then
-            # macOS ping syntax
-            ping_result=$(ping -c 3 -t 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
-        elif [ "$PLATFORM_NAME" = "Linux" ]; then
-            # Linux ping syntax
-            ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
-        fi
+	# Check network connectivity (ping 1.1.1.1)
+	log_verbose "Checking network connectivity"
+	if command -v ping >/dev/null; then
+		if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+			# macOS ping syntax
+			ping_result=$(ping -c 3 -t 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
+		elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+			# Linux ping syntax
+			ping_result=$(ping -c 3 -W 5 1.1.1.1 2>/dev/null | tail -1 | awk -F'/' '{print $5}' | cut -d'.' -f1)
+		fi
 
-        # if [ -z "$ping_result" ]; then
-        #     echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
-        #     failed_requirements=$((failed_requirements + 1))
-        # elif [ "$ping_result" -gt 200 ]; then
-        #     echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
-        #     failed_requirements=$((failed_requirements + 1))
-        # elif [ "$ping_result" -gt 100 ]; then
-        #     echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
-        #     warnings=$((warnings + 1))
-        # else
-        #     echo "✅ Network latency: ${ping_result}ms"
-        # fi
-    else
-        echo "⚠️  Cannot test network - ping command not available"
-        warnings=$((warnings + 1))
-    fi
+		# if [[ -z "${ping_result}" ]]; then
+		# 	echo "❌ Network connectivity failed - cannot reach 1.1.1.1"
+		# 	failed_requirements=$((failed_requirements + 1))
+		# elif [[ "${ping_result}" -gt 200 ]]; then
+		# 	echo "❌ Network latency too high: ${ping_result}ms (maximum: 200ms)"
+		# 	failed_requirements=$((failed_requirements + 1))
+		# elif [[ "${ping_result}" -gt 100 ]]; then
+		# 	echo "⚠️  Network latency above recommended: ${ping_result}ms (recommended: <100ms)"
+		# 	warnings=$((warnings + 1))
+		# else
+		# 	echo "✅ Network latency: ${ping_result}ms"
+		# fi
+	else
+		echo "⚠️  Cannot test network - ping command not available"
+		warnings=$((warnings + 1))
+	fi
 
-    # Helper function to check if a port is in use
-    is_port_in_use() {
-        local port=$1
-        if command -v lsof > /dev/null; then
-            lsof -i :$port > /dev/null 2>&1
-            return $?
-        elif command -v netstat > /dev/null; then
-            netstat -an | grep ":$port " > /dev/null 2>&1
-            return $?
-        else
-            # Cannot check, assume not in use
-            return 1
-        fi
-    }
+	# Helper function to check if a port is in use
+	is_port_in_use() {
+		local port=$1
+		if command -v lsof >/dev/null; then
+			lsof -i :"$port" >/dev/null 2>&1
+			return $?
+		elif command -v netstat >/dev/null; then
+			netstat -an | grep ":${port} " >/dev/null 2>&1
+			return $?
+		else
+			# Cannot check, assume not in use
+			return 1
+		fi
+	}
 
-    # Check port availability
-    log_verbose "Checking port availability"
+	# Check port availability
+	log_verbose "Checking port availability"
 
-    if ! command -v lsof > /dev/null && ! command -v netstat > /dev/null; then
-        echo "⚠️  Cannot check port availability - lsof and netstat not available"
-        warnings=$((warnings + 1))
-    else
-        # Only check PostgreSQL port if not using external database
-        if [ "$EXTERNAL_DB" = false ]; then
-            # Check PostgreSQL port with auto-recovery attempt
-            if is_port_in_use $PG_PORT; then
-                echo "⚠️  PostgreSQL port $PG_PORT is in use, attempting to stop leftover containers..."
-                log_verbose "Trying to stop postgres_${PG_PORT} container"
+	if ! command -v lsof >/dev/null && ! command -v netstat >/dev/null; then
+		echo "⚠️  Cannot check port availability - lsof and netstat not available"
+		warnings=$((warnings + 1))
+	else
+		# Only check PostgreSQL port if not using external database
+		if [[ "${EXTERNAL_DB}" = false ]]; then
+			# Check PostgreSQL port with auto-recovery attempt
+			if is_port_in_use "$PG_PORT"; then
+				echo "⚠️  PostgreSQL port ${PG_PORT} is in use, attempting to stop leftover containers..."
+				log_verbose "Trying to stop postgres_${PG_PORT} container"
 
-                # Try to stop the docker container that might be using the port
-                PG_FOLDER="postgres_${PG_PORT}"
-                if [ -d "$PG_FOLDER" ]; then
-                    (cd "$PG_FOLDER" && docker compose down 2>/dev/null) || true
-                    sleep 2  # Give Docker time to release the port
-                fi
+				# Try to stop the docker container that might be using the port
+				PG_FOLDER="postgres_${PG_PORT}"
+				if [[ -d "${PG_FOLDER}" ]]; then
+					(cd "${PG_FOLDER}" && docker compose down 2>/dev/null) || true
+					sleep 2 # Give Docker time to release the port
+				fi
 
-                # Also try the base postgres folder in case it's using the port
-                if [ -d "postgres" ]; then
-                    (cd "postgres" && docker compose down 2>/dev/null) || true
-                    sleep 1
-                fi
+				# Also try the base postgres folder in case it's using the port
+				if [[ -d "postgres" ]]; then
+					(cd "postgres" && docker compose down 2>/dev/null) || true
+					sleep 1
+				fi
 
-                # Recheck after cleanup attempt
-                if is_port_in_use $PG_PORT; then
-                    echo "❌ PostgreSQL port $PG_PORT is still in use after cleanup attempt"
-                    echo "   Another process is using this port. Check with: lsof -i :$PG_PORT"
-                    failed_requirements=$((failed_requirements + 1))
-                else
-                    echo "✅ PostgreSQL port $PG_PORT is now available (stopped leftover container)"
-                fi
-            else
-                echo "✅ PostgreSQL port $PG_PORT is available"
-            fi
-        fi
+				# Recheck after cleanup attempt
+				if is_port_in_use "$PG_PORT"; then
+					echo "❌ PostgreSQL ${PG_PORT} is still in use after cleanup attempt"
+					echo "   Another process is using this port. Check with: lsof -i :${PG_PORT}"
+					failed_requirements=$((failed_requirements + 1))
+				else
+					echo "✅ PostgreSQL ${PG_PORT} is now available (stopped leftover container)"
+				fi
+			else
+				echo "✅ PostgreSQL ${PG_PORT} is available"
+			fi
+		fi
 
-        # Check Node port
-        if is_port_in_use $PORT; then
-            echo "❌ Node port $PORT is already in use"
-            failed_requirements=$((failed_requirements + 1))
-        else
-            echo "✅ Node port $PORT is available"
-        fi
-    fi
+		# Check Node port
+		if is_port_in_use "$PORT"; then
+			echo "❌ Node ${PORT} is already in use"	
+			failed_requirements=$((failed_requirements + 1))
+		else
+			echo "✅ Node ${PORT} is available"
+		fi
+	fi
 
-    # Summary
-    if [ $failed_requirements -gt 0 ]; then
-        echo ""
-        echo "❌ System requirements check FAILED!"
-        echo "   Failed requirements: $failed_requirements"
-        echo "   Please resolve the above issues before running the node."
-        echo ""
-        echo "💡 Need help? Visit: https://demos.network/support"
-        exit 1
-    elif [ $warnings -gt 0 ]; then
-        echo ""
-        echo "⚠️  System requirements check passed with $warnings warning(s)"
-        echo "   The node will run but performance may be limited."
-        echo ""
-    else
-        echo ""
-        echo "✅ All system requirements met!"
-        echo ""
-    fi
+	# Summary
+	if [[ "$failed_requirements" -gt 0 ]]; then
+		echo ""
+		echo "❌ System requirements check FAILED!"
+		echo "   Failed requirements: ${failed_requirements}"
+		echo "   Please resolve the above issues before running the node."
+		echo ""
+		echo "💡 Need help? Visit: https://demos.network/support"
+		exit 1
+	elif [[ "$warnings" -gt 0 ]]; then
+		echo ""
+		echo "⚠️  System requirements check passed with ${warnings} warning(s)"
+		echo "   The node will run but performance may be limited."
+		echo ""
+	else
+		echo ""
+		echo "✅ All system requirements met!"
+		echo ""
+	fi
 }
 
 function ctrl_c() {
-    HAS_BEEN_INTERRUPTED=true
-    if [ "$EXTERNAL_DB" = false ]; then
-        cd postgres
-        docker compose down
-        cd ..
-    fi
-    # Stop TLSNotary container if running (enabled by default)
-    if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
-        (cd tlsnotary && docker compose down --timeout 5 2>/dev/null) || true
-        # Force kill if still running
-        docker rm -f "tlsn-notary-${TLSNOTARY_PORT:-7047}" 2>/dev/null || true
-    fi
-    # Stop monitoring stack if running (enabled by default)
-    if [ "$MONITORING_DISABLED" != "true" ] && [ -d "monitoring" ]; then
-        (cd monitoring && docker compose down --timeout 5 2>/dev/null) || true
-    fi
+	HAS_BEEN_INTERRUPTED=true
+	if [[ "${EXTERNAL_DB}" = false ]]; then
+		cd postgres
+		docker compose down
+		cd ..
+	fi
+	# Stop TLSNotary container if running (enabled by default)
+	if [[ "${TLSNOTARY_DISABLED}" != "true" ]] && [[ -d "tlsnotary" ]]; then
+		(cd tlsnotary && docker compose down --timeout 5 2>/dev/null) || true
+		# Force kill if still running
+		docker rm -f "tlsn-notary-${TLSNOTARY_PORT:-7047}" 2>/dev/null || true
+	fi
+	# Stop monitoring stack if running (enabled by default)
+	if [[ "${MONITORING_DISABLED}" != "true" ]] && [[ -d "monitoring" ]]; then
+		(cd monitoring && docker compose down --timeout 5 2>/dev/null) || true
+	fi
 }
 
 # Function to check if we are on the first run with the .RUN file
 function is_first_run() {
-    if [ ! -f ".RUN" ]; then
-        return 0
-    else
-        return 1
-    fi
+	if [ ! -f ".RUN" ]; then
+		return 0
+	else
+		return 1
+	fi
 }
-
 
 # If we are on the first run, we need to install the dependencies
 if is_first_run; then
-    echo "Installing node dependencies"
-    if ! bun install; then
-        echo "Error: Dependencies failed to install"
-        exit 1
-    fi
-    echo "Ok, dependencies installed"
-    patch_falcon_sign
-    # We need docker and docker compose to be installed (unless using external DB)
-    if [ "$EXTERNAL_DB" = false ]; then
-        echo "🔍 Checking Docker..."
-        if ! command -v docker &> /dev/null; then
-            echo "❌ Docker is not installed"
-            echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
-            if [ "$PLATFORM_NAME" = "macOS" ]; then
-                echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
-            elif [ "$PLATFORM_NAME" = "Linux" ]; then
-                echo "🐧 On Linux: Use your package manager or install script"
-            fi
-            exit 1
-        fi
+	echo "Installing node dependencies"
+	if ! bun install; then
+		echo "Error: Dependencies failed to install"
+		exit 1
+	fi
+	echo "Ok, dependencies installed"
+	patch_falcon_sign
+	# We need docker and docker compose to be installed (unless using external DB)
+	if [[ "${EXTERNAL_DB}" = false ]]; then
+		echo "🔍 Checking Docker..."
+		if ! command -v docker &>/dev/null; then
+			echo "❌ Docker is not installed"
+			echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
+			if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+				echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
+			elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+				echo "🐧 On Linux: Use your package manager or install script"
+			fi
+			exit 1
+		fi
 
-        if ! docker compose version &> /dev/null; then
-            echo "❌ Docker Compose is not available"
-            echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
-            exit 1
-        fi
+		if ! docker compose version &>/dev/null; then
+			echo "❌ Docker Compose is not available"
+			echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
+			exit 1
+		fi
 
-        # Check if Docker daemon is running
-        if ! docker info &> /dev/null; then
-            echo "❌ Docker daemon is not running"
-            echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
-            exit 1
-        fi
+		# Check if Docker daemon is running
+		if ! docker info &>/dev/null; then
+			echo "❌ Docker daemon is not running"
+			echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
+			exit 1
+		fi
 
-        echo "✅ Docker and Docker Compose are ready"
-    fi
-    # Check if Bun is installed
-    if ! command -v bun &> /dev/null; then
-        echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
-        echo "Install bun following: https://bun.sh/docs/installation."
-        exit 1
-    else
-        echo "Ok, Bun is installed"
-    fi
-    # This file is used to check if we are on the first run
+		echo "✅ Docker and Docker Compose are ready"
+	fi
+	# Check if Bun is installed
+	if ! command -v bun &>/dev/null; then
+		echo "Error: Bun is not installed and is required to run the node (since 0.9.5)"
+		echo "Install bun following: https://bun.sh/docs/installation."
+		exit 1
+	else
+		echo "Ok, Bun is installed"
+	fi
+	# This file is used to check if we are on the first run
 
-    # This file is used to check if we are on the first run
-    touch .RUN
+	# This file is used to check if we are on the first run
+	touch .RUN
 fi
 
 CLEAN="false"
@@ -463,430 +462,433 @@ PORT=53550
 
 # Handle long options (--no-tui, --external-db) before getopts
 for arg in "$@"; do
-    case $arg in
-        --no-tui)
-            NO_TUI=true
-            # Remove --no-tui from arguments so getopts doesn't choke on it
-            set -- "${@/--no-tui/}"
-            ;;
-        --external-db)
-            EXTERNAL_DB=true
-            # Remove --external-db from arguments so getopts doesn't choke on it
-            set -- "${@/--external-db/}"
-            ;;
-        --no-monitoring)
-            MONITORING_DISABLED=true
-            # Remove --no-monitoring from arguments so getopts doesn't choke on it
-            set -- "${@/--no-monitoring/}"
-            ;;
-    esac
+	case ${arg} in
+	--no-tui)
+		NO_TUI=true
+		# Remove --no-tui from arguments so getopts doesn't choke on it
+		set -- "${@/--no-tui/}"
+		;;
+	--external-db)
+		EXTERNAL_DB=true
+		# Remove --external-db from arguments so getopts doesn't choke on it
+		set -- "${@/--external-db/}"
+		;;
+	--no-monitoring)
+		MONITORING_DISABLED=true
+		# Remove --no-monitoring from arguments so getopts doesn't choke on it
+		set -- "${@/--no-monitoring/}"
+		;;
+	esac
 done
 
 # Getting arguments
 while getopts "p:d:c:i:n:u:l:r:b:tvehm" opt; do
-    case $opt in
-        p) PORT=$OPTARG;;
-        d) PG_PORT=$OPTARG;;
-        c) CLEAN=$OPTARG;;
-        i) IDENTITY_FILE=$OPTARG;;
-        l) PEER_LIST_FILE=$OPTARG;;
-        n) GIT_PULL=false;;
-        u) EXPOSED_URL=$OPTARG;;
-        r) RUNTIME=$OPTARG;;
-        b) RESTORE=$OPTARG;;
-        t) NO_TUI=true;;
-        v) VERBOSE=true;;
-        e) EXTERNAL_DB=true;;
-        m) MONITORING_DISABLED=true;;
-        h) show_help; exit 0;;
-        *) echo "Invalid option. Use -h for help."; exit 1;;
-    esac
+	case $opt in
+	p) PORT=$OPTARG ;;
+	d) PG_PORT=$OPTARG ;;
+	c) CLEAN=$OPTARG ;;
+	i) IDENTITY_FILE=$OPTARG ;;
+	l) PEER_LIST_FILE=$OPTARG ;;
+	n) GIT_PULL=false ;;
+	u) EXPOSED_URL=$OPTARG ;;
+	r) RUNTIME=$OPTARG ;;
+	b) RESTORE=${OPTARG} ;;
+	t) NO_TUI=true ;;
+	v) VERBOSE=true ;;
+	e) EXTERNAL_DB=true ;;
+	m) MONITORING_DISABLED=true ;;
+	h)
+		show_help
+		exit 0
+		;;
+	*)
+		echo "Invalid option. Use -h for help."
+		exit 1
+		;;
+	esac
 done
-shift $((OPTIND -1))
+shift $((OPTIND - 1))
 
 # if RESTORE is true, make clean false
-if [ "$RESTORE" == "true" ]; then
-    CLEAN="false"
+if [[ "${RESTORE}" == "true" ]]; then
+	CLEAN="false"
 fi
 
 # Run system requirements check
 check_system_requirements
 
 # Check git origin configuration (may disable GIT_PULL if fork detected)
-if [ "$GIT_PULL" = true ]; then
-    check_git_origin
+if [[ "${GIT_PULL}" = true ]]; then
+	check_git_origin
 fi
 
 # Perform git pull if GIT_PULL is true
 if [ "$GIT_PULL" = true ]; then
-    echo "🔄 Updating repository..."
-    log_verbose "Running git pull to get latest changes"
+	echo "🔄 Updating repository..."
+	log_verbose "Running git pull to get latest changes"
 
-    # Attempt git pull, handle conflicts
-    PULL_OUTPUT=$(git pull 2>&1)
-    PULL_EXIT_CODE=$?
+	# Attempt git pull, handle conflicts
+	PULL_OUTPUT=$(git pull 2>&1)
+	PULL_EXIT_CODE=$?
 
-    if [ $PULL_EXIT_CODE -ne 0 ]; then
-        # Check if the conflict is ONLY about package.json (stash issue)
-        if echo "$PULL_OUTPUT" | grep -qE "package\.json" && ! echo "$PULL_OUTPUT" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
-            echo "⚠️  package.json conflict detected, stashing and retrying..."
-            log_verbose "Stashing local changes to package.json"
-            git stash
-            if ! git pull; then
-                echo "❌ Git pull failed even after stashing"
-                exit 1
-            fi
-            echo "✅ Repository updated after stashing package.json"
-        else
-            # Hard exit on any other git pull failure
-            echo "❌ Git pull failed:"
-            echo "$PULL_OUTPUT"
-            echo ""
+	if [[ "$PULL_EXIT_CODE" -ne 0 ]]; then
+		# Check if the conflict is ONLY about package.json (stash issue)
+		if echo "${PULL_OUTPUT}" | grep -qE "package\.json" && ! echo "${PULL_OUTPUT}" | grep -vE "package\.json|error:|CONFLICT|stash|overwritten" | grep -qE "\.ts|\.js|\.md|\.json"; then
+			echo "⚠️  package.json conflict detected, stashing and retrying..."
+			log_verbose "Stashing local changes to package.json"
+			git stash
+			if ! git pull; then
+				echo "❌ Git pull failed even after stashing"
+				exit 1
+			fi
+			echo "✅ Repository updated after stashing package.json"
+		else
+			# Hard exit on any other git pull failure
+			echo "❌ Git pull failed:"
+			echo "${PULL_OUTPUT}"
+			echo ""
 
-            # Check for specific "no such ref" error (common with forks)
-            if echo "$PULL_OUTPUT" | grep -q "no such ref was fetched"; then
-                echo "💡 This error typically occurs when:"
-                echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
-                echo "   - Run 'git remote -v' to check your remotes"
-                echo ""
-                echo "   Quick fixes:"
-                echo "   1. Skip git pull: ./run -n true"
-                echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
-                echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
-            else
-                echo "💡 Please resolve git conflicts manually and try again"
-            fi
-            exit 1
-        fi
-    else
-        echo "✅ Repository updated successfully"
-    fi
+			# Check for specific "no such ref" error (common with forks)
+			if echo "${PULL_OUTPUT}" | grep -q "no such ref was fetched"; then
+				echo "💡 This error typically occurs when:"
+				echo "   - Your 'origin' remote points to a fork that doesn't have the 'testnet' branch"
+				echo "   - Run 'git remote -v' to check your remotes"
+				echo ""
+				echo "   Quick fixes:"
+				echo "   1. Skip git pull: ./run -n true"
+				echo "   2. Fix origin: git remote set-url origin https://github.com/kynesyslabs/node"
+				echo "   3. Or re-run ./run and choose 'Y' when prompted about the fork"
+			else
+				echo "💡 Please resolve git conflicts manually and try again"
+			fi
+			exit 1
+		fi
+	else
+		echo "✅ Repository updated successfully"
+	fi
 
-    # Always run bun install after successful git pull
-    echo "📦 Installing dependencies..."
-    log_verbose "Running bun install after git pull"
-    if ! bun install; then
-        echo "❌ Failed to install dependencies"
-        exit 1
-    fi
-    echo "✅ Dependencies installed successfully"
-    patch_falcon_sign
+	# Always run bun install after successful git pull
+	echo "📦 Installing dependencies..."
+	log_verbose "Running bun install after git pull"
+	if ! bun install; then
+		echo "❌ Failed to install dependencies"
+		exit 1
+	fi
+	echo "✅ Dependencies installed successfully"
+	patch_falcon_sign
 fi
-
 
 echo ""
 echo "🚀 Welcome to Demos Network!"
 echo "⚙️  Node Configuration:"
 echo "   🌐 Node Port: $PORT"
-if [ "$EXTERNAL_DB" = false ]; then
-    echo "   🗄️  Database Port: $PG_PORT"
+if [[ "${EXTERNAL_DB}" = false ]]; then
+	echo "   🗄️  Database Port: $PG_PORT"
 fi
-if [ ! -z "$IDENTITY_FILE" ]; then
-    echo "   🔑 Identity File: $IDENTITY_FILE"
+if [[ ! -z "${IDENTITY_FILE}" ]]; then
+	echo "   🔑 Identity File: $IDENTITY_FILE"
 fi
-if [ ! -z "$EXPOSED_URL" ]; then
-    echo "   📡 Exposed URL: $EXPOSED_URL"
+if [[ ! -z "${EXPOSED_URL}" ]]; then
+	echo "   📡 Exposed URL: $EXPOSED_URL"
 fi
 echo "   👥 Peer List: $PEER_LIST_FILE"
-if [ "$EXTERNAL_DB" = true ]; then
-    echo "   🔗 Mode: External database (DATABASE_URL)"
-elif [ "$RESTORE" = "true" ]; then
-    echo "   📦 Mode: Restore from backup"
-elif [ "$CLEAN" = "true" ]; then
-    echo "   🧹 Mode: Clean start (fresh database)"
+if [[ "${EXTERNAL_DB}" = true ]]; then
+	echo "   🔗 Mode: External database (DATABASE_URL)"
+elif [[ "${RESTORE}" = "true" ]]; then
+	echo "   📦 Mode: Restore from backup"
+elif [[ "${CLEAN}" = "true" ]]; then
+	echo "   🧹 Mode: Clean start (fresh database)"
 else
-    echo "   ▶️  Mode: Normal start"
+	echo "   ▶️  Mode: Normal start"
 fi
-if [ "$NO_TUI" = true ]; then
-    echo "   📜 Display: Legacy logs (TUI disabled)"
+if [[ "${NO_TUI}" = true ]]; then
+	echo "   📜 Display: Legacy logs (TUI disabled)"
 else
-    echo "   🖥️  Display: TUI (use -t or --no-tui for legacy logs)"
+	echo "   🖥️  Display: TUI (use -t or --no-tui for legacy logs)"
 fi
-log_verbose "Platform: $PLATFORM_NAME"
+log_verbose "Platform: ${PLATFORM_NAME}"
 log_verbose "Verbose logging enabled"
 echo ""
 
 # Check if runtime is forced via CLI argument
 if [ ! -z "$RUNTIME" ]; then
-    case $RUNTIME in
-        "node")
-            echo "❌ Error: Node runtime requested but Bun is required to run the node (since 0.9.5)"
-            exit 1
-            ;;
-        "bun")
-            if ! command -v bun &> /dev/null; then
-                echo "❌ Error: Bun runtime requested but Bun is not installed"
-                exit 1
-            fi
-            START_COMMAND="bun run start:bun"
-            ;;
-        *)
-            echo "❌ Error: Invalid runtime specified. Use 'bun' only (node deprecated)"
-            exit 1
-            ;;
-    esac
+	case $RUNTIME in
+	"node")
+		echo "❌ Error: Node runtime requested but Bun is required to run the node (since 0.9.5)"
+		exit 1
+		;;
+	"bun")
+		if ! command -v bun &>/dev/null; then
+			echo "❌ Error: Bun runtime requested but Bun is not installed"
+			exit 1
+		fi
+		START_COMMAND="bun run start:bun"
+		;;
+	*)
+		echo "❌ Error: Invalid runtime specified. Use 'bun' only (node deprecated)"
+		exit 1
+		;;
+	esac
 else
-    # Default behavior: Check if Bun is available and set the start command
-    if command -v bun &> /dev/null; then
-        START_COMMAND="bun run start:bun"
-        log_verbose "Using Bun runtime with command: $START_COMMAND"
-    else
-        echo "❌ Error: Bun is not installed and is required to run the node (since 0.9.5)"
-        echo "💡 Install Bun from: https://bun.sh/docs/installation"
-        if [ "$PLATFORM_NAME" = "macOS" ]; then
-            echo "🍎 On macOS: brew install oven-sh/bun/bun"
-        elif [ "$PLATFORM_NAME" = "Linux" ]; then
-            echo "🐧 On Linux: curl -fsSL https://bun.sh/install | bash"
-        fi
-        exit 1
-    fi
-    # Temporary overriding
-    START_COMMAND="bun start:bun"  # REVIEW Consider using bun directly
+	# Default behavior: Check if Bun is available and set the start command
+	if command -v bun &>/dev/null; then
+		START_COMMAND="bun run start:bun"
+		log_verbose "Using Bun runtime with command: ${START_COMMAND}"
+	else
+		echo "❌ Error: Bun is not installed and is required to run the node (since 0.9.5)"
+		echo "💡 Install Bun from: https://bun.sh/docs/installation"
+		if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+			echo "🍎 On macOS: brew install oven-sh/bun/bun"
+		elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+			echo "🐧 On Linux: curl -fsSL https://bun.sh/install | bash"
+		fi
+		exit 1
+	fi
+	# Temporary overriding
+	START_COMMAND="bun start:bun" # REVIEW Consider using bun directly
 fi
 
-
 echo "🚀 Starting your Demos Network node..."
-log_verbose "Using command: $START_COMMAND"
+log_verbose "Using command: ${START_COMMAND}"
 echo "💡 This may take a moment to initialize all services..."
 sleep 1
-
 
 # PG_PORT and IDENTITY_FILE are exported for both docker and bun
 export PG_PORT=$PG_PORT
 export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
-export RESTORE=$RESTORE
+export RESTORE=${RESTORE}
 
 # Only manage PostgreSQL if not using external database
-if [ "$EXTERNAL_DB" = false ]; then
-    # Database management with proper folder based on the port
-    # Create a unique postgres folder for this instance based on the port number
-    PG_FOLDER="postgres_${PG_PORT}"
+if [[ "${EXTERNAL_DB}" = false ]]; then
+	# Database management with proper folder based on the port
+	# Create a unique postgres folder for this instance based on the port number
+	PG_FOLDER="postgres_${PG_PORT}"
 
-    # If the folder doesn't exist yet, create it by copying the base postgres folder
-    # This allows multiple instances to run simultaneously with different ports
-    if [ ! -d "$PG_FOLDER" ]; then
-        cp -r postgres $PG_FOLDER
-    fi
-    cd $PG_FOLDER
+	# If the folder doesn't exist yet, create it by copying the base postgres folder
+	# This allows multiple instances to run simultaneously with different ports
+	if [ ! -d "$PG_FOLDER" ]; then
+		cp -r postgres $PG_FOLDER
+	fi
+	cd $PG_FOLDER || exit
 
-    # If we are cleaning, we need to remove the database
-    if [ "$CLEAN" == "true" ]; then
-        echo "🧹 Cleaning the database..."
-        log_verbose "Removing existing database data for clean start"
-        sleep 1
-        rm -rf data_*
-        mkdir data_${PG_PORT}
-        echo "✅ Database cleaned"
-    fi
+	# If we are cleaning, we need to remove the database
+	if [[ "${CLEAN}" == "true" ]]; then
+		echo "🧹 Cleaning the database..."
+		log_verbose "Removing existing database data for clean start"
+		sleep 1
+		rm -rf data_*
+		mkdir data_"${PG_PORT}"
+		echo "✅ Database cleaned"
+	fi
 
-    # Suppressing errors if the database is not running
-    docker compose down > /dev/null 2>&1
-    if [ "$CLEAN" == "true" ]; then
-        rm -rf data_${PG_PORT} || rm -rf data_${PG_PORT}
-        mkdir data_${PG_PORT}
-    fi
+	# Suppressing errors if the database is not running
+	docker compose down >/dev/null 2>&1
+	if [[ "${CLEAN}" == "true" ]]; then
+		rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"
+		mkdir data_"${PG_PORT}"
+	fi
 
-    # Finally starting the database
-    echo "🗄️  Starting PostgreSQL database..."
-    log_verbose "Running docker compose up -d in $PG_FOLDER"
-    if ! docker compose up -d; then
-        echo "❌ Failed to start PostgreSQL database"
-        echo "💡 Check Docker Desktop is running and try again"
-        exit 1
-    fi
-    echo "✅ PostgreSQL container started"
-    cd ..
+	# Finally starting the database
+	echo "🗄️  Starting PostgreSQL database..."
+	log_verbose "Running docker compose up -d in ${PG_FOLDER}"
+	if ! docker compose up -d; then
+		echo "❌ Failed to start PostgreSQL database"
+		echo "💡 Check Docker Desktop is running and try again"
+		exit 1
+	fi
+	echo "✅ PostgreSQL container started"
+	cd ..
 
-    function is_db_ready() {
-        docker exec postgres_${PG_PORT} pg_isready -U demosuser -d demos > /dev/null 2>&1
-        return $?
-    }
+	function is_db_ready() {
+		docker exec postgres_"${PG_PORT}" pg_isready -U demosuser -d demos >/dev/null 2>&1
+		return $?
+	}
 
-    # Function to wait for database availability
-    function wait_for_database() {
-        local port=$1
-        local timeout=${2:-30}  # Increased timeout to 30 seconds
+	# Function to wait for database availability
+	function wait_for_database() {
+		local port=$1
+		local timeout=${2:-30} # Increased timeout to 30 seconds
 
-        echo "⏳ Waiting for PostgreSQL to be available on port $port..."
-        log_verbose "Checking database connectivity with timeout of ${timeout}s"
-        local count=0
-        while ! nc -z localhost $port; do
-            if [ $((count % 5)) -eq 0 ]; then
-                echo "   Still waiting... (${count}s elapsed)"
-            fi
-            count=$((count+1))
-            if [ $count -gt $timeout ]; then
-                echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
-                echo "💡 Try increasing resources or check Docker logs"
-                return 1
-            fi
-            sleep 1
-        done
-        echo "✅ PostgreSQL is accepting connections"
-        return 0
-    }
+		echo "⏳ Waiting for PostgreSQL to be available on port ${port}..."
+		log_verbose "Checking database connectivity with timeout of ${timeout}s"
+		local count=0
+		while ! nc -z localhost "$port"; do
+			if [[ $((count % 5)) -eq 0 ]]; then
+				echo "   Still waiting... (${count}s elapsed)"
+			fi
+			count=$((count + 1))
+			if [[ "$count" -gt "$timeout" ]]; then
+				echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
+				echo "💡 Try increasing resources or check Docker logs"
+				return 1
+			fi
+			sleep 1
+		done
+		echo "✅ PostgreSQL is accepting connections"
+		return 0
+	}
 
-    function wait_for_database_ready() {
-        local port=$1
-        local timeout=${2:-20}  # Increased timeout to 20 seconds
+	function wait_for_database_ready() {
+		local port=$1
+		local timeout=${2:-20} # Increased timeout to 20 seconds
 
-        echo "⏳ Waiting for PostgreSQL to be ready for connections..."
-        log_verbose "Checking database readiness with pg_isready, timeout ${timeout}s"
-        local count=0
-        while ! is_db_ready; do
-            if [ $((count % 3)) -eq 0 ] && [ $count -gt 0 ]; then
-                echo "   Database initializing... (${count}s elapsed)"
-            fi
-            count=$((count+1))
-            if [ $count -gt $timeout ]; then
-                echo "❌ Timeout waiting for PostgreSQL to be ready after ${timeout}s"
-                echo "💡 Database may be still initializing - check Docker logs"
-                return 1
-            fi
-            sleep 1
-        done
-        echo "✅ PostgreSQL is ready for operations"
-        return 0
-    }
+		echo "⏳ Waiting for PostgreSQL to be ready for connections..."
+		log_verbose "Checking database readiness with pg_isready, timeout ${timeout}s"
+		local count=0
+		while ! is_db_ready; do
+			if [[ $((count % 3)) -eq 0 ]] && [[ "$count" -gt 0 ]]; then
+				echo "   Database initializing... (${count}s elapsed)"
+			fi
+			count=$((count + 1))
+			if [[ "$count" -gt "$timeout" ]]; then
+				echo "❌ Timeout waiting for PostgreSQL to be ready after ${timeout}s"
+				echo "💡 Database may be still initializing - check Docker logs"
+				return 1
+			fi
+			sleep 1
+		done
+		echo "✅ PostgreSQL is ready for operations"
+		return 0
+	}
 
-    # Replace the original wait code with function call
-    if ! wait_for_database $PG_PORT; then
-        echo "❌ Failed to connect to PostgreSQL database"
-        echo "💡 Try restarting Docker or check system resources"
-        exit 1
-    fi
+	# Replace the original wait code with function call
+	if ! wait_for_database "$PG_PORT"; then
+		echo "❌ Failed to connect to PostgreSQL database"
+		echo "💡 Try restarting Docker or check system resources"
+		exit 1
+	fi
 
-    if [ "$RESTORE" == "true" ]; then
-        if ! wait_for_database_ready $PG_PORT; then
-            echo "❌ Failed to connect to PostgreSQL database"
-            echo "💡 Database may need more time to initialize"
-            exit 1
-        fi
+	if [[ "${RESTORE}" == "true" ]]; then
+		if ! wait_for_database_ready "$PG_PORT"; then
+			echo "❌ Failed to connect to PostgreSQL database"
+			echo "💡 Database may need more time to initialize"
+			exit 1
+		fi
 
-        echo "🔄 Restoring the node"
-        if ! bun run restore; then
-            echo "❌ Error: Failed to restore the node"
-            exit 1
-        fi
-        # sleep 20
-        # exit 0
+		echo "🔄 Restoring the node"
+		if ! bun run restore; then
+			echo "❌ Error: Failed to restore the node"
+			exit 1
+		fi
+		# sleep 20
+		# exit 0
 
-        # Stop the database
-        echo "Stopping the database"
-        cd postgres_${PG_PORT}
-        docker compose down
+		# Stop the database
+		echo "Stopping the database"
+		cd postgres_${PG_PORT} || exit
+		docker compose down
 
-        # Remove the database folder
-        echo "Removing the database folder"
-        rm -rf data_* || sudo rm -rf data_*
-        mkdir data_${PG_PORT}
+		# Remove the database folder
+		echo "Removing the database folder"
+		rm -rf data_* || sudo rm -rf data_*
+		mkdir data_"${PG_PORT}"
 
-        # Start the database
-        echo "Starting the database"
-        docker compose up -d
-        cd ..
+		# Start the database
+		echo "Starting the database"
+		docker compose up -d
+		cd ..
 
-        # Wait for the database to be available
-        echo "Restarting database"
-        wait_for_database $PG_PORT
-    # else
-    #     echo "Cleaning the output/ folder"
-    #     rm -rf output/*
-    fi
+		# Wait for the database to be available
+		echo "Restarting database"
+		wait_for_database "$PG_PORT"
+	# else
+	#     echo "Cleaning the output/ folder"
+	#     rm -rf output/*
+	fi
 fi
 
 # TLSNotary Docker container management (enabled by default)
 # Set TLSNOTARY_DISABLED=true to disable
-if [ "$TLSNOTARY_DISABLED" != "true" ]; then
-    TLSNOTARY_PORT="${TLSNOTARY_PORT:-7047}"
-    echo "🔐 Starting TLSNotary notary container..."
+if [[ "${TLSNOTARY_DISABLED}" != "true" ]]; then
+	TLSNOTARY_PORT="${TLSNOTARY_PORT:-7047}"
+	echo "🔐 Starting TLSNotary notary container..."
 
-    if [ -d "tlsnotary" ]; then
-        cd tlsnotary
+	if [[ -d "tlsnotary" ]]; then
+		cd tlsnotary
 
-        # Stop any existing container
-        docker compose down > /dev/null 2>&1 || true
+		# Stop any existing container
+		docker compose down >/dev/null 2>&1 || true
 
-        # Start the TLSNotary container
-        log_verbose "Starting TLSNotary container on port $TLSNOTARY_PORT"
-        if ! TLSNOTARY_PORT=$TLSNOTARY_PORT docker compose up -d; then
-            echo "⚠️  Warning: Failed to start TLSNotary container"
-            echo "💡 TLSNotary attestation features will not be available"
-        else
-            echo "✅ TLSNotary container started on port $TLSNOTARY_PORT"
+		# Start the TLSNotary container
+		log_verbose "Starting TLSNotary container on port ${TLSNOTARY_PORT}"
+		if ! TLSNOTARY_PORT=${TLSNOTARY_PORT} docker compose up -d; then
+			echo "⚠️  Warning: Failed to start TLSNotary container"
+			echo "💡 TLSNotary attestation features will not be available"
+		else
+			echo "✅ TLSNotary container started on port ${TLSNOTARY_PORT}"
 
-            # Wait for TLSNotary to be healthy (max 15 seconds)
-            log_verbose "Waiting for TLSNotary to be healthy..."
-            TLSN_TIMEOUT=15
-            TLSN_COUNT=0
-            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$TLSNOTARY_PORT/info" > /dev/null 2>&1; do
-                TLSN_COUNT=$((TLSN_COUNT+1))
-                if [ $TLSN_COUNT -gt $TLSN_TIMEOUT ]; then
-                    echo "⚠️  Warning: TLSNotary health check timeout"
-                    break
-                fi
-                sleep 1
-            done
+			# Wait for TLSNotary to be healthy (max 15 seconds)
+			log_verbose "Waiting for TLSNotary to be healthy..."
+			TLSN_TIMEOUT=15
+			TLSN_COUNT=0
+			while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:${TLSNOTARY_PORT}/info" >/dev/null 2>&1; do
+				TLSN_COUNT=$((TLSN_COUNT + 1))
+				if [ "$TLSN_COUNT" -gt "$TLSN_TIMEOUT" ]; then
+					echo "⚠️  Warning: TLSNotary health check timeout"
+					break
+				fi
+				sleep 1
+			done
 
-            if [ $TLSN_COUNT -le $TLSN_TIMEOUT ]; then
-                echo "✅ TLSNotary is ready"
-            fi
-        fi
-        cd ..
-    else
-        echo "⚠️  Warning: tlsnotary folder not found, skipping TLSNotary setup"
-    fi
+			if [[ "$TLSN_COUNT" -le "$TLSN_TIMEOUT" ]]; then
+				echo "✅ TLSNotary is ready"
+			fi
+		fi
+		cd ..
+	else
+		echo "⚠️  Warning: tlsnotary folder not found, skipping TLSNotary setup"
+	fi
 else
-    log_verbose "TLSNotary disabled (TLSNOTARY_DISABLED=true)"
+	log_verbose "TLSNotary disabled (TLSNOTARY_DISABLED=true)"
 fi
 
 # Monitoring stack (Prometheus/Grafana) management (enabled by default)
 # Set MONITORING_DISABLED=true or use -m/--no-monitoring to disable
-if [ "$MONITORING_DISABLED" != "true" ]; then
-    echo "📊 Starting monitoring stack (Prometheus/Grafana)..."
+if [[ "${MONITORING_DISABLED}" != "true" ]]; then
+	echo "📊 Starting monitoring stack (Prometheus/Grafana)..."
 
-    if [ -d "monitoring" ]; then
-        cd monitoring
+	if [[ -d "monitoring" ]]; then
+		cd monitoring || exit
 
-        # Stop any existing containers
-        docker compose down > /dev/null 2>&1 || true
+		# Stop any existing containers
+		docker compose down >/dev/null 2>&1 || true
 
-        # Start the monitoring stack
-        log_verbose "Starting monitoring containers"
-        if ! docker compose up -d; then
-            echo "⚠️  Warning: Failed to start monitoring stack"
-            echo "💡 Monitoring dashboards will not be available"
-        else
-            echo "✅ Monitoring stack started"
-            echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
-            echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
+		# Start the monitoring stack
+		log_verbose "Starting monitoring containers"
+		if ! docker compose up -d; then
+			echo "⚠️  Warning: Failed to start monitoring stack"
+			echo "💡 Monitoring dashboards will not be available"
+		else
+			echo "✅ Monitoring stack started"
+			echo "   📈 Prometheus: http://localhost:${PROMETHEUS_PORT:-9091}"
+			echo "   📊 Grafana:    http://localhost:${GRAFANA_PORT:-3000} (admin/demos)"
 
-            # Wait for Grafana to be healthy (max 30 seconds)
-            log_verbose "Waiting for Grafana to be healthy..."
-            GRAFANA_TIMEOUT=30
-            GRAFANA_COUNT=0
-            GRAFANA_PORT="${GRAFANA_PORT:-3000}"
-            while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:$GRAFANA_PORT/api/health" > /dev/null 2>&1; do
-                GRAFANA_COUNT=$((GRAFANA_COUNT+1))
-                if [ $GRAFANA_COUNT -gt $GRAFANA_TIMEOUT ]; then
-                    echo "⚠️  Warning: Grafana health check timeout"
-                    break
-                fi
-                sleep 1
-            done
+			# Wait for Grafana to be healthy (max 30 seconds)
+			log_verbose "Waiting for Grafana to be healthy..."
+			GRAFANA_TIMEOUT=30
+			GRAFANA_COUNT=0
+			GRAFANA_PORT="${GRAFANA_PORT:-3000}"
+			while ! curl -sf --connect-timeout 1 --max-time 2 "http://localhost:${GRAFANA_PORT}/api/health" >/dev/null 2>&1; do
+				GRAFANA_COUNT=$((GRAFANA_COUNT + 1))
+				if [[ "$GRAFANA_COUNT" -gt "$GRAFANA_TIMEOUT" ]]; then
+					echo "⚠️  Warning: Grafana health check timeout"
+					break
+				fi
+				sleep 1
+			done
 
-            if [ $GRAFANA_COUNT -le $GRAFANA_TIMEOUT ]; then
-                echo "✅ Grafana is ready"
-            fi
-        fi
-        cd ..
-    else
-        echo "⚠️  Warning: monitoring folder not found, skipping monitoring setup"
-    fi
+			if [[ "$GRAFANA_COUNT" -le "$GRAFANA_TIMEOUT" ]]; then
+				echo "✅ Grafana is ready"
+			fi
+		fi
+		cd ..
+	else
+		echo "⚠️  Warning: monitoring folder not found, skipping monitoring setup"
+	fi
 else
-    log_verbose "Monitoring disabled (MONITORING_DISABLED=true)"
+	log_verbose "Monitoring disabled (MONITORING_DISABLED=true)"
 fi
 
 # Ensuring the logs folder exists
@@ -895,9 +897,9 @@ mkdir -p logs
 echo ""
 echo "🎉 All systems ready! Starting your Demos Network node..."
 echo "📝 Logs will be saved to: logs/"
-echo "🌐 Your node will be available on: http://localhost:$PORT"
-if [ ! -z "$EXPOSED_URL" ]; then
-    echo "🌍 External URL: $EXPOSED_URL"
+echo "🌐 Your node will be available on: http://localho${t:$P}ORT"
+if [[ ! -z "${EXPOSED_URL}" ]]; then
+	echo "🌍 External URL: ${EXPOSED_URL}"
 fi
 echo ""
 echo "💡 Press Ctrl+C to stop the node safely"
@@ -905,83 +907,83 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Build the final command with optional --no-tui flag
-FINAL_COMMAND="$START_COMMAND"
-if [ "$NO_TUI" = true ]; then
-    FINAL_COMMAND="$START_COMMAND -- --no-tui"
+FINAL_COMMAND="${START_COMMAND}"
+if [[ "${NO_TUI}" = true ]]; then
+	FINAL_COMMAND="${START_COMMAND} -- --no-tui"
 fi
 
 # Starting the node managing errors
-log_verbose "Starting node with environment: RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE"
-log_verbose "Command: $FINAL_COMMAND"
+log_verbose "Starting node with environment: RPC_PORT=${PORT} PG_PORT=${PG_PORT} IDENTITY_FILE=${IDENTITY_FILE}"
+log_verbose "Command: ${FINAL_COMMAND}"
 if ! RPC_PORT=$PORT PG_PORT=$PG_PORT IDENTITY_FILE=$IDENTITY_FILE $FINAL_COMMAND; then
-    if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
-        echo ""
-        echo "✅ Demos Network node stopped successfully"
-    else
-        echo "❌ Error: RPC failed to start or crashed"
-        exit_code=$?
-        # Logging memory usage (cross-platform)
-        echo "💾 Memory usage at crash:"
-        if [ "$PLATFORM_NAME" = "macOS" ]; then
-            vm_stat | head -10
-            vm_stat | head -10 > last_crash_memory_usage.txt
-        elif [ "$PLATFORM_NAME" = "Linux" ]; then
-            free -m
-            free -m > last_crash_memory_usage.txt
-        else
-            echo "Unknown platform - cannot collect memory info"
-            echo "Platform: $PLATFORM_NAME" > last_crash_memory_usage.txt
-        fi
-    fi
+	if [ "$HAS_BEEN_INTERRUPTED" == "true" ]; then
+		echo ""
+		echo "✅ Demos Network node stopped successfully"
+	else
+		echo "❌ Error: RPC failed to start or crashed"
+		exit_code=$?
+		# Logging memory usage (cross-platform)
+		echo "💾 Memory usage at crash:"
+		if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+			vm_stat | head -10
+			vm_stat | head -10 >last_crash_memory_usage.txt
+		elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+			free -m
+			free -m >last_crash_memory_usage.txt
+		else
+			echo "Unknown platform - cannot collect memory info"
+			echo "Platform: ${PLATFORM_NAME}" >last_crash_memory_usage.txt
+		fi
+	fi
 else
-    echo ""
-    echo "✅ Demos Network node exited successfully"
-    exit_code=0
+	echo ""
+	echo "✅ Demos Network node exited successfully"
+	exit_code=0
 fi
 
 # Only stop PostgreSQL if we started it
-if [ "$EXTERNAL_DB" = false ]; then
-    # Once exiting, stopping the database
-    echo "🛑 Stopping PostgreSQL database..."
-    cd postgres_${PG_PORT}
-    if docker compose down; then
-        echo "✅ PostgreSQL stopped successfully"
-    else
-        echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
-    fi
-    cd ..
+if [[ "${EXTERNAL_DB}" = false ]]; then
+	# Once exiting, stopping the database
+	echo "🛑 Stopping PostgreSQL database..."
+	cd postgres_${PG_PORT}
+	if docker compose down; then
+		echo "✅ PostgreSQL stopped successfully"
+	else
+		echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
+	fi
+	cd ..
 fi
 
 # Stop TLSNotary container if it was started (enabled by default)
-if [ "$TLSNOTARY_DISABLED" != "true" ] && [ -d "tlsnotary" ]; then
-    echo "🛑 Stopping TLSNotary container..."
-    TLSN_CONTAINER="tlsn-notary-${TLSNOTARY_PORT:-7047}"
+if [[ "${TLSNOTARY_DISABLED}" != "true" ]] && [[ -d "tlsnotary" ]]; then
+	echo "🛑 Stopping TLSNotary container..."
+	TLSN_CONTAINER="tlsn-notary-${TLSNOTARY_PORT:-7047}"
 
-    # Try graceful shutdown first with short timeout
-    cd tlsnotary
-    docker compose down --timeout 5 2>/dev/null || true
-    cd ..
+	# Try graceful shutdown first with short timeout
+	cd tlsnotary || exit
+	docker compose down --timeout 5 2>/dev/null || true
+	cd ..
 
-    # Force kill if still running
-    if docker ps -q -f "name=$TLSN_CONTAINER" 2>/dev/null | grep -q .; then
-        echo "   Force stopping TLSNotary container..."
-        docker kill "$TLSN_CONTAINER" 2>/dev/null || true
-        docker rm -f "$TLSN_CONTAINER" 2>/dev/null || true
-    fi
+	# Force kill if still running
+	if docker ps -q -f "name=${TLSN_CONTAINER}" 2>/dev/null | grep -q .; then
+		echo "   Force stopping TLSNotary container..."
+		docker kill "${TLSN_CONTAINER}" 2>/dev/null || true
+		docker rm -f "${TLSN_CONTAINER}" 2>/dev/null || true
+	fi
 
-    echo "✅ TLSNotary stopped"
+	echo "✅ TLSNotary stopped"
 fi
 
 # Stop monitoring stack if it was started (enabled by default)
-if [ "$MONITORING_DISABLED" != "true" ] && [ -d "monitoring" ]; then
-    echo "🛑 Stopping monitoring stack..."
+if [[ "${MONITORING_DISABLED}" != "true" ]] && [[ -d "monitoring" ]]; then
+	echo "🛑 Stopping monitoring stack..."
 
-    # Try graceful shutdown first with short timeout (subshell to preserve working directory)
-    (
-        cd monitoring && docker compose down --timeout 5 2>/dev/null
-    ) || echo "⚠️  Warning: Failed to stop monitoring stack cleanly."
+	# Try graceful shutdown first with short timeout (subshell to preserve working directory)
+	(
+		cd monitoring && docker compose down --timeout 5 2>/dev/null
+	) || echo "⚠️  Warning: Failed to stop monitoring stack cleanly."
 
-    echo "✅ Monitoring stack stopped"
+	echo "✅ Monitoring stack stopped"
 fi
 
 echo ""
@@ -990,4 +992,4 @@ echo "💡 Thank you for running a Demos Network node!"
 echo "📚 For support: https://demos.network/support"
 echo ""
 
-log_verbose "Final exit code: $exit_code"
+log_verbose "Final exit code: ${exit_code}"

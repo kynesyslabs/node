@@ -8,8 +8,7 @@ export class ActivityPubStorage {
         actors: "id TEXT PRIMARY KEY, type TEXT, name TEXT, inbox TEXT, outbox TEXT, followers TEXT, following TEXT, liked TEXT",
         objects:
             "id TEXT PRIMARY KEY, type TEXT, attributedTo TEXT, content TEXT",
-        activities:
-            "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
+        activities: "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
         inboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
         outboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
         followers: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
@@ -43,7 +42,9 @@ export class ActivityPubStorage {
     }
 
     createTables() {
-        for (const [collection, columns] of Object.entries(this.collectionSchemas)) {
+        for (const [collection, columns] of Object.entries(
+            this.collectionSchemas,
+        )) {
             const sql = `CREATE TABLE IF NOT EXISTS ${collection} (${columns})`
             this.db.run(sql)
         }

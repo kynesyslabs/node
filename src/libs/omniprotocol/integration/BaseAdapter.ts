@@ -19,6 +19,7 @@ import {
 import { ConnectionPool } from "../transport/ConnectionPool"
 import { OmniProtocolError } from "../types/errors"
 import { getNodePrivateKey, getNodePublicKey } from "./keys"
+import { RateLimiter } from "../ratelimit"
 
 export interface BaseAdapterOptions {
     config?: OmniProtocolConfig
@@ -46,18 +47,12 @@ export abstract class BaseOmniAdapter {
     protected readonly connectionPool: ConnectionPool
 
     constructor(options: BaseAdapterOptions = {}) {
-        this.config = cloneConfig(
-            options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG,
-        )
+        this.config = cloneConfig(options.config ?? DEFAULT_OMNIPROTOCOL_CONFIG)
 
-        // Initialize ConnectionPool with configuration
-        this.connectionPool = new ConnectionPool({
-            maxTotalConnections: this.config.pool.maxTotalConnections,
-            maxConnectionsPerPeer: this.config.pool.maxConnectionsPerPeer,
-            idleTimeout: this.config.pool.idleTimeout,
-            connectTimeout: this.config.pool.connectTimeout,
-            authTimeout: this.config.pool.authTimeout,
-        })
+        // Initialize ConnectionPool with RateLimiter
+        this.connectionPool = ConnectionPool.getInstance(
+            RateLimiter.getInstance(),
+        )
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -149,7 +144,9 @@ export abstract class BaseOmniAdapter {
             return process.env.OMNI_PORT
         }
         // Match server's detectDefaultPort() logic: HTTP port + 1
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
+        const httpPort = parseInt(
+            process.env.NODE_PORT || process.env.PORT || "3000",
+        )
         return String(httpPort + 1)
     }
 
@@ -182,12 +179,12 @@ export abstract class BaseOmniAdapter {
     // Connection Pool Access
     // ─────────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Get the underlying connection pool for direct access
-     */
-    protected getConnectionPool(): ConnectionPool {
-        return this.connectionPool
-    }
+    // /**
+    //  * Get the underlying connection pool for direct access
+    //  */
+    // protected getConnectionPool(): ConnectionPool {
+    //     return this.connectionPool
+    // }
 
     /**
      * Get connection pool statistics
@@ -230,7 +227,8 @@ export abstract class BaseOmniAdapter {
         }
 
         // Format error message
-        const errorMessage = error instanceof Error ? error.message : String(error)
+        const errorMessage =
+            error instanceof Error ? error.message : String(error)
         const errorStack = error instanceof Error ? error.stack : undefined
 
         log.error(`[OmniProtocol] OMNI_FATAL: ${context}`)
@@ -242,11 +240,12 @@ export abstract class BaseOmniAdapter {
         // If it's already an OmniProtocolError, it should have already exited
         // This handles non-OmniProtocolError cases (like plain Error("Connection closed"))
         if (!(error instanceof OmniProtocolError)) {
-            log.error("[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError")
+            log.error(
+                "[OmniProtocol] OMNI_FATAL: Exiting due to non-OmniProtocolError",
+            )
             process.exit(1)
         }
 
         return true
     }
 }
-

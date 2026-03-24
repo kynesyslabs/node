@@ -1,15 +1,28 @@
-import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
+import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import SharedState, { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import getShard from "@/libs/consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
+import { DTRManager } from "@/libs/network/dtr/dtrmanager"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { OmniOpcode } from "@/libs/omniprotocol/protocol/opcodes"
 import { ConnectionPool } from "@/libs/omniprotocol/transport/ConnectionPool"
 import { encodeJsonRequest } from "@/libs/omniprotocol/serialization/jsonEnvelope"
 import { getNodePrivateKey, getNodePublicKey } from "@/libs/omniprotocol/integration/keys"
 import type { L2PSHashUpdateRequest } from "@/libs/omniprotocol/serialization/l2ps"
+import { confirmTransaction } from "@/libs/blockchain/routines/validateTransaction"
+import type { ValidityData } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
+import {
+    HASH_RELAY_MAX_TOTAL_CONNECTIONS,
+    HASH_RELAY_MAX_CONNECTIONS_PER_PEER,
+    HASH_RELAY_IDLE_TIMEOUT_MS,
+    HASH_RELAY_CONNECT_TIMEOUT_MS,
+    HASH_RELAY_AUTH_TIMEOUT_MS,
+    HASH_RELAY_OMNI_REQUEST_TIMEOUT_MS,
+} from "./constants"
 
 /**
  * L2PS Hash Generation Service
@@ -42,7 +55,7 @@ export class L2PSHashService {
     private isRunning = false
 
     /** Hash generation interval in milliseconds */
-    private readonly GENERATION_INTERVAL = Number.parseInt(process.env.L2PS_HASH_INTERVAL_MS || "5000", 10)
+    private readonly GENERATION_INTERVAL = Config.getInstance().l2ps.hashIntervalMs
 
     /** Statistics tracking */
     private stats = {
@@ -63,7 +76,7 @@ export class L2PSHashService {
     private connectionPool: ConnectionPool | null = null
 
     /** OmniProtocol enabled flag */
-    private readonly omniEnabled: boolean = process.env.OMNI_ENABLED === "true"
+    private readonly omniEnabled: boolean = Config.getInstance().omni.enabled
 
     /**
      * Get singleton instance of L2PS Hash Service
@@ -111,13 +124,7 @@ export class L2PSHashService {
 
         // Initialize OmniProtocol connection pool if enabled
         if (this.omniEnabled) {
-            this.connectionPool = new ConnectionPool({
-                maxTotalConnections: 50,
-                maxConnectionsPerPeer: 3,
-                idleTimeout: 5 * 60 * 1000, // 5 minutes
-                connectTimeout: 5000,
-                authTimeout: 5000,
-            })
+            this.connectionPool = ConnectionPool.getInstance()
             log.info("[L2PS Hash Service] OmniProtocol enabled for hash relay")
         }
 
@@ -252,8 +259,8 @@ export class L2PSHashService {
                 return
             }
 
-            // Get transaction count for this UID (only processed transactions)
-            const transactions = await L2PSMempool.getByUID(l2psUid, "processed")
+            // Get transaction count for this UID (only executed transactions awaiting batching)
+            const transactions = await L2PSMempool.getByUID(l2psUid, L2PS_STATUS.EXECUTED)
             const transactionCount = transactions.length
 
             // Only generate hash update if there are transactions
@@ -272,12 +279,18 @@ export class L2PSHashService {
                 transactionCount,
                 this.demos,
             )
+            const normalizedHashUpdateTx =
+                await this.normalizeHashUpdateTransaction(hashUpdateTx)
+            const validityData = await confirmTransaction(
+                normalizedHashUpdateTx as any,
+                normalizedHashUpdateTx.content.from,
+            )
 
             this.stats.totalHashesGenerated++
 
             // Relay to validators via DTR infrastructure
             // Note: Self-directed transaction will automatically trigger DTR routing
-            await this.relayToValidators(hashUpdateTx)
+            await this.relayToValidators(normalizedHashUpdateTx, validityData)
 
             this.stats.successfulRelays++
 
@@ -291,6 +304,52 @@ export class L2PSHashService {
     }
 
     /**
+     * Normalize SDK-produced hash update transactions before relay.
+     *
+     * The published demosdk can return a malformed nonce payload from
+     * `getAddressNonce()` in some environments, which produces values like
+     * `"[object Object]1"`. Re-read the authoritative nonce from RPC and re-sign
+     * locally so relay payloads stay coherent even when the bundled SDK is stale.
+     */
+    private async normalizeHashUpdateTransaction(hashUpdateTx: any): Promise<any> {
+        const nonce = hashUpdateTx?.content?.nonce
+
+        if (
+            (typeof nonce === "number" && Number.isFinite(nonce)) ||
+            (typeof nonce === "string" && /^\d+$/.test(nonce))
+        ) {
+            return hashUpdateTx
+        }
+
+        const address = hashUpdateTx?.content?.from
+        if (!address) {
+            throw new Error("[L2PS Hash Service] Hash update transaction missing sender address")
+        }
+
+        const account = await ensureGCRForUser(address)
+        const rawNonce = account?.nonce
+        const currentNonce =
+            typeof rawNonce === "number"
+                ? rawNonce
+                : Number.parseInt(String(rawNonce ?? "0"), 10)
+
+        if (!Number.isFinite(currentNonce)) {
+            throw new Error(
+                `[L2PS Hash Service] Failed to recover nonce for ${address}: ${String(rawNonce)}`,
+            )
+        }
+
+        const normalizedTx = structuredClone(hashUpdateTx)
+        normalizedTx.content.nonce = currentNonce + 1
+
+        log.debug(
+            `[L2PS Hash Service] Normalized malformed hash-update nonce for ${address} -> ${normalizedTx.content.nonce}`,
+        )
+
+        return await this.demos.sign(normalizedTx)
+    }
+
+    /**
      * Relay hash update transaction to validators via DTR or OmniProtocol
      *
      * Uses OmniProtocol when enabled for efficient binary communication,
@@ -299,18 +358,24 @@ export class L2PSHashService {
      *
      * @param hashUpdateTx - Signed L2PS hash update transaction
      */
-    private async relayToValidators(hashUpdateTx: any): Promise<void> {
+    private async relayToValidators(
+        hashUpdateTx: any,
+        validityData: ValidityData,
+    ): Promise<void> {
         try {
-            // Only relay in production mode (same as existing DTR pattern)
-            if (!getSharedState.PROD) {
+            // Allow explicit local-devnet relay coverage without switching the full node into PROD.
+            const allowNonProdRelay = process.env.L2PS_HASH_RELAY_NON_PROD === "true"
+            if (!getSharedState.PROD && !allowNonProdRelay) {
                 log.debug("[L2PS Hash Service] Skipping DTR relay (non-production mode)")
                 return
             }
 
             // Get validators using same logic as DTR RelayRetryService
             const { commonValidatorSeed } = await getCommonValidatorSeed()
+            const localIdentity = getSharedState.publicKeyHex
             const validators = await getShard(commonValidatorSeed)
             const availableValidators = validators
+                .filter(v => v.identity !== localIdentity)
                 .filter(v => v.status.online && v.sync.status)
                 .sort(() => Math.random() - 0.5) // Random order for load balancing
 
@@ -335,13 +400,10 @@ export class L2PSHashService {
                     }
 
                     // HTTP fallback
-                    const result = await validator.call({
-                        method: "nodeCall",
-                        params: [{
-                            type: "RELAY_TX",
-                            data: { transaction: hashUpdateTx },
-                        }],
-                    }, true)
+                    const result = await DTRManager.relayTransactions(
+                        validator,
+                        [validityData],
+                    )
 
                     if (result.result === 200) {
                         log.info(`[L2PS Hash Service] Successfully relayed hash update via HTTP to validator ${validator.identity.substring(0, 8)}...`)
@@ -398,15 +460,21 @@ export class L2PSHashService {
             }
 
             const url = new URL(httpUrl)
-            const tcpProtocol = process.env.OMNI_TLS_ENABLED === "true" ? "tls" : "tcp"
+            const tcpProtocol = Config.getInstance().omni.tls.enabled ? "tls" : "tcp"
             const peerHttpPort = Number.parseInt(url.port, 10) || 80
             const omniPort = peerHttpPort + 1
             const tcpConnectionString = `${tcpProtocol}://${url.hostname}:${omniPort}`
 
             // Prepare L2PS hash update request payload
-            const l2psUid = hashUpdateTx.content?.data?.[0] || hashUpdateTx.l2ps_uid
-            const consolidatedHash = hashUpdateTx.content?.data?.[1] || hashUpdateTx.hash
-            const transactionCount = hashUpdateTx.content?.data?.[2] || 0
+            const hashPayload =
+                hashUpdateTx?.content?.data?.[0] === "l2ps_hash_update"
+                    ? hashUpdateTx.content.data[1]
+                    : undefined
+            const l2psUid = hashPayload?.l2ps_uid || hashUpdateTx.l2ps_uid
+            const consolidatedHash =
+                hashPayload?.consolidated_hash || hashUpdateTx.hash
+            const transactionCount =
+                hashPayload?.transaction_count || hashUpdateTx.transaction_count || 0
 
             const hashUpdateRequest: L2PSHashUpdateRequest = {
                 l2psUid,
@@ -427,7 +495,7 @@ export class L2PSHashService {
                 payload,
                 privateKey,
                 publicKey,
-                { timeout: 10000 }, // 10 second timeout
+                { timeout: HASH_RELAY_OMNI_REQUEST_TIMEOUT_MS },
             )
 
             // Check response status (first 2 bytes)

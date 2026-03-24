@@ -17,6 +17,32 @@ import { poseidon2 } from "poseidon-lite"
 import { DataSource, Repository, EntityManager } from "typeorm"
 import { MerkleTreeState } from "@/model/entities/GCRv2/MerkleTreeState.js"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment.js"
+import log from "src/utilities/logger"
+import { handleError } from "src/errors"
+
+function isHexCommitment(value: string): boolean {
+    return /^(0x)?[0-9a-fA-F]{64}$/.test(value)
+}
+
+function normalizeCommitmentKey(value: string): string {
+    return isHexCommitment(value) ? value.toLowerCase().replace(/^0x/, "") : value
+}
+
+function parseCommitmentValue(value: string): bigint {
+    if (!value || typeof value !== "string") {
+        throw new Error("Invalid commitment: must be a non-empty string")
+    }
+
+    if (isHexCommitment(value)) {
+        return BigInt(`0x${normalizeCommitmentKey(value)}`)
+    }
+
+    if (/^\d+$/.test(value)) {
+        return BigInt(value)
+    }
+
+    throw new Error(`Invalid commitment format: ${value}`)
+}
 
 export class MerkleTreeManager {
     private tree: IncrementalMerkleTree
@@ -76,16 +102,16 @@ export class MerkleTreeManager {
                     )
                 }
 
-                console.log(
-                    `✅ Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,
+                log.info(
+                    `[CORE] Loaded Merkle tree: ${state.leafCount} commitments, root: ${state.rootHash.slice(0, 10)}...`,
                 )
                 return true
             } else {
-                console.log("🌱 Initialized new Merkle tree")
+                log.info("[CORE] Initialized new Merkle tree")
                 return false
             }
         } catch (error) {
-            console.error("❌ Failed to load Merkle tree from database:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.initialize" })
             throw error
         }
     }
@@ -98,18 +124,7 @@ export class MerkleTreeManager {
      */
     addCommitment(commitment: string): number {
         try {
-            // REVIEW: Validate commitment input
-            if (!commitment || typeof commitment !== "string") {
-                throw new Error("Invalid commitment: must be a non-empty string")
-            }
-
-            // REVIEW: Validate BigInt conversion
-            let commitmentBigInt: bigint
-            try {
-                commitmentBigInt = BigInt(commitment)
-            } catch (e) {
-                throw new Error(`Invalid commitment format: ${commitment}`)
-            }
+            const commitmentBigInt = parseCommitmentValue(commitment)
 
             // Check tree capacity before insertion
             const capacity = Math.pow(2, this.depth)
@@ -123,7 +138,7 @@ export class MerkleTreeManager {
             const leafIndex = this.tree.leaves.length - 1
             return leafIndex
         } catch (error) {
-            console.error("❌ Failed to add commitment to tree:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.addCommitment" })
             throw error
         }
     }
@@ -168,7 +183,7 @@ export class MerkleTreeManager {
                 leaf: proof.leaf.toString(),
             }
         } catch (error) {
-            console.error(`❌ Failed to generate proof for leaf ${leafIndex}:`, error)
+            handleError(error, "CORE", { source: `MerkleTreeManager.generateProof(leaf=${leafIndex})` })
             throw error
         }
     }
@@ -187,13 +202,15 @@ export class MerkleTreeManager {
         leafIndex: number
     } | null> {
         try {
+            const normalizedCommitmentHash = normalizeCommitmentKey(commitmentHash)
+
             // Find the commitment in the database to get its leaf index
             const commitment = await this.commitmentRepo.findOne({
-                where: { commitmentHash },
+                where: { commitmentHash: normalizedCommitmentHash },
             })
 
             if (!commitment || commitment.leafIndex === -1) {
-                console.warn(`⚠️ Commitment not found: ${commitmentHash.slice(0, 10)}...`)
+                log.info(`[CORE] Commitment not found: ${commitmentHash.slice(0, 10)}...`)
                 return null
             }
 
@@ -203,7 +220,7 @@ export class MerkleTreeManager {
                 leafIndex: commitment.leafIndex,
             }
         } catch (error) {
-            console.error("❌ Failed to get proof for commitment:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.getProofForCommitment" })
             // REVIEW: Throw error instead of returning null to distinguish from "not found"
             throw error
         }
@@ -241,11 +258,11 @@ export class MerkleTreeManager {
                 treeSnapshot: snapshot,
             })
 
-            console.log(
-                `💾 Saved Merkle tree state: ${this.getLeafCount()} leaves at block ${blockNumber}`,
+            log.info(
+                `[CORE] Saved Merkle tree state: ${this.getLeafCount()} leaves at block ${blockNumber}`,
             )
         } catch (error) {
-            console.error("❌ Failed to save Merkle tree to database:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.saveToDatabase" })
             throw error
         }
     }
@@ -264,11 +281,15 @@ export class MerkleTreeManager {
         root: bigint,
     ): boolean {
         try {
-            // REVIEW: verifyProof accepts only one argument - the MerkleProof object
-            // Include leaf and root in proof object as required by zk-kit library
-            return IncrementalMerkleTree.verifyProof({ ...proof, leaf, root })
+            const verifier = new IncrementalMerkleTree(
+                poseidon2,
+                proof.pathIndices.length,
+                BigInt(0),
+                2,
+            )
+            return verifier.verifyProof({ ...proof, leaf, root })
         } catch (error) {
-            console.error("❌ Proof verification failed:", error)
+            handleError(error, "CORE", { source: "MerkleTreeManager.verifyProof" })
             return false
         }
     }

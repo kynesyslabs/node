@@ -45,58 +45,58 @@ CHECKS_WARNED=0
 
 # Add an OK result
 report_ok() {
-    local check_name="$1"
-    local message="$2"
-    OK_MESSAGES+=("[$check_name] $message")
-    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+	local check_name="$1"
+	local message="$2"
+	OK_MESSAGES+=("[${check_name}] ${message}")
+	CHECKS_PASSED=$((CHECKS_PASSED + 1))
 }
 
 # Add a PROBLEM result
 report_problem() {
-    local check_name="$1"
-    local message="$2"
-    local hint="${3:-}"
-    PROBLEM_MESSAGES+=("[$check_name] $message")
-    if [ -n "$hint" ]; then
-        HINT_MESSAGES+=("[$check_name] 💡 $hint")
-    fi
-    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+	local check_name="$1"
+	local message="$2"
+	local hint="${3-}"
+	PROBLEM_MESSAGES+=("[${check_name}] ${message}")
+	if [[ -n "${hint}" ]]; then
+		HINT_MESSAGES+=("[${check_name}] �${� $h}int")
+	fi
+	CHECKS_FAILED=$((CHECKS_FAILED + 1))
 }
 
 # Add a WARNING result (not critical but worth noting)
 report_warning() {
-    local check_name="$1"
-    local message="$2"
-    local hint="${3:-}"
-    WARNING_MESSAGES+=("[$check_name] $message")
-    if [ -n "$hint" ]; then
-        HINT_MESSAGES+=("[$check_name] 💡 $hint")
-    fi
-    CHECKS_WARNED=$((CHECKS_WARNED + 1))
+	local check_name="$1"
+	local message="$2"
+	local hint="${3-}"
+	WARNING_MESSAGES+=("[${check_name}] ${message}")
+	if [[ -n "${hint}" ]]; then
+		HINT_MESSAGES+=("[${check_name}] �${� $h}int")
+	fi
+	CHECKS_WARNED=$((CHECKS_WARNED + 1))
 }
 
 # Run a check (wrapper that increments counter)
 run_check() {
-    local check_name="$1"
-    local check_function="$2"
-    CHECKS_RUN=$((CHECKS_RUN + 1))
+	local check_name="$1"
+	local check_function="$2"
+	CHECKS_RUN=$((CHECKS_RUN + 1))
 
-    echo -ne "  Checking ${check_name}... "
+	echo -ne "  Checking ${check_name}... "
 
-    # Run the check function
-    if $check_function; then
-        echo -e "${GREEN}✓${NC}"
-    else
-        echo -e "${RED}✗${NC}"
-    fi
+	# Run the check function
+	if ${check_function}; then
+		echo -e "${GREEN}✓${NC}"
+	else
+		echo -e "${RED}✗${NC}"
+	fi
 }
 
 # Print section header
 print_section() {
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}  $1${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	echo ""
+	echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	echo -e "${BOLD}  $1${NC}"
+	echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # ============================================================================
@@ -110,161 +110,161 @@ print_section() {
 
 # --- Example Check: Git Origin ---
 check_git_origin() {
-    local origin_url=$(git remote get-url origin 2>/dev/null)
+	local origin_url=$(git remote get-url origin 2>/dev/null)
 
-    if [ -z "$origin_url" ]; then
-        report_problem "Git Origin" "No git origin configured" \
-            "Run: git remote add origin https://github.com/kynesyslabs/node"
-        return 1
-    fi
+	if [[ -z "${origin_url}" ]]; then
+		report_problem "Git Origin" "No git origin configured" \
+			"Run: git remote add origin https://github.com/kynesyslabs/node"
+		return 1
+	fi
 
-    local valid_https="https://github.com/kynesyslabs/node"
-    local valid_https_git="https://github.com/kynesyslabs/node.git"
-    local valid_ssh="git@github.com:kynesyslabs/node.git"
+	local valid_https="https://github.com/kynesyslabs/node"
+	local valid_https_git="https://github.com/kynesyslabs/node.git"
+	local valid_ssh="git@github.com:kynesyslabs/node.git"
 
-    if [ "$origin_url" = "$valid_https" ] || [ "$origin_url" = "$valid_https_git" ] || \
-       [ "$origin_url" = "$valid_ssh" ]; then
-        report_ok "Git Origin" "Origin correctly set to official repository"
-        return 0
-    else
-        report_problem "Git Origin" "Origin points to: $origin_url (expected official repo)" \
-            "Run: git remote set-url origin https://github.com/kynesyslabs/node"
-        return 1
-    fi
+	if [[ "${origin_url}" = "${valid_https}" ]] || [[ "${origin_url}" = "${valid_https_git}" ]] ||
+		[[ "${origin_url}" = "${valid_ssh}" ]]; then
+		report_ok "Git Origin" "Origin correctly set to official repository"
+		return 0
+	else
+		report_problem "Git Origin" "Origin points to: ${origin_url} (expected official repo)" \
+			"Run: git remote set-url origin https://github.com/kynesyslabs/node"
+		return 1
+	fi
 }
 
 # --- Example Check: Git Branch ---
 check_git_branch() {
-    local current_branch=$(git branch --show-current 2>/dev/null)
+	local current_branch=$(git branch --show-current 2>/dev/null)
 
-    if [ -z "$current_branch" ]; then
-        report_warning "Git Branch" "Could not determine current branch" \
-            "Make sure you're in a git repository"
-        return 1
-    fi
+	if [[ -z "${current_branch}" ]]; then
+		report_warning "Git Branch" "Could not determine current branch" \
+			"Make sure you're in a git repository"
+		return 1
+	fi
 
-    if [ "$current_branch" = "testnet" ] || [ "$current_branch" = "main" ]; then
-        report_ok "Git Branch" "On branch: $current_branch"
-        return 0
-    else
-        report_warning "Git Branch" "On branch: $current_branch (expected testnet or main)" \
-            "For production, use: git checkout testnet"
-        return 1
-    fi
+	if [[ "${current_branch}" = "testnet" ]] || [[ "${current_branch}" = "main" ]]; then
+		report_ok "Git Branch" "On branch: ${current_branch}"
+		return 0
+	else
+		report_warning "Git Branch" "On branch: ${current_branch} (expected testnet or main)" \
+			"For production, use: git checkout testnet"
+		return 1
+	fi
 }
 
 # --- Check: Bun Installed (requires >= 1.2) ---
 check_bun_installed() {
-    if ! command -v bun &> /dev/null; then
-        report_problem "Bun Runtime" "Bun is not installed" \
-            "Install Bun: curl -fsSL https://bun.sh/install | bash"
-        return 1
-    fi
+	if ! command -v bun &>/dev/null; then
+		report_problem "Bun Runtime" "Bun is not installed" \
+			"Install Bun: curl -fsSL https://bun.sh/install | bash"
+		return 1
+	fi
 
-    local bun_version=$(bun --version 2>/dev/null)
+	local bun_version=$(bun --version 2>/dev/null)
 
-    # Extract major.minor version
-    local major=$(echo "$bun_version" | cut -d. -f1)
-    local minor=$(echo "$bun_version" | cut -d. -f2)
+	# Extract major.minor version
+	local major=$(echo "${bun_version}" | cut -d. -f1)
+	local minor=$(echo "${bun_version}" | cut -d. -f2)
 
-    # Check if version >= 1.2
-    if [ "$major" -gt 1 ] || ([ "$major" -eq 1 ] && [ "$minor" -ge 2 ]); then
-        report_ok "Bun Runtime" "Bun $bun_version (>= 1.2 required)"
-        return 0
-    else
-        report_problem "Bun Runtime" "Bun $bun_version is too old (>= 1.2 required)" \
-            "Update Bun: bun upgrade"
-        return 1
-    fi
+	# Check if version >= 1.2
+	if [[ "${major}" -gt 1 ]] || ([[ "${major}" -eq 1 ]] && [[ "${minor}" -ge 2 ]]); then
+		report_ok "Bun Runtime" "Bun ${bun_version} (>= 1.2 required)"
+		return 0
+	else
+		report_problem "Bun Runtime" "Bun ${bun_version} is too old (>= 1.2 required)" \
+			"Update Bun: bun upgrade"
+		return 1
+	fi
 }
 
 # --- Check: Docker Running ---
 check_docker_running() {
-    if ! command -v docker &> /dev/null; then
-        report_problem "Docker" "Docker is not installed" \
-            "Install Docker: https://docs.docker.com/get-docker/"
-        return 1
-    fi
+	if ! command -v docker &>/dev/null; then
+		report_problem "Docker" "Docker is not installed" \
+			"Install Docker: https://docs.docker.com/get-docker/"
+		return 1
+	fi
 
-    if docker info &> /dev/null; then
-        report_ok "Docker" "Docker daemon is running"
-        return 0
-    else
-        report_problem "Docker" "Docker daemon is not running" \
-            "Start Docker: sudo systemctl start docker (Linux) or open Docker Desktop (macOS)"
-        return 1
-    fi
+	if docker info &>/dev/null; then
+		report_ok "Docker" "Docker daemon is running"
+		return 0
+	else
+		report_problem "Docker" "Docker daemon is not running" \
+			"Start Docker: sudo systemctl start docker (Linux) or open Docker Desktop (macOS)"
+		return 1
+	fi
 }
 
 # --- Check: Disk Space (>5GB required, >20GB recommended) ---
 check_disk_space() {
-    local min_space_gb=5
-    local recommended_space_gb=20
+	local min_space_gb=5
+	local recommended_space_gb=20
 
-    # Get available space in the current directory's filesystem (in KB)
-    local available_kb=$(df -k . | awk 'NR==2 {print $4}')
+	# Get available space in the current directory's filesystem (in KB)
+	local available_kb=$(df -k . | awk 'NR==2 {print $4}')
 
-    if [ -z "$available_kb" ]; then
-        report_warning "Disk Space" "Could not determine available disk space"
-        return 1
-    fi
+	if [[ -z "${available_kb}" ]]; then
+		report_warning "Disk Space" "Could not determine available disk space"
+		return 1
+	fi
 
-    # Convert to GB (integer)
-    local available_gb=$((available_kb / 1024 / 1024))
+	# Convert to GB (integer)
+	local available_gb=$((available_kb / 1024 / 1024))
 
-    if [ "$available_gb" -lt "$min_space_gb" ]; then
-        report_problem "Disk Space" "Only ${available_gb}GB available (minimum: ${min_space_gb}GB)" \
-            "Free up disk space before running the node"
-        return 1
-    elif [ "$available_gb" -lt "$recommended_space_gb" ]; then
-        report_warning "Disk Space" "${available_gb}GB available (${recommended_space_gb}GB+ recommended)" \
-            "Consider freeing up disk space for optimal performance"
-        return 1
-    else
-        report_ok "Disk Space" "${available_gb}GB available (${recommended_space_gb}GB+ recommended)"
-        return 0
-    fi
+	if [[ "${available_gb}" -lt "${min_space_gb}" ]]; then
+		report_problem "Disk Space" "Only ${available_gb}GB available (minimum: ${min_space_gb}GB)" \
+			"Free up disk space before running the node"
+		return 1
+	elif [[ "${available_gb}" -lt "${recommended_space_gb}" ]]; then
+		report_warning "Disk Space" "${available_gb}GB available (${recommended_space_gb}GB+ recommended)" \
+			"Consider freeing up disk space for optimal performance"
+		return 1
+	else
+		report_ok "Disk Space" "${available_gb}GB available (${recommended_space_gb}GB+ recommended)"
+		return 0
+	fi
 }
 
 # --- Check: Node Modules ---
 check_node_modules() {
-    if [ -d "node_modules" ]; then
-        local module_count=$(find node_modules -maxdepth 1 -type d | wc -l)
-        if [ "$module_count" -gt 10 ]; then
-            report_ok "Dependencies" "node_modules present ($module_count packages)"
-            return 0
-        else
-            report_warning "Dependencies" "node_modules seems incomplete" \
-                "Run: bun install"
-            return 1
-        fi
-    else
-        report_problem "Dependencies" "node_modules not found" \
-            "Run: bun install"
-        return 1
-    fi
+	if [[ -d "node_modules" ]]; then
+		local module_count=$(find node_modules -maxdepth 1 -type d | wc -l)
+		if [[ "${module_count}" -gt 10 ]]; then
+			report_ok "Dependencies" "node_modules present (${module_count} packages)"
+			return 0
+		else
+			report_warning "Dependencies" "node_modules seems incomplete" \
+				"Run: bun install"
+			return 1
+		fi
+	else
+		report_problem "Dependencies" "node_modules not found" \
+			"Run: bun install"
+		return 1
+	fi
 }
 
 # --- Example Check: Identity File ---
 check_identity_file() {
-    local identity_file=".demos_identity"
+	local identity_file=".demos_identity"
 
-    if [ -f "$identity_file" ]; then
-        # Check if file is not empty and has reasonable size
-        local size=$(wc -c < "$identity_file")
-        if [ "$size" -gt 50 ]; then
-            report_ok "Identity" "Identity file exists ($size bytes)"
-            return 0
-        else
-            report_warning "Identity" "Identity file seems too small ($size bytes)" \
-                "Identity file may be corrupted. Back it up and regenerate if needed."
-            return 1
-        fi
-    else
-        report_warning "Identity" "No identity file found (will be created on first run)" \
-            "This is normal for first-time setup"
-        return 0
-    fi
+	if [[ -f "${identity_file}" ]]; then
+		# Check if file is not empty and has reasonable size
+		local size=$(wc -c <"${identity_file}")
+		if [[ "${size}" -gt 50 ]]; then
+			report_ok "Identity" "Identity file exists (${size} bytes)"
+			return 0
+		else
+			report_warning "Identity" "Identity file seems too small (${size} bytes)" \
+				"Identity file may be corrupted. Back it up and regenerate if needed."
+			return 1
+		fi
+	else
+		report_warning "Identity" "No identity file found (will be created on first run)" \
+			"This is normal for first-time setup"
+		return 0
+	fi
 }
 
 # ============================================================================
@@ -272,23 +272,23 @@ check_identity_file() {
 # ============================================================================
 
 run_all_checks() {
-    print_section "🔍 Running Node Doctor Diagnostics"
+	print_section "🔍 Running Node Doctor Diagnostics"
 
-    echo ""
-    echo "  Environment Checks:"
-    run_check "Bun Runtime" check_bun_installed
-    run_check "Docker" check_docker_running
-    run_check "Disk Space" check_disk_space
+	echo ""
+	echo "  Environment Checks:"
+	run_check "Bun Runtime" check_bun_installed
+	run_check "Docker" check_docker_running
+	run_check "Disk Space" check_disk_space
 
-    echo ""
-    echo "  Repository Checks:"
-    run_check "Git Origin" check_git_origin
-    run_check "Git Branch" check_git_branch
+	echo ""
+	echo "  Repository Checks:"
+	run_check "Git Origin" check_git_origin
+	run_check "Git Branch" check_git_branch
 
-    echo ""
-    echo "  Project Checks:"
-    run_check "Dependencies" check_node_modules
-    run_check "Identity" check_identity_file
+	echo ""
+	echo "  Project Checks:"
+	run_check "Dependencies" check_node_modules
+	run_check "Identity" check_identity_file
 }
 
 # ============================================================================
@@ -296,61 +296,61 @@ run_all_checks() {
 # ============================================================================
 
 print_report() {
-    print_section "📋 Diagnostic Report"
+	print_section "📋 Diagnostic Report"
 
-    # Summary line
-    echo ""
-    echo -e "  ${BOLD}Summary:${NC} $CHECKS_RUN checks run"
-    echo -e "    ${GREEN}✓ Passed:${NC}   $CHECKS_PASSED"
-    echo -e "    ${RED}✗ Failed:${NC}   $CHECKS_FAILED"
-    echo -e "    ${YELLOW}⚠ Warnings:${NC} $CHECKS_WARNED"
+	# Summary line
+	echo ""
+	echo -e "  ${BOLD}Summary:${NC} ${CHECKS_RUN} checks run"
+	echo -e "    ${GREEN}✓ Passed:${NC} ${ $CHECKS_PASS}ED"
+	echo -e "    ${RED}✗ Failed:${NC} ${ $CHECKS_FAIL}ED"
+	echo -e "    ${YELLOW}⚠ Warnings:${NC${ $CHECKS_WARN}ED"
 
-    # Problems section
-    if [ ${#PROBLEM_MESSAGES[@]} -gt 0 ]; then
-        echo ""
-        echo -e "  ${RED}${BOLD}Problems Found:${NC}"
-        for msg in "${PROBLEM_MESSAGES[@]}"; do
-            echo -e "    ${RED}✗${NC} $msg"
-        done
-    fi
+	# Problems section
+	if [[ ${#PROBLEM_MESSAGES[@]} -gt 0 ]]; then
+		echo ""
+		echo -e "  ${RED}${BOLD}Problems Found:${NC}"
+		for msg in "${PROBLEM_MESSAGES[@]}"; do
+			echo -e "    ${RED}✗${NC${ $m}sg"
+		done
+	fi
 
-    # Warnings section
-    if [ ${#WARNING_MESSAGES[@]} -gt 0 ]; then
-        echo ""
-        echo -e "  ${YELLOW}${BOLD}Warnings:${NC}"
-        for msg in "${WARNING_MESSAGES[@]}"; do
-            echo -e "    ${YELLOW}⚠${NC} $msg"
-        done
-    fi
+	# Warnings section
+	if [[ ${#WARNING_MESSAGES[@]} -gt 0 ]]; then
+		echo ""
+		echo -e "  ${YELLOW}${BOLD}Warnings:${NC}"
+		for msg in "${WARNING_MESSAGES[@]}"; do
+			echo -e "    ${YELLOW}⚠${NC${ $m}sg"
+		done
+	fi
 
-    # Hints section
-    if [ ${#HINT_MESSAGES[@]} -gt 0 ]; then
-        echo ""
-        echo -e "  ${BLUE}${BOLD}Suggested Fixes:${NC}"
-        for msg in "${HINT_MESSAGES[@]}"; do
-            echo -e "    $msg"
-        done
-    fi
+	# Hints section
+	if [[ ${#HINT_MESSAGES[@]} -gt 0 ]]; then
+		echo ""
+		echo -e "  ${BLUE}${BOLD}Suggested Fixes:${NC}"
+		for msg in "${HINT_MESSAGES[@]}"; do
+			echo -e "    ${msg}"
+		done
+	fi
 
-    # OK section (verbose mode or if no problems)
-    if [ ${#PROBLEM_MESSAGES[@]} -eq 0 ] && [ ${#WARNING_MESSAGES[@]} -eq 0 ]; then
-        echo ""
-        echo -e "  ${GREEN}${BOLD}All Checks Passed:${NC}"
-        for msg in "${OK_MESSAGES[@]}"; do
-            echo -e "    ${GREEN}✓${NC} $msg"
-        done
-    fi
+	# OK section (verbose mode or if no problems)
+	if [[ ${#PROBLEM_MESSAGES[@]} -eq 0 ]] && [[ ${#WARNING_MESSAGES[@]} -eq 0 ]]; then
+		echo ""
+		echo -e "  ${GREEN}${BOLD}All Checks Passed:${NC}"
+		for msg in "${OK_MESSAGES[@]}"; do
+			echo -e "    ${GREEN}✓${NC${ $m}sg"
+		done
+	fi
 
-    # Final verdict
-    echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    if [ ${#PROBLEM_MESSAGES[@]} -eq 0 ]; then
-        echo -e "  ${GREEN}${BOLD}✓ Your node setup looks healthy!${NC}"
-    else
-        echo -e "  ${RED}${BOLD}✗ Some issues need attention before running the node.${NC}"
-    fi
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo ""
+	# Final verdict
+	echo ""
+	echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	if [[ ${#PROBLEM_MESSAGES[@]} -eq 0 ]]; then
+		echo -e "  ${GREEN}${BOLD}✓ Your node setup looks healthy!${NC}"
+	else
+		echo -e "  ${RED}${BOLD}✗ Some issues need attention before running the node.${NC}"
+	fi
+	echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+	echo ""
 }
 
 # ============================================================================
@@ -358,7 +358,7 @@ print_report() {
 # ============================================================================
 
 show_help() {
-    cat << EOF
+	cat <<EOF
 🩺 Node Doctor - Demos Network Diagnostic Tool
 
 USAGE:
@@ -392,45 +392,45 @@ EOF
 # ============================================================================
 
 main() {
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -h|--help)
-                show_help
-                exit 0
-                ;;
-            -v|--verbose)
-                VERBOSE=true
-                shift
-                ;;
-            -q|--quiet)
-                QUIET=true
-                shift
-                ;;
-            *)
-                echo "Unknown option: $1"
-                echo "Use --help for usage information"
-                exit 1
-                ;;
-        esac
-    done
+	# Parse arguments
+	while [[ $# -gt 0 ]]; do
+		case $1 in
+		-h | --help)
+			show_help
+			exit 0
+			;;
+		-v | --verbose)
+			VERBOSE=true
+			shift
+			;;
+		-q | --quiet)
+			QUIET=true
+			shift
+			;;
+		*)
+			echo "Unknown option: $1"
+			echo "Use --help for usage information"
+			exit 1
+			;;
+		esac
+	done
 
-    echo ""
-    echo -e "${BOLD}🩺 Node Doctor - Demos Network Diagnostic Tool${NC}"
-    echo ""
+	echo ""
+	echo -e "${BOLD}🩺 Node Doctor - Demos Network Diagnostic Tool${NC}"
+	echo ""
 
-    # Run all checks
-    run_all_checks
+	# Run all checks
+	run_all_checks
 
-    # Print final report
-    print_report
+	# Print final report
+	print_report
 
-    # Exit with appropriate code
-    if [ ${#PROBLEM_MESSAGES[@]} -gt 0 ]; then
-        exit 1
-    else
-        exit 0
-    fi
+	# Exit with appropriate code
+	if [[ ${#PROBLEM_MESSAGES[@]} -gt 0 ]]; then
+		exit 1
+	else
+		exit 0
+	fi
 }
 
 # Run main

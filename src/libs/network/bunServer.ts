@@ -2,26 +2,16 @@ import { Server } from "bun"
 import { Headers } from "node-fetch"
 import log from "@/utilities/logger"
 
-export type BunRequest = Request & {
-    params?: Record<string, string>
-}
-
+export type BunRequest = Request & { params: Record<string, string> }
 export type Handler = (req: BunRequest) => Promise<Response> | Response
 export type Middleware = (
-    req: BunRequest,
+    req: Request,
     next: () => Promise<Response>,
     server?: Server,
 ) => Promise<Response>
 
-type ParamRoute = {
-    path: string
-    segments: string[]
-    handler: Handler
-}
-
 export class BunServer {
     private routes: Map<string, Map<string, Handler>> = new Map()
-    private paramRoutes: Map<string, ParamRoute[]> = new Map()
     private middlewares: Middleware[] = []
     private port: number
     private hostname: string
@@ -48,54 +38,53 @@ export class BunServer {
     }
 
     private addRoute(method: string, path: string, handler: Handler): void {
-        if (path.includes("/:")) {
-            if (!this.paramRoutes.has(method)) {
-                this.paramRoutes.set(method, [])
-            }
-            this.paramRoutes.get(method)!.push({
-                path,
-                segments: path.split("/").filter(Boolean),
-                handler,
-            })
-            return
-        }
         if (!this.routes.has(method)) {
             this.routes.set(method, new Map())
         }
         this.routes.get(method)?.set(path, handler)
     }
 
-    private matchParamRoute(method: string, pathname: string): {
-        handler: Handler
-        params: Record<string, string>
-    } | null {
-        const candidates = this.paramRoutes.get(method)
-        if (!candidates || candidates.length === 0) return null
+    private matchRoute(
+        method: string,
+        path: string,
+    ): { handler: Handler; params: Record<string, string> } | null {
+        const methodRoutes = this.routes.get(method)
+        if (!methodRoutes) {
+            return null
+        }
 
-        const requestSegments = pathname.split("/").filter(Boolean)
+        const exact = methodRoutes.get(path)
+        if (exact) {
+            return { handler: exact, params: {} }
+        }
 
-        for (const route of candidates) {
-            if (route.segments.length !== requestSegments.length) continue
+        const requestedParts = path.split("/").filter(Boolean)
+        for (const [routePath, handler] of methodRoutes.entries()) {
+            const routeParts = routePath.split("/").filter(Boolean)
+            if (routeParts.length !== requestedParts.length) {
+                continue
+            }
+
             const params: Record<string, string> = {}
-            let matched = true
+            let matches = true
 
-            for (let i = 0; i < route.segments.length; i++) {
-                const routeSeg = route.segments[i]
-                const reqSeg = requestSegments[i]
+            for (let i = 0; i < routeParts.length; i++) {
+                const routePart = routeParts[i]
+                const requestedPart = requestedParts[i]
 
-                if (routeSeg.startsWith(":")) {
-                    params[routeSeg.slice(1)] = decodeURIComponent(reqSeg)
+                if (routePart.startsWith(":")) {
+                    params[routePart.slice(1)] = decodeURIComponent(requestedPart)
                     continue
                 }
 
-                if (routeSeg !== reqSeg) {
-                    matched = false
+                if (routePart !== requestedPart) {
+                    matches = false
                     break
                 }
             }
 
-            if (matched) {
-                return { handler: route.handler, params }
+            if (matches) {
+                return { handler, params }
             }
         }
 
@@ -103,7 +92,7 @@ export class BunServer {
     }
 
     private async handleRequest(
-        req: BunRequest,
+        req: Request,
         server?: Server,
     ): Promise<Response> {
         const url = new URL(req.url)
@@ -112,18 +101,13 @@ export class BunServer {
 
         // Create the final handler (route handler)
         const finalHandler = async (): Promise<Response> => {
-            let routeHandler = this.routes.get(method)?.get(path)
-            if (!routeHandler) {
-                const match = this.matchParamRoute(method, path)
-                if (match) {
-                    routeHandler = match.handler
-                    req.params = match.params
-                }
+            const match = this.matchRoute(method, path)
+            if (match) {
+                const bunReq = req as BunRequest
+                bunReq.params = match.params
+                return await match.handler(bunReq)
             }
-            if (routeHandler) {
-                return await routeHandler(req)
-            }
-            return new Response("Not Found", { status: 404 })
+            return jsonResponse({ error: "Not Found" }, 404)
         }
 
         // Build middleware chain from right to left (last to first)
@@ -176,6 +160,8 @@ export const cors = (): Middleware => {
         headers = { ...headers, ...response.headers.toJSON() }
 
         return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
             headers: headers,
         })
     }
@@ -184,7 +170,9 @@ export const cors = (): Middleware => {
 export const json = (): Middleware => {
     return async (req, next) => {
         const response = await next()
-        response.headers.set("Content-Type", "application/json")
+        if (!response.headers.has("Content-Type")) {
+            response.headers.set("Content-Type", "application/json")
+        }
         return response
     }
 }

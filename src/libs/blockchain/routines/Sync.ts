@@ -28,6 +28,7 @@ import {
     PeerUnreachableError,
     TimeoutError,
 } from "src/exceptions"
+import { handleError } from "src/errors"
 import HandleGCR from "../gcr/handleGCR"
 import {
     discoverL2PSParticipants,
@@ -74,10 +75,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
     const ourLastBlockHash = lastBlock.hash
 
     log.info(
-        "[fastSync] Our last block number is " +
-        ourLastBlockNumber +
-        " and our last block hash is " +
-        ourLastBlockHash,
+        `[fastSync] Our last block number is ${ourLastBlockNumber} and our last block hash is ${ourLastBlockHash}`,
     )
 
     // REVIEW: With the peer gossip working, can we replace getLastBlockNumber
@@ -159,7 +157,7 @@ async function getHigestBlockPeerData(peers: Peer[] = []) {
             peerLastBlockNumbers.push(0)
         }
     }
-    log.info("[fastSync] Peer last block numbers: " + peerLastBlockNumbers)
+    log.info(`[fastSync] Peer last block numbers: ${peerLastBlockNumbers}`)
     log.custom(
         "fastsync_blocknumbers",
         "Request block numbers: " + JSON.stringify(requestBlockNumbers),
@@ -261,8 +259,8 @@ async function verifyLastBlockIntegrity(
 
     if (genesisBlock.hash !== ourGenesisHash) {
         log.error("[fastSync] Genesis hash is not coherent")
-        log.info("[fastSync] Our hash: " + ourGenesisHash)
-        log.info("[fastSync] Peer hash: " + genesisBlock.hash)
+        log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
+        log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
         process.exit(1)
     }
 
@@ -609,7 +607,7 @@ async function waitForNextBlock() {
             return false
         }
 
-        console.error(error)
+        handleError(error, "SYNC")
         return false
     }
 }
@@ -709,7 +707,7 @@ async function requestBlocks(): Promise<boolean> {
                 `[requestBlocks] Batch sync completed. Current block: ${getSharedState.lastBlockNumber}`,
             )
         } catch (error) {
-            console.error(error)
+            handleError(error, "SYNC", { source: "block download" })
             // Handle chain head reached
             if (error instanceof BlockNotFoundError) {
                 log.info(
@@ -785,6 +783,7 @@ export async function syncGCRTables(
                 )
                 console.error("[SYNC] [ ERROR ]")
                 console.error(error)
+                handleError(error, "SYNC", { source: "GCR table sync" })
             }
         }
     } finally {
@@ -886,7 +885,7 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
 
         if (newPeerObjects.length > 0) {
             // Run in background, don't block blockchain sync
-            exchangeL2PSParticipation(newPeerObjects, getSharedState.l2psJoinedUids)
+            exchangeL2PSParticipation(newPeerObjects)
                 .catch(error => {
                     log.error("[Sync] L2PS participation exchange failed:", error.message)
                 })
@@ -903,7 +902,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         return true
     }
 
-    if (getSharedState.fastSyncCount == 0) {
+    if (getSharedState.fastSyncCount === 0) {
         // INFO: Only run integrity checks on first sync
         const verified = await verifyLastBlockIntegrity(
             highestBlockPeer(),
@@ -918,6 +917,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
+        if (getSharedState.isShuttingDown) return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -927,6 +927,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     if (getSharedState.fastSyncCount === 0) {
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
+            if (getSharedState.isShuttingDown) return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )

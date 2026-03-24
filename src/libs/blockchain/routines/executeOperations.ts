@@ -22,23 +22,6 @@ import Block from "../block"
 import log from "src/utilities/logger"
 import subOperations from "./subOperations"
 
-// export interface OperationResult {
-//     success: boolean
-//     message: string
-// }
-
-// export interface Operation {
-//     // TODO Add parameters as a property
-//     operator: string
-//     actor: string
-//     params: any
-//     hash: string
-//     nonce: number
-//     timestamp: number
-//     status: boolean | "pending"
-//     fees: TxFee
-// }
-
 // NOTE The Actor object is designed to represent a single operator and the status of its operations
 export interface Actor {
     operations: Map<Operation, OperationResult>

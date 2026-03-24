@@ -119,7 +119,7 @@ export default class Mempool {
             let message = "Error: Failed to add transaction to mempool"
 
             if (error instanceof QueryFailedError) {
-                log.error("Error saving tx: " + transaction.hash)
+                log.error(`Error saving tx: ${transaction.hash}`)
                 log.error(error.message)
                 message = "Error: Transaction already in mempool"
             }
@@ -185,7 +185,7 @@ export default class Mempool {
             if (!existingHashes[tx.hash]) {
                 incomingSet[tx.hash] = true
             } else {
-                log.error("tx already exists: " + tx.hash)
+                log.error(`tx already exists: ${tx.hash}`)
             }
         }
 
@@ -196,7 +196,7 @@ export default class Mempool {
                 await this.repo.save(tx)
             } catch (error) {
                 if (error instanceof QueryFailedError) {
-                    log.error("Error saving tx: " + tx.hash)
+                    log.error(`Error saving tx: ${tx.hash}`)
                     log.error(error.message)
                 }
             }
@@ -237,18 +237,17 @@ export default class Mempool {
             const result = await this.repo.delete({ hash: txHash })
 
             if (result.affected > 0) {
-                console.log(
+                log.debug(
                     `[Mempool] Removed transaction ${txHash} (DTR relay success)`,
                 )
             } else {
-                console.log(
+                log.debug(
                     `[Mempool] Transaction ${txHash} not found for removal`,
                 )
             }
         } catch (error) {
-            console.log(
-                `[Mempool] Error removing transaction ${txHash}:`,
-                error,
+            log.error(
+                `[Mempool] Error removing transaction ${txHash}: ${error}`,
             )
             throw error
         }

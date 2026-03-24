@@ -19,7 +19,6 @@ export interface ImDiscoverMessage extends ImBaseMessage {
     payload: {}
 }
 
-
 export interface ImPeerMessage extends ImBaseMessage {
     type: "message"
     payload: {

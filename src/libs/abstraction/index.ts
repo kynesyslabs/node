@@ -156,10 +156,11 @@ async function verifyTelegramProof(
             success: true,
             message: "Telegram proof verified successfully",
         }
-    } catch (error: any) {
+    } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error)
         return {
             success: false,
-            message: `Failed to verify telegram proof: ${error.toString()}`,
+            message: `Failed to verify telegram proof: ${errorMsg}`,
         }
     }
 }
@@ -241,19 +242,21 @@ export async function verifyWeb2Proof(
                     ? `Verified ${payload.context} proof`
                     : `Failed to verify ${payload.context} proof`,
             }
-        } catch (error: any) {
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
             return {
                 success: false,
                 message: `Failed to verify ${
                     payload.context
-                } proof: ${error.toString()}`,
+                } proof: ${errorMsg}`,
             }
         }
-    } catch (error: any) {
+    } catch (error) {
         log.error(error)
+        const errorMsg = error instanceof Error ? error.message : String(error)
         return {
             success: false,
-            message: error.toString(),
+            message: errorMsg,
         }
     }
 }

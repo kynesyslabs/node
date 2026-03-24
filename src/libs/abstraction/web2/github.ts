@@ -1,7 +1,9 @@
 import axios from "axios"
+import log from "src/utilities/logger"
 import { Octokit } from "@octokit/core"
 import { Web2ProofParser } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
 
 export class GithubProofParser extends Web2ProofParser {
     private static instance: GithubProofParser
@@ -22,18 +24,19 @@ export class GithubProofParser extends Web2ProofParser {
             const gistId = pathParts[2]
             return { username, gistId }
         } catch (error) {
-            console.error(error)
+            log.error("[GITHUB] " + error)
             throw new Error("Failed to extract gist details")
         }
     }
 
     async login() {
-        if (!process.env.GITHUB_TOKEN) {
-            throw new Error("GITHUB_TOKEN is not set")
+        const githubToken = Config.getInstance().identity.githubToken
+        if (!githubToken) {
+            throw new Error("GITHUB_TOKEN is not configured")
         }
 
         this.github = new Octokit({
-            auth: process.env.GITHUB_TOKEN,
+            auth: githubToken,
         })
     }
 

@@ -10,6 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import { DataSource } from "typeorm"
+import { Config } from "src/config"
 
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
@@ -23,6 +24,7 @@ import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRToken } from "./entities/GCRv2/GCR_Token.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
+import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
@@ -43,11 +45,11 @@ const TYPEORM_SYNCHRONIZE =
 
 export const dataSource = new DataSource({
     type: "postgres",
-    host: process.env.PG_HOST || "localhost",
-    port: parseInt(process.env.PG_PORT) || 5332,
-    username: process.env.PG_USER || "demosuser",
-    password: process.env.PG_PASSWORD || "demospassword",
-    database: process.env.PG_DATABASE || "demos",
+    host: Config.getInstance().database.host,
+    port: Config.getInstance().database.port,
+    username: Config.getInstance().database.user,
+    password: Config.getInstance().database.password,
+    database: Config.getInstance().database.database,
     migrations: ["../migrations/*.{ts,js}"],
     entities: [
         Blocks,
@@ -63,6 +65,7 @@ export const dataSource = new DataSource({
         GCRMain,
         GCRToken,
         GCRTLSNotary,
+        GCRStorageProgram,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
@@ -77,7 +80,6 @@ export const dataSource = new DataSource({
     synchronize: TYPEORM_SYNCHRONIZE,
     logging: false,
 })
-
 
 class Datasource {
     private static instance: Datasource

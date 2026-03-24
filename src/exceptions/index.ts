@@ -1,9 +1,26 @@
 /**
+ * Legacy exception classes — now backed by AppError.
+ *
+ * These maintain backward compatibility (constructor takes just a message string)
+ * while gaining AppError features (code, category, severity, context).
+ *
+ * For new code, prefer using domain errors from "src/errors" directly.
+ */
+
+import { AppError } from "src/errors/AppError"
+import { ErrorSeverity } from "src/errors/types"
+import { ErrorCode } from "src/errors/codes"
+
+/**
  * Thrown when a Waiter event times out
  */
-export class TimeoutError extends Error {
+export class TimeoutError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.TIMEOUT_EXCEEDED,
+            category: "CORE",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "TimeoutError"
     }
 }
@@ -11,44 +28,68 @@ export class TimeoutError extends Error {
 /**
  * Thrown when a Waiter event is aborted
  */
-export class AbortError extends Error {
+export class AbortError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.OPERATION_ABORTED,
+            category: "CORE",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "AbortError"
     }
 }
 
-export class BlockNotFoundError extends Error {
+export class BlockNotFoundError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.NOT_FOUND_BLOCK,
+            category: "CHAIN",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "BlockNotFoundError"
     }
 }
 
-export class PeerUnreachableError extends Error {
+export class PeerUnreachableError extends AppError {
     constructor(message: string) {
-        super(message)
-        this.name = "PeerOfflineError"
+        super(message, {
+            code: ErrorCode.PEER_UNREACHABLE,
+            category: "PEER",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
+        this.name = "PeerUnreachableError"
     }
 }
 
-export class NotInShardError extends Error {
+export class NotInShardError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.PEER_NOT_IN_SHARD,
+            category: "PEER",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "NotInShardError"
     }
 }
 
-export class ForgingEndedError extends Error {
+export class ForgingEndedError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.CONSENSUS_FORGING_ENDED,
+            category: "CONSENSUS",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "ForgingEndedError"
     }
 }
 
-export class BlockInvalidError extends Error {
+export class BlockInvalidError extends AppError {
     constructor(message: string) {
-        super(message)
+        super(message, {
+            code: ErrorCode.VALIDATION_BLOCK_INVALID,
+            category: "CHAIN",
+            severity: ErrorSeverity.RECOVERABLE,
+        })
         this.name = "BlockInvalidError"
     }
 }

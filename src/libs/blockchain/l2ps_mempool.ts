@@ -63,7 +63,7 @@ export default class L2PSMempool {
             const db = await Datasource.getInstance()
             this.repo = db.getDataSource().getRepository(L2PSMempoolTx)
             log.info("[L2PS Mempool] Initialized successfully")
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Mempool] Failed to initialize:", error)
             throw error
         }
@@ -143,11 +143,12 @@ export default class L2PSMempool {
             // Save with retries
             return await this.saveTransactionWithRetry(l2psUid, encryptedTx, originalHash, blockNumber, status)
 
-        } catch (error: any) {
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
             log.error("[L2PS Mempool] Error adding transaction:", error)
             return {
                 success: false,
-                error: error.message || "Unknown error",
+                error: errorMsg || "Unknown error",
             }
         }
     }
@@ -214,11 +215,13 @@ export default class L2PSMempool {
                 log.info(`[L2PS Mempool] Added transaction ${encryptedTx.hash} (seq: ${result.sequenceNumber}) for L2PS ${l2psUid}`)
                 return { success: true }
 
-            } catch (error: any) {
+            } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error)
+                const errorCode = (error as Record<string, unknown>)?.code
                 // Check for unique constraint violation (Postgres error code 23505)
-                const isUniqueViolation = error.code === "23505" ||
-                    error.message?.includes("UQ_L2PS_UID_SEQUENCE") ||
-                    error.message?.includes("unique constraint")
+                const isUniqueViolation = errorCode === "23505" ||
+                    errorMsg?.includes("UQ_L2PS_UID_SEQUENCE") ||
+                    errorMsg?.includes("unique constraint")
 
                 if (isUniqueViolation && retries > 1) {
                     retries--
@@ -231,7 +234,7 @@ export default class L2PSMempool {
                 log.error("[L2PS Mempool] Error adding transaction:", error)
                 return {
                     success: false,
-                    error: error.message || "Unknown error",
+                    error: errorMsg || "Unknown error",
                 }
             }
         }
@@ -280,13 +283,13 @@ export default class L2PSMempool {
      * Get all L2PS transactions for a specific UID, optionally filtered by status
      * 
      * @param l2psUid - L2PS network identifier
-     * @param status - Optional status filter ("pending", "processed", "failed")
+     * @param status - Optional status filter ("pending", "processed", "executed", "failed")
      * @returns Promise resolving to array of L2PS mempool transactions
      * 
      * @example
      * ```typescript
-     * // Get all processed transactions for network_1
-     * const txs = await L2PSMempool.getByUID("network_1", "processed")
+     * // Get all executed transactions for network_1
+     * const txs = await L2PSMempool.getByUID("network_1", "executed")
      * ```
      */
     public static async getByUID(l2psUid: string, status?: string): Promise<L2PSMempoolTx[]> {
@@ -306,7 +309,7 @@ export default class L2PSMempool {
             }
 
             return await this.repo.find(options)
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error getting transactions for UID ${l2psUid}:`, error)
             return []
         }
@@ -327,7 +330,7 @@ export default class L2PSMempool {
                 where: { l2ps_uid: l2psUid },
                 order: { timestamp: "DESC" }
             })
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error getting latest transaction for UID ${l2psUid}:`, error)
             return null
         }
@@ -360,7 +363,7 @@ export default class L2PSMempool {
             const options: FindManyOptions<L2PSMempoolTx> = {
                 where: {
                     l2ps_uid: l2psUid,
-                    status: "processed",  // Only include successfully processed transactions
+                    status: L2PS_STATUS.EXECUTED,  // Only include successfully executed transactions awaiting batching
                 },
                 order: {
                     timestamp: "ASC",
@@ -395,7 +398,7 @@ export default class L2PSMempool {
             log.debug(`[L2PS Mempool] Generated hash for ${l2psUid}${blockSuffix}: ${consolidatedHash} (${sortedHashes.length} txs)`)
             return consolidatedHash
 
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error generating hash for UID ${l2psUid}, block ${blockNumber}:`, error)
             // Return deterministic error hash
             const blockSuffix = blockNumber === undefined ? "_ALL" : `_BLOCK_${blockNumber}`
@@ -433,7 +436,7 @@ export default class L2PSMempool {
             }
             return updated
 
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error updating status for ${hash}:`, error)
             return false
         }
@@ -513,7 +516,7 @@ export default class L2PSMempool {
             }
             return updated
 
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Mempool] Error batch updating status:", error)
             return 0
         }
@@ -529,7 +532,7 @@ export default class L2PSMempool {
      * @example
      * ```typescript
      * // Get all processed transactions ready for batching
-     * const readyToBatch = await L2PSMempool.getByStatus(L2PS_STATUS.PROCESSED, 100)
+     * const readyToBatch = await L2PSMempool.getByStatus(L2PS_STATUS.EXECUTED, 100)
      * ```
      */
     public static async getByStatus(status: L2PSStatus, limit?: number): Promise<L2PSMempoolTx[]> {
@@ -549,7 +552,7 @@ export default class L2PSMempool {
             }
 
             return await this.repo.find(options)
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error getting transactions by status ${status}:`, error)
             return []
         }
@@ -584,7 +587,7 @@ export default class L2PSMempool {
             }
 
             return await this.repo.find(options)
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error getting transactions for UID ${l2psUid} with status ${status}:`, error)
             return []
         }
@@ -612,7 +615,7 @@ export default class L2PSMempool {
             }
             return deleted
 
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Mempool] Error deleting transactions:", error)
             return 0
         }
@@ -645,7 +648,7 @@ export default class L2PSMempool {
             }
             return deletedCount
 
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error during cleanup by status ${status}:`, error)
             return 0
         }
@@ -663,7 +666,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             return await this.repo.exists({ where: { original_hash: originalHash } })
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error checking original hash ${originalHash}:`, error)
             throw error
         }
@@ -680,7 +683,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             return await this.repo.exists({ where: { hash } })
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error checking hash ${hash}:`, error)
             throw error
         }
@@ -697,7 +700,7 @@ export default class L2PSMempool {
             await this.ensureInitialized()
 
             return await this.repo.findOne({ where: { hash } })
-        } catch (error: any) {
+        } catch (error) {
             log.error(`[L2PS Mempool] Error getting transaction ${hash}:`, error)
             return null
         }
@@ -736,7 +739,7 @@ export default class L2PSMempool {
             }
             return deletedCount
 
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Mempool] Error during cleanup:", error)
             return 0
         }
@@ -797,7 +800,7 @@ export default class L2PSMempool {
                 transactionsByStatus,
             }
 
-        } catch (error: any) {
+        } catch (error) {
             log.error("[L2PS Mempool] Error getting stats:", error)
             return {
                 totalTransactions: 0,

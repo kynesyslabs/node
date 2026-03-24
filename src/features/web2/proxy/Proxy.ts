@@ -195,10 +195,10 @@ export class Proxy {
                 const isDisallowedV4 = (v4: string): boolean => {
                     if (/^127(?:\.\d{1,3}){3}$/.test(v4)) return true // loopback
                     if (/^10\./.test(v4)) return true // private
-                    const m = v4.match(/^172\.(\d{1,3})\./)
-                    if (m) {
-                        const o = Number(m[1])
-                        if (o >= 16 && o <= 31) return true
+                    const ipMatch = v4.match(/^172\.(\d{1,3})\./)
+                    if (ipMatch) {
+                        const secondOctet = Number(ipMatch[1])
+                        if (secondOctet >= 16 && secondOctet <= 31) return true
                     }
                     if (/^192\.168\./.test(v4)) return true // private
                     if (/^169\.254\./.test(v4)) return true // link-local
@@ -418,10 +418,10 @@ export class Proxy {
             targetPort: parsedUrl.port
                 ? Number(parsedUrl.port)
                 : parsedUrl.protocol === "https:"
-                ? 443
-                : parsedUrl.protocol === "http:"
-                ? 80
-                : undefined,
+                  ? 443
+                  : parsedUrl.protocol === "http:"
+                    ? 80
+                    : undefined,
         }
     }
 

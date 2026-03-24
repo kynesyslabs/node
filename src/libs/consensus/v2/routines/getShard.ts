@@ -23,7 +23,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     if (peers.length < maxShardSize) {
         maxShardSize = peers.length
     }
-    log.debug("[getShard] maxShardSize: " + maxShardSize)
+    log.debug(`[getShard] maxShardSize: ${maxShardSize}`)
     const shard: Peer[] = []
     log.custom("last_shard", "Shard seed is: " + seed)
     // getSharedState.lastShardSeed = seed
@@ -42,7 +42,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
-   
+
     // Setting the last shard
     // getSharedState.lastShard = shard.map(peer => peer.identity)
     if (shard.length < 3) {

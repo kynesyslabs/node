@@ -15,7 +15,7 @@ import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
-import SecretaryManager from "./types/secretaryManager"
+import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
 import {
     BlockInvalidError,
     ForgingEndedError,
@@ -83,7 +83,7 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.debug("Forgin block: " + manager.shard.blockRef)
+        log.debug(`Forgin block: ${manager.shard.blockRef}`)
         log.debug("[consensusRoutine] We are in the shard, creating the block")
         log.info(
             `[consensusRoutine] shard: ${JSON.stringify(
@@ -127,8 +127,8 @@ export async function consensusRoutine(): Promise<void> {
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
-        log.info("[consensusRoutine] Successful Txs: " + successfulTxs.length)
-        log.info("[consensusRoutine] Failed Txs: " + failedTxs.length)
+        log.info(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
+        log.info(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
         if (failedTxs.length > 0) {
             log.debug(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -136,7 +136,7 @@ export async function consensusRoutine(): Promise<void> {
             //  Prune the mempool of the failed txs
             // NOTE The mempool should now be updated with only the successful txs
             for (const tx of failedTxs) {
-                log.debug("Failed tx: " + tx)
+                log.debug(`Failed tx: ${tx}`)
                 await Mempool.removeTransactionsByHashes([tx])
             }
             // Ensure the forged block uses the same tx set as the applied state.
@@ -146,12 +146,19 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
         // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-        const l2psResult = await L2PSConsensus.applyPendingProofs(blockRef, false)
+        const l2psResult = await L2PSConsensus.applyPendingProofs(
+            blockRef,
+            false,
+        )
         if (l2psResult.proofsApplied > 0) {
-            log.info(`[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`)
+            log.info(
+                `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+            )
         }
         if (l2psResult.proofsFailed > 0) {
-            log.warning(`[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`)
+            log.warning(
+                `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+            )
         }
 
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
@@ -228,21 +235,19 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 7: End the consensus routine
         await updateValidatorPhase(7, blockRef)
     } catch (error) {
-        if (error instanceof NotInShardError) {
-            log.info(
-                "[consensusRoutine] We are not in the shard, waiting for the block",
-            )
+        if (
+            error instanceof NotInShardError ||
+            error instanceof ForgingEndedError
+        ) {
+            log.error(error)
+            log.error("[consensusRoutine] Exiting consensus routine")
             return
         }
 
-        if (error instanceof ForgingEndedError) {
-            log.info(
-                "[consensusRoutine] We are forging an ended block. Exiting the consensus routine",
-            )
-            return
-        }
-
-        if (error instanceof BlockInvalidError) {
+        if (
+            error instanceof BlockInvalidError ||
+            error instanceof AbortConsensusError
+        ) {
             log.info(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
@@ -256,7 +261,7 @@ export async function consensusRoutine(): Promise<void> {
                 }
             }
             await rollbackGCREditsFromTxs(txsToRollback)
-            await Mempool.removeTransactionsByHashes(successfulTxs)
+            // await Mempool.removeTransactionsByHashes(successfulTxs)
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)
@@ -264,8 +269,7 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        console.error(error)
-        log.error(`[CONSENSUS] Fatal consensus error: ${error}`)
+        log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
@@ -356,11 +360,16 @@ async function mergeAndOrderMempools(
     log.debug(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool)}`)
     log.info("[CONSENSUS] Our mempool has been retrieved")
 
-    // NOTE: Transactions here should be ordered by timestamp
     await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3, blockRef)
 
-    return await Mempool.getMempool(blockRef)
+    const mempool = await Mempool.getMempool(blockRef)
+    const hashes = mempool.map(tx => tx.hash)
+    const existingHashes = await Chain.getExistingTransactionHashes(hashes)
+
+    // INFO: Remove existing txs from mempool
+    await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
+    return mempool.filter(tx => !existingHashes.has(tx.hash))
 }
 
 /**

@@ -13,9 +13,10 @@ import * as fs from "fs"
 import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
+import { Config } from "src/config"
 
 function getLatestGCRRecoveryData() {
-    if (!process.env.RESTORE) {
+    if (!Config.getInstance().core.restore) {
         return null
     }
 
@@ -43,7 +44,7 @@ export default async function findGenesisBlock() {
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
-        log.info("[GENESIS] Genesis block found. Hash: " + genesisBlockHash)
+        log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
         return
     }
 

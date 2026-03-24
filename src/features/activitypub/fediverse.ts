@@ -3,6 +3,7 @@ import helmet from "helmet"
 
 import { ActivityPubStorage } from "./fedistore"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
 
 const app = express()
 app.use(helmet())
@@ -78,7 +79,7 @@ async function main() {
 main()
 
 // Start the server
-const port = process.env.PORT || 3000
+const port = Config.getInstance().server.serverPort
 app.listen(port, () => {
     log.info(`ActivityPub server listening on port ${port}`)
     connected = true

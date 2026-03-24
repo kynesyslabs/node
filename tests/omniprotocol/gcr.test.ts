@@ -14,7 +14,8 @@ const fixturesDir = path.resolve(__dirname, "../../fixtures")
 describe("JSON Envelope Serialization", () => {
     it("should encode and decode JSON request without data loss", () => {
         const original = {
-            address: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+            address:
+                "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
             extra: "test data",
             number: 42,
         }
@@ -66,7 +67,8 @@ describe("JSON Envelope Serialization", () => {
 describe("GCR Operations - getIdentities Request", () => {
     it("should encode valid getIdentities request", () => {
         const request = {
-            address: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+            address:
+                "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
         }
 
         const encoded = encodeJsonRequest(request)
@@ -81,11 +83,13 @@ describe("GCR Operations - getIdentities Request", () => {
             result: 200,
             response: {
                 web2: {
-                    twitter: [{
-                        proof: "https://twitter.com/user/status/123",
-                        userId: "123456",
-                        username: "testuser",
-                    }],
+                    twitter: [
+                        {
+                            proof: "https://twitter.com/user/status/123",
+                            userId: "123456",
+                            username: "testuser",
+                        },
+                    ],
                 },
                 xm: {},
                 pqc: {},
@@ -105,7 +109,8 @@ describe("GCR Operations - getIdentities Request", () => {
 describe("GCR Operations - getPoints Request", () => {
     it("should encode valid getPoints request", () => {
         const request = {
-            address: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+            address:
+                "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
         }
 
         const encoded = encodeJsonRequest(request)
@@ -146,7 +151,8 @@ describe("GCR Operations - getPoints Request", () => {
 describe("GCR Operations - getReferralInfo Request", () => {
     it("should encode valid getReferralInfo request", () => {
         const request = {
-            address: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+            address:
+                "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
         }
 
         const encoded = encodeJsonRequest(request)
@@ -193,7 +199,8 @@ describe("GCR Operations - validateReferral Request", () => {
             result: 200,
             response: {
                 isValid: true,
-                referrerPubkey: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+                referrerPubkey:
+                    "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
                 message: "Referral code is valid",
             },
             require_reply: false,
@@ -223,7 +230,11 @@ describe("GCR Operations - validateReferral Request", () => {
         const decoded = decodeRpcResponse(encoded)
 
         expect(decoded.result).toBe(200)
-        const resp = decoded.response as { isValid: boolean; referrerPubkey: string | null; message: string }
+        const resp = decoded.response as {
+            isValid: boolean
+            referrerPubkey: string | null
+            message: string
+        }
         expect(resp.isValid).toBe(false)
     })
 })
@@ -291,7 +302,11 @@ describe("GCR Operations - getTopAccounts Request", () => {
 
         expect(decoded.result).toBe(200)
         expect(Array.isArray(decoded.response)).toBe(true)
-        const resp = decoded.response as Array<{ pubkey: string; points: number; rank: number }>
+        const resp = decoded.response as Array<{
+            pubkey: string
+            points: number
+            rank: number
+        }>
         expect(resp.length).toBe(3)
         expect(resp[0].rank).toBe(1)
     })
@@ -335,7 +350,8 @@ describe("GCR Fixture - address_info.json", () => {
 describe("GCR Round-Trip Encoding", () => {
     it("should handle complex nested objects without data loss", () => {
         const complexRequest = {
-            address: "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
+            address:
+                "0xd58e8528cd9585dab850733ee92255ae84fe28d8d44543a8e39b95cf098fd329",
             metadata: {
                 nested: {
                     deeply: {

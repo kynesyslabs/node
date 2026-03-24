@@ -168,7 +168,7 @@ async function verifyChallenge(
 
         return isValid
     } catch (error) {
-        console.error("[PEER AUTHENTICATION] Challenge verification failed:", error)
+        log.error("[PEER AUTHENTICATION] Challenge verification failed: " + error)
         return false
     }
 }
@@ -243,7 +243,9 @@ export default async function getPeerIdentity(
         if (receivedIdentity === expectedIdentity) {
             log.debug("[PEER AUTH] Identity is the expected one")
         } else {
-            log.warning(`[PEER AUTH] Identity mismatch - Expected: ${expectedIdentity}, Received: ${receivedIdentity}`)
+            log.warning(
+                `[PEER AUTH] Identity mismatch - Expected: ${expectedIdentity}, Received: ${receivedIdentity}`,
+            )
             return null
         }
         // Adding the property to the peer
@@ -255,7 +257,9 @@ export default async function getPeerIdentity(
         peer.verification.message = `getPeerIdentity routine verified with challenge-response (challenge: ${challenge.slice(0, 16)}...)`
         peer.verification.timestamp = new Date().getTime()
     } else {
-        log.warning(`[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`)
+        log.warning(
+            `[PEER AUTH] [FAILED] Response ${response.result} received: ${response.response}`,
+        )
         return null
     }
     // ? Should we add it to the peerList here instead of in the peerBootstrap routine / hello_peer routine?

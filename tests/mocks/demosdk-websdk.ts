@@ -2,13 +2,19 @@ export class Demos {
     rpc_url = ""
     connected = false
 
-    async connectWallet(mnemonic: string, _options?: Record<string, unknown>): Promise<string> {
+    async connectWallet(
+        mnemonic: string,
+        _options?: Record<string, unknown>,
+    ): Promise<string> {
         this.connected = true
         void mnemonic
         return "0xmockwallet"
     }
 
-    async rpcCall(_request: unknown, _authenticated = false): Promise<{
+    async rpcCall(
+        _request: unknown,
+        _authenticated = false,
+    ): Promise<{
         result: number
         response: unknown
         require_reply: boolean
