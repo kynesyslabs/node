@@ -4,11 +4,13 @@
  * PRE_APPROVED: Read-only transactions (no GCR edits). Soft finality ~2s.
  * TO_APPROVE: State-changing transactions pending delta agreement across shard.
  * PROBLEMATIC: Transactions where shard members disagree on the resulting state delta.
+ * FAILED: Speculative execution failed — TX will not be included in any block.
  */
 export enum TransactionClassification {
     PRE_APPROVED = "PRE_APPROVED",
     TO_APPROVE = "TO_APPROVE",
     PROBLEMATIC = "PROBLEMATIC",
+    FAILED = "FAILED",
 }
 
 /**

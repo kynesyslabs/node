@@ -121,6 +121,11 @@ export default class Mempool {
                     )
                     if (specResult.success && specResult.delta) {
                         deltaHash = specResult.delta.hash
+                    } else {
+                        classification = TransactionClassification.FAILED
+                        log.warn(
+                            `[Mempool] Speculative execution failed for ${transaction.hash}, marking as FAILED`,
+                        )
                     }
                 }
 
