@@ -13,7 +13,11 @@
 import * as fs from "fs"
 import * as bip39 from "bip39"
 import { wordlist } from "@scure/bip39/wordlists/english.js"
-import { Hashing, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import {
+    Hashing,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import * as dotenv from "dotenv"
 
@@ -44,7 +48,9 @@ async function mnemonicToSeed(mnemonic: string): Promise<Uint8Array> {
     mnemonic = mnemonic.trim()
 
     if (!bip39.validateMnemonic(mnemonic, wordlist)) {
-        console.error("Error: Invalid mnemonic - not a valid BIP39 mnemonic phrase")
+        console.error(
+            "Error: Invalid mnemonic - not a valid BIP39 mnemonic phrase",
+        )
         process.exit(1)
     }
 
@@ -63,7 +69,9 @@ async function main() {
     // Check if identity file exists
     if (!fs.existsSync(IDENTITY_FILE)) {
         console.error(`Error: Identity file not found at '${IDENTITY_FILE}'`)
-        console.error("Run the node once to generate an identity, or create one manually.")
+        console.error(
+            "Run the node once to generate an identity, or create one manually.",
+        )
         process.exit(1)
     }
 
@@ -72,9 +80,13 @@ async function main() {
 
     // Check if this looks like a mnemonic (has spaces) vs old hex format
     if (!mnemonic.includes(" ")) {
-        console.error("Error: Identity file appears to use old format (hex private key).")
+        console.error(
+            "Error: Identity file appears to use old format (hex private key).",
+        )
         console.error("The new identity system uses BIP39 mnemonic phrases.")
-        console.error("Use 'bun run keygen' for old format, or regenerate identity with new system.")
+        console.error(
+            "Use 'bun run keygen' for old format, or regenerate identity with new system.",
+        )
         process.exit(1)
     }
 
@@ -102,7 +114,7 @@ async function main() {
     }
 }
 
-main().catch((error) => {
+main().catch(error => {
     console.error("Error:", error.message)
     process.exit(1)
 })

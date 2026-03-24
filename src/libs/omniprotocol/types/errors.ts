@@ -1,7 +1,10 @@
 import log from "src/utilities/logger"
 
 export class OmniProtocolError extends Error {
-    constructor(message: string, public readonly code: number) {
+    constructor(
+        message: string,
+        public readonly code: number,
+    ) {
         super(message)
         this.name = "OmniProtocolError"
 
@@ -25,7 +28,10 @@ export class UnknownOpcodeError extends OmniProtocolError {
 }
 
 export class SigningError extends OmniProtocolError {
-    constructor(message: string, public readonly cause?: Error) {
+    constructor(
+        message: string,
+        public readonly cause?: Error,
+    ) {
         super(`Signing failed: ${message}`, 0xf001)
         this.name = "SigningError"
     }

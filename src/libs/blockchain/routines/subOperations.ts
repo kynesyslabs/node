@@ -33,7 +33,9 @@ export default class SubOperations {
         }
         // NOTE Insert blindly stuff into the GCR if no genesis is present
         // Using the genesis schema it is easy to follow the structure of the genesis file
-        log.debug("Genesis operation params: " + JSON.stringify(operation.params))
+        log.debug(
+            "Genesis operation params: " + JSON.stringify(operation.params),
+        )
         const genesisContent: Genesis = operation.params
         // Let's extract the genesis transaction from the genesis block
         const genesisTx = await Chain.getTransactionFromHash(

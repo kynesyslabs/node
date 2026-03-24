@@ -4,11 +4,9 @@ import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
 import log from "@/utilities/logger"
 
-export default async function handleAptosBalanceQuery(
-    operation: IOperation,
-) {
+export default async function handleAptosBalanceQuery(operation: IOperation) {
     log.debug("[XM Method] Aptos Balance Query")
-    
+
     try {
         // Get the provider URL from our configuration
         const providerUrl = chainProviders.aptos[operation.subchain]
@@ -26,9 +24,9 @@ export default async function handleAptosBalanceQuery(
 
         // Map subchain to Network enum
         const networkMap = {
-            "mainnet": Network.MAINNET,
-            "testnet": Network.TESTNET,
-            "devnet": Network.DEVNET,
+            mainnet: Network.MAINNET,
+            testnet: Network.TESTNET,
+            devnet: Network.DEVNET,
         }
 
         const network = networkMap[operation.subchain]
@@ -72,13 +70,16 @@ export default async function handleAptosBalanceQuery(
 
         // Query balance using the appropriate method
         let balance: string
-        
+
         if (params.coinType === "0x1::aptos_coin::AptosCoin") {
             // Use APT-specific method for efficiency
             balance = await aptosInstance.getAPTBalanceDirect(params.address)
         } else {
             // Use generic coin balance method
-            balance = await aptosInstance.getCoinBalanceDirect(params.coinType, params.address)
+            balance = await aptosInstance.getCoinBalanceDirect(
+                params.coinType,
+                params.address,
+            )
         }
 
         log.debug("balance query result:", balance)
@@ -87,7 +88,6 @@ export default async function handleAptosBalanceQuery(
             result: balance,
             status: true,
         }
-
     } catch (error) {
         log.error("Aptos balance query error:", error)
         return {

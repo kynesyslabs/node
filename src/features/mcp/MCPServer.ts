@@ -194,7 +194,7 @@ export class MCPServerManager {
 
     /**
      * Start the MCP server and begin listening for connections
-     * 
+     *
      * Supports both stdio (local) and SSE (remote network) transports.
      */
     public async start(): Promise<void> {
@@ -269,18 +269,20 @@ export class MCPServerManager {
             res.writeHead(200, {
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
+                Connection: "keep-alive",
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Headers": "Cache-Control",
             })
 
             // Create SSE transport for this connection
             const sseTransport = new SSEServerTransport("/message", res)
-            
+
             // Connect server to this SSE transport
             if (this.server) {
-                this.server.connect(sseTransport).catch((error) => {
-                log.error(`[MCP] Failed to connect SSE transport: ${String(error)}`)
+                this.server.connect(sseTransport).catch(error => {
+                    log.error(
+                        `[MCP] Failed to connect SSE transport: ${String(error)}`,
+                    )
                     res.end()
                 })
             }
@@ -293,7 +295,11 @@ export class MCPServerManager {
             // Handle client disconnect
             req.on("close", () => {
                 log.info("[MCP] SSE client disconnected")
-                sseTransport.close().catch((err) => log.error("[MCP] SSE transport close error:", err))
+                sseTransport
+                    .close()
+                    .catch(err =>
+                        log.error("[MCP] SSE transport close error:", err),
+                    )
             })
         })
 
@@ -305,7 +311,9 @@ export class MCPServerManager {
                     // The message handling is done internally by the transport
                     res.json({ status: "received" })
                 } else {
-                    res.status(500).json({ error: "No SSE transport available" })
+                    res.status(500).json({
+                        error: "No SSE transport available",
+                    })
                 }
             } catch (error) {
                 log.error(`[MCP] Error handling message: ${String(error)}`)
@@ -317,13 +325,17 @@ export class MCPServerManager {
         await new Promise<void>((resolve, reject) => {
             if (this.httpServer) {
                 this.httpServer.listen(port, host, () => {
-                log.info(`[MCP] SSE server listening on http://${host}:${port}`)
-                log.info(`[MCP] SSE endpoint: http://${host}:${port}/sse`)
-                log.info(`[MCP] Message endpoint: http://${host}:${port}/message`)
-                resolve()
+                    log.info(
+                        `[MCP] SSE server listening on http://${host}:${port}`,
+                    )
+                    log.info(`[MCP] SSE endpoint: http://${host}:${port}/sse`)
+                    log.info(
+                        `[MCP] Message endpoint: http://${host}:${port}/message`,
+                    )
+                    resolve()
                 })
 
-                this.httpServer.on("error", (error) => {
+                this.httpServer.on("error", error => {
                     reject(error)
                 })
             }
@@ -444,4 +456,3 @@ export function createDemosMCPServer(options?: {
 
     return new MCPServerManager(config)
 }
-

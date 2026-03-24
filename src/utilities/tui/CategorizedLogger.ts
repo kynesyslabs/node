@@ -839,7 +839,10 @@ export class CategorizedLogger extends EventEmitter {
      */
     getAllEntries(): LogEntry[] {
         // Return cached result if entry counter hasn't changed
-        if (this.allEntriesCache !== null && this.allEntriesCacheLastCounter === this.entryCounter) {
+        if (
+            this.allEntriesCache !== null &&
+            this.allEntriesCacheLastCounter === this.entryCounter
+        ) {
             return this.allEntriesCache
         }
 

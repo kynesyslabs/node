@@ -1,31 +1,31 @@
 {
-  "request": {
-    "method": "consensus_routine",
-    "params": [
-      {
-        "method": "proposeBlockHash",
+    "request": {
+        "method": "consensus_routine",
         "params": [
-          "989edd2f8d5e387c7c67cd57907442633530a6720f47f4034c5d2409f1c44a21",
-          {
-            "signatures": {
-              "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x183bd674520629bd64c0f8a0510e7fce0cb19fe69cd68ef8b30fb7d58e7cabcc12a4acfc7e63068e488f881acee086cea7862fa3fea725469825ad8db16f1c0e"
+            {
+                "method": "proposeBlockHash",
+                "params": [
+                    "989edd2f8d5e387c7c67cd57907442633530a6720f47f4034c5d2409f1c44a21",
+                    {
+                        "signatures": {
+                            "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x183bd674520629bd64c0f8a0510e7fce0cb19fe69cd68ef8b30fb7d58e7cabcc12a4acfc7e63068e488f881acee086cea7862fa3fea725469825ad8db16f1c0e"
+                        }
+                    },
+                    "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9"
+                ]
             }
-          },
-          "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9"
         ]
-      }
-    ]
-  },
-  "response": {
-    "result": 200,
-    "response": "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9",
-    "require_reply": false,
-    "extra": {
-      "signatures": {
-        "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x183bd674520629bd64c0f8a0510e7fce0cb19fe69cd68ef8b30fb7d58e7cabcc12a4acfc7e63068e488f881acee086cea7862fa3fea725469825ad8db16f1c0e"
-      }
-    }
-  },
-  "frame_request": "22",
-  "frame_response": "24"
+    },
+    "response": {
+        "result": 200,
+        "response": "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9",
+        "require_reply": false,
+        "extra": {
+            "signatures": {
+                "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x183bd674520629bd64c0f8a0510e7fce0cb19fe69cd68ef8b30fb7d58e7cabcc12a4acfc7e63068e488f881acee086cea7862fa3fea725469825ad8db16f1c0e"
+            }
+        }
+    },
+    "frame_request": "22",
+    "frame_response": "24"
 }

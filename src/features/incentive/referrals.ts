@@ -157,9 +157,8 @@ export class Referrals {
         referralCode: string,
         gcrMainRepository: any,
     ): Promise<void> {
-        const referrerAccount = await Referrals.findAccountByReferralCode(
-            referralCode,
-        )
+        const referrerAccount =
+            await Referrals.findAccountByReferralCode(referralCode)
 
         if (!referrerAccount) {
             // Invalid referral code
@@ -205,7 +204,6 @@ export class Referrals {
         referrerAccount.points.totalPoints += this.REFERRER_BONUS
         referrerAccount.points.breakdown.referrals += this.REFERRER_BONUS
         referrerAccount.points.lastUpdated = date
-
 
         // Update referrer's referral info
         referrerAccount.referralInfo.totalReferrals += 1

@@ -27,4 +27,3 @@ export function errorResponse(
 export function encodeResponse(response: RPCResponse): Buffer {
     return encodeRpcResponse(response)
 }
-

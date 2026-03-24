@@ -1,146 +1,150 @@
 version: "3.8"
 
 services:
-  # Shared PostgreSQL instance with 4 databases
-  postgres:
-    image: postgres:16-alpine
-    container_name: demos-devnet-postgres
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-demosuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
-      POSTGRES_DB: postgres
-    volumes:
-      - ./postgres-init:/docker-entrypoint-initdb.d:ro
-      - ${PERSISTENT:+postgres-data:/var/lib/postgresql/data}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - demos-network
+    # Shared PostgreSQL instance with 4 databases
+    postgres:
+        image: postgres:16-alpine
+        container_name: demos-devnet-postgres
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER:-demosuser}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
+            POSTGRES_DB: postgres
+        volumes:
+            - ./postgres-init:/docker-entrypoint-initdb.d:ro
+            - ${PERSISTENT:+postgres-data:/var/lib/postgresql/data}
+        healthcheck:
+            test:
+                [
+                    CMD-SHELL,
+                    "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres",
+                ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        networks:
+            - demos-network
 
-  # Node 1
-  node-1:
-    image: demos-devnet-node
-    build:
-      context: ..
-      dockerfile: devnet/Dockerfile
-    container_name: demos-devnet-node-1
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      - NODE_ENV=development
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_USER=${POSTGRES_USER:-demosuser}
-      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
-      - PG_DATABASE=node1_db
-      - PORT=${NODE1_PORT:-53551}
-      - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
-      - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
-    volumes:
-      - ./identities/node1.identity:/app/.demos_identity:ro
-      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
-    ports:
-      - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
-      - "${NODE1_OMNI_PORT:-53561}:${NODE1_OMNI_PORT:-53561}"
-    networks:
-      - demos-network
-    restart: unless-stopped
+    # Node 1
+    node-1:
+        image: demos-devnet-node
+        build:
+            context: ..
+            dockerfile: devnet/Dockerfile
+        container_name: demos-devnet-node-1
+        depends_on:
+            postgres:
+                condition: service_healthy
+        environment:
+            - NODE_ENV=development
+            - PG_HOST=postgres
+            - PG_PORT=5432
+            - PG_USER=${POSTGRES_USER:-demosuser}
+            - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+            - PG_DATABASE=node1_db
+            - PORT=${NODE1_PORT:-53551}
+            - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
+            - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
+        volumes:
+            - ./identities/node1.identity:/app/.demos_identity:ro
+            - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+        ports:
+            - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
+            - "${NODE1_OMNI_PORT:-53561}:${NODE1_OMNI_PORT:-53561}"
+        networks:
+            - demos-network
+        restart: unless-stopped
 
-  # Node 2
-  node-2:
-    image: demos-devnet-node
-    container_name: demos-devnet-node-2
-    depends_on:
-      postgres:
-        condition: service_healthy
-      node-1:
-        condition: service_started
-    environment:
-      - NODE_ENV=development
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_USER=${POSTGRES_USER:-demosuser}
-      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
-      - PG_DATABASE=node2_db
-      - PORT=${NODE2_PORT:-53552}
-      - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
-      - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
-    volumes:
-      - ./identities/node2.identity:/app/.demos_identity:ro
-      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
-    ports:
-      - "${NODE2_PORT:-53552}:${NODE2_PORT:-53552}"
-      - "${NODE2_OMNI_PORT:-53562}:${NODE2_OMNI_PORT:-53562}"
-    networks:
-      - demos-network
-    restart: unless-stopped
+    # Node 2
+    node-2:
+        image: demos-devnet-node
+        container_name: demos-devnet-node-2
+        depends_on:
+            postgres:
+                condition: service_healthy
+            node-1:
+                condition: service_started
+        environment:
+            - NODE_ENV=development
+            - PG_HOST=postgres
+            - PG_PORT=5432
+            - PG_USER=${POSTGRES_USER:-demosuser}
+            - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+            - PG_DATABASE=node2_db
+            - PORT=${NODE2_PORT:-53552}
+            - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
+            - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
+        volumes:
+            - ./identities/node2.identity:/app/.demos_identity:ro
+            - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+        ports:
+            - "${NODE2_PORT:-53552}:${NODE2_PORT:-53552}"
+            - "${NODE2_OMNI_PORT:-53562}:${NODE2_OMNI_PORT:-53562}"
+        networks:
+            - demos-network
+        restart: unless-stopped
 
-  # Node 3
-  node-3:
-    image: demos-devnet-node
-    container_name: demos-devnet-node-3
-    depends_on:
-      postgres:
-        condition: service_healthy
-      node-1:
-        condition: service_started
-    environment:
-      - NODE_ENV=development
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_USER=${POSTGRES_USER:-demosuser}
-      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
-      - PG_DATABASE=node3_db
-      - PORT=${NODE3_PORT:-53553}
-      - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
-      - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
-    volumes:
-      - ./identities/node3.identity:/app/.demos_identity:ro
-      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
-    ports:
-      - "${NODE3_PORT:-53553}:${NODE3_PORT:-53553}"
-      - "${NODE3_OMNI_PORT:-53563}:${NODE3_OMNI_PORT:-53563}"
-    networks:
-      - demos-network
-    restart: unless-stopped
+    # Node 3
+    node-3:
+        image: demos-devnet-node
+        container_name: demos-devnet-node-3
+        depends_on:
+            postgres:
+                condition: service_healthy
+            node-1:
+                condition: service_started
+        environment:
+            - NODE_ENV=development
+            - PG_HOST=postgres
+            - PG_PORT=5432
+            - PG_USER=${POSTGRES_USER:-demosuser}
+            - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+            - PG_DATABASE=node3_db
+            - PORT=${NODE3_PORT:-53553}
+            - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
+            - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
+        volumes:
+            - ./identities/node3.identity:/app/.demos_identity:ro
+            - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+        ports:
+            - "${NODE3_PORT:-53553}:${NODE3_PORT:-53553}"
+            - "${NODE3_OMNI_PORT:-53563}:${NODE3_OMNI_PORT:-53563}"
+        networks:
+            - demos-network
+        restart: unless-stopped
 
-  # Node 4
-  node-4:
-    image: demos-devnet-node
-    container_name: demos-devnet-node-4
-    depends_on:
-      postgres:
-        condition: service_healthy
-      node-1:
-        condition: service_started
-    environment:
-      - NODE_ENV=development
-      - PG_HOST=postgres
-      - PG_PORT=5432
-      - PG_USER=${POSTGRES_USER:-demosuser}
-      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
-      - PG_DATABASE=node4_db
-      - PORT=${NODE4_PORT:-53554}
-      - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
-      - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
-    volumes:
-      - ./identities/node4.identity:/app/.demos_identity:ro
-      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
-    ports:
-      - "${NODE4_PORT:-53554}:${NODE4_PORT:-53554}"
-      - "${NODE4_OMNI_PORT:-53564}:${NODE4_OMNI_PORT:-53564}"
-    networks:
-      - demos-network
-    restart: unless-stopped
+    # Node 4
+    node-4:
+        image: demos-devnet-node
+        container_name: demos-devnet-node-4
+        depends_on:
+            postgres:
+                condition: service_healthy
+            node-1:
+                condition: service_started
+        environment:
+            - NODE_ENV=development
+            - PG_HOST=postgres
+            - PG_PORT=5432
+            - PG_USER=${POSTGRES_USER:-demosuser}
+            - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+            - PG_DATABASE=node4_db
+            - PORT=${NODE4_PORT:-53554}
+            - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
+            - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
+        volumes:
+            - ./identities/node4.identity:/app/.demos_identity:ro
+            - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+        ports:
+            - "${NODE4_PORT:-53554}:${NODE4_PORT:-53554}"
+            - "${NODE4_OMNI_PORT:-53564}:${NODE4_OMNI_PORT:-53564}"
+        networks:
+            - demos-network
+        restart: unless-stopped
 
 networks:
-  demos-network:
-    driver: bridge
+    demos-network:
+        driver: bridge
 
 volumes:
-  postgres-data:
-    driver: local
+    postgres-data:
+        driver: local

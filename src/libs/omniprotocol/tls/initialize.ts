@@ -87,7 +87,11 @@ export async function initializeTLSCertificates(
 /**
  * Get default TLS paths
  */
-export function getDefaultTLSPaths(): { certPath: string; keyPath: string; certDir: string } {
+export function getDefaultTLSPaths(): {
+    certPath: string
+    keyPath: string
+    certDir: string
+} {
     const certDir = path.join(process.cwd(), "certs")
     return {
         certDir,

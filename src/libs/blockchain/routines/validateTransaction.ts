@@ -37,7 +37,9 @@ export async function confirmTransaction(
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
     // REVIEW This should work just fine
-    log.debug(`[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`)
+    log.debug(
+        `[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`,
+    )
     log.debug(`[TX] confirmTransaction - Examining tx: ${JSON.stringify(tx)}`)
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
@@ -131,6 +133,9 @@ export async function confirmTransaction(
         }
     }
 
+    log.debug(
+        "[TX] confirmTransaction - Transaction validity verified, compiling ValidityData",
+    )
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
@@ -219,7 +224,10 @@ async function defineGas(
         }
         log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
-        log.error("TX", "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction")
+        log.error(
+            "TX",
+            "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction",
+        )
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
@@ -239,7 +247,11 @@ async function defineGas(
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
-        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " + from)
+        log.error(
+            "TX",
+            "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
+                from,
+        )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
@@ -260,8 +272,13 @@ async function defineGas(
     const compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
     if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
-        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-            compositeFeeAmount + "; available: " + fromBalance)
+        log.error(
+            "TX",
+            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+                compositeFeeAmount +
+                "; available: " +
+                fromBalance,
+        )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
             compositeFeeAmount +

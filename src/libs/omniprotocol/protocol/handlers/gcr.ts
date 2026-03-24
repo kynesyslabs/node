@@ -34,9 +34,9 @@ interface IdentityAssignRequest {
         type: "identity"
         isRollback: boolean
         account: string
-        context: "xm" | "web2" | "pqc" | "ud"
+        context: "xm" | "web2" | "pqc" | "ud" | "nomis" | "ethos" | "tlsn"
         operation: "add" | "remove"
-        data: any  // Varies by context - see GCREditIdentity
+        data: any // Varies by context - see GCREditIdentity
         txhash: string
         referralCode?: string
     }
@@ -46,37 +46,68 @@ interface IdentityAssignRequest {
  * Handler for 0x41 GCR_IDENTITY_ASSIGN opcode
  *
  * Internal operation triggered by write transactions to assign/remove identities.
- * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud).
+ * Uses GCRIdentityRoutines to apply identity changes (xm, web2, pqc, ud, nomis, ethos, tlsn).
  */
-export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for identityAssign"))
+export const handleIdentityAssign: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for identityAssign"),
+        )
     }
 
     try {
-        const request = decodeJsonRequest<IdentityAssignRequest>(message.payload)
+        const request = decodeJsonRequest<IdentityAssignRequest>(
+            message.payload,
+        )
 
         if (!request.editOperation) {
-            return encodeResponse(errorResponse(400, "editOperation is required"))
+            return encodeResponse(
+                errorResponse(400, "editOperation is required"),
+            )
         }
 
         const { editOperation } = request
 
         // Validate required fields
         if (editOperation.type !== "identity") {
-            return encodeResponse(errorResponse(400, "Invalid edit operation type, expected 'identity'"))
+            return encodeResponse(
+                errorResponse(
+                    400,
+                    "Invalid edit operation type, expected 'identity'",
+                ),
+            )
         }
 
         if (!editOperation.account) {
             return encodeResponse(errorResponse(400, "account is required"))
         }
 
-        if (!editOperation.context || !["xm", "web2", "pqc", "ud"].includes(editOperation.context)) {
-            return encodeResponse(errorResponse(400, "Invalid context, must be xm, web2, pqc, or ud"))
+        if (
+            !editOperation.context ||
+            !["xm", "web2", "pqc", "ud", "nomis", "ethos", "tlsn"].includes(editOperation.context)
+        ) {
+            return encodeResponse(
+                errorResponse(
+                    400,
+                    "Invalid context, must be xm, web2, pqc, ud, nomis, ethos, or tlsn",
+                ),
+            )
         }
 
-        if (!editOperation.operation || !["add", "remove"].includes(editOperation.operation)) {
-            return encodeResponse(errorResponse(400, "Invalid operation, must be add or remove"))
+        if (
+            !editOperation.operation ||
+            !["add", "remove"].includes(editOperation.operation)
+        ) {
+            return encodeResponse(
+                errorResponse(400, "Invalid operation, must be add or remove"),
+            )
         }
 
         if (!editOperation.data) {
@@ -88,11 +119,11 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, conte
         }
 
         // Import GCR routines
-        const { default: gcrIdentityRoutines } = await import(
-            "src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines"
-        )
+        const { default: gcrIdentityRoutines } =
+            await import("src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines")
         const { default: Datasource } = await import("src/model/datasource")
-        const { GCRMain: gcrMain } = await import("@/model/entities/GCRv2/GCR_Main")
+        const { GCRMain: gcrMain } =
+            await import("@/model/entities/GCRv2/GCR_Main")
 
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(gcrMain)
@@ -101,24 +132,39 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({ message, conte
         const result = await gcrIdentityRoutines.apply(
             editOperation,
             gcrMainRepository,
-            false,  // simulate = false (actually apply changes)
+            false, // simulate = false (actually apply changes)
         )
 
         if (result.success) {
-            return encodeResponse(successResponse({
-                success: true,
-                message: result.message,
-            }))
+            return encodeResponse(
+                successResponse({
+                    success: true,
+                    message: result.message,
+                }),
+            )
         } else {
-            return encodeResponse(errorResponse(400, result.message || "Identity assignment failed"))
+            return encodeResponse(
+                errorResponse(
+                    400,
+                    result.message || "Identity assignment failed",
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleIdentityAssign] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
-export const handleGetAddressInfo: OmniHandler<Buffer> = async ({ message }) => {
+export const handleGetAddressInfo: OmniHandler<Buffer> = async ({
+    message,
+}) => {
     if (!message.payload || message.payload.length === 0) {
         return encodeResponse(
             errorResponse(400, "Missing payload for getAddressInfo"),
@@ -132,15 +178,14 @@ export const handleGetAddressInfo: OmniHandler<Buffer> = async ({ message }) => 
     }
 
     try {
-        const { default: ensureGCRForUser } = await import(
-            "src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
-        )
+        const { default: ensureGCRForUser } =
+            await import("src/libs/blockchain/gcr/gcr_routines/ensureGCRForUser")
         const info = await ensureGCRForUser(payload.address)
 
         const balance = BigInt(
             typeof info.balance === "string"
                 ? info.balance
-                : info.balance ?? 0,
+                : (info.balance ?? 0),
         )
         const nonce = BigInt(info.nonce ?? 0)
         const additional = Buffer.from(JSON.stringify(info), "utf8")
@@ -153,7 +198,11 @@ export const handleGetAddressInfo: OmniHandler<Buffer> = async ({ message }) => 
         })
     } catch (error) {
         return encodeResponse(
-            errorResponse(400, "error", error instanceof Error ? error.message : error),
+            errorResponse(
+                400,
+                "error",
+                error instanceof Error ? error.message : error,
+            ),
         )
     }
 }
@@ -163,9 +212,18 @@ export const handleGetAddressInfo: OmniHandler<Buffer> = async ({ message }) => 
  *
  * Returns all identities (web2, xm, pqc) for a given address.
  */
-export const handleGetIdentities: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getIdentities"))
+export const handleGetIdentities: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getIdentities"),
+        )
     }
 
     try {
@@ -175,23 +233,39 @@ export const handleGetIdentities: OmniHandler<Buffer> = async ({ message, contex
             return encodeResponse(errorResponse(400, "address is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getIdentities" as const,
             params: [request.address],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get identities", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get identities",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetIdentities] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -200,9 +274,18 @@ export const handleGetIdentities: OmniHandler<Buffer> = async ({ message, contex
  *
  * Returns web2 identities only (twitter, github, discord) for a given address.
  */
-export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getWeb2Identities"))
+export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getWeb2Identities"),
+        )
     }
 
     try {
@@ -212,23 +295,39 @@ export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({ message, co
             return encodeResponse(errorResponse(400, "address is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getWeb2Identities" as const,
             params: [request.address],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get web2 identities", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get web2 identities",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetWeb2Identities] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -237,9 +336,18 @@ export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({ message, co
  *
  * Returns crosschain/XM identities only for a given address.
  */
-export const handleGetXmIdentities: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getXmIdentities"))
+export const handleGetXmIdentities: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getXmIdentities"),
+        )
     }
 
     try {
@@ -249,23 +357,39 @@ export const handleGetXmIdentities: OmniHandler<Buffer> = async ({ message, cont
             return encodeResponse(errorResponse(400, "address is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getXmIdentities" as const,
             params: [request.address],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get XM identities", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get XM identities",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetXmIdentities] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -274,9 +398,18 @@ export const handleGetXmIdentities: OmniHandler<Buffer> = async ({ message, cont
  *
  * Returns incentive points breakdown for a given address.
  */
-export const handleGetPoints: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getPoints"))
+export const handleGetPoints: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getPoints"),
+        )
     }
 
     try {
@@ -286,23 +419,39 @@ export const handleGetPoints: OmniHandler<Buffer> = async ({ message, context })
             return encodeResponse(errorResponse(400, "address is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getPoints" as const,
             params: [request.address],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get points", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get points",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetPoints] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -312,25 +461,44 @@ export const handleGetPoints: OmniHandler<Buffer> = async ({ message, context })
  * Returns leaderboard of top accounts by incentive points.
  * No parameters required - returns all top accounts.
  */
-export const handleGetTopAccounts: OmniHandler<Buffer> = async ({ message, context }) => {
+export const handleGetTopAccounts: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
     try {
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getTopAccountsByPoints" as const,
             params: [],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get top accounts", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get top accounts",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetTopAccounts] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -339,9 +507,18 @@ export const handleGetTopAccounts: OmniHandler<Buffer> = async ({ message, conte
  *
  * Returns referral information for a given address.
  */
-export const handleGetReferralInfo: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getReferralInfo"))
+export const handleGetReferralInfo: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getReferralInfo"),
+        )
     }
 
     try {
@@ -351,23 +528,39 @@ export const handleGetReferralInfo: OmniHandler<Buffer> = async ({ message, cont
             return encodeResponse(errorResponse(400, "address is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getReferralInfo" as const,
             params: [request.address],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get referral info", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get referral info",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetReferralInfo] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -376,35 +569,62 @@ export const handleGetReferralInfo: OmniHandler<Buffer> = async ({ message, cont
  *
  * Validates a referral code and returns referrer information.
  */
-export const handleValidateReferral: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for validateReferral"))
+export const handleValidateReferral: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for validateReferral"),
+        )
     }
 
     try {
-        const request = decodeJsonRequest<ValidateReferralRequest>(message.payload)
+        const request = decodeJsonRequest<ValidateReferralRequest>(
+            message.payload,
+        )
 
         if (!request.code) {
             return encodeResponse(errorResponse(400, "code is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "validateReferralCode" as const,
             params: [request.code],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to validate referral", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to validate referral",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleValidateReferral] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }
 
@@ -413,34 +633,61 @@ export const handleValidateReferral: OmniHandler<Buffer> = async ({ message, con
  *
  * Looks up an account by identity (e.g., twitter username, discord id).
  */
-export const handleGetAccountByIdentity: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for getAccountByIdentity"))
+export const handleGetAccountByIdentity: OmniHandler<Buffer> = async ({
+    message,
+    context,
+}) => {
+    if (
+        !message.payload ||
+        !Buffer.isBuffer(message.payload) ||
+        message.payload.length === 0
+    ) {
+        return encodeResponse(
+            errorResponse(400, "Missing payload for getAccountByIdentity"),
+        )
     }
 
     try {
-        const request = decodeJsonRequest<AccountByIdentityRequest>(message.payload)
+        const request = decodeJsonRequest<AccountByIdentityRequest>(
+            message.payload,
+        )
 
         if (!request.identity) {
             return encodeResponse(errorResponse(400, "identity is required"))
         }
 
-        const { default: manageGCRRoutines } = await import("../../../network/manageGCRRoutines")
+        const { default: manageGCRRoutines } =
+            await import("../../../network/manageGCRRoutines")
 
         const httpPayload = {
             method: "getAccountByIdentity" as const,
             params: [request.identity],
         }
 
-        const httpResponse = await manageGCRRoutines(context.peerIdentity, httpPayload)
+        const httpResponse = await manageGCRRoutines(
+            context.peerIdentity,
+            httpPayload,
+        )
 
         if (httpResponse.result === 200) {
             return encodeResponse(successResponse(httpResponse.response))
         } else {
-            return encodeResponse(errorResponse(httpResponse.result, "Failed to get account by identity", httpResponse.extra))
+            return encodeResponse(
+                errorResponse(
+                    httpResponse.result,
+                    "Failed to get account by identity",
+                    httpResponse.extra,
+                ),
+            )
         }
     } catch (error) {
         log.error("[handleGetAccountByIdentity] Error: " + error)
-        return encodeResponse(errorResponse(500, "Internal error", error instanceof Error ? error.message : error))
+        return encodeResponse(
+            errorResponse(
+                500,
+                "Internal error",
+                error instanceof Error ? error.message : error,
+            ),
+        )
     }
 }

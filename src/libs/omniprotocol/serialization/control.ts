@@ -59,7 +59,9 @@ function serializePeerEntry(peer: PeerlistEntry): Buffer {
     const identityBytes = Buffer.from(stripHexPrefix(peer.identity), "hex")
     const urlBytes = Buffer.from(peer.url, "utf8")
     const hashBytes = Buffer.from(stripHexPrefix(peer.blockHash), "hex")
-    const metadata = peer.metadata ? Buffer.from(JSON.stringify(peer.metadata), "utf8") : Buffer.alloc(0)
+    const metadata = peer.metadata
+        ? Buffer.from(JSON.stringify(peer.metadata), "utf8")
+        : Buffer.alloc(0)
 
     return Buffer.concat([
         PrimitiveEncoder.encodeBytes(identityBytes),
@@ -71,7 +73,10 @@ function serializePeerEntry(peer: PeerlistEntry): Buffer {
     ])
 }
 
-function deserializePeerEntry(buffer: Buffer, offset: number): { entry: PeerlistEntry; bytesRead: number } {
+function deserializePeerEntry(
+    buffer: Buffer,
+    offset: number,
+): { entry: PeerlistEntry; bytesRead: number } {
     let cursor = offset
 
     const identity = PrimitiveDecoder.decodeBytes(buffer, cursor)
@@ -95,7 +100,9 @@ function deserializePeerEntry(buffer: Buffer, offset: number): { entry: Peerlist
     let metadata: Record<string, unknown> | undefined
     if (metadataBytes.value.length > 0) {
         try {
-            metadata = JSON.parse(metadataBytes.value.toString("utf8")) as Record<string, unknown>
+            metadata = JSON.parse(
+                metadataBytes.value.toString("utf8"),
+            ) as Record<string, unknown>
         } catch {
             // Malformed metadata, leave as undefined
             metadata = undefined
@@ -115,7 +122,9 @@ function deserializePeerEntry(buffer: Buffer, offset: number): { entry: Peerlist
     }
 }
 
-export function encodePeerlistResponse(payload: PeerlistResponsePayload): Buffer {
+export function encodePeerlistResponse(
+    payload: PeerlistResponsePayload,
+): Buffer {
     const parts: Buffer[] = []
 
     parts.push(PrimitiveEncoder.encodeUInt16(payload.status))
@@ -128,13 +137,17 @@ export function encodePeerlistResponse(payload: PeerlistResponsePayload): Buffer
     return Buffer.concat(parts)
 }
 
-export function decodePeerlistResponse(buffer: Buffer): PeerlistResponsePayload {
+export function decodePeerlistResponse(
+    buffer: Buffer,
+): PeerlistResponsePayload {
     let offset = 0
 
-    const { value: status, bytesRead: statusBytes } = PrimitiveDecoder.decodeUInt16(buffer, offset)
+    const { value: status, bytesRead: statusBytes } =
+        PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += statusBytes
 
-    const { value: count, bytesRead: countBytes } = PrimitiveDecoder.decodeUInt16(buffer, offset)
+    const { value: count, bytesRead: countBytes } =
+        PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += countBytes
 
     const peers: PeerlistEntry[] = []
@@ -148,14 +161,18 @@ export function decodePeerlistResponse(buffer: Buffer): PeerlistResponsePayload 
     return { status, peers }
 }
 
-export function encodePeerlistSyncRequest(payload: PeerlistSyncRequestPayload): Buffer {
+export function encodePeerlistSyncRequest(
+    payload: PeerlistSyncRequestPayload,
+): Buffer {
     return Buffer.concat([
         PrimitiveEncoder.encodeUInt16(payload.peerCount),
         PrimitiveEncoder.encodeBytes(payload.peerHash),
     ])
 }
 
-export function decodePeerlistSyncRequest(buffer: Buffer): PeerlistSyncRequestPayload {
+export function decodePeerlistSyncRequest(
+    buffer: Buffer,
+): PeerlistSyncRequestPayload {
     let offset = 0
     const count = PrimitiveDecoder.decodeUInt16(buffer, offset)
     offset += count.bytesRead
@@ -169,7 +186,9 @@ export function decodePeerlistSyncRequest(buffer: Buffer): PeerlistSyncRequestPa
     }
 }
 
-export function encodePeerlistSyncResponse(payload: PeerlistSyncResponsePayload): Buffer {
+export function encodePeerlistSyncResponse(
+    payload: PeerlistSyncResponsePayload,
+): Buffer {
     const parts: Buffer[] = []
 
     parts.push(PrimitiveEncoder.encodeUInt16(payload.status))
@@ -199,7 +218,10 @@ function toBigInt(value: unknown): bigint {
     return 0n
 }
 
-function decodeNodeCallParam(buffer: Buffer, offset: number): { value: unknown; bytesRead: number } {
+function decodeNodeCallParam(
+    buffer: Buffer,
+    offset: number,
+): { value: unknown; bytesRead: number } {
     let cursor = offset
     const type = PrimitiveDecoder.decodeUInt8(buffer, cursor)
     cursor += type.bytesRead
@@ -250,13 +272,19 @@ function decodeNodeCallParam(buffer: Buffer, offset: number): { value: unknown; 
     }
 }
 
-function encodeNodeCallValue(value: unknown): { type: NodeCallValueType; buffer: Buffer } {
+function encodeNodeCallValue(value: unknown): {
+    type: NodeCallValueType
+    buffer: Buffer
+} {
     if (value === null || value === undefined) {
         return { type: NodeCallValueType.Null, buffer: Buffer.alloc(0) }
     }
 
     if (typeof value === "string") {
-        return { type: NodeCallValueType.String, buffer: PrimitiveEncoder.encodeString(value) }
+        return {
+            type: NodeCallValueType.String,
+            buffer: PrimitiveEncoder.encodeString(value),
+        }
     }
 
     if (typeof value === "number") {
@@ -333,7 +361,9 @@ export function encodeNodeCallRequest(payload: NodeCallRequestPayload): Buffer {
     return Buffer.concat(parts)
 }
 
-export function encodeNodeCallResponse(payload: NodeCallResponsePayload): Buffer {
+export function encodeNodeCallResponse(
+    payload: NodeCallResponsePayload,
+): Buffer {
     const encoded = encodeNodeCallValue(payload.value)
     const parts: Buffer[] = [
         PrimitiveEncoder.encodeUInt16(payload.status),
@@ -348,7 +378,9 @@ export function encodeNodeCallResponse(payload: NodeCallResponsePayload): Buffer
     return Buffer.concat(parts)
 }
 
-export function decodeNodeCallResponse(buffer: Buffer): NodeCallResponsePayload {
+export function decodeNodeCallResponse(
+    buffer: Buffer,
+): NodeCallResponsePayload {
     let offset = 0
 
     const status = PrimitiveDecoder.decodeUInt16(buffer, offset)
@@ -434,7 +466,10 @@ export function encodeStringResponse(status: number, value: string): Buffer {
     ])
 }
 
-export function decodeStringResponse(buffer: Buffer): { status: number; value: string } {
+export function decodeStringResponse(buffer: Buffer): {
+    status: number
+    value: string
+} {
     const status = PrimitiveDecoder.decodeUInt16(buffer, 0)
     const value = PrimitiveDecoder.decodeString(buffer, status.bytesRead)
     return { status: status.value, value: value.value }
@@ -449,7 +484,10 @@ export function encodeJsonResponse(status: number, value: unknown): Buffer {
     ])
 }
 
-export function decodeJsonResponse(buffer: Buffer): { status: number; value: unknown } {
+export function decodeJsonResponse(buffer: Buffer): {
+    status: number
+    value: unknown
+} {
     const status = PrimitiveDecoder.decodeUInt16(buffer, 0)
     const body = PrimitiveDecoder.decodeVarBytes(buffer, status.bytesRead)
     let parsed: unknown = null
@@ -461,7 +499,9 @@ export function decodeJsonResponse(buffer: Buffer): { status: number; value: unk
     return { status: status.value, value: parsed }
 }
 
-export function decodePeerlistSyncResponse(buffer: Buffer): PeerlistSyncResponsePayload {
+export function decodePeerlistSyncResponse(
+    buffer: Buffer,
+): PeerlistSyncResponsePayload {
     let offset = 0
 
     const status = PrimitiveDecoder.decodeUInt16(buffer, offset)

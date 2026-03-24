@@ -1,0 +1,6 @@
+# Bun configuration for Demos Network Node
+# Docs: https://bun.sh/docs/runtime/bunfig
+
+[install]
+# Faster installs, consistent lockfile
+exact = true

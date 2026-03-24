@@ -73,6 +73,9 @@ const indexState: {
     METRICS_ENABLED: boolean
     METRICS_PORT: number
     metricsServer: any
+    // Server references for graceful shutdown
+    rpcServer: any
+    signalingServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -101,6 +104,9 @@ const indexState: {
     METRICS_ENABLED: process.env.METRICS_ENABLED?.toLowerCase() !== "false",
     METRICS_PORT: parseInt(process.env.METRICS_PORT ?? "9090", 10),
     metricsServer: null,
+    // Server references for graceful shutdown
+    rpcServer: null,
+    signalingServer: null,
 }
 
 // SECTION Preparation methods
@@ -291,7 +297,7 @@ async function warmup() {
     // This should start the server_rpc without any other needed operation
     log.info("[MAIN] Starting the RPC server")
     //server_rpc()
-    serverRpcBun()
+    indexState.rpcServer = await serverRpcBun()
     indexState.peerManager = PeerManager.getInstance()
     log.info("[MAIN] peerManager started")
 
@@ -417,40 +423,10 @@ async function main() {
             })
 
             // Listen for quit event from TUI for graceful shutdown
+            // Delegate to the unified gracefulShutdown handler so all services
+            // (L2PS, OmniProtocol, DTR, TLSNotary, Metrics, etc.) are stopped.
             indexState.tuiManager.on("quit", () => {
-                log.info("[MAIN] Graceful shutdown initiated...")
-
-                // Set a timeout fallback for forced termination
-                const forceExitTimeout = setTimeout(() => {
-                    log.warning(
-                        "[MAIN] Graceful shutdown timeout, forcing exit...",
-                    )
-                    process.exit(1)
-                }, 5000)
-
-                // Perform cleanup operations
-                Promise.resolve()
-                    .then(async () => {
-                        // Disconnect peers gracefully
-                        if (indexState.peerManager) {
-                            log.info("[MAIN] Disconnecting peers...")
-                            // PeerManager cleanup if available
-                        }
-
-                        // Close MCP server if running
-                        if (indexState.mcpServer) {
-                            log.info("[MAIN] Stopping MCP server...")
-                        }
-
-                        log.info("[MAIN] Shutdown complete.")
-                    })
-                    .catch(err => {
-                        log.error(`[MAIN] Error during shutdown: ${err}`)
-                    })
-                    .finally(() => {
-                        clearTimeout(forceExitTimeout)
-                        process.exit(0)
-                    })
+                gracefulShutdown("TUI_QUIT")
             })
         } catch (error) {
             console.error(
@@ -567,9 +543,8 @@ async function main() {
     // REVIEW: Start Prometheus Metrics server (enabled by default)
     if (indexState.METRICS_ENABLED) {
         try {
-            const { getMetricsServer, getMetricsCollector } = await import(
-                "./features/metrics"
-            )
+            const { getMetricsServer, getMetricsCollector } =
+                await import("./features/metrics")
 
             indexState.METRICS_PORT = await getNextAvailablePort(
                 indexState.METRICS_PORT,
@@ -624,10 +599,10 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         // Starting the signaling server
-        const signalingServer = new SignalingServer(
+        indexState.signalingServer = new SignalingServer(
             indexState.SIGNALING_SERVER_PORT,
         )
-        if (signalingServer) {
+        if (indexState.signalingServer) {
             getSharedState.isSignalingServerStarted = true
             log.info("[NETWORK] Signaling server started")
         } else {
@@ -734,9 +709,8 @@ async function main() {
                 log.error(
                     "[TLSNotary] Failed to start TLSNotary service: " + error,
                 )
-                const { isTLSNotaryFatal } = await import(
-                    "./features/tlsnotary"
-                )
+                const { isTLSNotaryFatal } =
+                    await import("./features/tlsnotary")
                 if (isTLSNotaryFatal()) {
                     log.error(
                         "[TLSNotary] FATAL: Exiting due to TLSNotary failure",
@@ -783,7 +757,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         log.info("[MAIN] Wait aborted, starting sync loop")
                     }
@@ -829,7 +805,9 @@ async function main() {
                     await Waiter.wait(Waiter.keys.STARTUP_HELLO_PEER, 15_000) // 15 seconds
                 } catch (error) {
                     if (error instanceof TimeoutError) {
-                        log.info("[MAIN] No wild peers found, starting sync loop")
+                        log.info(
+                            "[MAIN] No wild peers found, starting sync loop",
+                        )
                     } else if (error instanceof AbortError) {
                         // Already logged above
                     }
@@ -889,20 +867,44 @@ async function main() {
 main()
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
+    // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
+    if (getSharedState.isShuttingDown) {
+        return
+    }
+    getSharedState.isShuttingDown = true
+    getSharedState.runMainLoop = false
+
     console.log(`\n[SHUTDOWN] Received ${signal}, shutting down gracefully...`)
 
+    // Force exit after 10 seconds if graceful shutdown hangs
+    const forceExitTimeout = setTimeout(() => {
+        console.log("[SHUTDOWN] Timeout exceeded, forcing exit...")
+        process.exit(0)
+    }, 5_000)
+    // Don't let this timer itself keep the process alive
+    if (forceExitTimeout.unref) forceExitTimeout.unref()
+
     try {
+        // Stop TUI first so terminal is restored for shutdown logs
+        if (indexState.tuiManager) {
+            try {
+                indexState.tuiManager.stop()
+            } catch (_) { /* ignore TUI errors during shutdown */ }
+        }
+
         // Stop DTR manager if running (PROD only)
         if (getSharedState.PROD) {
             console.log("[SHUTDOWN] Stopping DTR manager...")
             DTRManager.getInstance().stop()
         }
 
-        // Stop L2PS services if running
+        // Stop L2PS services if running (await so their intervals are cleared)
         try {
             console.log("[SHUTDOWN] Stopping L2PS services...")
-            L2PSHashService.getInstance().stop()
-            L2PSBatchAggregator.getInstance().stop()
+            await Promise.allSettled([
+                L2PSHashService.getInstance().stop(3000),
+                L2PSBatchAggregator.getInstance().stop(3000),
+            ])
         } catch (error) {
             console.error("[SHUTDOWN] Error stopping L2PS services:", error)
         }
@@ -910,7 +912,11 @@ async function gracefulShutdown(signal: string) {
         // Stop OmniProtocol server if running
         if (indexState.omniServer) {
             console.log("[SHUTDOWN] Stopping OmniProtocol server...")
-            await stopOmniProtocolServer()
+            try {
+                await stopOmniProtocolServer()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping OmniProtocol:", error)
+            }
         }
 
         // Stop MCP server if running
@@ -923,25 +929,24 @@ async function gracefulShutdown(signal: string) {
             }
         }
 
-        // REVIEW: Stop TLSNotary service if running
+        // Stop TLSNotary service if running
         if (indexState.tlsnotaryService) {
             console.log("[SHUTDOWN] Stopping TLSNotary service...")
             try {
-                const { shutdownTLSNotary } = await import(
-                    "./features/tlsnotary"
-                )
+                const { shutdownTLSNotary } =
+                    await import("./features/tlsnotary")
                 await shutdownTLSNotary()
             } catch (error) {
                 console.error("[SHUTDOWN] Error stopping TLSNotary:", error)
             }
         }
 
-        // REVIEW: Stop Metrics collector and server if running
+        // Stop Metrics collector and server if running
         if (indexState.metricsServer) {
             console.log("[SHUTDOWN] Stopping Metrics collector and server...")
             try {
-                // Stop the collector first to clear interval timer and prevent collection during shutdown
-                const { getMetricsCollector } = await import("./features/metrics")
+                const { getMetricsCollector } =
+                    await import("./features/metrics")
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
             } catch (error) {
@@ -949,10 +954,38 @@ async function gracefulShutdown(signal: string) {
             }
         }
 
+        // Stop HTTP RPC server
+        if (indexState.rpcServer) {
+            console.log("[SHUTDOWN] Stopping RPC server...")
+            try {
+                indexState.rpcServer.stop()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping RPC server:", error)
+            }
+        }
+
+        // Stop Signaling server
+        if (indexState.signalingServer) {
+            console.log("[SHUTDOWN] Stopping Signaling server...")
+            try {
+                indexState.signalingServer.disconnect()
+            } catch (error) {
+                console.error("[SHUTDOWN] Error stopping Signaling server:", error)
+            }
+        }
+
+        // Stop HTTP rate limiter cleanup interval
+        try {
+            const { RateLimiter: HttpRateLimiter } = await import("./libs/network/middleware/rateLimiter")
+            HttpRateLimiter.getInstance().destroy()
+        } catch (_) { /* may not be initialized */ }
+
         console.log("[SHUTDOWN] Cleanup complete, exiting...")
+        clearTimeout(forceExitTimeout)
         process.exit(0)
     } catch (error) {
         console.error("[SHUTDOWN] Error during shutdown:", error)
+        clearTimeout(forceExitTimeout)
         process.exit(1)
     }
 }

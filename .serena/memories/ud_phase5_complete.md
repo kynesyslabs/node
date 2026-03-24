@@ -15,21 +15,23 @@ Successfully updated identity type definitions to support multi-address verifica
 **File**: `src/model/entities/types/IdentityTypes.ts`
 
 **BREAKING CHANGES from Phase 4**:
+
 ```typescript
 export interface SavedUdIdentity {
-    domain: string              // Unchanged: "brad.crypto" or "example.demos"
-    signingAddress: string      // ✅ CHANGED from resolvedAddress
+    domain: string // Unchanged: "brad.crypto" or "example.demos"
+    signingAddress: string // ✅ CHANGED from resolvedAddress
     signatureType: SignatureType // ✅ NEW: "evm" | "solana"
-    signature: string           // Unchanged
-    publicKey: string           // Unchanged
-    timestamp: number           // Unchanged
-    signedData: string          // Unchanged
+    signature: string // Unchanged
+    publicKey: string // Unchanged
+    timestamp: number // Unchanged
+    signedData: string // Unchanged
     network: "polygon" | "ethereum" | "base" | "sonic" | "solana" // ✅ ADDED "solana"
     registryType: "UNS" | "CNS" // Unchanged
 }
 ```
 
 **Key Changes**:
+
 - `resolvedAddress` → `signingAddress`: More accurate - this is the address that SIGNED, not necessarily the domain owner
 - Added `signatureType`: Indicates whether to use EVM (ethers.verifyMessage) or Solana (nacl.sign.detached.verify)
 - Added `"solana"` to network union: Supports .demos domains on Solana
@@ -41,6 +43,7 @@ export interface SavedUdIdentity {
 **Method**: `applyUdIdentityAdd()` (lines 470-560)
 
 Updated to extract and validate new fields:
+
 ```typescript
 const {
     domain,
@@ -75,15 +78,22 @@ const data: SavedUdIdentity = {
 ### 3. Database Storage
 
 **Storage Structure** (JSONB column, no migration needed):
+
 ```typescript
 gcr_main.identities = {
-    xm: { /* ... */ },
-    web2: { /* ... */ },
-    pqc: { /* ... */ },
+    xm: {
+        /* ... */
+    },
+    web2: {
+        /* ... */
+    },
+    pqc: {
+        /* ... */
+    },
     ud: [
         {
             domain: "example.crypto",
-            signingAddress: "0x123...",  // Address that signed
+            signingAddress: "0x123...", // Address that signed
             signatureType: "evm",
             signature: "0xabc...",
             network: "polygon",
@@ -91,13 +101,13 @@ gcr_main.identities = {
         },
         {
             domain: "alice.demos",
-            signingAddress: "ABCD...xyz",  // Solana address
+            signingAddress: "ABCD...xyz", // Solana address
             signatureType: "solana",
             signature: "base58...",
             network: "solana",
             // ...
-        }
-    ]
+        },
+    ],
 }
 ```
 
@@ -108,6 +118,7 @@ gcr_main.identities = {
 **Method**: `udDomainLinked()` (line 117+)
 
 Awards points for first-time UD domain linking:
+
 ```typescript
 static async udDomainLinked(
     demosAddress: string,
@@ -122,6 +133,7 @@ static async udDomainLinked(
 ## Documentation Comments Added
 
 Added comprehensive JSDoc comments to `SavedUdIdentity`:
+
 ```typescript
 /**
  * The Unstoppable Domains identity saved in the GCR
@@ -141,6 +153,7 @@ Added comprehensive JSDoc comments to `SavedUdIdentity`:
 ## Type Safety Verification
 
 ✅ **No type errors** in affected files:
+
 - `src/model/entities/types/IdentityTypes.ts`
 - `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts`
 - `src/libs/blockchain/gcr/gcr_routines/udIdentityManager.ts`
@@ -153,11 +166,12 @@ Added comprehensive JSDoc comments to `SavedUdIdentity`:
 **No database migration required** ✅
 
 Why:
+
 - `identities` column is JSONB (flexible JSON storage)
 - Defensive initialization in `GCRIdentityRoutines.applyUdIdentityAdd()`:
-  ```typescript
-  accountGCR.identities.ud = accountGCR.identities.ud || []
-  ```
+    ```typescript
+    accountGCR.identities.ud = accountGCR.identities.ud || []
+    ```
 - New accounts: Include `ud: []` in default initialization (handled by GCR system)
 - Existing accounts: Key auto-added on first UD link operation
 
@@ -166,10 +180,17 @@ Why:
 ### With Phase 4 (Multi-Signature Verification)
 
 Phase 4's `verifyPayload()` method already expects these fields (with backward compatibility):
+
 ```typescript
 // Phase 4 comment: "Phase 5 will update SDK to use signingAddress + signatureType"
-const { domain, resolvedAddress, signature, signedData, network, registryType } =
-    payload.payload
+const {
+    domain,
+    resolvedAddress,
+    signature,
+    signedData,
+    network,
+    registryType,
+} = payload.payload
 
 // Phase 5 completed this - now properly uses signingAddress
 ```
@@ -177,6 +198,7 @@ const { domain, resolvedAddress, signature, signedData, network, registryType } 
 ### With Storage System
 
 All UD identities stored in `gcr_main.identities.ud[]` array:
+
 - Each entry is a `SavedUdIdentity` object
 - Supports mixed signature types (EVM + Solana in same account)
 - Queried via `GCRIdentityRoutines` methods
@@ -184,6 +206,7 @@ All UD identities stored in `gcr_main.identities.ud[]` array:
 ### With Incentive System
 
 First-time domain linking triggers points:
+
 ```typescript
 const isFirst = await this.isFirstConnection(
     "ud",
@@ -204,27 +227,31 @@ if (isFirst) {
 ## Files Modified
 
 **Node Repository** (this repo):
+
 - `src/model/entities/types/IdentityTypes.ts` - Interface updates
 - `src/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines.ts` - Field extraction and validation
 - Documentation comments added throughout
 
 **SDK Repository** (../sdks) - **Phase 6 pending**:
+
 - Still uses old `UDIdentityPayload` format in `src/types/abstraction/index.ts`
 - Needs update to match node-side changes
 
 ## Backward Compatibility
 
 **Breaking Changes**:
+
 - `SavedUdIdentity.resolvedAddress` removed (now `signingAddress`)
 - New required field: `signatureType`
 - Network type expanded: added `"solana"`
 
 **Migration Path for Existing Data**:
+
 - N/A - No existing UD identities in production yet
 - If there were, would need script to:
-  1. Rename `resolvedAddress` → `signingAddress`
-  2. Detect and add `signatureType` based on address format
-  3. Update network if needed
+    1. Rename `resolvedAddress` → `signingAddress`
+    2. Detect and add `signatureType` based on address format
+    3. Update network if needed
 
 ## Testing Checklist
 
@@ -239,6 +266,7 @@ if (isFirst) {
 **Phase 6: Update SDK Client Methods** (../sdks repository)
 
 Required changes:
+
 1. Update `UDIdentityPayload` in `src/types/abstraction/index.ts`
 2. Remove old payload format
 3. Use new payload format from `UDResolution.ts`
@@ -255,6 +283,6 @@ Required changes:
 ✅ GCR storage logic updated  
 ✅ Incentive system integration working  
 ✅ No type errors or lint issues  
-✅ Backward compatibility considered  
+✅ Backward compatibility considered
 
 **Phase 5 Status: COMPLETE** ✅

@@ -93,20 +93,28 @@ IP.1 = 127.0.0.1
         return { certPath, keyPath }
     } catch (error) {
         log.error("[TLS] Failed to generate certificate: " + error)
-        throw new Error(`Certificate generation failed: ${(error as Error).message}`)
+        throw new Error(
+            `Certificate generation failed: ${(error as Error).message}`,
+        )
     }
 }
 
 /**
  * Load certificate from file and extract information
  */
-export async function loadCertificate(certPath: string): Promise<CertificateInfo> {
+export async function loadCertificate(
+    certPath: string,
+): Promise<CertificateInfo> {
     try {
         const certPem = await fs.promises.readFile(certPath, "utf8")
-        const cert = crypto.X509Certificate ? new crypto.X509Certificate(certPem) : null
+        const cert = crypto.X509Certificate
+            ? new crypto.X509Certificate(certPem)
+            : null
 
         if (!cert) {
-            throw new Error("X509Certificate not available in this Node.js version")
+            throw new Error(
+                "X509Certificate not available in this Node.js version",
+            )
         }
 
         return {
@@ -125,14 +133,18 @@ export async function loadCertificate(certPath: string): Promise<CertificateInfo
             serialNumber: cert.serialNumber,
         }
     } catch (error) {
-        throw new Error(`Failed to load certificate: ${(error as Error).message}`)
+        throw new Error(
+            `Failed to load certificate: ${(error as Error).message}`,
+        )
     }
 }
 
 /**
  * Get SHA256 fingerprint from certificate file
  */
-export async function getCertificateFingerprint(certPath: string): Promise<string> {
+export async function getCertificateFingerprint(
+    certPath: string,
+): Promise<string> {
     const certInfo = await loadCertificate(certPath)
     return certInfo.fingerprint256
 }
@@ -140,18 +152,24 @@ export async function getCertificateFingerprint(certPath: string): Promise<strin
 /**
  * Verify certificate validity (not expired, valid dates)
  */
-export async function verifyCertificateValidity(certPath: string): Promise<boolean> {
+export async function verifyCertificateValidity(
+    certPath: string,
+): Promise<boolean> {
     try {
         const certInfo = await loadCertificate(certPath)
         const now = new Date()
 
         if (now < certInfo.validFrom) {
-            log.warning(`[TLS] Certificate not yet valid (valid from ${certInfo.validFrom})`)
+            log.warning(
+                `[TLS] Certificate not yet valid (valid from ${certInfo.validFrom})`,
+            )
             return false
         }
 
         if (now > certInfo.validTo) {
-            log.warning(`[TLS] Certificate expired (expired on ${certInfo.validTo})`)
+            log.warning(
+                `[TLS] Certificate expired (expired on ${certInfo.validTo})`,
+            )
             return false
         }
 
@@ -165,7 +183,9 @@ export async function verifyCertificateValidity(certPath: string): Promise<boole
 /**
  * Check days until certificate expires
  */
-export async function getCertificateExpiryDays(certPath: string): Promise<number> {
+export async function getCertificateExpiryDays(
+    certPath: string,
+): Promise<number> {
     const certInfo = await loadCertificate(certPath)
     const now = new Date()
     const daysUntilExpiry = Math.floor(
@@ -191,7 +211,9 @@ export async function ensureCertDirectory(certDir: string): Promise<void> {
 /**
  * Get certificate info as string for logging
  */
-export async function getCertificateInfoString(certPath: string): Promise<string> {
+export async function getCertificateInfoString(
+    certPath: string,
+): Promise<string> {
     try {
         const info = await loadCertificate(certPath)
         const expiryDays = await getCertificateExpiryDays(certPath)

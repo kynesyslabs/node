@@ -8,28 +8,25 @@ export class AuthBlockParser {
      * @param offset Offset into buffer where auth block starts
      * @returns Parsed auth block and bytes consumed
      */
-    static parse(buffer: Buffer, offset: number): { auth: AuthBlock; bytesRead: number } {
+    static parse(
+        buffer: Buffer,
+        offset: number,
+    ): { auth: AuthBlock; bytesRead: number } {
         let pos = offset
 
         // Algorithm (1 byte)
-        const { value: algorithm, bytesRead: algBytes } = PrimitiveDecoder.decodeUInt8(
-            buffer,
-            pos,
-        )
+        const { value: algorithm, bytesRead: algBytes } =
+            PrimitiveDecoder.decodeUInt8(buffer, pos)
         pos += algBytes
 
         // Signature Mode (1 byte)
-        const { value: signatureMode, bytesRead: modeBytes } = PrimitiveDecoder.decodeUInt8(
-            buffer,
-            pos,
-        )
+        const { value: signatureMode, bytesRead: modeBytes } =
+            PrimitiveDecoder.decodeUInt8(buffer, pos)
         pos += modeBytes
 
         // Timestamp (8 bytes)
-        const { value: timestamp, bytesRead: tsBytes } = PrimitiveDecoder.decodeUInt64(
-            buffer,
-            pos,
-        )
+        const { value: timestamp, bytesRead: tsBytes } =
+            PrimitiveDecoder.decodeUInt64(buffer, pos)
         pos += tsBytes
 
         // Identity Length (2 bytes)

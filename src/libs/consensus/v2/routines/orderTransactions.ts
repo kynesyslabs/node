@@ -25,8 +25,8 @@ export async function orderTransactions(
         },
     )
     // Stringify the transactions
-    const orderedTransactions = orderedTransactionsObjects.map(transaction =>
-        transaction,
+    const orderedTransactions = orderedTransactionsObjects.map(
+        transaction => transaction,
     )
     return orderedTransactions
 }

@@ -112,7 +112,9 @@ export class Waiter {
 
     static preHold(id: string, data: any = null) {
         if (Waiter.waitList.has(id)) {
-            log.error(`[WAITER] Cannot pre-hold key: ${id} because it's already waiting`)
+            log.error(
+                `[WAITER] Cannot pre-hold key: ${id} because it's already waiting`,
+            )
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 

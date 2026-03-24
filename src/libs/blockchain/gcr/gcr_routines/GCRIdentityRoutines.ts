@@ -13,16 +13,26 @@ import ensureGCRForUser from "./ensureGCRForUser"
 import Hashing from "@/libs/crypto/hashing"
 import {
     NomisWalletIdentity,
+    EthosWalletIdentity,
     PqcIdentityEdit,
+    SavedHumanPassportIdentity,
     SavedNomisIdentity,
+    SavedEthosIdentity,
     SavedXmIdentity,
     SavedUdIdentity,
 } from "@/model/entities/types/IdentityTypes"
 import log from "@/utilities/logger"
 import { IncentiveManager } from "./IncentiveManager"
+import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
+import { EthosApiClient } from "@/libs/identity/tools/ethos"
+import {
+    verifyTLSNProof,
+    type TLSNIdentityPayload,
+    type TLSNProofRanges,
+    type TLSNotaryPresentation,
+} from "@/libs/tlsnotary"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
-import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
 import {
     IdentityCommitmentPayload,
     IdentityAttestationPayload,
@@ -269,9 +279,9 @@ export default class GCRIdentityRoutines {
                     context === "telegram"
                         ? "Telegram attestation validation failed"
                         : "Sha256 proof mismatch: Expected " +
-                        data.proofHash +
-                        " but got " +
-                        Hashing.sha256(data.proof),
+                          data.proofHash +
+                          " but got " +
+                          Hashing.sha256(data.proof),
             }
         }
 
@@ -583,8 +593,9 @@ export default class GCRIdentityRoutines {
         if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid network: ${payload.network
-                    }. Must be one of: ${validNetworks.join(", ")}`,
+                message: `Invalid network: ${
+                    payload.network
+                }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
         if (!validRegistryTypes.includes(payload.registryType)) {
@@ -1161,6 +1172,49 @@ export default class GCRIdentityRoutines {
                     simulate,
                 )
                 break
+            case "humanpassportadd":
+                result = await this.applyHumanPassportIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "humanpassportremove":
+                result = await this.applyHumanPassportIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "ethosadd":
+                result = await this.applyEthosIdentityUpsert(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "ethosremove":
+                result = await this.applyEthosIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            case "tlsnadd":
+                result = await this.applyTLSNIdentityAdd(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
+            
+            case "tlsnremove":
+                result = await this.applyTLSNIdentityRemove(
+                    identityEdit,
+                    gcrMainRepository,
+                    simulate,
+                )
+                break
             case "zk_attestationadd":
                 result = await this.applyZkAttestationAdd(
                     identityEdit,
@@ -1186,18 +1240,33 @@ export default class GCRIdentityRoutines {
             | "telegram"
             | "discord"
             | "ud"
-            | "nomis",
+            | "nomis"
+            | "humanpassport"
+            | "ethos",
         data: {
             userId?: string // for twitter/github/discord
             chain?: string // for web3
             subchain?: string // for web3
-            address?: string // for web3
+            address?: string // for web3/humanpassport
             domain?: string // for ud
         },
         gcrMainRepository: Repository<GCRMain>,
         currentAccount?: string,
     ): Promise<boolean> {
-        if (type !== "web3" && type !== "ud" && type !== "nomis") {
+        if (type === "humanpassport") {
+            const result = await gcrMainRepository
+                .createQueryBuilder("gcr")
+                .where(
+                    "EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'humanpassport', '[]'::jsonb)) AS hp WHERE LOWER(hp->>'address') = LOWER(:address))",
+                    { address: data.address },
+                )
+                .andWhere("gcr.pubkey != :currentAccount", { currentAccount })
+                .getOne()
+
+            return !result
+        }
+
+        if (type !== "web3" && type !== "ud" && type !== "nomis" && type !== "ethos") {
             // Handle web2 identity types: twitter, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
@@ -1237,7 +1306,7 @@ export default class GCRIdentityRoutines {
             const addressToCheck =
                 data.chain === "evm" ? data.address.toLowerCase() : data.address
 
-            const rootKey = type === "web3" ? "xm" : "nomis"
+            const rootKey = type === "web3" ? "xm" : type === "ethos" ? "ethos" : "nomis"
 
             const result = await gcrMainRepository
                 .createQueryBuilder("gcr")
@@ -1420,5 +1489,631 @@ export default class GCRIdentityRoutines {
         }
 
         return { success: true, message: "Nomis identity removed" }
+    }
+
+    // SECTION Human Passport Identity Routines
+
+    private static async applyHumanPassportIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        try {
+            const clientData = editOperation.data as { address: string; verificationMethod: "api" | "onchain" }
+            const normalizedAddress = clientData.address.toLowerCase()
+
+            // Fetch verified score from Human Passport API (uses cache from earlier verification)
+            const provider = HumanPassportProvider.getInstance()
+            const verification = await provider.verifyAddress(normalizedAddress)
+
+            // REVIEW: Guard against score degradation between tx submission and block application
+            if (!verification.passingScore) {
+                return {
+                    success: false,
+                    message: `Human Passport score ${verification.score} no longer meets the required threshold (${verification.threshold})`,
+                }
+            }
+
+            const savedIdentity: SavedHumanPassportIdentity = {
+                address: verification.address,
+                score: verification.score,
+                passingScore: verification.passingScore,
+                threshold: verification.threshold,
+                stamps: verification.stamps,
+                verificationMethod: clientData.verificationMethod,
+                verifiedAt: verification.verifiedAt,
+                expiresAt: verification.expirationTimestamp
+                    ? new Date(verification.expirationTimestamp).getTime()
+                    : null,
+            }
+
+            const accountGCR = await ensureGCRForUser(editOperation.account)
+
+            // Initialize humanpassport array if needed
+            if (!accountGCR.identities.humanpassport) {
+                accountGCR.identities.humanpassport = []
+            }
+
+            // Global uniqueness check across all accounts
+            const isFirst = await this.isFirstConnection(
+                "humanpassport",
+                { address: normalizedAddress },
+                gcrMainRepository,
+                editOperation.account,
+            )
+
+            // Upsert: remove existing then add new
+            accountGCR.identities.humanpassport =
+                accountGCR.identities.humanpassport.filter(
+                    (hp: SavedHumanPassportIdentity) =>
+                        hp.address.toLowerCase() !== normalizedAddress,
+                )
+            accountGCR.identities.humanpassport.push(savedIdentity)
+
+            if (!simulate) {
+                await gcrMainRepository.save(accountGCR)
+
+                if (isFirst) {
+                    await IncentiveManager.humanPassportLinked(
+                        accountGCR.pubkey,
+                        editOperation.referralCode,
+                    )
+                }
+            }
+
+            return { success: true, message: "Human Passport identity added" }
+        } catch (error: any) {
+            log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${error.message}`)
+            return { success: false, message: error.message || "Failed to add Human Passport identity" }
+        }
+    }
+
+    private static async applyHumanPassportIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const data = editOperation.data as { address: string }
+        const normalizedAddress = data.address.toLowerCase()
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        if (!accountGCR.identities.humanpassport || accountGCR.identities.humanpassport.length === 0) {
+            return { success: false, message: "No Human Passport identities found" }
+        }
+
+        const addressExists = accountGCR.identities.humanpassport.some(
+            (hp: SavedHumanPassportIdentity) =>
+                hp.address.toLowerCase() === normalizedAddress,
+        )
+
+        if (!addressExists) {
+            return { success: false, message: "Identity not found" }
+        }
+
+        accountGCR.identities.humanpassport =
+            accountGCR.identities.humanpassport.filter(
+                (hp: SavedHumanPassportIdentity) =>
+                    hp.address.toLowerCase() !== normalizedAddress,
+            )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
+        }
+
+        return { success: true, message: "Human Passport identity removed" }
+    }
+
+    // SECTION Ethos Identity Routines
+
+    private static normalizeEthosAddress(
+        chain: string,
+        address: string,
+    ): string {
+        if (chain === "evm") {
+            return address.trim().toLowerCase()
+        }
+
+        return address.trim()
+    }
+
+    static async applyEthosIdentityUpsert(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const {
+            chain,
+            subchain,
+            address,
+        } = editOperation.data
+
+        if (!chain || !subchain || !address) {
+            return { success: false, message: "Invalid Ethos identity payload: missing chain, subchain or address" }
+        }
+
+        const normalizedAddress = this.normalizeEthosAddress(chain, address)
+
+        // Fetch authoritative score from Ethos API server-side
+        const ethosClient = EthosApiClient.getInstance()
+        let serverScore: number
+        let serverProfileId: number | undefined
+        let serverMetadata: { displayName?: string; username?: string } | undefined
+
+        try {
+            const ethosData = await ethosClient.getScore(normalizedAddress)
+            serverScore = ethosData.score
+            serverProfileId = ethosData.profileId
+            serverMetadata = {
+                displayName: ethosData.displayName,
+                username: ethosData.username,
+            }
+        } catch (error: any) {
+            log.error(`[GCRIdentityRoutines] Failed to fetch Ethos score from API`)
+            return { success: false, message: "Failed to fetch Ethos score" }
+        }
+
+        const isFirst = await this.isFirstConnection(
+            "ethos",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            gcrMainRepository,
+            editOperation.account,
+        )
+
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.ethos = accountGCR.identities.ethos || {}
+        accountGCR.identities.ethos[chain] =
+            accountGCR.identities.ethos[chain] || {}
+        accountGCR.identities.ethos[chain][subchain] =
+            accountGCR.identities.ethos[chain][subchain] || []
+
+        const chainBucket = accountGCR.identities.ethos[chain][subchain]
+
+        const filtered = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                chain,
+                existing.address,
+            )
+            return existingAddress !== normalizedAddress
+        })
+
+        const record: SavedEthosIdentity = {
+            address: normalizedAddress,
+            score: serverScore,
+            profileId: serverProfileId,
+            lastSyncedAt: new Date().toISOString(),
+            metadata: serverMetadata,
+        }
+
+        filtered.push(record)
+        accountGCR.identities.ethos[chain][subchain] = filtered
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            log.info(
+                `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${serverScore}, isFirstConnection=${isFirst}`,
+            )
+
+            if (isFirst) {
+                await IncentiveManager.ethosLinked(
+                    accountGCR.pubkey,
+                    chain,
+                    serverScore,
+                    editOperation.referralCode,
+                )
+            }
+        }
+
+        return { success: true, message: "Ethos identity upserted" }
+    }
+
+    static async applyEthosIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const identity = editOperation.data as EthosWalletIdentity
+
+        if (!identity?.chain || !identity?.subchain || !identity?.address) {
+            return { success: false, message: "Invalid Ethos identity payload" }
+        }
+
+        const normalizedAddress = this.normalizeEthosAddress(
+            identity.chain,
+            identity.address,
+        )
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        const chainBucket =
+            accountGCR.identities?.ethos?.[identity.chain]?.[identity.subchain]
+
+        if (!Array.isArray(chainBucket)) {
+            return { success: false, message: "Ethos identity not found" }
+        }
+
+        const exists = chainBucket.some(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress === normalizedAddress
+        })
+
+        if (!exists) {
+            return { success: false, message: "Ethos identity not found" }
+        }
+
+        const filteredBucket = chainBucket.filter(existing => {
+            const existingAddress = this.normalizeEthosAddress(
+                identity.chain,
+                existing.address,
+            )
+            return existingAddress !== normalizedAddress
+        })
+
+        accountGCR.identities.ethos[identity.chain][identity.subchain] =
+            filteredBucket
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            // Only deduct points if NO Ethos identities remain for this chain
+            // (checking all subchains, since points are tracked per-chain)
+            const chainIdentities = accountGCR.identities.ethos[identity.chain]
+            const hasRemainingIdentities = Object.values(chainIdentities).some(
+                subchainBucket =>
+                    Array.isArray(subchainBucket) && subchainBucket.length > 0,
+            )
+
+            log.info(
+                `[EthosIdentity] UNLINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${identity.chain}, subchain=${identity.subchain}, pointsDeducted=${!hasRemainingIdentities}`,
+            )
+
+            if (!hasRemainingIdentities) {
+                await IncentiveManager.ethosUnlinked(
+                    accountGCR.pubkey,
+                    identity.chain,
+                )
+            }
+        }
+
+        return { success: true, message: "Ethos identity removed" }
+    }
+
+    // SECTION TLSNotary Identity Routines
+
+    /**
+     * Expected API endpoints for TLSN verification per context
+     */
+    private static TLSN_EXPECTED_ENDPOINTS: Record<
+        string,
+        { server: string; pathPrefix: string }
+    > = {
+        github: { server: "api.github.com", pathPrefix: "/user" },
+        discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
+        telegram: {
+            server: "telegram-backend",
+            pathPrefix: "/api/telegram/user",
+        },
+    }
+
+    /**
+     * Add an identity via TLSNotary proof verification.
+     */
+    static async applyTLSNIdentityAdd(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        // Extract context from editOperation.data (top level)
+        const { context } = editOperation.data
+        // Extract nested data fields (proof, username, userId are inside data.data)
+        const {
+            proof: proofString,
+            recvHash,
+            proofRanges,
+            revealedRecv,
+            username,
+            userId,
+        } = editOperation.data.data || {}
+        // referralCode is at the editOperation level
+        const referralCode = editOperation.referralCode
+
+        if (!context) {
+            return {
+                success: false,
+                message: "Missing TLSN context",
+            }
+        }
+
+        if (!username) {
+            return {
+                success: false,
+                message: "Missing TLSN username",
+            }
+        }
+
+        if (userId === undefined || userId === null) {
+            return {
+                success: false,
+                message: "Missing TLSN userId",
+            }
+        }
+
+        if (proofString === undefined || proofString === null) {
+            return {
+                success: false,
+                message: "Missing TLSN proof",
+            }
+        }
+
+        if (!recvHash) {
+            return {
+                success: false,
+                message: "Missing TLSN recvHash",
+            }
+        }
+
+        if (!proofRanges) {
+            return {
+                success: false,
+                message: "Missing TLSN proofRanges",
+            }
+        }
+
+        if (revealedRecv === undefined || revealedRecv === null) {
+            return {
+                success: false,
+                message: "Missing TLSN revealedRecv",
+            }
+        }
+
+        // Parse the proof JSON string back to object
+        let proof: any
+        try {
+            proof =
+                typeof proofString === "string"
+                    ? JSON.parse(proofString)
+                    : proofString
+        } catch (e) {
+            return {
+                success: false,
+                message: "Invalid proof: failed to parse proof JSON string",
+            }
+        }
+
+        // 1. Validate context is supported
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
+            return {
+                success: false,
+                message: `Unsupported TLSN context: ${context}`,
+            }
+        }
+
+        // 2. Validate proof structure
+        if (!proof || typeof proof !== "object") {
+            return {
+                success: false,
+                message:
+                    "Invalid proof: expected TLSNotary presentation object",
+            }
+        }
+
+        if (!proof.data || !proof.version) {
+            return {
+                success: false,
+                message: "Invalid proof structure: missing data or version",
+            }
+        }
+
+        // 3. Verify proof and validate recvHash/proofRanges-derived identity claims
+        const verification = await verifyTLSNProof({
+            context,
+            proof: proof as TLSNotaryPresentation,
+            recvHash,
+            proofRanges: proofRanges as TLSNProofRanges,
+            revealedRecv,
+            username: String(username),
+            userId: String(userId),
+            referralCode,
+        } as TLSNIdentityPayload)
+
+        if (!verification.success) {
+            log.warn(
+                `[TLSN Identity] Proof verification failed: ${verification.message}`,
+            )
+            return {
+                success: false,
+                message: verification.message,
+            }
+        }
+
+        // 8. Get/create GCR and check for duplicates
+        const accountGCR = await ensureGCRForUser(editOperation.account)
+
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        // Check if identity already exists (by userId to prevent duplicate registrations)
+        const exists = accountGCR.identities.web2[context].some(
+            (id: Web2GCRData["data"]) => id.userId === String(userId),
+        )
+
+        if (exists) {
+            return { success: false, message: "Identity already exists" }
+        }
+
+        // 9. Prepare data for storage
+        const proofHash = Hashing.sha256(JSON.stringify(proof))
+        const data = {
+            userId: String(userId),
+            username: username,
+            proof: proof,
+            proofHash: proofHash,
+            proofType: "tlsn", // Mark as TLSNotary-verified
+            timestamp: Date.now(),
+        }
+
+        accountGCR.identities.web2[context].push(data)
+
+        // 10. Save and award incentives
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            if (context === "github") {
+                const isFirst = await this.isFirstConnection(
+                    "github",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.githubLinked(
+                        editOperation.account,
+                        String(userId),
+                        referralCode,
+                    )
+                }
+            } else if (context === "discord") {
+                const isFirst = await this.isFirstConnection(
+                    "discord",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.discordLinked(
+                        editOperation.account,
+                        referralCode,
+                    )
+                }
+            } else if (context === "telegram") {
+                const isFirst = await this.isFirstConnection(
+                    "telegram",
+                    { userId: String(userId) },
+                    gcrMainRepository,
+                    editOperation.account,
+                )
+
+                if (isFirst) {
+                    await IncentiveManager.telegramTLSNLinked(
+                        editOperation.account,
+                        String(userId),
+                        referralCode,
+                    )
+                }
+            }
+        }
+
+        return { success: true, message: "TLSN identity added successfully" }
+    }
+
+    /**
+     * Remove an identity that was added via TLSNotary.
+     *
+     * Removes only TLSN-proven identities (proofType === "tlsn") from web2 storage.
+     */
+    static async applyTLSNIdentityRemove(
+        editOperation: any,
+        gcrMainRepository: Repository<GCRMain>,
+        simulate: boolean,
+    ): Promise<GCRResult> {
+        const { context, username } = editOperation.data as {
+            context?: string
+            username?: string
+        }
+
+        if (!context || !username) {
+            return {
+                success: false,
+                message: "Invalid payload: missing context or username",
+            }
+        }
+
+        if (!this.TLSN_EXPECTED_ENDPOINTS[context]) {
+            return {
+                success: false,
+                message: `Unsupported TLSN context: ${context}`,
+            }
+        }
+
+        const accountGCR = await gcrMainRepository.findOneBy({
+            pubkey: editOperation.account,
+        })
+
+        if (!accountGCR) {
+            return { success: false, message: "Account not found" }
+        }
+
+        accountGCR.identities.web2 = accountGCR.identities.web2 || {}
+        accountGCR.identities.web2[context] =
+            accountGCR.identities.web2[context] || []
+
+        const isMatch = (id: Web2GCRData["data"] & { proofType?: string }) => {
+            // TLSN remove must never affect legacy/non-TLSN web2 identities.
+            if (id.proofType !== "tlsn") {
+                return false
+            }
+            return id.username === username
+        }
+
+        // Find the TLSN identity to remove
+        const identity = accountGCR.identities.web2[context].find(
+            (id: Web2GCRData["data"]) => isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
+
+        if (!identity) {
+            return { success: false, message: "TLSN identity not found" }
+        }
+
+        // Filter out only the matching TLSN identity
+        accountGCR.identities.web2[context] = accountGCR.identities.web2[
+            context
+        ].filter(
+            (id: Web2GCRData["data"]) =>
+                !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        )
+
+        if (!simulate) {
+            await gcrMainRepository.save(accountGCR)
+
+            // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
+            if (context === "github" && identity.userId) {
+                await IncentiveManager.githubUnlinked(
+                    editOperation.account,
+                    identity.userId,
+                )
+            } else if (context === "discord") {
+                await IncentiveManager.discordUnlinked(editOperation.account)
+            } else if (context === "telegram") {
+                await IncentiveManager.telegramUnlinked(editOperation.account)
+            }
+        }
+
+        return { success: true, message: "TLSN identity removed successfully" }
     }
 }

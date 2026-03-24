@@ -64,7 +64,7 @@ export class MetricsServer {
         this.server = Bun.serve({
             port: this.config.port,
             hostname: this.config.hostname,
-            fetch: async (req) => this.handleRequest(req),
+            fetch: async req => this.handleRequest(req),
         })
 
         log.info(
@@ -98,9 +98,7 @@ export class MetricsServer {
                     },
                 })
             } catch (error) {
-                log.error(
-                    `[METRICS SERVER] Error generating metrics: ${error}`,
-                )
+                log.error(`[METRICS SERVER] Error generating metrics: ${error}`)
                 return new Response("Internal Server Error", { status: 500 })
             }
         }
