@@ -303,16 +303,16 @@ src/
 
 ### Issue Tracking
 
-This project uses **bd (beads)** for issue tracking, not markdown TODOs:
+This project uses **Mycelium (`myc`)** for repo-visible task tracking, not markdown TODOs:
 
 ```bash
-bd ready                     # Show unblocked work
-bd create "title" -t task    # Create issue
-bd update <id> --status in_progress
-bd close <id>
+myc task list
+myc task create --title "title" --priority medium
+myc task close 1
+myc summary
 ```
 
-See [AGENTS.md](AGENTS.md) for full workflow.
+See [AGENTS.md](AGENTS.md) for the full `myc` workflow and optional `br` interoperability notes.
 
 ## Support
 

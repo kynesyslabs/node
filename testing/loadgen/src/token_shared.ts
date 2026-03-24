@@ -888,7 +888,7 @@ export async function sendTokenUpgradeScriptTxWithDemos(params: {
   tx.content.timestamp = Date.now()
   tx.content.data = [
     "token",
-    { operation: "upgradeScript", tokenAddress: params.tokenAddress, newScript, upgradeReason: "better_testing scripted token smoke" },
+    { operation: "upgradeScript", tokenAddress: params.tokenAddress, newScript, upgradeReason: "testing scripted token smoke" },
   ]
 
   const tokenEdit = {
@@ -898,7 +898,7 @@ export async function sendTokenUpgradeScriptTxWithDemos(params: {
     tokenAddress: params.tokenAddress,
     txhash: "",
     isRollback: false,
-    data: { newScript, upgradeReason: "better_testing scripted token smoke" },
+    data: { newScript, upgradeReason: "testing scripted token smoke" },
   }
 
   const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]

@@ -6,97 +6,15 @@ Semantic map: see `repository-semantic-map/`.
 
 - Use `bun run check` as the canonical “magic” check (authoritative `tsc` via `tsconfig.check.json` + a Bun bundling sanity check).
 - Use `bun run check:full` when you need to type-check the full repository.
-## Issue Tracking with br (beads_rust)
+## Task Tracking
 
-**IMPORTANT**: This project uses **br (beads_rust)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
-### Why br?
+**IMPORTANT**: Use **Mycelium (`myc`)** as the repo-visible task tracker. Do NOT create markdown TODOs, and do not reintroduce committed `.beads/` or `.beadspace/` state.
 
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Auto-syncs to JSONL for version control
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
+### Optional br interoperability
 
-### Quick Start
+`br` remains available as a local interoperability layer when explicitly needed, but it is secondary to `myc` in this repository.
 
-**Check for ready work:**
-```bash
-br ready --json
-```
-
-**Create new issues:**
-```bash
-br create "Issue title" -t bug|feature|task -p 0-4 --json
-br create "Issue title" -p 1 --deps discovered-from:br-123 --json
-```
-
-**Claim and update:**
-```bash
-br update br-42 --status in_progress --json
-br update br-42 --priority 1 --json
-```
-
-**Complete work:**
-```bash
-br close br-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `br ready` shows unblocked issues
-2. **Claim your task**: `br update <id> --status in_progress`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `br create "Found bug" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `br close <id> --reason "Done"`
-6. **Commit together**: Always commit the `.beads/issues.jsonl` file together with the code changes so issue state stays in sync with code state
-
-### Auto-Sync
-
-br automatically syncs with git:
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
-
-### GitHub Copilot Integration
-
-If using GitHub Copilot, also create `.github/copilot-instructions.md` for automatic instruction loading.
-Run `br onboard` to get the content, or see step 2 of the onboard instructions.
-
-### MCP Server (Recommended)
-
-If using Claude or MCP-compatible clients, install the beads MCP server:
-
-```bash
-pip install beads-mcp
-```
-
-Add to MCP config (e.g., `~/.config/claude/config.json`):
-```json
-{
-  "beads": {
-    "command": "beads-mcp",
-    "args": []
-  }
-}
-```
-
-Then use `mcp__beads__*` functions instead of CLI commands.
+- Prefer `bun run brx -- <br command...>` for mutating `br` operations.
 
 ### Managing AI-Generated Planning Documents
 
@@ -128,10 +46,7 @@ history/
 
 ### Important Rules
 
-- Use br for ALL task tracking
-- Always use `--json` flag for programmatic use
-- Link discovered work with `discovered-from` dependencies
-- Check `br ready` before asking "what should I work on?"
+- Use `myc` for repo-visible task tracking
 - Store AI planning docs in `history/` directory
 - Do NOT create markdown TODO lists
 - Do NOT use external issue trackers
@@ -215,6 +130,6 @@ When working on this project:
 2. Check blocked tasks: `myc task list --blocked`
 3. Create tasks for new work: `myc task create --title "..." --epic N`
 4. Mark tasks complete when done: `myc task close N`
-5. Use `--json` flag for machine-readable output: `myc task list --json`
+5. Use `--format json` for machine-readable output: `myc task list --format json`
 6. For mutating `br` operations, prefer `bun run brx -- <br command...>` so `br` stays synced into Mycelium automatically
 7. Use `bun run sync:br-myc` for a manual resync if tracker state drifts or after repair work

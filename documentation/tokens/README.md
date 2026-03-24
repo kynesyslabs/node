@@ -256,6 +256,6 @@ stateDiagram-v2
 
 ---
 
-## 6) Practical verification (better_testing)
+## 6) Practical verification
 
-The `better_testing/` harness contains scenarios that exercised and verified this system end-to-end (across multiple nodes, consensus rounds, and committed reads). See `better_testing/README.md` for runnable scenarios and verified RUN_IDs.
+The maintained end-to-end verification surface now lives under `testing/`. Use `bun run testenv:tokens:local -- --build-first` for the token-core suite, and inspect `testing/runs/_latest/` for generated summaries.
