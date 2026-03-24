@@ -13,8 +13,10 @@ export default async function ensureCandidateBlockFormed(): Promise<boolean> {
             log.info(
                 "[ensureCandidateBlockFormed] Petri active — waiting for Petri block compilation...",
             )
-            // Wait up to 5s for Petri to set candidateBlock
-            for (let i = 0; i < 50; i++) {
+            // Wait up to blockIntervalMs for Petri to set candidateBlock
+            const waitMs = getSharedState.petriConfig?.blockIntervalMs ?? 5000
+            const iterations = Math.ceil(waitMs / 100)
+            for (let i = 0; i < iterations; i++) {
                 if (getSharedState.candidateBlock) break
                 await new Promise(r => setTimeout(r, 100))
             }
