@@ -278,9 +278,9 @@ export class ContinuousForge {
                 )
 
                 if (response.result === 200 && response.response) {
-                    const data = response.response as { deltas?: Record<string, string> }
-                    if (data.deltas) {
-                        peerDeltas[peer.identity] = data.deltas
+                    const data = response.response as { deltas?: unknown }
+                    if (data.deltas && typeof data.deltas === "object" && !Array.isArray(data.deltas)) {
+                        peerDeltas[peer.identity] = data.deltas as Record<string, string>
                     }
                 }
             } catch (error) {
@@ -290,7 +290,12 @@ export class ContinuousForge {
             }
         })
 
-        await Promise.all(promises)
+        // Timeout the entire exchange to prevent round stalls from slow/dead peers
+        const exchangeTimeoutMs = this.config.forgeIntervalMs ?? 2000
+        await Promise.race([
+            Promise.all(promises),
+            new Promise<void>(resolve => setTimeout(resolve, exchangeTimeoutMs)),
+        ])
         return peerDeltas
     }
 }
