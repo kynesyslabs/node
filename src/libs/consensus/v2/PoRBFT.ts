@@ -64,7 +64,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const blockRef = getSharedState.lastBlockNumber + 1
     const manager = SecretaryManager.getInstance(blockRef, true)
 
@@ -82,11 +82,11 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.debug(`Forgin block: ${manager.shard.blockRef}`)
-        log.debug("[consensusRoutine] We are in the shard, creating the block")
-        log.info(
+        log.only(`Forgin block: ${manager.shard.blockRef}`)
+        log.only("[consensusRoutine] We are in the shard, creating the block")
+        log.only(
             `[consensusRoutine] shard: ${JSON.stringify(
-                manager.shard,
+                manager.shard.members.map(m => m.connection.string),
                 null,
                 2,
             )}`,
@@ -126,8 +126,8 @@ export async function consensusRoutine(): Promise<void> {
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
-        log.info(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
-        log.info(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
+        log.only(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
+        log.only(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
         if (failedTxs.length > 0) {
             log.debug(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -167,7 +167,7 @@ export async function consensusRoutine(): Promise<void> {
         } else {
             // INFO: This should never happen
             // If it does, request the block timestamp from the secretary
-            log.debug(
+            log.error(
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
@@ -192,7 +192,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
-            log.debug(
+            log.only(
                 "[consensusRoutine] [result] Block is valid with " +
                     pro +
                     " votes",
@@ -263,6 +263,9 @@ export async function consensusRoutine(): Promise<void> {
 
         cleanupConsensusState()
         manager.endConsensusRoutine()
+
+        log.only("[consensusRoutine] Consensus routine ended")
+        log.only("🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴")
     }
 }
 
@@ -341,7 +344,8 @@ async function mergeAndOrderMempools(
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockRef)
-    log.debug(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool)}`)
+    log.only(`[CONSENSUS] Our mempool: ${ourMempool.length} txs`)
+    log.only(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool.map(tx => tx.hash), null, 2)}`)
     log.info("[CONSENSUS] Our mempool has been retrieved")
 
     await mergeMempools(ourMempool, shard)
@@ -351,9 +355,17 @@ async function mergeAndOrderMempools(
     const hashes = mempool.map(tx => tx.hash)
     const existingHashes = await Chain.getExistingTransactionHashes(hashes)
 
+    log.only(`[CONSENSUS] Existing hashes: ${existingHashes.size} hashes`)
+    log.only(`[CONSENSUS] Existing hashes: ${JSON.stringify(Array.from(existingHashes), null, 2)}`)
+
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    return mempool.filter(tx => !existingHashes.has(tx.hash))
+    const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
+
+    log.only(`[CONSENSUS] Final mempool: ${finalMempool.length} txs`)
+    log.only(`[CONSENSUS] Final mempool: ${JSON.stringify(finalMempool.map(tx => tx.hash), null, 2)}`)
+
+    return finalMempool
 }
 
 /**
@@ -513,7 +525,7 @@ async function voteOnBlock(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    log.info(
+    log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
@@ -521,10 +533,10 @@ async function voteOnBlock(
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
 
-    log.info(
+    log.only(
         `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
     )
-    log.info(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    log.only(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
 
     return [pro, con]
 }
