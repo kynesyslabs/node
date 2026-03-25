@@ -38,6 +38,23 @@ function envFloat(key: string, fallback: number): number {
     return Number.isNaN(parsed) ? fallback : parsed
 }
 
+function hasEnvValue(key: string): boolean {
+    const raw = process.env[key]
+    return raw !== undefined && raw !== ""
+}
+
+function envFloatWithFallback(
+    primaryKey: string,
+    primaryFallback: number,
+    secondaryKey: string,
+    secondaryFallback: number,
+): number {
+    if (hasEnvValue(primaryKey)) {
+        return envFloat(primaryKey, primaryFallback)
+    }
+    return envFloat(secondaryKey, secondaryFallback)
+}
+
 function envBool(key: string, fallback: boolean): boolean {
     const raw = process.env[key]
     if (raw === undefined || raw === "") return fallback
@@ -67,6 +84,9 @@ export function loadConfig(): Readonly<AppConfig> {
     const d = DEFAULT_CONFIG
 
     const serverPort = envInt(EnvKey.SERVER_PORT, d.server.serverPort)
+    const configuredOmniPort = envInt(EnvKey.OMNI_PORT, d.omni.port)
+    const resolvedOmniPort =
+        configuredOmniPort > 0 ? configuredOmniPort : serverPort + 1
     const serverConfig = {
         serverPort,
         rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
@@ -75,7 +95,7 @@ export function loadConfig(): Readonly<AppConfig> {
         rpcSignalingPort: envInt(EnvKey.RPC_SIGNALING_PORT, d.server.rpcSignalingPort),
         mcpServerPort: envInt(EnvKey.MCP_SERVER_PORT, d.server.mcpServerPort),
         rpcMcpPort: envInt(EnvKey.RPC_MCP_PORT, d.server.rpcMcpPort),
-        omniPort: envInt(EnvKey.OMNI_PORT, d.server.omniPort || serverPort + 1),
+        omniPort: resolvedOmniPort,
     }
 
     const config: AppConfig = {
@@ -126,7 +146,7 @@ export function loadConfig(): Readonly<AppConfig> {
 
         omni: {
             enabled: envBool(EnvKey.OMNI_ENABLED, d.omni.enabled),
-            port: envInt(EnvKey.OMNI_PORT, d.omni.port) || serverConfig.rpcPort + 1,
+            port: resolvedOmniPort,
             fatal: envBool(EnvKey.OMNI_FATAL, d.omni.fatal),
             mode: envStr(EnvKey.OMNI_MODE, d.omni.mode),
             tls: {
@@ -168,16 +188,36 @@ export function loadConfig(): Readonly<AppConfig> {
             minNetworkDownloadSpeed: envFloat(EnvKey.MIN_NETWORK_DOWNLOAD_SPEED, d.diagnostics.minNetworkDownloadSpeed),
             minNetworkUploadSpeed: envFloat(EnvKey.MIN_NETWORK_UPLOAD_SPEED, d.diagnostics.minNetworkUploadSpeed),
             networkTestFileSize: envFloat(EnvKey.NETWORK_TEST_FILE_SIZE, d.diagnostics.networkTestFileSize),
-            suggestedCpuSpeed: envFloat(EnvKey.SUGGESTED_CPU_SPEED, d.diagnostics.suggestedCpuSpeed)
-                || envFloat(EnvKey.MIN_CPU_SPEED, d.diagnostics.suggestedCpuSpeed),
-            suggestedRam: envFloat(EnvKey.SUGGESTED_RAM, d.diagnostics.suggestedRam)
-                || envFloat(EnvKey.MIN_RAM, d.diagnostics.suggestedRam),
-            suggestedDiskSpace: envFloat(EnvKey.SUGGESTED_DISK_SPACE, d.diagnostics.suggestedDiskSpace)
-                || envFloat(EnvKey.MIN_DISK_SPACE, d.diagnostics.suggestedDiskSpace),
-            suggestedNetworkDownloadSpeed: envFloat(EnvKey.SUGGESTED_NETWORK_DOWNLOAD_SPEED, d.diagnostics.suggestedNetworkDownloadSpeed)
-                || envFloat(EnvKey.MIN_NETWORK_DOWNLOAD_SPEED, d.diagnostics.suggestedNetworkDownloadSpeed),
-            suggestedNetworkUploadSpeed: envFloat(EnvKey.SUGGESTED_NETWORK_UPLOAD_SPEED, d.diagnostics.suggestedNetworkUploadSpeed)
-                || envFloat(EnvKey.MIN_NETWORK_UPLOAD_SPEED, d.diagnostics.suggestedNetworkUploadSpeed),
+            suggestedCpuSpeed: envFloatWithFallback(
+                EnvKey.SUGGESTED_CPU_SPEED,
+                d.diagnostics.suggestedCpuSpeed,
+                EnvKey.MIN_CPU_SPEED,
+                d.diagnostics.minCpuSpeed,
+            ),
+            suggestedRam: envFloatWithFallback(
+                EnvKey.SUGGESTED_RAM,
+                d.diagnostics.suggestedRam,
+                EnvKey.MIN_RAM,
+                d.diagnostics.minRam,
+            ),
+            suggestedDiskSpace: envFloatWithFallback(
+                EnvKey.SUGGESTED_DISK_SPACE,
+                d.diagnostics.suggestedDiskSpace,
+                EnvKey.MIN_DISK_SPACE,
+                d.diagnostics.minDiskSpace,
+            ),
+            suggestedNetworkDownloadSpeed: envFloatWithFallback(
+                EnvKey.SUGGESTED_NETWORK_DOWNLOAD_SPEED,
+                d.diagnostics.suggestedNetworkDownloadSpeed,
+                EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
+                d.diagnostics.minNetworkDownloadSpeed,
+            ),
+            suggestedNetworkUploadSpeed: envFloatWithFallback(
+                EnvKey.SUGGESTED_NETWORK_UPLOAD_SPEED,
+                d.diagnostics.suggestedNetworkUploadSpeed,
+                EnvKey.MIN_NETWORK_UPLOAD_SPEED,
+                d.diagnostics.minNetworkUploadSpeed,
+            ),
         },
 
         identity: {

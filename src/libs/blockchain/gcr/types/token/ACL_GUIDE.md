@@ -6,7 +6,7 @@ The Token ACL system provides granular permission management for GCRv2 tokens on
 
 ## Permission Hierarchy
 
-```
+```text
                     +-------------------+
                     |      Owner        |
                     | (All Permissions) |

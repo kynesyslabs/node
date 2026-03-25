@@ -1,7 +1,7 @@
 # Token Scripting - View Functions
 
 ## Summary
-View functions are read-only script methods that allow querying token state without producing mutations. They are called via nodeCall (no consensus needed) and return computed values directly.
+View functions are script methods used for direct token queries outside consensus. They are called via node handlers and return computed values directly.
 
 ## Architecture
 
@@ -12,19 +12,15 @@ High-level orchestration for view function execution:
 - Delegates to TokenSandbox.executeView()
 - Returns ViewResult with value or error
 
-### TokenSandbox.executeView()
-Low-level SES execution for view functions:
-- Creates read-only endowments (token, Math, JSON, console, BigInt)
-- Evaluates script code in SES compartment
-- Calls specified method with provided arguments
-- Validates result does NOT contain mutations
-- Returns computed value or rejects with error
+### Current Runtime
+The active implementation lives in `src/libs/scripting/index.ts` and:
+- compiles the script into a Node `vm` context,
+- invokes `module.exports.views[method]`,
+- passes the current token data plus provided args,
+- enforces execution timeouts.
 
-### Mutation Rejection
-View functions MUST NOT return mutations:
-- containsMutations() recursively checks result
-- isMutationLike() detects mutation objects
-- If mutations found: returns ViewError with errorType="mutation_rejected"
+### Mutation Expectations
+View methods are intended to be read-oriented, but the current implementation does not perform structural mutation-result rejection. This memory should not claim that a mutation scanner or rejection path is active unless the runtime grows one.
 
 ## Types
 
@@ -104,10 +100,10 @@ function canTransfer(from, amount) {
 | Aspect | executeMethod() | executeView() |
 |--------|----------------|---------------|
 | Consensus | Required | Not required |
-| Mutations | Allowed | Rejected |
+| Mutations | Allowed | Conventionally avoided |
 | Call path | Transaction → Consensus | nodeCall → Direct |
-| Randomness | Deterministic (block+tx) | Simple seed |
-| Endowments | Full (context, token, Math, Date) | Minimal (token, Math, JSON, console, BigInt) |
+| Runtime | VM with timeout | VM with timeout |
+| Endowments | Script method context | Token data plus arguments |
 
 ## Security
 

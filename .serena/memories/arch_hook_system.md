@@ -99,12 +99,12 @@ if (result.success) {
 ```
 
 ## Integration with ScriptExecutor
-HookExecutor uses `ScriptExecutor.executeHook()` internally, which delegates to `TokenSandbox.executeHook()` for secure SES-based execution.
+HookExecutor uses the current `scriptExecutor` implementation in `src/libs/scripting/index.ts`, which executes exported hook functions inside a Node `vm` context with timeouts. This is a determinism-oriented execution model, not a security boundary.
 
 ## Error Handling
-- Hook errors automatically cancel operation (safety first)
-- afterHook rejections revert all changes including native mutations
-- Detailed metadata tracks which hooks executed and how many mutations each produced
+- Hook errors cancel the operation.
+- The current branch does not re-run hook logic during rollback; rollback support is limited to the native reverse paths implemented in `GCRTokenRoutines`.
+- Custom-method rollback remains explicitly unsupported and should not be documented as fully restorative.
 
 ## Consensus Integration (Phase 5.1)
 
@@ -188,7 +188,7 @@ handleTransferToken / handleMintToken / handleBurnToken
 - `timestamp` from transaction content, fallback to Date.now()
 
 ### Rollback Handling
-Script hooks are NOT executed during rollbacks. Rollback operations reverse the native operation directly, preserving the original state before the script was executed.
+Script hooks are not executed during rollback. Rollback paths currently reverse only the supported native token effects; script-upgrade payload restoration and opaque custom-method state reversal are tracked separately and are not complete guarantees today.
 
 ## Last Updated
 2026-02-23 - Phase 5.1 consensus integration complete

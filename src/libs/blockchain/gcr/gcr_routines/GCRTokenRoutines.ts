@@ -120,7 +120,7 @@ export default class GCRTokenRoutines {
                 ),
             ]),
         )
-        if (data.storage) {
+        if (data.storage !== undefined) {
             token.customState = data.storage
         }
     }

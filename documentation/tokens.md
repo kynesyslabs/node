@@ -1,4 +1,3 @@
 # Tokens
 
-See `documentation/tokens/README.md`.
-
+See [documentation/tokens/README.md](./tokens/README.md).

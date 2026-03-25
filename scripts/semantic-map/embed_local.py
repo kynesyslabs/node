@@ -67,7 +67,12 @@ def main() -> None:
     # Local embedding provider: fastembed (ONNX).
     # Default model: small + good quality, 384-dim.
     model_name = os.environ.get("EMBED_LOCAL_MODEL", "BAAI/bge-small-en-v1.5")
-    batch_size = int(os.environ.get("EMBED_BATCH_SIZE", "128"))
+    try:
+        batch_size = int(os.environ.get("EMBED_BATCH_SIZE", "128"))
+    except ValueError as exc:
+        raise SystemExit("EMBED_BATCH_SIZE must be an integer") from exc
+    if batch_size <= 0:
+        raise SystemExit("EMBED_BATCH_SIZE must be greater than 0")
 
     from fastembed import TextEmbedding  # type: ignore
     import numpy as np  # type: ignore
@@ -135,4 +140,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

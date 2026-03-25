@@ -58,7 +58,7 @@ Complete technical documentation for the IPFS integration in the Demos Network.
 ### Add Content
 
 ```typescript
-import { DemosClient } from "@anthropic/demos-sdk"
+import { DemosClient } from "@kynesyslabs/demosdk"
 
 const client = new DemosClient()
 
@@ -119,7 +119,7 @@ Pinning marks content to prevent garbage collection:
 Demos operates a private IPFS swarm:
 
 - Isolated from public IPFS network
-- All Demos nodes share the same swarm key
+- All Demos nodes use the built-in swarm key unless `DEMOS_IPFS_SWARM_KEY` overrides it
 - Optimized for network performance
 - Optional public bridge for external access
 

@@ -17,7 +17,7 @@ By default, all Demos nodes join a private IPFS network defined by a shared swar
 
 ## Swarm Key
 
-### Official Demos Swarm Key
+### Built-In Demos Swarm Key
 
 ```
 1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
@@ -35,7 +35,7 @@ The swarm key is stored in `~/.ipfs/swarm.key`:
 
 ### Automatic Configuration
 
-The Demos node automatically configures the swarm key:
+The Demos node automatically configures the built-in swarm key unless `DEMOS_IPFS_SWARM_KEY` is provided:
 
 ```typescript
 import { DEMOS_IPFS_SWARM_KEY_FILE } from "./swarmKey"
@@ -70,7 +70,7 @@ Actual security is provided by:
 3. **Consensus validation** - All operations verified by network
 4. **Identity system** - Demos blockchain identity
 
-### Why Public Key?
+### Why Public Swarm Key?
 
 The swarm key is intentionally public because:
 
@@ -84,7 +84,7 @@ The swarm key is intentionally public because:
 ### Environment Variables
 
 ```bash
-# Use custom swarm key (optional)
+# Override the built-in swarm key (optional)
 DEMOS_IPFS_SWARM_KEY=your64characterhexkey
 
 # Force private network (default: enabled)

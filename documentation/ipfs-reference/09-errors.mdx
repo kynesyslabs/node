@@ -13,6 +13,7 @@ Comprehensive guide to IPFS error handling.
 IPFSError (base)
 ├── IPFSConnectionError
 ├── IPFSTimeoutError
+├── IPFSQuotaExceededError
 ├── IPFSNotFoundError
 ├── IPFSInvalidCIDError
 └── IPFSAPIError
@@ -74,6 +75,18 @@ throw new IPFSTimeoutError("get", 30000)
 - Network congestion
 - Content not available
 - Slow peers
+
+### IPFSQuotaExceededError
+
+Thrown when an account exceeds its pin or byte quota.
+
+```typescript
+class IPFSQuotaExceededError extends IPFSError {
+  current: number
+  limit: number
+  // code: "IPFS_QUOTA_EXCEEDED"
+}
+```
 
 ### IPFSNotFoundError
 
@@ -255,13 +268,13 @@ async function withRetry<T>(
   operation: () => Promise<T>,
   maxRetries: number = 5
 ): Promise<T> {
-  let lastError: Error
+  let lastError: Error | null = null
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await operation()
     } catch (error) {
-      lastError = error
+      lastError = error instanceof Error ? error : new Error(String(error))
 
       // Only retry connection/timeout errors
       if (error instanceof IPFSConnectionError ||
@@ -276,7 +289,7 @@ async function withRetry<T>(
     }
   }
 
-  throw lastError
+  throw lastError ?? new Error("Retry loop exited without capturing an error")
 }
 ```
 

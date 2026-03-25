@@ -151,7 +151,9 @@ async function main() {
     const textHash = texts.map(t => sha1(t))
 
     const batchSize = Number(process.env.EMBED_BATCH_SIZE ?? "64")
-    if (!Number.isFinite(batchSize) || batchSize <= 0) throw new Error("Invalid EMBED_BATCH_SIZE")
+    if (!Number.isInteger(batchSize) || batchSize <= 0) {
+        throw new Error("EMBED_BATCH_SIZE must be a positive integer")
+    }
 
     const rows = entries.length
     const cols = provider.dim

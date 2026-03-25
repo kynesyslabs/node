@@ -18,6 +18,9 @@ export interface GCRMainExtended {
     other: any[]
 }
 
+export const DEFAULT_GCR_MAIN_EXTENDED_SQL =
+    '\'{"tokens":[],"nfts":[],"xm":[],"web2":[],"other":[]}\''
+
 @Entity("gcr_main")
 @Index("idx_gcr_main_pubkey", ["pubkey"])
 export class GCRMain {
@@ -31,7 +34,11 @@ export class GCRMain {
     balance: bigint
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities
-    @Column({ type: "jsonb", name: "extended", default: () => "'{}'" })
+    @Column({
+        type: "jsonb",
+        name: "extended",
+        default: () => DEFAULT_GCR_MAIN_EXTENDED_SQL,
+    })
     extended: GCRMainExtended
     @Column({ type: "jsonb", name: "points", default: () => "'{}'" })
     points: {

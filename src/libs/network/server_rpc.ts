@@ -4,6 +4,7 @@ import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import { Config } from "@/config"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { RateLimiter } from "./middleware/rateLimiter"
 import { getAuthContext } from "./authContext"
@@ -134,7 +135,7 @@ export async function serverRpcBun() {
     })
 
     // ── Feature routes (lazy loaded) ──────────────────────────
-    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+    if (Config.getInstance().tlsnotary.enabled) {
         try {
             const { registerTLSNotaryRoutes } =
                 await import("@/features/tlsnotary/routes")

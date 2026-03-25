@@ -284,9 +284,6 @@ export class TLSServer extends EventEmitter {
         // Close all existing connections
         await this.connectionManager.closeAll()
 
-        // Stop rate limiter
-        this.rateLimiter.stop()
-
         this.isRunning = false
         this.server = null
 

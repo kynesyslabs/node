@@ -20,7 +20,7 @@ Complete reference for IPFS configuration options.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEMOS_IPFS_SWARM_KEY` | Built-in | 64-char hex swarm key |
+| `DEMOS_IPFS_SWARM_KEY` | Built-in default | Optional 64-char hex swarm key override |
 | `LIBP2P_FORCE_PNET` | `1` | Force private network mode |
 | `DEMOS_IPFS_PUBLIC_MODE` | `false` | Join public IPFS instead |
 | `DEMOS_IPFS_BOOTSTRAP_NODES` | - | Comma-separated multiaddrs |
@@ -104,10 +104,10 @@ if [ ! -f /data/ipfs/config ]; then
 fi
 
 # Write swarm key for private network
-cat > /data/ipfs/swarm.key << 'EOF'
+cat > /data/ipfs/swarm.key <<EOF
 /key/swarm/psk/1.0.0/
 /base16/
-1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4
+${DEMOS_IPFS_SWARM_KEY:-1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4}
 EOF
 
 # Clear default bootstrap for private network

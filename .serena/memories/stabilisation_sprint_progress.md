@@ -33,11 +33,11 @@
 - **GCRIdentityRoutines.ts** (2212→~170 lines): Split 19 routines into `routines/` by domain (xm, web2, pqc, ud, rewards, zk, nomis, humanpassport, ethos, tlsn) + shared utils
 
 ## Remaining
-- [ ] `chain.ts` (781 lines) → split by concern
-- [ ] `server_rpc.ts` (741 lines) → routes by domain
-- [ ] `endpointHandlers.ts` (891 lines) → handlers by domain
-- [ ] Test environment unification (assigned to another developer)
-- [ ] Migrate remaining magic string error sources to ErrorSource constants
+- `chain.ts` still needs a split by concern.
+- `server_rpc.ts` still needs to be broken into route/domain modules.
+- `endpointHandlers.ts` still needs handler extraction by domain.
+- Test-environment unification remains assigned to another developer.
+- Some magic-string error sources still need migration to `ErrorSource` constants.
 
 ## Key Decisions
 - All refactors are pure file reorganization — no logic changes
