@@ -12,7 +12,6 @@ export type AuthMessage = [
 
 export async function manageAuth(data: any): Promise<RPCResponse> {
     // REVIEW Auth reply listener should not add a client to the peerlist if is read only
-    const identity = await Cryptography.load("./.demos_identity")
     log.info("SERVER", "Received auth reply")
     // Unpack the data for readability
     if (data !== "readonly") {
@@ -53,8 +52,6 @@ export async function manageAuth(data: any): Promise<RPCResponse> {
     } else {
         log.info("SERVER", "Client is read only: not asking for authentication")
     }
-    // And we reply ok with our signature too
-    const signature = Cryptography.sign("auth_ok", identity.privateKey as any)
     return {
         result: 200,
         response: "OK",
