@@ -401,6 +401,8 @@ async function rollbackGCREditsFromTxs(
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
 ): Promise<[string[], string[]]> {
+    log.only("Applyign GCR Edits for merged mempool")
+    const now = Date.now()
     // TODO Implement this
     const successfulTxs: string[] = []
     const failedTxs: string[] = []
@@ -450,6 +452,9 @@ async function applyGCREditsFromMergedMempool(
         successSet.add(tx.hash)
         continue
     }
+
+    const end = Date.now()
+    log.only(`[applyGCREditsFromMergedMempool] Time taken: ${Math.round((end - now) / 1000)} seconds to apply GCR edits for ${mempool.length} txs`)
 
     // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
     return [successfulTxs, failedTxs]
