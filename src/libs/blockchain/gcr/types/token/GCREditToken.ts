@@ -156,6 +156,12 @@ export interface GCREditTokenUpgradeScript extends GCREditTokenBase {
         upgradeReason?: string
         /** Previous script version (for rollback support) */
         previousVersion?: number
+        /** Previous script payload (for rollback support) */
+        previousScript?: TokenScript | null
+        /** Previous hasScript flag (for rollback support) */
+        previousHasScript?: boolean
+        /** Previous script update timestamp (for rollback support) */
+        previousLastScriptUpdate?: number | null
     }
 }
 
@@ -166,6 +172,7 @@ export interface GCREditTokenTransferOwnership extends GCREditTokenBase {
     operation: "transferOwnership"
     data: {
         newOwner: string
+        previousOwner?: string
     }
 }
 

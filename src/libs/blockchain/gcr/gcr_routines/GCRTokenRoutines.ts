@@ -43,7 +43,7 @@ import {
     GCREditTokenTransferOwnership,
     GCREditTokenCustom,
 } from "../types/token/GCREditToken"
-import type { TokenPermission, TokenHolderReference } from "../types/token/TokenTypes"
+import type { TokenPermission, TokenHolderReference, TokenScript } from "../types/token/TokenTypes"
 import { hasPermission } from "../types/token/TokenTypes"
 import { Referrals } from "@/features/incentive/referrals"
 
@@ -1325,7 +1325,14 @@ export default class GCRTokenRoutines {
         simulate: boolean,
         tx?: Transaction,
     ): Promise<GCRResult> {
-        const { newScript, upgradeReason, previousVersion } = edit.data
+        const {
+            newScript,
+            upgradeReason,
+            previousVersion,
+            previousScript,
+            previousHasScript,
+            previousLastScriptUpdate,
+        } = edit.data
         const tokenAddress = edit.tokenAddress
 
         log.debug("[GCRTokenRoutines] Upgrade script for token: " + tokenAddress)
@@ -1347,12 +1354,29 @@ export default class GCRTokenRoutines {
         // Store previous version for logging/rollback reference
         const currentVersion = token.scriptVersion ?? 0
         const currentTimestamp = this.getDeterministicTxTimestamp(tx)
+        const currentScript = token.script
+            ? (JSON.parse(JSON.stringify(token.script)) as TokenScript)
+            : null
+
+        if (!edit.isRollback && !simulate) {
+            edit.data.previousVersion ??= currentVersion
+            edit.data.previousScript ??= currentScript
+            edit.data.previousHasScript ??= token.hasScript
+            edit.data.previousLastScriptUpdate ??= token.lastScriptUpdate ?? null
+        }
 
         // For rollback, attempt to restore previous version state
         if (edit.isRollback) {
-            // If previousVersion was provided, use it to decrement
-            if (previousVersion !== undefined && previousVersion >= 0) {
+            // If a prior script snapshot was recorded, restore it atomically.
+            if (
+                previousVersion !== undefined &&
+                previousVersion >= 0 &&
+                previousHasScript !== undefined
+            ) {
                 token.scriptVersion = previousVersion
+                token.script = previousScript ?? undefined
+                token.hasScript = previousHasScript
+                token.lastScriptUpdate = previousLastScriptUpdate ?? null
                 log.info(
                     "[GCRTokenRoutines] Script rollback to version " +
                         previousVersion +
@@ -1430,7 +1454,7 @@ export default class GCRTokenRoutines {
         gcrTokenRepository: Repository<GCRToken>,
         simulate: boolean,
     ): Promise<GCRResult> {
-        const { newOwner } = edit.data
+        const { newOwner, previousOwner } = edit.data
         const tokenAddress = edit.tokenAddress
 
         log.debug(
@@ -1457,9 +1481,19 @@ export default class GCRTokenRoutines {
 
         const oldOwner = token.owner
 
+        if (!edit.isRollback && !simulate) {
+            edit.data.previousOwner ??= oldOwner
+        }
+
         // For rollback, swap back
         if (edit.isRollback) {
-            token.owner = edit.account // Previous owner was the caller
+            if (!previousOwner) {
+                return {
+                    success: false,
+                    message: "Cannot rollback ownership transfer without previous owner",
+                }
+            }
+            token.owner = previousOwner
         } else {
             token.owner = newOwner
         }
