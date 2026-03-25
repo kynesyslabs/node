@@ -3,6 +3,7 @@
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
@@ -15,6 +16,7 @@ class Atom:
 
 def read_jsonl(path: Path) -> List[Atom]:
     atoms: List[Atom] = []
+    seen_uuids: set[str] = set()
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -22,6 +24,9 @@ def read_jsonl(path: Path) -> List[Atom]:
                 continue
             obj = json.loads(line)
             uuid = str(obj.get("uuid"))
+            if uuid in seen_uuids:
+                raise SystemExit(f"Duplicate UUID found in {path}: {uuid}")
+            seen_uuids.add(uuid)
             descs = (
                 obj.get("semantic_fingerprint", {})
                 .get("natural_language_descriptions", [])
@@ -102,7 +107,7 @@ def main() -> None:
     mapping_path.write_text(
         json.dumps(
             {
-                "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "provider": {"name": "fastembed", "model": model_name, "dim": int(cols)},
                 "rows": int(rows),
                 "cols": int(cols),
@@ -118,7 +123,7 @@ def main() -> None:
     meta_path.write_text(
         json.dumps(
             {
-                "generated_at": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "index_path": "repository-semantic-map/semantic-index.jsonl",
                 "npy_path": "repository-semantic-map/embeddings/semantic-fingerprints.npy",
                 "mapping_path": "repository-semantic-map/embeddings/uuid-mapping.json",

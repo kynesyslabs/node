@@ -20,7 +20,7 @@ Complete reference for IPFS configuration options.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DEMOS_IPFS_SWARM_KEY` | Built-in default | Optional 64-char hex swarm key override |
+| `DEMOS_IPFS_SWARM_KEY` | none for private networks | Required 64-char hex swarm key for private deployments; use a unique value per environment |
 | `LIBP2P_FORCE_PNET` | `1` | Force private network mode |
 | `DEMOS_IPFS_PUBLIC_MODE` | `false` | Join public IPFS instead |
 | `DEMOS_IPFS_BOOTSTRAP_NODES` | - | Comma-separated multiaddrs |
@@ -104,10 +104,16 @@ if [ ! -f /data/ipfs/config ]; then
 fi
 
 # Write swarm key for private network
+SWARM_KEY="${DEMOS_IPFS_SWARM_KEY:-}"
+if ! [[ "$SWARM_KEY" =~ ^[0-9a-fA-F]{64}$ ]]; then
+  echo "ERROR: DEMOS_IPFS_SWARM_KEY must be exactly 64 hex characters for private-network deployments" >&2
+  exit 1
+fi
+
 cat > /data/ipfs/swarm.key <<EOF
 /key/swarm/psk/1.0.0/
 /base16/
-${DEMOS_IPFS_SWARM_KEY:-1d8b2cfa0ee76011ab655cec98be549f3f5cd81199b1670003ec37c0db0592e4}
+${SWARM_KEY}
 EOF
 
 # Clear default bootstrap for private network
@@ -218,6 +224,8 @@ DEMOS_IPFS_PUBLIC_MODE=true  # Use public IPFS for testing
 ```
 
 ### Production (Private Network)
+
+Private-network deployments must provide a unique `DEMOS_IPFS_SWARM_KEY` per environment. Do not rely on shared fallback values, or separate deployments can join the same private swarm unintentionally.
 
 ```bash
 # .env.production

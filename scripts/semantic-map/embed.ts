@@ -38,6 +38,21 @@ function readJsonl(p: string) {
     return raw.split("\n").map(l => JSON.parse(l)) as SemanticEntry[]
 }
 
+function getDuplicateUuids(entries: SemanticEntry[]) {
+    const seen = new Set<string>()
+    const duplicates = new Set<string>()
+
+    for (const entry of entries) {
+        if (seen.has(entry.uuid)) {
+            duplicates.add(entry.uuid)
+            continue
+        }
+        seen.add(entry.uuid)
+    }
+
+    return [...duplicates].sort()
+}
+
 function stringifyAtomText(e: SemanticEntry) {
     const descs = e.semantic_fingerprint?.natural_language_descriptions ?? []
     const cleaned = descs
@@ -82,8 +97,19 @@ async function embedWithHttpEndpoint(args: {
         throw new Error("Embedding response missing `data` array")
     }
     const embeddings = data.map((d: any) => d?.embedding)
-    if (!embeddings.every((x: any) => Array.isArray(x))) {
-        throw new Error("Embedding response `data[].embedding` must be number[]")
+    for (let embeddingIndex = 0; embeddingIndex < embeddings.length; embeddingIndex++) {
+        const embedding = embeddings[embeddingIndex]
+        if (!Array.isArray(embedding)) {
+            throw new Error(`Embedding response data[${embeddingIndex}].embedding must be number[]`)
+        }
+        for (let valueIndex = 0; valueIndex < embedding.length; valueIndex++) {
+            const value = embedding[valueIndex]
+            if (typeof value !== "number" || !Number.isFinite(value)) {
+                throw new Error(
+                    `Embedding response data[${embeddingIndex}].embedding[${valueIndex}] must be a finite number`,
+                )
+            }
+        }
     }
     return embeddings as number[][]
 }
@@ -139,6 +165,10 @@ async function main() {
     const entries = readJsonl(indexPath)
     if (entries.length === 0) {
         throw new Error(`No atoms found in ${indexPath}`)
+    }
+    const duplicateUuids = getDuplicateUuids(entries)
+    if (duplicateUuids.length > 0) {
+        throw new Error(`Duplicate UUIDs found in ${indexPath}: ${duplicateUuids.join(", ")}`)
     }
 
     const provider = await makeProviderFromEnv()
