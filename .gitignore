@@ -297,3 +297,4 @@ better_testing/runs/*
 /documentation/internal-docs/src/.deps/npm/@openzeppelin/contracts
 /documentation/internal-docs/src/lib
 /.github/copilot-instructions.md
+/history/tmp
