@@ -18,47 +18,44 @@ High-level orchestrator for hook execution during native operations.
 **Main Method**: `executeWithHooks(request: ExecuteWithHooksRequest): Promise<HookExecutionResult>`
 
 **Execution Flow**:
-```
+```text
 ExecuteWithHooksRequest
        │
        ▼
 1. Execute beforeHook
-   ├── If rejected → Return failure with HookRejection
-   └── If proceed → Apply beforeHook mutations to state
+   ├── If hook throws or returns `reject` → Return `rejection`
+   └── If hook returns mutations/setStorage → Update working state
        │
        ▼
 2. Apply native operation mutations
        │
        ▼
 3. Execute afterHook
-   ├── If rejected → Return failure, revert all changes
-   └── If proceed → Apply afterHook mutations
+   ├── If hook throws or returns `reject` → Return `rejection`
+   └── If hook returns mutations/setStorage → Update working state
        │
        ▼
 4. Return HookExecutionResult
-   ├── success: boolean
    ├── finalState: GCRTokenData
-   ├── allMutations: StateMutation[]
-   ├── events: AppliedEvent[]
+   ├── mutations: TokenMutation[]
+   ├── rejection: { hookType: string; reason: string } | null
    └── metadata: HookExecutionMetadata
 ```
 
 ### Hook Result Structure
 ```typescript
 interface HookResult {
-    proceed: boolean        // Whether to continue operation
-    mutations: StateMutation[] // Additional mutations
-    modifiedData?: Record<string, unknown> // Modified operation data
-    cancelReason?: string   // Reason if proceed=false
+    reject?: string | boolean
+    mutations?: TokenMutation[]
+    setStorage?: Record<string, unknown>
 }
 ```
 
 ### Hook Rejection
 ```typescript
 interface HookRejection {
-    hookType: HookType      // Which hook rejected
-    reason: string          // Why rejected
-    phase: "before" | "after"
+    hookType: string
+    reason: string
 }
 ```
 
@@ -91,7 +88,7 @@ const result = await executor.executeWithHooks({
     nativeOperationMutations: createTransferMutations("0x1", "0x2", 100n),
 })
 
-if (result.success) {
+if (!result.rejection) {
     // Apply result.finalState to storage
 } else {
     // Handle rejection: result.rejection.reason
@@ -146,7 +143,7 @@ The hook system is now integrated into the consensus flow through `GCRTokenRouti
 
 ### Consensus Flow
 
-```
+```text
 Transaction submitted
        │
        ▼
@@ -182,10 +179,10 @@ handleTransferToken / handleMintToken / handleBurnToken
 ```
 
 ### Determinism Notes
-- Scripts execute in SES sandbox with seeded randomness
-- `prevBlockHash` currently empty string (will be injected by consensus in Phase 5.2)
-- `blockHeight` uses `tx.blockNumber` (may be null during mempool processing)
-- `timestamp` from transaction content, fallback to Date.now()
+- Consensus-critical hook execution currently uses the Node `vm`-based runtime in `src/libs/scripting/index.ts`, not SES.
+- `prevBlockHash` is currently a placeholder value in some paths and is intended to be injected by consensus later.
+- `blockHeight` comes from `tx.blockNumber` and may be absent during mempool-side processing.
+- `timestamp` is taken from transaction content when available; any `Date.now()` fallback should be treated as non-consensus or pre-consensus behavior, not as a deterministic guarantee.
 
 ### Rollback Handling
 Script hooks are not executed during rollback. Rollback paths currently reverse only the supported native token effects; script-upgrade payload restoration and opaque custom-method state reversal are tracked separately and are not complete guarantees today.
