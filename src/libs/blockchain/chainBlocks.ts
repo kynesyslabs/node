@@ -225,13 +225,26 @@ export async function insertBlock(
                         tx,
                         "confirmed",
                     )
-                    await transactionalEntityManager
-                        .createQueryBuilder()
-                        .insert()
-                        .into(transactionsRepo.target)
-                        .values(rawTransaction as any)
-                        .orIgnore()
-                        .execute()
+                    const existingTransaction =
+                        await transactionalEntityManager.findOne(
+                            transactionsRepo.target,
+                            {
+                                where: { hash: tx.hash } as any,
+                            },
+                        )
+                    if (existingTransaction) {
+                        log.warn(
+                            `[ChainDB] [ WARN ]: Transaction ${tx.hash} already exists during transactional block insert; skipping duplicate row insert.`,
+                        )
+                    } else {
+                        await transactionalEntityManager
+                            .createQueryBuilder()
+                            .insert()
+                            .into(transactionsRepo.target)
+                            .values(rawTransaction as any)
+                            .orIgnore()
+                            .execute()
+                    }
 
                     await persistConfirmedTransactionProjection(
                         tx,

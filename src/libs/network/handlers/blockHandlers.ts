@@ -1,6 +1,5 @@
 import Chain from "../../blockchain/chain"
 import Hashing from "../../crypto/hashing"
-import fs from "fs"
 import getPreviousHashFromBlockNumber from "../routines/nodecalls/getPreviousHashFromBlockNumber"
 import getPreviousHashFromBlockHash from "../routines/nodecalls/getPreviousHashFromBlockHash"
 import getBlockHeaderByNumber from "../routines/nodecalls/getBlockHeaderByNumber"
@@ -14,17 +13,16 @@ import type { NodeCallHandler } from "./types"
 export const blockHandlers: Record<string, NodeCallHandler> = {
     getGenesisDataHash: async (_data, response) => {
         try {
-            const genesisBlock = await Chain.getGenesisBlock().catch(() => null)
-            let genesisData =
-                genesisBlock?.content?.extra?.genesisData || null
+            const genesisBlock = await Chain.getGenesisBlock()
+            let genesisData = genesisBlock?.content?.extra?.genesisData || null
 
             if (typeof genesisData === "string") {
                 genesisData = JSON.parse(genesisData)
             }
 
             if (!genesisData) {
-                genesisData = JSON.parse(
-                    fs.readFileSync("data/genesis.json", "utf8"),
+                throw new Error(
+                    "Genesis data is unavailable from chain storage",
                 )
             }
 

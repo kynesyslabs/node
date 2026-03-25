@@ -23,10 +23,8 @@ function rejectCommittedReadIfStateInFlux(response: {
 
     if (maxMs > 0 && ageMs > maxMs) {
         log.warn(
-            `[tokenHandlers] inGcrApply stuck for ${ageMs}ms (> ${maxMs}ms). Clearing inGcrApply to unblock committed reads.`,
+            `[tokenHandlers] inGcrApply stuck for ${ageMs}ms (> ${maxMs}ms). Refusing committed read until the writer clears state.`,
         )
-        getSharedState.inGcrApply = false
-        return false
     }
 
     response.result = 409

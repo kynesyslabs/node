@@ -26,10 +26,16 @@ export async function handleValidateTransaction(
         validationData = await confirmTransaction(tx, sender)
 
         const gcrEdits = await GCRGeneration.generate(tx)
-        gcrEdits.forEach((gcredit: GCREdit) => {
-            gcredit.txhash = ""
+        const generatedComparableEdits = gcrEdits as any[]
+        const generatedNonTokenEdits = generatedComparableEdits.filter(
+            (gcrEdit: any) => gcrEdit?.type !== "token",
+        )
+        generatedNonTokenEdits.forEach((gcrEdit: any) => {
+            gcrEdit.txhash = ""
         })
-        const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+        const gcrEditsHash = Hashing.sha256(
+            JSON.stringify(generatedNonTokenEdits),
+        )
         log.debug(
             "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
         )

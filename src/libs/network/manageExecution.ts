@@ -19,6 +19,19 @@ export async function manageExecution(
 
     log.info(`[serverListeners] Received execution request for type: ${content.type}`)
 
+    const securityInterceptor: ISecurityReport = await Security.checkRateLimits(
+        sender,
+        String(content.extra ?? content.type ?? "unknown"),
+        Date.now(),
+    )
+    if (!securityInterceptor.state) {
+        returnValue.result = 429
+        returnValue.response = "Rate limited"
+        returnValue.extra = securityInterceptor.message
+        returnValue.require_reply = false
+        return returnValue
+    }
+
     if (content.type === "l2ps" || content.type === "l2psEncryptedTx") {
         const response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {
@@ -99,21 +112,6 @@ export async function manageExecution(
             returnValue.response = "Bad Request"
             returnValue.require_reply = false
             break
-    }
-    // ANCHOR Reply logic
-
-    // Optional security interceptor (rate limiting). Disabled unless explicitly enabled via env.
-    const securityInterceptor: ISecurityReport = await Security.checkRateLimits(
-        sender,
-        String(content.extra ?? content.type ?? "unknown"),
-        Date.now(),
-    )
-    if (securityInterceptor && (securityInterceptor as any).state === false) {
-        returnValue.result = 429
-        returnValue.response = "Rate limited"
-        returnValue.extra = securityInterceptor.message
-        returnValue.require_reply = false
-        return returnValue
     }
 
     // Sending back the response
