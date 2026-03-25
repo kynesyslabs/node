@@ -1548,10 +1548,9 @@ export default class GCRTokenRoutines {
                 "[GCRTokenRoutines] Rollback not fully supported for custom method: " +
                     method,
             )
-            // For now, we skip rollback - proper rollback would need mutation logging
             return {
-                success: true,
-                message: "Custom method rollback skipped (state opaque)",
+                success: false,
+                message: "Custom method rollback is unsupported without mutation logging",
             }
         }
 

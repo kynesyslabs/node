@@ -282,6 +282,11 @@ export async function insertBlock(
                 transactionalEntityManager,
             )
 
+            if (block.number > getSharedState.lastBlockNumber) {
+                getSharedState.lastBlockNumber = block.number
+                getSharedState.lastBlockHash = block.hash
+            }
+
             return savedBlock
         }
 
