@@ -45,6 +45,7 @@ import {
 } from "../types/token/GCREditToken"
 import type { TokenPermission, TokenHolderReference } from "../types/token/TokenTypes"
 import { hasPermission } from "../types/token/TokenTypes"
+import { Referrals } from "@/features/incentive/referrals"
 
 /**
  * GCRTokenRoutines handles all token-related GCR edit operations.
@@ -73,6 +74,55 @@ export default class GCRTokenRoutines {
             this.hookExecutor = new HookExecutor(scriptExecutor)
         }
         return this.hookExecutor
+    }
+
+    private static buildEmptyHolderAccount(pubkey: string): GCRMain {
+        const account = new GCRMain()
+        account.pubkey = pubkey
+        account.balance = 0n
+        account.identities = {
+            xm: {},
+            web2: {},
+            pqc: {},
+            ud: [],
+        }
+        account.assignedTxs = []
+        account.nonce = 0
+        account.extended = {
+            tokens: [],
+            nfts: [],
+            xm: [],
+            web2: [],
+            other: [],
+        }
+        account.points = {
+            totalPoints: 0,
+            breakdown: {
+                web3Wallets: {},
+                socialAccounts: {
+                    twitter: 0,
+                    github: 0,
+                    discord: 0,
+                    telegram: 0,
+                },
+                referrals: 0,
+                demosFollow: 0,
+                nomisScores: {},
+            },
+            lastUpdated: new Date(),
+        }
+        account.referralInfo = {
+            totalReferrals: 0,
+            referralCode: Referrals.generateReferralCode(pubkey),
+            referrals: [],
+            referredBy: null,
+        }
+        account.flagged = false
+        account.flaggedReason = ""
+        account.reviewed = false
+        account.createdAt = new Date()
+        account.updatedAt = new Date()
+        return account
     }
 
     /**
@@ -1604,18 +1654,15 @@ export default class GCRTokenRoutines {
         try {
             if (em) {
                 const repo = em.getRepository(GCRMain)
-                const holder = await repo.findOne({
+                let holder = await repo.findOne({
                     where: { pubkey: holderAddress },
                     lock: { mode: "pessimistic_write" },
                 })
 
                 if (!holder) {
-                    log.debug(
-                        "[GCRTokenRoutines] Holder " +
-                            holderAddress +
-                            " not found in transactional context, skipping reference add",
+                    holder = await repo.save(
+                        this.buildEmptyHolderAccount(holderAddress),
                     )
-                    return
                 }
 
                 const current = holder.extended ?? {

@@ -71,6 +71,7 @@ export async function consensusRoutine(): Promise<void> {
 
     // Defining the variables needed for rolling back the GCREdits
     let successfulTxs: string[] = []
+    let rollbackEligibleTxs: string[] = []
     let failedTxs: string[] = []
     let tempMempool: Transaction[] = []
 
@@ -123,9 +124,12 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        const [localSuccessfulTxs, localFailedTxs] =
+        const [localSuccessfulTxs, localFailedTxs, localRollbackEligibleTxs] =
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+        rollbackEligibleTxs = rollbackEligibleTxs.concat(
+            localRollbackEligibleTxs,
+        )
         failedTxs = failedTxs.concat(localFailedTxs)
         log.info(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
         log.info(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
@@ -254,7 +258,7 @@ export async function consensusRoutine(): Promise<void> {
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
-            for (const txHash of successfulTxs) {
+            for (const txHash of rollbackEligibleTxs) {
                 const tx = tempMempool.find(tx => tx.hash === txHash)
                 if (tx) {
                     txsToRollback.push(tx)
@@ -410,8 +414,9 @@ async function rollbackGCREditsFromTxs(
  */
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
-): Promise<[string[], string[]]> {
+): Promise<[string[], string[], string[]]> {
     const successfulTxs = new Set<string>()
+    const rollbackEligibleTxs = new Set<string>()
     const failedTxs = new Set<string>()
 
     const prevInGcrApply = getSharedState.inGcrApply
@@ -470,14 +475,16 @@ async function applyGCREditsFromMergedMempool(
             } as any as Transaction
 
             const result = await HandleGCR.applyToTx(txNonToken, false, false)
-            if (result.success) successfulTxs.add(tx.hash)
-            else failedTxs.add(tx.hash)
+            if (result.success) {
+                successfulTxs.add(tx.hash)
+                rollbackEligibleTxs.add(tx.hash)
+            } else failedTxs.add(tx.hash)
         }
     } finally {
         getSharedState.inGcrApply = prevInGcrApply
     }
 
-    return [[...successfulTxs], [...failedTxs]]
+    return [[...successfulTxs], [...failedTxs], [...rollbackEligibleTxs]]
 }
 
 // /**
@@ -739,11 +746,34 @@ async function fetchTxsByHashesFromPeers(
                     continue
                 }
 
-                for (const tx of res.response as Transaction[]) {
-                    if (tx?.hash && remaining.has(tx.hash)) {
-                        remaining.delete(tx.hash)
-                        results.push(tx)
+                for (const candidate of res.response as Transaction[]) {
+                    const claimedHash =
+                        typeof candidate?.hash === "string"
+                            ? candidate.hash
+                            : null
+                    if (!claimedHash || !remaining.has(claimedHash)) {
+                        continue
                     }
+
+                    const tx = Object.assign(new Transaction(), candidate)
+                    const rehashed = Transaction.hash(tx)
+                    if (!rehashed || tx.hash !== claimedHash) {
+                        log.warning(
+                            `[CONSENSUS] Dropping peer tx with mismatched hash for requested tx ${claimedHash}`,
+                        )
+                        continue
+                    }
+
+                    const validation = await Transaction.confirmTx(tx, "")
+                    if (!validation?.success) {
+                        log.warning(
+                            `[CONSENSUS] Dropping peer tx ${claimedHash}: signature/integrity validation failed`,
+                        )
+                        continue
+                    }
+
+                    remaining.delete(claimedHash)
+                    results.push(tx)
                 }
             } catch {
                 // best-effort; keep trying other peers
