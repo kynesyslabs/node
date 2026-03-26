@@ -66,6 +66,60 @@ export default class GCRTokenRoutines {
     // REVIEW: Phase 5.1 - HookExecutor instance for script execution in consensus
     private static hookExecutor: HookExecutor | null = null
 
+    private static parseTokenBigInt(value: unknown, label: string): bigint {
+        if (typeof value === "bigint") return value
+        if (typeof value === "number" && Number.isFinite(value) && Number.isInteger(value)) {
+            return this.parseTokenBigInt(value.toString(), label)
+        }
+        if (typeof value === "string") {
+            try {
+                const trimmed = value.trim()
+                if (/^[+-]?\d+$/.test(trimmed)) return BigInt(trimmed)
+                const match = trimmed.match(/^([+-]?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/)
+                if (!match) throw new SyntaxError("Failed to parse String to BigInt")
+                const [, sign, intPart, fracPartRaw = "", exponentRaw] = match
+                const exponent = Number.parseInt(exponentRaw, 10)
+                if (!Number.isFinite(exponent)) throw new SyntaxError("Failed to parse String to BigInt")
+                const digits = `${intPart}${fracPartRaw}`.replace(/^0+/, "") || "0"
+                const scale = fracPartRaw.length
+                const shift = exponent - scale
+                if (shift < 0) {
+                    const fractional = digits.slice(digits.length + shift)
+                    if (fractional && /[1-9]/.test(fractional)) {
+                        throw new SyntaxError("Failed to parse String to BigInt")
+                    }
+                    const wholeDigits = digits.slice(0, digits.length + shift) || "0"
+                    return BigInt(`${sign}${wholeDigits}`)
+                }
+                return BigInt(`${sign}${digits}${"0".repeat(shift)}`)
+            } catch (error) {
+                log.error(`[GCRTokenRoutines] Invalid bigint string for ${label}: ${JSON.stringify(value)}`)
+                throw error
+            }
+        }
+        if (
+            value &&
+            typeof value === "object" &&
+            !Array.isArray(value) &&
+            typeof (value as any).$demos_bigint_v1 === "string"
+        ) {
+            return BigInt((value as any).$demos_bigint_v1)
+        }
+        log.error(`[GCRTokenRoutines] Invalid bigint value for ${label}: ${JSON.stringify(value)}`)
+        throw new Error(`Invalid bigint value for ${label}`)
+    }
+
+    private static materializeHookFinalState(
+        tokenData: GCRTokenData,
+        result: HookExecutionResult,
+    ): GCRTokenData {
+        const applied = applyMutations(tokenData, result.mutations).newState
+        return {
+            ...applied,
+            storage: result.finalState.storage,
+        }
+    }
+
     /**
      * Get or create the HookExecutor instance
      */
@@ -136,15 +190,18 @@ export default class GCRTokenRoutines {
             ticker: token.ticker,
             decimals: token.decimals,
             owner: token.owner,
-            totalSupply: BigInt(token.totalSupply),
+            totalSupply: this.parseTokenBigInt(token.totalSupply, "token.totalSupply"),
             balances: Object.fromEntries(
-                Object.entries(token.balances).map(([k, v]) => [k, BigInt(v)]),
+                Object.entries(token.balances).map(([k, v]) => [k, this.parseTokenBigInt(v, `token.balances.${k}`)]),
             ),
             allowances: Object.fromEntries(
                 Object.entries(token.allowances).map(([owner, spenders]) => [
                     owner,
                     Object.fromEntries(
-                        Object.entries(spenders).map(([spender, v]) => [spender, BigInt(v)]),
+                        Object.entries(spenders).map(([spender, v]) => [
+                            spender,
+                            this.parseTokenBigInt(v, `token.allowances.${owner}.${spender}`),
+                        ]),
                     ),
                 ]),
             ),
@@ -486,10 +543,10 @@ export default class GCRTokenRoutines {
             if (!token) return { success: false, message: "Token not found: " + tokenAddress }
             if (token.paused && !edit.isRollback) return { success: false, message: "Token is paused" }
 
-            const fromBalance = BigInt(token.balances[actualFrom] ?? "0")
+            const fromBalance = this.parseTokenBigInt(token.balances[actualFrom] ?? "0", `token.balances.${actualFrom}`)
             if (fromBalance < transferAmount) return { success: false, message: "Insufficient balance" }
 
-            const prevToBalance = BigInt(token.balances[actualTo] ?? "0")
+            const prevToBalance = this.parseTokenBigInt(token.balances[actualTo] ?? "0", `token.balances.${actualTo}`)
 
             if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                 try {
@@ -517,7 +574,10 @@ export default class GCRTokenRoutines {
                         }
                     }
 
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } catch (error) {
                     return { success: false, message: `Script execution failed: ${error}` }
                 }
@@ -548,15 +608,17 @@ export default class GCRTokenRoutines {
                 if (!token) throw new Error("Token not found: " + tokenAddress)
                 if (token.paused && !edit.isRollback) throw new Error("Token is paused")
 
-                const fromBefore = BigInt(token.balances[actualFrom] ?? "0")
-                const toBefore = BigInt(token.balances[actualTo] ?? "0")
+                const fromBefore = this.parseTokenBigInt(token.balances[actualFrom] ?? "0", `token.balances.${actualFrom}`)
+                const toBefore = this.parseTokenBigInt(token.balances[actualTo] ?? "0", `token.balances.${actualTo}`)
                 if (fromBefore < transferAmount) throw new Error("Insufficient balance")
 
                 const tokenMeta: TokenHolderReference = { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals }
                 const beforeByAddr: Record<string, bigint> = {}
                 const recordBefore = (mutations: TokenMutation[]) => {
                     const affected = this.collectAddressesFromMutations(mutations)
-                    for (const addr of affected) beforeByAddr[addr] = BigInt(token.balances[addr] ?? "0")
+                    for (const addr of affected) {
+                        beforeByAddr[addr] = this.parseTokenBigInt(token.balances[addr] ?? "0", `token.balances.${addr}`)
+                    }
                 }
 
                 if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
@@ -584,7 +646,10 @@ export default class GCRTokenRoutines {
                     }
 
                     recordBefore(result.mutations)
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } else {
                     const nativeMutations = isSelfTransfer
                         ? []
@@ -604,7 +669,7 @@ export default class GCRTokenRoutines {
                 const adds: string[] = []
                 const removes: string[] = []
                 for (const [addr, before] of Object.entries(beforeByAddr)) {
-                    const after = BigInt(token.balances[addr] ?? "0")
+                    const after = this.parseTokenBigInt(token.balances[addr] ?? "0", `token.balances.${addr}`)
                     if (before === 0n && after > 0n) adds.push(addr)
                     if (before > 0n && after === 0n) removes.push(addr)
                 }
@@ -697,7 +762,10 @@ export default class GCRTokenRoutines {
                             message: `Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
                         }
                     }
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } catch (error) {
                     return { success: false, message: `Script execution failed: ${error}` }
                 }
@@ -759,7 +827,10 @@ export default class GCRTokenRoutines {
                         throw new Error(`Mint rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
                     }
                     recordBefore(result.mutations)
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } else {
                     recordBefore(createMintMutations(to, mintAmount))
                     token.balances[to] = (prevBalance + mintAmount).toString()
@@ -819,10 +890,12 @@ export default class GCRTokenRoutines {
                 }
             }
 
-            const prevBalance = BigInt(token.balances[from] ?? "0")
+            const prevBalance = this.parseTokenBigInt(token.balances[from] ?? "0", `token.balances.${from}`)
             if (edit.isRollback) {
                 token.balances[from] = (prevBalance + burnAmount).toString()
-                token.totalSupply = (BigInt(token.totalSupply) + burnAmount).toString()
+                token.totalSupply = (
+                    this.parseTokenBigInt(token.totalSupply, "token.totalSupply") + burnAmount
+                ).toString()
             } else if (token.hasScript && token.script?.code && tx) {
                 if (prevBalance < burnAmount) return { success: false, message: "Insufficient balance to burn" }
                 try {
@@ -845,14 +918,19 @@ export default class GCRTokenRoutines {
                             message: `Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`,
                         }
                     }
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } catch (error) {
                     return { success: false, message: `Script execution failed: ${error}` }
                 }
             } else {
                 if (prevBalance < burnAmount) return { success: false, message: "Insufficient balance to burn" }
                 token.balances[from] = (prevBalance - burnAmount).toString()
-                token.totalSupply = (BigInt(token.totalSupply) - burnAmount).toString()
+                token.totalSupply = (
+                    this.parseTokenBigInt(token.totalSupply, "token.totalSupply") - burnAmount
+                ).toString()
                 if (token.balances[from] === "0") delete token.balances[from]
             }
 
@@ -875,14 +953,16 @@ export default class GCRTokenRoutines {
                     }
                 }
 
-                const prevBalance = BigInt(token.balances[from] ?? "0")
-                const supplyBefore = BigInt(token.totalSupply ?? "0")
+                const prevBalance = this.parseTokenBigInt(token.balances[from] ?? "0", `token.balances.${from}`)
+                const supplyBefore = this.parseTokenBigInt(token.totalSupply ?? "0", "token.totalSupply")
 
                 const tokenMeta: TokenHolderReference = { tokenAddress, ticker: token.ticker, name: token.name, decimals: token.decimals }
                 const beforeByAddr: Record<string, bigint> = {}
                 const recordBefore = (mutations: TokenMutation[]) => {
                     const affected = this.collectAddressesFromMutations(mutations)
-                    for (const addr of affected) beforeByAddr[addr] = BigInt(token.balances[addr] ?? "0")
+                    for (const addr of affected) {
+                        beforeByAddr[addr] = this.parseTokenBigInt(token.balances[addr] ?? "0", `token.balances.${addr}`)
+                    }
                 }
 
                 if (edit.isRollback) {
@@ -910,7 +990,10 @@ export default class GCRTokenRoutines {
                         throw new Error(`Burn rejected by ${result.rejection.hookType}: ${result.rejection.reason}`)
                     }
                     recordBefore(result.mutations)
-                    this.applyGCRTokenDataToEntity(token, result.finalState)
+                    this.applyGCRTokenDataToEntity(
+                        token,
+                        this.materializeHookFinalState(tokenData, result),
+                    )
                 } else {
                     recordBefore(createBurnMutations(from, burnAmount))
                     if (prevBalance < burnAmount) throw new Error("Insufficient balance to burn")
@@ -924,7 +1007,7 @@ export default class GCRTokenRoutines {
                 const adds: string[] = []
                 const removes: string[] = []
                 for (const [addr, before] of Object.entries(beforeByAddr)) {
-                    const after = BigInt(token.balances[addr] ?? "0")
+                    const after = this.parseTokenBigInt(token.balances[addr] ?? "0", `token.balances.${addr}`)
                     if (before === 0n && after > 0n) adds.push(addr)
                     if (before > 0n && after === 0n) removes.push(addr)
                 }

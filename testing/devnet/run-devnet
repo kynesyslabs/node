@@ -133,6 +133,7 @@ export IDENTITY_FILE=${IDENTITY_FILE}
 export EXPOSED_URL=${EXPOSED_URL}
 export PEER_LIST_FILE=${PEER_LIST_FILE}
 export RESTORE=${RESTORE}
+export SERVER_PORT=${PORT}
 
 # Ensure logs folder exists
 mkdir -p logs
@@ -150,10 +151,10 @@ echo ""
 FINAL_COMMAND="${START_COMMAND} -- --no-tui"
 
 # Start the node
-log_verbose "Starting node with: RPC_PORT=${PORT}"
+log_verbose "Starting node with: SERVER_PORT=${PORT}"
 log_verbose "Command: ${FINAL_COMMAND}"
 
-if ! RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
+if ! SERVER_PORT=${PORT} RPC_PORT=${PORT} IDENTITY_FILE=${IDENTITY_FILE} ${FINAL_COMMAND}; then
     if [[ "${HAS_BEEN_INTERRUPTED}" == "true" ]]; then
         echo ""
         echo "✅ Demos Network node stopped successfully"

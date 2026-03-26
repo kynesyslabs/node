@@ -1,5 +1,6 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
+import fs from "node:fs"
 import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
@@ -78,7 +79,11 @@ export async function serverRpcBun() {
 
     server.get("/genesis", async () => {
         const genesisBlock = await Chain.getGenesisBlock()
-        let genesisData = genesisBlock.content.extra?.genesisData || null
+        let genesisData = genesisBlock?.content?.extra?.genesisData || null
+
+        if (!genesisData && fs.existsSync("data/genesis.json")) {
+            genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+        }
 
         if (typeof genesisData === "string") {
             genesisData = JSON.parse(genesisData)

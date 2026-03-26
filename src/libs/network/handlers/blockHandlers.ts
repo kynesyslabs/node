@@ -1,3 +1,4 @@
+import fs from "node:fs"
 import Chain from "../../blockchain/chain"
 import Hashing from "../../crypto/hashing"
 import getPreviousHashFromBlockNumber from "../routines/nodecalls/getPreviousHashFromBlockNumber"
@@ -10,15 +11,28 @@ import getBlocks from "../routines/nodecalls/getBlocks"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
+function loadGenesisDataForRpc() {
+    const genesisBlock = Chain.getGenesisBlock()
+
+    return genesisBlock.then(block => {
+        let genesisData = block?.content?.extra?.genesisData || null
+
+        if (!genesisData && fs.existsSync("data/genesis.json")) {
+            genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+        }
+
+        if (typeof genesisData === "string") {
+            genesisData = JSON.parse(genesisData)
+        }
+
+        return genesisData
+    })
+}
+
 export const blockHandlers: Record<string, NodeCallHandler> = {
     getGenesisDataHash: async (_data, response) => {
         try {
-            const genesisBlock = await Chain.getGenesisBlock()
-            let genesisData = genesisBlock?.content?.extra?.genesisData || null
-
-            if (typeof genesisData === "string") {
-                genesisData = JSON.parse(genesisData)
-            }
+            const genesisData = await loadGenesisDataForRpc()
 
             if (!genesisData) {
                 throw new Error(
