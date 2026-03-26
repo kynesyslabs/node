@@ -194,6 +194,11 @@ function isThenable(value: any): value is Promise<any> {
     return !!value && (typeof value === "object" || typeof value === "function") && typeof value.then === "function"
 }
 
+function cloneHookValue<T>(value: T): T {
+    if (value === undefined || value === null) return value
+    return structuredClone(value)
+}
+
 async function awaitWithTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     if (!(timeoutMs > 0)) return await promise
     let timer: any
@@ -383,11 +388,11 @@ export const scriptExecutor: ScriptExecutor = {
             if (typeof hook !== "function") return null
             const ctx = {
                 operation: req.operation,
-                operationData: req.operationData,
+                operationData: cloneHookValue(req.operationData),
                 tokenAddress: req.tokenAddress,
-                token: tokenData,
-                txContext: req.txContext,
-                mutations,
+                token: cloneHookValue(tokenData),
+                txContext: cloneHookValue(req.txContext),
+                mutations: cloneHookValue(mutations),
             }
             const out = runExportedFunctionInVm({
                 compiled,
