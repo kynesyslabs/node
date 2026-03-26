@@ -200,7 +200,7 @@ export default class GCRTokenRoutines {
         const sharedState = getSharedState
         const fromShared = sharedState.lastBlockNumber
         if (typeof fromShared === "number" && Number.isFinite(fromShared) && fromShared >= 0) return fromShared
-        return 0
+        throw new Error("Unable to resolve deterministic block height from transaction or shared state")
     }
 
     private static buildHookTxContext(tx: Transaction) {
