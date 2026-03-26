@@ -176,8 +176,6 @@ type CompiledTokenScript = {
     context: any
 }
 
-const compiledCache = new Map<string, CompiledTokenScript>()
-
 let vmCallSeq = 0
 
 function envInt(name: string, fallback: number): number {
@@ -192,8 +190,6 @@ const TOKEN_SCRIPT_VIEW_TIMEOUT_MS = envInt("TOKEN_SCRIPT_VIEW_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_HOOK_TIMEOUT_MS = envInt("TOKEN_SCRIPT_HOOK_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_METHOD_TIMEOUT_MS = envInt("TOKEN_SCRIPT_METHOD_TIMEOUT_MS", 50)
 const TOKEN_SCRIPT_ASYNC_TIMEOUT_MS = envInt("TOKEN_SCRIPT_ASYNC_TIMEOUT_MS", 2000)
-const TOKEN_SCRIPT_COMPILED_CACHE_MAX = envInt("TOKEN_SCRIPT_COMPILED_CACHE_MAX", 256)
-
 function isThenable(value: any): value is Promise<any> {
     return !!value && (typeof value === "object" || typeof value === "function") && typeof value.then === "function"
 }
@@ -240,9 +236,6 @@ function runExportedFunctionInVm(params: {
 }
 
 function compileScript(scriptCode: string): CompiledTokenScript {
-    const cached = compiledCache.get(scriptCode)
-    if (cached) return cached
-
     // Lazy import to keep this module tree simple for Bun bundling.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const vm = require("vm") as typeof import("vm")
@@ -284,14 +277,6 @@ function compileScript(scriptCode: string): CompiledTokenScript {
         context,
     }
 
-    if (TOKEN_SCRIPT_COMPILED_CACHE_MAX > 0) {
-        compiledCache.set(scriptCode, compiled)
-        while (compiledCache.size > TOKEN_SCRIPT_COMPILED_CACHE_MAX) {
-            const oldestKey = compiledCache.keys().next().value
-            if (!oldestKey) break
-            compiledCache.delete(oldestKey)
-        }
-    }
     return compiled
 }
 
