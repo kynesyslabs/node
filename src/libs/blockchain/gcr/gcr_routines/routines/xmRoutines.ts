@@ -8,8 +8,9 @@ import { safeGCRSave, isFirstConnection } from "./utils"
 
 export async function applyXmIdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
+    // gcrMainRepository: Repository<GCRMain>,
+    // simulate: boolean,
 ): Promise<GCRResult> {
     const {
         chain,
@@ -40,7 +41,7 @@ export async function applyXmIdentityAdd(
         ? addressToStore.toLowerCase()
         : addressToStore
 
-    const accountGCR = await ensureGCRForUser(editOperation.account)
+    // const accountGCR = await ensureGCRForUser(editOperation.account)
 
     accountGCR.identities.xm[chain] = accountGCR.identities.xm[chain] || {}
     accountGCR.identities.xm[chain][subchain] =
@@ -66,13 +67,7 @@ export async function applyXmIdentityAdd(
     }
 
     accountGCR.identities.xm[chain][subchain].push(data)
-
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyXmIdentityAdd")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function awardPoints() {
         /**
          * Check if this is the first connection
          */
@@ -83,7 +78,6 @@ export async function applyXmIdentityAdd(
                 subchain,
                 address: normalizedAddress,
             },
-            gcrMainRepository,
             editOperation.account,
         )
 
@@ -100,13 +94,17 @@ export async function applyXmIdentityAdd(
         }
     }
 
-    return { success: true, message: "Identity applied" }
+    return {
+        success: true,
+        message: "Identity applied",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 export async function applyXmIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { chain, isEVM, subchain, targetAddress } = editOperation.data
 
@@ -117,14 +115,6 @@ export async function applyXmIdentityRemove(
     const normalizedAddress = isEVM
         ? targetAddress.toLowerCase()
         : targetAddress
-
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
-    }
 
     if (
         !accountGCR.identities ||
@@ -149,20 +139,15 @@ export async function applyXmIdentityRemove(
         return { success: false, message: "Identity not found" }
     }
 
-    accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[
-        chain
-    ][subchain].filter((id: SavedXmIdentity) =>
+    accountGCR.identities.xm[chain][subchain] = accountGCR.identities.xm[chain][
+        subchain
+    ].filter((id: SavedXmIdentity) =>
         isEVM
             ? id.address.toLowerCase() !== normalizedAddress
             : id.address !== normalizedAddress,
     )
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyXmIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function deductPoints() {
         /**
          * Deduct incentive points for wallet unlinking
          */
@@ -173,5 +158,10 @@ export async function applyXmIdentityRemove(
         )
     }
 
-    return { success: true, message: "Identity removed" }
+    return {
+        success: true,
+        message: "Identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

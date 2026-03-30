@@ -9,8 +9,7 @@ import { safeGCRSave, isFirstConnection } from "./utils"
 
 export async function applyUdIdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const payload = editOperation.data as UDIdentityAssignPayload["payload"]
 
@@ -63,7 +62,6 @@ export async function applyUdIdentityAdd(
         }
     }
 
-    const accountGCR = await ensureGCRForUser(editOperation.account)
     accountGCR.identities.ud = accountGCR.identities.ud || []
 
     // Check if domain already exists for this account
@@ -81,19 +79,13 @@ export async function applyUdIdentityAdd(
 
     accountGCR.identities.ud.push(payload)
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyUDIdentityAdd")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function awardPoints() {
         /**
          * Check if this is the first connection for this domain
          */
         const isFirst = await isFirstConnection(
             "ud",
             { domain: payload.domain },
-            gcrMainRepository,
             editOperation.account,
         )
 
@@ -110,26 +102,22 @@ export async function applyUdIdentityAdd(
         }
     }
 
-    return { success: true, message: "UD identity added" }
+    return {
+        success: true,
+        message: "UD identity added",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 export async function applyUdIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { domain } = editOperation.data
 
     if (!domain) {
         return { success: false, message: "Invalid edit operation data" }
-    }
-
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
     }
 
     if (!accountGCR.identities || !accountGCR.identities.ud) {
@@ -153,17 +141,14 @@ export async function applyUdIdentityRemove(
             id.domain.toLowerCase() !== domain.toLowerCase(),
     )
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyUDIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
-        /**
-         * Deduct incentive points for UD domain unlinking
-         */
+    async function deductPoints() {
         await IncentiveManager.udDomainUnlinked(accountGCR.pubkey, domain)
     }
 
-    return { success: true, message: "UD identity removed" }
+    return {
+        success: true,
+        message: "UD identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

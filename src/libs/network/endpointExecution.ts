@@ -44,7 +44,7 @@ export async function handleExecuteTransaction(
 ): Promise<ExecutionResult> {
     log.debug(
         "[handleExecuteTransaction] Validated Data: " +
-        JSON.stringify(validatedData),
+            JSON.stringify(validatedData),
     )
 
     const fname = "[handleExecuteTransaction] "
@@ -55,9 +55,8 @@ export async function handleExecuteTransaction(
         require_reply: false,
     }
 
-    const ourKey = (
-        await ucrypto.getIdentity(getSharedState.signingAlgorithm)
-    ).publicKey
+    const ourKey = (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
+        .publicKey
 
     log.debug("Our key: " + ourKey)
     const hexOurKey = uint8ArrayToHex(ourKey as Uint8Array)
@@ -65,18 +64,18 @@ export async function handleExecuteTransaction(
     if (!queriedTx.blockNumber) {
         log.warning(
             "[handleExecuteTransaction] Queried tx has no block number: " +
-            queriedTx.hash,
+                queriedTx.hash,
         )
         const lastBlockNumber = await Chain.getLastBlockNumber()
         queriedTx.blockNumber = lastBlockNumber + 1
         log.warning(
             "[handleExecuteTransaction] Queried tx block number set to: " +
-            queriedTx.blockNumber,
+                queriedTx.blockNumber,
         )
     }
     log.debug(
         "[handleExecuteTransaction] Queried tx processing in block: " +
-        queriedTx.blockNumber,
+            queriedTx.blockNumber,
     )
 
     if (validatedData.rpc_public_key.data !== hexOurKey) {
@@ -94,18 +93,16 @@ export async function handleExecuteTransaction(
     const signatureValid = await ucrypto.verify({
         algorithm: validatedData.signature.type as SigningAlgorithm,
         message: new TextEncoder().encode(hashedData),
-        publicKey: hexToUint8Array(
-            validatedData.rpc_public_key.data,
-        ) as any,
+        publicKey: hexToUint8Array(validatedData.rpc_public_key.data) as any,
         signature: hexToUint8Array(validatedData.signature.data) as any,
     })
 
     if (!signatureValid) {
         log.error(
             "[handleExecuteTransaction] Invalid validityData signature: " +
-            validatedData.signature.data +
-            " - " +
-            validatedData.rpc_public_key.data,
+                validatedData.signature.data +
+                " - " +
+                validatedData.rpc_public_key.data,
         )
         result.success = false
         result.response = false
@@ -119,9 +116,9 @@ export async function handleExecuteTransaction(
     if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
         log.error(
             "[handleExecuteTransaction] Invalid validityData block reference: " +
-            blockNumber +
-            " - " +
-            lastBlockNumber,
+                blockNumber +
+                " - " +
+                lastBlockNumber,
         )
         result.success = false
         result.response = false
@@ -132,7 +129,7 @@ export async function handleExecuteTransaction(
     if (!validatedData.data.valid) {
         log.error(
             "[handleExecuteTransaction] Invalid validityData: " +
-            validatedData.data.message,
+                validatedData.data.message,
         )
         result.success = false
         result.response = false
@@ -145,53 +142,68 @@ export async function handleExecuteTransaction(
     let payload: DemoScript | any
 
     switch (tx.content.type) {
-        case "crosschainOperation":
+        case "crosschainOperation": {
             payload = tx.content.data
             log.debug(
                 "[handleExecuteTransaction] Included XM Chainscript: " +
-                JSON.stringify(payload[1]),
+                    JSON.stringify(payload[1]),
             )
-            const xmResult = await multichainDispatcher.digest(payload[1] as XMScript)
+            const xmResult = await multichainDispatcher.digest(
+                payload[1] as XMScript,
+            )
             result.success = xmResult.success
             result.response = {
                 message: xmResult.message,
                 results: xmResult.results,
             }
             break
+        }
 
-        case "subnet":
+        case "subnet": {
             payload = tx.content.data
             log.debug(
                 "[handleExecuteTransaction] Subnet payload: " +
-                JSON.stringify(payload[1]),
+                    JSON.stringify(payload[1]),
             )
             const subnetResult = await handleL2PS(tx as L2PSTransaction)
             result.response = subnetResult
             break
+        }
 
         case "l2psEncryptedTx": {
             log.debug("[handleExecuteTransaction] Processing L2PS Encrypted Tx")
 
             if (!tx.signature?.data) {
-                log.error("[handleExecuteTransaction] L2PS tx rejected: missing signature")
+                log.error(
+                    "[handleExecuteTransaction] L2PS tx rejected: missing signature",
+                )
                 result.success = false
-                result.response = { error: "L2PS transaction requires valid signature" }
+                result.response = {
+                    error: "L2PS transaction requires valid signature",
+                }
                 break
             }
 
             const l2psPayload = tx.content?.data?.[1]
             if (!l2psPayload || typeof l2psPayload !== "object") {
-                log.error("[handleExecuteTransaction] L2PS tx rejected: invalid payload structure")
+                log.error(
+                    "[handleExecuteTransaction] L2PS tx rejected: invalid payload structure",
+                )
                 result.success = false
                 result.response = { error: "Invalid L2PS payload structure" }
                 break
             }
 
-            const senderAddress = tx.content?.from || tx.content?.from_ed25519_address
+            const senderAddress =
+                tx.content?.from || tx.content?.from_ed25519_address
             if (!senderAddress) {
-                log.error("[handleExecuteTransaction] L2PS tx rejected: missing sender address")
+                log.error(
+                    "[handleExecuteTransaction] L2PS tx rejected: missing sender address",
+                )
                 result.success = false
-                result.response = { error: "L2PS transaction requires sender address" }
+                result.response = {
+                    error: "L2PS transaction requires sender address",
+                }
                 break
             }
 
@@ -214,7 +226,7 @@ export async function handleExecuteTransaction(
             break
         }
 
-        case "demoswork":
+        case "demoswork": {
             const demosWorkPayload = tx.content.data
             const demosWorkScript = demosWorkPayload[1] as DemoScript
             try {
@@ -222,14 +234,13 @@ export async function handleExecuteTransaction(
                     await handleDemosWorkRequest(demosWorkScript)
                 result.response = demosWorkResult
             } catch (e) {
-                log.error(
-                    "[handleExecuteTransaction] Error in demosWork: " + e,
-                )
+                log.error("[handleExecuteTransaction] Error in demosWork: " + e)
                 result.success = false
                 result.response = e
                 result.extra = "Error in demosWork"
             }
             break
+        }
 
         case "native":
             result.response = {
@@ -240,10 +251,7 @@ export async function handleExecuteTransaction(
 
         case "identity":
             try {
-                const identityResult = await handleIdentityRequest(
-                    tx,
-                    sender,
-                )
+                const identityResult = await handleIdentityRequest(tx, sender)
                 const status = identityResult.success
                     ? "applied"
                     : "not applied"
@@ -265,7 +273,7 @@ export async function handleExecuteTransaction(
             }
             break
 
-        case "nativeBridge":
+        case "nativeBridge": {
             payload = tx.content.data
             const nativeBridgeResult = await handleNativeBridgeTx(
                 payload[1] as NativeBridgeOperationCompiled,
@@ -279,6 +287,7 @@ export async function handleExecuteTransaction(
             }
             result.response = nativeBridgeResult
             break
+        }
 
         case "l2ps_hash_update": {
             const { handleL2PSHashUpdate } = await import("./endpointL2PSHash")
@@ -291,19 +300,20 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const simulate = true
-        const editsResults = await HandleGCR.applyToTx(
+        const affectedAccounts = await HandleGCR.prepareAccounts([queriedTx])
+        const simulateResult = await HandleGCR.simulateOne(
+            affectedAccounts,
             queriedTx,
             false,
-            simulate,
+            true,
         )
 
-        if (!editsResults.success) {
+        if (!simulateResult.success) {
             log.error("[handleExecuteTransaction] Failed to apply GCREdit")
             result.success = false
             result.response = false
             result.extra = {
-                error: "Failed to apply GCREdit: " + editsResults.message,
+                error: "Failed to apply GCREdit: " + simulateResult.message,
             }
             return result
         }
@@ -325,9 +335,7 @@ export async function handleExecuteTransaction(
 
             const results = await Promise.allSettled(
                 availableValidators.map(validator =>
-                    DTRManager.relayTransactions(validator, [
-                        validatedData,
-                    ]),
+                    DTRManager.relayTransactions(validator, [validatedData]),
                 ),
             )
 
@@ -361,25 +369,21 @@ export async function handleExecuteTransaction(
         }
 
         log.debug(
-            "👀 not in consensus loop, adding tx to mempool: " +
-            queriedTx.hash,
+            "👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash,
         )
 
         log.debug(
             "[handleExecuteTransaction] Adding tx with hash: " +
-            queriedTx.hash +
-            " to the mempool",
+                queriedTx.hash +
+                " to the mempool",
         )
         try {
-            const { confirmationBlock, error } =
-                await Mempool.addTransaction({
-                    ...queriedTx,
-                    reference_block: validatedData.data.reference_block,
-                })
+            const { confirmationBlock, error } = await Mempool.addTransaction({
+                ...queriedTx,
+                reference_block: validatedData.data.reference_block,
+            })
 
-            log.debug(
-                "[handleExecuteTransaction] Transaction added to mempool",
-            )
+            log.debug("[handleExecuteTransaction] Transaction added to mempool")
 
             if (error) {
                 result.success = false
@@ -402,7 +406,7 @@ export async function handleExecuteTransaction(
 
             log.error(
                 "[handleExecuteTransaction] Failed to add transaction to mempool: " +
-                e,
+                    e,
             )
         }
     }

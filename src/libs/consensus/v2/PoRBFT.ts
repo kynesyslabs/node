@@ -26,6 +26,11 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
+import { In } from "typeorm"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
+import Datasource, { dataSource } from "src/model/datasource"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /* INFO
 # Semaphore system
@@ -122,7 +127,7 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        const [localSuccessfulTxs, localFailedTxs] =
+        const { successfulTxs: localSuccessfulTxs, failedTxs: localFailedTxs } =
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
@@ -345,7 +350,13 @@ async function mergeAndOrderMempools(
 ): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockRef)
     log.only(`[CONSENSUS] Our mempool: ${ourMempool.length} txs`)
-    log.only(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool.map(tx => tx.hash), null, 2)}`)
+    log.only(
+        `[CONSENSUS] Our mempool: ${JSON.stringify(
+            ourMempool.map(tx => tx.hash),
+            null,
+            2,
+        )}`,
+    )
     log.info("[CONSENSUS] Our mempool has been retrieved")
 
     await mergeMempools(ourMempool, shard)
@@ -356,14 +367,22 @@ async function mergeAndOrderMempools(
     const existingHashes = await Chain.getExistingTransactionHashes(hashes)
 
     log.only(`[CONSENSUS] Existing hashes: ${existingHashes.size} hashes`)
-    log.only(`[CONSENSUS] Existing hashes: ${JSON.stringify(Array.from(existingHashes), null, 2)}`)
+    log.only(
+        `[CONSENSUS] Existing hashes: ${JSON.stringify(Array.from(existingHashes), null, 2)}`,
+    )
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
     const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
 
     log.only(`[CONSENSUS] Final mempool: ${finalMempool.length} txs`)
-    log.only(`[CONSENSUS] Final mempool: ${JSON.stringify(finalMempool.map(tx => tx.hash), null, 2)}`)
+    log.only(
+        `[CONSENSUS] Final mempool: ${JSON.stringify(
+            finalMempool.map(tx => tx.hash),
+            null,
+            2,
+        )}`,
+    )
 
     return finalMempool
 }
@@ -374,90 +393,138 @@ async function mergeAndOrderMempools(
  * @param txs - The txs
  * @returns The successful and failed GCREdits
  */
-async function rollbackGCREditsFromTxs(
-    txs: Transaction[],
-): Promise<[string[], string[]]> {
-    const successfulTxs: string[] = []
-    const failedTxs: string[] = []
-    // 1. Parse the txs to get the GCREdits
-    for (const tx of txs) {
-        // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
-        const result = await HandleGCR.applyToTx(tx, true)
-        if (result.success) {
-            successfulTxs.push(tx.hash)
-        } else {
-            failedTxs.push(tx.hash)
-        }
-    }
-    return [successfulTxs, failedTxs]
+async function rollbackGCREditsFromTxs(txs: Transaction[]) {
+    // const successfulTxs: string[] = []
+    // const failedTxs: string[] = []
+    // // 1. Parse the txs to get the GCREdits
+    // for (const tx of txs) {
+    //     // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
+    //     const result = await HandleGCR.applyToTx(tx, true)
+    //     if (result.success) {
+    //         successfulTxs.push(tx.hash)
+    //     } else {
+    //         failedTxs.push(tx.hash)
+    //     }
+    // }
+
+    // return [successfulTxs, failedTxs]
+    return await HandleGCR.applyMany(txs, true)
 }
 
 /**
- * Apply the GCREdits from the merged mempool
+ * Type for GCREdit that has an account property (balance, nonce types)
+ */
+type GCREditWithAccount = GCREdit & {
+    account: string | Uint8Array
+}
+
+/**
+ * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
+ * Returns true for balance and nonce types which have the 'account' property
+ */
+function isBatchableGCREdit(edit: GCREdit): edit is GCREditWithAccount {
+    // @ts-expect-error - edit.account is not available in GCREditStorageProgram type
+    return edit.account !== undefined && edit.account !== null
+}
+
+/**
+ * Helper to normalize pubkey from different formats
+ */
+function normalizePubkey(account: string | Uint8Array): string {
+    return typeof account === "string" ? account : forgeToHex(account)
+}
+
+/**
+ * Interface for tracking entity snapshots for rollback
+ */
+interface GCRMainSnapshot {
+    pubkey: string
+    entity: GCRMain | null // null means entity was newly created
+}
+
+/**
+ * Bulk update assignedTxs using raw SQL for efficiency
+ */
+async function bulkUpdateAssignedTxs(
+    updates: Map<string, string[]>,
+): Promise<void> {
+    if (updates.size === 0) return
+
+    const db = await Datasource.getInstance()
+    const queryRunner = db.getDataSource().createQueryRunner()
+
+    try {
+        // Build VALUES clause with proper escaping
+        // assignedTxs is jsonb, so we use jsonb arrays and || operator for concatenation
+        const valueEntries: string[] = []
+        for (const [pubkey, txHashes] of updates.entries()) {
+            const escapedPubkey = pubkey.replace(/'/g, "''")
+            // Create a JSON array string for jsonb
+            const jsonArray = JSON.stringify(txHashes).replace(/'/g, "''")
+            valueEntries.push(
+                `('${escapedPubkey}'::text, '${jsonArray}'::jsonb)`,
+            )
+        }
+
+        const sql = `
+            UPDATE gcr_main AS g
+            SET "assignedTxs" = COALESCE(g."assignedTxs", '[]'::jsonb) || v.new_txs,
+                "updatedAt" = NOW()
+            FROM (VALUES ${valueEntries.join(",\n")}) AS v(pubkey, new_txs)
+            WHERE g.pubkey = v.pubkey
+        `
+
+        await queryRunner.query(sql)
+    } finally {
+        await queryRunner.release()
+    }
+}
+
+/**
+ * Apply the GCREdits from the merged mempool using batched entity processing.
+ *
+ * This optimized version:
+ * 1. Pre-filters already-executed txs in a single batch query
+ * 2. Batch loads all affected GCRMain entities
+ * 3. Processes edits in-memory without per-edit DB operations
+ * 4. Commits all changes in a single batch at the end
  *
  * @param mempool - The mempool
  * @returns The successful and failed GCREdits
  */
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
-): Promise<[string[], string[]]> {
-    log.only("Applyign GCR Edits for merged mempool")
-    const now = Date.now()
-    // TODO Implement this
-    const successfulTxs: string[] = []
+): Promise<{ successfulTxs: string[]; failedTxs: string[] }> {
     const failedTxs: string[] = []
 
-    const successSet = new Set<string>()
-    const failedSet = new Set<string>()
-
-    // 1. Parse the mempool txs to get the GCREdits
-    txloop: for (const tx of mempool) {
-        if (successSet.has(tx.hash) || failedSet.has(tx.hash)) {
-            log.error(`[applyGCREditsFromMergedMempool] Transaction ${tx.hash} already processed`)
-            process.exit(1)
-        }
-
-        const txExists = await Chain.checkTxExists(tx.hash)
-        if (txExists) {
-            failedTxs.push(tx.hash)
-            failedSet.add(tx.hash)
-            continue
-        }
-
-        const txGCREdits = tx.content.gcr_edits
-        // Skip transactions that don't have GCR edits (e.g., l2psBatch)
-        if (
-            !txGCREdits ||
-            !Array.isArray(txGCREdits) ||
-            txGCREdits.length === 0
-        ) {
-            // These transactions are valid but don't modify GCR state
-            successfulTxs.push(tx.hash)
-            successSet.add(tx.hash)
-            continue
-        }
-
-        // 2. Apply the GCREdits to the state for each tx
-        for (const gcrEdit of txGCREdits) {
-            const applyResult = await HandleGCR.apply(gcrEdit, tx)
-            if (!applyResult.success) {
-                // If the apply succeeds, add the tx to the successfulTxs array
-                failedTxs.push(tx.hash)
-                failedSet.add(tx.hash)
-                continue txloop
-            }
-        }
-
-        successfulTxs.push(tx.hash)
-        successSet.add(tx.hash)
-        continue
+    if (mempool.length === 0) {
+        return { successfulTxs: [], failedTxs: [] }
     }
 
-    const end = Date.now()
-    log.only(`[applyGCREditsFromMergedMempool] Time taken: ${Math.round((end - now) / 1000)} seconds to apply GCR edits for ${mempool.length} txs`)
+    // Filter already-executed txs in single batch query
+    const allTxHashes = mempool.map(tx => tx.hash)
+    const existingTxHashes =
+        await Chain.getExistingTransactionHashes(allTxHashes)
 
-    // 4. Return the successful and failed GCREdits // NOTE They will be used to prune the mempool
-    return [successfulTxs, failedTxs]
+    const pendingTxs = mempool.filter(tx => {
+        if (existingTxHashes.has(tx.hash)) {
+            failedTxs.push(tx.hash)
+            return false
+        }
+        return true
+    })
+
+    log.only(
+        `[applyGCREditsFromMergedMempool] Filtered ${mempool.length - pendingTxs.length} already-executed txs`,
+    )
+
+    if (pendingTxs.length === 0) {
+        return { successfulTxs: [], failedTxs: [] }
+    }
+
+    const res = await HandleGCR.applyMany(pendingTxs, false)
+    failedTxs.push(...res.failedTxs)
+    return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
 }
 
 // /**

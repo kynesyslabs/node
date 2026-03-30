@@ -18,7 +18,6 @@ import log from "@/utilities/logger"
  */
 export async function applyZkCommitmentAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
     simulate: boolean,
 ): Promise<GCRResult> {
     const payload = Array.isArray(editOperation.data)
@@ -126,7 +125,6 @@ export async function applyZkCommitmentAdd(
  */
 export async function applyZkAttestationAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
     simulate: boolean,
 ): Promise<GCRResult> {
     const payload = Array.isArray(editOperation.data)
