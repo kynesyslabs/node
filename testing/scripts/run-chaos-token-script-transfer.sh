@@ -85,14 +85,14 @@ fi
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 
-default_targets="http://node-1:53551,http://node-2:53552,http://node-3:53553,http://node-4:53554"
+default_targets="http://node-1:53551,http://node-2:53553,http://node-3:53555,http://node-4:53557"
 full_targets="${TARGETS:-$default_targets}"
 node_url=""
 case "$NODE_SERVICE" in
   node-1) node_url="http://node-1:53551" ;;
-  node-2) node_url="http://node-2:53552" ;;
-  node-3) node_url="http://node-3:53553" ;;
-  node-4) node_url="http://node-4:53554" ;;
+  node-2) node_url="http://node-2:53553" ;;
+  node-3) node_url="http://node-3:53555" ;;
+  node-4) node_url="http://node-4:53557" ;;
   *) node_url="" ;;
 esac
 

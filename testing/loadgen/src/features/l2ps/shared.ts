@@ -26,9 +26,9 @@ export type L2psLiveCommandResult = {
 
 const defaultLiveTargets = [
   "http://localhost:53551",
-  "http://localhost:53552",
   "http://localhost:53553",
-  "http://localhost:53554",
+  "http://localhost:53555",
+  "http://localhost:53557",
 ]
 
 const defaultDatabases = ["node1_db", "node2_db", "node3_db", "node4_db"]

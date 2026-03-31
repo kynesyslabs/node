@@ -11,7 +11,7 @@ export function normalizeOmniTarget(value: string): string {
 
 export function httpRpcToOmni(rpcUrl: string): string {
   const parsed = new URL(rpcUrl)
-  const offset = envInt("OMNI_PORT_OFFSET", 10)
+  const offset = envInt("OMNI_PORT_OFFSET", 1)
   const port = Number(parsed.port || (parsed.protocol === "https:" ? "443" : "80"))
   if (!Number.isFinite(port)) throw new Error(`Cannot derive Omni port from ${rpcUrl}`)
   return `tcp://${parsed.hostname}:${port + offset}`

@@ -310,6 +310,7 @@ export async function handleExecuteTransaction(
 
         if (!simulateResult.success) {
             log.error("[handleExecuteTransaction] Failed to apply GCREdit")
+            log.error(simulateResult.message)
             result.success = false
             result.response = false
             result.extra = {
