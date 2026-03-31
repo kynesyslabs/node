@@ -69,7 +69,6 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.only("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const blockRef = getSharedState.lastBlockNumber + 1
     const manager = SecretaryManager.getInstance(blockRef, true)
 
@@ -87,9 +86,9 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.only(`Forgin block: ${manager.shard.blockRef}`)
-        log.only("[consensusRoutine] We are in the shard, creating the block")
-        log.only(
+        log.debug(`Forgin block: ${manager.shard.blockRef}`)
+        log.debug("[consensusRoutine] We are in the shard, creating the block")
+        log.debug(
             `[consensusRoutine] shard: ${JSON.stringify(
                 manager.shard.members.map(m => m.connection.string),
                 null,
@@ -131,8 +130,8 @@ export async function consensusRoutine(): Promise<void> {
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
-        log.only(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
-        log.only(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
+        log.debug(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
+        log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
         if (failedTxs.length > 0) {
             log.debug(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -197,7 +196,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
-            log.only(
+            log.debug(
                 "[consensusRoutine] [result] Block is valid with " +
                     pro +
                     " votes",
@@ -254,7 +253,6 @@ export async function consensusRoutine(): Promise<void> {
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)
-
             return
         }
 
@@ -269,8 +267,7 @@ export async function consensusRoutine(): Promise<void> {
         cleanupConsensusState()
         manager.endConsensusRoutine()
 
-        log.only("[consensusRoutine] Consensus routine ended")
-        log.only("🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴")
+        log.debug("[consensusRoutine] Consensus routine ended")
     }
 }
 
@@ -349,16 +346,6 @@ async function mergeAndOrderMempools(
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockRef)
-    log.only(`[CONSENSUS] Our mempool: ${ourMempool.length} txs`)
-    log.only(
-        `[CONSENSUS] Our mempool: ${JSON.stringify(
-            ourMempool.map(tx => tx.hash),
-            null,
-            2,
-        )}`,
-    )
-    log.info("[CONSENSUS] Our mempool has been retrieved")
-
     await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3, blockRef)
 
@@ -366,25 +353,9 @@ async function mergeAndOrderMempools(
     const hashes = mempool.map(tx => tx.hash)
     const existingHashes = await Chain.getExistingTransactionHashes(hashes)
 
-    log.only(`[CONSENSUS] Existing hashes: ${existingHashes.size} hashes`)
-    log.only(
-        `[CONSENSUS] Existing hashes: ${JSON.stringify(Array.from(existingHashes), null, 2)}`,
-    )
-
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
-
-    log.only(`[CONSENSUS] Final mempool: ${finalMempool.length} txs`)
-    log.only(
-        `[CONSENSUS] Final mempool: ${JSON.stringify(
-            finalMempool.map(tx => tx.hash),
-            null,
-            2,
-        )}`,
-    )
-
-    return finalMempool
+    return mempool.filter(tx => !existingHashes.has(tx.hash))
 }
 
 /**
@@ -394,90 +365,7 @@ async function mergeAndOrderMempools(
  * @returns The successful and failed GCREdits
  */
 async function rollbackGCREditsFromTxs(txs: Transaction[]) {
-    // const successfulTxs: string[] = []
-    // const failedTxs: string[] = []
-    // // 1. Parse the txs to get the GCREdits
-    // for (const tx of txs) {
-    //     // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
-    //     const result = await HandleGCR.applyToTx(tx, true)
-    //     if (result.success) {
-    //         successfulTxs.push(tx.hash)
-    //     } else {
-    //         failedTxs.push(tx.hash)
-    //     }
-    // }
-
-    // return [successfulTxs, failedTxs]
-    return await HandleGCR.applyMany(txs, true)
-}
-
-/**
- * Type for GCREdit that has an account property (balance, nonce types)
- */
-type GCREditWithAccount = GCREdit & {
-    account: string | Uint8Array
-}
-
-/**
- * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
- * Returns true for balance and nonce types which have the 'account' property
- */
-function isBatchableGCREdit(edit: GCREdit): edit is GCREditWithAccount {
-    // @ts-expect-error - edit.account is not available in GCREditStorageProgram type
-    return edit.account !== undefined && edit.account !== null
-}
-
-/**
- * Helper to normalize pubkey from different formats
- */
-function normalizePubkey(account: string | Uint8Array): string {
-    return typeof account === "string" ? account : forgeToHex(account)
-}
-
-/**
- * Interface for tracking entity snapshots for rollback
- */
-interface GCRMainSnapshot {
-    pubkey: string
-    entity: GCRMain | null // null means entity was newly created
-}
-
-/**
- * Bulk update assignedTxs using raw SQL for efficiency
- */
-async function bulkUpdateAssignedTxs(
-    updates: Map<string, string[]>,
-): Promise<void> {
-    if (updates.size === 0) return
-
-    const db = await Datasource.getInstance()
-    const queryRunner = db.getDataSource().createQueryRunner()
-
-    try {
-        // Build VALUES clause with proper escaping
-        // assignedTxs is jsonb, so we use jsonb arrays and || operator for concatenation
-        const valueEntries: string[] = []
-        for (const [pubkey, txHashes] of updates.entries()) {
-            const escapedPubkey = pubkey.replace(/'/g, "''")
-            // Create a JSON array string for jsonb
-            const jsonArray = JSON.stringify(txHashes).replace(/'/g, "''")
-            valueEntries.push(
-                `('${escapedPubkey}'::text, '${jsonArray}'::jsonb)`,
-            )
-        }
-
-        const sql = `
-            UPDATE gcr_main AS g
-            SET "assignedTxs" = COALESCE(g."assignedTxs", '[]'::jsonb) || v.new_txs,
-                "updatedAt" = NOW()
-            FROM (VALUES ${valueEntries.join(",\n")}) AS v(pubkey, new_txs)
-            WHERE g.pubkey = v.pubkey
-        `
-
-        await queryRunner.query(sql)
-    } finally {
-        await queryRunner.release()
-    }
+    return await HandleGCR.applyTransactions(txs, true)
 }
 
 /**
@@ -514,15 +402,11 @@ async function applyGCREditsFromMergedMempool(
         return true
     })
 
-    log.only(
-        `[applyGCREditsFromMergedMempool] Filtered ${mempool.length - pendingTxs.length} already-executed txs`,
-    )
-
     if (pendingTxs.length === 0) {
         return { successfulTxs: [], failedTxs: [] }
     }
 
-    const res = await HandleGCR.applyMany(pendingTxs, false)
+    const res = await HandleGCR.applyTransactions(pendingTxs, false)
     failedTxs.push(...res.failedTxs)
     return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
 }
@@ -612,18 +496,14 @@ async function voteOnBlock(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    log.only(
+    log.debug(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
-
-    log.only(
-        `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
-    )
-    log.only(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    log.debug(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
 
     return [pro, con]
 }

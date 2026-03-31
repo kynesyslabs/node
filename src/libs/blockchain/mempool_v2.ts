@@ -144,7 +144,6 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
-        log.only(`[Mempool.receive] Incoming tx count: ${incoming.length}`)
         if (!getSharedState.inConsensusLoop) {
             return {
                 success: false,
@@ -183,10 +182,6 @@ export default class Mempool {
 
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
-        log.only(
-            `[Mempool.receive] Existing tx count: ${Object.keys(existingHashes).length}`,
-        )
-
         // REVIEW: Should we save each tx individually?
         // await this.repo.save(incoming)
         for (const tx of incoming) {

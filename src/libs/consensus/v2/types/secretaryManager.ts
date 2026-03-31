@@ -76,22 +76,22 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
-        log.only("\n\n\n")
-        log.only("INITIALIZED SHARD:")
-        log.only(
+        log.debug("\n\n\n")
+        log.debug("INITIALIZED SHARD:")
+        log.debug(
             `SHARD: ${JSON.stringify(
                 this.shard.members.map(m => m.connection.string),
             )}`,
         )
-        log.only(`SECRETARY: ${this.secretary.identity}`)
+        log.debug(`SECRETARY: ${this.secretary.identity}`)
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            log.only(
+            log.debug(
                 "⬜️ We are the secretary ⬜️. starting the secretary routine",
             )
             this.secretaryRoutine().finally(async () => {
-                log.only("Secretary routine finished confetti confetti 🎊🎉")
+                log.debug("Secretary routine finished confetti confetti 🎊🎉")
             })
         }
 

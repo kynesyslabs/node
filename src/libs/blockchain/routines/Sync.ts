@@ -723,7 +723,7 @@ async function requestBlocks(): Promise<boolean> {
 
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]) {
-    return await HandleGCR.applyMany(txs, false)
+    return await HandleGCR.applyTransactions(txs, false)
 }
 
 // Helper function to ask for the transactions in a block

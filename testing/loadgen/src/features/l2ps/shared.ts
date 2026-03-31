@@ -57,8 +57,8 @@ export function getL2psLiveOmniTargets(): string[] {
 }
 
 export async function waitForL2psLiveTargets(rpcTargets: string[]) {
-  const waitForRpcSec = envInt("WAIT_FOR_RPC_SEC", 120)
-  const waitForTxSec = envInt("WAIT_FOR_TX_SEC", 120)
+  const waitForRpcSec = envInt("WAIT_FOR_RPC_SEC", 3)
+  const waitForTxSec = envInt("WAIT_FOR_TX_SEC", 3)
   await Promise.all(rpcTargets.map((rpcUrl) => waitForRpcReady(rpcUrl, waitForRpcSec)))
   await Promise.all(rpcTargets.map((rpcUrl) => waitForTxReady(rpcUrl, waitForTxSec)))
 }
