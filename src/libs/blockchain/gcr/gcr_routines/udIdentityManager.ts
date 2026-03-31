@@ -345,7 +345,7 @@ export class UDIdentityManager {
             domain,
             UD_RECORD_KEYS,
         )
-        console.log("solanaResult: ", solanaResult)
+        log.debug("solanaResult: " + JSON.stringify(solanaResult))
 
         if (solanaResult.exists) {
             log.debug(
@@ -554,10 +554,7 @@ export class UDIdentityManager {
         try {
             if (authorizedAddress.signatureType === "evm") {
                 // EVM signature verification using ethers
-                const recoveredAddress = verifyMessage(
-                    signedData,
-                    signature,
-                )
+                const recoveredAddress = verifyMessage(signedData, signature)
 
                 if (
                     recoveredAddress.toLowerCase() !==

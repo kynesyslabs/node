@@ -3,7 +3,7 @@
  *
  * This module provides MCP tools specific to Demos Network operations,
  * including blockchain queries, network status, and node management.
- * 
+ *
  * @fileoverview MCP tools for interacting with Demos Network blockchain and infrastructure
  */
 
@@ -28,20 +28,20 @@ export interface DemosNetworkToolsConfig {
 
 /**
  * Creates a comprehensive set of MCP tools for Demos Network operations
- * 
+ *
  * Provides tools for:
  * - Blockchain queries (blocks, chain height, etc.)
  * - Network status monitoring
  * - Peer management and discovery
- * 
+ *
  * @param config - Configuration to enable/disable specific tool categories
  * @returns Array of configured MCP tools ready for registration
- * 
+ *
  * @example
  * ```typescript
  * // Create all available tools
  * const allTools = createDemosNetworkTools()
- * 
+ *
  * // Create only blockchain tools
  * const blockchainTools = createDemosNetworkTools({
  *   enableBlockchainTools: true,
@@ -78,7 +78,7 @@ export function createDemosNetworkTools(
 
 /**
  * Creates network status and node identity MCP tools
- * 
+ *
  * @returns Array of network-related MCP tools
  * @internal
  */
@@ -103,7 +103,9 @@ function createNetworkTools(): MCPTool[] {
                         rpcFee: sharedState.rpcFee,
                     }
                 } catch (error) {
-                    log.error(`[MCP] Error getting network status: ${String(error)}`)
+                    log.error(
+                        `[MCP] Error getting network status: ${String(error)}`,
+                    )
                     throw new Error("Failed to get network status")
                 }
             },
@@ -126,7 +128,9 @@ function createNetworkTools(): MCPTool[] {
                         signingAlgorithm: getSharedState.signingAlgorithm,
                     }
                 } catch (error) {
-                    log.error(`[MCP] Error getting node identity: ${String(error)}`)
+                    log.error(
+                        `[MCP] Error getting node identity: ${String(error)}`,
+                    )
                     throw new Error("Failed to get node identity")
                 }
             },
@@ -136,7 +140,7 @@ function createNetworkTools(): MCPTool[] {
 
 /**
  * Creates blockchain query and block information MCP tools
- * 
+ *
  * @returns Array of blockchain-related MCP tools
  * @internal
  */
@@ -157,7 +161,9 @@ function createBlockchainTools(): MCPTool[] {
                         content: lastBlock.content,
                     }
                 } catch (error) {
-                    log.error(`[MCP] Error getting last block: ${String(error)}`)
+                    log.error(
+                        `[MCP] Error getting last block: ${String(error)}`,
+                    )
                     throw new Error("Failed to get last block")
                 }
             },
@@ -206,7 +212,9 @@ function createBlockchainTools(): MCPTool[] {
                         lastBlockHash: lastBlock.hash,
                     }
                 } catch (error) {
-                    log.error(`[MCP] Error getting chain height: ${String(error)}`)
+                    log.error(
+                        `[MCP] Error getting chain height: ${String(error)}`,
+                    )
                     throw new Error("Failed to get chain height")
                 }
             },
@@ -216,7 +224,7 @@ function createBlockchainTools(): MCPTool[] {
 
 /**
  * Creates peer management and network discovery MCP tools
- * 
+ *
  * @returns Array of peer-related MCP tools
  * @internal
  */
@@ -258,12 +266,12 @@ function createPeerTools(): MCPTool[] {
                         peerCount: peers.length,
                     }
                 } catch (error) {
-                    log.error(`[MCP] Error getting peer count: ${String(error)}`)
+                    log.error(
+                        `[MCP] Error getting peer count: ${String(error)}`,
+                    )
                     throw new Error("Failed to get peer count")
                 }
             },
         },
     ]
 }
-
-export default createDemosNetworkTools

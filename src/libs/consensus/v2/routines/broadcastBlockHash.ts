@@ -40,7 +40,7 @@ export async function broadcastBlockHash(
                 )
                 log.debug(
                     "[broadcastBlockHash] response: " +
-                        JSON.stringify(response, null, 2),
+                        JSON.stringify(response),
                 )
                 // Add the validation data to the block
                 // ? Should we check if the peer is in the shard? Theoretically we checked before
@@ -103,7 +103,7 @@ export async function broadcastBlockHash(
                 )
                 log.error(
                     "[broadcastBlockHash] Response received: " +
-                        JSON.stringify(response.extra, null, 2),
+                        JSON.stringify(response.extra),
                 )
                 con++
             }

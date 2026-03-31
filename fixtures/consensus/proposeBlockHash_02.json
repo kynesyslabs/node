@@ -1,0 +1,31 @@
+{
+    "request": {
+        "method": "consensus_routine",
+        "params": [
+            {
+                "method": "proposeBlockHash",
+                "params": [
+                    "a819695847f3a86b254d0e305239c00e3e987db26d778eca13539f2e1e0b66bb",
+                    {
+                        "signatures": {
+                            "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x832fc86a1283d3212b3c8e187e3ad800aaa74e82e69889da23ea483ba4359e1a2a3376edb241da37ff3015a0ad0da7210929c5d9073c7d54f8f1e7d118d6e400"
+                        }
+                    },
+                    "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9"
+                ]
+            }
+        ]
+    },
+    "response": {
+        "result": 200,
+        "response": "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9",
+        "require_reply": false,
+        "extra": {
+            "signatures": {
+                "0x21a1d74bf75776432ffc94163ddb4bffe35b0b78e7ab8fcb7401ebac0ddb32d9": "0x832fc86a1283d3212b3c8e187e3ad800aaa74e82e69889da23ea483ba4359e1a2a3376edb241da37ff3015a0ad0da7210929c5d9073c7d54f8f1e7d118d6e400"
+            }
+        }
+    },
+    "frame_request": "100",
+    "frame_response": "102"
+}

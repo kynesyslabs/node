@@ -14,18 +14,18 @@ Each computer’s hardware can behave differently during Ubuntu installation. Th
 
 ### Hardware Minimum Requirements
 
--   4GB RAM
--   4 CPU cores (2GHz+)
--   Modern SSD
--   200 Mbps internet connection
--   Ubuntu 22.04 LTS or newer (or compatible Linux distribution)
+- 4GB RAM
+- 4 CPU cores (2GHz+)
+- Modern SSD
+- 200 Mbps internet connection
+- Ubuntu 22.04 LTS or newer (or compatible Linux distribution)
 
 ### Hardware Recommended Specs
 
--   8GB RAM
--   6 CPU cores (2GHz+)
--   Modern SSD
--   1 Gbps internet connection
+- 8GB RAM
+- 6 CPU cores (2GHz+)
+- Modern SSD
+- 1 Gbps internet connection
 
 ## ⚡ Installation Steps - Short Version
 
@@ -42,11 +42,11 @@ sudo apt install -y curl git wget build-essential ca-certificates gnupg lsb-rele
 
 ### 2. Install the Following Packages
 
--   **Install Docker and docker-compose for non-root users**
-    -   Docker: [https://docs.docker.com/get-started/get-docker/](https://docs.docker.com/get-started/get-docker/)
-    -   Docker Compose: [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
--   **Install Bun**
-    -   We suggest managing bun with mise ([https://mise.jdx.dev/getting-started.html](https://mise.jdx.dev/getting-started.html) and `mise use -g bun@latest`) for convenience
+- **Install Docker and docker-compose for non-root users**
+    - Docker: [https://docs.docker.com/get-started/get-docker/](https://docs.docker.com/get-started/get-docker/)
+    - Docker Compose: [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/)
+- **Install Bun**
+    - We suggest managing bun with mise ([https://mise.jdx.dev/getting-started.html](https://mise.jdx.dev/getting-started.html) and `mise use -g bun@latest`) for convenience
 
 ### 3. Clone the Repository
 
@@ -62,9 +62,11 @@ cd node
 ### 4. Install Dependencies
 
 ```bash
-# Install all dependencies at once
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying.
 
 ### 5. Run Node and Generate Keys
 
@@ -87,9 +89,9 @@ cp demos_peerlist.json.example demos_peerlist.json
 
 **Edit .env file:** The most important setting is `EXPOSED_URL`. Set it based on your setup:
 
--   Local testing: `http://localhost:53550`
--   Remote machine: `http://YOUR_PUBLIC_IP:53550`
--   Behind proxy: `https://demos.example.com`
+- Local testing: `http://localhost:53550`
+- Remote machine: `http://YOUR_PUBLIC_IP:53550`
+- Behind proxy: `https://demos.example.com`
 
 **Edit demos_peerlist.json:** Add known peers in the format:
 
@@ -171,6 +173,7 @@ mise use -g bun@latest
 # Verify Bun
 bun -v
 ```
+
 ### 3b. Install Bun without Mise
 
 ```bash
@@ -197,15 +200,22 @@ git branch
 #### 2. Install Dependencies
 
 ```bash
-# Install All dependencies
-bun install && bun pm trust --all
+# Install all dependencies (requires Rust/Cargo for wstcp)
+./install-deps.sh
 ```
+
+> **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:
+>
+> ```bash
+> curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+> source ~/.cargo/env
+> ```
 
 ## 🎯 Starting and Configuring the Node
 
 ### 1. Start the Node
 
-You can start the node using the `run` script shown below. 
+You can start the node using the `run` script shown below.
 
 ```bash
 ./run
@@ -214,6 +224,7 @@ You can start the node using the `run` script shown below.
 Running the node the first time will generate a private key for your node and store it in the `.demos_identity` file by default. The public key for your node is printed on the terminal when the node runs and is also saved in a `publickey_*` file in the same directory.
 
 ### Run script usage
+
 ```
 🚀 Demos Network Node Runner
 
@@ -288,10 +299,10 @@ nano .env
 
 Set the following variable:
 
--   **EXPOSED_URL:** Your node's public URL
-    -   Local testing: `http://localhost:53550`
-    -   Remote server: `http://YOUR_PUBLIC_IP:53550`
-    -   Behind proxy: `https://your-domain.com`
+- **EXPOSED_URL:** Your node's public URL
+    - Local testing: `http://localhost:53550`
+    - Remote server: `http://YOUR_PUBLIC_IP:53550`
+    - Behind proxy: `https://your-domain.com`
 
 ### 5. Node Identity - Public and Private Keys
 
@@ -305,7 +316,7 @@ To join a network, you can edit the `demos_peerlist.json` file to add known peer
 
 ```jsonc
 {
-    "publickey": "connectionstring" //  Example: "0xd0b2be2cb6d...": "http://otherpeer.localhost"
+    "publickey": "connectionstring", //  Example: "0xd0b2be2cb6d...": "http://otherpeer.localhost"
 }
 ```
 
@@ -346,10 +357,10 @@ docker ps
 
 The node will output logs showing:
 
--   Database connection status
--   RPC server initialization
--   Your node's public key
--   Peer connection attempts
+- Database connection status
+- RPC server initialization
+- Your node's public key
+- Peer connection attempts
 
 ### Stopping the Node
 
@@ -402,7 +413,6 @@ bun install
 ## 🔒 Security Notes
 
 1. **Backup your identity files:**
-
     - `.demos_identity` (private key - KEEP SECRET)
     - `public.key` (public identifier)
 
@@ -416,10 +426,28 @@ bun install
 
 ## 🌐 Network Information
 
--   Default node port: 53550
--   Default database port: 5332
--   Logs directory: `logs_53550_demos_identity/`
--   Configuration: `.env` and `demos_peerlist.json`
+> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+
+### Required Ports
+
+| Port        | Service      | Description                             |
+| ----------- | ------------ | --------------------------------------- |
+| 53550       | Node RPC     | Main node API endpoint                  |
+| 53551       | OmniProtocol | P2P communication (TCP+UDP)             |
+| 7047        | TLSNotary    | TLSNotary server                        |
+| 55000-60000 | WS Proxy     | WebSocket proxy for TLSNotary (TCP+UDP) |
+
+### Optional Ports
+
+| Port | Service    | Description                          |
+| ---- | ---------- | ------------------------------------ |
+| 9090 | Metrics    | Node Prometheus metrics endpoint     |
+| 9091 | Prometheus | Prometheus server (monitoring stack) |
+| 3000 | Grafana    | Dashboard UI (monitoring stack)      |
+| 5332 | PostgreSQL | Database (local only, do not expose) |
+
+- Logs directory: `logs_53550_demos_identity/`
+- Configuration: `.env` and `demos_peerlist.json`
 
 ## ➡️ Next Steps
 

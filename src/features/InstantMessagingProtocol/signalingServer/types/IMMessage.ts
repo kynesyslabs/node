@@ -1,4 +1,4 @@
-import { SerializedSignedObject } from "../../../../../../sdks/src/encryption/unifiedCrypto" // FIXME Import from the sdk once we can
+import { SerializedSignedObject } from "@kynesyslabs/demosdk/types"
 
 export interface ImBaseMessage {
     type: string
@@ -18,7 +18,6 @@ export interface ImDiscoverMessage extends ImBaseMessage {
     type: "discover"
     payload: {}
 }
-
 
 export interface ImPeerMessage extends ImBaseMessage {
     type: "message"

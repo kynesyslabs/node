@@ -1,37 +1,37 @@
 name: Beads Merge Warning
 
 on:
-  pull_request:
-    branches: ['**']
+    pull_request:
+        branches: ["**"]
 
 jobs:
-  beads-warning:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check for .beads changes
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+    beads-warning:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check for .beads changes
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
 
-      - name: Warn about .beads files
-        run: |
-          # Check if PR touches .beads issue tracking files
-          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -qE "^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$"; then
-            echo "⚠️  This PR modifies .beads/ issue tracking files"
-            echo "🤖 After merge, these will be auto-reverted to preserve branch-specific issues"
-            echo ""
-            echo "Files affected:"
-            git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E "^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$" | sed 's/^/  - /'
+            - name: Warn about .beads files
+              run: |
+                  # Check if PR touches .beads issue tracking files
+                  if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -qE "^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$"; then
+                    echo "⚠️  This PR modifies .beads/ issue tracking files"
+                    echo "🤖 After merge, these will be auto-reverted to preserve branch-specific issues"
+                    echo ""
+                    echo "Files affected:"
+                    git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E "^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$" | sed 's/^/  - /'
 
-            # Post comment on PR
-            gh pr comment ${{ github.event.number }} --body "⚠️ **Beads Issue Tracking Files Detected**
+                    # Post comment on PR
+                    gh pr comment ${{ github.event.number }} --body "⚠️ **Beads Issue Tracking Files Detected**
 
-            This PR modifies \`.beads/\` issue tracking files. After merge, these changes will be **automatically reverted** to preserve branch-specific issue tracking.
+                    This PR modifies \`.beads/\` issue tracking files. After merge, these changes will be **automatically reverted** to preserve branch-specific issue tracking.
 
-            Files that will be reverted:
-            $(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$' | sed 's/^/- /')" || echo "Could not post comment"
-          else
-            echo "✅ No .beads issue tracking files affected"
-          fi
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                    Files that will be reverted:
+                    $(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -E '^\.beads/(issues\.jsonl|deletions\.jsonl|metadata\.json)$' | sed 's/^/- /')" || echo "Could not post comment"
+                  else
+                    echo "✅ No .beads issue tracking files affected"
+                  fi
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,5 +1,23 @@
 import { Web2GCRData, SignatureType } from "@kynesyslabs/demosdk/types"
 
+export interface NomisWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
+
 export interface SavedXmIdentity {
     // NOTE: We don't store the message here
     // The signed message is the ed25519 address (with 0x prefix) of the sender which can
@@ -9,6 +27,85 @@ export interface SavedXmIdentity {
     publicKey: string
     timestamp: number
     signedData: string
+}
+export interface SavedNomisIdentity {
+    address: string
+    score: number
+    scoreType: number
+    mintedScore?: number | null
+    lastSyncedAt: string
+    metadata?: {
+        referralCode?: string
+        referrerCode?: string
+        deadline?: number
+        nonce?: number
+        apiVersion?: string
+        [key: string]: unknown
+    }
+}
+
+/**
+ * Human Passport (formerly Gitcoin Passport) identity saved in the GCR
+ *
+ * Stores verified humanity score from Human Passport's Stamps API.
+ * Users verify stamps (Google, Discord, GitHub, etc.) to build a score.
+ * Score >= 20 is considered "human" (Sybil resistant).
+ */
+export interface SavedHumanPassportIdentity {
+    /** EVM address */
+    address: string
+    /** Humanity score (0-100+) */
+    score: number
+    /** Whether score met threshold at verification time */
+    passingScore: boolean
+    /** Score threshold used (default: 20) */
+    threshold: number
+    /** List of verified stamp provider names */
+    stamps: string[]
+    /** Verification method: "api" or "onchain" */
+    verificationMethod: "api" | "onchain"
+    /** Chain ID for onchain verification */
+    chainId?: number
+    /** Milliseconds since Unix epoch when verified (converted from API date string by identityManager/GCRIdentityRoutines) */
+    verifiedAt: number
+    /** Milliseconds since Unix epoch when score expires, or null if not applicable (converted from API date string by identityManager/GCRIdentityRoutines) */
+    expiresAt: number | null
+}
+
+/**
+ * Ethos wallet identity structure for linking Ethos reputation scores
+ * @property chain - Blockchain network (e.g., "evm")
+ * @property subchain - Network subchain (e.g., "mainnet")
+ * @property address - Wallet address
+ * @property score - Ethos reputation score (0-2800)
+ * @property profileId - Ethos profile ID
+ * @property lastSyncedAt - ISO timestamp of last sync
+ * @property metadata - Additional profile data (displayName, username)
+ */
+export interface EthosWalletIdentity {
+    chain: string
+    subchain: string
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
+}
+
+export interface SavedEthosIdentity {
+    address: string
+    score: number
+    profileId?: number
+    lastSyncedAt: string
+    metadata?: {
+        displayName?: string
+        username?: string
+        [key: string]: unknown
+    }
 }
 
 /**
@@ -67,4 +164,15 @@ export type StoredIdentities = {
         [algorithm: string]: SavedPqcIdentity[]
     }
     ud: SavedUdIdentity[] // Unstoppable Domains identities
+    nomis?: {
+        [chain: string]: {
+            [subchain: string]: SavedNomisIdentity[]
+        }
+    }
+    humanpassport?: SavedHumanPassportIdentity[] // Human Passport (Proof of Personhood) identities
+    ethos?: {
+        [chain: string]: {
+            [subchain: string]: SavedEthosIdentity[]
+        }
+    }
 }

@@ -1,9 +1,8 @@
-import { RPCResponse } from "@kynesyslabs/demosdk/types"
+import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { emptyResponse } from "./server_rpc"
 import Chain from "../blockchain/chain"
 import eggs from "./routines/eggs"
 import { getSharedState } from "src/utilities/sharedState"
-import _ from "lodash"
 // Importing methods themselves
 import getPeerInfo from "./routines/nodecalls/getPeerInfo"
 import getPeerlist from "./routines/nodecalls/getPeerlist"
@@ -15,16 +14,27 @@ import getBlockByNumber from "./routines/nodecalls/getBlockByNumber"
 import getBlockByHash from "./routines/nodecalls/getBlockByHash"
 import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
+import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
-import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
+import L2PSMempool from "../blockchain/l2ps_mempool"
+import TxUtils from "../blockchain/transaction"
+import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { Twitter } from "../identity/tools/twitter"
 import { Tweet } from "@kynesyslabs/demosdk/types"
 import Mempool from "../blockchain/mempool_v2"
 import ensureGCRForUser from "../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import { Discord, DiscordMessage } from "../identity/tools/discord"
 import { UDIdentityManager } from "../blockchain/gcr/gcr_routines/udIdentityManager"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
+import { DTRManager } from "./dtr/dtrmanager"
 
 export interface NodeCall {
     message: string
@@ -32,28 +42,58 @@ export interface NodeCall {
     muid: string
 }
 
-// REVIEW Is this module too big?
+/**
+ * Dispatches an incoming NodeCall message to the appropriate handler and produces an RPCResponse.
+ *
+ * @param content - NodeCall containing `message` (the RPC action to perform), `data` (payload for the action), and `muid` (message unique id)
+ * @returns An RPCResponse containing the numeric status, the response payload for the requested action, and optional `extra` diagnostic data
+ */
 export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     // Basic Node API handling logic
     // ...
     let result: any // Storage for the result
     let nStat: any // Storage for the native status
     const { data } = content
-    let response = _.cloneDeep(emptyResponse)
+    let response = structuredClone(emptyResponse)
     response.result = 200 // Until proven otherwise
     response.require_reply = false // Until proven otherwise
     response.extra = null // Until proven otherwise
-    //console.log(typeof data)
-    console.log(JSON.stringify(content))
+    log.debug("[manageNodeCall] Content: " + JSON.stringify(content))
     switch (content.message) {
         case "getPeerInfo":
             response.response = await getPeerInfo()
             break
+        case "getGenesisDataHash": {
+            try {
+                const genesisBlock = await Chain.getGenesisBlock()
+                let genesisData =
+                    genesisBlock.content.extra?.genesisData || null
+
+                if (typeof genesisData === "string") {
+                    genesisData = JSON.parse(genesisData)
+                }
+
+                response.response = Hashing.sha256(JSON.stringify(genesisData))
+                break
+            } catch (error) {
+                log.error(
+                    "[manageNodeCall] Failed to get genesis data hash: " +
+                        error,
+                )
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get genesis data hash",
+                }
+            }
+            break
+        }
+
         case "getPeerlist":
             response.response = await getPeerlist()
             break
-        case "getPeerlistHash":
-            var peerlist = await getPeerlist()
+        case "getPeerlistHash": {
+            let peerlist = await getPeerlist()
             response.response = Hashing.sha256(JSON.stringify(peerlist))
             log.custom(
                 "manageNodeCall",
@@ -61,6 +101,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 true,
             )
             break
+        }
         // REVIEW Both below for getting the last hash (untested yet)
         case "getPreviousHashFromBlockNumber":
             result = await getPreviousHashFromBlockNumber(data)
@@ -84,10 +125,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             response.extra = result.extra
             break
         case "getLastBlockNumber":
-            console.log("[SERVER] Received getLastBlockNumber")
+            log.debug("[SERVER] Received getLastBlockNumber")
             response.response = await Chain.getLastBlockNumber()
-            console.log("[CHAIN.ts] Received reply from the database") // REVIEW Debug
-            //console.log(response)
+            log.debug("[CHAIN] Received reply from the database")
             break
         case "getLastBlock":
             response.response = await Chain.getLastBlock()
@@ -95,8 +135,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getLastBlockHash":
             response.response = await Chain.getLastBlockHash()
             break
-        case "getBlockByNumber":
+        case "getBlockByNumber": {
             return await getBlockByNumber(data)
+        }
         case "getBlocks":
             return await getBlocks(data)
         case "getTransactions":
@@ -104,9 +145,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         case "getBlockByHash":
             // Check if we have .hash or .blockHash
             if (data.hash) {
-                console.log(`get block by hash ${data.hash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.hash}`)
             } else if (data.blockHash) {
-                console.log(`get block by hash ${data.blockHash}`)
+                log.debug(`[SERVER] getBlockByHash: ${data.blockHash}`)
                 data.hash = data.blockHash
             } else {
                 response.result = 400
@@ -128,7 +169,7 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "No hash specified"
                 break
             }
-            console.log(`getting tx with hash ${data.hash}`)
+            log.debug(`[SERVER] getTxByHash: ${data.hash}`)
             try {
                 response.response = await Chain.getTxByHash(data.hash)
             } catch (e) {
@@ -141,6 +182,20 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                 response.response = "error"
             }
             break
+        case "getTxsByHashes":
+            return await getTxsByHashes(data)
+
+        case "getBlockTransactions": {
+            if (!data.blockHash) {
+                response.result = 400
+                response.response = "No block hash specified"
+                break
+            }
+
+            response.response = await Chain.getBlockTransactions(data.blockHash)
+            break
+        }
+
         case "getMempool":
             response.response = await Mempool.getMempool()
             break
@@ -273,7 +328,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
                     response.response = res
                 }
             } catch (error) {
-                console.error(error)
+                log.error(
+                    "[manageNodeCall] Failed to resolve web3 domain: " + error,
+                )
                 response.result = 400
                 response.response = {
                     success: false,
@@ -456,14 +513,488 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         //     break
         // }
 
+        // REVIEW: TLSNotary proxy request endpoint for SDK (requires valid token)
+        case "requestTLSNproxy": {
+            try {
+                const { requestProxy, ProxyError } = await import(
+                    "@/features/tlsnotary/proxyManager"
+                )
+                const { validateToken, consumeRetry } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
+
+                // Require tokenId and owner (pubkey) for paid access
+                if (!data.tokenId || !data.owner) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing tokenId or owner parameter",
+                    }
+                    break
+                }
+
+                if (!data.targetUrl) {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Missing targetUrl parameter",
+                    }
+                    break
+                }
+
+                // Validate URL is HTTPS
+                if (!data.targetUrl.startsWith("https://")) {
+                    response.result = 400
+                    response.response = {
+                        error: ProxyError.INVALID_URL,
+                        message:
+                            "Only HTTPS URLs are supported for TLS attestation",
+                    }
+                    break
+                }
+
+                // Validate the token
+                const validation = validateToken(
+                    data.tokenId,
+                    data.owner,
+                    data.targetUrl,
+                )
+                if (!validation.valid) {
+                    response.result =
+                        validation.error === "TOKEN_NOT_FOUND" ? 404 : 403
+                    response.response = {
+                        error: validation.error,
+                        message: `Token validation failed: ${validation.error}`,
+                        domain: validation.token?.domain, // Show expected domain on mismatch
+                    }
+                    break
+                }
+
+                // Request the proxy (this spawns wstcp if needed)
+                const result = await requestProxy(
+                    data.targetUrl,
+                    data.requestOrigin,
+                )
+
+                if ("error" in result) {
+                    // Map proxy errors to appropriate HTTP status codes
+                    switch (result.error) {
+                        case ProxyError.INVALID_URL:
+                            response.result = 400 // Bad Request - client error
+                            break
+                        case ProxyError.PORT_EXHAUSTED:
+                            response.result = 503 // Service Unavailable - temporary
+                            break
+                        case ProxyError.WSTCP_NOT_AVAILABLE:
+                        case ProxyError.PROXY_SPAWN_FAILED:
+                        default:
+                            response.result = 500 // Internal Server Error
+                            break
+                    }
+                    response.response = result
+                } else {
+                    // Success - consume a retry and link proxyId to token
+                    const updatedToken = consumeRetry(
+                        data.tokenId,
+                        result.proxyId,
+                    )
+                    if (updatedToken) {
+                        log.info(
+                            `[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`,
+                        )
+                    }
+
+                    // Add token info to response
+                    response.response = {
+                        ...result,
+                        tokenId: data.tokenId,
+                        retriesLeft: updatedToken?.retriesLeft ?? 0,
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] requestTLSNproxy error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to request TLSNotary proxy",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary discovery endpoint for SDK auto-configuration
+        case "tlsnotary.getInfo": {
+            // Dynamic import to avoid circular dependencies and check if enabled
+            try {
+                const { getTLSNotaryService } = await import(
+                    "@/features/tlsnotary"
+                )
+                const service = getTLSNotaryService()
+
+                if (!service || !service.isRunning()) {
+                    response.result = 503
+                    response.response = {
+                        success: false,
+                        error: "TLSNotary service is not enabled or not running",
+                    }
+                    break
+                }
+
+                const publicKey = service.getPublicKeyHex()
+                const port = service.getPort()
+
+                const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
+
+                // Extract host and determine WebSocket scheme from exposedUrl
+                // The node's host is used - SDK connects to the same host it's already connected to
+                let nodeHost = "localhost"
+                const wsScheme = (() => {
+                    try {
+                        const exposedUrl = getSharedState.exposedUrl
+                        if (exposedUrl) {
+                            const url = new URL(exposedUrl)
+                            nodeHost = url.hostname
+                            return url.protocol === "https:" ? "wss" : "ws"
+                        }
+                    } catch {
+                        // Fall back to localhost and ws if URL parsing fails
+                    }
+                    return "ws"
+                })()
+
+                // Build the notary WebSocket URL - Port is the TLSNotary WebSocket port
+                const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
+
+                // WebSocket proxy URL for TCP tunneling
+                const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+
+                response.response = {
+                    notaryUrl,
+                    proxyUrl,
+                    publicKey,
+                    version: "0.1.0", // TLSNotary integration version
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getInfo error: " + error)
+                response.result = 500
+                response.response = {
+                    success: false,
+                    error: "Failed to get TLSNotary info",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token lookup by transaction hash
+        case "tlsnotary.getToken": {
+            try {
+                const { getTokenByTxHash, getToken } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
+
+                // Support lookup by either tokenId or txHash
+                const { tokenId, txHash } = data as {
+                    tokenId?: string
+                    txHash?: string
+                }
+
+                let token
+                if (tokenId) {
+                    token = getToken(tokenId)
+                } else if (txHash) {
+                    token = getTokenByTxHash(txHash)
+                } else {
+                    response.result = 400
+                    response.response = {
+                        error: "INVALID_REQUEST",
+                        message: "Either tokenId or txHash is required",
+                    }
+                    break
+                }
+
+                if (!token) {
+                    response.result = 404
+                    response.response = {
+                        error: "TOKEN_NOT_FOUND",
+                        message: "No token found for the provided identifier",
+                    }
+                } else {
+                    response.response = {
+                        token: {
+                            id: token.id,
+                            owner: token.owner,
+                            domain: token.domain,
+                            status: token.status,
+                            expiresAt: token.expiresAt,
+                            retriesLeft: token.retriesLeft,
+                        },
+                    }
+                }
+            } catch (error) {
+                log.error("[manageNodeCall] tlsnotary.getToken error: " + error)
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token",
+                }
+            }
+            break
+        }
+
+        // REVIEW: TLSNotary token stats for monitoring
+        case "tlsnotary.getTokenStats": {
+            try {
+                const { getTokenStats } = await import(
+                    "@/features/tlsnotary/tokenManager"
+                )
+                const stats = getTokenStats()
+                response.response = { stats }
+            } catch (error) {
+                log.error(
+                    "[manageNodeCall] tlsnotary.getTokenStats error: " + error,
+                )
+                response.result = 500
+                response.response = {
+                    error: "INTERNAL_ERROR",
+                    message: "Failed to get token stats",
+                }
+            }
+            break
+        }
+
+        // REVIEW L2PS: Node-to-node communication for L2PS mempool synchronization
+        case "getL2PSParticipationById":
+            console.log("[L2PS] Received L2PS participation query")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+            try {
+                // Check if this node participates in the specified L2PS network
+                const joinedUIDs = getSharedState.l2psJoinedUids || []
+                const isParticipating = joinedUIDs.includes(data.l2psUid)
+
+                response.result = 200
+                response.response = {
+                    participating: isParticipating,
+                    l2psUid: data.l2psUid,
+                    nodeIdentity: getSharedState.publicKeyHex,
+                }
+
+                log.debug(`[L2PS] Participation query for ${data.l2psUid}: ${isParticipating}`)
+            } catch (error) {
+                log.error("[L2PS] Error checking L2PS participation:", error)
+                response.result = 500
+                response.response = "Internal error checking L2PS participation"
+            }
+            break
+
+        case "getL2PSMempoolInfo": {
+            // REVIEW: Phase 3c-1 - L2PS mempool info endpoint
+            console.log("[L2PS] Received L2PS mempool info request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+
+            try {
+                // Get all processed transactions for this L2PS UID
+                const transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactionCount: transactions.length,
+                    lastTimestamp: transactions.at(-1)?.timestamp ?? 0,
+                    oldestTimestamp: transactions.at(0)?.timestamp ?? 0,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get mempool info:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS mempool info"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        case "getL2PSTransactions": {
+            // REVIEW: Phase 3c-1 - L2PS transactions sync endpoint
+            console.log("[L2PS] Received L2PS transactions sync request")
+            if (!data.l2psUid) {
+                response.result = 400
+                response.response = "No L2PS UID specified"
+                break
+            }
+
+            try {
+                // Optional timestamp filter for incremental sync
+                const sinceTimestamp = data.since_timestamp || 0
+
+                // Get all processed transactions for this L2PS UID
+                let transactions = await L2PSMempool.getByUID(data.l2psUid, "processed")
+
+                // Filter by timestamp if provided (incremental sync)
+                if (sinceTimestamp > 0) {
+                    transactions = transactions.filter(tx => tx.timestamp > sinceTimestamp)
+                }
+
+                // Return encrypted transactions (validators never see this)
+                // Only L2PS participants can decrypt
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    transactions: transactions.map(tx => ({
+                        hash: tx.hash,
+                        l2ps_uid: tx.l2ps_uid,
+                        original_hash: tx.original_hash,
+                        encrypted_tx: tx.encrypted_tx,
+                        timestamp: tx.timestamp,
+                        block_number: tx.block_number,
+                    })),
+                    count: transactions.length,
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS transactions"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
+        case "getL2PSAccountTransactions": {
+            // L2PS transaction history for a specific account
+            // REQUIRES AUTHENTICATION: User must sign a message to prove address ownership
+            console.log("[L2PS] Received account transactions request")
+            if (!data.l2psUid || !data.address) {
+                response.result = 400
+                response.response = "L2PS UID and address are required"
+                break
+            }
+
+            // Verify ownership via signature
+            // User must provide: signature of message "getL2PSHistory:{address}:{timestamp}"
+            if (!data.signature || !data.timestamp) {
+                response.result = 401
+                response.response = "Authentication required. Provide signature and timestamp."
+                response.extra = {
+                    message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
+                    example: `getL2PSHistory:${data.address}:${Date.now()}`
+                }
+                break
+            }
+
+            // Validate timestamp (max 5 minutes old to prevent replay attacks)
+            const requestTime = Number.parseInt(data.timestamp, 10)
+            const now = Date.now()
+            if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
+                response.result = 401
+                response.response = "Request expired or invalid timestamp."
+                break
+            }
+
+            try {
+                // Verify signature using Cryptography class
+                const expectedMessage = `getL2PSHistory:${data.address}:${data.timestamp}`
+
+                // Import Cryptography for signature verification
+                const Cryptography = (await import("../crypto/cryptography")).default
+
+                // Address should be hex public key, signature should be hex
+                let signature = data.signature
+                let publicKey = data.address
+
+                // Remove 0x prefix if present
+                if (signature.startsWith("0x")) signature = signature.slice(2)
+                if (publicKey.startsWith("0x")) publicKey = publicKey.slice(2)
+
+                // Verify signature - wrap in try-catch as invalid format throws
+                let isValid = false
+                try {
+                    isValid = Cryptography.verify(expectedMessage, signature, publicKey)
+                } catch (verifyError: any) {
+                    log.warning(`[L2PS] Signature verification error: ${verifyError.message}`)
+                    // Invalid signature format - treat as auth failure
+                    isValid = false
+                }
+
+                if (!isValid) {
+                    response.result = 403
+                    response.response = "Invalid signature. Unable to verify address ownership."
+                    break
+                }
+
+                // Signature verified - user owns this address
+                log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
+
+                const maxLimit = 1000
+                const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
+                const offset = Math.max(0, data.offset || 0)
+
+                // Import the executor to get account transactions
+                const { default: L2PSTransactionExecutor } = await import("../l2ps/L2PSTransactionExecutor")
+                const transactions = await L2PSTransactionExecutor.getAccountTransactions(
+                    data.l2psUid,
+                    data.address,
+                    limit,
+                    offset
+                )
+
+                response.result = 200
+                response.response = {
+                    l2psUid: data.l2psUid,
+                    address: data.address,
+                    authenticated: true,
+                    transactions: transactions.map(tx => {
+                        // Extract message from transaction content if execution_message is not set
+                        // Content structure: data[1].message
+                        let txMessage = tx.execution_message
+                        if (!txMessage && tx.content?.data?.[1]?.message) {
+                            txMessage = tx.content.data[1].message
+                        }
+
+                        return {
+                            hash: tx.hash,
+                            encrypted_hash: tx.encrypted_hash,
+                            l1_batch_hash: tx.l1_batch_hash,
+                            type: tx.type,
+                            from: tx.from_address,
+                            to: tx.to_address,
+                            amount: tx.amount?.toString() || "0",
+                            status: tx.status,
+                            timestamp: tx.timestamp?.toString() || "0",
+                            l1_block_number: tx.l1_block_number,
+                            execution_message: txMessage
+                        }
+                    }),
+                    count: transactions.length,
+                    hasMore: transactions.length === limit
+                }
+            } catch (error: any) {
+                log.error("[L2PS] Failed to get account transactions:", error)
+                response.result = 500
+                response.response = "Failed to get L2PS account transactions"
+                response.extra = error.message || "Internal error"
+            }
+            break
+        }
+
         // NOTE Don't look past here, go away
         // INFO For real, nothing here to be seen
+        // REVIEW DTR: Handle relayed transactions from non-validator nodes
+        case "RELAY_TX":
+            return await DTRManager.receiveRelayedTransactions(
+                data as ValidityData[],
+            )
         case "hots":
-            console.log("[SERVER] Received hots")
+            log.debug("[SERVER] Received hots")
             response.response = eggs.hots()
             break
+
         default:
-            console.log("[SERVER] Received unknown message")
+            log.warning("[SERVER] Received unknown message")
             // eslint-disable-next-line quotes
             response.response = '{ error: "Unknown message"}'
             break

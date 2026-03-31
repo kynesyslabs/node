@@ -453,9 +453,7 @@ export class Twitter {
 
             return { username, tweetId }
         } catch (error) {
-            console.error(
-                `Failed to extract tweet details from URL: ${tweetUrl}`,
-            )
+            log.error(`Failed to extract tweet details from URL: ${tweetUrl}`)
             throw new Error(
                 `Invalid tweet URL: ${
                     error instanceof Error ? error.message : "Unknown error"
@@ -526,7 +524,7 @@ export class Twitter {
         if (res.status === 200) {
             await fs.promises.writeFile(
                 `data/twitter/${userId}.json`,
-                JSON.stringify(res.data, null, 2),
+                JSON.stringify(res.data),
             )
             return res.data
         } else {
@@ -545,7 +543,7 @@ export class Twitter {
         if (res.status === 200) {
             await fs.promises.writeFile(
                 `data/twitter/${userId}_followers.json`,
-                JSON.stringify(res.data, null, 2),
+                JSON.stringify(res.data),
             )
             return res.data
         } else {
@@ -569,7 +567,7 @@ export class Twitter {
             )
             return result
         } catch (error) {
-            console.error("Error checking if user is bot:", error)
+            log.error("Error checking if user is bot:", error)
             return undefined
         }
     }

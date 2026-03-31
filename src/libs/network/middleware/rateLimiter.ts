@@ -3,6 +3,12 @@ import { Server } from "bun"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
+import { setAuthContext } from "../authContext"
+import {
+    verifySignature,
+    isKeyWhitelisted,
+    VerificationResult,
+} from "../verifySignature"
 
 interface RateLimitData {
     count: number
@@ -26,6 +32,7 @@ interface RateLimitConfig {
     defaultLimit: MethodLimitConfig
     blockDurationMs: number
     whitelistedIPs: string[]
+    whitelistedKeys: string[]
     methodLimits: Record<string, MethodLimitConfig>
     txPerBlock: number
 }
@@ -41,10 +48,13 @@ export class RateLimiter {
         this.config = config
 
         // Clean up expired entries every 15 minutes
-        this.cleanupInterval = setInterval(() => {
-            this.cleanup()
-            this.dumpIPs()
-        }, 15 * 60 * 1000)
+        this.cleanupInterval = setInterval(
+            () => {
+                this.cleanup()
+                this.dumpIPs()
+            },
+            15 * 60 * 1000,
+        )
 
         this.loadIPs()
     }
@@ -89,10 +99,7 @@ export class RateLimiter {
             allIPs[ip] = data
         }
         try {
-            await fs.promises.writeFile(
-                filePath,
-                JSON.stringify(allIPs, null, 2),
-            )
+            await fs.promises.writeFile(filePath, JSON.stringify(allIPs))
         } catch (error) {
             log.error(`[Rate Limiter] Failed to dump IPs: ${error}`)
         }
@@ -240,6 +247,56 @@ export class RateLimiter {
     public createMiddleware(): Middleware {
         return async (req, next, server) => {
             if (!this.config.enabled) {
+                return await next()
+            }
+
+            // Check for identity/signature headers for key-based whitelisting
+            const identity = req.headers.get("identity")
+            const signature = req.headers.get("signature")
+            let verifyResult: VerificationResult | null = null
+
+            if (identity && signature) {
+                // Verify signature
+                verifyResult = await verifySignature(identity, signature)
+
+                if (!verifyResult.valid) {
+                    // Invalid signature - return 401
+                    log.error(
+                        `[Rate Limiter] Invalid signature: ${verifyResult.error}`,
+                    )
+                    return new Response(
+                        JSON.stringify({
+                            error: "Invalid signature",
+                            details: verifyResult.error,
+                        }),
+                        {
+                            status: 401,
+                            headers: { "Content-Type": "application/json" },
+                        },
+                    )
+                }
+
+                // Attach verified auth context to request for handler to use
+                setAuthContext(req, {
+                    verified: true,
+                    identity: verifyResult.identity,
+                    publicKey: verifyResult.publicKey,
+                    algorithm: verifyResult.algorithm,
+                })
+            }
+
+            // Check if key is whitelisted
+            if (
+                verifyResult &&
+                verifyResult.publicKey &&
+                isKeyWhitelisted(
+                    verifyResult.publicKey,
+                    this.config.whitelistedKeys,
+                )
+            ) {
+                log.info(
+                    `[Rate Limiter] Whitelisted key: ${verifyResult.publicKey}, bypassing rate limiting`,
+                )
                 return await next()
             }
 

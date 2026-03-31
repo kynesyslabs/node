@@ -1,26 +1,28 @@
 import Cryptography from "../crypto/cryptography"
 import * as forge from "node-forge"
-import terminalkit from "terminal-kit"
 import log from "src/utilities/logger"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Peer, PeerManager } from "../peer"
 
-const term = terminalkit.terminal
-
-export type AuthMessage = [string, forge.pki.ed25519.NativeBuffer, forge.pki.ed25519.BinaryBuffer]
+export type AuthMessage = [
+    string,
+    forge.pki.ed25519.NativeBuffer,
+    forge.pki.ed25519.BinaryBuffer,
+]
 
 export async function manageAuth(data: any): Promise<RPCResponse> {
     // REVIEW Auth reply listener should not add a client to the peerlist if is read only
     const identity = await Cryptography.load("./.demos_identity")
-    term.yellow("[SERVER] Received auth reply")
+    log.info("SERVER", "Received auth reply")
     // Unpack the data for readability
     if (data !== "readonly") {
         const authMessage = data as AuthMessage
-        term.yellow("[SERVER] Received auth reply: verifying")
-        log.info("Received auth reply: verifying")
+        log.info("SERVER", "Received auth reply: verifying")
         const originalMessage = authMessage[0] as string
-        const originalSignature = authMessage[1] as forge.pki.ed25519.NativeBuffer
-        const originalIdentity = authMessage[2] as forge.pki.ed25519.BinaryBuffer
+        const originalSignature =
+            authMessage[1] as forge.pki.ed25519.NativeBuffer
+        const originalIdentity =
+            authMessage[2] as forge.pki.ed25519.BinaryBuffer
         const verification = Cryptography.verify(
             originalMessage, // The message that our peer should have signed
             originalSignature, // The signature of the auth message as defined in commonListeners.ts
@@ -49,9 +51,7 @@ export async function manageAuth(data: any): Promise<RPCResponse> {
         PeerManager.getInstance().addPeer(newPeer)
         log.info("Peer added to the peerlist: " + connectionString)
     } else {
-        term.yellow(
-            "[SERVER] Client is read only: not asking for authentication",
-        )
+        log.info("SERVER", "Client is read only: not asking for authentication")
     }
     // And we reply ok with our signature too
     const signature = Cryptography.sign("auth_ok", identity.privateKey)

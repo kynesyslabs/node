@@ -1,0 +1,30 @@
+# Generated circuit artifacts
+circuits/*.r1cs
+circuits/*.wasm
+circuits/*.sym
+circuits/*.json
+circuits/*_js/
+
+# Proving keys (large, not needed for validators)
+keys/*_*.zkey
+keys/circuit_final.zkey
+
+# Powers of Tau (large, public download)
+keys/powersOfTau*.ptau
+
+# IMPORTANT: Verification keys MUST be committed for consensus
+!keys/verification_key.json
+!keys/verification_key_merkle.json
+
+# Build artifacts
+*.o
+*.a
+*.so
+
+# Test outputs
+tests/tmp/
+tests/output/
+
+# Node modules (shouldn't be here but just in case)
+node_modules/
+*.sym

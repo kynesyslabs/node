@@ -1,0 +1,367 @@
+---
+title: "StorageProgram Access Control"
+description: "Detailed ACL configuration for StorageProgram read and write permissions"
+---
+
+# StorageProgram Access Control
+
+StorageProgram implements a robust Access Control List (ACL) system supporting owner-only, public, and restricted access modes with group-based permissions.
+
+## ACL Modes
+
+### Owner Mode
+
+The most restrictive mode. Only the storage program owner can read or modify data.
+
+```typescript
+acl: {
+  mode: "owner"
+}
+```
+
+| Operation | Permission |
+|-----------|------------|
+| Read | Owner only |
+| Write | Owner only |
+| Delete | Owner only |
+| Update ACL | Owner only |
+
+### Public Mode
+
+Anyone can read the data, but only the owner can modify it.
+
+```typescript
+acl: {
+  mode: "public",
+  blacklisted: [
+    "ed25519:blocked-address..."  // Optional: denied even in public mode
+  ]
+}
+```
+
+| Operation | Permission |
+|-----------|------------|
+| Read | Anyone (except blacklisted) |
+| Write | Owner only |
+| Delete | Owner only |
+| Update ACL | Owner only |
+
+### Restricted Mode
+
+Fine-grained control over who can read, write, and delete.
+
+```typescript
+acl: {
+  mode: "restricted",
+  allowed: [
+    "ed25519:reader1...",
+    "ed25519:reader2..."
+  ],
+  blacklisted: [
+    "ed25519:blocked..."
+  ],
+  groups: {
+    editors: {
+      members: ["ed25519:editor1..."],
+      permissions: ["read", "write"]
+    },
+    admins: {
+      members: ["ed25519:admin1..."],
+      permissions: ["read", "write", "delete"]
+    }
+  }
+}
+```
+
+| Operation | Permission |
+|-----------|------------|
+| Read | Owner, allowed list, or group with "read" |
+| Write | Owner or group with "write" |
+| Delete | Owner or group with "delete" |
+| Update ACL | Owner only |
+
+## ACL Structure
+
+```typescript
+interface StorageProgramACL {
+  /**
+   * Access mode:
+   * - "owner": Only owner can read/write
+   * - "public": Anyone can read, only owner writes
+   * - "restricted": Configurable via allowed/groups
+   */
+  mode: "owner" | "public" | "restricted"
+
+  /**
+   * Addresses with read access (restricted mode only)
+   * These addresses can read but cannot write unless in a group
+   */
+  allowed?: string[]
+
+  /**
+   * Addresses denied access regardless of mode
+   * Takes precedence over allowed list and group membership
+   */
+  blacklisted?: string[]
+
+  /**
+   * Named groups with specific permissions
+   * Members inherit all permissions assigned to the group
+   */
+  groups?: {
+    [groupName: string]: {
+      members: string[]
+      permissions: ("read" | "write" | "delete")[]
+    }
+  }
+}
+```
+
+## Permission Resolution
+
+Permission checks follow this precedence order (varies slightly by mode):
+
+**Public Mode:**
+```
+1. Check blacklist (deny if blacklisted)
+2. Allow read (anyone can read)
+3. Deny write/delete (owner only, checked separately)
+```
+
+**Owner Mode:**
+```
+1. Check if owner (allow all if owner)
+2. Deny all (non-owners have no access)
+```
+
+**Restricted Mode:**
+```
+1. Check if owner (allow all - owner cannot be blacklisted)
+2. Check blacklist (deny if blacklisted)
+3. Check allowed list (read access)
+4. Check group membership and permissions
+5. Deny by default
+```
+
+### Flowchart
+
+```
+┌─ What is the ACL mode?
+│
+├─ PUBLIC
+│   └─ Is address blacklisted?
+│       ├─ Yes → DENY
+│       └─ No → ALLOW READ (write/delete: owner only)
+│
+├─ OWNER
+│   └─ Is address the owner?
+│       ├─ Yes → ALLOW ALL
+│       └─ No → DENY ALL
+│
+└─ RESTRICTED
+    └─ Is address the owner?
+        ├─ Yes → ALLOW ALL (owner cannot be blacklisted)
+        └─ No → Is address blacklisted?
+                 ├─ Yes → DENY
+                 └─ No → Is in allowed list?
+                          ├─ Yes → ALLOW READ
+                          └─ No → Check groups for permission
+                                   ├─ Has permission → ALLOW
+                                   └─ No permission → DENY
+```
+
+> **Note**: In restricted mode, owner is checked before blacklist because the owner cannot be blacklisted from their own storage program.
+
+## Group Permissions
+
+Groups provide a way to assign multiple permissions to multiple addresses:
+
+| Permission | Grants |
+|------------|--------|
+| `read` | Can read storage program data via RPC |
+| `write` | Can update data using WRITE_STORAGE operation |
+| `delete` | Can soft delete using DELETE_STORAGE_PROGRAM operation |
+
+### Group Examples
+
+**Read-Only Group**
+```typescript
+groups: {
+  viewers: {
+    members: ["ed25519:viewer1...", "ed25519:viewer2..."],
+    permissions: ["read"]
+  }
+}
+```
+
+**Editor Group**
+```typescript
+groups: {
+  editors: {
+    members: ["ed25519:editor1..."],
+    permissions: ["read", "write"]
+  }
+}
+```
+
+**Admin Group**
+```typescript
+groups: {
+  admins: {
+    members: ["ed25519:admin1..."],
+    permissions: ["read", "write", "delete"]
+  }
+}
+```
+
+**Multiple Groups**
+```typescript
+groups: {
+  readers: {
+    members: ["ed25519:reader1...", "ed25519:reader2..."],
+    permissions: ["read"]
+  },
+  contributors: {
+    members: ["ed25519:contrib1..."],
+    permissions: ["read", "write"]
+  },
+  maintainers: {
+    members: ["ed25519:maint1..."],
+    permissions: ["read", "write", "delete"]
+  }
+}
+```
+
+## Blacklist Behavior
+
+The blacklist takes precedence over all other permissions:
+
+```typescript
+acl: {
+  mode: "public",
+  blacklisted: ["ed25519:bad-actor..."]
+}
+```
+
+- Blacklisted addresses are denied even in public mode
+- Blacklist is checked first in all permission evaluations
+- Owner cannot be blacklisted (owner always has full access)
+
+## Common Patterns
+
+### Public Read, Owner Write
+
+```typescript
+acl: {
+  mode: "public"
+}
+```
+
+### Team Collaboration
+
+```typescript
+acl: {
+  mode: "restricted",
+  groups: {
+    team: {
+      members: [
+        "ed25519:alice...",
+        "ed25519:bob...",
+        "ed25519:charlie..."
+      ],
+      permissions: ["read", "write"]
+    }
+  }
+}
+```
+
+### Read-Only Sharing
+
+```typescript
+acl: {
+  mode: "restricted",
+  allowed: [
+    "ed25519:client1...",
+    "ed25519:client2..."
+  ]
+}
+```
+
+### Tiered Access
+
+```typescript
+acl: {
+  mode: "restricted",
+  groups: {
+    free: {
+      members: ["ed25519:free-user1..."],
+      permissions: ["read"]
+    },
+    premium: {
+      members: ["ed25519:premium-user1..."],
+      permissions: ["read", "write"]
+    },
+    enterprise: {
+      members: ["ed25519:enterprise-user1..."],
+      permissions: ["read", "write", "delete"]
+    }
+  }
+}
+```
+
+### Public with Exceptions
+
+```typescript
+acl: {
+  mode: "public",
+  blacklisted: [
+    "ed25519:spammer1...",
+    "ed25519:abuser2..."
+  ]
+}
+```
+
+## Updating ACL
+
+Only the owner can update ACL settings:
+
+```typescript
+const payload = storage.buildStorageProgramPayload({
+  operation: "UPDATE_ACCESS_CONTROL",
+  storageAddress: "stor-abc123...",
+  acl: {
+    mode: "restricted",
+    allowed: ["ed25519:new-reader..."],
+    groups: {
+      editors: {
+        members: ["ed25519:new-editor..."],
+        permissions: ["read", "write"]
+      }
+    }
+  }
+})
+```
+
+**Important**: The entire ACL is replaced, not merged. Include all desired settings.
+
+## RPC Identity Header
+
+To access restricted storage programs, clients must provide identity headers:
+
+```http
+GET /storage-program/stor-abc123...
+identity: ed25519:your-public-key
+signature: your-signed-message
+```
+
+Without identity headers:
+- Public mode: Access granted
+- Owner/Restricted mode: Access denied
+
+## Security Considerations
+
+1. **Owner immutability**: The owner cannot be changed after creation
+2. **Blacklist precedence**: Always checked first for security
+3. **Group validation**: Group names and permissions are validated
+4. **Address format**: All addresses must be valid Demos addresses
+5. **No anonymous writes**: All write operations require authentication

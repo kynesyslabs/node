@@ -33,6 +33,7 @@ import {
 import { getSharedState } from "@/utilities/sharedState"
 import IdentityManager from "./gcr/gcr_routines/identityManager"
 import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
+import log from "src/utilities/logger"
 
 interface TransactionResponse {
     status: string
@@ -42,34 +43,42 @@ interface TransactionResponse {
 }
 
 export default class Transaction implements ITransaction {
-    content: TransactionContent
-    signature: ISignature
-    hash: string
-    status: string
-    blockNumber: number
-    ed25519_signature: string
+    // Properties automatically follow ITransaction interface
+    content: TransactionContent | null = null
+    signature: ISignature | null = null
+    ed25519_signature: string | null = null
+    hash: string | null = null
+    status: string | null = null
+    blockNumber: number | null = null
 
-    constructor() {
-        this.content = {
-            type: null,
-            from: "",
-            from_ed25519_address: "",
-            to: "",
-            amount: null,
-            data: [null, null],
-            gcr_edits: [],
-            nonce: null,
-            timestamp: null,
-            transaction_fee: {
-                network_fee: null,
-                rpc_fee: null,
-                additional_fee: null,
+    constructor(data?: Partial<ITransaction>) {
+        // Initialize with defaults or provided data
+        Object.assign(this, {
+            content: {
+                from_ed25519_address: null,
+                type: null,
+                from: "",
+                to: "",
+                amount: null,
+                data: [null, null],
+                gcr_edits: [],
+                nonce: null,
+                timestamp: null,
+                transaction_fee: {
+                    network_fee: null,
+                    rpc_fee: null,
+                    additional_fee: null,
+                },
             },
-        }
-        this.signature = null
-        this.hash = null
-        this.status = null
+            signature: null,
+            ed25519_signature: null,
+            hash: null,
+            status: null,
+            blockNumber: null,
+            ...data,
+        })
     }
+
 
     // INFO Given a transaction, sign it with the private key of the sender
     public static async sign(tx: Transaction): Promise<[boolean, any]> {
@@ -112,9 +121,7 @@ export default class Transaction implements ITransaction {
         // publicKey: forge.pki.ed25519.BinaryBuffer,
         // privateKey: forge.pki.ed25519.BinaryBuffer,
     ) {
-        console.log("[TRANSACTION]: confirmTx")
-        console.log("Signature: ")
-        console.log(tx.signature)
+        log.debug(`[TX] confirmTx - Signature: ${JSON.stringify(tx.signature)}`)
         const structured = this.structured(tx)
         if (!structured.valid) {
             return null // TODO Improve return type
@@ -165,12 +172,9 @@ export default class Transaction implements ITransaction {
         tx: Transaction,
         sender: string = null,
     ): Promise<{ success: boolean; message: string }> {
-        console.log("[validateSignature] Checking the signature of the tx")
-        console.log("Hash: " + tx.hash)
-        console.log("Signature: ")
-        console.log(tx.signature)
-        console.log("From: ")
-        console.log(tx.content.from)
+        log.debug(
+            `[TX] validateSignature - Hash: ${tx.hash}, From: ${tx.content.from}, Signature: ${JSON.stringify(tx.signature)}`,
+        )
 
         // INFO: Ensure tx signer is the sender of the tx request
         // TIP: This function is also called without the sender to validate mempool txs
@@ -261,14 +265,12 @@ export default class Transaction implements ITransaction {
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
     public static isCoherent(tx: Transaction) {
-        console.log(
-            "[isCoherent] Checking the coherence of the tx with hash: " +
-                tx.hash,
-        )
+        log.debug(`[TX] isCoherent - Checking coherence of tx hash: ${tx.hash}`)
         const derivedHash = Hashing.sha256(JSON.stringify(tx.content))
-        console.log("[isCoherent] Derived hash: " + derivedHash)
+        log.debug(
+            `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash == tx.hash}`,
+        )
         const coherence = derivedHash == tx.hash
-        console.log("[isCoherent] Coherence: " + coherence)
         return coherence
     }
     /**
@@ -297,12 +299,13 @@ export default class Transaction implements ITransaction {
         valid: boolean
         message: string
     } {
-        console.log("[validateToField] Validating TO field")
-        console.log(to)
+        log.debug(
+            `[TX] validateToField - Validating TO field: ${JSON.stringify(to)}`,
+        )
 
         // Step 1: Check if the field exists
         if (!to) {
-            console.log("[validateToField] Missing TO field")
+            log.debug("[TX] validateToField - Missing TO field")
             return {
                 valid: false,
                 message: "Missing TO field",
@@ -321,8 +324,8 @@ export default class Transaction implements ITransaction {
 
             // Step 3: Validate buffer length (must be exactly 32 bytes for Ed25519)
             if (toBuffer.length !== 32) {
-                console.log(
-                    `[validateToField] TO field must be exactly 32 bytes (received ${toBuffer.length} bytes)`,
+                log.debug(
+                    `[TX] validateToField - TO field must be exactly 32 bytes (received ${toBuffer.length} bytes)`,
                 )
                 return {
                     valid: false,
@@ -333,8 +336,8 @@ export default class Transaction implements ITransaction {
             // Step 4: Validate as Ed25519 public key
             // We'll just verify it's a 32-byte buffer, which is the correct size for a raw Ed25519 public key
             // NOTE: any 32-byte buffer is a valid Ed25519 public key (not just the ones generated by forge)
-            console.log(
-                "[validateToField] TO field is a valid Ed25519 public key format",
+            log.debug(
+                "[TX] validateToField - TO field is a valid Ed25519 public key format",
             )
 
             // All validations passed
@@ -343,12 +346,13 @@ export default class Transaction implements ITransaction {
                 message: "TO field is valid",
             }
         } catch (e) {
-            console.log("[validateToField] Error validating TO field:", e)
+            log.error(
+                `[TX] validateToField - Error validating TO field: ${e instanceof Error ? e.message : String(e)}`,
+            )
             return {
                 valid: false,
-                message: `Error validating TO field: ${
-                    e instanceof Error ? e.message : String(e)
-                }`,
+                message: `Error validating TO field: ${e instanceof Error ? e.message : String(e)
+                    }`,
             }
         }
     }
@@ -371,8 +375,8 @@ export default class Transaction implements ITransaction {
 
                 // Add warning if the string doesn't start with "0x"
                 if (!input.startsWith("0x")) {
-                    console.warn(
-                        "[validateToField] Warning: Hex string should start with '0x' prefix for consistency",
+                    log.warning(
+                        "[TX] convertToBuffer - Hex string should start with '0x' prefix for consistency",
                     )
                 }
 
@@ -403,27 +407,80 @@ export default class Transaction implements ITransaction {
             }
 
             // Unsupported format
-            console.log("[validateToField] TO field is not in a valid format")
+            log.debug(
+                "[TX] convertToBuffer - TO field is not in a valid format",
+            )
             return null
         } catch (e) {
-            console.log(
-                "[validateToField] Error converting TO field to Buffer:",
-                e,
+            log.error(
+                `[TX] convertToBuffer - Error converting TO field to Buffer: ${e instanceof Error ? e.message : String(e)}`,
             )
             return null
         }
     }
+    /**
+     * Validates a storage address format (stor-{40 hex chars})
+     * Used for StorageProgram transaction type where 'to' field is a storage address
+     */
+    private static validateStorageAddress(to: string): {
+        valid: boolean
+        message: string
+    } {
+        log.debug(
+            `[TX] validateStorageAddress - Validating storage address: ${to}`,
+        )
+
+        if (!to || typeof to !== "string") {
+            return {
+                valid: false,
+                message: "Missing or invalid storage address",
+            }
+        }
+
+        // Storage address format: stor-{40 hex chars}
+        const storageAddressRegex = /^stor-[0-9a-f]{40}$/i
+        if (!storageAddressRegex.test(to)) {
+            log.debug(
+                `[TX] validateStorageAddress - Invalid storage address format: ${to}`,
+            )
+            return {
+                valid: false,
+                message: `Invalid storage address format: ${to}. Expected: stor-{40 hex chars}`,
+            }
+        }
+
+        log.debug("[TX] validateStorageAddress - Storage address is valid")
+        return {
+            valid: true,
+            message: "Storage address is valid",
+        }
+    }
+
     // Modify the structured method to use the new validation
     public static structured(tx: Transaction): {
         valid: boolean
         message: string
     } {
-        // Validate TO field
-        const toValidation = this.validateToField(tx.content.to)
-        if (!toValidation.valid) {
-            return {
-                valid: false,
-                message: toValidation.message,
+        // REVIEW: StorageProgram transactions use stor-{hash} format for 'to' field
+        // instead of Ed25519 public key, so we use different validation
+        if (tx.content.type === "storageProgram") {
+            const storageValidation = this.validateStorageAddress(
+                tx.content.to as string,
+            )
+            if (!storageValidation.valid) {
+                return {
+                    valid: false,
+                    message: storageValidation.message,
+                }
+            }
+        } else {
+            // Validate TO field as Ed25519 public key for non-storage transactions
+            const toValidation = this.validateToField(tx.content.to)
+            if (!toValidation.valid) {
+                return {
+                    valid: false,
+                    message: toValidation.message,
+                }
             }
         }
 
@@ -445,13 +502,9 @@ export default class Transaction implements ITransaction {
         tx: Transaction,
         status = "confirmed",
     ): RawTransaction {
-        console.log("[toRawTransaction] attempting to create a raw tx")
-        console.log("[toRawTransaction] Signature: ")
-        console.log(tx.signature.data)
-        console.log("[toRawTransaction] Block number: " + tx.blockNumber)
-        console.log("[toRawTransaction] Status: " + status)
-        console.log("[toRawTransaction] Hash: " + tx.hash)
-        console.log("[toRawTransaction] Type: " + tx.content.type)
+        log.debug(
+            `[TX] toRawTransaction - Creating raw tx: hash=${tx.hash}, type=${tx.content.type}, status=${status}, blockNumber=${tx.blockNumber}`,
+        )
 
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
@@ -461,8 +514,9 @@ export default class Transaction implements ITransaction {
             tx.content.from = tx.content.from["data"]?.toString("hex")
         }
 
-        console.log("[toRawTransaction] From: " + tx.content.from)
-        console.log("[toRawTransaction] To: " + tx.content.to)
+        log.debug(
+            `[TX] toRawTransaction - From: ${tx.content.from}, To: ${tx.content.to}`,
+        )
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
@@ -471,9 +525,10 @@ export default class Transaction implements ITransaction {
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,
+            from_ed25519_address: tx.content.from_ed25519_address,
+
             to: tx.content.to,
             from: tx.content.from,
-            from_ed25519_address: tx.content.from_ed25519_address,
             amount: tx.content.amount,
             nonce: tx.content.nonce,
             timestamp: tx.content.timestamp,
@@ -487,9 +542,13 @@ export default class Transaction implements ITransaction {
     }
 
     public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+        if (!rawTx) {
+            return null
+        }
+
         console.log(
             "[fromRawTransaction] Attempting to create a transaction from a raw transaction with hash: " +
-                rawTx.hash,
+            rawTx.hash,
         )
         const tx = new Transaction()
 

@@ -4,7 +4,6 @@
 import {
     BrowserRequest,
     BundleContent,
-    Ed25519SignedObject,
     RPCRequest,
     RPCResponse,
 } from "@kynesyslabs/demosdk/types"
@@ -23,17 +22,107 @@ import { handleWeb2ProxyRequest } from "./routines/transactions/handleWeb2ProxyR
 import { parseWeb2ProxyRequest } from "../utils/web2RequestUtils"
 import manageBridges from "./manageBridge"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
-import { ucrypto } from "@kynesyslabs/demosdk/encryption"
-import { signedObject } from "@kynesyslabs/demosdk/types"
-import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
 import { RateLimiter } from "./middleware/rateLimiter"
-import GCR from "../blockchain/gcr/gcr"
-// Reading the port from sharedState
+import { getAuthContext } from "./authContext"
+import GCR, { AccountParams } from "../blockchain/gcr/gcr"
+// REVIEW: ZK imports for Phase 8
+import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
+import { MerkleTreeManager } from "@/features/zk/merkle/MerkleTreeManager"
+import {
+    getCurrentMerkleTreeState,
+} from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
+import Datasource from "@/model/datasource"
+import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier"
+import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
 
-const noAuthMethods = ["nodeCall"]
+// REVIEW: ZK Merkle tree configuration constants
+const ZK_MERKLE_TREE_DEPTH = 20 // Maximum tree depth for ZK proofs
+const ZK_MERKLE_TREE_ID = "global" // Global tree identifier for identity attestations
+
+// REVIEW: Singleton MerkleTreeManager instance to avoid expensive per-request initialization
+let globalMerkleManager: MerkleTreeManager | null = null
+// REVIEW: Initialization promise to prevent concurrent initialization race condition
+let initializationPromise: Promise<MerkleTreeManager> | null = null
+// REVIEW: HIGH FIX - Track initialization failures to prevent retry storms
+let lastInitializationError: { timestamp: number; error: Error } | null = null
+const INITIALIZATION_BACKOFF_MS = 5000 // 5 seconds
+// REVIEW: Timeout for initialization to prevent indefinite hangs
+const INIT_TIMEOUT_MS = 30000 // 30 seconds
+
+/**
+ * Get or create the global MerkleTreeManager singleton instance
+ * Lazily initializes on first call to avoid startup overhead
+ * Thread-safe: Prevents concurrent initialization with promise guard
+ */
+async function getMerkleTreeManager(): Promise<MerkleTreeManager> {
+    // Fast path: already initialized
+    if (globalMerkleManager) {
+        return globalMerkleManager
+    }
+
+    // Wait for ongoing initialization
+    if (initializationPromise) {
+        return await initializationPromise
+    }
+
+    // REVIEW: HIGH FIX - Check if recent initialization failed and enforce backoff
+    if (lastInitializationError) {
+        const timeSinceError = Date.now() - lastInitializationError.timestamp
+        if (timeSinceError < INITIALIZATION_BACKOFF_MS) {
+            // REVIEW: Don't expose precise timing to avoid leaking information
+            log.warn(
+                "MerkleTreeManager initialization in backoff period",
+            )
+            throw new Error(
+                "MerkleTreeManager initialization temporarily unavailable. Please retry shortly.",
+            )
+        }
+        // Backoff period expired, clear error and allow retry
+        lastInitializationError = null
+    }
+
+    // Start initialization with timeout protection
+    // REVIEW: Wrap initialization in timeout to prevent indefinite hangs
+    initializationPromise = Promise.race([
+        (async () => {
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            // REVIEW: Create local instance, only assign to global after successful init
+            const manager = new MerkleTreeManager(
+                dataSource,
+                ZK_MERKLE_TREE_DEPTH,
+                ZK_MERKLE_TREE_ID,
+            )
+            await manager.initialize()
+            log.info("✅ Global MerkleTreeManager initialized")
+            globalMerkleManager = manager
+            return globalMerkleManager
+        })(),
+        new Promise<MerkleTreeManager>((_, reject) =>
+            setTimeout(() => reject(new Error("Initialization timeout")), INIT_TIMEOUT_MS),
+        ),
+    ])
+
+    try {
+        const result = await initializationPromise
+        initializationPromise = null
+        return result
+    } catch (error) {
+        // Clear promise to allow backoff logic to run on next attempt
+        initializationPromise = null
+        lastInitializationError = {
+            timestamp: Date.now(),
+            error: error instanceof Error ? error : new Error(String(error)),
+        }
+        log.error("MerkleTreeManager initialization failed:", error)
+        throw error
+    }
+}
+
+// Reading the port from sharedState
 
 // INFO: Protected endpoints
 // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -76,67 +165,6 @@ function isRPCRequest(obj: any): obj is RPCRequest {
     )
 }
 
-// Validate the headers
-async function validateHeaders(headers: Headers): Promise<[boolean, string]> {
-    // Check if we have a valid signature and identity header
-    if (!headers.get("signature")) {
-        return [false, "Missing signature header"]
-    }
-    if (!headers.get("identity")) {
-        log.error("[RPC Call] Missing identity header")
-        return [false, "Missing identity header"]
-    }
-    // Check if the signature is valid
-    const signature = headers.get("signature") as string
-    const identity = headers.get("identity") as string
-    const message = identity
-
-    const splits = identity.split(":")
-
-    let isValid = false
-    let signatureObj: signedObject
-    const supportedAlgorithms = ["ed25519", "falcon", "ml-dsa"]
-
-    if (splits.length > 1) {
-        // INFO: Handle Ed25519 signatures
-        if (supportedAlgorithms.includes(splits[0])) {
-            const publicKey = hexToUint8Array(splits[1])
-            const _signature = hexToUint8Array(signature)
-
-            signatureObj = {
-                algorithm: splits[0],
-                signature: _signature,
-                message: new TextEncoder().encode(splits[1]),
-                publicKey: publicKey,
-            } as Ed25519SignedObject
-        }
-
-        // TODO: Handle other signature algorithms
-    } else {
-        signatureObj = {
-            algorithm: "ed25519",
-            signature: hexToUint8Array(signature),
-            message: new TextEncoder().encode(message),
-            publicKey: hexToUint8Array(identity),
-        } as Ed25519SignedObject
-    }
-
-    if (!signatureObj) {
-        log.error("[RPC Call] Invalid signature object")
-        return [false, "Unsupported or malformed identity or signature header"]
-    }
-
-    isValid = await ucrypto.verify(signatureObj)
-
-    if (isValid) {
-        log.info("[RPC Call] Headers are valid for: " + identity)
-        return [true, "Signature validated"]
-    }
-
-    log.error("[RPC Call] Invalid signature for: " + identity)
-    return [false, "Invalid signature"]
-}
-
 /* End of helper functions */
 
 /* ANCHOR Processor method */
@@ -149,6 +177,8 @@ async function processPayload(
     if (splits.length > 1) {
         sender = splits[1]
     }
+
+    PeerManager.getInstance().updatePeerLastSeen(sender)
 
     if (PROTECTED_ENDPOINTS.has(payload.method)) {
         if (sender !== getSharedState.SUDO_PUBKEY) {
@@ -198,9 +228,9 @@ async function processPayload(
             log.info(
                 "[RPC Call] Received mempool merge request from: " + sender,
             )
-            var res = await ServerHandlers.handleMempool(payload.params[0])
+            var res = await ServerHandlers.handleMempool(payload.params)
             log.info("[RPC Call] Merged mempool from: " + sender)
-            log.info(JSON.stringify(res, null, 2))
+            log.info(JSON.stringify(res))
             return res
         // REVIEW Peerlist merging
         case "peerlist":
@@ -288,8 +318,8 @@ async function processPayload(
         }
 
         case "awardPoints": {
-            const twitterUsernames = payload.params[0].message as string[]
-            const awardedAccounts = await GCR.awardPoints(twitterUsernames)
+            const awardPointsData = payload.params[0].message as AccountParams[]
+            const awardedAccounts = await GCR.awardPoints(awardPointsData)
 
             return {
                 result: 200,
@@ -298,6 +328,74 @@ async function processPayload(
                 },
                 require_reply: false,
                 extra: null,
+            }
+        }
+
+        // REVIEW: ZK proof verification endpoint for Phase 8
+        case "verifyProof": {
+            try {
+                const attestation = payload.params[0] as IdentityAttestationProof
+
+                if (
+                    !attestation.proof ||
+                    !attestation.publicSignals ||
+                    !Array.isArray(attestation.publicSignals) ||
+                    attestation.publicSignals.length < 2
+                ) {
+                    return {
+                        result: 400,
+                        response: "Invalid proof format: missing proof or insufficient public signals",
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+
+                const db = await Datasource.getInstance()
+                const dataSource = db.getDataSource()
+                const verifier = new ProofVerifier(dataSource)
+
+                // 1. Check if nullifier is already used
+                const isUsed = await verifier.isNullifierUsed(attestation.publicSignals[0])
+                if (isUsed) {
+                    return {
+                        result: 200, // Valid request, but nullifier used
+                        response: {
+                            valid: false,
+                            reason: "Nullifier already used",
+                            nullifier: attestation.publicSignals[0],
+                            merkleRoot: attestation.publicSignals[1],
+                        },
+                        require_reply: false,
+                        extra: null,
+                    }
+                }
+
+                // 2. Verify cryptography only
+                const isValid = await ProofVerifier.verifyProofOnly(
+                    attestation.proof,
+                    attestation.publicSignals
+                )
+
+                return {
+                    result: isValid ? 200 : 400,
+                    response: {
+                        valid: isValid,
+                        reason: isValid ? "Valid proof" : "Invalid cryptographic proof",
+                        nullifier: attestation.publicSignals[0],
+                        merkleRoot: attestation.publicSignals[1],
+                    },
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error("[ZK RPC] Error verifying proof:", error)
+                // REVIEW: Sanitize error response - don't expose internal details
+                return {
+                    result: 500,
+                    response: "Internal server error",
+                    require_reply: false,
+                    extra: null,
+                }
             }
         }
 
@@ -335,10 +433,12 @@ export async function serverRpcBun() {
     // eslint-disable-next-line quotes
     server.get("/", req => {
         const clientIP = rateLimiter.getClientIP(req, server.server)
-        return new Response(JSON.stringify({
-            message: "Hello, World!",
-            yourIP: clientIP,
-        }))
+        return new Response(
+            JSON.stringify({
+                message: "Hello, World!",
+                yourIP: clientIP,
+            }),
+        )
     })
 
     server.get("/info", async () => {
@@ -389,6 +489,118 @@ export async function serverRpcBun() {
         return jsonResponse(rateLimiter.getStats())
     })
 
+    // REVIEW: ZK endpoints for Phase 8
+    // Get current Merkle tree root
+    server.get("/zk/merkle-root", async () => {
+        try {
+            // REVIEW: HIGH FIX - Use singleton MerkleTreeManager for consistency
+            const manager = await getMerkleTreeManager()
+            const stats = manager.getStats()
+
+            // Get current block number from database (required for response)
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            const currentState = await getCurrentMerkleTreeState(dataSource)
+
+            return jsonResponse({
+                rootHash: stats.root, // From in-memory singleton (fast)
+                blockNumber: currentState?.blockNumber || 0, // From database
+                leafCount: stats.leafCount, // From in-memory singleton (fast)
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error getting Merkle root:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
+    })
+
+    // Get Merkle proof for a commitment
+    server.get("/zk/merkle/proof/:commitment", async req => {
+        try {
+            const commitment = req.params.commitment
+
+            if (!commitment) {
+                return jsonResponse(
+                    { error: "Commitment hash required" },
+                    400,
+                )
+            }
+
+            // REVIEW: Input validation to prevent injection attacks
+            if (!/^0x[0-9a-fA-F]{64}$/.test(commitment)) {
+                return jsonResponse(
+                    { error: "Invalid commitment format" },
+                    400,
+                )
+            }
+
+            // REVIEW: Use singleton MerkleTreeManager to avoid per-request initialization overhead
+            const merkleManager = await getMerkleTreeManager()
+
+            const proof = await merkleManager.getProofForCommitment(commitment)
+
+            if (!proof) {
+                return jsonResponse(
+                    { error: "Commitment not found in Merkle tree" },
+                    404,
+                )
+            }
+
+            return jsonResponse({
+                commitment: commitment,
+                proof: {
+                    siblings: proof.siblings,
+                    pathIndices: proof.pathIndices,
+                    root: proof.root,
+                    leafIndex: proof.leafIndex,
+                },
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error getting Merkle proof:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
+    })
+
+    // Check if nullifier has been used
+    server.get("/zk/nullifier/:hash", async req => {
+        try {
+            const nullifierHash = req.params.hash
+
+            if (!nullifierHash) {
+                return jsonResponse({ error: "Nullifier hash required" }, 400)
+            }
+
+            // REVIEW: Input validation to prevent injection attacks
+            if (!/^0x[0-9a-fA-F]{64}$/.test(nullifierHash)) {
+                return jsonResponse({ error: "Invalid nullifier hash format" }, 400)
+            }
+
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+            const nullifierRepo = dataSource.getRepository(UsedNullifier)
+
+            const nullifier = await nullifierRepo.findOne({
+                where: { nullifierHash },
+            })
+
+            if (!nullifier) {
+                return jsonResponse({
+                    used: false,
+                    nullifierHash,
+                })
+            }
+
+            return jsonResponse({
+                used: true,
+                nullifierHash,
+                blockNumber: nullifier.blockNumber,
+                transactionHash: nullifier.transactionHash,
+            })
+        } catch (error) {
+            log.error("[ZK RPC] Error checking nullifier:", error)
+            return jsonResponse({ error: "Internal server error" }, 500)
+        }
+    })
+
     // Main RPC endpoint
     server.post("/", async req => {
         try {
@@ -411,43 +623,46 @@ export async function serverRpcBun() {
             }
 
             if (!isRPCRequest(payload)) {
-                return jsonResponse({ error: "Invalid request format" }, 400)
+                return jsonResponse(
+                    { error: "Invalid request format. Not an RPCRequest" },
+                    400,
+                )
             }
 
             log.info(
-                "[RPC Call] Received request: " +
-                    JSON.stringify(payload, null, 2),
+                "[RPC Call] Received request: " + JSON.stringify(payload),
                 false,
             )
 
-            let sender = ""
-            if (!noAuthMethods.includes(payload.method)) {
-                const headers = req.headers
-                log.info(
-                    "[RPC Call] Headers: " + JSON.stringify(headers, null, 2),
-                    true,
-                )
-                const headerValidation = await validateHeaders(headers)
-                console.log("headerValidation", headerValidation)
-                console.log(
-                    "headerValidation: " +
-                        JSON.stringify(headerValidation, null, 2),
-                )
-                if (!headerValidation[0]) {
-                    return jsonResponse(
-                        { error: "Invalid headers:" + headerValidation[1] },
-                        401,
-                    )
-                }
-                sender = headers.get("identity") || ""
-            }
-
+            const authCtx = getAuthContext(req)
+            const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
             return jsonResponse(response)
         } catch (e) {
+            console.error("Error in serverRpcBun: " + e)
             return jsonResponse({ error: "Invalid request format" }, 400)
         }
     })
+
+    // REVIEW: Register TLSNotary routes if enabled
+    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+        try {
+            const { registerTLSNotaryRoutes } =
+                await import("@/features/tlsnotary/routes")
+            registerTLSNotaryRoutes(server)
+        } catch (error) {
+            log.warning("[RPC] Failed to register TLSNotary routes: " + error)
+        }
+    }
+
+    // REVIEW: Register StorageProgram routes for unified storage access
+    try {
+        const { registerStorageProgramRoutes } =
+            await import("@/features/storageprogram/routes")
+        registerStorageProgramRoutes(server)
+    } catch (error) {
+        log.warning("[RPC] Failed to register StorageProgram routes: " + error)
+    }
 
     log.info("[RPC Call] Server is running on 0.0.0.0:" + port, true)
     return server.start()

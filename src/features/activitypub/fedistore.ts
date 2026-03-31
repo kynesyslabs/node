@@ -1,4 +1,5 @@
 import * as sqlite3 from "sqlite3"
+import log from "@/utilities/logger"
 
 export class ActivityPubStorage {
     db: sqlite3.Database
@@ -7,8 +8,7 @@ export class ActivityPubStorage {
         actors: "id TEXT PRIMARY KEY, type TEXT, name TEXT, inbox TEXT, outbox TEXT, followers TEXT, following TEXT, liked TEXT",
         objects:
             "id TEXT PRIMARY KEY, type TEXT, attributedTo TEXT, content TEXT",
-        activities:
-            "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
+        activities: "id TEXT PRIMARY KEY, type TEXT, actor TEXT, object TEXT",
         inboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
         outboxes: "id TEXT PRIMARY KEY, owner TEXT, content TEXT",
         followers: "id TEXT PRIMARY KEY, owner TEXT, actor TEXT",
@@ -25,9 +25,9 @@ export class ActivityPubStorage {
     constructor(dbPath) {
         this.db = new sqlite3.Database(dbPath, err => {
             if (err) {
-                console.error(err.message)
+                log.error(err.message)
             }
-            console.log("Connected to the SQLite database.")
+            log.info("Connected to the SQLite database.")
             this.createTables()
         })
 
@@ -42,7 +42,9 @@ export class ActivityPubStorage {
     }
 
     createTables() {
-        for (const [collection, columns] of Object.entries(this.collectionSchemas)) {
+        for (const [collection, columns] of Object.entries(
+            this.collectionSchemas,
+        )) {
             const sql = `CREATE TABLE IF NOT EXISTS ${collection} (${columns})`
             this.db.run(sql)
         }
@@ -53,9 +55,9 @@ export class ActivityPubStorage {
         const sql = `INSERT INTO ${collection}(id, data) VALUES(?, ?)`
         this.db.run(sql, [item.id, JSON.stringify(item)], function (err) {
             if (err) {
-                return console.error(err.message)
+                return log.error(err.message)
             }
-            console.log(`Item with ID ${item.id} inserted into ${collection}`)
+            log.debug(`Item with ID ${item.id} inserted into ${collection}`)
         })
     }
 
@@ -64,14 +66,14 @@ export class ActivityPubStorage {
         const sql = `SELECT * FROM ${collection} WHERE id = ?`
         this.db.get(sql, [id], (err, row: any) => {
             if (err) {
-                return console.error(err.message)
+                return log.error(err.message)
             }
             try {
-                console.log(row)
+                log.debug(row)
                 const data = row
                 callback(data)
             } catch (e) {
-                console.error("Error parsing JSON data:", e)
+                log.error("Error parsing JSON data:", e)
             }
         })
     }
@@ -81,9 +83,9 @@ export class ActivityPubStorage {
         const sql = `DELETE FROM ${collection} WHERE id = ?`
         this.db.run(sql, [id], function (err) {
             if (err) {
-                return console.error(err.message)
+                return log.error(err.message)
             }
-            console.log(`Item with ID ${id} deleted from ${collection}`)
+            log.debug(`Item with ID ${id} deleted from ${collection}`)
         })
     }
 }

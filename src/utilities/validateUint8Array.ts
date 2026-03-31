@@ -1,4 +1,6 @@
-export default function validateIfUint8Array(input: unknown): Uint8Array | unknown {
+export default function validateIfUint8Array(
+    input: unknown,
+): Uint8Array | unknown {
     // Early exit for arrays and typed arrays - pass through unchanged
     if (Array.isArray(input) || ArrayBuffer.isView(input)) {
         return input
@@ -34,7 +36,9 @@ export default function validateIfUint8Array(input: unknown): Uint8Array | unkno
         })
 
         // Validate all values are numbers
-        const allValuesNumbers = entries.every(([, val]) => typeof val === "number")
+        const allValuesNumbers = entries.every(
+            ([, val]) => typeof val === "number",
+        )
 
         if (allKeysNumericIntegers && allValuesNumbers) {
             // Sort by numeric key and extract values

@@ -1,5 +1,10 @@
-import { MempoolData } from "src/libs/blockchain/mempool"
-import Transaction from "src/libs/blockchain/transaction"
+import Transaction from "@/libs/blockchain/transaction"
+import { Transaction as SDKTransaction } from "@kynesyslabs/demosdk/types"
+
+// Local type definition for mempool data structure
+interface MempoolData {
+    transactions: SDKTransaction[]
+}
 
 export async function orderTransactions(
     mempool: MempoolData,
@@ -20,8 +25,8 @@ export async function orderTransactions(
         },
     )
     // Stringify the transactions
-    const orderedTransactions = orderedTransactionsObjects.map(transaction =>
-        transaction,
+    const orderedTransactions = orderedTransactionsObjects.map(
+        transaction => transaction,
     )
     return orderedTransactions
 }

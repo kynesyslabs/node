@@ -19,6 +19,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { Operation, OperationResult } from "@kynesyslabs/demosdk/types"
 
 import Block from "../block"
+import log from "src/utilities/logger"
 import subOperations from "./subOperations"
 
 // export interface OperationResult {
@@ -48,7 +49,7 @@ export default async function executeOperations(
     operations: Operation[],
     block: Block = null,
 ): Promise<Map<string, Actor>> {
-    console.log("Executing operations")
+    log.debug("Executing operations")
     //console.log("executeOperations", operations)
     const results = new Map<string, Actor>()
     // First of all we divide the operations into groups of addresses
@@ -95,7 +96,7 @@ async function executeSequence(
         // ANCHOR Dispatching the operation to the appropriate method
         switch (operations[i].operator) {
             case "genesis":
-                console.log("Genesis block: applying genesis operations")
+                log.debug("Genesis block: applying genesis operations")
                 result = await subOperations.genesis(operations[i], block)
                 break
             case "transfer_native":

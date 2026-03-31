@@ -1,0 +1,251 @@
+---
+title: "StorageProgram Architecture"
+description: "System design and data flow for StorageProgram operations"
+---
+
+# StorageProgram Architecture
+
+This document describes the internal architecture and data flow of the StorageProgram feature.
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Client Application                          │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ SDK
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    @kynesyslabs/demosdk                             │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  storage.buildStorageProgramPayload()                       │   │
+│  │  - Generates deterministic storage addresses                │   │
+│  │  - Validates payload structure                              │   │
+│  │  - Calculates fees                                          │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Transaction
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Demos Network Node                          │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                     RPC Layer                                │   │
+│  │  - POST / (confirm/broadcast flow)                          │   │
+│  │  - GET /storage-program/:address (read)                     │   │
+│  │  - GET /storage-program/owner/:owner (list)                 │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              │                                      │
+│                              ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                  GCR Processing Layer                        │   │
+│  │  - GCRStorageProgramRoutines.apply()                        │   │
+│  │  - Validation and fee verification                          │   │
+│  │  - ACL enforcement                                          │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                              │                                      │
+│                              ▼                                      │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                   Storage Layer                              │   │
+│  │  - GCR_StorageProgram entity (TypeORM)                      │   │
+│  │  - PostgreSQL persistence                                    │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Components
+
+### SDK Layer
+
+The SDK provides the `storage` module with functions for building StorageProgram payloads:
+
+```typescript
+import { storage } from "@kynesyslabs/demosdk"
+
+// Build a payload with automatic address generation
+const payload = storage.buildStorageProgramPayload({
+  operation: "CREATE_STORAGE_PROGRAM",
+  owner: senderAddress,
+  programName: "my-storage",
+  // ...
+})
+```
+
+The SDK handles:
+- **Address Generation**: Deterministic `stor-{hash}` addresses
+- **Payload Validation**: Structure and field validation
+- **Fee Calculation**: Based on data size and pricing constants
+
+### GCR Processing Layer
+
+The `GCRStorageProgramRoutines` class processes StorageProgram operations:
+
+```typescript
+// File: src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines.ts
+
+class GCRStorageProgramRoutines {
+  static async apply(
+    editOperation: GCREdit,
+    repository: Repository<GCRStorageProgram>,
+    simulate: boolean
+  ): Promise<GCRResult>
+}
+```
+
+Operations flow:
+1. **Validation**: Payload structure and permissions
+2. **Fee Verification**: Confirm sufficient funds
+3. **State Mutation**: Create/update/delete records
+4. **Persistence**: Save to database
+
+### Storage Layer
+
+The `GCR_StorageProgram` entity stores program data:
+
+```typescript
+@Entity({ name: "gcr_storage_program" })
+export class GCRStorageProgram {
+  @PrimaryColumn()
+  storageAddress: string  // stor-{hash}
+
+  @Column()
+  owner: string
+
+  @Column()
+  programName: string
+
+  @Column()
+  encoding: "json" | "binary"
+
+  @Column({ type: "jsonb", nullable: true })
+  data: Record<string, unknown> | string | null
+
+  @Column({ type: "jsonb" })
+  acl: StorageProgramACL
+
+  @Column()
+  storageLocation: string  // "onchain" or future "ipfs"
+
+  @Column({ nullable: true })
+  ipfsCid: string | null  // Future IPFS support
+
+  // ... additional fields
+}
+```
+
+## Transaction Flow
+
+### Confirm Phase
+
+1. Client builds payload using SDK
+2. Client sends to RPC with `method: "execute"` and `extra: "confirmTx"`
+3. Node validates payload and calculates fees
+4. Node returns fee breakdown and validation result
+
+### Broadcast Phase
+
+1. Client signs and sends confirmed transaction
+2. Node processes through GCR layer
+3. `GCRStorageProgramRoutines.apply()` handles the operation
+4. State changes are persisted to database
+
+```
+Client                           Node
+  │                               │
+  │─── Confirm Request ──────────▶│
+  │                               │ Validate payload
+  │                               │ Calculate fees
+  │◀── Fee Breakdown ─────────────│
+  │                               │
+  │─── Broadcast (signed) ───────▶│
+  │                               │ Apply GCR edit
+  │                               │ Persist state
+  │◀── Success Response ──────────│
+```
+
+## Data Flow by Operation
+
+### CREATE_STORAGE_PROGRAM
+
+```
+1. SDK generates stor-{hash} address
+2. Node validates address doesn't exist
+3. Node validates payload structure
+4. Node calculates storage fee
+5. New GCRStorageProgram record created
+6. Owner, ACL, data, and metadata stored
+```
+
+### WRITE_STORAGE
+
+```
+1. Node looks up existing program by address
+2. Node verifies sender has write permission
+3. Node calculates fee for new data size
+4. Data field updated
+5. Metadata merged if provided
+6. lastModifiedByTx and totalFeesPaid updated
+```
+
+### UPDATE_ACCESS_CONTROL
+
+```
+1. Node looks up existing program
+2. Node verifies sender is owner
+3. ACL structure validated
+4. ACL field replaced with new value
+5. lastModifiedByTx updated
+```
+
+### DELETE_STORAGE_PROGRAM
+
+```
+1. Node looks up existing program
+2. Node verifies sender has delete permission
+3. isDeleted flag set to true
+4. deletedByTx recorded
+5. Data preserved for auditability
+```
+
+## RPC Endpoints
+
+### Read Operations
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/storage-program/:address` | GET | Read a storage program by address |
+| `/storage-program/owner/:owner` | GET | List programs owned by an address |
+
+### Write Operations
+
+All write operations go through the standard confirm/broadcast flow on the main RPC endpoint (`POST /`).
+
+## ACL Enforcement
+
+Read permissions are checked in the RPC layer:
+
+```typescript
+static checkReadPermission(
+  program: GCRStorageProgram,
+  requesterAddress?: string
+): boolean
+```
+
+Write and delete permissions are checked in the GCR layer during operation processing.
+
+## Future: IPFS Integration
+
+The architecture is prepared for IPFS storage:
+
+```typescript
+// Current stub implementation
+program.storageLocation = "onchain"  // Always onchain
+program.ipfsCid = null               // Populated when IPFS implemented
+
+// Future flow:
+// 1. Pin data to IPFS network
+// 2. Store CID in ipfsCid field
+// 3. Set storageLocation to "ipfs"
+// 4. Data field contains CID reference only
+```

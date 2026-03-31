@@ -1,7 +1,6 @@
 import { IWeb2Request } from "@kynesyslabs/demosdk/types"
 import { DAHR } from "src/features/web2/dahr/DAHR"
-import terminalKit from "terminal-kit"
-const term = terminalKit.terminal
+import log from "src/utilities/logger"
 
 /**
  * DAHRFactory is a singleton class that manages DAHR instances.
@@ -25,8 +24,9 @@ export class DAHRFactory {
             }
         }
         if (cleanedCount > 0) {
-            term.yellow(
-                `[DAHRFactory] Cleaned up ${cleanedCount} expired DAHR instances\n`,
+            log.info(
+                "DAHR",
+                `[DAHRFactory] Cleaned up ${cleanedCount} expired DAHR instances`,
             )
         }
     }
@@ -37,7 +37,7 @@ export class DAHRFactory {
      */
     static get instance(): DAHRFactory {
         if (!DAHRFactory._instance) {
-            term.yellow("[DAHRFactory] Creating new DAHRFactory instance\n")
+            log.info("DAHR", "[DAHRFactory] Creating new DAHRFactory instance")
             DAHRFactory._instance = new DAHRFactory()
         }
         return DAHRFactory._instance
@@ -52,8 +52,9 @@ export class DAHRFactory {
         await this.cleanupExpired()
         const newDAHR = new DAHR(web2Request)
         const sessionId = newDAHR.sessionId // Get the sessionId from the DAHR instance
-        term.yellow(
-            `[DAHRManager] Creating new DAHR instance with sessionId: ${sessionId}\n`,
+        log.info(
+            "DAHR",
+            `[DAHRManager] Creating new DAHR instance with sessionId: ${sessionId}`,
         )
         this._dahrs.set(sessionId, { dahr: newDAHR, lastAccess: Date.now() })
 
@@ -72,7 +73,10 @@ export class DAHRFactory {
 
             return dahrEntry.dahr
         }
-        term.yellow(`[DAHRFactory] No DAHR found for sessionId: ${sessionId}\n`)
+        log.info(
+            "DAHR",
+            `[DAHRFactory] No DAHR found for sessionId: ${sessionId}`,
+        )
 
         return undefined
     }

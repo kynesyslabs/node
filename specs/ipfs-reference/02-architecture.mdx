@@ -1,0 +1,210 @@
+---
+title: "Architecture"
+description: "IPFS system architecture and component design"
+---
+
+# Architecture
+
+The IPFS integration follows a layered architecture with clear separation of concerns.
+
+## System Diagram
+
+```
+                                    ┌─────────────────────┐
+                                    │   Client / DApp     │
+                                    └──────────┬──────────┘
+                                               │
+                                               ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Demos Node                                  │
+│  ┌──────────────────┐    ┌──────────────────┐    ┌──────────────┐  │
+│  │   RPC Layer      │───▶│  Transaction     │───▶│  GCR State   │  │
+│  │   (NodeCalls)    │    │  Processing      │    │  Management  │  │
+│  └──────────────────┘    └──────────────────┘    └──────────────┘  │
+│           │                       │                                 │
+│           ▼                       ▼                                 │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                      IPFSManager                              │  │
+│  │   - Content operations (add, get, pin, unpin)                │  │
+│  │   - Streaming support for large files                        │  │
+│  │   - Swarm peer management                                    │  │
+│  │   - Health monitoring                                        │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                  │                                  │
+└──────────────────────────────────┼──────────────────────────────────┘
+                                   │
+                                   ▼
+                    ┌──────────────────────────────┐
+                    │      Kubo IPFS Daemon        │
+                    │   (Docker Container)         │
+                    │   - Kubo v0.26.0            │
+                    │   - Private swarm mode      │
+                    │   - HTTP API :54550         │
+                    │   - Swarm :4001             │
+                    └──────────────────────────────┘
+```
+
+## Components
+
+### RPC Layer (NodeCalls)
+
+The RPC layer exposes IPFS operations to clients via the Demos RPC protocol:
+
+- Validates incoming requests
+- Enforces rate limits
+- Routes to appropriate handlers
+- Returns structured responses
+
+**Location:** `src/libs/network/routines/nodecalls/ipfs/`
+
+### Transaction Processing
+
+Blockchain transactions modify account state through consensus:
+
+- Validates signatures and permissions
+- Checks quotas and balances
+- Calculates and deducts fees
+- Updates account IPFS state
+
+**Location:** `src/libs/blockchain/routines/ipfsOperations.ts`
+
+### GCR State Management
+
+The Global Consensus Registry stores account IPFS state:
+
+```typescript
+interface AccountIPFSState {
+  pins: PinnedContent[]
+  totalPinnedBytes: number
+  earnedRewards: string
+  paidCosts: string
+  freeAllocationBytes: number
+  usedFreeBytes: number
+  lastUpdated?: number
+}
+```
+
+**Location:** `src/libs/blockchain/gcr/gcr_routines/GCRIPFSRoutines.ts`
+
+### IPFSManager
+
+The core interface to the Kubo IPFS daemon:
+
+```typescript
+class IPFSManager {
+  // Content operations
+  add(content: Buffer): Promise<AddResult>
+  get(cid: string): Promise<Buffer>
+  pin(cid: string): Promise<void>
+  unpin(cid: string): Promise<void>
+
+  // Streaming for large files
+  addStream(stream: ReadableStream): Promise<AddResult>
+  getStream(cid: string): Promise<ReadableStream>
+
+  // Status and health
+  healthCheck(): Promise<HealthStatus>
+  getNodeInfo(): Promise<NodeInfo>
+
+  // Swarm management
+  swarmPeers(): Promise<Peer[]>
+  swarmConnect(multiaddr: string): Promise<void>
+}
+```
+
+**Location:** `src/features/ipfs/IPFSManager.ts`
+
+### Kubo IPFS Daemon
+
+Each Demos node runs an isolated Kubo instance in Docker:
+
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| Image | `ipfs/kubo:v0.26.0` | IPFS implementation |
+| IPFS_PROFILE | `server` | Always-on optimization |
+| LIBP2P_FORCE_PNET | `1` | Private network mode |
+| API Port | `54550` | HTTP API (internal) |
+| Gateway Port | `58080` | Read-only gateway |
+| Swarm Port | `4001` | P2P communication |
+
+## Data Flow
+
+### Adding Content
+
+```
+1. Client sends base64 content via RPC
+2. NodeCall validates request format
+3. Transaction processor:
+   a. Decodes content
+   b. Validates quota
+   c. Calculates cost
+   d. Checks balance
+   e. Deducts fee
+4. IPFSManager.add() stores in Kubo
+5. GCR updates account state with pin
+6. CID returned to client
+```
+
+### Retrieving Content
+
+```
+1. Client requests CID via RPC
+2. NodeCall validates CID format
+3. IPFSManager.get() fetches from Kubo
+4. Content returned (base64 encoded)
+```
+
+## State Schema
+
+### PinnedContent
+
+```typescript
+interface PinnedContent {
+  cid: string           // Content Identifier
+  size: number          // Size in bytes
+  timestamp: number     // Pin creation time (Unix ms)
+  expiresAt?: number    // Optional expiration (Unix ms)
+  duration?: number     // Original duration in seconds
+  metadata?: object     // User-defined metadata
+  wasFree?: boolean     // Used free tier flag
+  freeBytes?: number    // Bytes covered by free tier
+  costPaid?: string     // Cost paid in DEM
+}
+```
+
+## Connection Management
+
+### Retry Logic
+
+IPFSManager implements exponential backoff for resilience:
+
+- Maximum retries: 5
+- Initial delay: 1 second
+- Maximum delay: 30 seconds
+- Backoff multiplier: 2x
+
+### Health Monitoring
+
+```typescript
+interface HealthStatus {
+  healthy: boolean
+  peerId?: string
+  peerCount?: number
+  repoSize?: number
+  timestamp: number
+  error?: string
+}
+```
+
+## File Locations
+
+| Component | Path |
+|-----------|------|
+| IPFSManager | `src/features/ipfs/IPFSManager.ts` |
+| ExpirationWorker | `src/features/ipfs/ExpirationWorker.ts` |
+| Types | `src/features/ipfs/types.ts` |
+| Errors | `src/features/ipfs/errors.ts` |
+| Swarm Key | `src/features/ipfs/swarmKey.ts` |
+| Transaction Handlers | `src/libs/blockchain/routines/ipfsOperations.ts` |
+| Tokenomics | `src/libs/blockchain/routines/ipfsTokenomics.ts` |
+| RPC Endpoints | `src/libs/network/routines/nodecalls/ipfs/` |

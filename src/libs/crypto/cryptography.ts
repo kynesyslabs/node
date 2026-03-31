@@ -9,23 +9,18 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import * as crypto from "crypto"
 import { promises as fs } from "fs"
 import forge from "node-forge"
 import { getSharedState } from "src/utilities/sharedState"
-import terminalkit from "terminal-kit"
+import log from "src/utilities/logger"
 
 import { forgeToHex } from "./forgeUtils"
-
-const term = terminalkit.terminal
-
-const algorithm = "aes-256-cbc"
 
 export default class Cryptography {
     static new() {
         const seed = forge.random.getBytesSync(32)
         const keys = forge.pki.ed25519.generateKeyPair({ seed })
-        console.log("Generated new ed25519 keypair")
+        log.debug("Generated new ed25519 keypair")
         return keys
     }
 
@@ -36,7 +31,7 @@ export default class Cryptography {
 
     // TODO Eliminate the old legacy compatibility
     static async save(keypair: forge.pki.KeyPair, path: string, mode = "hex") {
-        console.log(keypair.privateKey)
+        log.debug(keypair.privateKey)
         if (mode === "hex") {
             const hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
             await fs.writeFile(path, hexPrivKey)
@@ -46,47 +41,13 @@ export default class Cryptography {
     }
 
     static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
-        console.log("[forge to string encoded]")
+        log.debug("[forge to string encoded]")
         //console.log(forgeBuffer) // REVIEW if it is like this
         const stringBuffer = forgeBuffer.toString("hex")
-        console.log("DECODED INTO:")
-        console.log("0x" + stringBuffer)
+        log.debug("DECODED INTO:")
+        log.debug("0x" + stringBuffer)
         return "0x" + stringBuffer
     }
-
-    // SECTION Encrypted save and load
-    static async saveEncrypted(
-        keypair: forge.pki.KeyPair,
-        path: string,
-        password: string,
-    ) {
-        const key = crypto.createCipher(algorithm, password)
-        // Getting the private key in hex form
-        const hexKey = keypair.privateKey.toString("hex")
-        // Encrypting and saving
-        const encryptedMessage = key.update(hexKey, "utf8", "hex")
-        await fs.writeFile(path, encryptedMessage)
-    }
-
-    static async loadEncrypted(path: string, password: string) {
-        let keypair: forge.pki.KeyPair = {
-            privateKey: null,
-            publicKey: null,
-        }
-        // Preparing the environment
-        const decipher = crypto.createDecipher(algorithm, password)
-        const contentOfFile = await fs.readFile(path, "utf8")
-        // Decrypting
-        const decryptedKey = decipher.update(contentOfFile, "hex", "utf8")
-        // Loading
-        if (decryptedKey.includes("{")) {
-            keypair = Cryptography.loadFromBufferString(contentOfFile)
-        } else {
-            keypair = Cryptography.loadFromHex(contentOfFile)
-        }
-        return keypair
-    }
-    // !SECTION Encrypted save and load
 
     static async load(path) {
         let keypair: forge.pki.KeyPair = {
@@ -107,24 +68,24 @@ export default class Cryptography {
         const keypair = { publicKey: null, privateKey: null }
         content = content.slice(2)
         const finalArray = new Uint8Array(64)
-        console.log("[string to forge encoded]")
-        console.log(content)
+        log.debug("[string to forge encoded]")
+        log.debug(content)
         for (let i = 0; i < content.length; i += 2) {
             const hexValue = content.substr(i, 2)
             const decimalValue = parseInt(hexValue, 16)
             finalArray[i / 2] = decimalValue
         }
-        console.log("ENCODED INTO:")
+        log.debug("ENCODED INTO:")
         //console.log(finalArray)
         // Condensing
-        console.log("That means:")
+        log.debug("That means:")
         keypair.privateKey = Buffer.from(finalArray)
-        console.log(keypair.privateKey)
-        console.log("And the public key is:")
+        log.debug(keypair.privateKey)
+        log.debug("And the public key is:")
         keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
         })
-        console.log(keypair.publicKey)
+        log.debug(keypair.publicKey)
         return keypair
     }
 
@@ -143,10 +104,9 @@ export default class Cryptography {
     ) {
         // REVIEW Test HexToForge support
         if (privateKey.type == "string") {
-            console.log("[HexToForge] Deriving a buffer from privateKey...")
+            log.debug("[HexToForge] Deriving a buffer from privateKey...")
             // privateKey = HexToForge(privateKey)
             privateKey = forge.util.binary.hex.decode(privateKey)
-            process.exit(0)
         }
 
         return forge.pki.ed25519.sign({
@@ -168,7 +128,7 @@ export default class Cryptography {
         console.log("publicKey: " + publicKey) */
         // REVIEW Test HexToForge support
         if (typeof signature == "string") {
-            console.log(
+            log.debug(
                 "[HexToForge] Deriving a buffer from signature: " + signature,
             )
             // signature = HexToForge(signature)
@@ -176,7 +136,7 @@ export default class Cryptography {
         }
 
         if (typeof publicKey == "string") {
-            console.log("[HexToForge] Deriving a buffer from publicKey...")
+            log.debug("[HexToForge] Deriving a buffer from publicKey...")
             // publicKey = HexToForge(publicKey)
             publicKey = forge.util.binary.hex.decode(publicKey)
         }
@@ -195,19 +155,19 @@ export default class Cryptography {
 
         //console.log(publicKey)
 
-        console.log(
+        log.debug(
             "[Cryptography] Verifying the signature of: (" +
                 typeof signed +
                 ") " +
                 signed,
         )
-        console.log(
+        log.debug(
             "[Cryptography] Using the signature: (" +
                 typeof signature +
                 ") " +
                 forgeToHex(signature),
         )
-        console.log(
+        log.debug(
             "[Cryptography] And the public key: (" +
                 typeof publicKey +
                 ") " +
@@ -233,7 +193,10 @@ export default class Cryptography {
             const seed = md.digest().toHex()
             const pnrg = forge.random.createInstance()
             pnrg.seedFileSync = () => seed
-            const keys = forge.pki.rsa.generateKeyPair({ bits: 4096, prng: pnrg })
+            const keys = forge.pki.rsa.generateKeyPair({
+                bits: 4096,
+                prng: pnrg,
+            })
             return keys
         },
 
@@ -265,20 +228,22 @@ export default class Cryptography {
                     privateKey = Buffer.from(privateKey)
                 }
             } catch (e) {
-                term.yellow(
-                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed\n",
+                log.debug(
+                    "CRYPTO",
+                    "[DECRYPTION] Looks like there is nothing to normalize here, let's proceed",
                 )
-                console.log(e)
+                log.error("CRYPTO", e)
             }
             // Converting back the message and decrypting it
             // NOTE If no private key is provided, we try to use our one
             if (!privateKey) {
-                term.yellow(
-                    "[DECRYPTION] No private key provided, using our one...\n",
+                log.warning(
+                    "CRYPTO",
+                    "[DECRYPTION] No private key provided, using our one...",
                 )
                 privateKey = getSharedState.identity.rsa.privateKey
                 if (!privateKey) {
-                    term.red("[DECRYPTION] No private key found\n")
+                    log.error("CRYPTO", "[DECRYPTION] No private key found")
                     return [false, "No private key found"]
                 }
             }

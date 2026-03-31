@@ -17,6 +17,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
 /* NOTE 
 
@@ -40,9 +41,16 @@ export default async function executeNativeTransaction(
     // ANCHOR Managing simple value transfer
     if (transaction.content.amount > 0) {
         let operation: Operation
-        const sender = transaction.content.from.toString("hex")
+        // Handle both string and Buffer types for from/to fields
+        const sender =
+            typeof transaction.content.from === "string"
+                ? transaction.content.from
+                : forgeToHex(transaction.content.from)
         const senderBalance = await GCR.getGCRNativeBalance(sender)
-        const receiver = transaction.content.to.toString("hex")
+        const receiver =
+            typeof transaction.content.to === "string"
+                ? transaction.content.to
+                : forgeToHex(transaction.content.to)
         const receiverBalance = await GCR.getGCRNativeBalance(receiver)
         // Refuse transaction if GCR is not in shape
         if (senderBalance < transaction.content.amount) {

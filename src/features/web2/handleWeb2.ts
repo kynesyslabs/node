@@ -20,16 +20,16 @@ export async function handleWeb2(
     web2Request: IWeb2Request,
 ): Promise<string | DAHR> {
     // TODO Remember that web2 could need to be signed and could need a fee
-    console.log("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
-    console.log("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
+    log.debug("[PAYLOAD FOR WEB2] [*] Received a Web2 Payload.")
+    log.debug("[PAYLOAD FOR WEB2] [*] Beginning sanitization checks...")
 
     const sanitizedForLog = sanitizeWeb2RequestForLogging(web2Request)
     log.debug(
         "[PAYLOAD FOR WEB2] [*] Web2 Request: " +
-            JSON.stringify(sanitizedForLog, null, 2),
+            JSON.stringify(sanitizedForLog),
     )
 
-    console.log(
+    log.debug(
         "[REQUEST FOR WEB2] [+] Found and loaded payload.message as expected...",
     )
 
@@ -37,11 +37,11 @@ export async function handleWeb2(
         const dahrFactoryInstance = DAHRFactory.instance
         const dahr = await dahrFactoryInstance.createDAHR(web2Request)
 
-        console.log("[handleWeb2] DAHR instance created.")
+        log.debug("[handleWeb2] DAHR instance created.")
 
         return dahr
     } catch (error: any) {
-        console.error("Error in handleWeb2:", error)
+        log.error("Error in handleWeb2:", error)
         return error.message
     }
 }

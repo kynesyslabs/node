@@ -34,7 +34,7 @@ export class Transactions {
     @Column("varchar", { name: "from" })
     from: string
 
-    @Column("varchar", { name: "from_ed25519_address" })
+    @Column("varchar", { name: "from_ed25519_address", nullable: true })
     from_ed25519_address: string
 
     @Column("varchar", { name: "to" })
@@ -43,7 +43,7 @@ export class Transactions {
     @Column("integer", { name: "amount" })
     amount: number
 
-    @Column("integer", { name: "nonce" })
+    @Column("bigint", { name: "nonce", nullable: true, default: 0 })
     nonce: number
 
     @Column("bigint", { name: "timestamp" })

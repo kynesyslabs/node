@@ -3,10 +3,11 @@ import * as multichain from "@kynesyslabs/demosdk/xm-localsdk"
 import { chainProviders } from "sdk/localsdk/multichain/configs/chainProviders"
 import { Network } from "@aptos-labs/ts-sdk"
 import handleAptosPayRest from "./aptos_pay_rest"
+import log from "@/utilities/logger"
 
 export default async function handleAptosContractWrite(operation: IOperation) {
     return await handleAptosPayRest(operation)
-    console.log("[XM Method] Aptos Contract Write")
+    log.debug("[XM Method] Aptos Contract Write")
 
     try {
         // Get the provider URL from our configuration
@@ -18,10 +19,10 @@ export default async function handleAptosContractWrite(operation: IOperation) {
             }
         }
 
-        console.log(
+        log.debug(
             `[XM Method] operation.chain: ${operation.chain}, operation.subchain: ${operation.subchain}`,
         )
-        console.log(`[XM Method]: providerUrl: ${providerUrl}`)
+        log.debug(`[XM Method]: providerUrl: ${providerUrl}`)
 
         // Map subchain to Network enum
         const networkMap = {
@@ -53,17 +54,14 @@ export default async function handleAptosContractWrite(operation: IOperation) {
             }
         }
 
-        console.log("Processing pre-signed Aptos contract write transaction")
+        log.debug("Processing pre-signed Aptos contract write transaction")
 
         // Send the pre-signed transaction using LocalSDK (same pattern as EVM)
         const signedTx = operation.task.signedPayloads[0]
         const txResponse = await aptosInstance.sendTransaction(signedTx)
 
-        console.log(
-            "Aptos contract write transaction result:",
-            txResponse.result,
-        )
-        console.log("Transaction hash:", txResponse.hash)
+        log.debug("Aptos contract write transaction result:", txResponse.result)
+        log.debug("Transaction hash:", txResponse.hash)
 
         return {
             result: txResponse.result,
@@ -71,7 +69,7 @@ export default async function handleAptosContractWrite(operation: IOperation) {
             status: txResponse.result === "success",
         }
     } catch (error) {
-        console.error("Aptos contract write error:", error)
+        log.error("Aptos contract write error:", error)
         return {
             result: "error",
             error: error.toString(),

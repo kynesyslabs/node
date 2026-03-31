@@ -1,0 +1,587 @@
+---
+title: "StorageProgram RPC Endpoints"
+description: "HTTP API reference for reading StorageProgram data"
+---
+
+# StorageProgram RPC Endpoints
+
+This document provides the HTTP API reference for reading StorageProgram data.
+
+## Endpoints Overview
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/storage-program/:address` | GET | Read a storage program by address |
+| `/storage-program/owner/:owner` | GET | List storage programs by owner |
+| `/storage-program/:address/fields` | GET | List all field names |
+| `/storage-program/:address/field/:field` | GET | Get a field's value |
+| `/storage-program/:address/field/:field/item/:index` | GET | Get an array item |
+| `/storage-program/:address/has/:field` | GET | Check if field exists |
+| `/storage-program/:address/type/:field` | GET | Get field value type |
+| `/storage-program/:address/all` | GET | Get all data |
+| `/storage-program/search?q=:query` | GET | Search by program name (partial match by default) |
+| `/storage-program/search/:name` | GET | Search by program name (path alias) |
+
+## Read Storage Program
+
+Retrieves a storage program by its address.
+
+### Request
+
+```http
+GET /storage-program/stor-abc123def456...
+```
+
+### Headers
+
+| Header | Required | Description |
+|--------|----------|-------------|
+| `identity` | Optional | Used for ACL checks on owner/restricted data. Format: `algorithm:publicKey` or just `publicKey` |
+| `signature` | Optional | Reserved for authenticated client flows; current storage GET routes use `identity` for access checks |
+
+**Note**: For anonymous requests, only publicly readable programs are accessible.
+
+### Response
+
+**Success (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123def456...",
+  "owner": "ed25519:owner-public-key...",
+  "programName": "my-storage-program",
+  "encoding": "json",
+  "data": {
+    "key": "value",
+    "nested": {
+      "data": "here"
+    }
+  },
+  "metadata": {
+    "version": "1.0",
+    "createdBy": "my-app"
+  },
+  "storageLocation": "onchain",
+  "sizeBytes": 1234,
+  "createdAt": "2024-01-15T10:30:00.000Z",
+  "updatedAt": "2024-01-16T14:20:00.000Z"
+}
+```
+
+**Not Found (404)**
+
+```json
+{
+  "success": false,
+  "error": "Storage program not found: stor-abc123...",
+  "errorCode": "NOT_FOUND"
+}
+```
+
+**Permission Denied (403)**
+
+```json
+{
+  "success": false,
+  "error": "Permission denied: You do not have read access to this storage program",
+  "errorCode": "PERMISSION_DENIED"
+}
+```
+
+**Invalid Address (400)**
+
+```json
+{
+  "success": false,
+  "error": "Invalid storage address format. Expected: stor-{hash}",
+  "errorCode": "INVALID_REQUEST"
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Whether the request succeeded |
+| `storageAddress` | string | The storage program address |
+| `owner` | string | Owner's address |
+| `programName` | string | Human-readable name |
+| `encoding` | string | "json" or "binary" |
+| `data` | object/string/null | Stored data content |
+| `metadata` | object/null | Optional metadata |
+| `storageLocation` | string | Storage location ("onchain") |
+| `sizeBytes` | number | Data size in bytes |
+| `createdAt` | string | ISO 8601 creation timestamp |
+| `updatedAt` | string | ISO 8601 last update timestamp |
+| `error` | string | Error message (on failure) |
+| `errorCode` | string | Error code (on failure) |
+
+### Error Codes
+
+| Code | HTTP Status | Description |
+|------|-------------|-------------|
+| `NOT_FOUND` | 404 | Storage program doesn't exist |
+| `INVALID_REQUEST` | 400 | Invalid address format or malformed request |
+| `PERMISSION_DENIED` | 403 | Requester lacks read access |
+| `INTERNAL_ERROR` | 500 | Server error during processing |
+
+### Example: cURL
+
+```bash
+# Public storage program (no auth needed)
+curl https://rpc.demos.network/storage-program/stor-abc123...
+
+# Protected storage program (with auth)
+curl https://rpc.demos.network/storage-program/stor-abc123... \
+  -H "identity: ed25519:your-public-key-hex" \
+  -H "signature: your-signature-hex"
+```
+
+### Example: JavaScript
+
+```javascript
+// Read public storage
+const response = await fetch(
+  'https://rpc.demos.network/storage-program/stor-abc123...'
+)
+const data = await response.json()
+
+// Read protected storage
+const response = await fetch(
+  'https://rpc.demos.network/storage-program/stor-abc123...', {
+    headers: {
+      'identity': 'ed25519:' + publicKeyHex,
+      'signature': signatureHex
+    }
+  }
+)
+```
+
+## List Storage Programs by Owner
+
+Retrieves all storage programs owned by an address.
+
+### Request
+
+```http
+GET /storage-program/owner/ed25519:owner-public-key...
+```
+
+### Headers
+
+Same as Read Storage Program. Used to filter results based on read permissions.
+
+### Response
+
+**Success (200)**
+
+```json
+{
+  "success": true,
+  "programs": [
+    {
+      "storageAddress": "stor-abc123...",
+      "programName": "config-v1",
+      "encoding": "json",
+      "sizeBytes": 1024,
+      "storageLocation": "onchain",
+      "createdAt": "2024-01-15T10:30:00.000Z",
+      "updatedAt": "2024-01-16T14:20:00.000Z"
+    },
+    {
+      "storageAddress": "stor-def456...",
+      "programName": "user-data",
+      "encoding": "binary",
+      "sizeBytes": 51200,
+      "storageLocation": "onchain",
+      "createdAt": "2024-01-10T08:00:00.000Z",
+      "updatedAt": "2024-01-10T08:00:00.000Z"
+    }
+  ],
+  "count": 2
+}
+```
+
+**No Programs Found (200)**
+
+```json
+{
+  "success": true,
+  "programs": [],
+  "count": 0
+}
+```
+
+### Response Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `success` | boolean | Whether the request succeeded |
+| `programs` | array | List of storage programs (without full data) |
+| `count` | number | Total programs in the list |
+| `error` | string | Error message (on failure) |
+
+### Program List Item Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `storageAddress` | string | The storage program address |
+| `programName` | string | Human-readable name |
+| `encoding` | string | "json" or "binary" |
+| `sizeBytes` | number | Data size in bytes |
+| `storageLocation` | string | Storage location ("onchain") |
+| `createdAt` | string | ISO 8601 creation timestamp |
+| `updatedAt` | string | ISO 8601 last update timestamp |
+
+**Note**: The list response does not include full `data` content to reduce response size. Use the individual read endpoint to get full data.
+
+### Filtering Behavior
+
+The list only returns programs that the requester can read:
+- **Anonymous**: Only public programs
+- **Authenticated**: Public + programs where requester has read access
+
+### Example: cURL
+
+```bash
+# List all public programs by owner
+curl https://rpc.demos.network/storage-program/owner/ed25519:abc123...
+
+# List all accessible programs (including restricted)
+curl https://rpc.demos.network/storage-program/owner/ed25519:abc123... \
+  -H "identity: ed25519:your-public-key-hex" \
+  -H "signature: your-signature-hex"
+```
+
+## Granular Read Endpoints
+
+These endpoints provide field-level access to storage program data for more efficient querying.
+
+### Get All Fields
+
+Retrieves all top-level field names from a storage program's data.
+
+```http
+GET /storage-program/:address/fields
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "fields": ["theme", "notifications", "settings", "posts"]
+}
+```
+
+### Get Field Value
+
+Retrieves the value of a specific field.
+
+```http
+GET /storage-program/:address/field/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "theme",
+  "value": "dark",
+  "type": "string"
+}
+```
+
+**Field Not Found (404)**
+
+```json
+{
+  "success": false,
+  "error": "Field not found: unknownField",
+  "errorCode": "FIELD_NOT_FOUND"
+}
+```
+
+### Get Array Item
+
+Retrieves a specific item from an array field by index.
+
+```http
+GET /storage-program/:address/field/:field/item/:index
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "posts",
+  "index": 0,
+  "value": {
+    "title": "First Post",
+    "content": "Hello World"
+  }
+}
+```
+
+**Index Out of Bounds (400)**
+
+```json
+{
+  "success": false,
+  "error": "Index out of bounds: 10 (array length: 3)",
+  "errorCode": "INDEX_OUT_OF_BOUNDS"
+}
+```
+
+**Field Not Array (400)**
+
+```json
+{
+  "success": false,
+  "error": "Field is not an array: theme",
+  "errorCode": "INVALID_FIELD_TYPE"
+}
+```
+
+### Check Field Exists
+
+Checks if a field exists in the storage program.
+
+```http
+GET /storage-program/:address/has/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "theme",
+  "exists": true
+}
+```
+
+### Get Field Type
+
+Returns the type of a specific field's value.
+
+```http
+GET /storage-program/:address/type/:field
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "field": "posts",
+  "type": "array"
+}
+```
+
+**Field Types**
+
+| Type | Description |
+|------|-------------|
+| `string` | Text value |
+| `number` | Numeric value (integer or float) |
+| `boolean` | True or false |
+| `array` | Ordered list of values |
+| `object` | Key-value mapping |
+| `null` | Null value |
+| `undefined` | Field exists but value is undefined |
+
+### Get All Data
+
+Retrieves all data from a storage program (equivalent to the base read endpoint).
+
+```http
+GET /storage-program/:address/all
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "storageAddress": "stor-abc123...",
+  "data": {
+    "theme": "dark",
+    "notifications": true,
+    "settings": { "language": "en" },
+    "posts": [{ "title": "Post 1" }]
+  }
+}
+```
+
+### Search by Name
+
+Search for storage programs by name with partial matching.
+
+```http
+GET /storage-program/search?q=user
+```
+
+Path alias is also supported:
+
+```http
+GET /storage-program/search/user
+```
+
+**Response (200)**
+
+```json
+{
+  "success": true,
+  "query": "user",
+  "programs": [
+    {
+      "storageAddress": "stor-abc123...",
+      "programName": "user-preferences",
+      "owner": "ed25519:...",
+      "sizeBytes": 1024
+    },
+    {
+      "storageAddress": "stor-def456...",
+      "programName": "user-settings",
+      "owner": "ed25519:...",
+      "sizeBytes": 512
+    }
+  ],
+  "count": 2
+}
+```
+
+### Granular Endpoints Summary
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/storage-program/:address/fields` | GET | List all field names |
+| `/storage-program/:address/field/:field` | GET | Get a field's value |
+| `/storage-program/:address/field/:field/item/:index` | GET | Get an array item |
+| `/storage-program/:address/has/:field` | GET | Check if field exists |
+| `/storage-program/:address/type/:field` | GET | Get field value type |
+| `/storage-program/:address/all` | GET | Get all data |
+| `/storage-program/search?q=:query` | GET | Search by program name |
+
+### Example: JavaScript with Granular Endpoints
+
+```javascript
+// Get all field names
+const fields = await fetch('/storage-program/stor-abc.../fields')
+  .then(r => r.json())
+console.log(fields.fields) // ["theme", "posts", "settings"]
+
+// Get specific field value
+const theme = await fetch('/storage-program/stor-abc.../field/theme')
+  .then(r => r.json())
+console.log(theme.value) // "dark"
+
+// Get array item
+const post = await fetch('/storage-program/stor-abc.../field/posts/item/0')
+  .then(r => r.json())
+console.log(post.value) // { title: "First Post", ... }
+
+// Check if field exists
+const hasField = await fetch('/storage-program/stor-abc.../has/theme')
+  .then(r => r.json())
+console.log(hasField.exists) // true
+
+// Get field type
+const fieldType = await fetch('/storage-program/stor-abc.../type/posts')
+  .then(r => r.json())
+console.log(fieldType.type) // "array"
+```
+
+## Authentication
+
+### Identity Header Format
+
+The `identity` header supports multiple formats:
+
+```
+# With algorithm prefix (recommended)
+identity: ed25519:public-key-hex
+
+# Without prefix (defaults to ed25519)
+identity: public-key-hex
+
+# Other supported algorithms
+identity: falcon:public-key-hex
+identity: ml-dsa:public-key-hex
+```
+
+### Signature Header
+
+The signature should be the result of signing the public key with the corresponding private key:
+
+```javascript
+// Using SDK
+const { ucrypto } = require("@kynesyslabs/demosdk/encryption")
+
+const message = publicKeyHex  // Sign the public key itself
+const signature = await ucrypto.sign(privateKey, message)
+const signatureHex = Buffer.from(signature).toString("hex")
+```
+
+### Signature Verification
+
+For storage GET routes, access checks are based on `identity` + ACL rules in storage handlers. Signature-based verification may be applied in broader node flows, but should not be assumed as mandatory for these direct GET endpoints.
+
+## Write Operations
+
+Write operations (CREATE, WRITE, UPDATE_ACCESS_CONTROL, DELETE) are not performed via these endpoints. They use the standard RPC confirm/broadcast flow:
+
+```http
+POST /
+Content-Type: application/json
+
+{
+  "method": "execute",
+  "params": [{
+    "data": {
+      "content": {
+        "data": ["storageProgram", { /* payload */ }]
+      }
+    },
+    "extra": "confirmTx"
+  }]
+}
+```
+
+See the SDK documentation for building and submitting StorageProgram transactions.
+
+## Rate Limiting
+
+The RPC endpoints respect the node's rate limiting configuration:
+
+- Per-IP request limits
+- Per-identity transaction limits
+- Automatic blocking for abuse
+
+Rate limit errors return:
+
+```json
+{
+  "error": "Rate limit exceeded",
+  "retryAfter": null
+}
+```
+
+## CORS
+
+The endpoints support CORS for browser-based applications:
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: Content-Type, identity, signature
+```

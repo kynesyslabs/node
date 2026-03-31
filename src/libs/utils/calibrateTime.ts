@@ -1,5 +1,6 @@
 import * as ntpClient from "ntp-client"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
+import log from "@/utilities/logger"
 
 const primaryNtpServer = "pool.ntp.org"
 const fallbackNtpServers = [
@@ -27,18 +28,21 @@ async function getMeasuredTimeDelta(): Promise<number> {
     const ntpTime = await getNtpTime()
     const endTime = Date.now()
     const roundTripTime = endTime - startTime
-    console.log("Round trip time:", roundTripTime)
+    log.debug("Round trip time:", roundTripTime)
 
     const halfTripTime = Math.floor(roundTripTime / 2)
     const halfTripTimeInSeconds = Math.floor(halfTripTime / 1000)
-    console.log("Half trip time (ntp correction in seconds):", halfTripTimeInSeconds)
+    log.debug(
+        "Half trip time (ntp correction in seconds):",
+        halfTripTimeInSeconds,
+    )
 
     const ntpTimeConsideringRoundTripTime = ntpTime - halfTripTimeInSeconds
     const localTime = Math.floor(Date.now() / 1000)
     const timeDelta = ntpTimeConsideringRoundTripTime - localTime
-    console.log("NTP time:", ntpTimeConsideringRoundTripTime)
-    console.log("Local time:", localTime)
-    console.log("Time delta:", timeDelta)
+    log.debug("NTP time:", ntpTimeConsideringRoundTripTime)
+    log.debug("Local time:", localTime)
+    log.debug("Time delta:", timeDelta)
     return timeDelta
 }
 
@@ -55,7 +59,7 @@ async function getNtpTime(): Promise<number> {
         })
         return Math.floor(time.getTime() / 1000)
     } catch (error) {
-        console.warn(`Failed to fetch time from ${primaryNtpServer}:`, error)
+        log.warning(`Failed to fetch time from ${primaryNtpServer}:`, error)
         return getFallbackNtpTime()
     }
 }
@@ -74,7 +78,7 @@ async function getFallbackNtpTime(): Promise<number> {
             })
             return Math.floor(time.getTime() / 1000)
         } catch (error) {
-            console.warn(`Failed to fetch time from ${server}:`, error)
+            log.warning(`Failed to fetch time from ${server}:`, error)
         }
     }
 

@@ -1,12 +1,7 @@
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
-import {
-    Column,
-    Entity,
-    Index,
-    PrimaryColumn,
-} from "typeorm"
+import { Column, Entity, Index, PrimaryColumn } from "typeorm"
 
 @Entity("mempooltx")
 @Index("idx_mempooltx_hash", ["hash"])
@@ -37,7 +32,7 @@ export class MempoolTx implements Transaction {
     @Column("jsonb", { name: "extra", nullable: true })
     extra: Record<string, any> | null
 
-    @Column("integer", { name: "nonce" })
+    @Column("bigint", { name: "nonce", nullable: true, default: 0 })
     nonce: number
 
     @Column("integer", { name: "reference_block" })

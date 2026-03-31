@@ -48,7 +48,14 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import Chain from "../chain"
 import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
+import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
+import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRoutines"
+import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { Referrals } from "@/features/incentive/referrals"
+// REVIEW: TLSNotary token management for native operations
+import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
+import { INativePayload } from "@kynesyslabs/demosdk/types"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -254,33 +261,105 @@ export default class HandleGCR {
             editOperation.isRollback = true
         }
 
+        let result: GCRResult
+
         // Applying the edit operations
         switch (editOperation.type) {
             case "balance":
-                return GCRBalanceRoutines.apply(
+                result = await GCRBalanceRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "nonce":
-                return GCRNonceRoutines.apply(
+                result = await GCRNonceRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "identity":
-                return GCRIdentityRoutines.apply(
+                result = await GCRIdentityRoutines.apply(
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
                 )
+                break
             case "assign":
             case "subnetsTx":
                 // TODO implementations
-                console.log(`Assigning GCREdit ${editOperation.type}`)
-                return { success: true, message: "Not implemented" }
+                log.debug(`Assigning GCREdit ${editOperation.type}`)
+                result = { success: true, message: "Not implemented" }
+                break
+            case "smartContract":
+            case "escrow":
+                // TODO implementations
+                log.debug(`GCREdit ${editOperation.type} not yet implemented`)
+                result = { success: true, message: "Not implemented" }
+                break
+            // REVIEW: StorageProgram unified storage operations
+            case "storageProgram":
+                result = await GCRStorageProgramRoutines.apply(
+                    editOperation,
+                    repositories.storageProgram as Repository<GCRStorageProgram>,
+                    simulate,
+                )
+                break
+            // REVIEW: TLSNotary attestation proof storage
+            case "tlsnotary":
+                result = await GCRTLSNotaryRoutines.apply(
+                    editOperation,
+                    repositories.tlsnotary as Repository<GCRTLSNotary>,
+                    simulate,
+                )
+                break
             default:
                 return { success: false, message: "Invalid GCREdit type" }
+        }
+
+        // REVIEW: Update assignedTxs for the transaction sender on successful operations
+        // This tracks all transactions associated with an account
+        const sender = tx.content?.from
+        if (result.success && !simulate && tx.hash && sender) {
+            try {
+                await this.addAssignedTx(sender, tx.hash, repositories.main)
+            } catch (error) {
+                log.warn(
+                    `[HandleGCR] Failed to update assignedTxs for ${sender}: ${error}`,
+                )
+                // Don't fail the operation if assignedTxs update fails
+            }
+        }
+
+        return result
+    }
+
+    /**
+     * Adds a transaction hash to the account's assignedTxs array
+     * @param pubkey The account public key
+     * @param txHash The transaction hash to add
+     * @param repository The GCRMain repository
+     */
+    private static async addAssignedTx(
+        pubkey: string,
+        txHash: string,
+        repository: Repository<GCRMain>,
+    ): Promise<void> {
+        let account = await repository.findOneBy({ pubkey })
+
+        if (!account) {
+            // Create account if it doesn't exist
+            account = await this.createAccount(pubkey)
+        }
+
+        // Avoid duplicates
+        if (!account.assignedTxs.includes(txHash)) {
+            account.assignedTxs.push(txHash)
+            await repository.save(account)
+            log.debug(
+                `[HandleGCR] Added tx ${txHash} to assignedTxs for ${pubkey}`,
+            )
         }
     }
 
@@ -306,7 +385,7 @@ export default class HandleGCR {
             }
         }
 
-        console.log(
+        log.debug(
             "[applyToTx] Starting execution of " +
                 tx.content.gcr_edits.length +
                 " GCREdits",
@@ -314,7 +393,11 @@ export default class HandleGCR {
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
         for (const edit of tx.content.gcr_edits) {
-            console.log("[applyToTx] Executing GCREdit: " + edit.type)
+            // REVIEW: Ensure txhash is set on each GCR edit from the transaction
+            // This is needed because client-side GCR edits don't have the txhash
+            // (it's cleared during validation for hash comparison)
+            edit.txhash = tx.hash
+            log.debug("[applyToTx] Executing GCREdit: " + edit.type)
             try {
                 const result = await HandleGCR.apply(
                     edit,
@@ -322,7 +405,7 @@ export default class HandleGCR {
                     isRollback,
                     simulate,
                 )
-                console.log(
+                log.debug(
                     "[applyToTx] GCREdit executed: " +
                         edit.type +
                         " with result: " +
@@ -343,7 +426,6 @@ export default class HandleGCR {
                 editsResults.push(result)
                 appliedEdits.push(edit) // Keep track of applied edits
             } catch (e) {
-                console.error("Error applying GCREdit: ", e)
                 log.error("[applyToTx] Error applying GCREdit: " + e)
                 editsResults.push({
                     success: false,
@@ -370,7 +452,85 @@ export default class HandleGCR {
             }
         }
 
+        // REVIEW: Post-processing hook for native transaction side-effects
+        // This handles side-effects that aren't part of GCR edits (e.g., token creation)
+        // Token creation happens during simulation (mempool entry) so user can immediately use it
+        // The token is created optimistically - if tx fails consensus, token will expire unused
+        if (!isRollback && tx.content.type === "native") {
+            try {
+                await this.processNativeSideEffects(tx, simulate)
+            } catch (sideEffectError) {
+                log.error(
+                    `[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`,
+                )
+                // Side-effect errors are logged but don't fail the transaction
+                // The GCR edits (fee burning) have already been applied
+            }
+        }
+
         return { success: true, message: "" }
+    }
+
+    /**
+     * Process side-effects for native transactions that aren't captured in GCR edits
+     * Currently handles:
+     * - tlsn_request: Creates attestation token when tx enters mempool (simulate=true)
+     *                 so user can immediately use the proxy
+     *
+     * Token creation is idempotent - if token already exists for this tx, it's skipped
+     */
+    private static async processNativeSideEffects(
+        tx: Transaction,
+        simulate = false,
+    ): Promise<void> {
+        const nativeData = tx.content.data as ["native", INativePayload]
+        const nativePayload = nativeData[1]
+
+        // Validate args exists before any destructuring
+        if (!nativePayload.args || !Array.isArray(nativePayload.args)) {
+            log.error(
+                `[TLSNotary] Invalid nativePayload.args: ${JSON.stringify(nativePayload.args)}`,
+            )
+            return
+        }
+
+        switch (nativePayload.nativeOperation) {
+            case "tlsn_request": {
+                const [targetUrl] = nativePayload.args
+
+                // Only create token once - during simulation (mempool entry)
+                // Skip if called again during block finalization
+                if (!simulate) {
+                    log.debug(
+                        `[TLSNotary] Skipping token creation for finalized tx ${tx.hash} (already created at mempool entry)`,
+                    )
+                    break
+                }
+
+                log.info(
+                    `[TLSNotary] Processing tlsn_request side-effect for ${targetUrl}`,
+                )
+
+                // Validate URL and extract domain
+                const domain = extractDomain(targetUrl)
+                log.debug(`[TLSNotary] Domain extracted: ${domain}`)
+
+                // Create the attestation token (idempotent - tokenManager handles duplicates)
+                const token = createToken(
+                    tx.content.from as string,
+                    targetUrl,
+                    tx.hash,
+                )
+                log.info(
+                    `[TLSNotary] Created token ${token.id} for tx ${tx.hash}`,
+                )
+                break
+            }
+            // tlsn_store side-effects are handled in GCRTLSNotaryRoutines.apply()
+            default:
+                // No side-effects for other native operations
+                break
+        }
     }
 
     /**
@@ -396,7 +556,7 @@ export default class HandleGCR {
         const counter = 0
         const results: GCRResult[] = []
         for (const edit of appliedEdits) {
-            console.log(
+            log.debug(
                 "[rollback] (" +
                     counter +
                     "/" +
@@ -463,6 +623,8 @@ export default class HandleGCR {
             hashes: dataSource.getRepository(GCRHashes),
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCRTracker),
+            tlsnotary: dataSource.getRepository(GCRTLSNotary),
+            storageProgram: dataSource.getRepository(GCRStorageProgram),
         }
     }
 

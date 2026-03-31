@@ -17,6 +17,7 @@ import {
     LessThan,
     FindManyOptions,
     Repository,
+    QueryFailedError,
 } from "typeorm"
 
 import Block from "./block"
@@ -28,6 +29,7 @@ import Hashing from "../crypto/hashing"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { Operation } from "@kynesyslabs/demosdk/types"
+import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import manageNative from "./gcr/gcr_routines/manageNative"
 import { getSharedState } from "src/utilities/sharedState"
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
@@ -54,8 +56,7 @@ export default class Chain {
             const db = await Datasource.getInstance()
             return await db.getDataSource().query(sqlQuery)
         } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
         }
     }
@@ -65,24 +66,26 @@ export default class Chain {
             const db = await Datasource.getInstance()
             return await db.getDataSource().query(sqlQuery)
         } catch (err) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
-            console.error(err)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(err))
             throw err
         }
     }
     // SECTION Getters
 
     // INFO Returns a transaction by its hash
-    static async getTxByHash(hash: string): Promise<Transaction> {
+    static async getTxByHash(hash: string): Promise<Transaction | null> {
         try {
-            return Transaction.fromRawTransaction(
-                await this.transactions.findOneBy({
-                    hash: ILike(hash),
-                }),
-            )
+            const rawTx = await this.transactions.findOneBy({
+                hash: ILike(hash),
+            })
+
+            if (!rawTx) {
+                return null
+            }
+
+            return Transaction.fromRawTransaction(rawTx)
         } catch (error) {
-            console.log("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
-            console.error(error)
+            log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             throw error // It does not crash the node, as it is caught by the endpoint handler
         }
     }
@@ -112,6 +115,15 @@ export default class Chain {
         return transaction.map(tx => Transaction.fromRawTransaction(tx))
     }
 
+    static async getBlockTransactions(
+        blockHash: string,
+    ): Promise<Transaction[]> {
+        const block = await this.getBlockByHash(blockHash)
+        return await this.getTransactionsFromHashes(
+            block.content.ordered_transactions,
+        )
+    }
+
     // INFO Get the last block number
     static async getLastBlockNumber(): Promise<number> {
         if (!getSharedState.lastBlockNumber) {
@@ -132,6 +144,16 @@ export default class Chain {
         return getSharedState.lastBlockHash
     }
 
+    /**
+     * Returns transaction hashes applied in the last block as a set
+     *
+     * @returns Set of transaction hashes in the last block
+     */
+    static async getLastBlockTransactionSet(): Promise<Set<string>> {
+        const lastBlock = await this.getLastBlock()
+        return new Set(lastBlock.content.ordered_transactions)
+    }
+
     // INFO returns all blocks by the given range, default from end of the table.
     /**
      * Returns <limit> blocks starting from the given block number.
@@ -144,8 +166,10 @@ export default class Chain {
         start: "latest" | number,
         limit: number,
     ): Promise<Blocks[]> {
-        const maxLimit = 50
-        const calculatedLimit = Math.min(limit, maxLimit)
+        const calculatedLimit = Math.min(
+            limit,
+            getSharedState.batchSyncBlockLimit,
+        )
 
         let options: FindManyOptions<Blocks> = {
             order: { number: "DESC" },
@@ -183,10 +207,14 @@ export default class Chain {
     }
 
     // ANCHOR Transactions
-    static async getTransactionFromHash(hash: string): Promise<Transaction> {
-        return Transaction.fromRawTransaction(
-            await this.transactions.findOneBy({ hash: ILike(hash) }),
-        )
+    static async getTransactionFromHash(
+        hash: string,
+    ): Promise<Transaction | null> {
+        const rawTx = await this.transactions.findOneBy({ hash: ILike(hash) })
+        if (!rawTx) {
+            return null
+        }
+        return Transaction.fromRawTransaction(rawTx)
     }
 
     // INFO returns transactions by hashes
@@ -231,6 +259,19 @@ export default class Chain {
 
     static async checkTxExists(hash: string): Promise<boolean> {
         return await this.transactions.exists({ where: { hash: hash } })
+    }
+
+    static async getExistingTransactionHashes(
+        hashes: string[],
+    ): Promise<Set<string>> {
+        if (hashes.length === 0) return new Set()
+
+        const rows = await this.transactions.find({
+            where: { hash: In(hashes) },
+            select: ["hash"],
+        })
+
+        return new Set(rows.map(r => r.hash))
     }
 
     // REVIEW Giving back all the properties of an address
@@ -320,25 +361,10 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
     ): Promise<Blocks> {
-        log.info(
-            "[insertBlock] Attempting to insert a block with hash: " +
-                block.hash,
-        )
-        // Convert the transactions strings back to Transaction objects
-        log.info("[insertBlock] Extracting transactions from block")
-        // ! FIXME The below fails when a tx like a web2Request is inserted
         const orderedTransactionsHashes = block.content.ordered_transactions
-        log.info(JSON.stringify(orderedTransactionsHashes))
         // Fetch transaction entities from the repository based on ordered transaction hashes
-        const transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
-        )
 
         const newBlock = new Blocks()
-        log.info("[CHAIN] reading hash")
-        log.info(JSON.stringify(transactionEntities))
-        log.info("[CHAIN] bork")
-
         newBlock.hash = block.hash
         newBlock.number = block.number
         newBlock.proposer = block.proposer
@@ -347,9 +373,7 @@ export default class Chain {
         newBlock.validation_data = block.validation_data
         newBlock.content = block.content
         newBlock.status = "confirmed"
-        newBlock.content.ordered_transactions = transactionEntities.map(
-            tx => tx.hash,
-        )
+        newBlock.content.ordered_transactions = orderedTransactionsHashes
 
         // Check if the position is provided and if a block with that position exists
         let existingBlock = null
@@ -390,29 +414,113 @@ export default class Chain {
                     position +
                     " does not exist: inserting a new block",
             )
-            const result = await this.blocks.save(newBlock)
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
 
-            log.debug(
-                "[insertBlock] lastBlockNumber: " +
-                    getSharedState.lastBlockNumber,
+            // Get transaction entities from mempool before starting transaction
+            const transactionEntities = await Mempool.getTransactionsByHashes(
+                orderedTransactionsHashes,
             )
-            log.debug(
-                "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
-            )
-            // REVIEW We then add the transactions to the Transactions repository
-            for (let i = 0; i < transactionEntities.length; i++) {
-                const tx = transactionEntities[i]
-                await this.insertTransaction(tx)
-            }
-            // REVIEW And we clean the mempool
-            if (cleanMempool) {
-                await Mempool.removeTransactionsByHashes(
-                    transactionEntities.map(tx => tx.hash),
+
+            // REVIEW: Wrap block insertion and Merkle tree update in transaction
+            // This ensures both succeed or both fail (prevents state divergence)
+            const db = await Datasource.getInstance()
+            const dataSource = db.getDataSource()
+
+            // REVIEW: HIGH FIX - Wrap transaction in try/catch for proper error handling
+            try {
+                // REVIEW: Transaction boundary fix - defer shared state updates until after commit
+                const result = await dataSource.transaction(
+                    async transactionalEntityManager => {
+                        // Save block within transaction
+                        const savedBlock =
+                            await transactionalEntityManager.save(
+                                this.blocks.target,
+                                newBlock,
+                            )
+
+                        // REVIEW: Add transactions using transactional manager (not direct repository)
+                        // This ensures all saves are part of the same transaction
+                        for (let i = 0; i < transactionEntities.length; i++) {
+                            const tx = transactionEntities[i]
+
+                            try {
+                                const rawTransaction =
+                                    Transaction.toRawTransaction(
+                                        tx,
+                                        "confirmed",
+                                    )
+                                await transactionalEntityManager.save(
+                                    this.transactions.target,
+                                    rawTransaction,
+                                )
+                            } catch (error) {
+                                // INFO: This should never happen
+                                if (error instanceof QueryFailedError) {
+                                    log.error(
+                                        `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
+                                    )
+                                    log.error("Message: " + error.message)
+                                    continue
+                                }
+
+                                log.error(
+                                    "Unexpected error while inserting tx: " +
+                                        tx.hash,
+                                )
+                                console.error(error)
+                                throw error
+                            }
+                        }
+
+                        // REVIEW: CRITICAL FIX - Clean mempool within transaction using transactional manager
+                        // This ensures atomicity: if Merkle tree update fails, mempool cleanup rolls back
+                        if (cleanMempool) {
+                            await Mempool.removeTransactionsByHashes(
+                                transactionEntities.map(tx => tx.hash),
+                                transactionalEntityManager,
+                            )
+                        }
+
+                        // Update ZK Merkle tree within same transaction
+                        // If this fails, entire block commit rolls back
+                        const commitmentsAdded =
+                            await updateMerkleTreeAfterBlock(
+                                dataSource,
+                                block.number,
+                                transactionalEntityManager,
+                            )
+                        if (commitmentsAdded > 0) {
+                            log.info(
+                                `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                            )
+                        }
+
+                        return savedBlock
+                    },
                 )
+
+                // REVIEW: Update shared state AFTER transaction commits successfully
+                // This prevents memory state corruption if transaction rolls back
+                if (block.number > getSharedState.lastBlockNumber) {
+                    getSharedState.lastBlockNumber = block.number
+                    getSharedState.lastBlockHash = block.hash
+                }
+
+                log.debug(
+                    "[insertBlock] lastBlockNumber: " +
+                        getSharedState.lastBlockNumber,
+                )
+                log.debug(
+                    "[insertBlock] lastBlockHash: " +
+                        getSharedState.lastBlockHash,
+                )
+
+                return result
+            } catch (error) {
+                log.error(
+                    `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
+                )
+                throw error
             }
-            return result
         }
     }
 
@@ -493,13 +601,13 @@ export default class Chain {
         }
         // Insert the genesis block into the database
         //console.log(genesis_block)
-        console.log("[GENESIS] Block generated, ready to insert it")
+        log.debug("[GENESIS] Block generated, ready to insert it")
         // console.log(genesisBlock)
-        console.log("[GENESIS] inserting transaction into the mempool")
+        log.debug("[GENESIS] inserting transaction into the mempool")
         // console.log(genesisTx)
         //await this.insertTransaction(genesis_tx)
         await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }) // ! FIXME This fails
-        console.log("[GENESIS] inserted transaction")
+        log.debug("[GENESIS] inserted transaction")
 
         // SECTION: Restoring account data
         const users = {}
@@ -525,7 +633,7 @@ export default class Chain {
         }
 
         const userAccounts: Record<string, any>[] = Object.values(users)
-        console.log("total users: " + userAccounts.length)
+        log.debug("total users: " + userAccounts.length)
 
         // INFO: Create all users in parallel batches
         const batchSize = 100
@@ -570,12 +678,12 @@ export default class Chain {
         transaction: Transaction,
         status = "confirmed",
     ): Promise<boolean> {
-        console.log(
+        log.debug(
             "[insertTransaction] Inserting transaction: " + transaction.hash,
         )
         const rawTransaction = Transaction.toRawTransaction(transaction, status)
-        console.log("[insertTransaction] Raw transaction: ")
-        console.log(rawTransaction)
+        log.debug("[insertTransaction] Raw transaction: ")
+        log.debug(JSON.stringify(rawTransaction))
         try {
             await this.transactions.save(rawTransaction)
             return true
@@ -591,17 +699,18 @@ export default class Chain {
     }
 
     // Wrapper for inserting multiple transactions
-    static async insertTransactions(
+    static async insertTransactionsFromSync(
         transactions: Transaction[],
     ): Promise<boolean> {
-        let success = true
         for (const tx of transactions) {
-            success = await this.insertTransaction(tx)
-            if (!success) {
-                return false
+            try {
+                await this.insertTransaction(tx)
+            } catch (error) {
+                console.error("[ChainDB] [ ERROR ]")
             }
         }
-        return success
+
+        return true
     }
     // !SECTION Setters
 
@@ -646,12 +755,12 @@ export default class Chain {
 
     static async pruneBlocksToGenesisBlock(): Promise<void> {
         await this.blocks.delete({ number: MoreThan(0) })
-        console.log("Pruned all blocks except the genesis block.")
+        log.info("Pruned all blocks except the genesis block.")
     }
 
     static async nukeGenesis(): Promise<void> {
         await this.blocks.delete({ number: 0 })
-        console.log("Deleted the genesis block.")
+        log.info("Deleted the genesis block.")
     }
 
     static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
@@ -663,7 +772,7 @@ export default class Chain {
                 timestamp: newTimestamp,
             }
             await this.blocks.save(genesisBlock)
-            console.log("Updated the timestamp of the genesis block.")
+            log.info("Updated the timestamp of the genesis block.")
         }
     }
 }

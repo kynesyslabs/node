@@ -24,6 +24,12 @@ export interface NodeInfo {
     peersCount: number
     blockNumber: number
     isSynced: boolean
+    // TLSNotary service info (optional)
+    tlsnotary?: {
+        enabled: boolean
+        port: number
+        running: boolean
+    }
 }
 
 export interface TUIConfig {
@@ -99,7 +105,8 @@ const TABS: Tab[] = [
     { key: "8", label: "MCP", category: "MCP" },
     { key: "9", label: "XM", category: "MULTICHAIN" },
     { key: "-", label: "DAHR", category: "DAHR" },
-    { key: "=", label: "CMD", category: "CMD" },
+    { key: "=", label: "TLSN", category: "TLSN" },
+    { key: "\\", label: "CMD", category: "CMD" },
 ]
 
 // SECTION Command definitions for CMD tab
@@ -116,7 +123,7 @@ const COMMANDS: Command[] = [
         handler: (_args, tui) => {
             tui.addCmdOutput("=== Available Commands ===")
             COMMANDS.forEach(cmd => {
-                tui.addCmdOutput(`  ${cmd.name.padEnd(12)} - ${cmd.description}`)
+                tui.addCmdOutput(`  ${cmd.name} - ${cmd.description}`)
             })
             tui.addCmdOutput("==========================")
         },
@@ -207,7 +214,8 @@ export class TUIManager extends EventEmitter {
 
     // Terminal event listener references (for cleanup in stop())
     private keyListener: ((key: string) => void) | null = null
-    private resizeListener: ((width: number, height: number) => void) | null = null
+    private resizeListener: ((width: number, height: number) => void) | null =
+        null
 
     private constructor(config: TUIConfig = {}) {
         super()
@@ -345,11 +353,15 @@ export class TUIManager extends EventEmitter {
      * Extract tag from message and infer category using shared TAG_TO_CATEGORY mapping.
      * Regex uses {1,50} limit to prevent ReDoS from unbounded backtracking.
      */
-    private extractCategoryFromMessage(message: string): { category: LogCategory; cleanMessage: string } {
+    private extractCategoryFromMessage(message: string): {
+        category: LogCategory
+        cleanMessage: string
+    } {
         // DEFENSIVE: Ensure message is a string to prevent crashes from non-string inputs
         // TUI errors must NEVER crash the node
-        const safeMessage = typeof message === "string" ? message : String(message ?? "")
-        
+        const safeMessage =
+            typeof message === "string" ? message : String(message ?? "")
+
         // Try to extract tag from message like "[PeerManager] ..."
         // Limit tag to 50 chars max to prevent ReDoS
         const match = safeMessage.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
@@ -385,7 +397,8 @@ export class TUIManager extends EventEmitter {
         console.log = (...args: unknown[]) => {
             try {
                 const message = args.map(a => String(a)).join(" ")
-                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                const { category, cleanMessage } =
+                    this.extractCategoryFromMessage(message)
                 this.logger.debug(category, `[console.log] ${cleanMessage}`)
             } catch {
                 // Silently ignore - TUI errors must never crash the node
@@ -395,7 +408,8 @@ export class TUIManager extends EventEmitter {
         console.error = (...args: unknown[]) => {
             try {
                 const message = args.map(a => String(a)).join(" ")
-                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                const { category, cleanMessage } =
+                    this.extractCategoryFromMessage(message)
                 this.logger.error(category, `[console.error] ${cleanMessage}`)
             } catch {
                 // Silently ignore - TUI errors must never crash the node
@@ -405,7 +419,8 @@ export class TUIManager extends EventEmitter {
         console.warn = (...args: unknown[]) => {
             try {
                 const message = args.map(a => String(a)).join(" ")
-                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                const { category, cleanMessage } =
+                    this.extractCategoryFromMessage(message)
                 this.logger.warning(category, `[console.warn] ${cleanMessage}`)
             } catch {
                 // Silently ignore - TUI errors must never crash the node
@@ -415,7 +430,8 @@ export class TUIManager extends EventEmitter {
         console.info = (...args: unknown[]) => {
             try {
                 const message = args.map(a => String(a)).join(" ")
-                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                const { category, cleanMessage } =
+                    this.extractCategoryFromMessage(message)
                 this.logger.info(category, `[console.info] ${cleanMessage}`)
             } catch {
                 // Silently ignore - TUI errors must never crash the node
@@ -425,7 +441,8 @@ export class TUIManager extends EventEmitter {
         console.debug = (...args: unknown[]) => {
             try {
                 const message = args.map(a => String(a)).join(" ")
-                const { category, cleanMessage } = this.extractCategoryFromMessage(message)
+                const { category, cleanMessage } =
+                    this.extractCategoryFromMessage(message)
                 this.logger.debug(category, `[console.debug] ${cleanMessage}`)
             } catch {
                 // Silently ignore - TUI errors must never crash the node
@@ -462,7 +479,8 @@ export class TUIManager extends EventEmitter {
     private updateDimensions(): void {
         this.width = term.width
         this.height = term.height
-        this.logAreaHeight = this.height - HEADER_HEIGHT - TAB_HEIGHT - FOOTER_HEIGHT
+        this.logAreaHeight =
+            this.height - HEADER_HEIGHT - TAB_HEIGHT - FOOTER_HEIGHT
     }
 
     // SECTION Input Handling
@@ -513,9 +531,17 @@ export class TUIManager extends EventEmitter {
                 this.setActiveTab(10) // DAHR tab
                 break
 
-            case "=":
-                this.setActiveTab(11) // CMD tab
+            case "=": {
+                const idx = TABS.findIndex(t => t.category === "TLSN")
+                if (idx >= 0) this.setActiveTab(idx)
                 break
+            }
+
+            case "\\": {
+                const idx = TABS.findIndex(t => t.category === "CMD")
+                if (idx >= 0) this.setActiveTab(idx)
+                break
+            }
 
             // Tab navigation
             case "TAB":
@@ -734,7 +760,8 @@ export class TUIManager extends EventEmitter {
         this.resizeListener = (width: number, height: number) => {
             this.width = width
             this.height = height
-            this.logAreaHeight = this.height - HEADER_HEIGHT - TAB_HEIGHT - FOOTER_HEIGHT
+            this.logAreaHeight =
+                this.height - HEADER_HEIGHT - TAB_HEIGHT - FOOTER_HEIGHT
             this.render()
         }
         term.on("resize", this.resizeListener)
@@ -863,7 +890,10 @@ export class TUIManager extends EventEmitter {
         const logsToUse = this.frozenLogs ?? this.filteredLogs
         const maxScroll = Math.max(0, logsToUse.length - this.logAreaHeight)
         const currentOffset = this.getScrollOffset()
-        const newOffset = Math.min(maxScroll, currentOffset + this.logAreaHeight)
+        const newOffset = Math.min(
+            maxScroll,
+            currentOffset + this.logAreaHeight,
+        )
         this.setScrollOffset(newOffset)
         this.render()
     }
@@ -910,19 +940,17 @@ export class TUIManager extends EventEmitter {
 
     // SECTION Log Management
 
+    // Flag to indicate logs have changed since last render
+    private logsNeedUpdate = true
+
     /**
      * Handle new log entry
+     * PERF: Don't update filtered logs on every entry - just mark as dirty
+     * The render loop will update when needed (every 100ms)
      */
     private handleLogEntry(_entry: LogEntry): void {
-        // Always update the live filtered logs
-        this.updateFilteredLogs()
-
-        // Only auto-scroll when enabled (frozen logs handles manual mode)
-        if (this.autoScroll) {
-            const maxScroll = Math.max(0, this.filteredLogs.length - this.logAreaHeight)
-            this.setScrollOffset(maxScroll)
-        }
-        // When autoScroll is off, frozenLogs is used for rendering so no action needed
+        // Mark that logs need updating - actual update happens in render()
+        this.logsNeedUpdate = true
     }
 
     /**
@@ -934,7 +962,9 @@ export class TUIManager extends EventEmitter {
         if (activeTab.category === "ALL") {
             this.filteredLogs = this.logger.getAllEntries()
         } else {
-            this.filteredLogs = this.logger.getEntriesByCategory(activeTab.category)
+            this.filteredLogs = this.logger.getEntriesByCategory(
+                activeTab.category,
+            )
         }
     }
 
@@ -977,7 +1007,10 @@ export class TUIManager extends EventEmitter {
             // Check if all peers are localhost
             const nonLocalPeers = peers.filter(peer => {
                 const connStr = peer.connection?.string?.toLowerCase() || ""
-                return !connStr.includes("localhost") && !connStr.includes("127.0.0.1")
+                return (
+                    !connStr.includes("localhost") &&
+                    !connStr.includes("127.0.0.1")
+                )
             })
 
             return nonLocalPeers.length === 0
@@ -994,6 +1027,20 @@ export class TUIManager extends EventEmitter {
      */
     render(): void {
         if (!this.isRunning) return
+
+        // PERF: Only update filtered logs when needed (debounced from log events)
+        if (this.logsNeedUpdate && !this.isCmdMode) {
+            this.updateFilteredLogs()
+            // Auto-scroll to bottom when enabled
+            if (this.autoScroll) {
+                const maxScroll = Math.max(
+                    0,
+                    this.filteredLogs.length - this.logAreaHeight,
+                )
+                this.setScrollOffset(maxScroll)
+            }
+            this.logsNeedUpdate = false
+        }
 
         // Render components (each clears its own area)
         this.renderHeader()
@@ -1069,8 +1116,18 @@ export class TUIManager extends EventEmitter {
         }
         term.brightWhite(keyDisplay)
 
-        // Line 5: Empty separator
+        // Line 5: TLSNotary status (if enabled)
         term.moveTo(infoStartX, 5)
+        term.eraseLine()
+        if (this.nodeInfo.tlsnotary?.enabled) {
+            term.yellow("🔐 ")
+            term.gray("TLSN: ")
+            if (this.nodeInfo.tlsnotary.running) {
+                term.bgGreen.black(` ✓ :${this.nodeInfo.tlsnotary.port} `)
+            } else {
+                term.bgRed.white(" ✗ STOPPED ")
+            }
+        }
 
         // Line 6: Port
         term.moveTo(infoStartX, 6)
@@ -1094,7 +1151,8 @@ export class TUIManager extends EventEmitter {
         term.moveTo(infoStartX, 8)
         term.yellow("📦 ")
         term.gray("Block: ")
-        const liveBlockNumber = getSharedState.lastBlockNumber ?? this.nodeInfo.blockNumber
+        const liveBlockNumber =
+            getSharedState.lastBlockNumber ?? this.nodeInfo.blockNumber
         term.brightWhite("#" + String(liveBlockNumber))
 
         // Line 9: Sync status (read live from sharedState)
@@ -1155,7 +1213,11 @@ export class TUIManager extends EventEmitter {
         }
 
         // Fill rest of line with tab bar background
-        const tabsWidth = TABS.reduce((acc, t) => acc + t.key.length + t.label.length + 3, 0) + 1
+        const tabsWidth =
+            TABS.reduce(
+                (acc, t) => acc + t.key.length + t.label.length + 3,
+                0,
+            ) + 1
         if (tabsWidth < this.width) {
             term.bgGray(" ".repeat(this.width - tabsWidth))
         }
@@ -1192,9 +1254,10 @@ export class TUIManager extends EventEmitter {
         // Scroll indicator
         if (logsToRender.length > this.logAreaHeight) {
             const maxScroll = logsToRender.length - this.logAreaHeight
-            const scrollPercent = maxScroll > 0
-                ? Math.round((currentOffset / maxScroll) * 100)
-                : 0
+            const scrollPercent =
+                maxScroll > 0
+                    ? Math.round((currentOffset / maxScroll) * 100)
+                    : 0
             term.moveTo(this.width - 5, startY)
             term.gray(`${scrollPercent}%`)
         }
@@ -1238,15 +1301,16 @@ export class TUIManager extends EventEmitter {
 
         // Category with bracket styling
         term.cyan(" [")
-        term.brightCyan(entry.category.padEnd(10))
+        term.brightCyan(entry.category)
         term.cyan("] ")
 
         // Message (truncate if too long)
         const prefixLen = 9 + 4 + 14 + 1 // time + icon/level + category + spaces
         const maxMsgLen = this.width - prefixLen - 1
-        const msg = entry.message.length > maxMsgLen
-            ? entry.message.slice(0, maxMsgLen - 3) + "..."
-            : entry.message
+        const msg =
+            entry.message.length > maxMsgLen
+                ? entry.message.slice(0, maxMsgLen - 3) + "..."
+                : entry.message
 
         // Color message based on level
         switch (entry.level) {
@@ -1273,7 +1337,7 @@ export class TUIManager extends EventEmitter {
      */
     private renderCmdArea(): void {
         const startY = HEADER_HEIGHT + TAB_HEIGHT + 1
-        const inputLineY = this.height - FOOTER_HEIGHT - 1  // One line above footer for input
+        const inputLineY = this.height - FOOTER_HEIGHT - 1 // One line above footer for input
 
         // Calculate available lines for output (minus 1 for input line)
         const outputAreaHeight = this.logAreaHeight - 1
@@ -1292,7 +1356,12 @@ export class TUIManager extends EventEmitter {
                 // Colorize special output
                 if (line.startsWith(">")) {
                     term.cyan(line)
-                } else if (line.startsWith("===") || line.startsWith("╔") || line.startsWith("║") || line.startsWith("╚")) {
+                } else if (
+                    line.startsWith("===") ||
+                    line.startsWith("╔") ||
+                    line.startsWith("║") ||
+                    line.startsWith("╚")
+                ) {
                     term.brightCyan(line)
                 } else if (line.startsWith("  ")) {
                     term.white(line)
@@ -1407,9 +1476,15 @@ export class TUIManager extends EventEmitter {
     private showHelp(): void {
         // Simple help - could be expanded to a modal
         this.logger.info("CORE", "=== TUI HELP ===")
-        this.logger.info("CORE", "Navigation: ↑↓ or j/k to scroll, PgUp/PgDn for pages")
+        this.logger.info(
+            "CORE",
+            "Navigation: ↑↓ or j/k to scroll, PgUp/PgDn for pages",
+        )
         this.logger.info("CORE", "Tabs: 0-9 or - for categories, Tab to cycle")
-        this.logger.info("CORE", "Controls: S=start, P=pause, R=restart, Q=quit")
+        this.logger.info(
+            "CORE",
+            "Controls: S=start, P=pause, R=restart, Q=quit",
+        )
         this.logger.info("CORE", "Other: A=auto-scroll, C=clear, H=help")
         this.logger.info("CORE", "================")
     }
@@ -1456,7 +1531,3 @@ export class TUIManager extends EventEmitter {
         }
     }
 }
-
-// SECTION Default Export
-
-export default TUIManager

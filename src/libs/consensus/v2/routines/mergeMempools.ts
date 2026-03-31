@@ -1,31 +1,40 @@
-import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
-import Mempool from "src/libs/blockchain/mempool_v2"
-import { MempoolData } from "src/libs/blockchain/mempool"
-import { Peer } from "src/libs/peer"
-import log from "src/utilities/logger"
+import { Peer } from "@/libs/peer"
+import log from "@/utilities/logger"
+import Mempool from "@/libs/blockchain/mempool_v2"
+import {
+    RPCRequest,
+    RPCResponse,
+    Transaction,
+} from "@kynesyslabs/demosdk/types"
+import { getSharedState } from "@/utilities/sharedState"
 
 export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
+    // INFO: if shard only contains us, skip network requests
+    shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
+    if (shard.length === 0) {
+        return
+    }
+
     const promises: Promise<RPCResponse>[] = []
+    const request: RPCRequest = {
+        method: "mempool",
+        params: mempool,
+    }
+
     for (const peer of shard) {
         log.info(`[mergeMempools] Merging mempool with ${peer.identity}`)
         promises.push(
-            peer.longCall(
-                {
-                    method: "mempool", // see server_rpc.ts
-                    params: [{ data: mempool }], // ? If possible, we should send the mempool directly without wrapping it in an object
-                },
-                true,
-                250,
-                3,
-            ),
+            peer.longCall(request, true, {
+                sleepTime: 250,
+                retries: 3,
+            }),
         )
     }
 
     const responses = await Promise.all(promises) // ! Add error handling
-
     for (const response of responses) {
         log.info("[mergeMempools] Received mempool merge response:")
-        log.info("[mergeMempools] " + JSON.stringify(response, null, 2))
+        log.debug("[mergeMempools] " + JSON.stringify(response))
 
         if (response.result === 200) {
             await Mempool.receive(response.response as Transaction[])

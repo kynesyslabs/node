@@ -1,0 +1,19 @@
+{
+    "request": {
+        "method": "consensus_routine",
+        "params": [
+            {
+                "method": "greenlight",
+                "params": [18, 1762006280, 5]
+            }
+        ]
+    },
+    "response": {
+        "result": 200,
+        "response": "Greenlight for phase: 5 received with block timestamp: 1762006280",
+        "require_reply": false,
+        "extra": null
+    },
+    "frame_request": "98",
+    "frame_response": "101"
+}

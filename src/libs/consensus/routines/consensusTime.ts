@@ -12,11 +12,9 @@ export async function checkConsensusTime(
 ): Promise<boolean> {
     // Safeguard to prevent the consensus time from being checked before the last block is forged
     if (getSharedState.inConsensusLoop) {
-        log.warning(
-            "[CONSENSUS TIME] Cannot check consensus time while in consensus loop, skipping",
-        )
         return false
     }
+
     let isConsensusTime = false
     // Using the average timestamp set in the last block
     //let lastTimestamp = await getSharedState.getLastConsensusTime() // ? Should we check it from the blockchain each time?
@@ -37,7 +35,6 @@ export async function checkConsensusTime(
         "[CONSENSUS TIME] consensusIntervalTime: " + consensusIntervalTime,
         true,
     )
-    //process.exit(0)
 
     // If the delta is greater than the consensus interval time, then the consensus time has passed
     log.info(
