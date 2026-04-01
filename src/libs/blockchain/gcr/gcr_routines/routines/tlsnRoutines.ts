@@ -34,8 +34,7 @@ const TLSN_EXPECTED_ENDPOINTS: Record<
  */
 export async function applyTLSNIdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     // Extract context from editOperation.data (top level)
     const { context } = editOperation.data
@@ -126,8 +125,7 @@ export async function applyTLSNIdentityAdd(
     if (!proof || typeof proof !== "object") {
         return {
             success: false,
-            message:
-                "Invalid proof: expected TLSNotary presentation object",
+            message: "Invalid proof: expected TLSNotary presentation object",
         }
     }
 
@@ -160,9 +158,6 @@ export async function applyTLSNIdentityAdd(
         }
     }
 
-    // 8. Get/create GCR and check for duplicates
-    const accountGCR = await ensureGCRForUser(editOperation.account)
-
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
@@ -190,17 +185,11 @@ export async function applyTLSNIdentityAdd(
     accountGCR.identities.web2[context].push(data)
 
     // 10. Save and award incentives
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyTLSNIdentityAdd")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    const awardPoints = async () => {
         if (context === "github") {
             const isFirst = await isFirstConnection(
                 "github",
                 { userId: String(userId) },
-                gcrMainRepository,
                 editOperation.account,
             )
 
@@ -215,7 +204,6 @@ export async function applyTLSNIdentityAdd(
             const isFirst = await isFirstConnection(
                 "discord",
                 { userId: String(userId) },
-                gcrMainRepository,
                 editOperation.account,
             )
 
@@ -229,7 +217,6 @@ export async function applyTLSNIdentityAdd(
             const isFirst = await isFirstConnection(
                 "telegram",
                 { userId: String(userId) },
-                gcrMainRepository,
                 editOperation.account,
             )
 
@@ -243,7 +230,12 @@ export async function applyTLSNIdentityAdd(
         }
     }
 
-    return { success: true, message: "TLSN identity added successfully" }
+    return {
+        success: true,
+        message: "TLSN identity added successfully",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 /**
@@ -253,8 +245,7 @@ export async function applyTLSNIdentityAdd(
  */
 export async function applyTLSNIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { context, username } = editOperation.data as {
         context?: string
@@ -275,14 +266,6 @@ export async function applyTLSNIdentityRemove(
         }
     }
 
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
-    }
-
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
@@ -297,7 +280,8 @@ export async function applyTLSNIdentityRemove(
 
     // Find the TLSN identity to remove
     const identity = accountGCR.identities.web2[context].find(
-        (id: Web2GCRData["data"]) => isMatch(id as Web2GCRData["data"] & { proofType?: string }),
+        (id: Web2GCRData["data"]) =>
+            isMatch(id as Web2GCRData["data"] & { proofType?: string }),
     )
 
     if (!identity) {
@@ -312,12 +296,7 @@ export async function applyTLSNIdentityRemove(
             !isMatch(id as Web2GCRData["data"] & { proofType?: string }),
     )
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyTLSNIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    const deductPoints = async () => {
         // Trigger TLSN incentive rollback only for confirmed TLSN provenance.
         if (context === "github" && identity.userId) {
             await IncentiveManager.githubUnlinked(
@@ -331,5 +310,10 @@ export async function applyTLSNIdentityRemove(
         }
     }
 
-    return { success: true, message: "TLSN identity removed successfully" }
+    return {
+        success: true,
+        message: "TLSN identity removed successfully",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

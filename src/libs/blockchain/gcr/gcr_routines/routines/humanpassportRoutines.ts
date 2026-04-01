@@ -1,7 +1,6 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../../handleGCR"
 import { Repository } from "typeorm"
-import ensureGCRForUser from "../ensureGCRForUser"
 import { SavedHumanPassportIdentity } from "@/model/entities/types/IdentityTypes"
 import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 import log from "@/utilities/logger"
@@ -10,11 +9,13 @@ import { safeGCRSave, isFirstConnection } from "./utils"
 
 export async function applyHumanPassportIdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     try {
-        const clientData = editOperation.data as { address: string; verificationMethod: "api" | "onchain" }
+        const clientData = editOperation.data as {
+            address: string
+            verificationMethod: "api" | "onchain"
+        }
         const normalizedAddress = clientData.address.toLowerCase()
 
         // Fetch verified score from Human Passport API (uses cache from earlier verification)
@@ -42,20 +43,10 @@ export async function applyHumanPassportIdentityAdd(
                 : null,
         }
 
-        const accountGCR = await ensureGCRForUser(editOperation.account)
-
         // Initialize humanpassport array if needed
         if (!accountGCR.identities.humanpassport) {
             accountGCR.identities.humanpassport = []
         }
-
-        // Global uniqueness check across all accounts
-        const isFirst = await isFirstConnection(
-            "humanpassport",
-            { address: normalizedAddress },
-            gcrMainRepository,
-            editOperation.account,
-        )
 
         // Upsert: remove existing then add new
         accountGCR.identities.humanpassport =
@@ -65,12 +56,13 @@ export async function applyHumanPassportIdentityAdd(
             )
         accountGCR.identities.humanpassport.push(savedIdentity)
 
-        if (!simulate) {
-            const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyHumanPassportIdentityAdd")
-            if (!saveResult.success) {
-                return { success: false, message: saveResult.error || "Database save failed" }
-            }
-
+        const awardPoints = async () => {
+            // Global uniqueness check across all accounts
+            const isFirst = await isFirstConnection(
+                "humanpassport",
+                { address: normalizedAddress },
+                editOperation.account,
+            )
             if (isFirst) {
                 await IncentiveManager.humanPassportLinked(
                     accountGCR.pubkey,
@@ -79,31 +71,36 @@ export async function applyHumanPassportIdentityAdd(
             }
         }
 
-        return { success: true, message: "Human Passport identity added" }
+        return {
+            success: true,
+            message: "Human Passport identity added",
+            entity: accountGCR,
+            sideEffect: awardPoints,
+        }
     } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error)
-        log.error(`[GCRIdentityRoutines] Failed to add Human Passport identity: ${errorMsg}`)
-        return { success: false, message: errorMsg || "Failed to add Human Passport identity" }
+        log.error(
+            `[GCRIdentityRoutines] Failed to add Human Passport identity: ${errorMsg}`,
+        )
+        return {
+            success: false,
+            message: errorMsg || "Failed to add Human Passport identity",
+            entity: accountGCR,
+        }
     }
 }
 
 export async function applyHumanPassportIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const data = editOperation.data as { address: string }
     const normalizedAddress = data.address.toLowerCase()
 
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
-    }
-
-    if (!accountGCR.identities.humanpassport || accountGCR.identities.humanpassport.length === 0) {
+    if (
+        !accountGCR.identities.humanpassport ||
+        accountGCR.identities.humanpassport.length === 0
+    ) {
         return { success: false, message: "No Human Passport identities found" }
     }
 
@@ -122,14 +119,14 @@ export async function applyHumanPassportIdentityRemove(
                 hp.address.toLowerCase() !== normalizedAddress,
         )
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyHumanPassportIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    const deductPoints = async () => {
         await IncentiveManager.humanPassportUnlinked(accountGCR.pubkey)
     }
 
-    return { success: true, message: "Human Passport identity removed" }
+    return {
+        success: true,
+        message: "Human Passport identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

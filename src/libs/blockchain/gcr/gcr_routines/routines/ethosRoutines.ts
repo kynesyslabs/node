@@ -13,17 +13,16 @@ import { safeGCRSave, isFirstConnection, normalizeEthosAddress } from "./utils"
 
 export async function applyEthosIdentityUpsert(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
-    const {
-        chain,
-        subchain,
-        address,
-    } = editOperation.data
+    const { chain, subchain, address } = editOperation.data
 
     if (!chain || !subchain || !address) {
-        return { success: false, message: "Invalid Ethos identity payload: missing chain, subchain or address" }
+        return {
+            success: false,
+            message:
+                "Invalid Ethos identity payload: missing chain, subchain or address",
+        }
     }
 
     const normalizedAddress = normalizeEthosAddress(chain, address)
@@ -43,22 +42,9 @@ export async function applyEthosIdentityUpsert(
             username: ethosData.username,
         }
     } catch (error) {
-        log.error(`[GCRIdentityRoutines] Failed to fetch Ethos score from API`)
+        log.error("[GCRIdentityRoutines] Failed to fetch Ethos score from API")
         return { success: false, message: "Failed to fetch Ethos score" }
     }
-
-    const isFirst = await isFirstConnection(
-        "ethos",
-        {
-            chain: chain,
-            subchain: subchain,
-            address: normalizedAddress,
-        },
-        gcrMainRepository,
-        editOperation.account,
-    )
-
-    const accountGCR = await ensureGCRForUser(editOperation.account)
 
     accountGCR.identities.ethos = accountGCR.identities.ethos || {}
     accountGCR.identities.ethos[chain] =
@@ -69,10 +55,7 @@ export async function applyEthosIdentityUpsert(
     const chainBucket = accountGCR.identities.ethos[chain][subchain]
 
     const filtered = chainBucket.filter(existing => {
-        const existingAddress = normalizeEthosAddress(
-            chain,
-            existing.address,
-        )
+        const existingAddress = normalizeEthosAddress(chain, existing.address)
         return existingAddress !== normalizedAddress
     })
 
@@ -87,11 +70,16 @@ export async function applyEthosIdentityUpsert(
     filtered.push(record)
     accountGCR.identities.ethos[chain][subchain] = filtered
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyEthosIdentityUpsert")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
+    const awardPoints = async () => {
+        const isFirst = await isFirstConnection(
+            "ethos",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            editOperation.account,
+        )
 
         log.info(
             `[EthosIdentity] LINKED: account=${accountGCR.pubkey.substring(0, 16)}..., chain=${chain}, subchain=${subchain}, score=${serverScore}, isFirstConnection=${isFirst}`,
@@ -107,13 +95,17 @@ export async function applyEthosIdentityUpsert(
         }
     }
 
-    return { success: true, message: "Ethos identity upserted" }
+    return {
+        success: true,
+        message: "Ethos identity upserted",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 export async function applyEthosIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const identity = editOperation.data as EthosWalletIdentity
 
@@ -125,14 +117,6 @@ export async function applyEthosIdentityRemove(
         identity.chain,
         identity.address,
     )
-
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
-    }
 
     const chainBucket =
         accountGCR.identities?.ethos?.[identity.chain]?.[identity.subchain]
@@ -164,12 +148,7 @@ export async function applyEthosIdentityRemove(
     accountGCR.identities.ethos[identity.chain][identity.subchain] =
         filteredBucket
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyEthosIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    const deductPoints = async () => {
         // Only deduct points if NO Ethos identities remain for this chain
         // (checking all subchains, since points are tracked per-chain)
         const chainIdentities = accountGCR.identities.ethos[identity.chain]
@@ -190,5 +169,10 @@ export async function applyEthosIdentityRemove(
         }
     }
 
-    return { success: true, message: "Ethos identity removed" }
+    return {
+        success: true,
+        message: "Ethos identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

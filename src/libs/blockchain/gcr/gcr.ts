@@ -1240,8 +1240,8 @@ export default class GCR {
                 const accountIdentifier = isWeb2Account(account)
                     ? account.username
                     : isXmAccount(account)
-                    ? `${account.chain}:${account.address}`
-                    : account.address
+                      ? `${account.chain}:${account.address}`
+                      : account.address
                 return {
                     success: false,
                     message:
@@ -1303,13 +1303,15 @@ export default class GCR {
 
         const tx = await this.createAwardPointsTransaction(accounts)
 
-        const editResults = await HandleGCR.applyToTx(
-            structuredClone(tx),
+        const affectedAccounts = await HandleGCR.prepareAccounts([tx])
+        const simulateResult = await HandleGCR.applyTransaction(
+            affectedAccounts,
+            tx,
             false,
             true,
         )
 
-        if (!editResults.success) {
+        if (!simulateResult.success) {
             log.error("Failed to apply GCREdit")
             return {
                 success: false,

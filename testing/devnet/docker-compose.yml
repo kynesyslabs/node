@@ -1,4 +1,3 @@
-version: "3.8"
 
 services:
   # Shared PostgreSQL instance with 4 databases
@@ -57,7 +56,7 @@ services:
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node1_db
       - PORT=${NODE1_PORT:-53551}
-      - OMNI_PORT=${NODE1_OMNI_PORT:-53561}
+      - OMNI_PORT=${NODE1_OMNI_PORT:-53552}
       - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
@@ -70,7 +69,7 @@ services:
       - ./l2ps:/app/data/l2ps:ro
     ports:
       - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
-      - "${NODE1_OMNI_PORT:-53561}:${NODE1_OMNI_PORT:-53561}"
+      - "${NODE1_OMNI_PORT:-53552}:${NODE1_OMNI_PORT:-53552}"
       - "${NODE1_SIGNALING_PORT:-3005}:3005"
     networks:
       - demos-network
@@ -95,9 +94,9 @@ services:
       - PG_USER=${POSTGRES_USER:-demosuser}
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node2_db
-      - PORT=${NODE2_PORT:-53552}
-      - OMNI_PORT=${NODE2_OMNI_PORT:-53562}
-      - EXPOSED_URL=http://node-2:${NODE2_PORT:-53552}
+      - PORT=${NODE2_PORT:-53553}
+      - OMNI_PORT=${NODE2_OMNI_PORT:-53554}
+      - EXPOSED_URL=http://node-2:${NODE2_PORT:-53553}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
@@ -108,8 +107,8 @@ services:
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
-      - "${NODE2_PORT:-53552}:${NODE2_PORT:-53552}"
-      - "${NODE2_OMNI_PORT:-53562}:${NODE2_OMNI_PORT:-53562}"
+      - "${NODE2_PORT:-53553}:${NODE2_PORT:-53553}"
+      - "${NODE2_OMNI_PORT:-53554}:${NODE2_OMNI_PORT:-53554}"
       - "${NODE2_SIGNALING_PORT:-3006}:3005"
     networks:
       - demos-network
@@ -134,9 +133,9 @@ services:
       - PG_USER=${POSTGRES_USER:-demosuser}
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node3_db
-      - PORT=${NODE3_PORT:-53553}
-      - OMNI_PORT=${NODE3_OMNI_PORT:-53563}
-      - EXPOSED_URL=http://node-3:${NODE3_PORT:-53553}
+      - PORT=${NODE3_PORT:-53555}
+      - OMNI_PORT=${NODE3_OMNI_PORT:-53556}
+      - EXPOSED_URL=http://node-3:${NODE3_PORT:-53555}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
@@ -147,8 +146,8 @@ services:
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
-      - "${NODE3_PORT:-53553}:${NODE3_PORT:-53553}"
-      - "${NODE3_OMNI_PORT:-53563}:${NODE3_OMNI_PORT:-53563}"
+      - "${NODE3_PORT:-53555}:${NODE3_PORT:-53555}"
+      - "${NODE3_OMNI_PORT:-53556}:${NODE3_OMNI_PORT:-53556}"
       - "${NODE3_SIGNALING_PORT:-3007}:3005"
     networks:
       - demos-network
@@ -173,9 +172,9 @@ services:
       - PG_USER=${POSTGRES_USER:-demosuser}
       - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
       - PG_DATABASE=node4_db
-      - PORT=${NODE4_PORT:-53554}
-      - OMNI_PORT=${NODE4_OMNI_PORT:-53564}
-      - EXPOSED_URL=http://node-4:${NODE4_PORT:-53554}
+      - PORT=${NODE4_PORT:-53557}
+      - OMNI_PORT=${NODE4_OMNI_PORT:-53558}
+      - EXPOSED_URL=http://node-4:${NODE4_PORT:-53557}
       - SUDO_PUBKEY=${SUDO_PUBKEY:-}
       - TLSNOTARY_ENABLED=true
       - TLSNOTARY_MODE=docker
@@ -186,8 +185,8 @@ services:
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
       - ./l2ps:/app/data/l2ps:ro
     ports:
-      - "${NODE4_PORT:-53554}:${NODE4_PORT:-53554}"
-      - "${NODE4_OMNI_PORT:-53564}:${NODE4_OMNI_PORT:-53564}"
+      - "${NODE4_PORT:-53557}:${NODE4_PORT:-53557}"
+      - "${NODE4_OMNI_PORT:-53558}:${NODE4_OMNI_PORT:-53558}"
       - "${NODE4_SIGNALING_PORT:-3008}:3005"
     networks:
       - demos-network

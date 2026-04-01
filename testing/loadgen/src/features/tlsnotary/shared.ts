@@ -19,7 +19,7 @@ export function getTlsNotaryTargets(): string[] {
   const explicit = splitCsv(process.env.TARGETS)
   const targets = explicit.length > 0
     ? explicit
-    : ["http://localhost:53551", "http://localhost:53552", "http://localhost:53553", "http://localhost:53554"]
+    : ["http://localhost:53551", "http://localhost:53553", "http://localhost:53555", "http://localhost:53557"]
   return targets.map(normalizeRpcUrl)
 }
 

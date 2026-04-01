@@ -10,7 +10,7 @@ services:
       - node-4
     environment:
       # Comma-separated list of node RPC base URLs (inside the docker network).
-      - TARGETS=${TARGETS:-http://node-1:53551,http://node-2:53552,http://node-3:53553,http://node-4:53554}
+      - TARGETS=${TARGETS:-http://node-1:53551,http://node-2:53553,http://node-3:53555,http://node-4:53557}
       # Scenario: rpc | transfer
       - SCENARIO=${SCENARIO:-rpc}
       - DURATION_SEC=${DURATION_SEC:-30}
