@@ -128,7 +128,6 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 " response=" +
                 JSON.stringify(res),
         )
-        process.exit(1)
     }
 }
 

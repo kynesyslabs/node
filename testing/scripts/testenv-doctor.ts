@@ -10,9 +10,9 @@ import { PeerConnection } from "../../src/libs/omniprotocol/transport/PeerConnec
 
 const defaultRpcTargets = [
   "http://localhost:53551",
-  "http://localhost:53552",
   "http://localhost:53553",
-  "http://localhost:53554",
+  "http://localhost:53555",
+  "http://localhost:53557",
 ]
 
 const outputJson = process.argv.includes("--json")
@@ -52,14 +52,18 @@ async function probeRpc(rpcUrl: string): Promise<RpcProbe> {
         : null
     const pingOk = ping.ok && ping.json?.result === 200
     const txReady = hash?.result === 200 && typeof hash?.response === "string" && hash.response.length > 0
-    return {
+
+    const res = {
       rpcUrl,
       pingOk,
       txReady,
       blockNumber: Number.isFinite(blockNumber as number) ? blockNumber : null,
       error: pingOk && txReady ? null : JSON.stringify({ ping: ping.json, getLastBlockHash: hash, getLastBlockNumber: numberRes }),
     }
+    console.log(res)
+    return res
   } catch (error) {
+    console.error(error)
     return {
       rpcUrl,
       pingOk: false,

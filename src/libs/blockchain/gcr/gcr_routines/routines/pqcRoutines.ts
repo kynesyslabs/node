@@ -7,8 +7,7 @@ import { safeGCRSave } from "./utils"
 
 export async function applyPqcIdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const identities: PqcIdentityEdit[] = editOperation.data
 
@@ -19,7 +18,6 @@ export async function applyPqcIdentityAdd(
         }
     }
 
-    const accountGCR = await ensureGCRForUser(editOperation.account)
     accountGCR.identities.pqc = accountGCR.identities.pqc || {}
 
     for (const identity of identities) {
@@ -55,20 +53,16 @@ export async function applyPqcIdentityAdd(
         })
     }
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyPqcIdentityAdd")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
+    return {
+        success: true,
+        message: "PQC identities added",
+        entity: accountGCR,
     }
-
-    return { success: true, message: "PQC identities added" }
 }
 
 export async function applyPqcIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const identities = editOperation.data
 
@@ -77,14 +71,6 @@ export async function applyPqcIdentityRemove(
             success: false,
             message: "Invalid edit operation data: expected array",
         }
-    }
-
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
     }
 
     if (!accountGCR.identities || !accountGCR.identities.pqc) {
@@ -100,8 +86,7 @@ export async function applyPqcIdentityRemove(
         if (!algorithm || !address) {
             return {
                 success: false,
-                message:
-                    "Invalid identity data: missing algorithm or address",
+                message: "Invalid identity data: missing algorithm or address",
             }
         }
 
@@ -135,12 +120,9 @@ export async function applyPqcIdentityRemove(
         )
     }
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyPqcIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
+    return {
+        success: true,
+        message: "PQC identities removed",
+        entity: accountGCR,
     }
-
-    return { success: true, message: "PQC identities removed" }
 }

@@ -1,6 +1,7 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Repository } from "typeorm"
 import log from "@/utilities/logger"
+import { dataSource } from "@/model/datasource"
 
 /**
  * Safe wrapper for GCR repository saves.
@@ -42,9 +43,9 @@ export async function isFirstConnection(
         address?: string // for web3/humanpassport
         domain?: string // for ud
     },
-    gcrMainRepository: Repository<GCRMain>,
     currentAccount?: string,
 ): Promise<boolean> {
+    const gcrMainRepository = dataSource.getRepository(GCRMain)
     if (type === "humanpassport") {
         const result = await gcrMainRepository
             .createQueryBuilder("gcr")

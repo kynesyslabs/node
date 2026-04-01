@@ -3,7 +3,6 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { GCRResult } from "../handleGCR"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
-import { Repository } from "typeorm"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import {
     applyXmIdentityAdd,
@@ -31,8 +30,8 @@ import {
 export default class GCRIdentityRoutines {
     static async apply(
         editOperation: GCREdit,
-        gcrMainRepository: Repository<GCRMain>,
-        simulate: boolean,
+        accountGCR: GCRMain,
+        simulate?: boolean, // NEEDED by zk transactions
     ): Promise<GCRResult> {
         if (
             editOperation.type !== "identity" ||
@@ -67,158 +66,131 @@ export default class GCRIdentityRoutines {
             case "zk_commitmentadd":
                 result = await applyZkCommitmentAdd(
                     identityEdit,
-                    gcrMainRepository,
                     simulate,
                 )
                 break
             case "zk_attestationadd":
                 result = await applyZkAttestationAdd(
                     identityEdit,
-                    gcrMainRepository,
                     simulate,
                 )
                 break
             default:
                 switch (identityEdit.context + operation) {
-            case "xmadd":
-                result = await applyXmIdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "xmremove":
-                result = await applyXmIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "web2add":
-                result = await applyWeb2IdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "web2remove":
-                result = await applyWeb2IdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "pqcadd":
-                result = await applyPqcIdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "pqcremove":
-                result = await applyPqcIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "udadd":
-                result = await applyUdIdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "udremove":
-                result = await applyUdIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "pointsadd":
-                result = await applyAwardPoints(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "pointsremove":
-                result = await applyAwardPointsRollback(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "nomisadd":
-                result = await applyNomisIdentityUpsert(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "zk_commitmentadd":
-                result = await applyZkCommitmentAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "nomisremove":
-                result = await applyNomisIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "humanpassportadd":
-                result = await applyHumanPassportIdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "humanpassportremove":
-                result = await applyHumanPassportIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "ethosadd":
-                result = await applyEthosIdentityUpsert(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "ethosremove":
-                result = await applyEthosIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            case "tlsnadd":
-                result = await applyTLSNIdentityAdd(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
+                    case "xmadd":
+                        result = await applyXmIdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "xmremove":
+                        result = await applyXmIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "web2add":
+                        result = await applyWeb2IdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "web2remove":
+                        result = await applyWeb2IdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "pqcadd":
+                        result = await applyPqcIdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "pqcremove":
+                        result = await applyPqcIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "udadd":
+                        result = await applyUdIdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "udremove":
+                        result = await applyUdIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "pointsadd":
+                        result = await applyAwardPoints(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "pointsremove":
+                        result = await applyAwardPointsRollback(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "nomisadd":
+                        result = await applyNomisIdentityUpsert(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "nomisremove":
+                        result = await applyNomisIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "humanpassportadd":
+                        result = await applyHumanPassportIdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "humanpassportremove":
+                        result = await applyHumanPassportIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "ethosadd":
+                        result = await applyEthosIdentityUpsert(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "ethosremove":
+                        result = await applyEthosIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    case "tlsnadd":
+                        result = await applyTLSNIdentityAdd(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
 
-            case "tlsnremove":
-                result = await applyTLSNIdentityRemove(
-                    identityEdit,
-                    gcrMainRepository,
-                    simulate,
-                )
-                break
-            default:
-                result = {
-                    success: false,
-                    message: "Unsupported identity operation",
-                }
+                    case "tlsnremove":
+                        result = await applyTLSNIdentityRemove(
+                            identityEdit,
+                            accountGCR,
+                        )
+                        break
+                    default:
+                        result = {
+                            success: false,
+                            message: "Unsupported identity operation",
+                        }
                 }
         }
 

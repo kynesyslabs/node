@@ -11,8 +11,7 @@ import { safeGCRSave, isFirstConnection, normalizeNomisAddress } from "./utils"
 
 export async function applyNomisIdentityUpsert(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const {
         chain,
@@ -31,19 +30,6 @@ export async function applyNomisIdentityUpsert(
 
     const normalizedAddress = normalizeNomisAddress(chain, address)
 
-    const isFirst = await isFirstConnection(
-        "nomis",
-        {
-            chain: chain,
-            subchain: subchain,
-            address: normalizedAddress,
-        },
-        gcrMainRepository,
-        editOperation.account,
-    )
-
-    const accountGCR = await ensureGCRForUser(editOperation.account)
-
     accountGCR.identities.nomis = accountGCR.identities.nomis || {}
     accountGCR.identities.nomis[chain] =
         accountGCR.identities.nomis[chain] || {}
@@ -53,10 +39,7 @@ export async function applyNomisIdentityUpsert(
     const chainBucket = accountGCR.identities.nomis[chain][subchain]
 
     const filtered = chainBucket.filter(existing => {
-        const existingAddress = normalizeNomisAddress(
-            chain,
-            existing.address,
-        )
+        const existingAddress = normalizeNomisAddress(chain, existing.address)
         return existingAddress !== normalizedAddress
     })
 
@@ -72,12 +55,16 @@ export async function applyNomisIdentityUpsert(
     filtered.push(record)
     accountGCR.identities.nomis[chain][subchain] = filtered
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyNomisIdentityUpsert")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function awardPoints() {
+        const isFirst = await isFirstConnection(
+            "nomis",
+            {
+                chain: chain,
+                subchain: subchain,
+                address: normalizedAddress,
+            },
+            editOperation.account,
+        )
         if (isFirst) {
             await IncentiveManager.nomisLinked(
                 accountGCR.pubkey,
@@ -88,13 +75,17 @@ export async function applyNomisIdentityUpsert(
         }
     }
 
-    return { success: true, message: "Nomis identity upserted" }
+    return {
+        success: true,
+        message: "Nomis identity upserted",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 export async function applyNomisIdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const identity = editOperation.data as NomisWalletIdentity
 
@@ -106,14 +97,6 @@ export async function applyNomisIdentityRemove(
         identity.chain,
         identity.address,
     )
-
-    const accountGCR = await gcrMainRepository.findOneBy({
-        pubkey: editOperation.account,
-    })
-
-    if (!accountGCR) {
-        return { success: false, message: "Account not found" }
-    }
 
     const chainBucket =
         accountGCR.identities?.nomis?.[identity.chain]?.[identity.subchain]
@@ -143,17 +126,14 @@ export async function applyNomisIdentityRemove(
             return existingAddress !== normalizedAddress
         })
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyNomisIdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
-        await IncentiveManager.nomisUnlinked(
-            accountGCR.pubkey,
-            identity.chain,
-        )
+    async function deductPoints() {
+        await IncentiveManager.nomisUnlinked(accountGCR.pubkey, identity.chain)
     }
 
-    return { success: true, message: "Nomis identity removed" }
+    return {
+        success: true,
+        message: "Nomis identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }
