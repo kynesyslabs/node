@@ -148,7 +148,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Build command with --no-tui
-FINAL_COMMAND="${START_COMMAND} -- --no-tui"
+FINAL_COMMAND="${START_COMMAND} --no-tui"
 
 # Start the node
 log_verbose "Starting node with: SERVER_PORT=${PORT}"

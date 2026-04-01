@@ -6,8 +6,7 @@ import { safeGCRSave } from "./utils"
 
 export async function applyAwardPoints(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { account: address, amount, date } = editOperation
     const account = await ensureGCRForUser(address)
@@ -25,23 +24,14 @@ export async function applyAwardPoints(
     account.points.totalPoints = (account.points.totalPoints || 0) + amount
     account.points.lastUpdated = new Date()
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, account, "applyAwardPoints")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-    }
-
-    return { success: true, message: "Points awarded" }
+    return { success: true, message: "Points awarded", entity: accountGCR }
 }
 
 export async function applyAwardPointsRollback(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    account: GCRMain,
 ): Promise<GCRResult> {
     const { account: address, amount, date } = editOperation
-    const account = await ensureGCRForUser(address)
 
     if (!account.points.breakdown.weeklyChallenge) {
         account.points.breakdown.weeklyChallenge = []
@@ -57,12 +47,5 @@ export async function applyAwardPointsRollback(
             ? 0
             : account.points.totalPoints - amount
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, account, "applyAwardPointsRollback")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-    }
-
-    return { success: true, message: "Points deducted" }
+    return { success: true, message: "Points deducted", entity: account }
 }

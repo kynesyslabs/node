@@ -10,12 +10,9 @@ import { safeGCRSave, isFirstConnection } from "./utils"
 
 export async function applyWeb2IdentityAdd(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { context, data } = editOperation.data as Web2GCRData
-    const accountGCR = await ensureGCRForUser(editOperation.account)
-
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
         accountGCR.identities.web2[context] || []
@@ -88,13 +85,7 @@ export async function applyWeb2IdentityAdd(
     }
 
     accountGCR.identities.web2[context].push(data)
-
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyWeb2IdentityAdd")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function awardPoints() {
         /**
          * Only award points if this is the first time this identity is being connected
          */
@@ -102,7 +93,6 @@ export async function applyWeb2IdentityAdd(
             const isFirst = await isFirstConnection(
                 "twitter",
                 { userId: data.userId },
-                gcrMainRepository,
                 editOperation.account,
             )
             if (isFirst) {
@@ -116,7 +106,6 @@ export async function applyWeb2IdentityAdd(
             const isFirst = await isFirstConnection(
                 "github",
                 { userId: data.userId },
-                gcrMainRepository,
                 editOperation.account,
             )
             if (isFirst) {
@@ -130,7 +119,6 @@ export async function applyWeb2IdentityAdd(
             const isFirst = await isFirstConnection(
                 "telegram",
                 { userId: data.userId },
-                gcrMainRepository,
                 editOperation.account,
             )
             if (isFirst) {
@@ -146,7 +134,6 @@ export async function applyWeb2IdentityAdd(
             const isFirst = await isFirstConnection(
                 "discord",
                 { userId: data.userId },
-                gcrMainRepository,
                 editOperation.account,
             )
             if (isFirst) {
@@ -160,19 +147,22 @@ export async function applyWeb2IdentityAdd(
         }
     }
 
-    return { success: true, message: "Web2 identity added" }
+    return {
+        success: true,
+        message: "Web2 identity added",
+        entity: accountGCR,
+        sideEffect: awardPoints,
+    }
 }
 
 export async function applyWeb2IdentityRemove(
     editOperation: any,
-    gcrMainRepository: Repository<GCRMain>,
-    simulate: boolean,
+    accountGCR: GCRMain,
 ): Promise<GCRResult> {
     const { context, username } = editOperation.data as {
         context: string
         username: string
     }
-    const accountGCR = await ensureGCRForUser(editOperation.account)
 
     accountGCR.identities.web2 = accountGCR.identities.web2 || {}
     accountGCR.identities.web2[context] =
@@ -199,12 +189,7 @@ export async function applyWeb2IdentityRemove(
         context
     ].filter((id: Web2GCRData["data"]) => id.username !== username)
 
-    if (!simulate) {
-        const saveResult = await safeGCRSave(gcrMainRepository, accountGCR, "applyWeb2IdentityRemove")
-        if (!saveResult.success) {
-            return { success: false, message: saveResult.error || "Database save failed" }
-        }
-
+    async function deductPoints() {
         /**
          * Deduct incentive points for Twitter unlinking
          */
@@ -230,5 +215,10 @@ export async function applyWeb2IdentityRemove(
         }
     }
 
-    return { success: true, message: "Web2 identity removed" }
+    return {
+        success: true,
+        message: "Web2 identity removed",
+        entity: accountGCR,
+        sideEffect: deductPoints,
+    }
 }

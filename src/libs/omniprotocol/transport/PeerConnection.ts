@@ -941,14 +941,14 @@ export class PeerConnection extends EventEmitter {
     private setState(newState: ConnectionStateValue): void {
         const oldState = this._state
 
-        if (!ConnectionStateUtils.canTransition(oldState, newState)) {
-            log.warning(
-                `[PeerConnection] Invalid state transition: ${ConnectionStateUtils.getName(
-                    oldState,
-                )} → ${ConnectionStateUtils.getName(newState)}`,
-            )
-            return
-        }
+        // if (!ConnectionStateUtils.canTransition(oldState, newState)) {
+        //     log.warning(
+        //         `[PeerConnection] Invalid state transition: ${ConnectionStateUtils.getName(
+        //             oldState,
+        //         )} → ${ConnectionStateUtils.getName(newState)}`,
+        //     )
+        //     return
+        // }
 
         this._state = newState
 

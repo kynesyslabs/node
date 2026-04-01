@@ -216,7 +216,7 @@ export async function getWalletAddresses(rpcUrl: string, mnemonics: string[]): P
   const addresses: string[] = []
   for (const mnemonic of mnemonics) {
     const demos = new Demos()
-    await waitForRpcReady(rpcUrl, envInt("WAIT_FOR_RPC_SEC", 120))
+    await waitForRpcReady(rpcUrl, envInt("WAIT_FOR_RPC_SEC", 3))
     await demos.connect(rpcUrl)
     await demos.connectWallet(mnemonic, { algorithm: "ed25519" })
     const sender = (await demos.crypto.getIdentity("ed25519")).publicKey

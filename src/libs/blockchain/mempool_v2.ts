@@ -144,6 +144,15 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
+        if (!getSharedState.inConsensusLoop) {
+            return {
+                success: false,
+                mempool: [],
+            }
+        }
+
+        // INFO: Transactions not to send back back
+        const noSendBackTxs = new Map<string, string>()
         for (const tx of incoming) {
             const isCoherent = TxUtils.isCoherent(tx)
             if (!isCoherent) {
@@ -160,53 +169,51 @@ export default class Mempool {
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
-                    tx.hash,
+                        tx.hash,
                 )
                 return {
                     success: false,
                     mempool: [],
                 }
             }
+
+            noSendBackTxs.set(tx.hash, tx.hash)
         }
 
-        if (!getSharedState.inConsensusLoop) {
-            return {
-                success: false,
-                mempool: [],
-            }
-        }
         const blockNumber = SecretaryManager.lastBlockRef
-
         const existingHashes = await this.getMempoolHashMap(blockNumber)
-        const incomingSet = {}
-
-        // INFO: Filter unique transactions
-        for (const tx of incoming) {
-            if (!existingHashes[tx.hash]) {
-                incomingSet[tx.hash] = true
-            } else {
-                log.error(`tx already exists: ${tx.hash}`)
-            }
-        }
-
         // REVIEW: Should we save each tx individually?
         // await this.repo.save(incoming)
         for (const tx of incoming) {
+            if (existingHashes[tx.hash]) {
+                log.info(`tx already exists: ${tx.hash}`)
+                continue
+            }
+
             try {
                 await this.repo.save(tx)
             } catch (error) {
-                if (error instanceof QueryFailedError) {
-                    log.error(`Error saving tx: ${tx.hash}`)
-                    log.error(error.message)
+                if (
+                    error instanceof QueryFailedError &&
+                    error.message.includes(
+                        "duplicate key value violates unique constraint",
+                    )
+                ) {
+                    noSendBackTxs.set(tx.hash, tx.hash)
+                    continue
                 }
+
+                // INFO: Log other errors
+                console.error(error)
             }
         }
+
         const finalPool = await this.getMempool(blockNumber)
 
         // INFO: Redundancy
         // INFO: Return the difference to the caller node
         const final = finalPool.filter(
-            tx => tx.blockNumber === blockNumber && !incomingSet[tx.hash],
+            tx => tx.blockNumber === blockNumber && !noSendBackTxs.has(tx.hash),
         )
         return {
             success: true,

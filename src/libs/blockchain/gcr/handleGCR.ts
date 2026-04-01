@@ -25,7 +25,7 @@ import _ from "lodash"
 import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
 import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
-import Datasource from "src/model/datasource"
+import Datasource, { dataSource } from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
 import hashGCRTables from "./gcr_routines/hashGCR"
@@ -38,6 +38,7 @@ import IdentityManager from "./gcr_routines/identityManager"
 import manageNative from "./gcr_routines/manageNative"
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
@@ -46,7 +47,7 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import Chain from "../chain"
-import { EntityManager, Repository } from "typeorm"
+import { EntityManager, In, Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -84,12 +85,67 @@ export type GetNativeSubnetsTxsOptions = {
 export interface GCRResult {
     success: boolean
     message: string
+    entity?: GCRMain
+    sideEffect?: () => Promise<void>
     response?: any
+}
+
+export interface GCRApplyResult {
+    success: boolean
+    accounts: Map<string, GCRMain>
+    message: string
+    sideEffects: (() => Promise<void>)[]
+    appliedEditsCount: number
+}
+
+/**
+ * Type for GCREdit that has an account property (balance, nonce types)
+ */
+type GCREditWithAccount = GCREdit & {
+    account: string | Uint8Array
+}
+
+/**
+ * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
+ * Returns true for balance and nonce types which have the 'account' property
+ */
+export function isBatchableGCREdit(edit: GCREdit): edit is GCREditWithAccount {
+    // @ts-expect-error - edit.account is not available in GCREditStorageProgram type
+    return edit.account !== undefined && edit.account !== null
+}
+
+/**
+ * Helper to normalize pubkey from different formats
+ */
+function normalizePubkey(account: string | Uint8Array): string {
+    return typeof account === "string" ? account : forgeToHex(account)
+}
+
+/**
+ * Interface for tracking entity snapshots for rollback
+ */
+interface GCRMainSnapshot {
+    pubkey: string
+    entity: GCRMain | null // null means entity was newly created
 }
 
 // ? Maybe sanitize the options?
 export default class HandleGCR {
-    // TODO Implement this
+    /**
+     * Set of GCR transaction types that can be batch processed with in-mem
+     * copies of the GCRMain entities.
+     * These don't need a special rollback routine.
+     */
+    static GCRTxTypes = new Set([
+        "balance",
+        "nonce",
+        "identity",
+        // These ⌄⌄⌄ are here because they don't have implemented handlers
+        "storageProgram",
+        "subnetsTx",
+        "assign",
+        "escrow",
+    ])
 
     static async getNativeStatus(
         publicKey: string,
@@ -233,35 +289,380 @@ export default class HandleGCR {
         return response
     }
 
-    // Routines
+    /**
+     * Bulk update assignedTxs using raw SQL for efficiency
+     */
+    static async bulkUpdateAssignedTxs(
+        updates: Map<string, string[]>,
+    ): Promise<void> {
+        if (updates.size === 0) return
+
+        const db = await Datasource.getInstance()
+        const queryRunner = db.getDataSource().createQueryRunner()
+
+        try {
+            // Build VALUES clause with proper escaping
+            // assignedTxs is jsonb, so we use jsonb arrays and || operator for concatenation
+            const valueEntries: string[] = []
+            for (const [pubkey, txHashes] of updates.entries()) {
+                const escapedPubkey = pubkey.replace(/'/g, "''")
+                // Create a JSON array string for jsonb
+                const jsonArray = JSON.stringify(txHashes).replace(/'/g, "''")
+                valueEntries.push(
+                    `('${escapedPubkey}'::text, '${jsonArray}'::jsonb)`,
+                )
+            }
+
+            const sql = `
+            UPDATE gcr_main AS g
+            SET "assignedTxs" = COALESCE(g."assignedTxs", '[]'::jsonb) || v.new_txs,
+                "updatedAt" = NOW()
+            FROM (VALUES ${valueEntries.join(",\n")}) AS v(pubkey, new_txs)
+            WHERE g.pubkey = v.pubkey
+        `
+
+            await queryRunner.query(sql)
+        } finally {
+            await queryRunner.release()
+        }
+    }
+
+    /**
+     * Loads accounts affected by given transactions into memory
+     *
+     * @param txs Transactions to load accounts for
+     * @returns Map of pubkeys to GCRMain entities
+     */
+    static async prepareAccounts(
+        txs: Transaction[],
+    ): Promise<Map<string, GCRMain>> {
+        const affectedPubkeys = new Set<string>()
+
+        for (const tx of txs) {
+            const gcrEdits = tx.content.gcr_edits
+            if (!gcrEdits || !Array.isArray(gcrEdits)) continue
+
+            for (const edit of gcrEdits) {
+                if (isBatchableGCREdit(edit)) {
+                    const pubkey = normalizePubkey(edit.account)
+                    affectedPubkeys.add(pubkey)
+                }
+            }
+
+            if (tx.content?.from_ed25519_address) {
+                affectedPubkeys.add(
+                    normalizePubkey(tx.content.from_ed25519_address),
+                )
+            }
+        }
+
+        // Batch load all affected GCRMain entities
+        const gcrMainRepo = dataSource.getRepository(GCRMain)
+        const gcrMainCache = new Map<string, GCRMain>()
+
+        if (affectedPubkeys.size > 0) {
+            const existingAccounts = await gcrMainRepo.find({
+                where: { pubkey: In([...affectedPubkeys]) },
+            })
+
+            for (const account of existingAccounts) {
+                gcrMainCache.set(account.pubkey, account)
+            }
+
+            // Create entities for missing accounts (unsaved)
+            for (const pubkey of affectedPubkeys) {
+                if (!gcrMainCache.has(pubkey)) {
+                    const newEntity = await HandleGCR.createAccount(
+                        pubkey,
+                        {},
+                        true,
+                    )
+                    gcrMainCache.set(pubkey, newEntity)
+                }
+            }
+        }
+
+        return gcrMainCache
+    }
+
+    /**
+     * Executes a transaction, applying the GCR edits to in-memory copies of the GCRMain entities
+     * Does not save the changes to the database or apply the side-effects
+     * Use together with HandleGCR.saveGCREditChanges() to save the changes to the database
+     * and apply the side-effects
+     *
+     * @param accounts - A map of pubkeys to GCRMain entities
+     * @param tx - The transaction to execute
+     * @param isRollback - Whether the operation is a rollback
+     * @param simulate - Whether the operation is being simulated (used for pre-consensus simulation)
+     **/
+    static async applyTransaction(
+        accounts: Map<string, GCRMain>,
+        tx: Transaction,
+        isRollback: boolean,
+        simulate: boolean,
+    ): Promise<GCRApplyResult> {
+        // Skip txs without GCR edits (valid but no state changes)
+        if (
+            !tx.content.gcr_edits ||
+            !Array.isArray(tx.content.gcr_edits) ||
+            tx.content.gcr_edits.length === 0
+        ) {
+            // successfulTxs.push(tx.hash)
+            // continue
+            return {
+                success: true,
+                accounts: accounts,
+                message: "No GCR edits to apply",
+                sideEffects: [],
+                appliedEditsCount: 0,
+            }
+        }
+
+        const gcrEdits = [...tx.content.gcr_edits]
+
+        // INFO: Reverse order of gcr_edits for rollback
+        if (isRollback) {
+            gcrEdits.reverse()
+        }
+
+        // Capture snapshots for potential rollback
+        const snapshots: GCRMainSnapshot[] = []
+        const editPubkeys = new Set<string>()
+
+        for (const edit of gcrEdits) {
+            if (isBatchableGCREdit(edit)) {
+                const pubkey = normalizePubkey(edit.account)
+                if (!editPubkeys.has(pubkey)) {
+                    editPubkeys.add(pubkey)
+                    const entity = accounts.get(pubkey)
+                    snapshots.push({
+                        pubkey,
+                        entity: entity ? structuredClone(entity) : null,
+                    })
+                }
+            }
+        }
+        const sideEffects: (() => Promise<void>)[] = []
+        const appliedEdits: GCREdit[] = []
+
+        // Apply all batchable edits for this tx
+        for (const edit of gcrEdits) {
+            let entity: GCRMain | null = null
+            if (isBatchableGCREdit(edit)) {
+                const pubkey = normalizePubkey(edit.account)
+                entity = accounts.get(pubkey)
+            }
+
+            let result: GCRResult
+
+            try {
+                result = await HandleGCR.applyGCREdit(
+                    edit,
+                    entity,
+                    isRollback,
+                    simulate,
+                )
+            } catch (error) {
+                log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
+                result = {
+                    success: false,
+                    message: `Error applying GCREdit: ${error}`,
+                }
+            }
+
+            if (!result.success) {
+                // Rollback all snapshots for this tx
+                for (const snap of snapshots) {
+                    if (snap.entity === null) {
+                        // Entity was newly created - restore to fresh state
+                        const freshEntity = await HandleGCR.createAccount(
+                            snap.pubkey,
+                            {},
+                            true,
+                        )
+                        accounts.set(snap.pubkey, freshEntity)
+                    } else {
+                        accounts.set(snap.pubkey, snap.entity)
+                    }
+                }
+
+                // INFO: If on a serious run, rollback hard edits
+                if (!simulate && !this.GCRTxTypes.has(edit.type)) {
+                    await this.rollback(tx, accounts, appliedEdits)
+                }
+
+                return {
+                    success: false,
+                    accounts: accounts,
+                    message: result.message,
+                    sideEffects: [],
+                    appliedEditsCount: 0,
+                }
+            }
+
+            if (result.sideEffect) {
+                sideEffects.push(result.sideEffect)
+            }
+
+            appliedEdits.push(edit)
+        }
+
+        // INFO: Process native side-effects
+        // REVIEW: Post-processing hook for native transaction side-effects
+        // This handles side-effects that aren't part of GCR edits (e.g., token creation)
+        // Token creation happens during simulation (mempool entry) so user can immediately use it
+        // The token is created optimistically - if tx fails consensus, token will expire unused
+        if (simulate && !isRollback && tx.content.type === "native") {
+            try {
+                await this.processNativeSideEffects(tx, simulate)
+            } catch (error) {
+                log.error(
+                    `[simulateOne] Error processing native side-effects: ${error}`,
+                )
+            }
+        }
+
+        return {
+            success: true,
+            accounts: accounts,
+            message: "Successfully applied GCR edits",
+            sideEffects: sideEffects,
+            appliedEditsCount: appliedEdits.length,
+        }
+    }
+
+    /**
+     * Apply transactions in bulk and save the changes to the database
+     *
+     * @param txs The transactions to apply
+     * @param isRollback Whether the operation is a rollback
+     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     *
+     * @returns The successful and failed transactions
+     */
+    static async applyTransactions(txs: Transaction[], isRollback: boolean) {
+        log.debug("Applying GCR Edits for merged mempool (batched)")
+        const now = Date.now()
+
+        const successfulTxs: string[] = []
+        const failedTxs: string[] = []
+        let gcrMainCache = await this.prepareAccounts(txs)
+
+        // Track assignedTxs updates for bulk SQL later
+        const sideEffects: (() => Promise<void>)[] = []
+        const assignedTxsUpdates = new Map<string, string[]>()
+
+        // Sequential tx processing (in-memory for batchable edits)
+        for (const tx of txs) {
+            const simulateResult = await HandleGCR.applyTransaction(
+                gcrMainCache,
+                tx,
+                isRollback,
+                false,
+            )
+            if (!simulateResult.success) {
+                failedTxs.push(tx.hash)
+                continue
+            }
+
+            gcrMainCache = simulateResult.accounts
+
+            if (simulateResult.success) {
+                sideEffects.push(...simulateResult.sideEffects)
+
+                // Track assignedTxs update
+                const sender = normalizePubkey(
+                    tx.content?.from_ed25519_address || tx.content.from,
+                )
+                if (sender && tx.hash) {
+                    if (!assignedTxsUpdates.has(sender)) {
+                        assignedTxsUpdates.set(sender, [])
+                    }
+
+                    assignedTxsUpdates.get(sender).push(tx.hash)
+                }
+
+                successfulTxs.push(tx.hash)
+            }
+        }
+
+        await this.saveGCREditChanges(gcrMainCache, sideEffects)
+        // Bulk update assignedTxs via raw SQL
+        if (assignedTxsUpdates.size > 0) {
+            log.debug(
+                `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
+            )
+            await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
+        }
+
+        const end = Date.now()
+        log.debug(
+            `[applyGCREditsFromMergedMempool] Time taken: ${(end - now) / 1000} seconds to apply GCR edits for ${txs.length} txs`,
+        )
+
+        return { successfulTxs, failedTxs }
+    }
+
+    /**
+     * Saves the GCR edits to the database and applies the side-effects
+     *
+     * @param accounts The accounts to save
+     * @param sideEffects The side-effects to apply
+     */
+    static async saveGCREditChanges(
+        accounts: Map<string, GCRMain>,
+        sideEffects: (() => Promise<void>)[],
+    ) {
+        const entitiesToSave = accounts.values().toArray()
+        if (entitiesToSave.length > 0) {
+            log.debug(
+                `[applyGCREditsFromMergedMempool] Saving ${entitiesToSave.length} entities`,
+            )
+            const gcrMainRepo = dataSource.getRepository(GCRMain)
+            await gcrMainRepo.save(entitiesToSave)
+        }
+
+        // INFO: Apply side-effects in sequence
+        for (const sideEffect of sideEffects) {
+            try {
+                await sideEffect()
+            } catch (error) {
+                log.error(
+                    `[saveGCREditChanges] Error applying side effect: ${error}`,
+                )
+            }
+        }
+    }
 
     // REVIEW Implement the execution of GCREdit objects
     // TODO Add this after the tx is synced in Sync.ts and in the consensus
     // ? Should we add the rollbacks here?
     // NOTE Once this is implemented, we can remove the old methods from gcr.ts and the other methods that overlap with this one
+
     /**
      * Applies a single GCR edit operation to the blockchain state
+     *
      * @param editOperation The GCR edit to apply
      * @param tx The original transaction containing this edit
-     * @param rollback Whether the operation is a rollback
+     * @param isRollback Whether the operation is a rollback
      * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     *
      * @returns Result indicating success/failure and any error messages
-     * @throws May throw database errors during repository operations
+     * also contains the modified entity.
+     *
+     * @throws database errors during repository operations
      */
-    static async apply(
+    static async applyGCREdit(
         editOperation: ExtendedGCREdit,
-        tx: Transaction,
-        rollback = false, // operations will be reverse in the rollback
+        account: GCRMain | null,
+        isRollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
     ): Promise<GCRResult> {
-        /*if (tx.hash !== editOperation.txhash) {
-            return { success: false, message: "Invalid txhash" }
-        }*/
-
         const repositories = await this.getRepositories()
 
         // NOTE The rollbacks are applied within the single routines based on the isRollback flag
-        if (rollback) {
+        if (isRollback) {
             editOperation.isRollback = true
         }
         // REVIEW: Handle token operations first (SDK GCREdit does not include token type yet)
@@ -283,25 +684,13 @@ export default class HandleGCR {
         // Applying the edit operations
         switch (sdkEdit.type) {
             case "balance":
-                result = await GCRBalanceRoutines.apply(
-                    sdkEdit,
-                    repositories.main as Repository<GCRMain>,
-                    simulate,
-                )
+                result = await GCRBalanceRoutines.apply(editOperation, account)
                 break
             case "nonce":
-                result = await GCRNonceRoutines.apply(
-                    sdkEdit,
-                    repositories.main as Repository<GCRMain>,
-                    simulate,
-                )
+                result = await GCRNonceRoutines.apply(editOperation, account)
                 break
             case "identity":
-                result = await GCRIdentityRoutines.apply(
-                    sdkEdit,
-                    repositories.main as Repository<GCRMain>,
-                    simulate,
-                )
+                result = await GCRIdentityRoutines.apply(editOperation, account)
                 break
             case "assign":
             case "subnetsTx":
@@ -331,161 +720,117 @@ export default class HandleGCR {
                 return { success: false, message: "Invalid GCREdit type" }
         }
 
-        // REVIEW: Update assignedTxs for the transaction sender on successful operations
-        // This tracks all transactions associated with an account
-        const sender = tx.content?.from
-        if (result.success && !simulate && tx.hash && sender) {
-            try {
-                await this.addAssignedTx(sender, tx.hash, repositories.main)
-            } catch (error) {
-                log.warn(
-                    `[HandleGCR] Failed to update assignedTxs for ${sender}: ${error}`,
-                )
-                // Don't fail the operation if assignedTxs update fails
-            }
-        }
-
         return result
     }
 
-    /**
-     * Adds a transaction hash to the account's assignedTxs array
-     * @param pubkey The account public key
-     * @param txHash The transaction hash to add
-     * @param repository The GCRMain repository
-     */
-    private static async addAssignedTx(
-        pubkey: string,
-        txHash: string,
-        repository: Repository<GCRMain>,
-    ): Promise<void> {
-        let account = await repository.findOneBy({ pubkey })
+    // /**
+    //  * Applies all GCR edits from a transaction
+    //  * @param tx Transaction containing GCR edits to apply
+    //  * @param isRollback Whether the operation is a rollback
+    //  * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+    //  * @returns Combined result of all edit applications
+    //  * @throws May throw if any edit application fails
+    //  */
+    // static async applyToTx(
+    //     tx: Transaction,
+    //     isRollback = false,
+    //     simulate = false,
+    // ): Promise<GCRResult> {
+    //     const editsResults: GCRResult[] = []
+    //     const txExists = await Chain.checkTxExists(tx.hash)
+    //     if (txExists) {
+    //         return {
+    //             success: false,
+    //             message: "Transaction already executed",
+    //         }
+    //     }
 
-        if (!account) {
-            // Create account if it doesn't exist
-            account = await this.createAccount(pubkey)
-        }
+    //     // const accounts = await this.prepareAccounts([tx])
+    //     // return await HandleGCR.simulateOne(accounts, tx, isRollback, simulate)
 
-        // Avoid duplicates
-        if (!account.assignedTxs.includes(txHash)) {
-            account.assignedTxs.push(txHash)
-            await repository.save(account)
-            log.debug(
-                `[HandleGCR] Added tx ${txHash} to assignedTxs for ${pubkey}`,
-            )
-        }
-    }
+    //     log.debug(
+    //         "[applyToTx] Starting execution of " +
+    //             tx.content.gcr_edits.length +
+    //             " GCREdits",
+    //     )
+    //     // Keep track of applied edits to be able to rollback them
+    //     const appliedEdits: GCREdit[] = []
+    //     for (const edit of tx.content.gcr_edits) {
+    //         // REVIEW: Ensure txhash is set on each GCR edit from the transaction
+    //         // This is needed because client-side GCR edits don't have the txhash
+    //         // (it's cleared during validation for hash comparison)
+    //         if (!simulate) {
+    //             edit.txhash = tx.hash
+    //         }
 
-    /**
-     * Applies all GCR edits from a transaction
-     * @param tx Transaction containing GCR edits to apply
-     * @param isRollback Whether the operation is a rollback
-     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
-     * @returns Combined result of all edit applications
-     * @throws May throw if any edit application fails
-     */
-    static async applyToTx(
-        tx: Transaction,
-        isRollback = false,
-        simulate = false,
-    ): Promise<GCRResult> {
-        const editsResults: GCRResult[] = []
-        const txExists = await Chain.checkTxExists(tx.hash)
-        if (txExists) {
-            return {
-                success: false,
-                message: "Transaction already executed",
-            }
-        }
+    //         log.debug("[applyToTx] Executing GCREdit: " + edit.type)
+    //         try {
+    //             const result = await HandleGCR.apply(edit, tx, simulate)
+    //             log.debug(
+    //                 "[applyToTx] GCREdit executed: " +
+    //                     edit.type +
+    //                     " with result: " +
+    //                     result.success +
+    //                     " and message: " +
+    //                     result.message,
+    //             )
+    //             // If not successful, we stop the execution
+    //             if (!result.success) {
+    //                 await this.rollback(tx, appliedEdits) // Rollback the applied edits
+    //                 throw new Error(
+    //                     "GCREdit failed for " +
+    //                         edit.type +
+    //                         " with message: " +
+    //                         result.message,
+    //                 )
+    //             }
+    //             editsResults.push(result)
+    //             appliedEdits.push(edit) // Keep track of applied edits
+    //         } catch (e) {
+    //             log.error("[applyToTx] Error applying GCREdit: " + e)
+    //             editsResults.push({
+    //                 success: false,
+    //                 message: `${e}`,
+    //             })
+    //             await this.rollback(tx, appliedEdits) // Rollback the applied edits
+    //             // Stopping the execution
+    //             if (!simulate) {
+    //                 break
+    //             }
+    //         }
+    //     }
 
-        log.debug(
-            "[applyToTx] Starting execution of " +
-                tx.content.gcr_edits.length +
-                " GCREdits",
-        )
-        // Keep track of applied edits to be able to rollback them
-        const appliedEdits: GCREdit[] = []
-        for (const edit of tx.content.gcr_edits) {
-            // REVIEW: Ensure txhash is set on each GCR edit from the transaction
-            // This is needed because client-side GCR edits don't have the txhash
-            // (it's cleared during validation for hash comparison)
-            if (!simulate){
-                edit.txhash = tx.hash
-            }
+    //     if (!editsResults.every(result => result.success)) {
+    //         log.error("[applyToTx] Failed to apply GCREdit")
+    //         const failedMessages = editsResults
+    //             .filter(result => !result.success)
+    //             .map(result => result.message)
+    //             .join(", ")
 
-            log.debug("[applyToTx] Executing GCREdit: " + edit.type)
-            try {
-                const result = await HandleGCR.apply(
-                    edit,
-                    tx,
-                    isRollback,
-                    simulate,
-                )
-                log.debug(
-                    "[applyToTx] GCREdit executed: " +
-                        edit.type +
-                        " with result: " +
-                        result.success +
-                        " and message: " +
-                        result.message,
-                )
-                // If not successful, we stop the execution
-                if (!result.success) {
-                    await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
-                    throw new Error(
-                        "GCREdit failed for " +
-                            edit.type +
-                            " with message: " +
-                            result.message,
-                    )
-                }
-                editsResults.push(result)
-                appliedEdits.push(edit) // Keep track of applied edits
-            } catch (e) {
-                log.error("[applyToTx] Error applying GCREdit: " + e)
-                editsResults.push({
-                    success: false,
-                    message: `${e}`,
-                })
-                await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
-                // Stopping the execution
-                if (!simulate) {
-                    break
-                }
-            }
-        }
+    //         return {
+    //             success: false,
+    //             message: failedMessages,
+    //         }
+    //     }
 
-        if (!editsResults.every(result => result.success)) {
-            log.error("[applyToTx] Failed to apply GCREdit")
-            const failedMessages = editsResults
-                .filter(result => !result.success)
-                .map(result => result.message)
-                .join(", ")
+    //     // REVIEW: Post-processing hook for native transaction side-effects
+    //     // This handles side-effects that aren't part of GCR edits (e.g., token creation)
+    //     // Token creation happens during simulation (mempool entry) so user can immediately use it
+    //     // The token is created optimistically - if tx fails consensus, token will expire unused
+    //     if (!isRollback && tx.content.type === "native") {
+    //         try {
+    //             await this.processNativeSideEffects(tx, simulate)
+    //         } catch (sideEffectError) {
+    //             log.error(
+    //                 `[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`,
+    //             )
+    //             // Side-effect errors are logged but don't fail the transaction
+    //             // The GCR edits (fee burning) have already been applied
+    //         }
+    //     }
 
-            return {
-                success: false,
-                message: failedMessages,
-            }
-        }
-
-        // REVIEW: Post-processing hook for native transaction side-effects
-        // This handles side-effects that aren't part of GCR edits (e.g., token creation)
-        // Token creation happens during simulation (mempool entry) so user can immediately use it
-        // The token is created optimistically - if tx fails consensus, token will expire unused
-        if (!isRollback && tx.content.type === "native") {
-            try {
-                await this.processNativeSideEffects(tx, simulate)
-            } catch (sideEffectError) {
-                log.error(
-                    `[applyToTx] Native side-effect error (non-fatal): ${sideEffectError}`,
-                )
-                // Side-effect errors are logged but don't fail the transaction
-                // The GCR edits (fee burning) have already been applied
-            }
-        }
-
-        return { success: true, message: "" }
-    }
+    //     return { success: true, message: "" }
+    // }
 
     /**
      * Apply only token-related GCR edits for a transaction.
@@ -630,9 +975,9 @@ export default class HandleGCR {
      */
     static async rollback(
         tx: Transaction,
+        accounts: Map<string, GCRMain>,
         appliedEditsOriginal: GCREdit[],
-        simulate = false,
-    ): Promise<GCRResult> {
+    ): Promise<void> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
         log.info(
@@ -644,6 +989,7 @@ export default class HandleGCR {
         // To rollback the edits, we need to pass the rollback flag to the apply method
         const counter = 0
         const results: GCRResult[] = []
+
         for (const edit of appliedEdits) {
             log.debug(
                 "[rollback] (" +
@@ -653,7 +999,24 @@ export default class HandleGCR {
                     ") Rolling back GCREdit: " +
                     edit.type,
             )
-            const result = await this.apply(edit, tx, true, simulate)
+            let account: GCRMain | null = null
+            if (isBatchableGCREdit(edit)) {
+                const pubkey = normalizePubkey(edit.account)
+                account = accounts.get(pubkey)
+            }
+
+            let result: GCRResult
+
+            try {
+                result = await this.applyGCREdit(edit, account, true)
+            } catch (error) {
+                log.error(`[rollback] Error applying GCREdit: ${error}`)
+                result = {
+                    success: false,
+                    message: `Error applying GCREdit: ${error}`,
+                }
+            }
+
             results.push(result)
         }
         log.info(
@@ -662,10 +1025,6 @@ export default class HandleGCR {
                 " GCREdits for tx: " +
                 tx.hash,
         )
-        return {
-            success: results.every(result => result.success),
-            message: results.map(result => result.message).join(", "),
-        }
     }
 
     // ! SECTION GCREdit methods
@@ -725,12 +1084,14 @@ export default class HandleGCR {
      *
      * @param pubkey The public key of the account
      * @param fillData Optional data to fill in the account
+     * @param skipSave If true, returns the entity without saving to database (for batch operations)
      * @returns The created GCRMain account
      */
     public static createAccount = async (
         pubkey: string,
         fillData: Record<string, any> = {},
-    ) => {
+        skipSave = false,
+    ): Promise<GCRMain> => {
         if (
             !pubkey ||
             typeof pubkey !== "string" ||
@@ -739,9 +1100,6 @@ export default class HandleGCR {
             throw new Error("Invalid public key provided")
         }
 
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
-        const repository = dataSource.getRepository(GCRMain)
         const account = new GCRMain()
 
         account.pubkey = pubkey
@@ -789,6 +1147,60 @@ export default class HandleGCR {
         account.createdAt = fillData["createdAt"] || new Date()
         account.updatedAt = fillData["updatedAt"] || new Date()
 
+        if (skipSave) {
+            return account
+        }
+
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        const repository = dataSource.getRepository(GCRMain)
         return await repository.save(account)
+    }
+
+    /**
+     * Applies a GCREdit operation directly to an entity without database operations.
+     * Used for batch processing where DB operations are deferred.
+     *
+     * @param editOperation The GCR edit to apply
+     * @param entity The GCRMain entity to modify
+     * @returns Result indicating success/failure
+     */
+    public static applyToEntity(
+        editOperation: GCREdit,
+        entity: GCRMain,
+    ): GCRResult {
+        // Only balance and nonce types have the 'account' property and are supported
+        if (
+            editOperation.type !== "balance" &&
+            editOperation.type !== "nonce"
+        ) {
+            return {
+                success: false,
+                message: `Unsupported edit type for batch processing: ${editOperation.type}`,
+            }
+        }
+
+        // Now TypeScript knows editOperation is balance or nonce type which have 'account'
+        const editOperationAccount =
+            typeof editOperation.account !== "string"
+                ? forgeToHex(editOperation.account)
+                : editOperation.account
+
+        if (entity.pubkey !== editOperationAccount) {
+            return { success: false, message: "Entity pubkey mismatch" }
+        }
+
+        if (editOperation.type === "balance") {
+            return GCRBalanceRoutines.applyToEntity(editOperation, entity)
+        } else {
+            return GCRNonceRoutines.applyToEntity(editOperation, entity)
+        }
+    }
+
+    /**
+     * Makes the getRepositories method public for batch operations
+     */
+    public static async getRepositoriesPublic() {
+        return this.getRepositories()
     }
 }

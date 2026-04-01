@@ -26,7 +26,11 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-import Datasource from "src/model/datasource"
+import { In } from "typeorm"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { forgeToHex } from "src/libs/crypto/forgeUtils"
+import Datasource, { dataSource } from "src/model/datasource"
+import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /* INFO
 # Semaphore system
@@ -65,7 +69,6 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    log.debug("🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥")
     const blockRef = getSharedState.lastBlockNumber + 1
     const manager = SecretaryManager.getInstance(blockRef, true)
 
@@ -86,9 +89,9 @@ export async function consensusRoutine(): Promise<void> {
         await initializeShard(blockRef)
         log.debug(`Forgin block: ${manager.shard.blockRef}`)
         log.debug("[consensusRoutine] We are in the shard, creating the block")
-        log.info(
+        log.debug(
             `[consensusRoutine] shard: ${JSON.stringify(
-                manager.shard,
+                manager.shard.members.map(m => m.connection.string),
                 null,
                 2,
             )}`,
@@ -124,15 +127,16 @@ export async function consensusRoutine(): Promise<void> {
         // await applyGCRForNewBlock(mempool)
 
         // Applying the GCREdits and see if everything is consistent
-        const [localSuccessfulTxs, localFailedTxs, localRollbackEligibleTxs] =
+        const { successfulTxs: localSuccessfulTxs, failedTxs: localFailedTxs } =
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+        // REVIEW: In batch mode all successful txs are rollback-eligible
         rollbackEligibleTxs = rollbackEligibleTxs.concat(
-            localRollbackEligibleTxs,
+            localSuccessfulTxs,
         )
         failedTxs = failedTxs.concat(localFailedTxs)
-        log.info(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
-        log.info(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
+        log.debug(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
+        log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
         if (failedTxs.length > 0) {
             log.debug(
                 "[consensusRoutine] Failed Txs found, pruning the mempool",
@@ -175,7 +179,7 @@ export async function consensusRoutine(): Promise<void> {
         } else {
             // INFO: This should never happen
             // If it does, request the block timestamp from the secretary
-            log.debug(
+            log.error(
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
@@ -269,7 +273,6 @@ export async function consensusRoutine(): Promise<void> {
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)
-
             return
         }
 
@@ -283,6 +286,8 @@ export async function consensusRoutine(): Promise<void> {
 
         cleanupConsensusState()
         manager.endConsensusRoutine()
+
+        log.debug("[consensusRoutine] Consensus routine ended")
     }
 }
 
@@ -361,9 +366,6 @@ async function mergeAndOrderMempools(
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
     const ourMempool = await Mempool.getMempool(blockRef)
-    log.debug(`[CONSENSUS] Our mempool: ${JSON.stringify(ourMempool)}`)
-    log.info("[CONSENSUS] Our mempool has been retrieved")
-
     await mergeMempools(ourMempool, shard)
     await updateValidatorPhase(3, blockRef)
 
@@ -382,69 +384,55 @@ async function mergeAndOrderMempools(
  * @param txs - The txs
  * @returns The successful and failed GCREdits
  */
-async function rollbackGCREditsFromTxs(
-    txs: Transaction[],
-): Promise<[string[], string[]]> {
-    const successfulTxs: string[] = []
-    const failedTxs: string[] = []
-    const prevInGcrApply = getSharedState.inGcrApply
-    getSharedState.inGcrApply = true
-    try {
-        // 1. Parse the txs to get the GCREdits
-        for (const tx of txs) {
-            // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
-            const result = await HandleGCR.applyToTx(tx, true)
-            if (result.success) {
-                successfulTxs.push(tx.hash)
-            } else {
-                failedTxs.push(tx.hash)
-            }
-        }
-    } finally {
-        getSharedState.inGcrApply = prevInGcrApply
-    }
-    return [successfulTxs, failedTxs]
+async function rollbackGCREditsFromTxs(txs: Transaction[]) {
+    return await HandleGCR.applyTransactions(txs, true)
 }
 
 /**
- * Apply the GCREdits from the merged mempool
+ * Apply the GCREdits from the merged mempool using batched entity processing.
+ *
+ * This optimized version:
+ * 1. Pre-filters already-executed txs in a single batch query
+ * 2. Batch loads all affected GCRMain entities
+ * 3. Processes edits in-memory without per-edit DB operations
+ * 4. Commits all changes in a single batch at the end
  *
  * @param mempool - The mempool
  * @returns The successful and failed GCREdits
  */
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
-): Promise<[string[], string[], string[]]> {
-    const successfulTxs = new Set<string>()
-    const rollbackEligibleTxs = new Set<string>()
-    const failedTxs = new Set<string>()
+): Promise<{ successfulTxs: string[]; failedTxs: string[] }> {
+    const failedTxs: string[] = []
 
-    const prevInGcrApply = getSharedState.inGcrApply
-    getSharedState.inGcrApply = true
-    try {
-        // Apply edits atomically per-tx (align with sync path).
-        // IMPORTANT: Never apply per-edit here; if a later edit fails it would leave partial state applied.
-        for (const tx of mempool) {
-            const txExists = await Chain.checkTxExists(tx.hash)
-            if (txExists) {
-                failedTxs.add(tx.hash)
-                continue
-            }
+    if (mempool.length === 0) {
+        return { successfulTxs: [], failedTxs: [] }
+    }
 
-            const txGCREdits = tx.content.gcr_edits
-            // Skip transactions that don't have GCR edits (e.g., l2psBatch)
-            if (
-                !txGCREdits ||
-                !Array.isArray(txGCREdits) ||
-                txGCREdits.length === 0
-            ) {
-                successfulTxs.add(tx.hash)
-                continue
-            }
+    // Filter already-executed txs in single batch query
+    const allTxHashes = mempool.map(tx => tx.hash)
+    const existingTxHashes =
+        await Chain.getExistingTransactionHashes(allTxHashes)
 
-            // Token edits are NOT currently included in the GCR integrity hash used by consensus.
-            // Validate token edits in simulate mode (so invalid token txs are pruned),
-            // but defer persistence of token edits until block finalization using the *actual* block tx list.
+    const pendingTxs = mempool.filter(tx => {
+        if (existingTxHashes.has(tx.hash)) {
+            failedTxs.push(tx.hash)
+            return false
+        }
+        return true
+    })
+
+    if (pendingTxs.length === 0) {
+        return { successfulTxs: [], failedTxs: allTxHashes }
+    }
+
+    // REVIEW: Token edit validation — validate token edits in simulate mode before batch processing.
+    // Token edits are NOT included in the GCR integrity hash used by consensus.
+    // Invalid token txs are pruned here; persistence deferred until block finalization.
+    const tokenValidatedTxs: Transaction[] = []
+    for (const tx of pendingTxs) {
+        const txGCREdits = tx.content.gcr_edits
+        if (txGCREdits && Array.isArray(txGCREdits)) {
             const hasTokenEdits = txGCREdits.some((e: any) => e?.type === "token")
             if (hasTokenEdits) {
                 const tokenValidation = await HandleGCR.applyTokenEditsToTx(
@@ -453,38 +441,39 @@ async function applyGCREditsFromMergedMempool(
                     true,
                 )
                 if (!tokenValidation.success) {
-                    failedTxs.add(tx.hash)
+                    failedTxs.push(tx.hash)
                     continue
                 }
             }
-
-            const nonTokenEdits = txGCREdits.filter(
-                (e: any) => e?.type !== "token",
-            )
-            if (nonTokenEdits.length === 0) {
-                successfulTxs.add(tx.hash)
-                continue
-            }
-
-            const txNonToken = {
-                ...tx,
-                content: {
-                    ...tx.content,
-                    gcr_edits: nonTokenEdits,
-                },
-            } as any as Transaction
-
-            const result = await HandleGCR.applyToTx(txNonToken, false, false)
-            if (result.success) {
-                successfulTxs.add(tx.hash)
-                rollbackEligibleTxs.add(tx.hash)
-            } else failedTxs.add(tx.hash)
         }
-    } finally {
-        getSharedState.inGcrApply = prevInGcrApply
+        tokenValidatedTxs.push(tx)
     }
 
-    return [[...successfulTxs], [...failedTxs], [...rollbackEligibleTxs]]
+    if (tokenValidatedTxs.length === 0) {
+        return { successfulTxs: [], failedTxs }
+    }
+
+    // REVIEW: Strip token edits before batch GCR processing (they are handled at block finalization)
+    const batchTxs = tokenValidatedTxs.map(tx => {
+        const txGCREdits = tx.content.gcr_edits
+        if (txGCREdits && Array.isArray(txGCREdits)) {
+            const nonTokenEdits = txGCREdits.filter((e: any) => e?.type !== "token")
+            if (nonTokenEdits.length !== txGCREdits.length) {
+                return {
+                    ...tx,
+                    content: {
+                        ...tx.content,
+                        gcr_edits: nonTokenEdits,
+                    },
+                } as any as Transaction
+            }
+        }
+        return tx
+    })
+
+    const res = await HandleGCR.applyTransactions(batchTxs, false)
+    failedTxs.push(...res.failedTxs)
+    return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
 }
 
 // /**
@@ -572,18 +561,14 @@ async function voteOnBlock(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    log.info(
+    log.debug(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
-
-    log.info(
-        `[consensusRoutine] Block hash broadcasted to the shard: ${block.hash}`,
-    )
-    log.info(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    log.debug(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
 
     return [pro, con]
 }
