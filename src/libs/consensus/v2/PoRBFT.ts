@@ -403,7 +403,7 @@ async function applyGCREditsFromMergedMempool(
     })
 
     if (pendingTxs.length === 0) {
-        return { successfulTxs: [], failedTxs: [] }
+        return { successfulTxs: [], failedTxs: allTxHashes }
     }
 
     const res = await HandleGCR.applyTransactions(pendingTxs, false)

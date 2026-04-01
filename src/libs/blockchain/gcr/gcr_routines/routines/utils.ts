@@ -1,7 +1,7 @@
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { Repository } from "typeorm"
 import log from "@/utilities/logger"
-import { dataSource } from "@/model/datasource";
+import { dataSource } from "@/model/datasource"
 
 /**
  * Safe wrapper for GCR repository saves.

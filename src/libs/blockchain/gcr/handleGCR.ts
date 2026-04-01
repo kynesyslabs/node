@@ -398,10 +398,12 @@ export default class HandleGCR {
         isRollback: boolean,
         simulate: boolean,
     ): Promise<GCRApplyResult> {
-        const gcrEdits = [...tx.content.gcr_edits]
-
         // Skip txs without GCR edits (valid but no state changes)
-        if (!gcrEdits || !Array.isArray(gcrEdits) || gcrEdits.length === 0) {
+        if (
+            !tx.content.gcr_edits ||
+            !Array.isArray(tx.content.gcr_edits) ||
+            tx.content.gcr_edits.length === 0
+        ) {
             // successfulTxs.push(tx.hash)
             // continue
             return {
@@ -412,6 +414,8 @@ export default class HandleGCR {
                 appliedEditsCount: 0,
             }
         }
+
+        const gcrEdits = [...tx.content.gcr_edits]
 
         // INFO: Reverse order of gcr_edits for rollback
         if (isRollback) {
@@ -446,12 +450,22 @@ export default class HandleGCR {
                 entity = accounts.get(pubkey)
             }
 
-            const result = await HandleGCR.applyGCREdit(
-                edit,
-                entity,
-                isRollback,
-                simulate,
-            )
+            let result: GCRResult
+
+            try {
+                result = await HandleGCR.applyGCREdit(
+                    edit,
+                    entity,
+                    isRollback,
+                    simulate,
+                )
+            } catch (error) {
+                log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
+                result = {
+                    success: false,
+                    message: `Error applying GCREdit: ${error}`,
+                }
+            }
 
             if (!result.success) {
                 // Rollback all snapshots for this tx
@@ -523,10 +537,7 @@ export default class HandleGCR {
      *
      * @returns The successful and failed transactions
      */
-    static async applyTransactions(
-        txs: Transaction[],
-        isRollback: boolean,
-    ) {
+    static async applyTransactions(txs: Transaction[], isRollback: boolean) {
         log.debug("Applying GCR Edits for merged mempool (batched)")
         const now = Date.now()
 
@@ -557,8 +568,9 @@ export default class HandleGCR {
                 sideEffects.push(...simulateResult.sideEffects)
 
                 // Track assignedTxs update
-                const sender =
-                    tx.content?.from_ed25519_address || tx.content.from
+                const sender = normalizePubkey(
+                    tx.content?.from_ed25519_address || tx.content.from,
+                )
                 if (sender && tx.hash) {
                     if (!assignedTxsUpdates.has(sender)) {
                         assignedTxsUpdates.set(sender, [])
@@ -607,9 +619,16 @@ export default class HandleGCR {
             await gcrMainRepo.save(entitiesToSave)
         }
 
-        // INFO: Apply side-effects
-        // REVIEW: Maybe apply this in the background?
-        await Promise.all(sideEffects.map(sideEffect => sideEffect()))
+        // INFO: Apply side-effects in sequence
+        for (const sideEffect of sideEffects) {
+            try {
+                await sideEffect()
+            } catch (error) {
+                log.error(
+                    `[saveGCREditChanges] Error applying side effect: ${error}`,
+                )
+            }
+        }
     }
 
     // REVIEW Implement the execution of GCREdit objects
@@ -901,7 +920,18 @@ export default class HandleGCR {
                 account = accounts.get(pubkey)
             }
 
-            const result = await this.applyGCREdit(edit, account, true)
+            let result: GCRResult
+
+            try {
+                result = await this.applyGCREdit(edit, account, true)
+            } catch (error) {
+                log.error(`[rollback] Error applying GCREdit: ${error}`)
+                result = {
+                    success: false,
+                    message: `Error applying GCREdit: ${error}`,
+                }
+            }
+
             results.push(result)
         }
         log.info(
