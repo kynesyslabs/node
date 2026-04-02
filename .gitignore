@@ -202,6 +202,7 @@ BUGS_AND_SECURITY_REPORT.md
 CEREMONY_COORDINATION.md
 PR_REVIEW_COMPREHENSIVE.md
 PR_REVIEW_RAW.md
+MERGE_REPORT*.md
 
 # ZK Ceremony files (SECURITY: must not be committed)
 zk_ceremony/
