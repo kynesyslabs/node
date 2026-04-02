@@ -307,6 +307,11 @@ export default class L2PSConsensus {
             }
         }
 
+        if (!account) {
+            proofResult.message = "No batchable account found in proof edits"
+            return false
+        }
+
         const mockTx = this.createMockTx(proof, account)
         const accounts = await HandleGCR.prepareAccounts([mockTx])
         const editResult = await HandleGCR.applyTransaction(
@@ -597,6 +602,14 @@ export default class L2PSConsensus {
                         break
                     }
                 }
+
+                if (!account) {
+                    log.warning(
+                        `[L2PS Consensus] No batchable account found in proof ${proof.id} for rollback, skipping`,
+                    )
+                    continue
+                }
+
                 const mockTx = this.createMockTx(proof, account)
                 const accounts = await HandleGCR.prepareAccounts([mockTx])
                 const editResult = await HandleGCR.applyTransaction(
@@ -605,6 +618,14 @@ export default class L2PSConsensus {
                     true,
                     false,
                 )
+
+                if (!editResult.success) {
+                    log.error(
+                        `[L2PS Consensus] Rollback failed for proof ${proof.id}: ${editResult.message}`,
+                    )
+                    continue
+                }
+
                 await HandleGCR.saveGCREditChanges(
                     editResult.accounts,
                     editResult.sideEffects,

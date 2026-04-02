@@ -664,16 +664,21 @@ export default class HandleGCR {
 
         let result: GCRResult
 
+        // Guard: balance, nonce, and identity edits require a valid account
+        if (!account && (editOperation.type === "balance" || editOperation.type === "nonce" || editOperation.type === "identity")) {
+            return { success: false, message: `Missing account for ${editOperation.type} edit` }
+        }
+
         // Applying the edit operations
         switch (editOperation.type) {
             case "balance":
-                result = await GCRBalanceRoutines.apply(editOperation, account)
+                result = await GCRBalanceRoutines.apply(editOperation, account!)
                 break
             case "nonce":
-                result = await GCRNonceRoutines.apply(editOperation, account)
+                result = await GCRNonceRoutines.apply(editOperation, account!)
                 break
             case "identity":
-                result = await GCRIdentityRoutines.apply(editOperation, account)
+                result = await GCRIdentityRoutines.apply(editOperation, account!)
                 break
             case "assign":
             case "subnetsTx":
