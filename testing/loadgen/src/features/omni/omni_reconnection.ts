@@ -5,6 +5,7 @@ import { PeerConnection } from "src/libs/omniprotocol/transport/PeerConnection"
 import { OmniOpcode } from "src/libs/omniprotocol/protocol/opcodes"
 import { decodePeerlistResponse } from "src/libs/omniprotocol/serialization/control"
 import { getOmniTargets } from "./shared"
+import { ConnectionState } from "@/libs/omniprotocol/transport/types"
 
 type ReconnectCycleReport = {
   cycle: number
@@ -37,6 +38,10 @@ async function sendPeerlist(connection: PeerConnection, requestTimeoutMs: number
   return decodePeerlistResponse(response)
 }
 
+function getConnectionStateName(state: number): string {
+  return Object.entries(ConnectionState).find(([_, v]) => v === state)?.[0] ?? `UNKNOWN(${state})`
+}
+
 async function probeTarget(target: string, connectTimeoutMs: number, requestTimeoutMs: number, cycles: number): Promise<ReconnectProbe> {
   const connection = new PeerConnection(`loadgen:${target}`, target)
   const reports: ReconnectCycleReport[] = []
@@ -64,9 +69,9 @@ async function probeTarget(target: string, connectTimeoutMs: number, requestTime
           status: first.status,
           peerCount: first.peers.length,
         },
-        afterCloseState,
+        afterCloseState: getConnectionStateName(afterCloseState),
         afterReconnect: {
-          state: connection.getState(),
+          state: getConnectionStateName(connection.getState()),
           status: second.status,
           peerCount: second.peers.length,
         },
@@ -82,7 +87,7 @@ async function probeTarget(target: string, connectTimeoutMs: number, requestTime
       report.beforeClose.peerCount >= minPeers &&
       report.afterReconnect.peerCount >= minPeers &&
       report.afterCloseState === "CLOSED" &&
-      report.afterReconnect.state === "READY"
+      report.afterReconnect.state === "READY",
     )
 
     return {

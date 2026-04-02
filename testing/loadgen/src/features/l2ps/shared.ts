@@ -26,9 +26,9 @@ export type L2psLiveCommandResult = {
 
 const defaultLiveTargets = [
   "http://localhost:53551",
-  "http://localhost:53552",
   "http://localhost:53553",
-  "http://localhost:53554",
+  "http://localhost:53555",
+  "http://localhost:53557",
 ]
 
 const defaultDatabases = ["node1_db", "node2_db", "node3_db", "node4_db"]
@@ -57,8 +57,8 @@ export function getL2psLiveOmniTargets(): string[] {
 }
 
 export async function waitForL2psLiveTargets(rpcTargets: string[]) {
-  const waitForRpcSec = envInt("WAIT_FOR_RPC_SEC", 120)
-  const waitForTxSec = envInt("WAIT_FOR_TX_SEC", 120)
+  const waitForRpcSec = envInt("WAIT_FOR_RPC_SEC", 3)
+  const waitForTxSec = envInt("WAIT_FOR_TX_SEC", 3)
   await Promise.all(rpcTargets.map((rpcUrl) => waitForRpcReady(rpcUrl, waitForRpcSec)))
   await Promise.all(rpcTargets.map((rpcUrl) => waitForTxReady(rpcUrl, waitForTxSec)))
 }

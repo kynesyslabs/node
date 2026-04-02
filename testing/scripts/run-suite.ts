@@ -33,7 +33,7 @@ type StartupBootstrapReport = {
 
 type SuiteArgs = ReturnType<typeof parseArgs>
 
-const defaultLocalTargets = "http://localhost:53551,http://localhost:53552,http://localhost:53553,http://localhost:53554"
+const defaultLocalTargets = "http://localhost:53551,http://localhost:53553,http://localhost:53555,http://localhost:53557"
 const dockerImageInputPaths = [
   "src",
   "testing/loadgen/src",
@@ -479,7 +479,7 @@ async function runScenario(
       `RUN_ID=${runId}`,
       `SCENARIO=${scenario}`,
       `QUIET=${verbose ? "false" : "true"}`,
-      `TARGETS=${targets ?? process.env.TARGETS ?? "http://localhost:53551,http://localhost:53552,http://localhost:53553,http://localhost:53554"}`,
+      `TARGETS=${targets ?? process.env.TARGETS ?? "http://localhost:53551,http://localhost:53553,http://localhost:53555,http://localhost:53557"}`,
       "bun",
       "testing/loadgen/src/main.ts",
     ]

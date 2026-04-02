@@ -10,15 +10,10 @@
  */
 
 import type { Transaction, GCREdit } from "@kynesyslabs/demosdk/types"
-import type { Repository } from "typeorm"
 import type { StateDelta } from "@/libs/consensus/petri/types/stateDelta"
 import { canonicalJson } from "@/libs/consensus/petri/utils/canonicalJson"
 import Hashing from "@/libs/crypto/hashing"
-import Datasource from "@/model/datasource"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import GCRBalanceRoutines from "@/libs/blockchain/gcr/gcr_routines/GCRBalanceRoutines"
-import GCRNonceRoutines from "@/libs/blockchain/gcr/gcr_routines/GCRNonceRoutines"
-import GCRIdentityRoutines from "@/libs/blockchain/gcr/gcr_routines/GCRIdentityRoutines"
+import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
 import log from "@/utilities/logger"
 import Chain from "@/libs/blockchain/chain"
 
@@ -43,53 +38,22 @@ export async function executeSpeculatively(
     tx: Transaction,
     gcrEdits: GCREdit[],
 ): Promise<SpeculativeResult> {
-    const db = await Datasource.getInstance()
-    const gcrMainRepo: Repository<GCRMain> = db
-        .getDataSource()
-        .getRepository(GCRMain)
+    // Use the new in-memory GCR pattern: batch-load accounts, then apply in simulation mode
+    const accounts = await HandleGCR.prepareAccounts([tx])
+    const applyResult = await HandleGCR.applyTransaction(
+        accounts,
+        tx,
+        false, // not a rollback
+        true, // simulate — no DB write
+    )
 
-    // REVIEW: Execute each GCR edit in simulation mode (simulate=true)
-    // This runs the full logic but skips the database save
-    for (const edit of gcrEdits) {
-        let result: { success: boolean; message: string }
-
-        switch (edit.type) {
-            case "balance":
-                result = await GCRBalanceRoutines.apply(
-                    edit,
-                    gcrMainRepo,
-                    true, // simulate — no DB write
-                )
-                break
-            case "nonce":
-                result = await GCRNonceRoutines.apply(
-                    edit,
-                    gcrMainRepo,
-                    true,
-                )
-                break
-            case "identity":
-                result = await GCRIdentityRoutines.apply(
-                    edit,
-                    gcrMainRepo,
-                    true,
-                )
-                break
-            default:
-                // For other GCR edit types (storage, tls, etc.), we still produce a delta
-                // but skip simulation — the edit presence itself is the state change signal
-                result = { success: true, message: "passthrough" }
-                break
-        }
-
-        if (!result.success) {
-            log.warn(
-                `[PetriSpecExec] Simulation failed for TX ${tx.hash}, edit type=${edit.type}: ${result.message}`,
-            )
-            return {
-                success: false,
-                error: `Simulation failed: ${result.message}`,
-            }
+    if (!applyResult.success) {
+        log.warn(
+            `[PetriSpecExec] Simulation failed for TX ${tx.hash}: ${applyResult.message}`,
+        )
+        return {
+            success: false,
+            error: `Simulation failed: ${applyResult.message}`,
         }
     }
 
