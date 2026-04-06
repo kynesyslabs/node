@@ -16,9 +16,13 @@ RUN cargo install wstcp
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S wstcp \
+    && adduser -S -G wstcp wstcp
 
 COPY --from=builder /usr/local/cargo/bin/wstcp /usr/local/bin/wstcp
+
+USER wstcp
 
 EXPOSE 55688
 
