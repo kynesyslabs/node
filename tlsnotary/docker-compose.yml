@@ -1,13 +1,15 @@
-# TLSNotary Docker Notary Server
-# Uses the official tlsn-js compatible notary server image
+# TLSNotary Stack
 #
-# This provides the full HTTP API + WebSocket interface that tlsn-js expects:
-# - GET /info - Get notary public key
-# - POST /session - Create session, returns sessionId
-# - WS /notarize?sessionId=xxx - WebSocket MPC-TLS session
+# Services:
+#   notary  — TLSNotary notary server (HTTP API + WebSocket MPC-TLS sessions)
+#   proxy   — wstcp WebSocket-to-TCP proxy (lets browsers reach the notary)
 #
-# Environment variables:
-# - TLSNOTARY_PORT: Port to expose (default: 7047)
+# Usage:
+#   docker compose up -d
+#
+# Environment variables (copy .env.example → .env to override defaults):
+#   TLSNOTARY_PORT   Port the notary listens on (default: 7047)
+#   PROXY_PORT       Port the wstcp proxy listens on (default: 55688)
 
 services:
     notary:
@@ -19,16 +21,26 @@ services:
         ports:
             - "${TLSNOTARY_PORT:-7047}:7047"
         restart: unless-stopped
-        healthcheck:
-            test: [CMD, curl, -f, http://localhost:7047/info]
-            interval: 10s
-            timeout: 5s
-            retries: 3
-            start_period: 10s
-        # Note: The Docker notary-server uses its own internal signing key
-        # Attestations are cryptographically bound to this notary's public key
-        # which can be retrieved via GET /info endpoint
+        networks:
+            - tlsn
+
+    proxy:
+        container_name: tlsn-proxy-${PROXY_PORT:-55688}
+        build:
+            context: .
+            dockerfile: Dockerfile.proxy
+        ports:
+            - "${PROXY_PORT:-55688}:55688"
+        # Forward WebSocket connections to the notary's internal TCP port.
+        # Uses the Docker service name so the proxy can reach the notary
+        # without exposing any extra ports on the host.
+        command: ["notary:7047"]
+        restart: unless-stopped
+        depends_on:
+            - notary
+        networks:
+            - tlsn
 
 networks:
-    default:
+    tlsn:
         driver: bridge
