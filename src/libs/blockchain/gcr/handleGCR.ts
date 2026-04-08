@@ -986,7 +986,7 @@ export default class HandleGCR {
             let result: GCRResult
 
             try {
-                result = await this.applyGCREdit(edit, account, true)
+                result = await this.applyGCREdit(edit, account, true, false, tx)
             } catch (error) {
                 log.error(`[rollback] Error applying GCREdit: ${error}`)
                 result = {
