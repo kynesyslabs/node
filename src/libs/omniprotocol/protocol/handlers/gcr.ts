@@ -128,10 +128,13 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(gcrMain)
 
+        // REVIEW: Load the GCRMain entity for the account (stabilisation batch-processing pattern)
+        const account = await gcrMainRepository.findOneBy({ pubkey: editOperation.account })
+
         // Apply the identity operation (simulate = false for actual execution)
         const result = await gcrIdentityRoutines.apply(
             editOperation,
-            gcrMainRepository,
+            account,
             false, // simulate = false (actually apply changes)
         )
 

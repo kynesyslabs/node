@@ -462,6 +462,7 @@ export default class HandleGCR {
                     entity,
                     isRollback,
                     simulate,
+                    tx,
                 )
             } catch (error) {
                 log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
@@ -658,6 +659,7 @@ export default class HandleGCR {
         account: GCRMain | null,
         isRollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
+        tx?: Transaction, // REVIEW: Optional transaction context for token hook execution
     ): Promise<GCRResult> {
         const repositories = await this.getRepositories()
 
@@ -867,38 +869,14 @@ export default class HandleGCR {
             return { success: true, message: "" }
         }
 
-        const editsResults: GCRResult[] = []
-        const appliedEdits: any[] = []
-
-        // NOTE: Rollbacks are applied within routines based on isRollback flag.
+        // REVIEW: Fallback path without EntityManager — use default repository
+        const repositories = await this.getRepositories()
+        const tokenRepo = repositories.token as Repository<GCRToken>
         for (const edit of tokenEdits) {
-            try {
-                const result = await HandleGCR.apply(edit as any, tx, isRollback, simulate)
-                if (!result.success) {
-                    await this.rollback(tx, appliedEdits as any, simulate)
-                    throw new Error(
-                        "Token GCREdit failed for " +
-                            (edit as any).operation +
-                            " with message: " +
-                            result.message,
-                    )
-                }
-                editsResults.push(result)
-                appliedEdits.push(edit)
-            } catch (e) {
-                log.error("[applyTokenEditsToTx] Error applying token GCREdit: " + e)
-                editsResults.push({ success: false, message: `${e}` })
-                await this.rollback(tx, appliedEdits as any, simulate)
-                if (!simulate) break
-            }
-        }
-
-        if (!editsResults.every(r => r.success)) {
-            const failedMessages = editsResults
-                .filter(r => !r.success)
-                .map(r => r.message)
-                .join(", ")
-            return { success: false, message: failedMessages }
+            const editOp = { ...(edit as any) }
+            if (isRollback) editOp.isRollback = true
+            const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
+            if (!result.success) return result
         }
 
         return { success: true, message: "" }
