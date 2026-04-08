@@ -739,7 +739,7 @@ export default class GCRTokenRoutines {
                 token.balances[to] = (prevBalance - mintAmount).toString()
                 token.totalSupply = (BigInt(token.totalSupply) - mintAmount).toString()
                 if (token.balances[to] === "0") delete token.balances[to]
-            } else if (token.hasScript && token.script?.code && tx) {
+            } else if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                 try {
                     const hookExecutor = this.getHookExecutor()
                     const tokenData = this.tokenToGCRTokenData(token)
@@ -807,7 +807,7 @@ export default class GCRTokenRoutines {
                     token.balances[to] = (prevBalance - mintAmount).toString()
                     token.totalSupply = (supplyBefore - mintAmount).toString()
                     if (token.balances[to] === "0") delete token.balances[to]
-                } else if (token.hasScript && token.script?.code && tx) {
+                } else if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                     const hookExecutor = this.getHookExecutor()
                     const tokenData = this.tokenToGCRTokenData(token)
                     const nativeMutations = createMintMutations(to, mintAmount)
@@ -896,7 +896,7 @@ export default class GCRTokenRoutines {
                 token.totalSupply = (
                     this.parseTokenBigInt(token.totalSupply, "token.totalSupply") + burnAmount
                 ).toString()
-            } else if (token.hasScript && token.script?.code && tx) {
+            } else if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                 if (prevBalance < burnAmount) return { success: false, message: "Insufficient balance to burn" }
                 try {
                     const hookExecutor = this.getHookExecutor()
@@ -969,7 +969,7 @@ export default class GCRTokenRoutines {
                     recordBefore([{ kind: "mint", to: from, amount: burnAmount }])
                     token.balances[from] = (prevBalance + burnAmount).toString()
                     token.totalSupply = (supplyBefore + burnAmount).toString()
-                } else if (token.hasScript && token.script?.code && tx) {
+                } else if (token.hasScript && token.script?.code && tx && !edit.isRollback) {
                     if (prevBalance < burnAmount) throw new Error("Insufficient balance to burn")
 
                     const hookExecutor = this.getHookExecutor()

@@ -9,8 +9,9 @@ import log from "src/utilities/logger"
 export default class GCRBalanceRoutines {
     static async apply(
         editOperation: GCREdit,
-        gcrMainRepository: Repository<GCRMain>,
-        simulate: boolean,
+        accountGCR: GCRMain,
+        // gcrMainRepository: Repository<GCRMain>,
+        // simulate: boolean,
     ): Promise<GCRResult> {
         if (editOperation.type !== "balance") {
             return { success: false, message: "Invalid GCREdit type" }
@@ -43,13 +44,13 @@ export default class GCRBalanceRoutines {
         }
 
         // Getting the account GCR
-        let accountGCR = await gcrMainRepository.findOneBy({
-            pubkey: editOperationAccount,
-        })
+        // let accountGCR = await gcrMainRepository.findOneBy({
+        //     pubkey: editOperationAccount,
+        // })
 
-        if (!accountGCR) {
-            accountGCR = await HandleGCR.createAccount(editOperationAccount)
-        }
+        // if (!accountGCR) {
+        //     accountGCR = await HandleGCR.createAccount(editOperationAccount)
+        // }
 
         // Getting the actual balance to apply the operation
         const actualBalance = accountGCR.balance
@@ -78,11 +79,66 @@ export default class GCRBalanceRoutines {
         }
 
         // Saving the account GCR if not simulating
-        if (!simulate) {
-            try {
-                await gcrMainRepository.save(accountGCR)
-            } catch (error) {
-                return { success: false, message: "Failed to save account GCR" }
+        // if (!simulate) {
+        //     try {
+        //         await gcrMainRepository.save(accountGCR)
+        //     } catch (error) {
+        //         return { success: false, message: "Failed to save account GCR" }
+        //     }
+        // }
+
+        return { success: true, message: "Balance applied", entity: accountGCR }
+    }
+
+    /**
+     * Applies a balance edit directly to an entity without database operations.
+     * Used for batch processing where DB operations are deferred.
+     *
+     * @param editOperation The GCR edit to apply
+     * @param entity The GCRMain entity to modify (mutated in place)
+     * @returns Result indicating success/failure
+     */
+    static applyToEntity(
+        editOperation: GCREdit,
+        entity: GCRMain,
+    ): { success: boolean; message: string } {
+        if (editOperation.type !== "balance") {
+            return { success: false, message: "Invalid GCREdit type" }
+        }
+
+        // Safeguarding the operation by checking if the amount is positive
+        if (editOperation.amount <= 0) {
+            return { success: false, message: "Invalid amount" }
+        }
+
+        // Determine operation (handle rollback)
+        let operation = editOperation.operation
+        if (editOperation.isRollback) {
+            operation = operation === "add" ? "remove" : "add"
+        }
+
+        const actualBalance = entity.balance
+
+        if (operation === "add") {
+            entity.balance =
+                BigInt(entity.balance) + BigInt(editOperation.amount)
+        } else if (operation === "remove") {
+            // Safeguarding the operation
+            // NOTE PROD flag is used to enable testing when not in production
+            if (
+                (actualBalance < editOperation.amount ||
+                    actualBalance === 0n) &&
+                getSharedState.PROD
+            ) {
+                return { success: false, message: "Insufficient balance" }
+            }
+            entity.balance =
+                BigInt(entity.balance) - BigInt(editOperation.amount)
+
+            // Safeguarding the operation by checking if the balance is negative
+            // NOTE This applies just to the non-production environment
+            if (entity.balance < 0n && !getSharedState.PROD) {
+                entity.balance = 0n
             }
         }
 

@@ -103,7 +103,7 @@ cmd=(
   -e QUIET="$QUIET"
 )
 
-for kv in "${EXTRA_ENV[@]}"; do
+for kv in ${EXTRA_ENV[@]+"${EXTRA_ENV[@]}"}; do
   if [[ -z "$kv" || "$kv" != *"="* ]]; then
     echo "Invalid --env value (expected KEY=VALUE): $kv" >&2
     exit 2

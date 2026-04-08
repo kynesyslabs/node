@@ -41,6 +41,7 @@ import { runTokenObserve } from "./token_observe"
 import { runTokenInvariantsKnownHolders } from "./token_invariants_known_holders"
 import { runTokenPauseUnderLoad } from "./token_pause_under_load"
 import { runTokenHoldersExport } from "./token_holders_export"
+import { runTokenGcrBatchExclusion } from "./token_gcr_batch_exclusion"
 import { runImOnlineLoadgen } from "./im_online_loadgen"
 import { runImOnlineRamp } from "./im_online_ramp"
 import { runImRegisterDiscoverSmoke } from "./features/im/im_register_discover_smoke"
@@ -156,6 +157,7 @@ registerScenario("token_observe", runTokenObserve)
 registerScenario("token_invariants_known_holders", runTokenInvariantsKnownHolders)
 registerScenario("token_pause_under_load", runTokenPauseUnderLoad)
 registerScenario("token_holders_export", runTokenHoldersExport)
+registerScenario("token_gcr_batch_exclusion", runTokenGcrBatchExclusion)
 registerScenario("im_online", runImOnlineLoadgen)
 registerScenario("im_online_ramp", runImOnlineRamp)
 registerScenario("im_register_discover_smoke", runImRegisterDiscoverSmoke)
