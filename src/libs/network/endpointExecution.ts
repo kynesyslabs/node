@@ -30,6 +30,7 @@ import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
+import { relay as petriRelay } from "@/libs/consensus/petri/routing/petriRouter"
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -320,6 +321,46 @@ export async function handleExecuteTransaction(
         }
 
         log.debug("PROD: " + getSharedState.PROD)
+
+        // REVIEW: Petri Consensus routing — relay to 2 shard members instead of DTR.
+        // Note: This early-returns before mempool addition. The originating node does NOT
+        // add the tx to its own mempool — shard members receive it via RELAY_TX and add it
+        // to theirs. Verify this flow works end-to-end in Phase 6 integration testing.
+        if (getSharedState.petriConsensus) {
+            const { success: relaySuccess } = await petriRelay(validatedData)
+
+            if (!relaySuccess) {
+                // Fallback: add to local mempool so the TX is not lost
+                log.warn(
+                    `[handleExecuteTransaction] Petri relay failed for ${queriedTx.hash}, adding to local mempool`,
+                )
+                try {
+                    await Mempool.addTransaction({
+                        ...queriedTx,
+                        reference_block: validatedData.data.reference_block,
+                    })
+                } catch (mempoolError) {
+                    log.error(
+                        `[handleExecuteTransaction] Fallback mempool insertion also failed for ${queriedTx.hash}: ${mempoolError instanceof Error ? mempoolError.message : String(mempoolError)}`,
+                    )
+                }
+            }
+
+            return {
+                success: true,
+                response: {
+                    message: relaySuccess
+                        ? "Transaction routed to shard members"
+                        : "Transaction accepted locally (relay pending)",
+                },
+                extra: {
+                    confirmationBlock: getSharedState.lastBlockNumber + 1,
+                    routing: "petri",
+                },
+                require_reply: false,
+            }
+        }
+
         const { isValidator, validators } = await isValidatorForNextBlock()
 
         if (!isValidator) {

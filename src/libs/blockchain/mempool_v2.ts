@@ -2,6 +2,7 @@ import {
     EntityManager,
     FindManyOptions,
     In,
+    IsNull,
     LessThanOrEqual,
     QueryFailedError,
     Repository,
@@ -15,6 +16,9 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
+import { TransactionClassification } from "@/libs/consensus/petri/types/classificationTypes"
+import { classifyTransaction } from "@/libs/consensus/petri/classifier/transactionClassifier"
+import { executeSpeculatively } from "@/libs/consensus/petri/execution/speculativeExecutor"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -38,7 +42,7 @@ export default class Mempool {
             },
         }
 
-        if (blockNumber) {
+        if (blockNumber !== undefined) {
             options.where = {
                 blockNumber: LessThanOrEqual(blockNumber),
             }
@@ -104,11 +108,41 @@ export default class Mempool {
         }
 
         try {
+            // REVIEW: Petri Consensus — classify at insertion time (gated by feature flag)
+            let classification: string | null = null
+            let deltaHash: string | null = null
+            if (getSharedState.petriConsensus) {
+                const result = await classifyTransaction(transaction)
+                classification = result.classification
+
+                if (result.classification === TransactionClassification.TO_APPROVE) {
+                    const specResult = await executeSpeculatively(
+                        transaction,
+                        result.gcrEdits,
+                    )
+                    if (specResult.success && specResult.delta) {
+                        deltaHash = specResult.delta.hash
+                    } else {
+                        classification = TransactionClassification.FAILED
+                        log.warn(
+                            `[Mempool] Speculative execution failed for ${transaction.hash}, marking as FAILED`,
+                        )
+                    }
+                }
+
+                log.debug(
+                    `[Mempool] Petri classification for ${transaction.hash}: ${classification}` +
+                    (deltaHash ? ` (delta=${deltaHash.substring(0, 16)}...)` : ""),
+                )
+            }
+
             const saved = await this.repo.save({
                 ...transaction,
                 timestamp: BigInt(transaction.content.timestamp),
                 nonce: transaction.content.nonce,
                 blockNumber: blockNumber,
+                classification,
+                delta_hash: deltaHash,
             })
 
             return {
@@ -258,6 +292,69 @@ export default class Mempool {
             )
             throw error
         }
+    }
+
+    // REVIEW: Petri Consensus classification queries (Phase 1)
+
+    /**
+     * Get mempool transactions filtered by Petri classification.
+     */
+    public static async getByClassification(
+        classification: TransactionClassification,
+        blockNumber?: number,
+    ): Promise<MempoolTx[]> {
+        const where: Record<string, unknown> = { classification }
+        if (blockNumber !== undefined) {
+            where.blockNumber = LessThanOrEqual(blockNumber)
+        }
+        return await this.repo.find({
+            where,
+            order: { timestamp: "ASC" },
+        })
+    }
+
+    /**
+     * Get mempool transactions that have no classification (arrived via merge).
+     */
+    public static async getUnclassified(): Promise<MempoolTx[]> {
+        return await this.repo.find({
+            where: { classification: IsNull() },
+            order: { timestamp: "ASC" },
+        })
+    }
+
+    /**
+     * Get all PRE_APPROVED transactions, optionally filtered by block number.
+     */
+    public static async getPreApproved(
+        blockNumber?: number,
+    ): Promise<MempoolTx[]> {
+        return this.getByClassification(
+            TransactionClassification.PRE_APPROVED,
+            blockNumber,
+        )
+    }
+
+    /**
+     * Update classification and optional delta hash for a transaction.
+     */
+    public static async updateClassification(
+        txHash: string,
+        classification: TransactionClassification,
+        deltaHash?: string,
+    ): Promise<void> {
+        const update: Record<string, unknown> = { classification }
+        if (deltaHash !== undefined) {
+            update.delta_hash = deltaHash
+        }
+        // REVIEW: Petri Phase 5 — record soft finality timestamp on first PRE_APPROVED only
+        if (classification === TransactionClassification.PRE_APPROVED) {
+            const existing = await this.repo.findOne({ where: { hash: txHash } })
+            if (!existing?.soft_finality_at) {
+                update.soft_finality_at = Date.now()
+            }
+        }
+        await this.repo.update({ hash: txHash }, update)
     }
 }
 

@@ -5,7 +5,7 @@ import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
-import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import getShard from "./getShard"
@@ -41,6 +41,35 @@ export default async function manageProposeBlockHash(
     log.info(
         "[manageProposeBlockHash] Validator is in the shard: voting for the block hash",
     )
+
+    // REVIEW: Petri Consensus — accept-and-sign model (Phase 9)
+    // In Petri, the elected secretary compiles the block and broadcasts its hash.
+    // Members trust the secretary's hash and sign it directly (accept-and-sign).
+    // This is safe because only one deterministically-elected secretary proposes per round.
+    if (getSharedState.petriConsensus) {
+        log.info(
+            "[manageProposeBlockHash] Petri active — accept-and-sign (secretary model)",
+        )
+
+        const blockSignature = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(blockHash),
+        )
+
+        log.info(
+            "[manageProposeBlockHash] Petri: signing secretary's block hash",
+        )
+        response.result = 200
+        response.response = getSharedState.publicKeyHex
+        response.extra = {
+            signatures: {
+                [getSharedState.publicKeyHex]: uint8ArrayToHex(blockSignature.signature),
+            },
+        }
+        return response
+    }
+
+    // PoRBFT v2 path: compare with our own candidate block
     // ? Should we check for the block number as well? Or we cancel the candidateBlock at the end of the consensus?
     // Vote for the block hash
     // We must ensure we generated a block indeed

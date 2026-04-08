@@ -63,6 +63,9 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node1.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -102,6 +105,9 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node2.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -141,6 +147,9 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node3.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro
@@ -180,6 +189,9 @@ services:
       - TLSNOTARY_MODE=docker
       - TLSNOTARY_HOST=tlsnotary
       - TLSNOTARY_PORT=7047
+      - OMNI_ENABLED=true
+      - OMNI_MODE=OMNI_PREFERRED
+      - PETRI_CONSENSUS=${PETRI_CONSENSUS:-true}
     volumes:
       - ./identities/node4.identity:/app/.demos_identity:ro
       - ./demos_peerlist.json:/app/demos_peerlist.json:ro

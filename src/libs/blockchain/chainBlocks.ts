@@ -211,89 +211,108 @@ export async function insertBlock(
         const dataSource = db.getDataSource()
 
         try {
-            const result = await dataSource.transaction(
-                async transactionalEntityManager => {
-                    const savedBlock =
-                        await transactionalEntityManager.save(
-                            blocksRepo.target,
-                            newBlock,
-                        )
+            // Use QueryRunner for savepoint support — prevents a single TX
+            // insert failure from poisoning the entire PostgreSQL transaction.
+            const queryRunner = dataSource.createQueryRunner()
+            await queryRunner.connect()
+            await queryRunner.startTransaction()
 
-                    for (let i = 0; i < transactionEntities.length; i++) {
-                        const tx = transactionEntities[i]
+            let savedBlock: Blocks
+            const committedTxHashes: string[] = []
 
-                        try {
-                            const rawTransaction =
-                                Transaction.toRawTransaction(
-                                    tx,
-                                    "confirmed",
-                                )
-                            await transactionalEntityManager.save(
-                                transactionsRepo.target,
-                                rawTransaction,
-                            )
-                            await persistConfirmedTransactionProjection(
+            try {
+                savedBlock = await queryRunner.manager.save(
+                    blocksRepo.target,
+                    newBlock,
+                )
+
+                for (let i = 0; i < transactionEntities.length; i++) {
+                    const tx = transactionEntities[i]
+                    const savepointName = `tx_insert_${i}`
+
+                    try {
+                        await queryRunner.query(`SAVEPOINT ${savepointName}`)
+
+                        const rawTransaction =
+                            Transaction.toRawTransaction(
                                 tx,
-                                block.number,
-                                transactionalEntityManager,
+                                "confirmed",
                             )
-                        } catch (error) {
-                            if (error instanceof QueryFailedError) {
-                                log.error(
-                                    `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
-                                )
-                                log.error(`Message: ${error.message}`)
-                                continue
-                            }
-
-                            log.error(
-                                "Unexpected error while inserting tx: " +
-                                    tx.hash,
-                            )
-                            handleError(error, "CHAIN", { source: "transaction insertion" })
-                            throw error
-                        }
-                    }
-
-                    if (cleanMempool) {
-                        await Mempool.removeTransactionsByHashes(
-                            transactionEntities.map(tx => tx.hash),
-                            transactionalEntityManager,
+                        await queryRunner.manager.save(
+                            transactionsRepo.target,
+                            rawTransaction,
                         )
-                    }
-
-                    const committedTxHashes = transactionEntities.map(
-                        tx => tx.hash,
-                    )
-                    if (committedTxHashes.length > 0) {
-                        await transactionalEntityManager
-                            .createQueryBuilder()
-                            .update(IdentityCommitment)
-                            .set({ blockNumber: block.number })
-                            .where("transaction_hash IN (:...hashes)", {
-                                hashes: committedTxHashes,
-                            })
-                            .andWhere("leaf_index = :leafIndex", {
-                                leafIndex: -1,
-                            })
-                            .execute()
-                    }
-
-                    const commitmentsAdded =
-                        await updateMerkleTreeAfterBlock(
-                            dataSource,
+                        await persistConfirmedTransactionProjection(
+                            tx,
                             block.number,
-                            transactionalEntityManager,
+                            queryRunner.manager,
                         )
-                    if (commitmentsAdded > 0) {
-                        log.info(
-                            `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
-                        )
-                    }
 
-                    return savedBlock
-                },
-            )
+                        await queryRunner.query(`RELEASE SAVEPOINT ${savepointName}`)
+                        committedTxHashes.push(tx.hash)
+                    } catch (error) {
+                        // Roll back only this savepoint — outer transaction stays valid
+                        await queryRunner.query(`ROLLBACK TO SAVEPOINT ${savepointName}`)
+
+                        if (error instanceof QueryFailedError) {
+                            log.error(
+                                `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
+                            )
+                            log.error("Message: " + error.message)
+                            continue
+                        }
+
+                        log.error(
+                            "Unexpected error while inserting tx: " +
+                                tx.hash,
+                        )
+                        handleError(error, "CHAIN", { source: "transaction insertion" })
+                        throw error
+                    }
+                }
+
+                if (cleanMempool && committedTxHashes.length > 0) {
+                    await Mempool.removeTransactionsByHashes(
+                        committedTxHashes,
+                        queryRunner.manager,
+                    )
+                }
+
+                if (committedTxHashes.length > 0) {
+                    await queryRunner.manager
+                        .createQueryBuilder()
+                        .update(IdentityCommitment)
+                        .set({ blockNumber: block.number })
+                        .where("transaction_hash IN (:...hashes)", {
+                            hashes: committedTxHashes,
+                        })
+                        .andWhere("leaf_index = :leafIndex", {
+                            leafIndex: -1,
+                        })
+                        .execute()
+                }
+
+                const commitmentsAdded =
+                    await updateMerkleTreeAfterBlock(
+                        dataSource,
+                        block.number,
+                        queryRunner.manager,
+                    )
+                if (commitmentsAdded > 0) {
+                    log.info(
+                        `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                    )
+                }
+
+                await queryRunner.commitTransaction()
+            } catch (error) {
+                await queryRunner.rollbackTransaction()
+                throw error
+            } finally {
+                await queryRunner.release()
+            }
+
+            const result = savedBlock
 
             if (block.number > getSharedState.lastBlockNumber) {
                 getSharedState.lastBlockNumber = block.number

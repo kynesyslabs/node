@@ -56,6 +56,7 @@ One-off path:
 ```text
 ACTIVE + IMPLEMENTED + COUNTED
 ──────────────────────────────
+ petri consensus (186 unit tests, bun run test:petri)
  native tx
  GCR / identity
  consensus

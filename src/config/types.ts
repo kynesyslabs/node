@@ -161,6 +161,17 @@ export interface IPFSConfig {
     apiPort: number
 }
 
+// --- Petri Consensus ---
+
+export interface PetriConsensusConfig {
+    enabled: boolean
+    forgeIntervalMs: number
+    blockIntervalMs: number
+    agreementThreshold: number
+    problematicTTLRounds: number
+    shardSize: number
+}
+
 // --- Full Application Config ---
 
 export interface AppConfig {
@@ -175,4 +186,5 @@ export interface AppConfig {
     identity: IdentityConfig
     bridges: BridgesConfig
     ipfs: IPFSConfig
+    petri: PetriConsensusConfig
 }

@@ -209,6 +209,31 @@ export function loadConfig(): Readonly<AppConfig> {
             swarmPort: envInt(EnvKey.IPFS_SWARM_PORT, d.ipfs.swarmPort),
             apiPort: envInt(EnvKey.IPFS_API_PORT, d.ipfs.apiPort),
         },
+
+        petri: {
+            enabled: envBool(EnvKey.PETRI_CONSENSUS, d.petri.enabled),
+            forgeIntervalMs: envInt(EnvKey.PETRI_FORGE_INTERVAL_MS, d.petri.forgeIntervalMs),
+            blockIntervalMs: envInt(EnvKey.PETRI_BLOCK_INTERVAL_MS, d.petri.blockIntervalMs),
+            agreementThreshold: envInt(EnvKey.PETRI_AGREEMENT_THRESHOLD, d.petri.agreementThreshold),
+            problematicTTLRounds: envInt(EnvKey.PETRI_PROBLEMATIC_TTL_ROUNDS, d.petri.problematicTTLRounds),
+            shardSize: envInt(EnvKey.PETRI_SHARD_SIZE, d.petri.shardSize),
+        },
+    }
+
+    // Validate Petri config invariants
+    if (config.petri.enabled) {
+        if (config.petri.forgeIntervalMs <= 0 || config.petri.blockIntervalMs <= 0) {
+            throw new Error("Petri intervals must be positive")
+        }
+        if (config.petri.shardSize <= 0) {
+            throw new Error("Petri shardSize must be positive")
+        }
+        if (config.petri.agreementThreshold <= 0 || config.petri.agreementThreshold > config.petri.shardSize) {
+            throw new Error("Petri agreementThreshold must be between 1 and shardSize")
+        }
+        if (config.petri.problematicTTLRounds < 0) {
+            throw new Error("Petri problematicTTLRounds cannot be negative")
+        }
     }
 
     return deepFreeze(config)

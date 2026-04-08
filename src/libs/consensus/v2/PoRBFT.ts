@@ -60,6 +60,8 @@ import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /**
  * The main consensus routine calling all the subroutines.
+ * @deprecated PoRBFT v2 is superseded by Petri consensus (PETRI_CONSENSUS=true).
+ * Retained as fallback — will be removed after testnet validation.
  */
 export async function consensusRoutine(): Promise<void> {
     if (isConsensusAlreadyRunning()) {

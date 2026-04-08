@@ -1,4 +1,7 @@
 // REVIEW: Consensus handlers for OmniProtocol binary communication
+// @deprecated — Secretary-related handlers (0x35 setValidatorPhase, 0x36 greenlight,
+// 0x37 getValidatorPhase, 0x38 getBlockTimestamp) replaced by Petri Consensus.
+// Kept for PoRBFT v2 fallback via feature flag.
 import log from "src/utilities/logger"
 import { OmniHandler } from "../../types/message"
 import {

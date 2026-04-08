@@ -25,6 +25,7 @@ import GCR, { AccountParams } from "../blockchain/gcr/gcr"
 import { ProofVerifier } from "@/features/zk/proof/ProofVerifier"
 import Datasource from "@/model/datasource"
 import type { IdentityAttestationProof } from "@/features/zk/proof/ProofVerifier"
+import { getTransactionFinality } from "@/libs/consensus/petri/finality/transactionFinality"
 
 // Protected endpoints requiring SUDO access
 const PROTECTED_ENDPOINTS = new Set([
@@ -270,6 +271,36 @@ export async function processPayload(
                 }
             } catch (error) {
                 log.error("[ZK RPC] Error verifying proof:", error)
+                return {
+                    result: 500,
+                    response: "Internal server error",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+        }
+
+        // REVIEW: Petri Consensus — transaction finality query (Phase 5)
+        case "getTransactionFinality": {
+            const txHash = payload.params?.[0] as string
+            if (!txHash || typeof txHash !== "string") {
+                return {
+                    result: 400,
+                    response: "Missing or invalid transaction hash",
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+            try {
+                const finality = await getTransactionFinality(txHash)
+                return {
+                    result: 200,
+                    response: finality,
+                    require_reply: false,
+                    extra: null,
+                }
+            } catch (error) {
+                log.error(`[RPC] getTransactionFinality error: ${error instanceof Error ? error.message : String(error)}`)
                 return {
                     result: 500,
                     response: "Internal server error",

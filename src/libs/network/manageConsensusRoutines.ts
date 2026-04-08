@@ -11,6 +11,8 @@ import {
     consensusRoutine,
     isConsensusAlreadyRunning,
 } from "../consensus/v2/PoRBFT"
+import { petriConsensusRoutine } from "@/libs/consensus/petri"
+import { receiveBlockHashSubmission } from "@/libs/consensus/petri/coordination/petriSecretary"
 import log from "src/utilities/logger"
 import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -31,6 +33,10 @@ export interface ConsensusMethod {
         | "getValidatorPhase"
         | "greenlight"
         | "getBlockTimestamp"
+        // REVIEW: Petri Consensus (Phase 2)
+        | "petri_exchangeDeltas"
+        // REVIEW: Petri Consensus (Phase 9) — Secretary-Coordinated Block Signing
+        | "petri_submitBlockHash"
     params: any[]
 }
 
@@ -74,7 +80,14 @@ export default async function manageConsensusRoutines(
             log.debug(
                 "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
             )
-            consensusRoutine() // Asynchronous function     to avoid blocking the main thread
+            // REVIEW: Petri Consensus dispatch
+            if (getSharedState.petriConsensus) {
+                const { commonValidatorSeed: petriSeed } = await getCommonValidatorSeed()
+                const petriShard = await getShard(petriSeed)
+                petriConsensusRoutine(petriShard) // Async — same pattern as PoRBFT
+            } else {
+                consensusRoutine() // Asynchronous function to avoid blocking the main thread
+            }
         }
         log.info(
             "[manageConsensusRoutines] We are within the consensus time window",
@@ -229,7 +242,18 @@ export default async function manageConsensusRoutines(
             break
 
         // SECTION: New Secretary Manager class handlers
+        // @deprecated — Secretary RPCs (setValidatorPhase, greenlight, getValidatorPhase, getBlockTimestamp)
+        // replaced by Petri Consensus leaderless coordination. Kept for PoRBFT v2 fallback.
+
+        // REVIEW: When Petri is active, Secretary RPCs are no-ops — Petri uses its own
+        // block compiler and finalizer. The Secretary flow must not interfere.
         case "setValidatorPhase": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = "Petri active — Secretary RPC ignored"
+                response.extra = { greenlight: true }
+                return response
+            }
             try {
                 const [phase, seed, blockRef] = payload.params
                 const manager = SecretaryManager.getInstance(blockRef)
@@ -343,9 +367,13 @@ export default async function manageConsensusRoutines(
             break
         }
 
+        // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "greenlight": {
-            // TODO: Check if the sender is the secretary (without verifying the signature
-            // as we have already done that) in validateHeaders
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = "Petri active — greenlight ignored"
+                return response
+            }
             const [blockRef, timestamp, validatorPhase] = payload.params as [
                 number, // blockRef
                 number, // timestamp
@@ -386,8 +414,14 @@ export default async function manageConsensusRoutines(
         }
 
         // SECTION: Getter handlers
-        // NOTE: Ideally, we should never need to use these methods
+        // @deprecated — Secretary RPCs (getValidatorPhase, getBlockTimestamp), replaced by Petri Consensus.
         case "getValidatorPhase": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = [null]
+                response.extra = { petri: true }
+                return response
+            }
             const manager = SecretaryManager.getInstance()
 
             if (!manager) {
@@ -402,7 +436,13 @@ export default async function manageConsensusRoutines(
             break
         }
 
+        // @deprecated — Secretary RPC, replaced by Petri Consensus. Kept for PoRBFT v2 fallback.
         case "getBlockTimestamp": {
+            if (getSharedState.petriConsensus) {
+                response.result = 200
+                response.response = [getSharedState.currentUTCTime]
+                return response
+            }
             const manager = SecretaryManager.getInstance()
 
             if (!manager) {
@@ -414,6 +454,80 @@ export default async function manageConsensusRoutines(
 
             response.result = 200
             response.response = [manager.blockTimestamp]
+            break
+        }
+
+        // REVIEW: Petri Consensus — delta exchange handler (Phase 2)
+        case "petri_exchangeDeltas": {
+            if (!getSharedState.petriConsensus) {
+                response.result = 400
+                response.response = "Petri consensus not enabled"
+                break
+            }
+
+            try {
+                const [deltaData] = payload.params
+                const { petriForgeInstance } = await import(
+                    "@/libs/consensus/petri/forge/forgeInstance"
+                )
+
+                if (!petriForgeInstance) {
+                    response.result = 503
+                    response.response = "Forge not running"
+                    break
+                }
+
+                // Return our local deltas in exchange
+                const ourDeltas = petriForgeInstance.getCurrentDeltas()
+                response.result = 200
+                response.response = {
+                    roundNumber: deltaData?.roundNumber ?? 0,
+                    deltas: ourDeltas,
+                }
+            } catch (error) {
+                log.error(
+                    "[manageConsensusRoutines] petri_exchangeDeltas error: " +
+                    error,
+                )
+                response.result = 500
+                response.response = "Error processing delta exchange"
+            }
+            break
+        }
+
+        // REVIEW: Petri Consensus — Secretary-Coordinated Block Signing (Phase 9)
+        // Members submit their signed block hash to the secretary for collection.
+        case "petri_submitBlockHash": {
+            if (!getSharedState.petriConsensus) {
+                response.result = 400
+                response.response = "Petri consensus not enabled"
+                break
+            }
+
+            try {
+                const [blockHash, signature, blockNumber] = payload.params as [
+                    string,
+                    string,
+                    number,
+                ]
+
+                const result = receiveBlockHashSubmission(
+                    sender,
+                    blockHash,
+                    signature,
+                    blockNumber,
+                )
+
+                response.result = 200
+                response.response = result
+            } catch (error) {
+                log.error(
+                    "[manageConsensusRoutines] petri_submitBlockHash error: " +
+                    error,
+                )
+                response.result = 500
+                response.response = "Error processing block hash submission"
+            }
             break
         }
     }

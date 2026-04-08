@@ -96,6 +96,10 @@ import { runConsensusTxInclusion } from "./features/consensus/consensus_tx_inclu
 import { runConsensusSecretaryRotation } from "./features/consensus/consensus_secretary_rotation"
 import { runConsensusRollbackSmoke } from "./features/consensus/consensus_rollback_smoke"
 import { runConsensusPartitionRecovery } from "./features/consensus/consensus_partition_recovery"
+import { runPetriBlockProduction } from "./features/consensus/petri_block_production"
+import { runPetriTxInclusion } from "./features/consensus/petri_tx_inclusion"
+import { runPetriRelayFlow } from "./features/consensus/petri_relay_flow"
+import { runPetriSoak } from "./features/consensus/petri_soak"
 import { runSyncCatchupSmoke } from "./features/peersync/sync_catchup_smoke"
 import { runSyncConsistency } from "./features/peersync/sync_consistency"
 import { runPeerDiscoverySmoke } from "./features/peersync/peer_discovery_smoke"
@@ -211,6 +215,10 @@ registerScenario("consensus_tx_inclusion", runConsensusTxInclusion)
 registerScenario("consensus_secretary_rotation", runConsensusSecretaryRotation)
 registerScenario("consensus_rollback_smoke", runConsensusRollbackSmoke)
 registerScenario("consensus_partition_recovery", runConsensusPartitionRecovery)
+registerScenario("petri_block_production", runPetriBlockProduction)
+registerScenario("petri_tx_inclusion", runPetriTxInclusion)
+registerScenario("petri_relay_flow", runPetriRelayFlow)
+registerScenario("petri_soak", runPetriSoak)
 registerScenario("sync_catchup_smoke", runSyncCatchupSmoke)
 registerScenario("sync_consistency", runSyncConsistency)
 registerScenario("peer_discovery_smoke", runPeerDiscoverySmoke)

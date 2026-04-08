@@ -6,6 +6,7 @@ import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import Chain from "./chain"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import log from "@/utilities/logger"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * L2PS Transaction Status Constants
@@ -155,15 +156,25 @@ export default class L2PSMempool {
 
     private static async determineBlockNumber(): Promise<{ blockNumber?: number; error?: string }> {
         // Determine block number (following main mempool pattern)
+        // When Petri is active, SecretaryManager is not used — go straight to chain
         let blockNumber: number
-        const manager = SecretaryManager.getInstance()
-        const shardBlockRef = manager?.shard?.blockRef
 
-        if (typeof shardBlockRef === "number" && shardBlockRef >= 0) {
-            blockNumber = shardBlockRef + 1
+        if (!getSharedState.petriConsensus) {
+            const manager = SecretaryManager.getInstance()
+            const shardBlockRef = manager?.shard?.blockRef
+            if (typeof shardBlockRef === "number" && shardBlockRef >= 0) {
+                blockNumber = shardBlockRef + 1
+            } else {
+                const lastBlockNumber = await Chain.getLastBlockNumber()
+                if (typeof lastBlockNumber !== "number" || lastBlockNumber < 0) {
+                    return {
+                        error: `Invalid last block number: ${lastBlockNumber}`,
+                    }
+                }
+                blockNumber = lastBlockNumber + 1
+            }
         } else {
             const lastBlockNumber = await Chain.getLastBlockNumber()
-            // Validate lastBlockNumber is a valid positive number
             if (typeof lastBlockNumber !== "number" || lastBlockNumber < 0) {
                 return {
                     error: `Invalid last block number: ${lastBlockNumber}`,
@@ -328,7 +339,7 @@ export default class L2PSMempool {
 
             return await this.repo.findOne({
                 where: { l2ps_uid: l2psUid },
-                order: { timestamp: "DESC" }
+                order: { timestamp: "DESC" },
             })
         } catch (error) {
             log.error(`[L2PS Mempool] Error getting latest transaction for UID ${l2psUid}:`, error)
@@ -454,7 +465,7 @@ export default class L2PSMempool {
     public static async updateGCREdits(
         hash: string,
         gcrEdits: GCREdit[],
-        affectedAccountsCount: number
+        affectedAccountsCount: number,
     ): Promise<boolean> {
         try {
             await this.ensureInitialized()
@@ -464,7 +475,7 @@ export default class L2PSMempool {
                 {
                     gcr_edits: gcrEdits,
                     affected_accounts_count: affectedAccountsCount,
-                    timestamp: Date.now().toString()
+                    timestamp: Date.now().toString(),
                 },
             )
 

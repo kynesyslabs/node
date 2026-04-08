@@ -21,7 +21,10 @@ export async function orderTransactions(
     // It avoids the need for manual insertion and has O(n log n) time complexity.
     const orderedTransactionsObjects: Transaction[] = mempool.transactions.sort(
         (a, b) => {
-            return a.content.timestamp - b.content.timestamp
+            const timeDiff = a.content.timestamp - b.content.timestamp
+            if (timeDiff !== 0) return timeDiff
+            // Deterministic tiebreaker: sort by hash when timestamps are equal
+            return a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0
         },
     )
     // Stringify the transactions

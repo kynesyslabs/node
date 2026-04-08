@@ -85,6 +85,7 @@ export async function handleValidateTransaction(
                 )
             }
         }
+
     } catch (e) {
         log.error("SERVER", "[TX VALIDATION ERROR] 💀 : " + e)
         validationData = {

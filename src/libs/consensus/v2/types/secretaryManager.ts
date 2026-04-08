@@ -19,6 +19,11 @@ export class AbortConsensusError extends Error {
 }
 
 // ANCHOR SecretaryManager
+/**
+ * @deprecated Replaced by Petri Consensus leaderless coordination.
+ * Kept for PoRBFT v2 fallback via feature flag.
+ * Will be removed after Petri is validated on testnet.
+ */
 export default class SecretaryManager {
     private _greenlight_timeout = 30_000 // 15 seconds
     private _set_validator_phase_timeout = 15_000 // 10 seconds

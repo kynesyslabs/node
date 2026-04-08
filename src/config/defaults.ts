@@ -67,7 +67,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         enabled: true,
         port: 0, // uses NODE_PORT or PORT fallback
         fatal: false,
-        mode: "",
+        mode: "OMNI_PREFERRED",
         tls: {
             enabled: false,
             mode: "self-signed",
@@ -143,5 +143,14 @@ export const DEFAULT_CONFIG: AppConfig = {
     ipfs: {
         swarmPort: 4001,
         apiPort: 5001,
+    },
+
+    petri: {
+        enabled: true,
+        forgeIntervalMs: 2000,
+        blockIntervalMs: 10000,
+        agreementThreshold: 7,
+        problematicTTLRounds: 5,
+        shardSize: 10,
     },
 }

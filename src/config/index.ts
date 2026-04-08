@@ -31,6 +31,7 @@ import type {
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,
+    PetriConsensusConfig,
 } from "./types"
 
 export class Config {
@@ -99,6 +100,10 @@ export class Config {
         return this.data.ipfs
     }
 
+    get petri(): Readonly<PetriConsensusConfig> {
+        return this.data.petri
+    }
+
     /** Full config snapshot (read-only) */
     get all(): Readonly<AppConfig> {
         return this.data
@@ -122,4 +127,5 @@ export type {
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,
+    PetriConsensusConfig,
 } from "./types"

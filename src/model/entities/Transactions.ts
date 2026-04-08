@@ -57,4 +57,8 @@ export class Transactions {
 
     @Column("integer", { name: "additionalFee" })
     additionalFee: number
+
+    // REVIEW: Petri Consensus soft finality timestamp (Phase 5)
+    @Column("bigint", { name: "soft_finality_at", nullable: true })
+    soft_finality_at: number | null
 }
