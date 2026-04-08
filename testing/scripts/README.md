@@ -12,6 +12,7 @@ Read `testing/README.md` first. This file is the narrower runner reference.
 | `bun run testenv:startup:local -- --build-first` | cold-boots the local devnet and validates startup |
 | `bun run testenv:cluster:local -- --build-first` | runs scheduled cluster-health checks |
 | `bun run testenv:prod-gate:local -- --build-first` | runs the must-pass local release gate |
+| `bun run testenv:tokens:local -- --build-first` | runs the maintained token core suite |
 | `bun run testenv:gcr:routine:local` | runs deterministic single-wallet GCR routine validation |
 | `bun run testenv:l2ps:local -- --build-first` | runs the L2PS live suite |
 | `bun run testenv:perf:baseline:local -- --build` | records the active-core baseline |
@@ -42,8 +43,10 @@ Primary report outputs:
 - `testing/runs/_latest/l2ps-live.latest.md`
 - `testing/runs/_latest/active-core-baseline.latest.md`
 - `testing/runs/_latest/cluster-soak.latest.md`
+- `testing/runs/_latest/token-core.latest.md`
 
 ## Notes
 
 - `run-scenario.sh` is for one-off execution, not for deciding what counts as active feature coverage.
-- Token scenarios are still runnable through the wrapper, but they are historical harness inventory, not current active-feature evidence.
+- Token coverage is now maintained through the `token-core` suite.
+- Broader token ramp, matrix, and complex-policy scenarios remain available through the wrapper, but they are not yet part of the maintained core suite.

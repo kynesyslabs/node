@@ -1,4 +1,5 @@
 import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
+import type { EntityManager } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool_v2"
@@ -149,6 +150,8 @@ export async function insertBlock(
     operations: any[] = [],
     position?: number,
     cleanMempool = true,
+    persistTransactions = true,
+    transactionalEntityManager?: EntityManager,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
     const transactionsRepo = getTransactionsRepo()
@@ -203,12 +206,89 @@ export async function insertBlock(
                 " does not exist: inserting a new block",
         )
 
-        const transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
-        )
+        const transactionEntities = persistTransactions
+            ? await Mempool.getTransactionsByHashes(orderedTransactionsHashes)
+            : []
 
         const db = await Datasource.getInstance()
         const dataSource = db.getDataSource()
+
+        if (transactionalEntityManager) {
+            const savedBlock = await transactionalEntityManager.save(
+                blocksRepo.target,
+                newBlock,
+            )
+
+            if (persistTransactions) {
+                for (const tx of transactionEntities) {
+                    const rawTransaction = Transaction.toRawTransaction(
+                        tx,
+                        "confirmed",
+                    )
+                    const existingTransaction =
+                        await transactionalEntityManager.findOne(
+                            transactionsRepo.target,
+                            {
+                                where: { hash: tx.hash } as any,
+                            },
+                        )
+                    if (existingTransaction) {
+                        log.warn(
+                            `[ChainDB] [ WARN ]: Transaction ${tx.hash} already exists during transactional block insert; skipping duplicate row insert.`,
+                        )
+                    } else {
+                        await transactionalEntityManager
+                            .createQueryBuilder()
+                            .insert()
+                            .into(transactionsRepo.target)
+                            .values(rawTransaction as any)
+                            .orIgnore()
+                            .execute()
+                    }
+
+                    await persistConfirmedTransactionProjection(
+                        tx,
+                        block.number,
+                        transactionalEntityManager,
+                    )
+                }
+            }
+
+            if (persistTransactions && cleanMempool) {
+                await Mempool.removeTransactionsByHashes(
+                    transactionEntities.map(tx => tx.hash),
+                    transactionalEntityManager,
+                )
+            }
+
+            const committedTxHashes = transactionEntities.map(tx => tx.hash)
+            if (committedTxHashes.length > 0) {
+                await transactionalEntityManager
+                    .createQueryBuilder()
+                    .update(IdentityCommitment)
+                    .set({ blockNumber: block.number })
+                    .where("transaction_hash IN (:...hashes)", {
+                        hashes: committedTxHashes,
+                    })
+                    .andWhere("leaf_index = :leafIndex", {
+                        leafIndex: -1,
+                    })
+                    .execute()
+            }
+
+            await updateMerkleTreeAfterBlock(
+                dataSource,
+                block.number,
+                transactionalEntityManager,
+            )
+
+            if (block.number > getSharedState.lastBlockNumber) {
+                getSharedState.lastBlockNumber = block.number
+                getSharedState.lastBlockHash = block.hash
+            }
+
+            return savedBlock
+        }
 
         try {
             const result = await dataSource.transaction(
@@ -219,53 +299,55 @@ export async function insertBlock(
                             newBlock,
                         )
 
-                    for (let i = 0; i < transactionEntities.length; i++) {
-                        const tx = transactionEntities[i]
+                    if (persistTransactions) {
+                        for (let i = 0; i < transactionEntities.length; i++) {
+                            const tx = transactionEntities[i]
 
-                        try {
-                            const rawTransaction =
-                                Transaction.toRawTransaction(
+                            try {
+                                const rawTransaction =
+                                    Transaction.toRawTransaction(
+                                        tx,
+                                        "confirmed",
+                                    )
+                                await transactionalEntityManager.save(
+                                    transactionsRepo.target,
+                                    rawTransaction,
+                                )
+                                await persistConfirmedTransactionProjection(
                                     tx,
-                                    "confirmed",
+                                    block.number,
+                                    transactionalEntityManager,
                                 )
-                            await transactionalEntityManager.save(
-                                transactionsRepo.target,
-                                rawTransaction,
-                            )
-                            await persistConfirmedTransactionProjection(
-                                tx,
-                                block.number,
-                                transactionalEntityManager,
-                            )
-                        } catch (error) {
-                            if (error instanceof QueryFailedError) {
-                                log.error(
-                                    `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
-                                )
-                                log.error(`Message: ${error.message}`)
-                                continue
-                            }
+                            } catch (error) {
+                                if (error instanceof QueryFailedError) {
+                                    log.error(
+                                        `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
+                                    )
+                                    log.error(`Message: ${error.message}`)
+                                    continue
+                                }
 
-                            log.error(
-                                "Unexpected error while inserting tx: " +
-                                    tx.hash,
-                            )
-                            handleError(error, "CHAIN", { source: "transaction insertion" })
-                            throw error
+                                log.error(
+                                    "Unexpected error while inserting tx: " +
+                                        tx.hash,
+                                )
+                                handleError(error, "CHAIN", {
+                                    source: "transaction insertion",
+                                })
+                                throw error
+                            }
                         }
                     }
 
-                    if (cleanMempool) {
+                    if (persistTransactions && cleanMempool) {
                         await Mempool.removeTransactionsByHashes(
                             transactionEntities.map(tx => tx.hash),
                             transactionalEntityManager,
                         )
                     }
 
-                    const committedTxHashes = transactionEntities.map(
-                        tx => tx.hash,
-                    )
-                    if (committedTxHashes.length > 0) {
+                    const committedTxHashes = transactionEntities.map(tx => tx.hash)
+                    if (persistTransactions && committedTxHashes.length > 0) {
                         await transactionalEntityManager
                             .createQueryBuilder()
                             .update(IdentityCommitment)

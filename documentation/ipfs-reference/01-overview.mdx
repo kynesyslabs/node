@@ -1,0 +1,110 @@
+---
+title: "IPFS Overview"
+description: "Introduction to IPFS integration in the Demos Network"
+---
+
+# IPFS Overview
+
+The Demos Network integrates the InterPlanetary File System (IPFS) to provide decentralized, content-addressed storage with blockchain-backed economic incentives.
+
+## What is IPFS?
+
+IPFS is a peer-to-peer distributed file system that identifies content by its cryptographic hash (Content Identifier or CID) rather than by location. This enables:
+
+- **Immutability** - Content cannot be modified without changing its CID
+- **Deduplication** - Identical content shares the same CID network-wide
+- **Resilience** - Content persists as long as at least one node pins it
+- **Verifiability** - Clients can cryptographically verify received content
+
+## Demos Integration
+
+The Demos Network extends IPFS with:
+
+| Feature | Description |
+|---------|-------------|
+| **Economic Model** | Token-based payments (DEM) incentivize storage providers |
+| **Account Integration** | Storage linked to Demos identity system |
+| **Quota Enforcement** | Consensus-level limits prevent abuse |
+| **Time-Limited Pins** | Flexible pricing for temporary content |
+| **Private Network** | Isolated swarm for performance optimization |
+
+## Key Concepts
+
+### Content Identifiers (CIDs)
+
+Every piece of content is identified by a unique CID derived from its cryptographic hash:
+
+```
+CIDv0: QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG
+CIDv1: bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi
+```
+
+### Pinning
+
+Pinning marks content to prevent garbage collection. When you pin content:
+
+1. The content is stored locally on your node
+2. Your account state records the pin
+3. Storage fees are charged based on size and duration
+4. Content remains available as long as pinned
+
+### Account State
+
+Each Demos account maintains IPFS state including:
+
+- List of pinned content with metadata
+- Total storage usage
+- Free tier allocation (genesis accounts)
+- Cumulative costs and rewards
+
+## Quick Start
+
+### Add Content
+
+```typescript
+// Add content and pin it to your account
+const result = await demosClient.ipfsAdd({
+  content: Buffer.from("Hello, Demos!").toString("base64"),
+  duration: "month"  // Pin for 1 month
+})
+
+console.log(result.cid)  // QmHash...
+```
+
+### Retrieve Content
+
+```typescript
+// Get content by CID
+const content = await demosClient.ipfsGet({
+  cid: "QmYwAPJzv5CZsnA..."
+})
+```
+
+### Check Quota
+
+```typescript
+// Check your storage usage
+const quota = await demosClient.ipfsQuota({
+  address: "your-demos-address"
+})
+
+console.log(`Used: ${quota.usedBytes} / ${quota.maxBytes}`)
+```
+
+## Account Tiers
+
+Storage limits vary by account type:
+
+| Tier | Max Storage | Max Pins | Free Tier |
+|------|-------------|----------|-----------|
+| Regular | 1 GB | 1,000 | None |
+| Genesis | 10 GB | 10,000 | 1 GB |
+
+Genesis accounts are those with balances in the network's genesis block.
+
+## Next Steps
+
+- [Architecture](/ipfs-reference/architecture) - System design and components
+- [Transactions](/ipfs-reference/transactions) - IPFS transaction types
+- [Pricing](/ipfs-reference/pricing) - Cost calculation and fee structure
+- [RPC Reference](/ipfs-reference/rpc-endpoints) - Complete API documentation

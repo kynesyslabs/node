@@ -1,0 +1,47 @@
+[
+  {
+    "version": "1.0.0",
+    "semver_logic": "MAJOR.MINOR.PATCH",
+    "git_ref": "67d37a2c",
+    "timestamp": "2026-02-22T19:09:40.449Z",
+    "parent_version": null,
+    "change_type": "full_reindex",
+    "statistics": {
+      "total_atoms": 2074,
+      "added": 2074,
+      "modified": null,
+      "removed": null,
+      "confidence_avg": 0.7573047251687686
+    }
+  },
+  {
+    "version": "1.0.1",
+    "semver_logic": "MAJOR.MINOR.PATCH",
+    "git_ref": "67d37a2c",
+    "timestamp": "2026-02-22T19:10:25.324Z",
+    "parent_version": "1.0.0",
+    "change_type": "incremental",
+    "statistics": {
+      "total_atoms": 2471,
+      "added": null,
+      "modified": null,
+      "removed": null,
+      "confidence_avg": 0.7535936867665043
+    }
+  },
+  {
+    "version": "1.0.2",
+    "semver_logic": "MAJOR.MINOR.PATCH",
+    "git_ref": "a454f37e",
+    "timestamp": "2026-02-22T19:12:05.352Z",
+    "parent_version": "1.0.1",
+    "change_type": "incremental",
+    "statistics": {
+      "total_atoms": 2472,
+      "added": null,
+      "modified": null,
+      "removed": null,
+      "confidence_avg": 0.7536124595469386
+    }
+  }
+]

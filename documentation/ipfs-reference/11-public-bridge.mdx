@@ -1,0 +1,330 @@
+---
+title: "Public Bridge"
+description: "Optional public IPFS gateway integration"
+---
+
+# Public Bridge
+
+The public bridge provides optional access to the public IPFS network for content retrieval and publishing.
+
+## Overview
+
+By default, Demos nodes operate in a private IPFS network. The public bridge enables:
+
+- **Fetching** content from public gateways
+- **Publishing** content to the public network (optional)
+- **Availability checks** across multiple gateways
+
+**Status:** Disabled by default. Enable explicitly if needed.
+
+## Configuration
+
+### Enable Public Bridge
+
+```bash
+DEMOS_IPFS_PUBLIC_BRIDGE_ENABLED=true
+```
+
+### Full Configuration
+
+```bash
+# Enable the bridge
+DEMOS_IPFS_PUBLIC_BRIDGE_ENABLED=true
+
+# Primary gateway (fallbacks available)
+DEMOS_IPFS_PUBLIC_GATEWAY=https://ipfs.io
+
+# Allow publishing to public network
+DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH=false
+
+# Timeout for gateway requests (ms)
+DEMOS_IPFS_PUBLIC_TIMEOUT=30000
+
+# Rate limiting
+DEMOS_IPFS_PUBLIC_MAX_REQUESTS=30      # Per minute
+DEMOS_IPFS_PUBLIC_MAX_BYTES=104857600  # 100 MB per minute
+```
+
+## Gateway List
+
+When the primary gateway fails, fallbacks are tried in order:
+
+| Gateway | URL |
+|---------|-----|
+| Primary (configurable) | `https://ipfs.io` |
+| Fallback 1 | `https://dweb.link` |
+| Fallback 2 | `https://cloudflare-ipfs.com` |
+| Fallback 3 | `https://gateway.pinata.cloud` |
+
+## Operations
+
+### Fetch from Public Network
+
+Retrieve content from public IPFS via gateways:
+
+```typescript
+const result = await client.ipfsPublicFetch({
+  cid: "QmPublicContent...",
+  gateway: "https://ipfs.io"  // Optional, uses default
+})
+
+console.log(result)
+// {
+//   content: "base64...",
+//   size: 1024,
+//   gateway: "https://ipfs.io"
+// }
+```
+
+### Check Public Availability
+
+Verify content availability across gateways:
+
+```typescript
+const result = await client.ipfsPublicCheck({
+  cid: "QmContent...",
+  gateways: [
+    "https://ipfs.io",
+    "https://dweb.link",
+    "https://cloudflare-ipfs.com"
+  ]
+})
+
+console.log(result)
+// {
+//   cid: "QmContent...",
+//   available: true,
+//   gateways: [
+//     { url: "https://ipfs.io", available: true, latency: 245 },
+//     { url: "https://dweb.link", available: true, latency: 312 },
+//     { url: "https://cloudflare-ipfs.com", available: false }
+//   ]
+// }
+```
+
+### Publish to Public Network
+
+Make Demos content available on public IPFS:
+
+```typescript
+// Requires: DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH=true
+
+const result = await client.ipfsPublicPublish({
+  cid: "QmDemosContent..."
+})
+
+console.log(result)
+// {
+//   published: true,
+//   cid: "QmDemosContent...",
+//   gateways: ["https://ipfs.io", "https://dweb.link"]
+// }
+```
+
+**Warning:** Publishing exposes content to the public internet. Only publish content intended for public access.
+
+## Rate Limiting
+
+Public bridge access is rate-limited to prevent abuse:
+
+### Limits
+
+| Metric | Default | Description |
+|--------|---------|-------------|
+| Requests | 30/min | Maximum requests per minute |
+| Bytes | 100 MB/min | Maximum data transfer per minute |
+
+### Check Status
+
+```typescript
+const status = await client.ipfsRateLimitStatus()
+
+console.log(status)
+// {
+//   requestsUsed: 12,
+//   requestsLimit: 30,
+//   bytesUsed: 52428800,
+//   bytesLimit: 104857600,
+//   resetAt: 1704067260000,
+//   throttled: false
+// }
+```
+
+### Throttling Behavior
+
+When limits are exceeded:
+
+1. New requests return `RATE_LIMIT_EXCEEDED` error
+2. Wait until `resetAt` timestamp
+3. Limits reset automatically after 1 minute
+
+```typescript
+if (status.throttled) {
+  const waitMs = status.resetAt - Date.now()
+  console.log(`Rate limited. Retry in ${waitMs}ms`)
+}
+```
+
+## Use Cases
+
+### Import from Public IPFS
+
+Fetch and pin public content to your Demos account:
+
+```typescript
+// 1. Fetch from public network
+const publicContent = await client.ipfsPublicFetch({
+  cid: "QmPublicData..."
+})
+
+// 2. Add to Demos (creates local copy with pin)
+const result = await client.ipfsAdd({
+  content: publicContent.content,
+  duration: "permanent"
+})
+
+console.log(`Imported as ${result.cid}`)
+```
+
+### Verify External Availability
+
+Check if Demos content is accessible externally:
+
+```typescript
+async function ensurePubliclyAvailable(cid: string) {
+  // First, pin in Demos
+  await client.ipfsPin({ cid, duration: "permanent" })
+
+  // Publish to public network
+  if (process.env.DEMOS_IPFS_ALLOW_PUBLIC_PUBLISH === "true") {
+    await client.ipfsPublicPublish({ cid })
+  }
+
+  // Verify availability
+  const check = await client.ipfsPublicCheck({ cid })
+
+  if (!check.available) {
+    console.warn("Content not yet available on public gateways")
+  }
+
+  return check
+}
+```
+
+### Gateway Fallback
+
+Implement robust fetching with fallbacks:
+
+```typescript
+const GATEWAYS = [
+  "https://ipfs.io",
+  "https://dweb.link",
+  "https://cloudflare-ipfs.com",
+  "https://gateway.pinata.cloud"
+]
+
+async function fetchWithFallback(cid: string) {
+  for (const gateway of GATEWAYS) {
+    try {
+      return await client.ipfsPublicFetch({ cid, gateway })
+    } catch (error) {
+      console.warn(`${gateway} failed, trying next...`)
+    }
+  }
+  throw new Error("All gateways failed")
+}
+```
+
+## Security Considerations
+
+### Data Exposure
+
+Content published to public IPFS is accessible to anyone:
+
+- No access control on public gateways
+- Content may be cached by third parties
+- Cannot "unpublish" from public network
+
+### Gateway Trust
+
+Public gateways are third-party services:
+
+- May have different privacy policies
+- Could modify or censor content
+- Subject to their rate limits
+
+### Best Practices
+
+```typescript
+// DO: Verify content integrity after fetch
+const content = await client.ipfsPublicFetch({ cid })
+const verified = verifyCID(content.content, cid)
+
+// DO: Use timeouts for gateway requests
+const result = await Promise.race([
+  client.ipfsPublicFetch({ cid }),
+  timeout(30000)
+])
+
+// DON'T: Publish sensitive data
+// await client.ipfsPublicPublish({ cid: sensitiveDataCid })
+```
+
+## Troubleshooting
+
+### Gateway Timeouts
+
+```typescript
+// Increase timeout for slow gateways
+DEMOS_IPFS_PUBLIC_TIMEOUT=60000
+```
+
+### Rate Limit Issues
+
+```typescript
+// Check current usage
+const status = await client.ipfsRateLimitStatus()
+
+// Increase limits if needed
+DEMOS_IPFS_PUBLIC_MAX_REQUESTS=60
+DEMOS_IPFS_PUBLIC_MAX_BYTES=209715200  // 200 MB
+```
+
+### Gateway Errors
+
+```bash
+# Test gateway directly
+curl -I "https://ipfs.io/ipfs/QmTest..."
+
+# Check DNS resolution
+nslookup ipfs.io
+```
+
+## Type Definitions
+
+```typescript
+interface PublicBridgeConfig {
+  enabled: boolean
+  gatewayUrl: string
+  allowPublish: boolean
+  timeout: number
+  maxRequestsPerMinute: number
+  maxBytesPerMinute: number
+}
+
+interface GatewayStatus {
+  url: string
+  available: boolean
+  latency?: number
+  error?: string
+}
+
+interface RateLimitStatus {
+  requestsUsed: number
+  requestsLimit: number
+  bytesUsed: number
+  bytesLimit: number
+  resetAt: number
+  throttled: boolean
+}
+```

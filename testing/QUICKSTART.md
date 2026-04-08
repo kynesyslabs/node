@@ -134,10 +134,25 @@ This prints the most recent report files. It does **not** run any tests -- it on
 - `l2ps_batch_submission_smoke` / `l2ps_batch_grouping_smoke`
 - And many more L2PS scenarios (run `--list` for the full set)
 
-### Token (historical, not part of active coverage)
-- `token_smoke` / `token_transfer` / `token_mint_smoke` / `token_burn_smoke`
-- Various token ACL, script, and edge case scenarios
-- These are retained for archaeology and future reactivation
+### Token core suite
+```bash
+bun run testenv:tokens:local -- --build-first
+```
+
+Maintained token-core scenarios:
+
+- `token_smoke`
+- `token_mint_smoke`
+- `token_burn_smoke`
+- `token_acl_smoke`
+- `token_query_coverage`
+- `token_consensus_consistency`
+- `token_edge_cases`
+- `token_script_smoke`
+- `token_script_rejects`
+- `token_script_hooks_correctness`
+
+Additional token load, matrix, and complex-policy scenarios remain runnable through `testing/scripts/run-scenario.sh`, but they are not yet part of the maintained core suite.
 
 ## Directory layout
 

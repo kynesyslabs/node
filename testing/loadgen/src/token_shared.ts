@@ -282,6 +282,23 @@ function deriveTokenAddress(deployer: string, deployerNonce: number, tokenObject
   return "0x" + addrHex
 }
 
+function getDefaultTokenName(): string {
+  const runId = (process.env.RUN_ID ?? "").trim()
+  const scenario = (process.env.SCENARIO ?? "").trim()
+  if (runId) return `Perf Token ${runId}`
+  if (scenario) return `Perf Token ${scenario}`
+  return "Perf Token"
+}
+
+function isTokenAlreadyExistsError(response: any): boolean {
+  const message = typeof response?.extra?.error === "string"
+    ? response.extra.error
+    : typeof response?.response === "string"
+      ? response.response
+      : ""
+  return message.includes("Token already exists at address")
+}
+
 async function findReusableTokenAddress(params: {
   rpcUrl: string
   ownerAddress: string
@@ -359,7 +376,7 @@ export async function ensureTokenAndBalances(
   }
 
   if (!tokenAddress) {
-    const name = process.env.TOKEN_NAME ?? "Perf Token"
+    const name = process.env.TOKEN_NAME ?? getDefaultTokenName()
     const ticker = process.env.TOKEN_TICKER ?? "PERF"
     const decimals = envInt("TOKEN_DECIMALS", 18)
     const initialSupply = BigInt(process.env.TOKEN_INITIAL_SUPPLY ?? "1000000000000000000000000")
@@ -425,7 +442,9 @@ export async function ensureTokenAndBalances(
     }
     const res = await (demos as any).broadcast(validity)
     if (res?.result !== 200) {
-      throw new Error(`Token create broadcast failed: ${JSON.stringify(res)}`)
+      if (!isTokenAlreadyExistsError(res)) {
+        throw new Error(`Token create broadcast failed: ${JSON.stringify(res)}`)
+      }
     }
 
     try {
@@ -456,13 +475,20 @@ export async function ensureTokenAndBalances(
     for (const addr of walletAddresses) {
       if (addr === deployerAddress) continue
 
+      const existingBalRes = await nodeCall(rpcUrl, "token.getBalance", { tokenAddress, address: addr }, `token.getBalance:bootstrap:${addr}`)
+      const existingBal = typeof existingBalRes?.response?.balance === "string"
+        ? BigInt(existingBalRes.response.balance)
+        : 0n
+      const needed = existingBal >= perWallet ? 0n : perWallet - existingBal
+      if (needed <= 0n) continue
+
       const tx = (demos as any).tx.empty()
       tx.content.type = "native"
       tx.content.to = addr
       tx.content.amount = 0
       tx.content.nonce = nextNonce++
       tx.content.timestamp = Date.now()
-      tx.content.data = ["token", { operation: "transfer", tokenAddress, to: addr, amount: perWallet.toString() }]
+      tx.content.data = ["token", { operation: "transfer", tokenAddress, to: addr, amount: needed.toString() }]
 
       const tokenEdit = {
         type: "token",
@@ -471,7 +497,7 @@ export async function ensureTokenAndBalances(
         tokenAddress,
         txhash: "",
         isRollback: false,
-        data: { from: deployerAddress, to: addr, amount: perWallet.toString() },
+        data: { from: deployerAddress, to: addr, amount: needed.toString() },
       }
 
       const edits = [...buildGasAndNonceEdits(deployerAddress), tokenEdit]
@@ -862,7 +888,7 @@ export async function sendTokenUpgradeScriptTxWithDemos(params: {
   tx.content.timestamp = Date.now()
   tx.content.data = [
     "token",
-    { operation: "upgradeScript", tokenAddress: params.tokenAddress, newScript, upgradeReason: "better_testing scripted token smoke" },
+    { operation: "upgradeScript", tokenAddress: params.tokenAddress, newScript, upgradeReason: "testing scripted token smoke" },
   ]
 
   const tokenEdit = {
@@ -872,7 +898,7 @@ export async function sendTokenUpgradeScriptTxWithDemos(params: {
     tokenAddress: params.tokenAddress,
     txhash: "",
     isRollback: false,
-    data: { newScript, upgradeReason: "better_testing scripted token smoke" },
+    data: { newScript, upgradeReason: "testing scripted token smoke" },
   }
 
   const edits = [...buildGasAndNonceEdits(fromHex), tokenEdit]

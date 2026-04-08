@@ -256,8 +256,8 @@ async function warmup() {
     indexState.RPC_FEE = cfg.core.rpcFee
     // Allow overriding pg port through RPC_PG_PORT
     indexState.PG_PORT = cfg.database.port
-    // Allow overriding server port through RPC_PORT
-    indexState.SERVER_PORT = cfg.server.rpcPort
+    // Allow overriding server port through SERVER_PORT
+    indexState.SERVER_PORT = cfg.server.serverPort
     // Allow overriding signaling server port through RPC_SIGNALING_PORT
     indexState.SIGNALING_SERVER_PORT =
         cfg.server.rpcSignalingPort || cfg.server.signalingServerPort

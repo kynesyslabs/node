@@ -25,7 +25,8 @@ Current status for this repo:
 
 - active implemented feature families are covered at the feature-family level
 - remaining open items are runtime bugs, local gate-health issues, or maintenance cleanup
-- tokens are **not** part of the active-feature claim today because the node repo does not currently expose an implemented token runtime/query surface in `src/`
+- token runtime/query coverage has been reactivated for a maintained core suite on the local devnet
+- broader token load, matrix, and complex-policy inventory still exists outside the maintained core suite
 
 Authoritative docs:
 
@@ -52,7 +53,7 @@ Do not count as active coverage:
 - native bridge paths
 - `storageProgram` placeholder behavior
 - contract-runtime / storage-contract stubs
-- historical token scenarios retained in the harness
+- unpromoted token long-tail scenarios retained in the harness
 - deferred SDK-repo concurrency work
 
 ## Start Here
@@ -87,6 +88,7 @@ bun run testenv:startup:local -- --build-first
 | Cold boot the cluster and verify startup | `bun run testenv:startup:local -- --build-first` |
 | Run the must-pass local release gate | `bun run testenv:prod-gate:local -- --build-first` |
 | Run scheduled operational cluster checks | `bun run testenv:cluster:local -- --build-first` |
+| Run the maintained token core suite | `bun run testenv:tokens:local -- --build-first` |
 | Run deterministic single-wallet GCR validation | `bun run testenv:gcr:routine:local` |
 | Run L2PS live validation | `bun run testenv:l2ps:local -- --build-first` |
 | Record active-core performance baseline | `bun run testenv:perf:baseline:local -- --build` |
@@ -114,11 +116,15 @@ This is the practical human summary. For the canonical contract, use the matrix 
 | Incentives | Yes | referral and score scenarios | one-off |
 | MCP factory / registry | Yes | MCP smoke scenarios | one-off |
 | L2PS | Yes | broad L2PS family plus live-path smokes | `testenv:l2ps:local` |
+| Tokens | Yes, core suite | `token_smoke`, `token_mint_smoke`, `token_burn_smoke`, `token_acl_smoke`, `token_query_coverage`, `token_consensus_consistency`, `token_edge_cases`, `token_script_smoke`, `token_script_rejects`, `token_script_hooks_correctness` | `testenv:tokens:local`, targeted local runs |
 | Storage handler mocked surface | Limited active surface only | `storage_handler_smoke` | one-off |
 
-Historical but **not** part of current active-feature coverage:
+Retained but **not** part of the maintained token-core claim:
 
-- all `token_*` scenarios
+- token ramp/load scenarios
+- token ACL matrix variants
+- token complex-policy suites
+- token observation / export / invariants helpers
 - placeholder storage-program behavior
 - inactive bridge / contract-runtime surfaces
 
@@ -132,6 +138,7 @@ For a local confidence pass:
 4. `bun run testenv:prod-gate:local -- --build-first`
 5. `bun run testenv:perf:baseline:local -- --build`
 6. `bun run testenv:soak:local -- --build`
+7. `bun run testenv:tokens:local -- --build-first`
 
 For a faster targeted pass:
 
@@ -152,6 +159,7 @@ Examples:
 testing/scripts/run-scenario.sh consensus_tx_inclusion --build
 testing/scripts/run-scenario.sh multichain_parser_execute_smoke --build
 testing/scripts/run-scenario.sh zk_commitment_smoke
+testing/scripts/run-scenario.sh token_script_smoke --build
 ```
 
 The full scenario registry lives in:
@@ -161,7 +169,8 @@ The full scenario registry lives in:
 Important boundary:
 
 - scenario registration does not automatically mean “active coverage”
-- many token scenarios are intentionally retained for archaeology and future reactivation only
+- the maintained token claim currently covers the `token-core` suite only
+- many heavier token scenarios are intentionally retained outside that maintained core until they are revalidated
 
 ## Reports And Artifacts
 
@@ -179,6 +188,7 @@ Most useful reports:
 - `testing/runs/_latest/l2ps-live.latest.md`
 - `testing/runs/_latest/active-core-baseline.latest.md`
 - `testing/runs/_latest/cluster-soak.latest.md`
+- `testing/runs/_latest/token-core.latest.md`
 
 ## Folder Guide
 

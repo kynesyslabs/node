@@ -51,7 +51,8 @@ That is intentional.
 Interpret the registry like this:
 
 - active implemented feature scenarios
-- historical token scenarios kept for archaeology and future reactivation
+- maintained token core scenarios
+- broader token scenarios kept available pending further revalidation
 - helper / observation / settle scenarios
 
 Do **not** assume:
@@ -81,7 +82,7 @@ Current registry includes families such as:
 - incentives
 - MCP
 - L2PS
-- token historical scenarios
+- token core and extended token scenarios
 
 ## Artifacts
 
@@ -94,6 +95,9 @@ Typical outputs:
 - `*.summary.json`
 - `*.timeseries.jsonl`
 
-## Historical Status
+## Token Status
 
-Token-related scenarios are still documented by the registry because they exist and are runnable in the harness, but they are not currently part of the active-feature claim for this repo.
+The token registry is split in two practical buckets:
+
+- maintained token core scenarios that are part of the active local token coverage story
+- heavier token scenarios that remain runnable but are still being promoted back into the maintained surface incrementally

@@ -58,8 +58,8 @@ import Chain from "@/libs/blockchain/chain"
 import {
     signedObject,
     SerializedSignedObject,
-    ucrypto,
     Cryptography,
+    ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import Mempool from "@/libs/blockchain/mempool_v2"
@@ -635,13 +635,13 @@ export class SignalingServer {
         // REVIEW: PR Fix #2 - Use mutex to prevent nonce race conditions
         // Acquire lock before reading/modifying nonce to ensure atomic operation
         return await this.nonceMutex.runExclusive(async () => {
-            const nodeIdentity = getSharedState.publicKeyHex
-            if (!nodeIdentity) {
-                throw new Error("[Signaling Server] Node public key not available for message persistence")
+            const signerPublicKeyHex = getSharedState.publicKeyHex
+            if (!signerPublicKeyHex) {
+                throw new Error("[Signaling Server] Node public key not available for message signing")
             }
 
-            // REVIEW: PR Fix #6 - Implement per-sender nonce counter for transaction uniqueness
-            const currentNonce = this.senderNonces.get(nodeIdentity) || 0
+            // REVIEW: PR Fix #6 - Nonce must be coherent for the actual signer (`from`)
+            const currentNonce = this.senderNonces.get(signerPublicKeyHex) || 0
             const nonce = currentNonce + 1
             // Don't increment yet - wait for mempool success for better error handling
 
@@ -649,9 +649,9 @@ export class SignalingServer {
             const transaction = new Transaction()
             transaction.content = {
                 type: "instantMessaging",
-                from: nodeIdentity,
+                from: signerPublicKeyHex,
                 to: targetId,
-                from_ed25519_address: nodeIdentity,
+                from_ed25519_address: signerPublicKeyHex,
                 amount: 0,
                 data: ["instantMessaging", { senderId, targetId, message, timestamp }] as any,
                 gcr_edits: [],
@@ -669,7 +669,7 @@ export class SignalingServer {
             transaction.signature = {
                 type: getSharedState.signingAlgorithm,
                 data: uint8ArrayToHex(signature.signature),
-            } as any
+            }
 
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
@@ -683,7 +683,7 @@ export class SignalingServer {
                     throw new Error(error)
                 }
                 // REVIEW: PR Fix #6 - Only increment nonce after successful mempool addition
-                this.senderNonces.set(nodeIdentity, nonce)
+                this.senderNonces.set(signerPublicKeyHex, nonce)
             } catch (error) {
                 handleError(error, "NETWORK", { source: "signaling server" })
                 throw error // Rethrow to be caught by caller's error handling
@@ -724,14 +724,14 @@ export class SignalingServer {
             })
             const messageHash = Hashing.sha256(messageContent)
 
-            // NOTE: Future improvement - will be replaced with sender signature verification once client-side signing is implemented
-            // Current: Sign with node's private key for integrity (not authentication)
-            // REVIEW: PR Fix #14 - Add null safety check for private key access (location 2/3)
             if (!getSharedState.identity?.ed25519?.privateKey) {
                 throw new Error("[Signaling Server] Private key not available for offline message signing")
             }
 
-            const signature = Cryptography.sign(messageHash, getSharedState.identity.ed25519.privateKey)
+            const signature = Cryptography.sign(
+                messageHash,
+                getSharedState.identity.ed25519.privateKey,
+            )
 
             const offlineMessage = offlineMessageRepository.create({
                 recipientPublicKey: targetId,

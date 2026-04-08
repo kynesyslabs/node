@@ -46,9 +46,7 @@ export class TLSServer extends EventEmitter {
         }
 
         // Initialize rate limiter
-        this.rateLimiter = new RateLimiter(
-            this.config.rateLimit ?? { enabled: true },
-        )
+        this.rateLimiter = RateLimiter.getInstance()
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,
@@ -285,9 +283,6 @@ export class TLSServer extends EventEmitter {
 
         // Close all existing connections
         await this.connectionManager.closeAll()
-
-        // Stop rate limiter
-        this.rateLimiter.stop()
 
         this.isRunning = false
         this.server = null

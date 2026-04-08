@@ -289,40 +289,79 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    await Chain.insertBlock(block, [], null, false)
-    log.debug("Block inserted successfully")
-    log.debug(
-        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
-    )
-    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+    const prevInGcrApply = getSharedState.inGcrApply
+    getSharedState.inGcrApply = true
+    try {
+        // REVIEW Merge the peerlist
+        log.info("[fastSync] Merging peers from block: " + block.hash)
+        const mergedPeerlist = await mergePeerlist(block)
+        log.info("[fastSync] Merged peers from block: " + mergedPeerlist)
 
-    // REVIEW Merge the peerlist
-    log.info(`[fastSync] Merging peers from block: ${block.hash}`)
-    const mergedPeerlist = await mergePeerlist(block)
-    log.info(`[fastSync] Merged peers from block: ${mergedPeerlist}`)
-    // REVIEW Parse the txs hashes in the block
-    log.info("[fastSync] Asking for transactions in the block", true)
-    const txs = await askTxsForBlock(block, peer)
-    log.info(`[fastSync] Transactions received: ${txs.length}`, true)
+        // REVIEW Parse the txs hashes in the block
+        log.info("[fastSync] Asking for transactions in the block", true)
+        const txs = await askTxsForBlock(block, peer)
+        log.info("[fastSync] Transactions received: " + txs.length, true)
 
-    // ! Sync the native tables
-    await syncGCRTables(txs)
+        // Always apply and persist transactions in block order.
+        // Token validity can be order-dependent (e.g., insufficient balance checks, scripts),
+        // and token state is not currently part of the consensus integrity hash. If we apply
+        // out-of-order during sync, nodes can permanently diverge even while sharing the same
+        // lastBlockHash/lastBlockNumber.
+        const orderedTxs = (() => {
+            const hashes = Array.isArray(block?.content?.ordered_transactions)
+                ? block.content.ordered_transactions
+                : []
+            if (hashes.length === 0) return txs
+            const byHash: Record<string, Transaction> = {}
+            for (const tx of txs) byHash[tx.hash] = tx
+            return hashes.map(h => byHash[h]).filter(Boolean)
+        })()
 
-    // REVIEW Insert the txs into the transactions database table
-    if (txs.length > 0) {
-        log.info("[fastSync] Inserting transactions into the database", true)
-        const success = await Chain.insertTransactionsFromSync(txs)
-        if (success) {
-            log.info("[fastSync] Transactions inserted successfully")
-            return true
+        for (const tx of orderedTxs) {
+            if (!tx.blockNumber) tx.blockNumber = block.number
         }
 
-        log.error("[fastSync] Transactions insertion failed")
-        return false
-    }
+        // ! Sync the native tables
+        await syncGCRTables(orderedTxs)
 
-    log.info("[fastSync] No transactions in the block")
-    return true
+        // IMPORTANT: Insert the block only AFTER applying GCR/token edits.
+        // Token scripts derive prevBlockHash from shared state; inserting the block first would
+        // advance lastBlockHash to the *current* block and drift hook contexts during sync.
+        // Also, Merkle tree updates can depend on the GCR edits (commitments) being applied first.
+        //
+        // IMPORTANT: When syncing, do not persist block transactions from local mempool.
+        // If we insert tx rows first, HandleGCR.applyToTx() would treat them as "already executed"
+        // and skip applying GCR/token edits, leading to cross-node state divergence.
+        await Chain.insertBlock(block, [], null, false, false)
+        log.debug("Block inserted successfully")
+        log.debug(
+            "Last block number: " +
+            getSharedState.lastBlockNumber +
+            " Last block hash: " +
+            getSharedState.lastBlockHash,
+        )
+        log.info(
+            "[fastSync] Block inserted successfully at the head of the chain!",
+        )
+
+        // REVIEW Insert the txs into the transactions database table
+        if (orderedTxs.length > 0) {
+            log.info("[fastSync] Inserting transactions into the database", true)
+            const success = await Chain.insertTransactionsFromSync(orderedTxs)
+            if (success) {
+                log.info("[fastSync] Transactions inserted successfully")
+                return true
+            }
+
+            log.error("[fastSync] Transactions insertion failed")
+            return false
+        }
+
+        log.info("[fastSync] No transactions in the block")
+        return true
+    } finally {
+        getSharedState.inGcrApply = prevInGcrApply
+    }
 }
 
 /**
@@ -506,21 +545,29 @@ async function batchDownloadBlocks(
 
     // Process each block in order
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        const prevInGcrApply = getSharedState.inGcrApply
+        getSharedState.inGcrApply = true
+        try {
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
-        // Insert block
-        await Chain.insertBlock(block, [], null, false)
-        log.info(
-            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
-        )
-
         // Merge peerlist
         await mergePeerlist(block)
 
+        for (const tx of blockTxs) {
+            if (!tx.blockNumber) tx.blockNumber = block.number
+        }
+
         // Sync GCR tables
         await syncGCRTables(blockTxs)
+
+        // IMPORTANT: Insert the block only AFTER applying GCR/token edits (see syncBlock rationale).
+        // IMPORTANT: When batch syncing, do not persist block transactions from local mempool.
+        await Chain.insertBlock(block, [], null, false, false)
+        log.info(
+            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
+        )
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -531,6 +578,9 @@ async function batchDownloadBlocks(
                 )
                 return false
             }
+        }
+        } finally {
+            getSharedState.inGcrApply = prevInGcrApply
         }
     }
 
@@ -755,7 +805,12 @@ export async function askTxsForBlock(
     })
 
     if (res.result === 200) {
-        return res.response as Transaction[]
+        const txs = res.response as Transaction[]
+        // Some peers may respond 200 with an empty list if the block's transactions
+        // are not yet persisted in their transactions table; fall back to hash lookup.
+        if (Array.isArray(txs) && txs.length > 0) {
+            return txs
+        }
     }
 
     // INFO: fetch all transactions by hashes

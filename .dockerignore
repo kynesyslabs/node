@@ -17,6 +17,14 @@ logs
 logs_*
 blocked_ips.json
 
+# Exclude local runtime state (may contain root-owned files / huge volumes)
+ipfs/data_*/
+ipfs_*/
+docker_data/
+logs/
+postgres/
+postgres_*/
+
 # Exclude unnecessary files
 *.log
 .DS_Store

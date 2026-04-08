@@ -24,7 +24,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
         type: getSharedState.signingAlgorithm,
         data: new Uint8Array(Buffer.from("0x0", "hex")),
     }.data.toString()
-    genesisTx.content.from_ed25519_address = ""
+    genesisTx.content.from_ed25519_address = "0x" + "00".repeat(32)
     genesisTx.signature = {
         type: getSharedState.signingAlgorithm,
         data: "0x0",

@@ -1,97 +1,20 @@
 # AI Agent Instructions for Demos Network
 
-## Issue Tracking with br (beads_rust)
+Semantic map: see `repository-semantic-map/`.
 
-**IMPORTANT**: This project uses **br (beads_rust)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+## Checks (no tests)
 
-### Why br?
+- Use `bun run check` as the canonical “magic” check (authoritative `tsc` via `tsconfig.check.json` + a Bun bundling sanity check).
+- Use `bun run check:full` when you need to type-check the full repository.
+## Task Tracking
 
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Auto-syncs to JSONL for version control
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
+**IMPORTANT**: Use **Mycelium (`myc`)** as the repo-visible task tracker. Do NOT create markdown TODOs, and do not reintroduce committed `.beads/` or `.beadspace/` state.
 
-### Quick Start
+### Optional br interoperability
 
-**Check for ready work:**
-```bash
-br ready --json
-```
+`br` remains available as a local interoperability layer when explicitly needed, but it is secondary to `myc` in this repository.
 
-**Create new issues:**
-```bash
-br create "Issue title" -t bug|feature|task -p 0-4 --json
-br create "Issue title" -p 1 --deps discovered-from:br-123 --json
-```
-
-**Claim and update:**
-```bash
-br update br-42 --status in_progress --json
-br update br-42 --priority 1 --json
-```
-
-**Complete work:**
-```bash
-br close br-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `br ready` shows unblocked issues
-2. **Claim your task**: `br update <id> --status in_progress`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `br create "Found bug" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `br close <id> --reason "Done"`
-6. **Commit together**: Always commit the `.beads/issues.jsonl` file together with the code changes so issue state stays in sync with code state
-
-### Auto-Sync
-
-br automatically syncs with git:
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
-
-### GitHub Copilot Integration
-
-If using GitHub Copilot, also create `.github/copilot-instructions.md` for automatic instruction loading.
-Run `br onboard` to get the content, or see step 2 of the onboard instructions.
-
-### MCP Server (Recommended)
-
-If using Claude or MCP-compatible clients, install the beads MCP server:
-
-```bash
-pip install beads-mcp
-```
-
-Add to MCP config (e.g., `~/.config/claude/config.json`):
-```json
-{
-  "beads": {
-    "command": "beads-mcp",
-    "args": []
-  }
-}
-```
-
-Then use `mcp__beads__*` functions instead of CLI commands.
+- Prefer `bun run brx -- <br command...>` for mutating `br` operations.
 
 ### Managing AI-Generated Planning Documents
 
@@ -123,10 +46,7 @@ history/
 
 ### Important Rules
 
-- Use br for ALL task tracking
-- Always use `--json` flag for programmatic use
-- Link discovered work with `discovered-from` dependencies
-- Check `br ready` before asking "what should I work on?"
+- Use `myc` for repo-visible task tracking
 - Store AI planning docs in `history/` directory
 - Do NOT create markdown TODO lists
 - Do NOT use external issue trackers
@@ -134,7 +54,6 @@ history/
 - Do NOT clutter repo root with planning documents
 
 For more details, see README.md and QUICKSTART.md.
-
 
 ## Project Management with Mycelium
 
@@ -150,7 +69,7 @@ myc init
 myc epic create --title "Feature X" --description "Build feature X"
 
 # Create tasks within an epic
-myc task create --title "Implement Y" --epic 1 --priority high --due 2025-12-31
+myc task create --title "Implement Y" --description "Build the implementation for Y" --epic 1 --priority high --due 2025-12-31
 
 # Task priorities: low, medium, high, critical
 # Task status: open, closed
@@ -187,8 +106,8 @@ myc export csv
 
 ### Data Model
 
-- **Epic**: A large body of work (e.g., a feature or milestone)
-- **Task**: A unit of work within an epic
+- **Epic**: A large body of work with a title and optional description (e.g., a feature or milestone)
+- **Task**: A unit of work with a title and optional description, optionally linked to an epic
 - **Dependency**: Task A blocks Task B (B cannot close until A is closed)
 - **Assignee**: Person assigned to a task (can have GitHub username)
 - **External Ref**: Link to GitHub issues/PRs or URLs
@@ -208,8 +127,58 @@ When working on this project:
 
 1. Check existing tasks: `myc task list`
 2. Check blocked tasks: `myc task list --blocked`
-3. Create tasks for new work: `myc task create --title "..." --epic N`
+3. Create tasks for new work: `myc task create --title "..." --description "..." --epic N`
 4. Mark tasks complete when done: `myc task close N`
-5. Use `--json` flag for machine-readable output: `myc task list --json`
-6. For mutating `br` operations, prefer `bun run brx -- <br command...>` so `br` stays synced into Mycelium automatically
-7. Use `bun run sync:br-myc` for a manual resync if tracker state drifts or after repair work
+5. Use `--format json` for machine-readable output: `myc task list --format json`
+
+## Mental Frameworks for Mycelium Usage
+
+### 1. INVEST — Task Quality Gate
+
+Before creating or updating any task, validate it against these criteria.
+A task that fails more than one is not ready to be written.
+
+| Criterion | Rule |
+|---|---|
+| **Independent** | Can be completed without unblocking other tasks first |
+| **Negotiable** | The *what* is fixed; the *how* remains open |
+| **Valuable** | Produces a verifiable, concrete outcome |
+| **Estimable** | If you cannot size it, it is too vague or too large |
+| **Small** | If it spans more than one work cycle, split it |
+| **Testable** | Has an explicit, binary done condition |
+
+> If a task fails **Estimable** or **Testable**, convert it to an Epic and decompose.
+
+---
+
+### 2. DAG — Dependency Graph Thinking
+
+Before scheduling or prioritizing, model the implicit dependency graph.
+
+**Rules:**
+- No task moves to `in_progress` if it has an unresolved upstream blocker
+- Priority is a function of both urgency **and fan-out** (how many tasks does completing this one unlock?)
+- Always work the **critical path** first — not the task that feels most urgent
+
+**Prioritization heuristic:**
+```
+score = urgency + (blocked_tasks_count × 1.5)
+```
+
+When creating a task, explicitly ask: *"What does this block, and what blocks this?"*
+Set dependency links in Mycelium before touching status.
+
+---
+
+### 3. Principle of Minimal Surprise (PMS)
+
+Mycelium's state must remain predictable and auditable at all times.
+
+**Rules:**
+- **Prefer idempotent operations** — update before you create; never duplicate
+- **Check before write** — search for an equivalent item before creating a new one
+- **Always annotate mutations** — every status change, priority shift, or reassignment must carry an explicit `reason` field
+- **No orphan tasks** — every task must be linked to an Epic; every Epic to a strategic goal
+- Deletions are a last resort; prefer `cancelled` status with a reason
+
+> The state of Mycelium after any operation must be explainable to another agent with zero context.

@@ -10,7 +10,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import { Repository } from "typeorm"
+import { EntityManager, Repository } from "typeorm"
 import Block from "./block"
 import { Peer } from "../peer"
 import Transaction from "./transaction"
@@ -143,8 +143,17 @@ export default class Chain {
         operations: Operation[] = [],
         position?: number,
         cleanMempool = true,
+        persistTransactions = true,
+        transactionalEntityManager?: EntityManager,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, operations, position, cleanMempool)
+        return blockOps.insertBlock(
+            block,
+            operations,
+            position,
+            cleanMempool,
+            persistTransactions,
+            transactionalEntityManager,
+        )
     }
 
     static async insertTransaction(transaction: Transaction, status = "confirmed"): Promise<boolean> {

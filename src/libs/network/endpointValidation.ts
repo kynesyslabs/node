@@ -26,16 +26,25 @@ export async function handleValidateTransaction(
         validationData = await confirmTransaction(tx, sender)
 
         const gcrEdits = await GCRGeneration.generate(tx)
-        gcrEdits.forEach((gcredit: GCREdit) => {
-            gcredit.txhash = ""
+        const generatedComparableEdits = gcrEdits as any[]
+        const generatedNonTokenEdits = generatedComparableEdits.filter(
+            (gcrEdit: any) => gcrEdit?.type !== "token",
+        )
+        generatedNonTokenEdits.forEach((gcrEdit: any) => {
+            gcrEdit.txhash = ""
         })
-        const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+        const gcrEditsHash = Hashing.sha256(
+            JSON.stringify(generatedNonTokenEdits),
+        )
         log.debug(
             "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
         )
-        const txGcrEditsHash = Hashing.sha256(
-            JSON.stringify(tx.content.gcr_edits),
-        )
+        const txEdits = Array.isArray(tx.content.gcr_edits)
+            ? (tx.content.gcr_edits as any[])
+            : []
+        const txNonTokenEdits = txEdits.filter(edit => edit?.type !== "token")
+        const tokenEditsCount = txEdits.length - txNonTokenEdits.length
+        const txGcrEditsHash = Hashing.sha256(JSON.stringify(txNonTokenEdits))
         log.debug(
             "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
         )
@@ -49,7 +58,9 @@ export async function handleValidateTransaction(
             )
         }
         if (comparison) {
-            log.info("[handleValidateTransaction] GCREdit hash match")
+            log.info(
+                `[handleValidateTransaction] GCREdit hash match (non-token edits; tokenEdits=${tokenEditsCount})`,
+            )
         } else {
             throw new Error("GCREdit mismatch")
         }

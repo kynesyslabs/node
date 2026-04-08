@@ -47,10 +47,14 @@ import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import Chain from "../chain"
-import { In, Repository } from "typeorm"
+import { EntityManager, In, Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
+// REVIEW: Token GCREdit routines
+import GCRTokenRoutines from "./gcr_routines/GCRTokenRoutines"
+import { GCRToken } from "@/model/entities/GCRv2/GCR_Token"
+import { GCREditToken, ExtendedGCREdit, isGCREditToken } from "./types/Token"
 import { GCRStorageProgramRoutines } from "./gcr_routines/GCRStorageProgramRoutines"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { Referrals } from "@/features/incentive/referrals"
@@ -458,6 +462,7 @@ export default class HandleGCR {
                     entity,
                     isRollback,
                     simulate,
+                    tx,
                 )
             } catch (error) {
                 log.error(`[applyTransaction] Error applying GCREdit: ${error}`)
@@ -650,10 +655,11 @@ export default class HandleGCR {
      * @throws database errors during repository operations
      */
     static async applyGCREdit(
-        editOperation: GCREdit,
+        editOperation: ExtendedGCREdit,
         account: GCRMain | null,
         isRollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
+        tx?: Transaction, // REVIEW: Optional transaction context for token hook execution
     ): Promise<GCRResult> {
         const repositories = await this.getRepositories()
 
@@ -661,6 +667,19 @@ export default class HandleGCR {
         if (isRollback) {
             editOperation.isRollback = true
         }
+        // REVIEW: Handle token operations first (SDK GCREdit does not include token type yet)
+        // REVIEW: Phase 5.1 - Pass transaction for script execution context
+        if (isGCREditToken(editOperation)) {
+            return GCRTokenRoutines.apply(
+                editOperation,
+                repositories.token as Repository<GCRToken>,
+                simulate,
+                tx, // Pass transaction for hook execution context
+            )
+        }
+
+        // Cast to SDK GCREdit for the switch statement
+        const sdkEdit = editOperation as GCREdit
 
         let result: GCRResult
 
@@ -670,7 +689,7 @@ export default class HandleGCR {
         }
 
         // Applying the edit operations
-        switch (editOperation.type) {
+        switch (sdkEdit.type) {
             case "balance":
                 result = await GCRBalanceRoutines.apply(editOperation, account!)
                 break
@@ -683,31 +702,27 @@ export default class HandleGCR {
             case "assign":
             case "subnetsTx":
                 // TODO implementations
-                log.debug(`Assigning GCREdit ${editOperation.type}`)
-                result = { success: true, message: "Not implemented" }
-                break
+                log.debug(`Assigning GCREdit ${sdkEdit.type}`)
+                return { success: true, message: "Not implemented" }
             case "smartContract":
             case "escrow":
                 // TODO implementations
-                log.debug(`GCREdit ${editOperation.type} not yet implemented`)
-                result = { success: true, message: "Not implemented" }
-                break
+                log.debug(`GCREdit ${sdkEdit.type} not yet implemented`)
+                return { success: true, message: "Not implemented" }
             // REVIEW: StorageProgram unified storage operations
             case "storageProgram":
-                result = await GCRStorageProgramRoutines.apply(
-                    editOperation,
+                return GCRStorageProgramRoutines.apply(
+                    sdkEdit,
                     repositories.storageProgram as Repository<GCRStorageProgram>,
                     simulate,
                 )
-                break
             // REVIEW: TLSNotary attestation proof storage
             case "tlsnotary":
-                result = await GCRTLSNotaryRoutines.apply(
-                    editOperation,
+                return GCRTLSNotaryRoutines.apply(
+                    sdkEdit,
                     repositories.tlsnotary as Repository<GCRTLSNotary>,
                     simulate,
                 )
-                break
             default:
                 return { success: false, message: "Invalid GCREdit type" }
         }
@@ -825,6 +840,54 @@ export default class HandleGCR {
     // }
 
     /**
+     * Apply only token-related GCR edits for a transaction.
+     *
+     * Rationale:
+     * - Token state is not currently included in the GCR integrity hash used during consensus.
+     * - During consensus forging, some nodes may not have the full mempool/tx set yet, causing token tables
+     *   to diverge if token edits are applied pre-forge.
+     * - This helper allows consensus to validate token edits (simulate=true) and later apply them deterministically
+     *   from the finalized block tx list, without coupling to Chain.checkTxExists().
+     */
+    static async applyTokenEditsToTx(
+        tx: Transaction,
+        isRollback = false,
+        simulate = false,
+        entityManager?: EntityManager,
+    ): Promise<GCRResult> {
+        const tokenEdits = Array.isArray(tx?.content?.gcr_edits)
+            ? (tx.content.gcr_edits as any[]).filter(e => e?.type === "token")
+            : []
+
+        if (tokenEdits.length === 0) {
+            return { success: true, message: "" }
+        }
+
+        if (entityManager) {
+            const tokenRepo = entityManager.getRepository(GCRToken)
+            for (const edit of tokenEdits) {
+                const editOp = { ...(edit as any) }
+                if (isRollback) editOp.isRollback = true
+                const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
+                if (!result.success) return result
+            }
+            return { success: true, message: "" }
+        }
+
+        // REVIEW: Fallback path without EntityManager — use default repository
+        const repositories = await this.getRepositories()
+        const tokenRepo = repositories.token as Repository<GCRToken>
+        for (const edit of tokenEdits) {
+            const editOp = { ...(edit as any) }
+            if (isRollback) editOp.isRollback = true
+            const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
+            if (!result.success) return result
+        }
+
+        return { success: true, message: "" }
+    }
+
+    /**
      * Process side-effects for native transactions that aren't captured in GCR edits
      * Currently handles:
      * - tlsn_request: Creates attestation token when tx enters mempool (simulate=true)
@@ -928,7 +991,7 @@ export default class HandleGCR {
             let result: GCRResult
 
             try {
-                result = await this.applyGCREdit(edit, account, true)
+                result = await this.applyGCREdit(edit, account, true, false, tx)
             } catch (error) {
                 log.error(`[rollback] Error applying GCREdit: ${error}`)
                 result = {
@@ -992,6 +1055,7 @@ export default class HandleGCR {
             subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
             tracker: dataSource.getRepository(GCRTracker),
             tlsnotary: dataSource.getRepository(GCRTLSNotary),
+            token: dataSource.getRepository(GCRToken),
             storageProgram: dataSource.getRepository(GCRStorageProgram),
         }
     }
@@ -1032,6 +1096,13 @@ export default class HandleGCR {
 
         account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
+        account.extended = fillData["extended"] || {
+            tokens: [],
+            nfts: [],
+            xm: [],
+            web2: [],
+            other: [],
+        }
         account.points = fillData["points"] || {
             totalPoints: 0,
             breakdown: {

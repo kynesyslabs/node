@@ -74,6 +74,7 @@ export async function consensusRoutine(): Promise<void> {
 
     // Defining the variables needed for rolling back the GCREdits
     let successfulTxs: string[] = []
+    let rollbackEligibleTxs: string[] = []
     let failedTxs: string[] = []
     let tempMempool: Transaction[] = []
 
@@ -129,6 +130,10 @@ export async function consensusRoutine(): Promise<void> {
         const { successfulTxs: localSuccessfulTxs, failedTxs: localFailedTxs } =
             await applyGCREditsFromMergedMempool(tempMempool)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+        // REVIEW: In batch mode all successful txs are rollback-eligible
+        rollbackEligibleTxs = rollbackEligibleTxs.concat(
+            localSuccessfulTxs,
+        )
         failedTxs = failedTxs.concat(localFailedTxs)
         log.debug(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
         log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
@@ -142,6 +147,9 @@ export async function consensusRoutine(): Promise<void> {
                 log.debug(`Failed tx: ${tx}`)
                 await Mempool.removeTransactionsByHashes([tx])
             }
+            // Ensure the forged block uses the same tx set as the applied state.
+            const failedSet = new Set(failedTxs)
+            tempMempool = tempMempool.filter(tx => !failedSet.has(tx.hash))
         }
 
         // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
@@ -201,7 +209,19 @@ export async function consensusRoutine(): Promise<void> {
                     pro +
                     " votes",
             )
-            await finalizeBlock(block, pro)
+            const finalized = await finalizeBlock(
+                block,
+                pro,
+                tempMempool,
+                manager.shard.members,
+            )
+            if (!finalized) {
+                log.warning(
+                    "[consensusRoutine] Failed to finalize block locally (missing tx bodies / deterministic apply guard); falling back to fastSync",
+                )
+                await fastSync(manager.shard.members, "finalizeBlock")
+                return
+            }
 
             // REVIEW: Should we await this?
             if (manager.checkIfWeAreSecretary()) {
@@ -242,7 +262,7 @@ export async function consensusRoutine(): Promise<void> {
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
-            for (const txHash of successfulTxs) {
+            for (const txHash of rollbackEligibleTxs) {
                 const tx = tempMempool.find(tx => tx.hash === txHash)
                 if (tx) {
                     txsToRollback.push(tx)
@@ -406,7 +426,52 @@ async function applyGCREditsFromMergedMempool(
         return { successfulTxs: [], failedTxs: allTxHashes }
     }
 
-    const res = await HandleGCR.applyTransactions(pendingTxs, false)
+    // REVIEW: Token edit validation — validate token edits in simulate mode before batch processing.
+    // Token edits are NOT included in the GCR integrity hash used by consensus.
+    // Invalid token txs are pruned here; persistence deferred until block finalization.
+    const tokenValidatedTxs: Transaction[] = []
+    for (const tx of pendingTxs) {
+        const txGCREdits = tx.content.gcr_edits
+        if (txGCREdits && Array.isArray(txGCREdits)) {
+            const hasTokenEdits = txGCREdits.some((e: any) => e?.type === "token")
+            if (hasTokenEdits) {
+                const tokenValidation = await HandleGCR.applyTokenEditsToTx(
+                    tx,
+                    false,
+                    true,
+                )
+                if (!tokenValidation.success) {
+                    failedTxs.push(tx.hash)
+                    continue
+                }
+            }
+        }
+        tokenValidatedTxs.push(tx)
+    }
+
+    if (tokenValidatedTxs.length === 0) {
+        return { successfulTxs: [], failedTxs }
+    }
+
+    // REVIEW: Strip token edits before batch GCR processing (they are handled at block finalization)
+    const batchTxs = tokenValidatedTxs.map(tx => {
+        const txGCREdits = tx.content.gcr_edits
+        if (txGCREdits && Array.isArray(txGCREdits)) {
+            const nonTokenEdits = txGCREdits.filter((e: any) => e?.type !== "token")
+            if (nonTokenEdits.length !== txGCREdits.length) {
+                return {
+                    ...tx,
+                    content: {
+                        ...tx.content,
+                        gcr_edits: nonTokenEdits,
+                    },
+                } as any as Transaction
+            }
+        }
+        return tx
+    })
+
+    const res = await HandleGCR.applyTransactions(batchTxs, false)
     failedTxs.push(...res.failedTxs)
     return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
 }
@@ -528,15 +593,180 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param block - The block
  * @param pro - The number of votes for the block
  */
-async function finalizeBlock(block: Block, pro: number): Promise<void> {
+async function finalizeBlock(
+    block: Block,
+    pro: number,
+    txs: Transaction[],
+    shardMembers: Peer[],
+): Promise<boolean> {
     log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
     log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
-    await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
+
+    const prevInGcrApply = getSharedState.inGcrApply
+    getSharedState.inGcrApply = true
+    try {
+        const orderedHashes = Array.isArray(block?.content?.ordered_transactions)
+            ? (block.content.ordered_transactions as string[])
+            : []
+        const byHash = new Map<string, Transaction>()
+        for (const tx of txs) byHash.set(tx.hash, tx)
+
+        const missingHashes = orderedHashes.filter(h => !byHash.has(h))
+        if (missingHashes.length > 0) {
+            log.warning(
+                `[CONSENSUS] Missing ${missingHashes.length}/${orderedHashes.length} tx bodies for finalized block ${block.number} (${block.hash}); attempting to fetch from shard`,
+            )
+
+            const fetched = await fetchTxsByHashesFromPeers(
+                missingHashes,
+                shardMembers,
+            )
+            for (const tx of fetched) byHash.set(tx.hash, tx)
+        }
+
+        const stillMissing = orderedHashes.filter(h => !byHash.has(h))
+        if (stillMissing.length > 0) {
+            log.error(
+                `[CONSENSUS] Cannot finalize block ${block.number} (${block.hash}): still missing ${stillMissing.length}/${orderedHashes.length} tx bodies. Refusing to apply token edits and commit local block.`,
+            )
+            return false
+        }
+
+        // Apply token edits deterministically from the finalized block transaction list.
+        // This prevents token-table divergence when shard members have incomplete mempools at forge time.
+        const orderedTxs = orderedHashes.map(h => byHash.get(h)) as Transaction[]
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+
+        try {
+            await dataSource.transaction(async em => {
+                for (const tx of orderedTxs) {
+                    // Ensure scripts see stable block height context.
+                    if (!tx.blockNumber) tx.blockNumber = block.number
+                    const tokenApply = await HandleGCR.applyTokenEditsToTx(
+                        tx,
+                        false,
+                        false,
+                        em,
+                    )
+                    if (!tokenApply.success) {
+                        throw new Error(
+                            `[CONSENSUS] Token edits failed for tx ${tx.hash}: ${tokenApply.message}`,
+                        )
+                    }
+                }
+
+                await Chain.insertBlock(block, [], undefined, true, true, em) // NOTE Transactions are added to the Transactions table here
+            })
+        } catch (error) {
+            log.error(String(error))
+            return false
+        }
+
+        if (block.number > getSharedState.lastBlockNumber) {
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
+        }
+
+        // Ensure the block's ordered transactions are persisted for downstream syncers.
+        // insertBlock relies on mempool-backed lookup; if a tx wasn't in local mempool at commit time,
+        // peers may not be able to fetch it (and would fail to apply GCR edits during sync).
+        if (orderedTxs.length > 0) await Chain.insertTransactionsFromSync(orderedTxs)
+    } finally {
+        getSharedState.inGcrApply = prevInGcrApply
+    }
     //getSharedState.consensusMode = false
     ///getSharedState.inConsensusLoop = false
     log.info("[CONSENSUS] Block added to the chain")
     const lastBlock = await Chain.getLastBlock()
     log.debug(`[CONSENSUS] Last block: ${JSON.stringify(lastBlock)}`)
+    return true
+}
+
+async function fetchTxsByHashesFromPeers(
+    hashes: string[],
+    peers: Peer[],
+): Promise<Transaction[]> {
+    const remaining = new Set(hashes)
+    const results: Transaction[] = []
+
+    const batchSize =
+        typeof getSharedState.batchSyncTxLimit === "number" &&
+        getSharedState.batchSyncTxLimit > 0
+            ? getSharedState.batchSyncTxLimit
+            : 250
+
+    const chunks: string[][] = []
+    const asArray = [...remaining]
+    for (let i = 0; i < asArray.length; i += batchSize) {
+        chunks.push(asArray.slice(i, i + batchSize))
+    }
+
+    for (const peer of peers) {
+        if (remaining.size === 0) break
+
+        for (const chunk of chunks) {
+            const need = chunk.filter(h => remaining.has(h))
+            if (need.length === 0) continue
+
+            try {
+                const req = {
+                    method: "nodeCall",
+                    params: [
+                        {
+                            message: "getTxsByHashes",
+                            data: { hashes: need },
+                            muid: null,
+                        },
+                    ],
+                }
+
+                const res: any = await peer.longCall(req as any, true, {
+                    protocol: "http",
+                    sleepTime: 250,
+                    retries: 3,
+                })
+
+                if (res?.result !== 200 || !Array.isArray(res?.response)) {
+                    continue
+                }
+
+                for (const candidate of res.response as Transaction[]) {
+                    const claimedHash =
+                        typeof candidate?.hash === "string"
+                            ? candidate.hash
+                            : null
+                    if (!claimedHash || !remaining.has(claimedHash)) {
+                        continue
+                    }
+
+                    const tx = Object.assign(new Transaction(), candidate)
+                    const rehashed = Transaction.hash(tx)
+                    if (!rehashed || tx.hash !== claimedHash) {
+                        log.warning(
+                            `[CONSENSUS] Dropping peer tx with mismatched hash for requested tx ${claimedHash}`,
+                        )
+                        continue
+                    }
+
+                    const validation = await Transaction.confirmTx(tx, "")
+                    if (!validation?.success) {
+                        log.warning(
+                            `[CONSENSUS] Dropping peer tx ${claimedHash}: signature/integrity validation failed`,
+                        )
+                        continue
+                    }
+
+                    remaining.delete(claimedHash)
+                    results.push(tx)
+                }
+            } catch {
+                // best-effort; keep trying other peers
+            }
+        }
+    }
+
+    return results
 }
 
 function preventForgingEnded(blockRef: number) {

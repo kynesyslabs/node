@@ -6,7 +6,7 @@ import { envInt } from "../loadgen/src/framework/common"
 import { waitForConsensusTargets } from "../loadgen/src/features/consensus/shared"
 import { getClusterObservation, waitForClusterConvergence } from "../loadgen/src/features/peersync/shared"
 
-type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "gcr-routine" | "prod-gate" | "l2ps-live" | "startup-cold-boot"
+type SuiteName = "sanity" | "cluster-health" | "gcr-focus" | "gcr-routine" | "prod-gate" | "l2ps-live" | "startup-cold-boot" | "token-core"
 
 type ScenarioResult = {
   scenario: string
@@ -84,6 +84,18 @@ const suites: Record<SuiteName, string[]> = {
   "startup-cold-boot": [
     "peer_discovery_smoke",
     "consensus_block_production",
+  ],
+  "token-core": [
+    "token_smoke",
+    "token_mint_smoke",
+    "token_burn_smoke",
+    "token_acl_smoke",
+    "token_query_coverage",
+    "token_consensus_consistency",
+    "token_edge_cases",
+    "token_script_smoke",
+    "token_script_rejects",
+    "token_script_hooks_correctness",
   ],
 }
 
@@ -267,7 +279,7 @@ async function resolveLocalTargets(suite: string, explicitTargets: string | null
   if (explicitTargets) return explicitTargets
   if (suite === "startup-cold-boot") return defaultLocalTargets
   if (suite === "gcr-routine") return defaultLocalTargets
-  if (suite === "cluster-health" || suite === "gcr-focus" || suite === "prod-gate") {
+  if (suite === "cluster-health" || suite === "gcr-focus" || suite === "prod-gate" || suite === "token-core") {
     return process.env.TARGETS ?? defaultLocalTargets
   }
   return null

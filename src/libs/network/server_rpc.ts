@@ -1,9 +1,11 @@
 /*  NOTE Importing this file automatically spawns a new server that listens for RPC requests */
 
+import fs from "node:fs"
 import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import { Config } from "@/config"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { RateLimiter } from "./middleware/rateLimiter"
 import { getAuthContext } from "./authContext"
@@ -77,7 +79,11 @@ export async function serverRpcBun() {
 
     server.get("/genesis", async () => {
         const genesisBlock = await Chain.getGenesisBlock()
-        let genesisData = genesisBlock.content.extra?.genesisData || null
+        let genesisData = genesisBlock?.content?.extra?.genesisData || null
+
+        if (!genesisData && fs.existsSync("data/genesis.json")) {
+            genesisData = JSON.parse(fs.readFileSync("data/genesis.json", "utf8"))
+        }
 
         if (typeof genesisData === "string") {
             genesisData = JSON.parse(genesisData)
@@ -134,7 +140,7 @@ export async function serverRpcBun() {
     })
 
     // ── Feature routes (lazy loaded) ──────────────────────────
-    if (process.env.TLSNOTARY_ENABLED?.toLowerCase() === "true") {
+    if (Config.getInstance().tlsnotary.enabled) {
         try {
             const { registerTLSNotaryRoutes } =
                 await import("@/features/tlsnotary/routes")

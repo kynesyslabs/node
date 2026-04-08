@@ -50,8 +50,8 @@ export async function discoverL2PSParticipants(peers: Peer[], l2psUids?: string[
                     params: [{
                         message: "getL2PSParticipationById",
                         data: { l2psUid: uid },
-                        muid: `l2ps_discovery_${Date.now()}` // Unique ID
-                    }]
+                        muid: `l2ps_discovery_${Date.now()}`, // Unique ID
+                    }],
                 }).then(response => {
                     if (response?.result === 200 && response?.response?.participating) {
                         addL2PSParticipant(uid, peer.identity)
@@ -117,10 +117,10 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
                 message: "getL2PSTransactions",
                 data: {
                     l2psUid: l2psUid,
-                    since_timestamp: sinceTimestamp
+                    since_timestamp: sinceTimestamp,
                 },
-                muid: `l2ps_sync_${Date.now()}`
-            }]
+                muid: `l2ps_sync_${Date.now()}`,
+            }],
         })
 
         if (response?.result === 200 && response.response?.transactions) {
@@ -141,9 +141,15 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
 /**
  * Exchange participation info with new peers (Gossip style)
  */
-export async function exchangeL2PSParticipation(peers: Peer[]): Promise<void> {
+export async function exchangeL2PSParticipation(
+    peers: Peer[],
+    l2psUids?: string[],
+): Promise<void> {
     // Piggyback on discovery for now
-    await discoverL2PSParticipants(peers)
+    await discoverL2PSParticipants(
+        peers,
+        l2psUids ?? getSharedState.l2psJoinedUids,
+    )
 }
 
 /**

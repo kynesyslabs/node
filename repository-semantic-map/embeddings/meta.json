@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-02-22T19:26:27.811195Z",
+  "index_path": "repository-semantic-map/semantic-index.jsonl",
+  "npy_path": "repository-semantic-map/embeddings/semantic-fingerprints.npy",
+  "mapping_path": "repository-semantic-map/embeddings/uuid-mapping.json",
+  "provider": {
+    "name": "fastembed",
+    "model": "BAAI/bge-small-en-v1.5",
+    "dim": 384
+  },
+  "notes": {
+    "text_source": "semantic_fingerprint.natural_language_descriptions (joined)",
+    "batch_size": 128
+  }
+}

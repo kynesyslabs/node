@@ -70,11 +70,12 @@ ACTIVE + IMPLEMENTED + COUNTED
  incentives
  MCP
  L2PS
+ token core suite
  storage handler mocked surface
 
 HISTORICAL OR EXCLUDED FROM ACTIVE COVERAGE
 ───────────────────────────────────────────
- token scenario family
+ extended token load / matrix / complex-policy scenarios
  native bridge paths
  storageProgram placeholder behavior
  contract-runtime / storage-contract stubs

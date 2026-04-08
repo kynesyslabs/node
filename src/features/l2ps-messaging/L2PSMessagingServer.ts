@@ -34,13 +34,13 @@ interface WSData {
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
-    private server: Server<WSData>
+    private server: Server
     private service: L2PSMessagingService
 
     constructor(port: number) {
         this.service = L2PSMessagingService.getInstance()
 
-        this.server = Bun.serve<WSData>({
+        this.server = Bun.serve({
             port,
             fetch: (req, server) => {
                 if (server.upgrade(req, { data: { publicKey: null, l2psUid: null } })) {
@@ -66,7 +66,7 @@ export class L2PSMessagingServer {
 
     // ─── Message Router ──────────────────────────────────────────
 
-    private async handleMessage(ws: ServerWebSocket<WSData>, raw: string): Promise<void> {
+    private async handleMessage(ws: ServerWebSocket<any>, raw: string): Promise<void> {
         if (raw.length > MAX_MESSAGE_SIZE) {
             this.sendError(ws, "INVALID_MESSAGE", `Message too large (max ${MAX_MESSAGE_SIZE} bytes)`)
             return
@@ -115,7 +115,7 @@ export class L2PSMessagingServer {
 
     // ─── Register ────────────────────────────────────────────────
 
-    private async handleRegister(ws: ServerWebSocket<WSData>, msg: RegisterMessage): Promise<void> {
+    private async handleRegister(ws: ServerWebSocket<any>, msg: RegisterMessage): Promise<void> {
         const { publicKey, l2psUid, proof } = msg.payload
 
         if (!publicKey || !l2psUid || !proof) {
@@ -187,7 +187,7 @@ export class L2PSMessagingServer {
         for (const peerKey of onlinePeers) {
             const peer = this.peers.get(peerKey)
             if (peer) {
-                this.send(peer.ws as ServerWebSocket<WSData>, {
+                this.send(peer.ws as ServerWebSocket<any>, {
                     type: "peer_joined",
                     payload: { publicKey },
                     timestamp: Date.now(),
@@ -203,7 +203,7 @@ export class L2PSMessagingServer {
 
     // ─── Send Message ────────────────────────────────────────────
 
-    private async handleSend(ws: ServerWebSocket<WSData>, msg: SendMessage): Promise<void> {
+    private async handleSend(ws: ServerWebSocket<any>, msg: SendMessage): Promise<void> {
         const senderKey = ws.data.publicKey
         if (!senderKey) {
             this.sendError(ws, "REGISTRATION_REQUIRED", "Register before sending")
@@ -272,7 +272,7 @@ export class L2PSMessagingServer {
 
     // ─── History ─────────────────────────────────────────────────
 
-    private async handleHistory(ws: ServerWebSocket<WSData>, msg: HistoryMessage): Promise<void> {
+    private async handleHistory(ws: ServerWebSocket<any>, msg: HistoryMessage): Promise<void> {
         const myKey = ws.data.publicKey
         if (!myKey) {
             this.sendError(ws, "REGISTRATION_REQUIRED", "Register first")
@@ -317,7 +317,7 @@ export class L2PSMessagingServer {
 
     // ─── Discover ────────────────────────────────────────────────
 
-    private handleDiscover(ws: ServerWebSocket<WSData>): void {
+    private handleDiscover(ws: ServerWebSocket<any>): void {
         if (!ws.data.publicKey || !ws.data.l2psUid) {
             this.sendError(ws, "REGISTRATION_REQUIRED", "Register before discovering peers")
             return
@@ -337,7 +337,7 @@ export class L2PSMessagingServer {
 
     // ─── Public Key Request ──────────────────────────────────────
 
-    private handleRequestPublicKey(ws: ServerWebSocket<WSData>, targetId: string): void {
+    private handleRequestPublicKey(ws: ServerWebSocket<any>, targetId: string): void {
         if (!ws.data.publicKey) {
             this.sendError(ws, "REGISTRATION_REQUIRED", "Register before requesting public keys")
             return
@@ -363,7 +363,7 @@ export class L2PSMessagingServer {
 
     // ─── Connection Close ────────────────────────────────────────
 
-    private handleClose(ws: ServerWebSocket<WSData>): void {
+    private handleClose(ws: ServerWebSocket<any>): void {
         const publicKey = ws.data.publicKey
         if (!publicKey) return
 
@@ -379,7 +379,7 @@ export class L2PSMessagingServer {
         // Notify peers in same L2PS network
         for (const [, p] of this.peers) {
             if (p.l2psUid === l2psUid) {
-                this.send(p.ws as ServerWebSocket<WSData>, {
+                this.send(p.ws as ServerWebSocket<any>, {
                     type: "peer_left",
                     payload: { publicKey },
                     timestamp: Date.now(),
@@ -393,7 +393,7 @@ export class L2PSMessagingServer {
     // ─── Offline Delivery ────────────────────────────────────────
 
     private async deliverQueuedMessages(
-        ws: ServerWebSocket<WSData>,
+        ws: ServerWebSocket<any>,
         toKey: string,
         l2psUid: string,
     ): Promise<void> {
@@ -434,7 +434,7 @@ export class L2PSMessagingServer {
 
     // ─── Helpers ─────────────────────────────────────────────────
 
-    private send(ws: ServerWebSocket<WSData>, frame: ProtocolFrame): void {
+    private send(ws: ServerWebSocket<any>, frame: ProtocolFrame): void {
         try {
             ws.send(JSON.stringify(frame))
         } catch (error) {
@@ -442,7 +442,7 @@ export class L2PSMessagingServer {
         }
     }
 
-    private sendError(ws: ServerWebSocket<WSData>, code: ErrorCode, message: string): void {
+    private sendError(ws: ServerWebSocket<any>, code: ErrorCode, message: string): void {
         this.send(ws, {
             type: "error",
             payload: { code, message },

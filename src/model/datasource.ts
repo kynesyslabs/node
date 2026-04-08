@@ -22,6 +22,7 @@ import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRToken } from "./entities/GCRv2/GCR_Token.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 import { GCRTracker } from "./entities/GCR/GCRTracker.js"
@@ -35,6 +36,12 @@ import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
+
+const DEFAULT_TYPEORM_SYNCHRONIZE = process.env.NODE_ENV !== "production"
+const TYPEORM_SYNCHRONIZE =
+    typeof process.env.TYPEORM_SYNCHRONIZE === "string"
+        ? process.env.TYPEORM_SYNCHRONIZE.toLowerCase() === "true"
+        : DEFAULT_TYPEORM_SYNCHRONIZE
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -56,6 +63,7 @@ export const dataSource = new DataSource({
         GlobalChangeRegistry,
         GCRTracker,
         GCRMain,
+        GCRToken,
         GCRTLSNotary,
         GCRStorageProgram,
         // ZK Identity entities
@@ -69,7 +77,7 @@ export const dataSource = new DataSource({
         L2PSTransaction,
         L2PSProof,
     ],
-    synchronize: true,
+    synchronize: TYPEORM_SYNCHRONIZE,
     logging: false,
 })
 
