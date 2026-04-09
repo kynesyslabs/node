@@ -219,9 +219,13 @@ export async function insertBlock(
                             newBlock,
                         )
 
+                    const queryRunner =
+                        transactionalEntityManager.queryRunner
                     for (let i = 0; i < transactionEntities.length; i++) {
                         const tx = transactionEntities[i]
+                        const savepoint = `tx_insert_${i}`
 
+                        await queryRunner.query(`SAVEPOINT ${savepoint}`)
                         try {
                             const rawTransaction =
                                 Transaction.toRawTransaction(
@@ -237,7 +241,13 @@ export async function insertBlock(
                                 block.number,
                                 transactionalEntityManager,
                             )
+                            await queryRunner.query(
+                                `RELEASE SAVEPOINT ${savepoint}`,
+                            )
                         } catch (error) {
+                            await queryRunner.query(
+                                `ROLLBACK TO SAVEPOINT ${savepoint}`,
+                            )
                             if (error instanceof QueryFailedError) {
                                 log.error(
                                     `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
