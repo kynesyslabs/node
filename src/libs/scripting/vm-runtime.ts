@@ -121,7 +121,7 @@ function hookNameForOperation(operation: string, phase: "before" | "after"): str
     if (op === "transfer") return phase === "before" ? "beforeTransfer" : "afterTransfer"
     if (op === "mint") return phase === "before" ? "beforeMint" : "afterMint"
     if (op === "burn") return phase === "before" ? "beforeBurn" : "afterBurn"
-    if (op === "approve") return "onApprove"
+    if (op === "approve") return phase === "before" ? "onApprove" : null
     return null
 }
 

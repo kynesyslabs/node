@@ -1627,38 +1627,6 @@ export default class GCRTokenRoutines {
                 tokenAddress,
         )
 
-        // Get token
-        const token = await gcrTokenRepository.findOneBy({ address: tokenAddress })
-        if (!token) {
-            return { success: false, message: "Token not found: " + tokenAddress }
-        }
-
-        // Check if token has a script
-        if (!token.hasScript || !token.script) {
-            return {
-                success: false,
-                message: "Token has no script - custom methods not available",
-            }
-        }
-
-        // Check if method is defined in the script
-        const methodDef = token.script.methods?.find((m) => m.name === method)
-        if (!methodDef) {
-            return {
-                success: false,
-                message: "Method not found in script: " + method,
-            }
-        }
-
-        // Verify method is a write operation (not view-only)
-        // TokenScriptMethod uses `mutates: boolean` - methods with mutates=false are view-only
-        if (!methodDef.mutates) {
-            return {
-                success: false,
-                message: "Cannot invoke view method as transaction: " + method,
-            }
-        }
-
         // Rollback not supported for custom methods (script state is opaque)
         if (edit.isRollback) {
             log.warn(
@@ -1671,81 +1639,110 @@ export default class GCRTokenRoutines {
             }
         }
 
-        // Prepare block context for script execution
-        // Note: getSharedState is a getter that returns SharedState instance directly
-        const sharedState = getSharedState
-        const blockContext = {
-            timestamp: this.getDeterministicTxTimestamp(tx),
-            height: sharedState.lastBlockNumber ?? 0,
-            prevBlockHash: sharedState.lastBlockHash ?? "0".repeat(64),
-        }
-
-        // Prepare script execution request
-        const tokenData = this.tokenToGCRTokenData(token)
-
         try {
-            // Execute the custom method via ScriptExecutor
-            const result = await scriptExecutor.executeMethod({
-                tokenAddress,
-                method,
-                args: params,
-                caller: edit.account,
-                blockContext,
-                txHash: edit.txhash,
-                tokenData,
-                scriptCode: token.script.code,
-            })
+            // Non-simulated execution must be serialized per-token to prevent lost updates when multiple
+            // block sync/apply paths touch the same token concurrently.
+            return await gcrTokenRepository.manager.transaction(async em => {
+                const repo = em.getRepository(GCRToken)
+                const token = await repo.findOne({
+                    where: { address: tokenAddress },
+                    lock: { mode: "pessimistic_write" },
+                })
 
-            // ScriptResult is a discriminated union - check success first
-            if (!result.success) {
-                // TypeScript needs explicit type extraction for discriminated union narrowing
-                const errorResult = result as Extract<typeof result, { success: false }>
-                log.error(
-                    "[GCRTokenRoutines] Custom method execution failed: " +
-                        errorResult.error,
-                )
-                return {
-                    success: false,
-                    message: errorResult.error ?? "Script execution failed",
+                if (!token) {
+                    return { success: false, message: "Token not found: " + tokenAddress }
                 }
-            }
 
-            // TypeScript now knows result is ScriptSuccess
-            // Apply state mutations from script execution using applyMutations
-            if (result.mutations.length > 0 && !simulate) {
-                // Apply mutations to get new state
-                const { newState } = applyMutations(tokenData, result.mutations)
-                this.applyGCRTokenDataToEntity(token, newState)
+                // Check if token has a script
+                if (!token.hasScript || !token.script) {
+                    return {
+                        success: false,
+                        message: "Token has no script - custom methods not available",
+                    }
+                }
 
-                try {
-                    await gcrTokenRepository.save(token)
+                // Check if method is defined in the script
+                const methodDef = token.script.methods?.find((m) => m.name === method)
+                if (!methodDef) {
+                    return {
+                        success: false,
+                        message: "Method not found in script: " + method,
+                    }
+                }
+
+                // Verify method is a write operation (not view-only)
+                // TokenScriptMethod uses `mutates: boolean` - methods with mutates=false are view-only
+                if (!methodDef.mutates) {
+                    return {
+                        success: false,
+                        message: "Cannot invoke view method as transaction: " + method,
+                    }
+                }
+
+                // Prepare block context for script execution
+                // Note: getSharedState is a getter that returns SharedState instance directly
+                const sharedState = getSharedState
+                const blockContext = {
+                    timestamp: this.getDeterministicTxTimestamp(tx),
+                    height: sharedState.lastBlockNumber ?? 0,
+                    prevBlockHash: sharedState.lastBlockHash ?? "0".repeat(64),
+                }
+
+                // Prepare script execution request
+                const tokenData = this.tokenToGCRTokenData(token)
+
+                // Execute the custom method via ScriptExecutor
+                const result = await scriptExecutor.executeMethod({
+                    tokenAddress,
+                    method,
+                    args: params,
+                    caller: edit.account,
+                    blockContext,
+                    txHash: edit.txhash,
+                    tokenData,
+                    scriptCode: token.script.code,
+                })
+
+                // ScriptResult is a discriminated union - check success first
+                if (!result.success) {
+                    // TypeScript needs explicit type extraction for discriminated union narrowing
+                    const errorResult = result as Extract<typeof result, { success: false }>
+                    log.error(
+                        "[GCRTokenRoutines] Custom method execution failed: " +
+                            errorResult.error,
+                    )
+                    return {
+                        success: false,
+                        message: errorResult.error ?? "Script execution failed",
+                    }
+                }
+
+                // TypeScript now knows result is ScriptSuccess
+                // Apply state mutations from script execution using applyMutations
+                if (result.mutations.length > 0 && !simulate) {
+                    // Apply mutations to get new state
+                    const { newState } = applyMutations(tokenData, result.mutations)
+                    this.applyGCRTokenDataToEntity(token, newState)
+
+                    await repo.save(token)
                     log.info(
                         "[GCRTokenRoutines] Custom method " +
                             method +
                             " executed on " +
                             tokenAddress,
                     )
-                } catch (error) {
-                    log.error(
-                        "[GCRTokenRoutines] Failed to save custom method state: " +
-                            error,
-                    )
-                    return {
-                        success: false,
-                        message: "Failed to persist custom method state",
-                    }
                 }
-            }
 
-            return {
-                success: true,
-                message: "Custom method executed: " + method,
-                response: {
+                return {
+                    success: true,
+                    message: "Custom method executed: " + method,
+                    response: {
                     method,
                     returnValue: result.returnValue,
                     mutations: result.mutations.length,
                 },
             }
+            })
         } catch (error) {
             log.error(
                 "[GCRTokenRoutines] Custom method execution error: " + error,

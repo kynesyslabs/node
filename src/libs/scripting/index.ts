@@ -142,7 +142,16 @@ class ScriptWorkerClient {
 
         const child = spawn(launch.command, launch.args, {
             cwd: process.cwd(),
-            env: process.env,
+            env: {
+                PATH: process.env.PATH,
+                HOME: process.env.HOME,
+                NODE_ENV: process.env.NODE_ENV,
+                TOKEN_SCRIPT_COMPILE_TIMEOUT_MS: process.env.TOKEN_SCRIPT_COMPILE_TIMEOUT_MS,
+                TOKEN_SCRIPT_VIEW_TIMEOUT_MS: process.env.TOKEN_SCRIPT_VIEW_TIMEOUT_MS,
+                TOKEN_SCRIPT_HOOK_TIMEOUT_MS: process.env.TOKEN_SCRIPT_HOOK_TIMEOUT_MS,
+                TOKEN_SCRIPT_METHOD_TIMEOUT_MS: process.env.TOKEN_SCRIPT_METHOD_TIMEOUT_MS,
+                TOKEN_SCRIPT_ASYNC_TIMEOUT_MS: process.env.TOKEN_SCRIPT_ASYNC_TIMEOUT_MS,
+            },
             stdio: ["pipe", "pipe", "inherit"],
         })
 
