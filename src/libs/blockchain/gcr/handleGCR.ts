@@ -611,6 +611,7 @@ export default class HandleGCR {
         sideEffects: (() => Promise<void>)[],
     ) {
         const entitiesToSave = accounts.values().toArray()
+        entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
         if (entitiesToSave.length > 0) {
             log.debug(
                 `[applyGCREditsFromMergedMempool] Saving ${entitiesToSave.length} entities`,

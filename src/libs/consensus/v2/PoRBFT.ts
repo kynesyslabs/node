@@ -257,6 +257,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         console.error(error)
+        console.error((error as Error).stack)
         log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
