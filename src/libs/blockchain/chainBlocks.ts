@@ -170,11 +170,11 @@ export async function insertBlock(
 
     const now = Date.now()
     existingBlock = await blocksRepo.findOneBy({
-        hash: ILike(block.hash),
+        hash: block.hash,
     })
     const after = Date.now()
     log.only(
-        `[ChainDB] [ INFO ]: Block ${block.hash} found in ${after - now}ms`,
+        `[ChainDB] [ INFO ]: Block ${block.number} found in ${after - now}ms`,
     )
 
     if (existingBlock && position) {
@@ -220,7 +220,7 @@ export async function insertBlock(
 
                 const now3 = Date.now()
                 log.only(
-                    `[ChainDB] [ INFO ]: Block ${block.hash} saved in ${now3 - now2}ms`,
+                    `[ChainDB] [ INFO ]: Block ${block.number} saved in ${now3 - now2}ms`,
                 )
 
                 const queryRunner = transactionalEntityManager.queryRunner
@@ -312,7 +312,7 @@ export async function insertBlock(
 
         const after2 = Date.now()
         log.only(
-            `[ChainDB] Block insert ops ${block.hash} completed in ${after2 - now2}ms`,
+            `[ChainDB] Block insert ops ${block.number} completed in ${after2 - now2}ms`,
         )
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number

@@ -167,9 +167,9 @@ export default class Chain {
     ): Promise<Blocks> {
         const now = Date.now()
         log.only(
-            `[Chain] [ INFO ]: Inserting block ${block.hash}`,
+            `[Chain] [ INFO ]: Inserting block ${block.number}`,
         )
-        const res = blockOps.insertBlock(
+        const res = await blockOps.insertBlock(
             block,
             operations,
             position,
@@ -177,7 +177,7 @@ export default class Chain {
         )
         const after = Date.now()
         log.only(
-            `[Chain] [ INFO ]: Block ${block.hash} inserted in ${after - now}ms`,
+            `[Chain] [ INFO ]: Block ${block.number} inserted in ${after - now}ms`,
         )
         return res
     }

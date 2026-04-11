@@ -289,7 +289,12 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
+    const now = Date.now()
     await Chain.insertBlock(block, [], null, false)
+    const after = Date.now()
+    log.only(
+        `[syncBlock] Block ${block.number} inserted in ${after - now}ms 🟢`,
+    )
     log.debug("Block inserted successfully")
     log.debug(
         `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
