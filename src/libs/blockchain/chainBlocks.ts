@@ -103,7 +103,8 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
     const blocks = await getBlocks("latest", 3)
 
     try {
-        const { getTransactionsFromHashes } = await import("./chainTransactions")
+        const { getTransactionsFromHashes } =
+            await import("./chainTransactions")
 
         const processedBlocks = await Promise.all(
             blocks.map(async block => {
@@ -116,27 +117,22 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
                         transaction =>
                             transaction?.content.type === "NODE_ONLINE",
                     )
-                    .map(
-                        transaction =>
-                            (transaction?.content as any).data,
-                    )
+                    .map(transaction => (transaction?.content as any).data)
 
-                const onlinePeersInBlock =
-                    onlinePeersInBlockTransactions.map(onlineTxRaw => {
+                const onlinePeersInBlock = onlinePeersInBlockTransactions.map(
+                    onlineTxRaw => {
                         const onlineTx = JSON.parse(onlineTxRaw[0])
                         return onlineTx.data
-                    })
+                    },
+                )
 
                 return onlinePeersInBlock
             }),
         )
 
-        const commonPeers = processedBlocks.reduce(
-            (common, peersInBlock) => {
-                return common.filter(peer => peersInBlock.includes(peer))
-            },
-            processedBlocks[0] || [],
-        )
+        const commonPeers = processedBlocks.reduce((common, peersInBlock) => {
+            return common.filter(peer => peersInBlock.includes(peer))
+        }, processedBlocks[0] || [])
 
         return commonPeers
     } catch (e) {
@@ -171,18 +167,12 @@ export async function insertBlock(
             block.hash +
             " already exists",
     )
-    if (position) {
-        log.info("Block has a position passed as arg")
-        existingBlock = await blocksRepo.findOneBy({
-            hash: ILike(block.hash),
-        })
-    } else {
-        log.info(
-            "[ChainDB] [ INFO ]: Found block with null hash, possibly genesis block",
-        )
-    }
 
-    if (existingBlock) {
+    existingBlock = await blocksRepo.findOneBy({
+        hash: ILike(block.hash),
+    })
+
+    if (existingBlock && position) {
         log.info(
             "[ChainDB] [ INFO ]: Block with position " +
                 position +
@@ -196,136 +186,132 @@ export async function insertBlock(
         existingBlock.validation_data = block.validation_data
         log.info("about to save block")
         return await blocksRepo.save(existingBlock)
-    } else {
+    }
+
+    if (existingBlock && !position) {
         log.info(
-            "[ChainDB] [ INFO ]: Block with position " +
-                position +
-                " does not exist: inserting a new block",
+            "[ChainDB] [ INFO ]: Block with hash " +
+                block.hash +
+                " already exists: returning existing block",
         )
+        return existingBlock
+    }
 
-        const transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
-        )
+    const transactionEntities = await Mempool.getTransactionsByHashes(
+        orderedTransactionsHashes,
+    )
 
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
+    const db = await Datasource.getInstance()
+    const dataSource = db.getDataSource()
 
-        try {
-            const result = await dataSource.transaction(
-                async transactionalEntityManager => {
-                    const savedBlock =
+    try {
+        const result = await dataSource.transaction(
+            async transactionalEntityManager => {
+                const savedBlock = await transactionalEntityManager.save(
+                    blocksRepo.target,
+                    newBlock,
+                )
+
+                const queryRunner = transactionalEntityManager.queryRunner
+                for (let i = 0; i < transactionEntities.length; i++) {
+                    const tx = transactionEntities[i]
+                    const savepoint = `tx_insert_${i}`
+
+                    await queryRunner.query(`SAVEPOINT ${savepoint}`)
+                    try {
+                        const rawTransaction = Transaction.toRawTransaction(
+                            tx,
+                            "confirmed",
+                        )
                         await transactionalEntityManager.save(
-                            blocksRepo.target,
-                            newBlock,
+                            transactionsRepo.target,
+                            rawTransaction,
                         )
-
-                    const queryRunner =
-                        transactionalEntityManager.queryRunner
-                    for (let i = 0; i < transactionEntities.length; i++) {
-                        const tx = transactionEntities[i]
-                        const savepoint = `tx_insert_${i}`
-
-                        await queryRunner.query(`SAVEPOINT ${savepoint}`)
-                        try {
-                            const rawTransaction =
-                                Transaction.toRawTransaction(
-                                    tx,
-                                    "confirmed",
-                                )
-                            await transactionalEntityManager.save(
-                                transactionsRepo.target,
-                                rawTransaction,
-                            )
-                            await persistConfirmedTransactionProjection(
-                                tx,
-                                block.number,
-                                transactionalEntityManager,
-                            )
-                            await queryRunner.query(
-                                `RELEASE SAVEPOINT ${savepoint}`,
-                            )
-                        } catch (error) {
-                            await queryRunner.query(
-                                `ROLLBACK TO SAVEPOINT ${savepoint}`,
-                            )
-                            if (error instanceof QueryFailedError) {
-                                log.error(
-                                    `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
-                                )
-                                log.error(`Message: ${error.message}`)
-                                continue
-                            }
-
-                            log.error(
-                                "Unexpected error while inserting tx: " +
-                                    tx.hash,
-                            )
-                            handleError(error, "CHAIN", { source: "transaction insertion" })
-                            throw error
-                        }
-                    }
-
-                    if (cleanMempool) {
-                        await Mempool.removeTransactionsByHashes(
-                            transactionEntities.map(tx => tx.hash),
-                            transactionalEntityManager,
-                        )
-                    }
-
-                    const committedTxHashes = transactionEntities.map(
-                        tx => tx.hash,
-                    )
-                    if (committedTxHashes.length > 0) {
-                        await transactionalEntityManager
-                            .createQueryBuilder()
-                            .update(IdentityCommitment)
-                            .set({ blockNumber: block.number })
-                            .where("transaction_hash IN (:...hashes)", {
-                                hashes: committedTxHashes,
-                            })
-                            .andWhere("leaf_index = :leafIndex", {
-                                leafIndex: -1,
-                            })
-                            .execute()
-                    }
-
-                    const commitmentsAdded =
-                        await updateMerkleTreeAfterBlock(
-                            dataSource,
+                        await persistConfirmedTransactionProjection(
+                            tx,
                             block.number,
                             transactionalEntityManager,
                         )
-                    if (commitmentsAdded > 0) {
-                        log.info(
-                            `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                        await queryRunner.query(
+                            `RELEASE SAVEPOINT ${savepoint}`,
                         )
+                    } catch (error) {
+                        await queryRunner.query(
+                            `ROLLBACK TO SAVEPOINT ${savepoint}`,
+                        )
+                        if (error instanceof QueryFailedError) {
+                            log.error(
+                                `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
+                            )
+                            log.error(`Message: ${error.message}`)
+                            continue
+                        }
+
+                        log.error(
+                            "Unexpected error while inserting tx: " + tx.hash,
+                        )
+                        handleError(error, "CHAIN", {
+                            source: "transaction insertion",
+                        })
+                        throw error
                     }
+                }
 
-                    return savedBlock
-                },
-            )
+                if (cleanMempool) {
+                    await Mempool.removeTransactionsByHashes(
+                        transactionEntities.map(tx => tx.hash),
+                        transactionalEntityManager,
+                    )
+                }
 
-            if (block.number > getSharedState.lastBlockNumber) {
-                getSharedState.lastBlockNumber = block.number
-                getSharedState.lastBlockHash = block.hash
-            }
+                const committedTxHashes = transactionEntities.map(tx => tx.hash)
+                if (committedTxHashes.length > 0) {
+                    await transactionalEntityManager
+                        .createQueryBuilder()
+                        .update(IdentityCommitment)
+                        .set({ blockNumber: block.number })
+                        .where("transaction_hash IN (:...hashes)", {
+                            hashes: committedTxHashes,
+                        })
+                        .andWhere("leaf_index = :leafIndex", {
+                            leafIndex: -1,
+                        })
+                        .execute()
+                }
 
-            log.debug(
-                "[insertBlock] lastBlockNumber: " +
-                    getSharedState.lastBlockNumber,
-            )
-            log.debug(
-                "[insertBlock] lastBlockHash: " +
-                    getSharedState.lastBlockHash,
-            )
+                const commitmentsAdded = await updateMerkleTreeAfterBlock(
+                    dataSource,
+                    block.number,
+                    transactionalEntityManager,
+                )
+                if (commitmentsAdded > 0) {
+                    log.info(
+                        `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
+                    )
+                }
 
-            return result
-        } catch (error) {
-            log.error(
-                `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
-            )
-            throw error
+                return savedBlock
+            },
+        )
+
+        if (block.number > getSharedState.lastBlockNumber) {
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
         }
+
+        log.debug(
+            "[insertBlock] lastBlockNumber: " + getSharedState.lastBlockNumber,
+        )
+        log.debug(
+            "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
+        )
+
+        return result
+    } catch (error) {
+        log.error(
+            `[ChainDB] [ ERROR ]: Failed to insert block ${block.number} with hash ${block.hash}: ${error}`,
+        )
+        throw error
     }
 }
 
@@ -339,7 +325,9 @@ export async function nukeGenesis(): Promise<void> {
     log.info("Deleted the genesis block.")
 }
 
-export async function updateGenesisTimestamp(newTimestamp: number): Promise<void> {
+export async function updateGenesisTimestamp(
+    newTimestamp: number,
+): Promise<void> {
     const genesisBlock = await getBlocksRepo().findOneBy({ number: 0 })
     if (genesisBlock) {
         genesisBlock.content = {

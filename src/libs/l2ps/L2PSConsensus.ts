@@ -337,10 +337,12 @@ export default class L2PSConsensus {
         }
 
         if (!simulate) {
-            await HandleGCR.saveGCREditChanges(
-                editResult.accounts,
-                editResult.sideEffects,
-            )
+            await HandleGCR.gcrWriteMutex.runExclusive(async () => {
+                await HandleGCR.saveGCREditChanges(
+                    editResult.accounts,
+                    editResult.sideEffects,
+                )
+            })
         }
 
         proofResult.editsApplied += editResult.appliedEditsCount

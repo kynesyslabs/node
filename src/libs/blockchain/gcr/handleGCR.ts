@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import Chain from "../chain"
 import { In, Repository } from "typeorm"
+import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -127,6 +128,9 @@ interface GCRMainSnapshot {
 
 // ? Maybe sanitize the options?
 export default class HandleGCR {
+    /** Mutex to serialize gcr_main writes and prevent deadlocks */
+    static gcrWriteMutex = new Mutex()
+
     /**
      * Set of GCR transaction types that can be batch processed with in-mem
      * copies of the GCRMain entities.
@@ -583,14 +587,16 @@ export default class HandleGCR {
             }
         }
 
-        await this.saveGCREditChanges(gcrMainCache, sideEffects)
-        // Bulk update assignedTxs via raw SQL
-        if (assignedTxsUpdates.size > 0) {
-            log.debug(
-                `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
-            )
-            await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
-        }
+        await HandleGCR.gcrWriteMutex.runExclusive(async () => {
+            await this.saveGCREditChanges(gcrMainCache, sideEffects)
+            // Bulk update assignedTxs via raw SQL
+            if (assignedTxsUpdates.size > 0) {
+                log.debug(
+                    `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
+                )
+                await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
+            }
+        })
 
         const end = Date.now()
         log.debug(
