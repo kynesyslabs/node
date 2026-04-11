@@ -169,3 +169,5 @@ GTAGS
 src/GPATH
 src/GRTAGS
 src/GTAGS
+/docs/diagrams
+/.serena
