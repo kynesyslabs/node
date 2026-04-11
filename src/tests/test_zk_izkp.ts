@@ -1,8 +1,8 @@
 import bigInt from "big-integer"
 import terminalkit from "terminal-kit"
 
-import { Prover, Verifier } from "./zk"
-import generateLargePrime from "./zkPrimer"
+import { Prover, Verifier } from "@/features/zk/iZKP/zk"
+import generateLargePrime from "@/features/zk/iZKP/zkPrimer"
 
 const term = terminalkit.terminal
 

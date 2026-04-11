@@ -43,5 +43,16 @@ export {
     MultichainError,
 } from "./domain"
 
+// Legacy exception classes (backward-compatible wrappers around AppError)
+export {
+    TimeoutError,
+    AbortError,
+    BlockNotFoundError,
+    PeerUnreachableError,
+    NotInShardError,
+    ForgingEndedError,
+    BlockInvalidError,
+} from "./legacy"
+
 // Utilities
 export { tryCatch, tryCatchSync, handleError, toErrorResponse } from "./handleError"

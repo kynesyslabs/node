@@ -137,6 +137,9 @@ env.example
 REPO_ANALYSIS/
 dtr_implementation/
 
+# ---- Solidity (belongs in separate contracts repo) ----
+*.sol
+
 # ---- Misc ----
 bridges_docs/
 aptos_examples_ts/
