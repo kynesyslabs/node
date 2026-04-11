@@ -130,6 +130,11 @@ src/features/bridges/EVMSmartContract/lib/
 src/features/bridges/EVMSmartContract/out/
 src/features/bridges/SolanaTankProgram/solana_tank/target/
 
+# ---- Project Index & Planning (root) ----
+PROJECT_INDEX.*
+MISSING_SP_ENDPOINTS.md
+env.example
+
 # ---- Misc ----
 bridges_docs/
 aptos_examples_ts/
