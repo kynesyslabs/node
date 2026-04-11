@@ -8,7 +8,7 @@ import { Waiter } from "src/utilities/waiter"
 import { _required as required } from "@kynesyslabs/demosdk/websdk"
 import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import { TimeoutError, AbortError, NotInShardError } from "src/exceptions"
+import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 
 export class AbortConsensusError extends Error {

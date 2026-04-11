@@ -27,8 +27,8 @@ import {
     BlockNotFoundError,
     PeerUnreachableError,
     TimeoutError,
-} from "src/exceptions"
-import { handleError } from "src/errors"
+    handleError,
+} from "@/errors"
 import HandleGCR from "../gcr/handleGCR"
 import {
     discoverL2PSParticipants,

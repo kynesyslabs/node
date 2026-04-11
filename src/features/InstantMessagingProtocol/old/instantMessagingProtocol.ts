@@ -1,2 +1,0 @@
-import IMSession from "./types/IMSession"
-

@@ -1,6 +1,6 @@
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { getRunConfig, writeJson } from "../../framework/io"
-import Mempool from "../../../../../src/libs/blockchain/mempool_v2"
+import Mempool from "../../../../../src/libs/blockchain/mempool"
 import { L2PSBatchAggregator } from "../../../../../src/libs/l2ps/L2PSBatchAggregator"
 import { getSharedState } from "../../../../../src/utilities/sharedState"
 

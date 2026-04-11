@@ -14,7 +14,7 @@ import { pki } from "node-forge"
 
 import * as bip39 from "bip39"
 import log from "@/utilities/logger"
-import { cryptography } from "../crypto"
+import { cryptography, type Ed25519KeyPair } from "../crypto"
 import getRemoteIP from "../network/routines/getRemoteIP"
 import { getSharedState } from "src/utilities/sharedState"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
@@ -28,7 +28,7 @@ import { wordlist } from "@scure/bip39/wordlists/english.js"
 export default class Identity {
     public masterSeed: Uint8Array
     private static instance: Identity
-    public ed25519: pki.KeyPair
+    public ed25519: Ed25519KeyPair
     public ed25519_hex: {
         privateKey: string
         publicKey: string

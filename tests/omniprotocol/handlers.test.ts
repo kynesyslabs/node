@@ -95,7 +95,7 @@ jest.mock("src/libs/network/routines/nodecalls/getBlockByNumber", () => ({
     __esModule: true,
     default: jest.fn(),
 }))
-jest.mock("src/libs/blockchain/mempool_v2", () => ({
+jest.mock("src/libs/blockchain/mempool", () => ({
     __esModule: true,
     default: {
         getMempool: jest.fn(),
@@ -194,7 +194,7 @@ beforeAll(async () => {
         .default as jest.Mock
     mockedGetBlockByNumber = (await import("src/libs/network/routines/nodecalls/getBlockByNumber"))
         .default as jest.Mock
-    mockedMempool = (await import("src/libs/blockchain/mempool_v2"))
+    mockedMempool = (await import("src/libs/blockchain/mempool"))
         .default as { getMempool: jest.Mock; receive: jest.Mock }
     mockedChain = (await import("src/libs/blockchain/chain"))
         .default as {

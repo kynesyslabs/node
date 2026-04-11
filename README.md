@@ -303,16 +303,7 @@ src/
 
 ### Issue Tracking
 
-This project uses **bd (beads)** for issue tracking, not markdown TODOs:
-
-```bash
-bd ready                     # Show unblocked work
-bd create "title" -t task    # Create issue
-bd update <id> --status in_progress
-bd close <id>
-```
-
-See [AGENTS.md](AGENTS.md) for full workflow.
+This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
 
 ## Support
 
@@ -320,7 +311,7 @@ For technical support and community discussions, visit [demos.sh](https://demos.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) License - see the [LICENSE](LICENSE.md) file for details.
 
 ## Contributing
 

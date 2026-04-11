@@ -1,7 +1,7 @@
 import Chain from "../../blockchain/chain"
 import getTransactions from "../routines/nodecalls/getTransactions"
 import getTxsByHashes from "../routines/nodecalls/getTxsByHashes"
-import Mempool from "../../blockchain/mempool_v2"
+import Mempool from "../../blockchain/mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 

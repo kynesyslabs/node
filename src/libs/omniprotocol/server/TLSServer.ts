@@ -46,9 +46,8 @@ export class TLSServer extends EventEmitter {
         }
 
         // Initialize rate limiter
-        this.rateLimiter = new RateLimiter(
-            this.config.rateLimit ?? { enabled: true },
-        )
+        // RateLimiter reads config from getSharedState.omniConfig.rateLimit
+        this.rateLimiter = new RateLimiter()
 
         this.connectionManager = new ServerConnectionManager({
             maxConnections: this.config.maxConnections,

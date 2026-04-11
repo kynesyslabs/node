@@ -75,6 +75,7 @@ export function loadConfig(): Readonly<AppConfig> {
         rpcSignalingPort: envInt(EnvKey.RPC_SIGNALING_PORT, d.server.rpcSignalingPort),
         mcpServerPort: envInt(EnvKey.MCP_SERVER_PORT, d.server.mcpServerPort),
         rpcMcpPort: envInt(EnvKey.RPC_MCP_PORT, d.server.rpcMcpPort),
+        omniPort: envInt(EnvKey.OMNI_PORT, d.server.omniPort),
     }
 
     const config: AppConfig = {

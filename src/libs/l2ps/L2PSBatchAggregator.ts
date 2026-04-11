@@ -1,6 +1,6 @@
 import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
-import Mempool from "@/libs/blockchain/mempool_v2"
+import Mempool from "@/libs/blockchain/mempool"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"

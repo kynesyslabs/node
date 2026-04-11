@@ -24,7 +24,7 @@ import { errorResponse, encodeResponse } from "./utils"
 
 export const handleGetMempool: OmniHandler<Buffer> = async () => {
     const { default: mempoolModule } =
-        await import("src/libs/blockchain/mempool_v2")
+        await import("src/libs/blockchain/mempool")
     const mempool = await mempoolModule.getMempool()
 
     const serializedTransactions = mempool.map(tx => encodeTransaction(tx))
@@ -41,7 +41,7 @@ export const handleMempoolSync: OmniHandler<Buffer> = async ({ message }) => {
     }
 
     const { default: mempoolModule } =
-        await import("src/libs/blockchain/mempool_v2")
+        await import("src/libs/blockchain/mempool")
     const { default: hashing } = await import("src/libs/crypto/hashing")
 
     const mempool = await mempoolModule.getMempool()
@@ -264,7 +264,7 @@ export const handleMempoolMerge: OmniHandler<Buffer> = async ({ message }) => {
     }
 
     const { default: mempoolModule } =
-        await import("src/libs/blockchain/mempool_v2")
+        await import("src/libs/blockchain/mempool")
     const result = await mempoolModule.receive(transactions as any)
 
     const serializedResponse = (result.mempool ?? []).map(tx =>

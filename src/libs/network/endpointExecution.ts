@@ -1,5 +1,5 @@
 import Chain from "src/libs/blockchain/chain"
-import Mempool from "src/libs/blockchain/mempool_v2"
+import Mempool from "src/libs/blockchain/mempool"
 import type { Transaction, L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"

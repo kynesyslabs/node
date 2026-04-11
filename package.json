@@ -1,9 +1,9 @@
 {
     "name": "demos-node-software",
     "version": "0.9.8",
-    "description": "Demos Node Software",
+    "description": "Demos Network Node - RPC and consensus implementation for the Demos blockchain",
     "author": "Kynesys Labs",
-    "license": "none",
+    "license": "CC-BY-NC-SA-4.0",
     "private": true,
     "main": "src/index.ts",
     "scripts": {
@@ -42,8 +42,6 @@
         "zk:compile:merkle": "circom2 src/features/zk/circuits/identity_with_merkle.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:test": "bun test src/features/zk/tests/",
         "zk:ceremony": "npx tsx src/features/zk/scripts/ceremony.ts",
-        "sync:br-myc": "bun scripts/sync-br-to-myc.ts",
-        "brx": "bun scripts/brx.ts",
         "repro:demosdk-multi-instance": "bun scripts/repro-demosdk-multi-instance-identity-bleed.ts",
         "testenv:doctor": "bun testing/scripts/testenv-doctor.ts",
         "testenv:doctor:verbose": "bun testing/scripts/testenv-doctor.ts --verbose",
