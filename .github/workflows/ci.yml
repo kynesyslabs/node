@@ -1,10 +1,11 @@
 name: CI
 
 on:
+on:
   pull_request:
-    branches: [main, testnet]
+    branches: [main, testnet, stabilisation]
   push:
-    branches: [main, testnet]
+    branches: [main, testnet, stabilisation]
 
 jobs:
   lint:
