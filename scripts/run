@@ -897,7 +897,7 @@ mkdir -p logs
 echo ""
 echo "🎉 All systems ready! Starting your Demos Network node..."
 echo "📝 Logs will be saved to: logs/"
-echo "🌐 Your node will be available on: http://localho${t:$P}ORT"
+echo "🌐 Your node will be available on: http://localhost:${PORT}"
 if [[ ! -z "${EXPOSED_URL}" ]]; then
 	echo "🌍 External URL: ${EXPOSED_URL}"
 fi
