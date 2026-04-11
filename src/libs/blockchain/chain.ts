@@ -21,11 +21,18 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import type { Operation } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 
-import { setupChainDb, readSql, writeSql, getBlocksRepo, getTransactionsRepo } from "./chainDb"
+import {
+    setupChainDb,
+    readSql,
+    writeSql,
+    getBlocksRepo,
+    getTransactionsRepo,
+} from "./chainDb"
 import * as blockOps from "./chainBlocks"
 import * as txOps from "./chainTransactions"
 import * as genesisOps from "./chainGenesis"
 import * as statusOps from "./chainStatus"
+import log from "src/utilities/logger"
 
 /**
  * Chain facade — delegates to focused sub-modules:
@@ -75,7 +82,10 @@ export default class Chain {
         return blockOps.getLastBlockTransactionSet()
     }
 
-    static async getBlocks(start: "latest" | number, limit: number): Promise<Blocks[]> {
+    static async getBlocks(
+        start: "latest" | number,
+        limit: number,
+    ): Promise<Blocks[]> {
         return blockOps.getBlocks(start, limit)
     }
 
@@ -113,19 +123,28 @@ export default class Chain {
         return txOps.getTransactionHistory(address, txtype, start, limit)
     }
 
-    static async getBlockTransactions(blockHash: string): Promise<Transaction[]> {
+    static async getBlockTransactions(
+        blockHash: string,
+    ): Promise<Transaction[]> {
         return txOps.getBlockTransactions(blockHash)
     }
 
-    static async getTransactionFromHash(hash: string): Promise<Transaction | null> {
+    static async getTransactionFromHash(
+        hash: string,
+    ): Promise<Transaction | null> {
         return txOps.getTransactionFromHash(hash)
     }
 
-    static async getTransactionsFromHashes(hashes: string[]): Promise<Transaction[]> {
+    static async getTransactionsFromHashes(
+        hashes: string[],
+    ): Promise<Transaction[]> {
         return txOps.getTransactionsFromHashes(hashes)
     }
 
-    static async getTransactions(start: "latest" | number, limit: number): Promise<Transactions[]> {
+    static async getTransactions(
+        start: "latest" | number,
+        limit: number,
+    ): Promise<Transactions[]> {
         return txOps.getTransactions(start, limit)
     }
 
@@ -133,7 +152,9 @@ export default class Chain {
         return txOps.checkTxExists(hash)
     }
 
-    static async getExistingTransactionHashes(hashes: string[]): Promise<Set<string>> {
+    static async getExistingTransactionHashes(
+        hashes: string[],
+    ): Promise<Set<string>> {
         return txOps.getExistingTransactionHashes(hashes)
     }
 
@@ -144,14 +165,33 @@ export default class Chain {
         position?: number,
         cleanMempool = true,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, operations, position, cleanMempool)
+        const now = Date.now()
+        log.only(
+            `[Chain] [ INFO ]: Inserting block ${block.hash}`,
+        )
+        const res = blockOps.insertBlock(
+            block,
+            operations,
+            position,
+            cleanMempool,
+        )
+        const after = Date.now()
+        log.only(
+            `[Chain] [ INFO ]: Block ${block.hash} inserted in ${after - now}ms`,
+        )
+        return res
     }
 
-    static async insertTransaction(transaction: Transaction, status = "confirmed"): Promise<boolean> {
+    static async insertTransaction(
+        transaction: Transaction,
+        status = "confirmed",
+    ): Promise<boolean> {
         return txOps.insertTransaction(transaction, status)
     }
 
-    static async insertTransactionsFromSync(transactions: Transaction[]): Promise<boolean> {
+    static async insertTransactionsFromSync(
+        transactions: Transaction[],
+    ): Promise<boolean> {
         return txOps.insertTransactionsFromSync(transactions)
     }
 

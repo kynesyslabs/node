@@ -168,9 +168,14 @@ export async function insertBlock(
             " already exists",
     )
 
+    const now = Date.now()
     existingBlock = await blocksRepo.findOneBy({
         hash: ILike(block.hash),
     })
+    const after = Date.now()
+    log.only(
+        `[ChainDB] [ INFO ]: Block ${block.hash} found in ${after - now}ms`,
+    )
 
     if (existingBlock && position) {
         log.info(
@@ -205,11 +210,17 @@ export async function insertBlock(
     const dataSource = db.getDataSource()
 
     try {
+        const now2 = Date.now()
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
                 const savedBlock = await transactionalEntityManager.save(
                     blocksRepo.target,
                     newBlock,
+                )
+
+                const now3 = Date.now()
+                log.only(
+                    `[ChainDB] [ INFO ]: Block ${block.hash} saved in ${now3 - now2}ms`,
                 )
 
                 const queryRunner = transactionalEntityManager.queryRunner
@@ -257,6 +268,11 @@ export async function insertBlock(
                     }
                 }
 
+                const now4 = Date.now()
+                log.only(
+                    `[ChainDB] [ INFO ]: ${transactionEntities.length} transactions inserted in ${now4 - now3}ms`,
+                )
+
                 if (cleanMempool) {
                     await Mempool.removeTransactionsByHashes(
                         transactionEntities.map(tx => tx.hash),
@@ -294,6 +310,10 @@ export async function insertBlock(
             },
         )
 
+        const after2 = Date.now()
+        log.only(
+            `[ChainDB] Block insert ops ${block.hash} completed in ${after2 - now2}ms`,
+        )
         if (block.number > getSharedState.lastBlockNumber) {
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash

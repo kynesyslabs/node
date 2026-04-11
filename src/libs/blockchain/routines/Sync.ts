@@ -325,62 +325,62 @@ export async function syncBlock(block: Block, peer: Peer) {
     return true
 }
 
-/**
- *
- * @param peer The peer to download the block from
- * @param blockToAsk The block number to download
- * @returns The block if downloaded successfully, false otherwise
- */
-async function downloadBlock(peer: Peer, blockToAsk: number) {
-    const blockRequest: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getBlockByNumber",
-                data: { blockNumber: blockToAsk.toString() },
-                muid: null,
-            },
-        ],
-    }
+// /**
+//  *
+//  * @param peer The peer to download the block from
+//  * @param blockToAsk The block number to download
+//  * @returns The block if downloaded successfully, false otherwise
+//  */
+// async function downloadBlock(peer: Peer, blockToAsk: number) {
+//     const blockRequest: RPCRequest = {
+//         method: "nodeCall",
+//         params: [
+//             {
+//                 message: "getBlockByNumber",
+//                 data: { blockNumber: blockToAsk.toString() },
+//                 muid: null,
+//             },
+//         ],
+//     }
 
-    const blockResponse = await peer.longCall(blockRequest, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-    log.debug("Block response: " + blockResponse.result)
+//     const blockResponse = await peer.longCall(blockRequest, true, {
+//         protocol: "http",
+//         sleepTime: 1000,
+//         retries: 3,
+//     })
+//     log.debug("Block response: " + blockResponse.result)
 
-    // INFO: Handle max retries reached
-    if (blockResponse.result === 400) {
-        log.info("[fastSync] Peer is offline")
-        // TODO: Test this!
-        throw new PeerUnreachableError("Peer is offline")
-    }
+//     // INFO: Handle max retries reached
+//     if (blockResponse.result === 400) {
+//         log.info("[fastSync] Peer is offline")
+//         // TODO: Test this!
+//         throw new PeerUnreachableError("Peer is offline")
+//     }
 
-    if (blockResponse.result === 404) {
-        log.error("[fastSync] Block not found")
-        log.error("BLOCK TO ASK: " + blockToAsk)
-        log.error("PEER: " + peer.connection.string)
+//     if (blockResponse.result === 404) {
+//         log.error("[fastSync] Block not found")
+//         log.error("BLOCK TO ASK: " + blockToAsk)
+//         log.error("PEER: " + peer.connection.string)
 
-        throw new BlockNotFoundError("Block not found")
-    }
+//         throw new BlockNotFoundError("Block not found")
+//     }
 
-    if (blockResponse.result === 200) {
-        log.debug(
-            `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
-        )
-        const block = blockResponse.response as Block
+//     if (blockResponse.result === 200) {
+//         log.debug(
+//             `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
+//         )
+//         const block = blockResponse.response as Block
 
-        if (!block) {
-            log.error("[downloadBlock] Block not received")
-            return false
-        }
+//         if (!block) {
+//             log.error("[downloadBlock] Block not received")
+//             return false
+//         }
 
-        return await syncBlock(block, peer)
-    }
+//         return await syncBlock(block, peer)
+//     }
 
-    return false
-}
+//     return false
+// }
 
 // Helper function to ask for transactions in batches
 export async function askTxsForBlocksBatch(
@@ -444,11 +444,12 @@ async function batchDownloadBlocks(
     startBlock: number,
     endBlock: number,
 ): Promise<boolean> {
+    const now = Date.now()
     const batchSize = getSharedState.batchSyncBlockSize
     const totalBlocks = endBlock - startBlock + 1
     const limit = Math.min(totalBlocks, batchSize)
 
-    log.debug(
+    log.only(
         `[batchDownloadBlocks] Fetching ${limit} blocks from ${startBlock} to ${
             startBlock + limit - 1
         }`,
@@ -496,35 +497,64 @@ async function batchDownloadBlocks(
         return false
     }
 
+    const after = Date.now()
+    log.only(
+        `[batchDownloadBlocks] ${blocks.length} blocks fetched in ${after - now}ms`,
+    )
+
     // Fetch all transactions for all blocks in batch
+    const now2 = Date.now()
     const txMap = await askTxsForBlocksBatch(blocks, peer)
-    log.info(
-        `[batchDownloadBlocks] Fetched ${
-            Object.keys(txMap).length
-        } unique transactions`,
+    const after2 = Date.now()
+    log.only(
+        `[batchDownloadBlocks] ${Object.keys(txMap).length} transactions fetched in ${after2 - now2}ms`,
     )
 
     // Process each block in order
+    const now3 = Date.now()
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        const now4 = Date.now()
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
 
         // Insert block
         await Chain.insertBlock(block, [], null, false)
+        const after4 = Date.now()
+        log.only(
+            `[batchDownloadBlocks] Block ${block.number} inserted successfully in ${after4 - now4}ms 🟢`,
+        )
         log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
 
+        const after5 = Date.now()
+
         // Merge peerlist
         await mergePeerlist(block)
 
+        const after6 = Date.now()
+        log.only(
+            `[batchDownloadBlocks] Block ${block.number} peerlist merged in ${after6 - after5}ms`,
+        )
+
+        const now5 = Date.now()
         // Sync GCR tables
         await syncGCRTables(blockTxs)
 
+        const after7 = Date.now()
+        log.only(
+            `[batchDownloadBlocks] Block ${block.number} GCR tables synced in ${after7 - now5}ms`,
+        )
+
         // Insert transactions
         if (blockTxs.length > 0) {
+            const now6 = Date.now()
             const success = await Chain.insertTransactionsFromSync(blockTxs)
+            const after8 = Date.now()
+            log.only(
+                `[batchDownloadBlocks] Block ${block.number} transactions inserted in ${after8 - now6}ms 🟠`,
+            )
             if (!success) {
                 log.error(
                     `[batchDownloadBlocks] Failed to insert transactions for block ${block.number}`,
@@ -533,6 +563,10 @@ async function batchDownloadBlocks(
             }
         }
     }
+    const after3 = Date.now()
+    log.only(
+        `[batchDownloadBlocks] ${blocks.length} blocks processed in ${after3 - now3}ms`,
+    )
 
     log.debug(
         `[batchDownloadBlocks] Successfully processed batch of ${blocks.length} blocks`,
@@ -548,14 +582,12 @@ async function batchDownloadBlocks(
  */
 async function waitForNextBlock() {
     try {
-        log.debug(
-            "[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳",
-        )
+        log.only("[waitForNextBlock] Waiting for next block 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
         const [newBlock, peer] = await Waiter.wait(
             Waiter.keys.SYNC_WAIT_FOR_BLOCK,
             120_000,
         )
-        log.debug("[waitForNextBlock] Block received: " + newBlock.number)
+        log.only("[waitForNextBlock] Block received: " + newBlock.number)
 
         return await syncBlock(newBlock as Block, peer)
     } catch (error) {

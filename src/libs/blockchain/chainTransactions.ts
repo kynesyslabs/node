@@ -189,7 +189,12 @@ export async function insertTransactionsFromSync(
 ): Promise<boolean> {
     for (const tx of transactions) {
         try {
+            const now = Date.now()
             await insertTransaction(tx)
+            const after = Date.now()
+            log.only(
+                `[ChainDB] [ INFO ]: Transaction ${tx.hash} inserted in ${after - now}ms 🟣`,
+            )
         } catch (error) {
             handleError(error, "CHAIN", { source: "ChainDB sync insertion" })
         }
