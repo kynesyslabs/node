@@ -169,7 +169,7 @@ export async function insertBlock(
     )
 
     existingBlock = await blocksRepo.findOneBy({
-        hash: ILike(block.hash),
+        hash: block.hash,
     })
 
     if (existingBlock && position) {
