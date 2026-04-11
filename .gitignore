@@ -134,6 +134,8 @@ src/features/bridges/SolanaTankProgram/solana_tank/target/
 PROJECT_INDEX.*
 MISSING_SP_ENDPOINTS.md
 env.example
+REPO_ANALYSIS/
+dtr_implementation/
 
 # ---- Misc ----
 bridges_docs/

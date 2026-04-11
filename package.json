@@ -1,7 +1,7 @@
 {
     "name": "demos-node-software",
     "version": "0.9.8",
-    "description": "Demos Node Software",
+    "description": "Demos Network Node - RPC and consensus implementation for the Demos blockchain",
     "author": "Kynesys Labs",
     "license": "CC-BY-NC-SA-4.0",
     "private": true,
