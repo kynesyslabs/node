@@ -35,6 +35,10 @@ twitter_cookies.json
 .tlsnotary-key
 .demos_id*
 wallet.demos
+publickey_*
+public.key
+private.key
+demos_peerlist.json
 src/ssl/
 
 # ---- Build & Cache ----
@@ -51,6 +55,11 @@ architecture/
 .trunk/
 .aider*
 
+# ---- Local artifacts ----
+ClaudeDocs/
+captraf.sh
+history/tmp/
+
 # ---- AI Tooling (local-only) ----
 CLAUDE.md
 AGENTS.md
@@ -63,6 +72,10 @@ mcp.json
 .beads_bak/
 .mycelium/mycelium.db
 .mycelium/.linear/
+
+# ---- Planning docs inside src/ (keep only README.md) ----
+src/**/*.md
+!src/**/README.md
 
 # ---- Test Artifacts ----
 testing/devnet/identities/
