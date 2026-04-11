@@ -380,7 +380,7 @@ check_system_requirements() {
 function ctrl_c() {
 	HAS_BEEN_INTERRUPTED=true
 	if [[ "${EXTERNAL_DB}" = false ]]; then
-		cd postgres
+		cd "postgres_${PG_PORT}"
 		docker compose down
 		cd ..
 	fi
