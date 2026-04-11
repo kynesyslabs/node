@@ -133,9 +133,8 @@ export const handleIdentityAssign: OmniHandler<Buffer> = async ({
             pubkey: editOperation.account,
         })
         if (!accountGCR) {
-            accountGCR = gcrMainRepository.create({
-                pubkey: editOperation.account,
-            })
+            const { default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
+            accountGCR = await HandleGCR.createAccount(editOperation.account, {}, true)
         }
 
         // Apply the identity operation (simulate = false for actual execution)

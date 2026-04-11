@@ -87,18 +87,18 @@ export default class Cryptography {
             keyBytes[i / 2] = parseInt(hexValue, 16)
         }
         keypair.privateKey = Buffer.from(keyBytes)
-        keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
+        keypair.publicKey = Buffer.from(forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
-        })
+        }))
         return keypair
     }
 
     static loadFromBufferString(content: string): Ed25519KeyPair {
         const keypair = { publicKey: null, privateKey: null }
         keypair.privateKey = Buffer.from(JSON.parse(content))
-        keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
+        keypair.publicKey = Buffer.from(forge.pki.ed25519.publicKeyFromPrivateKey({
             privateKey: keypair.privateKey,
-        })
+        }))
         return keypair
     }
 
