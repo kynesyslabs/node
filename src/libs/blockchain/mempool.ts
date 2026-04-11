@@ -165,7 +165,7 @@ export default class Mempool {
                 }
             }
 
-            const signatureValid = TxUtils.validateSignature(tx)
+            const { success: signatureValid } = await TxUtils.validateSignature(tx)
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
