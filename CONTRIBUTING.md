@@ -172,7 +172,7 @@ Include:
 
 ## 📄 License
 
-By contributing to this project, you agree that your contributions will be licensed under the CC BY-NC-ND 4.0 License.
+By contributing to this project, you agree that your contributions will be licensed under the [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) License.
 
 ## 🙏 Thank You!
 
