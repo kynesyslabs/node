@@ -12,6 +12,10 @@ import {
     RateLimitResult,
     RateLimitType,
 } from "./types"
+import {
+    RATE_LIMIT_BLOCK_DURATION_MS,
+    DEFAULT_MANUAL_BLOCK_DURATION_MS,
+} from "../constants"
 import log from "@/utilities/tui/LegacyLoggerAdapter"
 
 export class RateLimiter {
