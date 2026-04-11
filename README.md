@@ -303,16 +303,7 @@ src/
 
 ### Issue Tracking
 
-This project uses **bd (beads)** for issue tracking, not markdown TODOs:
-
-```bash
-bd ready                     # Show unblocked work
-bd create "title" -t task    # Create issue
-bd update <id> --status in_progress
-bd close <id>
-```
-
-See [AGENTS.md](AGENTS.md) for full workflow.
+This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
 
 ## Support
 
