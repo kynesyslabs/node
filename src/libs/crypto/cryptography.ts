@@ -16,21 +16,38 @@ import log from "src/utilities/logger"
 
 import { forgeToHex } from "./forgeUtils"
 
+/**
+ * Ed25519 key pair with Buffer-typed keys.
+ * Unlike forge.pki.KeyPair which unions RSA and ed25519 types,
+ * this reflects the actual runtime type produced by our load/new methods.
+ */
+export interface Ed25519KeyPair {
+    publicKey: Buffer
+    privateKey: Buffer
+}
+
 export default class Cryptography {
-    static new() {
+    static new(): Ed25519KeyPair {
         const seed = forge.random.getBytesSync(32)
         const keys = forge.pki.ed25519.generateKeyPair({ seed })
         log.debug("Generated new ed25519 keypair")
-        return keys
+        return {
+            publicKey: Buffer.from(keys.publicKey),
+            privateKey: Buffer.from(keys.privateKey),
+        }
     }
 
     // INFO Method to generate a new key pair from a seed
-    static newFromSeed(stringSeed: string) {
-        return forge.pki.ed25519.generateKeyPair({ seed: stringSeed })
+    static newFromSeed(stringSeed: string): Ed25519KeyPair {
+        const keys = forge.pki.ed25519.generateKeyPair({ seed: stringSeed })
+        return {
+            publicKey: Buffer.from(keys.publicKey),
+            privateKey: Buffer.from(keys.privateKey),
+        }
     }
 
     // TODO Eliminate the old legacy compatibility
-    static async save(keypair: forge.pki.KeyPair, path: string, mode = "hex") {
+    static async save(keypair: Ed25519KeyPair, path: string, mode = "hex") {
         log.debug(keypair.privateKey)
         if (mode === "hex") {
             const hexPrivKey = Cryptography.saveToHex(keypair.privateKey)
@@ -40,13 +57,13 @@ export default class Cryptography {
         }
     }
 
-    static saveToHex(forgeBuffer: forge.pki.PrivateKey): string {
+    static saveToHex(forgeBuffer: Buffer): string {
         const stringBuffer = forgeBuffer.toString("hex")
         return "0x" + stringBuffer
     }
 
-    static async load(path: string) {
-        let keypair: forge.pki.KeyPair = {
+    static async load(path: string): Promise<Ed25519KeyPair> {
+        let keypair: Ed25519KeyPair = {
             privateKey: null,
             publicKey: null,
         }
@@ -60,7 +77,7 @@ export default class Cryptography {
         return keypair
     }
 
-    static loadFromHex(content: string): forge.pki.KeyPair {
+    static loadFromHex(content: string): Ed25519KeyPair {
         const keypair = { publicKey: null, privateKey: null }
         content = content.slice(2)
         const ED25519_KEY_SIZE = 64
@@ -76,7 +93,7 @@ export default class Cryptography {
         return keypair
     }
 
-    static loadFromBufferString(content: string): forge.pki.KeyPair {
+    static loadFromBufferString(content: string): Ed25519KeyPair {
         const keypair = { publicKey: null, privateKey: null }
         keypair.privateKey = Buffer.from(JSON.parse(content))
         keypair.publicKey = forge.pki.ed25519.publicKeyFromPrivateKey({
