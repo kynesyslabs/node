@@ -70,7 +70,7 @@ import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
-import Mempool from "../mempool_v2"
+import Mempool from "../mempool"
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {

@@ -1,4 +1,4 @@
-import { AbortError, TimeoutError } from "../exceptions"
+import { AbortError, TimeoutError } from "@/errors"
 import log from "./logger"
 
 // Bun does not support NodeJS.Timeout, so we need to create a type for it

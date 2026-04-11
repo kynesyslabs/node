@@ -1,6 +1,6 @@
 import Transaction from "src/libs/blockchain/transaction"
 import getCommonValidatorSeed from "./routines/getCommonValidatorSeed"
-import Mempool from "src/libs/blockchain/mempool_v2"
+import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
@@ -20,7 +20,7 @@ import {
     BlockInvalidError,
     ForgingEndedError,
     NotInShardError,
-} from "src/exceptions"
+} from "@/errors"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"

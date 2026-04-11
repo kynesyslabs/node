@@ -1,4 +1,4 @@
-import Mempool from "../../blockchain/mempool_v2"
+import Mempool from "../../blockchain/mempool"
 import isValidatorForNextBlock from "../../consensus/v2/routines/isValidator"
 import getShard from "../../consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "../../consensus/v2/routines/getCommonValidatorSeed"

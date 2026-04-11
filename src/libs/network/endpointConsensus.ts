@@ -1,4 +1,4 @@
-import Mempool from "src/libs/blockchain/mempool_v2"
+import Mempool from "src/libs/blockchain/mempool"
 import { ConsensusRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"

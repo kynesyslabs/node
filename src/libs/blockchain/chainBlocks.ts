@@ -1,7 +1,7 @@
 import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
-import Mempool from "./mempool_v2"
+import Mempool from "./mempool"
 import Transaction from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"

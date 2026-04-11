@@ -1,6 +1,6 @@
 import { Peer } from "@/libs/peer"
 import log from "@/utilities/logger"
-import Mempool from "@/libs/blockchain/mempool_v2"
+import Mempool from "@/libs/blockchain/mempool"
 import {
     RPCRequest,
     RPCResponse,
