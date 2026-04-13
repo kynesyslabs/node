@@ -239,6 +239,7 @@ export class ConnectionPool extends EventEmitter {
         log.debug(`Existing connection: ${existing ? "Found" : "Not found"}`)
         if (existing) {
             log.debug(`Returning existing connection, Socket ID: ${existing.socketId}`)
+            log.debug(`URL: ${existing.socket?.remoteAddress}:${existing.socket?.remotePort}`)
             return existing
         }
 

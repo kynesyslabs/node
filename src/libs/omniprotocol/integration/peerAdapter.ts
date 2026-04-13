@@ -16,6 +16,8 @@ import {
     decodeNodeCallResponse,
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
+import { getSharedState } from "src/utilities/sharedState"
+import { OMNI_PORT_OFFSET } from "../constants"
 
 export type AdapterOptions = BaseAdapterOptions
 
@@ -40,10 +42,19 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
 
         // REVIEW Wave 8.1: TCP transport implementation with ConnectionPool
         try {
-            // Convert HTTP URL to TCP connection string
-            const tcpConnectionString = this.httpToTcpConnectionString(
-                peer.connection.string,
-            )
+            // For self-calls, always use localhost to avoid going through the
+            // public URL — the node may be unreachable from outside under load.
+            let tcpConnectionString: string
+            if (peer.isLocalNode) {
+                const omniPort =
+                    parseInt(String(getSharedState.serverPort)) +
+                    OMNI_PORT_OFFSET
+                tcpConnectionString = `${this.getTcpProtocol()}://127.0.0.1:${omniPort}`
+            } else {
+                tcpConnectionString = this.httpToTcpConnectionString(
+                    peer.connection.string,
+                )
+            }
 
             // Encode RPC request as binary NodeCall format
             const payload = encodeNodeCallRequest({

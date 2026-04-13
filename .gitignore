@@ -171,3 +171,5 @@ src/GRTAGS
 src/GTAGS
 /docs/diagrams
 /.serena
+node*.sh
+yarn.lock

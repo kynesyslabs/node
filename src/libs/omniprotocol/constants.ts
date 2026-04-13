@@ -48,7 +48,7 @@ export const DEFAULT_TLS_MIN_VERSION = "TLSv1.3" as const
 export const DEFAULT_POOL_MAX_TOTAL_CONNECTIONS = 100
 
 /** Default maximum connections to a single peer */
-export const DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER = 1
+export const DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER = 2
 
 /** Default idle timeout for pooled connections in milliseconds (10 minutes) */
 export const DEFAULT_POOL_IDLE_TIMEOUT_MS = 10 * 60 * 1000 // 600_000

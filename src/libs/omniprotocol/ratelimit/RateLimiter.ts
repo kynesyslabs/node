@@ -16,8 +16,6 @@ import {
     RATE_LIMIT_BLOCK_DURATION_MS,
     DEFAULT_MANUAL_BLOCK_DURATION_MS,
 } from "../constants"
-import log from "@/utilities/tui/LegacyLoggerAdapter"
-import { DEFAULT_MANUAL_BLOCK_DURATION_MS, RATE_LIMIT_BLOCK_DURATION_MS } from "../constants"
 
 export class RateLimiter {
     private static instance: RateLimiter | null = null
