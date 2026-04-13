@@ -448,6 +448,10 @@ export default class HandleGCR {
 
         // Apply all batchable edits for this tx
         for (const edit of gcrEdits) {
+            if (!simulate && tx.hash) {
+                edit.txhash = tx.hash
+            }
+
             let entity: GCRMain | null = null
             if (isBatchableGCREdit(edit)) {
                 const pubkey = normalizePubkey(edit.account)
