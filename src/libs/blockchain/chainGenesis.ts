@@ -1,6 +1,6 @@
 import log from "src/utilities/logger"
 import Block from "./block"
-import Mempool from "./mempool_v2"
+import Mempool from "./mempool"
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"

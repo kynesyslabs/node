@@ -63,7 +63,7 @@ cd node
 
 ```bash
 # Install all dependencies (requires Rust/Cargo for wstcp)
-./install-deps.sh
+./scripts/install-deps.sh
 ```
 
 > **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying.
@@ -201,7 +201,7 @@ git branch
 
 ```bash
 # Install all dependencies (requires Rust/Cargo for wstcp)
-./install-deps.sh
+./scripts/install-deps.sh
 ```
 
 > **Note:** The install script requires [Rust](https://rustup.rs/) to be installed. It will install the `wstcp` tool needed for TLSNotary WebSocket proxying. If you don't have Rust installed, run:

@@ -4,12 +4,12 @@
  * These maintain backward compatibility (constructor takes just a message string)
  * while gaining AppError features (code, category, severity, context).
  *
- * For new code, prefer using domain errors from "src/errors" directly.
+ * For new code, prefer using domain errors from "@/errors" directly.
  */
 
-import { AppError } from "src/errors/AppError"
-import { ErrorSeverity } from "src/errors/types"
-import { ErrorCode } from "src/errors/codes"
+import { AppError } from "@/errors/AppError"
+import { ErrorSeverity } from "@/errors/types"
+import { ErrorCode } from "@/errors/codes"
 
 /**
  * Thrown when a Waiter event times out

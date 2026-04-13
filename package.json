@@ -1,9 +1,9 @@
 {
     "name": "demos-node-software",
     "version": "0.9.8",
-    "description": "Demos Node Software",
+    "description": "Demos Network Node - RPC and consensus implementation for the Demos blockchain",
     "author": "Kynesys Labs",
-    "license": "none",
+    "license": "CC-BY-NC-SA-4.0",
     "private": true,
     "main": "src/index.ts",
     "scripts": {
@@ -46,7 +46,6 @@
         "zk:compile:merkle": "circom2 src/features/zk/circuits/identity_with_merkle.circom --r1cs --wasm --sym -o src/features/zk/circuits/ -l node_modules",
         "zk:test": "bun test src/features/zk/tests/",
         "zk:ceremony": "npx tsx src/features/zk/scripts/ceremony.ts",
-        "brx": "bun scripts/brx.ts",
         "repro:demosdk-multi-instance": "bun scripts/repro-demosdk-multi-instance-identity-bleed.ts",
         "testenv:doctor": "bun testing/scripts/testenv-doctor.ts",
         "testenv:doctor:verbose": "bun testing/scripts/testenv-doctor.ts --verbose",
@@ -112,7 +111,7 @@
         "@zk-kit/incremental-merkle-tree": "^1.1.0",
         "alea": "^1.0.1",
         "async-mutex": "^0.5.0",
-        "axios": "^1.6.5",
+        "axios": "^1.7.4",
         "big-integer": "^1.6.52",
         "bip39": "^3.1.0",
         "bs58": "^6.0.0",
@@ -124,7 +123,7 @@
         "crc": "^4.3.2",
         "dotenv": "^16.4.5",
         "ethers": "^6.16.0",
-        "express": "^4.19.2",
+        "express": "^4.21.0",
         "fastify": "^4.28.1",
         "ffjavascript": "^0.3.1",
         "helmet": "^8.1.0",
@@ -148,8 +147,8 @@
         "seedrandom": "^3.0.5",
         "ses": "^1.14.0",
         "snarkjs": "^0.7.5",
-        "socket.io": "^4.7.1",
-        "socket.io-client": "^4.7.2",
+        "socket.io": "^4.7.4",
+        "socket.io-client": "^4.7.4",
         "sqlite3": "^5.1.6",
         "superdilithium": "^2.0.6",
         "terminal-kit": "^3.1.1",
@@ -164,5 +163,12 @@
     "optionalDependencies": {
         "bufferutil": "^4.0.8",
         "utf-8-validate": "^5.0.10"
+    },
+    "overrides": {
+        "ws": ">=8.17.1",
+        "socket.io-parser": ">=4.2.6",
+        "valibot": ">=1.2.0",
+        "fast-xml-parser": ">=5.3.4",
+        "validator": ">=13.15.20"
     }
 }

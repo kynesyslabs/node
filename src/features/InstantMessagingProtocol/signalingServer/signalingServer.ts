@@ -62,7 +62,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
-import Mempool from "@/libs/blockchain/mempool_v2"
+import Mempool from "@/libs/blockchain/mempool"
 
 import type { SerializedEncryptedObject } from "@kynesyslabs/demosdk/types"
 import Hashing from "@/libs/crypto/hashing"

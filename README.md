@@ -303,16 +303,7 @@ src/
 
 ### Issue Tracking
 
-This project uses **Mycelium (`myc`)** for repo-visible task tracking, not markdown TODOs:
-
-```bash
-myc task list
-myc task create --title "title" --priority medium
-myc task close 1
-myc summary
-```
-
-See [AGENTS.md](AGENTS.md) for the full `myc` workflow and optional `br` interoperability notes.
+This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
 
 ## Support
 
@@ -320,7 +311,7 @@ For technical support and community discussions, visit [demos.sh](https://demos.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) License - see the [LICENSE](LICENSE.md) file for details.
 
 ## Contributing
 

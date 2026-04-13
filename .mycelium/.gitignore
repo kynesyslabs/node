@@ -4,4 +4,3 @@
 *.db-shm
 # Temporary files
 *.tmp
-.linear/

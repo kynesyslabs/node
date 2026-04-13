@@ -48,6 +48,7 @@ import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
 import Chain from "../chain"
 import { EntityManager, In, Repository } from "typeorm"
+import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -131,6 +132,9 @@ interface GCRMainSnapshot {
 
 // ? Maybe sanitize the options?
 export default class HandleGCR {
+    /** Mutex to serialize gcr_main writes and prevent deadlocks */
+    static gcrWriteMutex = new Mutex()
+
     /**
      * Set of GCR transaction types that can be batch processed with in-mem
      * copies of the GCRMain entities.
@@ -588,14 +592,16 @@ export default class HandleGCR {
             }
         }
 
-        await this.saveGCREditChanges(gcrMainCache, sideEffects)
-        // Bulk update assignedTxs via raw SQL
-        if (assignedTxsUpdates.size > 0) {
-            log.debug(
-                `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
-            )
-            await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
-        }
+        await HandleGCR.gcrWriteMutex.runExclusive(async () => {
+            await this.saveGCREditChanges(gcrMainCache, sideEffects)
+            // Bulk update assignedTxs via raw SQL
+            if (assignedTxsUpdates.size > 0) {
+                log.debug(
+                    `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
+                )
+                await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
+            }
+        })
 
         const end = Date.now()
         log.debug(
@@ -616,6 +622,7 @@ export default class HandleGCR {
         sideEffects: (() => Promise<void>)[],
     ) {
         const entitiesToSave = accounts.values().toArray()
+        entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
         if (entitiesToSave.length > 0) {
             log.debug(
                 `[applyGCREditsFromMergedMempool] Saving ${entitiesToSave.length} entities`,
@@ -683,16 +690,21 @@ export default class HandleGCR {
 
         let result: GCRResult
 
+        // Guard: balance, nonce, and identity edits require a valid account
+        if (!account && (editOperation.type === "balance" || editOperation.type === "nonce" || editOperation.type === "identity")) {
+            return { success: false, message: `Missing account for ${editOperation.type} edit` }
+        }
+
         // Applying the edit operations
         switch (sdkEdit.type) {
             case "balance":
-                result = await GCRBalanceRoutines.apply(editOperation, account)
+                result = await GCRBalanceRoutines.apply(editOperation, account!)
                 break
             case "nonce":
-                result = await GCRNonceRoutines.apply(editOperation, account)
+                result = await GCRNonceRoutines.apply(editOperation, account!)
                 break
             case "identity":
-                result = await GCRIdentityRoutines.apply(editOperation, account)
+                result = await GCRIdentityRoutines.apply(editOperation, account!)
                 break
             case "assign":
             case "subnetsTx":

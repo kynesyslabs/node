@@ -19,7 +19,7 @@ import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import { Waiter } from "./utilities/waiter"
-import { TimeoutError, AbortError } from "./exceptions"
+import { TimeoutError, AbortError } from "@/errors"
 import {
     startOmniProtocolServer,
     stopOmniProtocolServer,
@@ -36,7 +36,7 @@ import { SignalingServer } from "./features/InstantMessagingProtocol/signalingSe
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 // DTR and L2PS imports
-import Mempool from "./libs/blockchain/mempool_v2"
+import Mempool from "./libs/blockchain/mempool"
 import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
