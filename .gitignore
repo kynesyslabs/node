@@ -11,7 +11,7 @@ output/
 *.sqlite3
 data/
 docker_data/
-postgres*/
+postgres_*/
 neo4j_data/
 ipfs*/
 logs/
