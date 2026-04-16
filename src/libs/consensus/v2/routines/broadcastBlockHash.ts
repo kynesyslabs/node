@@ -88,6 +88,7 @@ export async function broadcastBlockHash(
                 await Promise.all(signatureVerificationPromises)
                 pro++
             } else {
+                log.error("Failed for validator: " + response.response)
                 log.error(
                     "[broadcastBlockHash] Block hash not confirmed from the validator: " +
                         response.response,
@@ -105,6 +106,34 @@ export async function broadcastBlockHash(
                     "[broadcastBlockHash] Response received: " +
                         JSON.stringify(response.extra),
                 )
+
+                if (response.extra.ourBlock) {
+                    log.error(
+                        "Their block: " +
+                            JSON.stringify(response.extra.ourBlock, null, 2),
+                    )
+                    log.error(
+                        "Our block: " +
+                            JSON.stringify(
+                                {
+                                    hash: getSharedState.candidateBlock.hash,
+                                    number: getSharedState.candidateBlock
+                                        .number,
+                                    timestamp:
+                                        getSharedState.candidateBlock.content
+                                            .timestamp,
+                                    txCount:
+                                        getSharedState.candidateBlock.content
+                                            .ordered_transactions.length,
+                                    txHashes:
+                                        getSharedState.candidateBlock.content
+                                            .ordered_transactions,
+                                },
+                                null,
+                                2,
+                            ),
+                    )
+                }
                 con++
             }
         })

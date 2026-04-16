@@ -120,9 +120,14 @@ export default async function manageProposeBlockHash(
     response.extra = {
         message: "Hash does not correspond to our candidate block",
         ourBlock: {
+            hash: getSharedState.candidateBlock.hash,
             number: getSharedState.candidateBlock.number,
             timestamp: getSharedState.candidateBlock.content.timestamp,
-            txCount: getSharedState.candidateBlock.content.ordered_transactions.length,
+            txCount:
+                getSharedState.candidateBlock.content.ordered_transactions
+                    .length,
+            txHashes:
+                getSharedState.candidateBlock.content.ordered_transactions,
         },
     }
     return response
