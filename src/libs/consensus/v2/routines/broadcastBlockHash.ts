@@ -88,6 +88,7 @@ export async function broadcastBlockHash(
                 await Promise.all(signatureVerificationPromises)
                 pro++
             } else {
+                log.error("Full response: " + JSON.stringify(response, null, 2))
                 log.error("Failed for validator: " + response.response)
                 log.error(
                     "[broadcastBlockHash] Block hash not confirmed from the validator: " +
@@ -103,7 +104,7 @@ export async function broadcastBlockHash(
                     "[broadcastBlockHash] Block hash proposed: " + block.hash,
                 )
                 log.error(
-                    "[broadcastBlockHash] Response received: " +
+                    "[broadcastBlockHash] Response received (with error): " +
                         JSON.stringify(response.extra),
                 )
 
