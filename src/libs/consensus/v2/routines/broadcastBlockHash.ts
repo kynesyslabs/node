@@ -89,6 +89,7 @@ export async function broadcastBlockHash(
                 pro++
             } else {
                 log.error("Full response: " + JSON.stringify(response, null, 2))
+                log.error("OUR Block: " + JSON.stringify(getSharedState.candidateBlock, null, 2))
                 log.error("Failed for validator: " + response.response)
                 log.error(
                     "[broadcastBlockHash] Block hash not confirmed from the validator: " +
