@@ -84,7 +84,9 @@ export default async function manageProposeBlockHash(
                 })
             } catch (e) {
                 const errorMsg = e instanceof Error ? e.message : String(e)
-                log.error(`[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`)
+                log.error(
+                    `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`,
+                )
                 continue
             }
 
@@ -115,6 +117,13 @@ export default async function manageProposeBlockHash(
     )
     response.result = 401
     response.response = getSharedState.publicKeyHex
-    response.extra = "Hash does not correspond to our candidate block"
+    response.extra = {
+        message: "Hash does not correspond to our candidate block",
+        ourBlock: {
+            number: getSharedState.candidateBlock.number,
+            timestamp: getSharedState.candidateBlock.content.timestamp,
+            txCount: getSharedState.candidateBlock.content.ordered_transactions.length,
+        },
+    }
     return response
 }
