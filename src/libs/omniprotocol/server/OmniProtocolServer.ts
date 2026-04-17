@@ -164,22 +164,28 @@ export class OmniProtocolServer extends EventEmitter {
         log.debug(
             `[OmniProtocolServer] Connections from ${ipAddress}: ${connectionCount}`,
         )
-        log.debug(`Connection count: ${connectionCount}`)
+        log.debug(`${ipAddress} Connection count: ${connectionCount}`)
 
-        // Check rate limits for IP
-        const rateLimitResult = this.rateLimiter.checkConnection(
-            ipAddress,
-            "OmniProtocolServer",
-        )
-
-        if (!rateLimitResult.allowed) {
-            log.error(
-                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
+        if (connectionCount > 0) {
+            // Check rate limits for IP
+            const rateLimitResult = this.rateLimiter.checkConnection(
+                ipAddress,
+                "OmniProtocolServer",
             )
-            socket.destroy()
-            this.emit("connection_rejected", remoteAddress, "rate_limit")
-            this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
-            return
+
+            if (!rateLimitResult.allowed) {
+                log.error(
+                    `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
+                )
+                log.error(
+                    `Rate limit result: ${JSON.stringify(rateLimitResult, null, 2)}`,
+                )
+
+                socket.destroy()
+                this.emit("connection_rejected", remoteAddress, "rate_limit")
+                this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
+                return
+            }
         }
 
         // Check if we're at capacity

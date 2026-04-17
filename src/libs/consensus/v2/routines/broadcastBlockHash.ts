@@ -17,15 +17,21 @@ export async function broadcastBlockHash(
     const proposeParams = [block.hash, block.validation_data, ourId]
     for (const peer of shard) {
         promises.push(
-            peer.longCall({
-                method: "consensus_routine",
-                params: [
-                    {
-                        method: "proposeBlockHash",
-                        params: proposeParams,
-                    },
-                ],
-            }), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
+            peer.longCall(
+                {
+                    method: "consensus_routine",
+                    params: [
+                        {
+                            method: "proposeBlockHash",
+                            params: proposeParams,
+                        },
+                    ],
+                },
+                true,
+                {
+                    allowedCodes: [401],
+                },
+            ), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         )
     }
     // See manageConsensusRoutine.ts for more details on the response format and mechanism
@@ -88,13 +94,12 @@ export async function broadcastBlockHash(
                 await Promise.all(signatureVerificationPromises)
                 pro++
             } else {
-                log.error("Full response: " + JSON.stringify(response, null, 2))
-                log.error("OUR Block: " + JSON.stringify(getSharedState.candidateBlock, null, 2))
                 log.error("Failed for validator: " + response.response)
                 log.error(
                     "[broadcastBlockHash] Block hash not confirmed from the validator: " +
                         response.response,
                 )
+                log.error("Message: " + response.extra.message)
                 // ! We have:
                 /* [WARNING] [2024-08-27T21:31:41.139Z] [RPC Call] [consensus_routine] [2024-08-27T21:31:41.100Z] Response not OK: Consensus mode is not active - 400
                 [broadcastBlockHash] response from a validator received.

@@ -531,11 +531,13 @@ export class ConnectionPool extends EventEmitter {
      * Get connection count by IP address
      */
     getConnectionCountByIp(ipAddress: string): number {
+        log.debug(`Counting connections for IP: ${ipAddress}`)
         let count = 0
 
         for (const peerConnections of this.connections.values()) {
             for (const conn of peerConnections) {
-                if (conn.socket?.remoteAddress === ipAddress) {
+                log.debug(`Found IP: ${conn.socket?.remoteAddress}`)
+                if (conn.socket?.remoteAddress === ipAddress && !conn.socket.destroyed) {
                     count++
                 }
             }
@@ -543,6 +545,7 @@ export class ConnectionPool extends EventEmitter {
 
         for (const conn of this.pendingConnections.values()) {
             if (conn.socket?.remoteAddress === ipAddress) {
+                log.debug(`Found pending IP: ${conn.socket?.remoteAddress}`)
                 count++
             }
         }
