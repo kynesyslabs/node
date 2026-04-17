@@ -179,3 +179,4 @@ better_testing/runs/*
 !better_testing/runs/.gitkeep
 /documentation/tokens/AUDIT.md
 /documentation/tokens/TEAM.md
+/myc.json
