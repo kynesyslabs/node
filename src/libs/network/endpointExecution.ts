@@ -369,6 +369,15 @@ export async function handleExecuteTransaction(
             return await DTRManager.inConsensusHandler(validatedData)
         }
 
+        log.debug("--------------------------------")
+        log.debug("In consensus loop: " + getSharedState.inConsensusLoop)
+        log.debug("In main loop: " + getSharedState.inMainLoop)
+        log.debug("In sync loop: " + getSharedState.inSyncLoop)
+        log.debug("In peer recheck loop: " + getSharedState.inPeerRecheckLoop)
+        log.debug("In starting consensus: " + getSharedState.startingConsensus)
+        log.debug("Running main loop: " + getSharedState.runMainLoop)
+        log.debug("--------------------------------")
+
         log.debug(
             "👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash,
         )
