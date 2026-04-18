@@ -881,22 +881,25 @@ export async function fastSync(
     }
 
     getSharedState.inSyncLoop = true
-    const synced = await fastSyncRoutine(peers)
-    log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    log.debug("[fastSync] Sync status: " + synced)
-    getSharedState.syncStatus = synced
-    await BroadcastManager.broadcastOurSyncData()
+    try {
+        const synced = await fastSyncRoutine(peers)
+        log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+        log.debug("[fastSync] Sync status: " + synced)
+        getSharedState.syncStatus = synced
+        await BroadcastManager.broadcastOurSyncData()
 
-    log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.debug(
-        "[fastSync] DB Last block number after sync: " +
-            lastBlockNumber +
-            " from: " +
-            from,
-    )
+        log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+        const lastBlockNumber = await Chain.getLastBlockNumber()
+        log.debug(
+            "[fastSync] DB Last block number after sync: " +
+                lastBlockNumber +
+                " from: " +
+                from,
+        )
 
-    getSharedState.inSyncLoop = false
-    log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    return true
+        return true
+    } finally {
+        getSharedState.inSyncLoop = false
+        log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+    }
 }
