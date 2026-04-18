@@ -313,9 +313,9 @@ export default class L2PSConsensus {
         }
 
         const mockTx = this.createMockTx(proof, account)
-        const accounts = await HandleGCR.prepareAccounts([mockTx])
+        const entities = await HandleGCR.prepareAccounts([mockTx])
         const editResult = await HandleGCR.applyTransaction(
-            accounts,
+            entities,
             mockTx,
             false,
             simulate,
@@ -339,7 +339,7 @@ export default class L2PSConsensus {
         if (!simulate) {
             await HandleGCR.gcrWriteMutex.runExclusive(async () => {
                 await HandleGCR.saveGCREditChanges(
-                    editResult.accounts,
+                    editResult.entities,
                     editResult.sideEffects,
                 )
             })
@@ -613,9 +613,9 @@ export default class L2PSConsensus {
                 }
 
                 const mockTx = this.createMockTx(proof, account)
-                const accounts = await HandleGCR.prepareAccounts([mockTx])
+                const entities = await HandleGCR.prepareAccounts([mockTx])
                 const editResult = await HandleGCR.applyTransaction(
-                    accounts,
+                    entities,
                     mockTx,
                     true,
                     false,
@@ -629,7 +629,7 @@ export default class L2PSConsensus {
                 }
 
                 await HandleGCR.saveGCREditChanges(
-                    editResult.accounts,
+                    editResult.entities,
                     editResult.sideEffects,
                 )
 

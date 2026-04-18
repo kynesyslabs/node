@@ -1303,9 +1303,9 @@ export default class GCR {
 
         const tx = await this.createAwardPointsTransaction(accounts)
 
-        const affectedAccounts = await HandleGCR.prepareAccounts([tx])
+        const entities = await HandleGCR.prepareAccounts([tx])
         const simulateResult = await HandleGCR.applyTransaction(
-            affectedAccounts,
+            entities,
             tx,
             false,
             true,
