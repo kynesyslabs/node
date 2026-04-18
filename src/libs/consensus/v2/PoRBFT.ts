@@ -363,7 +363,22 @@ async function mergeAndOrderMempools(
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    return mempool.filter(tx => !existingHashes.has(tx.hash))
+    const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
+
+    // Log transaction type breakdown
+    const typeCounts: Record<string, number> = {}
+    for (const tx of finalMempool) {
+        const txType = tx.content.type ?? "unknown"
+        typeCounts[txType] = (typeCounts[txType] || 0) + 1
+    }
+    log.debug(
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs (removed ${existingHashes.size} existing)`,
+    )
+    for (const [type, count] of Object.entries(typeCounts)) {
+        log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)
+    }
+
+    return finalMempool
 }
 
 /**
