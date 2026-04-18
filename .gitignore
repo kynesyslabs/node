@@ -173,3 +173,6 @@ src/GTAGS
 /.serena
 node*.sh
 yarn.lock
+/TEAM.md
+/documentation/tokens/TEAM.md
+/documentation/tokens/AUDIT.md
