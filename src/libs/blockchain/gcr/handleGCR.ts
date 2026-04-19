@@ -722,7 +722,7 @@ export default class HandleGCR {
                 log.debug(
                     `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
                 )
-                await spRepo.delete(spToDelete)
+                await spRepo.delete({ storageAddress: In(spToDelete) })
             }
         }
 
@@ -749,7 +749,7 @@ export default class HandleGCR {
                 log.debug(
                     `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
                 )
-                await tlsRepo.delete(tlsToDelete)
+                await tlsRepo.delete({ tokenId: In(tlsToDelete) })
             }
         }
 
