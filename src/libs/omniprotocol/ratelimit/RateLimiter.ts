@@ -51,7 +51,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: `[${callerName}] IP temporarily blocked`,
+                reason: `[${callerName}] IP temporarily blocked. ${entry.rejectionReason}`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: entry.blockExpiry - now,
@@ -69,6 +69,7 @@ export class RateLimiter {
             // Block IP for duration
             entry.blocked = true
             entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
+            entry.rejectionReason = `(max ${this.config.maxConnectionsPerIP} connections per IP)`
 
             return {
                 allowed: false,
@@ -159,7 +160,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: `${type} temporarily blocked`,
+                reason: `${type} temporarily blocked. ${entry.rejectionReason}`,
                 currentCount: entry.timestamps.length,
                 limit: maxRequests,
                 resetIn: entry.blockExpiry - now,
@@ -181,6 +182,7 @@ export class RateLimiter {
             // Block for duration
             entry.blocked = true
             entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
+            entry.rejectionReason = `(max ${maxRequests} requests per second)`
 
             return {
                 allowed: false,
@@ -293,15 +295,6 @@ export class RateLimiter {
             blockedIPs,
             blockedIdentities,
         }
-    }
-
-    /**
-     * Manually block an IP or identity
-     */
-    blockKey(key: string, type: RateLimitType, durationMs = DEFAULT_MANUAL_BLOCK_DURATION_MS): void {
-        const entry = this.getOrCreateEntry(key, type)
-        entry.blocked = true
-        entry.blockExpiry = Date.now() + durationMs
     }
 
     /**

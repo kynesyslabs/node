@@ -153,57 +153,75 @@ export default class Mempool {
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
-        for (const tx of incoming) {
+
+        const validateOne = async (
+            tx: Transaction,
+        ): Promise<Transaction | null> => {
             const isCoherent = TxUtils.isCoherent(tx)
             if (!isCoherent) {
                 log.error(
                     "[Mempool.receive] Transaction is not coherent: " + tx.hash,
                 )
-                return {
-                    success: false,
-                    mempool: [],
-                }
+                return null
             }
 
-            const { success: signatureValid } = await TxUtils.validateSignature(tx)
+            const { success: signatureValid } =
+                await TxUtils.validateSignature(tx)
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
                         tx.hash,
                 )
-                return {
-                    success: false,
-                    mempool: [],
-                }
+                return null
             }
 
+            return tx
+        }
+
+        const BATCH_SIZE = 16
+        const validationResults: (Transaction | null)[] = []
+        for (let i = 0; i < incoming.length; i += BATCH_SIZE) {
+            const batch = incoming.slice(i, i + BATCH_SIZE)
+            const results = await Promise.all(batch.map(validateOne))
+            validationResults.push(...results)
+        }
+
+        const validTransactions = validationResults.filter(
+            (tx): tx is Transaction => tx !== null,
+        )
+
+        for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
         }
 
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
-        // REVIEW: Should we save each tx individually?
-        // await this.repo.save(incoming)
-        for (const tx of incoming) {
-            if (existingHashes[tx.hash]) {
-                log.info(`tx already exists: ${tx.hash}`)
-                continue
-            }
 
+        const newTransactions = validTransactions.filter(
+            tx => !existingHashes[tx.hash],
+        )
+
+        // for test only
+        // duplicate transactions to test the orIgnore() behavior
+        const duplicateTransactions = newTransactions.slice(0, 10)
+        newTransactions.push(...duplicateTransactions)
+
+        if (newTransactions.length > 0) {
             try {
-                await this.repo.save(tx)
-            } catch (error) {
-                if (
-                    error instanceof QueryFailedError &&
-                    error.message.includes(
-                        "duplicate key value violates unique constraint",
-                    )
-                ) {
-                    noSendBackTxs.set(tx.hash, tx.hash)
-                    continue
-                }
+                const insertResult = await this.repo
+                    .createQueryBuilder()
+                    .insert()
+                    .into(MempoolTx)
+                    .values(newTransactions)
+                    .orIgnore()
+                    .execute()
 
-                // INFO: Log other errors
+                const insertedCount = insertResult.identifiers.length
+                log.debug(
+                    `[Mempool.receive] Inserted ${insertedCount}/${newTransactions.length} transactions`,
+                )
+            } catch (error) {
+                log.error("[Mempool.receive] Error saving received mempool:")
                 console.error(error)
             }
         }

@@ -300,9 +300,9 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const affectedAccounts = await HandleGCR.prepareAccounts([queriedTx])
+        const entities = await HandleGCR.prepareEntities([queriedTx])
         const simulateResult = await HandleGCR.applyTransaction(
-            affectedAccounts,
+            entities,
             queriedTx,
             false,
             true,
@@ -368,6 +368,15 @@ export async function handleExecuteTransaction(
         if (getSharedState.inConsensusLoop) {
             return await DTRManager.inConsensusHandler(validatedData)
         }
+
+        log.debug("--------------------------------")
+        log.debug("In consensus loop: " + getSharedState.inConsensusLoop)
+        log.debug("In main loop: " + getSharedState.inMainLoop)
+        log.debug("In sync loop: " + getSharedState.inSyncLoop)
+        log.debug("In peer recheck loop: " + getSharedState.inPeerRecheckLoop)
+        log.debug("In starting consensus: " + getSharedState.startingConsensus)
+        log.debug("Running main loop: " + getSharedState.runMainLoop)
+        log.debug("--------------------------------")
 
         log.debug(
             "👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash,

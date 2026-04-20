@@ -16,11 +16,7 @@ import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
 import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
-import {
-    BlockInvalidError,
-    ForgingEndedError,
-    NotInShardError,
-} from "@/errors"
+import { BlockInvalidError, ForgingEndedError, NotInShardError } from "@/errors"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { Waiter } from "@/utilities/waiter"
@@ -105,9 +101,19 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        log.debug("[consensusRoutine] Merging and ordering the mempools...")
         tempMempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
+        )
+
+        log.debug(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
+        log.debug(
+            `[consensusRoutine] Our mempool: ${JSON.stringify(
+                tempMempool.map(tx => tx.hash),
+                null,
+                2,
+            )}`,
         )
 
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
@@ -204,9 +210,10 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // REVIEW: Should we await this?
-            if (manager.checkIfWeAreSecretary()) {
-                BroadcastManager.broadcastNewBlock(block)
-            }
+            // REVIEW: All nodes broadcast the block for redundancy
+            // if (manager.checkIfWeAreSecretary()) {
+            BroadcastManager.broadcastNewBlock(block)
+            // }
 
             // INFO: Release DTR transaction relay waiter
             await DTRManager.releaseDTRWaiter(block)
@@ -357,7 +364,22 @@ async function mergeAndOrderMempools(
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    return mempool.filter(tx => !existingHashes.has(tx.hash))
+    const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
+
+    // Log transaction type breakdown
+    const typeCounts: Record<string, number> = {}
+    for (const tx of finalMempool) {
+        const txType = tx.content.type ?? "unknown"
+        typeCounts[txType] = (typeCounts[txType] || 0) + 1
+    }
+    log.debug(
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs (removed ${existingHashes.size} existing)`,
+    )
+    for (const [type, count] of Object.entries(typeCounts)) {
+        log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)
+    }
+
+    return finalMempool
 }
 
 /**

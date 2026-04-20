@@ -201,7 +201,7 @@ export default async function manageConsensusRoutines(
             // TODO
             // compare the block hash with the one we have and reply
             try {
-                response = await manageProposeBlockHash(
+                return await manageProposeBlockHash(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     payload.params[2] as string,

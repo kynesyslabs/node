@@ -22,7 +22,9 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     }
 
     for (const peer of shard) {
-        log.info(`[mergeMempools] Merging mempool with ${peer.identity}`)
+        log.debug(
+            `[mergeMempools] Merging mempool with ${peer.connection.string}`,
+        )
         promises.push(
             peer.longCall(request, true, {
                 sleepTime: 250,
@@ -34,7 +36,13 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     const responses = await Promise.all(promises) // ! Add error handling
     for (const response of responses) {
         if (response.result === 200) {
+            log.debug(
+                `[mergeMempools] Received ${response.response.length} transactions`,
+            )
             await Mempool.receive(response.response as Transaction[])
+        } else {
+            log.error("Error when merging mempools")
+            log.error(JSON.stringify(response, null, 2))
         }
     }
 }
