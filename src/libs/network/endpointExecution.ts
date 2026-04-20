@@ -300,7 +300,7 @@ export async function handleExecuteTransaction(
 
     // Only if the transaction is valid we add it to the mempool
     if (result.success) {
-        const entities = await HandleGCR.prepareAccounts([queriedTx])
+        const entities = await HandleGCR.prepareEntities([queriedTx])
         const simulateResult = await HandleGCR.applyTransaction(
             entities,
             queriedTx,

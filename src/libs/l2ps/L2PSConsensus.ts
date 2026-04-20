@@ -313,7 +313,7 @@ export default class L2PSConsensus {
         }
 
         const mockTx = this.createMockTx(proof, account)
-        const entities = await HandleGCR.prepareAccounts([mockTx])
+        const entities = await HandleGCR.prepareEntities([mockTx])
         const editResult = await HandleGCR.applyTransaction(
             entities,
             mockTx,
@@ -613,7 +613,7 @@ export default class L2PSConsensus {
                 }
 
                 const mockTx = this.createMockTx(proof, account)
-                const entities = await HandleGCR.prepareAccounts([mockTx])
+                const entities = await HandleGCR.prepareEntities([mockTx])
                 const editResult = await HandleGCR.applyTransaction(
                     entities,
                     mockTx,

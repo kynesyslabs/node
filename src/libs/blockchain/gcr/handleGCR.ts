@@ -349,7 +349,7 @@ export default class HandleGCR {
      * @param txs Transactions to load entities for
      * @returns Caches for accounts, storage programs, and TLS notaries
      */
-    static async prepareAccounts(txs: Transaction[]): Promise<GCREntityCaches> {
+    static async prepareEntities(txs: Transaction[]): Promise<GCREntityCaches> {
         const affectedPubkeys = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
@@ -623,7 +623,7 @@ export default class HandleGCR {
 
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
-        const entities = await this.prepareAccounts(txs)
+        const entities = await this.prepareEntities(txs)
 
         // Track assignedTxs updates for bulk SQL later
         const sideEffects: (() => Promise<void>)[] = []

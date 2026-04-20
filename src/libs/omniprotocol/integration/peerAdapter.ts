@@ -16,7 +16,6 @@ import {
     decodeNodeCallResponse,
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
-import { Config } from "@/config"
 import { getSharedState } from "@/utilities/sharedState"
 
 export type AdapterOptions = BaseAdapterOptions
