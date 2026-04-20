@@ -25,6 +25,10 @@ export class BroadcastManager {
                 block.validation_data.signatures[peer.identity] == undefined,
         )
 
+        if (peers.length === 0) {
+            return
+        }
+
         const promises = peers.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",

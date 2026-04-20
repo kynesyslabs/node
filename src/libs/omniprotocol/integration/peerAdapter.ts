@@ -16,8 +16,7 @@ import {
     decodeNodeCallResponse,
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
-import { getSharedState } from "src/utilities/sharedState"
-import { OMNI_PORT_OFFSET } from "../constants"
+import { Config } from "@/config"
 
 export type AdapterOptions = BaseAdapterOptions
 
@@ -46,9 +45,7 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
             // public URL — the node may be unreachable from outside under load.
             let tcpConnectionString: string
             if (peer.isLocalNode) {
-                const omniPort =
-                    parseInt(String(getSharedState.serverPort)) +
-                    OMNI_PORT_OFFSET
+                const omniPort = Config.getInstance().omni.port
                 tcpConnectionString = `${this.getTcpProtocol()}://127.0.0.1:${omniPort}`
             } else {
                 tcpConnectionString = this.httpToTcpConnectionString(

@@ -210,9 +210,10 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // REVIEW: Should we await this?
-            if (manager.checkIfWeAreSecretary()) {
-                BroadcastManager.broadcastNewBlock(block)
-            }
+            // REVIEW: All nodes broadcast the block for redundancy
+            // if (manager.checkIfWeAreSecretary()) {
+            BroadcastManager.broadcastNewBlock(block)
+            // }
 
             // INFO: Release DTR transaction relay waiter
             await DTRManager.releaseDTRWaiter(block)
