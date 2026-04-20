@@ -77,6 +77,10 @@ export class BunServer {
                     continue
                 }
 
+                if (routePart === "*") {
+                    continue
+                }
+
                 if (routePart !== requestedPart) {
                     matches = false
                     break
@@ -107,6 +111,7 @@ export class BunServer {
                 bunReq.params = match.params
                 return await match.handler(bunReq)
             }
+
             return jsonResponse({ error: "Not Found" }, 404)
         }
 
