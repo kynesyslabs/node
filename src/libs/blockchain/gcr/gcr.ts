@@ -317,13 +317,12 @@ export default class GCR {
                 order: { first_seen: "DESC" },
             })
 
-            // Hashing
-            let total = 0
-            stakes.forEach(stake => {
-                total += stake.stake // Replace 'stake.stake' with the correct field name if different
+            let total = 0n
+            stakes.forEach(v => {
+                total += BigInt(v.staked_amount ?? "0")
             })
 
-            return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
+            return Hashing.sha256(total.toString())
         } catch (e) {
             log.error(`Error fetching GCR hashed stakes: ${e}`)
         }

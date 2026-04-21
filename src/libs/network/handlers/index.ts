@@ -5,6 +5,7 @@ import { identityHandlers } from "./identityHandlers"
 import { tlsnotaryHandlers } from "./tlsnotaryHandlers"
 import { l2psHandlers } from "./l2psHandlers"
 import { miscHandlers } from "./miscHandlers"
+import { validatorHandlers } from "./validatorHandlers"
 import type { NodeCallHandler } from "./types"
 
 export type { NodeCallHandler } from "./types"
@@ -17,4 +18,5 @@ export const handlerRegistry: Record<string, NodeCallHandler> = {
     ...tlsnotaryHandlers,
     ...l2psHandlers,
     ...miscHandlers,
+    ...validatorHandlers,
 }

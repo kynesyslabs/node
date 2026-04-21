@@ -45,6 +45,7 @@ import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
 import Chain from "../chain"
 import { In, Repository } from "typeorm"
@@ -718,6 +719,17 @@ export default class HandleGCR {
                     repositories.tlsnotary as Repository<GCRTLSNotary>,
                     simulate,
                 )
+                break
+            // Phase 0 staking: mutates the Validators table outside of the
+            // batched GCRMain save path.
+            case "validatorStake" as unknown as typeof editOperation.type:
+                if (simulate) {
+                    // Validation already ran during handleStakingTx; we don't
+                    // mutate state during mempool simulation.
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    result = await GCRValidatorStakeRoutines.apply(editOperation)
+                }
                 break
             default:
                 return { success: false, message: "Invalid GCREdit type" }

@@ -296,6 +296,24 @@ export async function handleExecuteTransaction(
             result.success = l2psHashResult.result === 200
             break
         }
+
+        // Phase 0: staking lifecycle. Routed via tx.content.type; validation
+        // is delegated to ValidatorsManagement, and the GCR edit embedded in
+        // the tx mutates the Validators table on confirmation.
+        case "validatorStake" as unknown as typeof tx.content.type:
+        case "validatorUnstake" as unknown as typeof tx.content.type:
+        case "validatorExit" as unknown as typeof tx.content.type: {
+            const { handleStakingTx } = await import(
+                "./routines/transactions/handleStakingTx"
+            )
+            const stakingResult = await handleStakingTx(tx)
+            result.success = stakingResult.success
+            result.response = { message: stakingResult.message }
+            if (!stakingResult.success) {
+                result.extra = { error: stakingResult.message }
+            }
+            break
+        }
     }
 
     // Only if the transaction is valid we add it to the mempool
