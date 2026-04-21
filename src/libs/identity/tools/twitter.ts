@@ -2,15 +2,15 @@ import * as fs from "fs"
 import axios, { AxiosResponse } from "axios"
 import {
     Tweet,
-    TwitterTimelineResponse,
-    TwitterFollowersResponse,
+    XTimelineResponse,
+    XFollowersResponse,
 } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 
-class TwitterBotDetector {
+class XBotDetector {
     constructor(
-        private timelineData: TwitterTimelineResponse,
-        private followersData: TwitterFollowersResponse,
+        private timelineData: XTimelineResponse,
+        private followersData: XFollowersResponse,
         private username: string,
     ) {
         this.timelineData = timelineData
@@ -516,8 +516,8 @@ export class Twitter {
     async getTimeline(
         username: string,
         userId: string,
-    ): Promise<TwitterTimelineResponse> {
-        const res = await this.makeRequest<TwitterTimelineResponse>(
+    ): Promise<XTimelineResponse> {
+        const res = await this.makeRequest<XTimelineResponse>(
             `${this.api_url}/timeline.php?screenname=${username}&rest_id=${userId}`,
         )
 
@@ -535,8 +535,8 @@ export class Twitter {
     async getFollowers(
         username: string,
         userId: string,
-    ): Promise<TwitterFollowersResponse> {
-        const res = await this.makeRequest<TwitterFollowersResponse>(
+    ): Promise<XFollowersResponse> {
+        const res = await this.makeRequest<XFollowersResponse>(
             `${this.api_url}/followers.php?screenname=${username}`,
         )
 
@@ -556,7 +556,7 @@ export class Twitter {
             const timelineData = await this.getTimeline(username, userId)
             const followersData = await this.getFollowers(username, userId)
 
-            const detector = new TwitterBotDetector(
+            const detector = new XBotDetector(
                 timelineData,
                 followersData,
                 username,

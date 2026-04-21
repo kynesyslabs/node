@@ -53,7 +53,11 @@ export interface ParsedHttpResponse {
 /**
  * Supported TLSN identity contexts
  */
-export type TLSNIdentityContext = "github" | "discord" | "telegram"
+export type TLSNIdentityContext =
+    | "github"
+    | "discord"
+    | "telegram"
+    | "x"
 
 /**
  * Extracted user data (generic for all platforms)
@@ -364,6 +368,19 @@ function extractUserFromRawText(
                         }
                     }
                 }
+
+                if (context === "x") {
+                    const user =
+                        value.data && typeof value.data === "object"
+                            ? (value.data as Record<string, any>)
+                            : value
+                    if (user.username && user.id !== undefined) {
+                        return {
+                            username: String(user.username),
+                            userId: String(user.id),
+                        }
+                    }
+                }
             }
 
             // Fallback for partially redacted/non-strict JSON candidates:
@@ -401,6 +418,16 @@ function extractUserFromRawText(
                         username: extractedUsername,
                         userId: idMatch[1],
                     }
+                }
+            }
+
+            if (context === "x") {
+                const usernameMatch = candidate.match(
+                    /"username"\s*:\s*"([^"]+)"/,
+                )
+                const idMatch = candidate.match(/"id"\s*:\s*"?(\d+)"?/) 
+                if (usernameMatch?.[1] && idMatch?.[1]) {
+                    return { username: usernameMatch[1], userId: idMatch[1] }
                 }
             }
         }
@@ -480,6 +507,23 @@ function extractUserFromRawText(
                     username: firstNameAndId[1],
                     userId: firstNameAndId[2],
                 }
+            }
+        }
+
+        if (context === "x") {
+            const pairMatch =
+                text.match(
+                    /"username"\s*:\s*"([^"]+)"[\s\S]{0,2000}"id"\s*:\s*"?(\d+)"?/,
+                ) ||
+                text.match(
+                    /"id"\s*:\s*"?(\d+)"?[\s\S]{0,2000}"username"\s*:\s*"([^"]+)"/,
+                )
+
+            if (pairMatch) {
+                if (pairMatch[1]?.match(/^\d+$/)) {
+                    return { username: pairMatch[2], userId: pairMatch[1] }
+                }
+                return { username: pairMatch[1], userId: pairMatch[2] }
             }
         }
     } catch {
@@ -641,7 +685,7 @@ export function parseHttpResponse(
  * Parses the JSON response from the platform's API and extracts
  * the username and user ID based on the context.
  *
- * @param context - The platform context (github, discord, telegram)
+ * @param context - The platform context (github, discord, telegram, x)
  * @param responseBody - The JSON body from the platform's API endpoint
  * @returns Extracted user data or null if extraction fails
  */
@@ -699,6 +743,20 @@ export function extractUser(
                 return null
             }
 
+            case "x": {
+                const user = json.data || json.user || json
+                if (user.username && user.id !== undefined) {
+                    return {
+                        username: user.username,
+                        userId: String(user.id),
+                    }
+                }
+                log.warn(
+                    "[TLSNotary Verifier] X response missing 'username' or 'id' fields",
+                )
+                return null
+            }
+
             default:
                 log.warn(`[TLSNotary Verifier] Unsupported context: ${context}`)
                 return null
@@ -730,7 +788,7 @@ export async function verifyTLSNProof(payload: TLSNIdentityPayload): Promise<{
     const { context, proof, recvHash, revealedRecv, username, userId } = payload
 
     // Validate context
-    if (!["github", "discord", "telegram"].includes(context)) {
+    if (!["github", "discord", "telegram", "x"].includes(context)) {
         return {
             success: false,
             message: `Unsupported TLSN context: ${context}`,

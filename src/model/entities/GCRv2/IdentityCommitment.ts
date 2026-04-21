@@ -32,7 +32,7 @@ export class IdentityCommitment {
     leafIndex: number
 
     /**
-     * Provider type (github, telegram, discord, twitter, etc.)
+        * Provider type (github, telegram, discord, x, etc.)
      * Used for categorization and analytics only
      */
     @Column({ type: "text", name: "provider" })

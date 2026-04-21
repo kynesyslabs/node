@@ -75,20 +75,20 @@ export default class IdentityManager {
     ): Promise<{
         success: boolean
         message: string
-        twitterAccountConnected: boolean
+        xAccountConnected: boolean
     }> {
-        // INFO: Check if the user has a Twitter account
+        // INFO: Check if the user has an X account
         const account = await ensureGCRForUser(sender)
-        const twitterAccounts = account.identities.web2["twitter"] || []
-        let twitterAccountConnected = false
+        const xAccounts = account.identities.web2["x"] || []
+        let xAccountConnected = false
 
-        if (twitterAccounts.length > 0) {
-            twitterAccountConnected = true
+        if (xAccounts.length > 0) {
+            xAccountConnected = true
         }
 
         const response = {
             success: false,
-            twitterAccountConnected,
+            xAccountConnected,
         }
 
         // INFO: Check if target address is active
@@ -185,7 +185,7 @@ export default class IdentityManager {
         payload: InferFromSignaturePayload,
         sender: string,
     ): Promise<{ success: boolean; message: string }> {
-        const { success, message, twitterAccountConnected } =
+        const { success, message, xAccountConnected } =
             await this.filterConnections(sender, payload)
 
         if (!success) {
@@ -237,8 +237,8 @@ export default class IdentityManager {
                 success: true,
                 message:
                     `${chainId} payload signature verified` +
-                    (!twitterAccountConnected
-                        ? ". Twitter account not connected, won't award points"
+                    (!xAccountConnected
+                        ? ". X account not connected, won't award points"
                         : ""),
             }
         } catch (error) {

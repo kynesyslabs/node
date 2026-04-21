@@ -83,9 +83,9 @@ describe("GCR Operations - getIdentities Request", () => {
             result: 200,
             response: {
                 web2: {
-                    twitter: [
+                    x: [
                         {
-                            proof: "https://twitter.com/user/status/123",
+                            proof: "https://x.com/user/status/123",
                             userId: "123456",
                             username: "testuser",
                         },
@@ -131,7 +131,7 @@ describe("GCR Operations - getPoints Request", () => {
                     socialAccounts: {
                         github: 25,
                         discord: 25,
-                        twitter: 25,
+                        x: 25,
                     },
                 },
                 lastUpdated: "2025-11-01T12:00:00.000Z",
@@ -242,7 +242,7 @@ describe("GCR Operations - validateReferral Request", () => {
 describe("GCR Operations - getAccountByIdentity Request", () => {
     it("should encode valid getAccountByIdentity request", () => {
         const request = {
-            identity: "twitter:testuser",
+            identity: "x:testuser",
         }
 
         const encoded = encodeJsonRequest(request)

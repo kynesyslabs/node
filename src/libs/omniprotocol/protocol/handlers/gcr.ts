@@ -272,7 +272,7 @@ export const handleGetIdentities: OmniHandler<Buffer> = async ({
 /**
  * Handler for 0x43 GCR_GET_WEB2_IDENTITIES opcode
  *
- * Returns web2 identities only (twitter, github, discord) for a given address.
+ * Returns web2 identities only (x, github, discord) for a given address.
  */
 export const handleGetWeb2Identities: OmniHandler<Buffer> = async ({
     message,
@@ -631,7 +631,7 @@ export const handleValidateReferral: OmniHandler<Buffer> = async ({
 /**
  * Handler for 0x49 GCR_GET_ACCOUNT_BY_IDENTITY opcode
  *
- * Looks up an account by identity (e.g., twitter username, discord id).
+ * Looks up an account by identity (e.g., x username, discord id).
  */
 export const handleGetAccountByIdentity: OmniHandler<Buffer> = async ({
     message,

@@ -8,7 +8,7 @@ export abstract class Web2ProofParser {
             "https://raw.githubusercontent.com",
             "https://gist.githubusercontent.com",
         ],
-        twitter: ["https://x.com", "https://twitter.com"],
+        x: ["https://x.com", "https://twitter.com"],
         discord: [
             "https://discord.com/channels",
             "https://ptb.discord.com/channels",

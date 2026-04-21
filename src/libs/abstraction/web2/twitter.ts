@@ -2,13 +2,13 @@ import { Web2ProofParser } from "./parsers"
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 
-export class TwitterProofParser extends Web2ProofParser {
-    private static instance: TwitterProofParser
-    twitter: Twitter
+export class XProofParser extends Web2ProofParser {
+    private static instance: XProofParser
+    x: Twitter
 
     constructor() {
         super()
-        this.twitter = Twitter.getInstance()
+        this.x = Twitter.getInstance()
     }
 
     async readData(tweetUrl: string): Promise<{
@@ -16,10 +16,10 @@ export class TwitterProofParser extends Web2ProofParser {
         signature: string
         type: SigningAlgorithm
     }> {
-        this.verifyProofFormat(tweetUrl, "twitter")
+        this.verifyProofFormat(tweetUrl, "x")
         // INFO: Get the tweet ID from the URL
-        const { username, tweetId } = this.twitter.extractTweetDetails(tweetUrl)
-        const tweet = await this.twitter.getTweetById(tweetId)
+        const { username, tweetId } = this.x.extractTweetDetails(tweetUrl)
+        const tweet = await this.x.getTweetById(tweetId)
 
         if (!tweet) {
             throw new Error("Failed to get tweet")
@@ -41,7 +41,7 @@ export class TwitterProofParser extends Web2ProofParser {
 
     static async getInstance() {
         if (!this.instance) {
-            this.instance = new TwitterProofParser()
+            this.instance = new XProofParser()
         }
 
         return this.instance

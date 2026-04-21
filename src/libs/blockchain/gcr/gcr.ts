@@ -105,7 +105,7 @@ export class OperationsRegistry {
 
 interface Web2AccountParams {
     username: string
-    platform: "twitter" | "discord" | "telegram" | "github"
+    platform: "x" | "discord" | "telegram" | "github"
 }
 
 interface XMAccountParams {
@@ -574,15 +574,15 @@ export default class GCR {
         }
     }
 
-    static async getAccountByTwitterUsername(username: string) {
+    static async getAccountByXUsername(username: string) {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
-        // INFO: Find all accounts that have the twitter identity with the given username using a jsonb query
+        // INFO: Find all accounts that have the x identity with the given username using a jsonb query
         const accounts = await gcrMainRepository
             .createQueryBuilder("gcr")
             .where(
-                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'twitter') as twitter_id WHERE twitter_id->>'username' = :username)",
+                "EXISTS (SELECT 1 FROM jsonb_array_elements(gcr.identities->'web2'->'x') as x_id WHERE x_id->>'username' = :username)",
                 { username },
             )
             .getMany()
@@ -598,9 +598,9 @@ export default class GCR {
         }
 
         // If multiple accounts found, find the one that was awarded points
-        // (Twitter points > 0 means the account was awarded points)
+        // (X points > 0 means the account was awarded points)
         const accountWithPoints = accounts.find(
-            account => account.points?.breakdown?.socialAccounts?.twitter > 0,
+            account => account.points?.breakdown?.socialAccounts?.x > 0,
         )
 
         // Return the account with points if found, otherwise return the first account
@@ -609,7 +609,7 @@ export default class GCR {
     static async getAccountByIdentity(identity: {
         type: "web2" | "xm"
         // web2
-        context?: "twitter" | "telegram" | "github" | "discord"
+        context?: "x" | "telegram" | "github" | "discord"
         username?: string
         userId?: string
         // xm
@@ -723,12 +723,12 @@ export default class GCR {
             },
         })
 
-        const twitterUsers = new Set()
+        const xUsers = new Set()
 
         const campaignData = {
             users: {
                 total: 0,
-                withTwitter: {
+                withX: {
                     total: 0,
                     followDemos: 0,
                 },
@@ -737,13 +737,13 @@ export default class GCR {
             },
             points: {
                 total: 0,
-                twitter: 0,
+                x: 0,
                 web3Wallets: 0,
-                accountsWithTwitterTotal: 0,
+                accountsWithXTotal: 0,
                 referrals: 0,
                 demosFollow: 0,
                 demTotal: 0,
-                accountsWithTwitterDemTotal: 0,
+                accountsWithXDemTotal: 0,
             },
             evmAccounts: 0,
             solanaAccounts: 0,
@@ -752,8 +752,7 @@ export default class GCR {
         for (const user of allUsers) {
             campaignData.users.total++
             campaignData.points.total += user.points.totalPoints
-            campaignData.points.twitter +=
-                user.points.breakdown.socialAccounts.twitter
+            campaignData.points.x += user.points.breakdown.socialAccounts.x
             campaignData.points.referrals +=
                 user.points.breakdown.referrals || 0
             campaignData.points.demosFollow +=
@@ -768,12 +767,12 @@ export default class GCR {
             campaignData.points.web3Wallets += web3WalletPoints
             campaignData.users.withWeb3Wallet += web3WalletPoints ? 1 : 0
 
-            if (user.identities.web2.twitter) {
-                campaignData.points.accountsWithTwitterTotal +=
+            if (user.identities.web2.x) {
+                campaignData.points.accountsWithXTotal +=
                     user.points.totalPoints || 0
-                for (const twitterAccount of user.identities.web2.twitter) {
-                    twitterUsers.add(twitterAccount.userId)
-                    campaignData.users.withTwitter.followDemos += user.points
+                for (const xAccount of user.identities.web2.x) {
+                    xUsers.add(xAccount.userId)
+                    campaignData.users.withX.followDemos += user.points
                         .breakdown.demosFollow
                         ? 1
                         : 0
@@ -797,17 +796,17 @@ export default class GCR {
             }
         }
 
-        campaignData.users.withTwitter.total = twitterUsers.size
+        campaignData.users.withX.total = xUsers.size
         campaignData.points.demTotal = campaignData.points.total * 30
-        campaignData.points.accountsWithTwitterDemTotal =
-            campaignData.points.accountsWithTwitterTotal * 30
+        campaignData.points.accountsWithXDemTotal =
+            campaignData.points.accountsWithXTotal * 30
 
         return campaignData
     }
 
     static async getAddressesByWeb2Usernames(
         queries: {
-            platform: "twitter" | "discord" | "telegram" | "github"
+            platform: "x" | "discord" | "telegram" | "github"
             username: string
         }[],
     ): Promise<Record<string, string>> {

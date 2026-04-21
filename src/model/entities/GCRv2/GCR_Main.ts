@@ -28,7 +28,7 @@ export class GCRMain {
         breakdown: {
             web3Wallets: { [chain: string]: number }
             socialAccounts: {
-                twitter: number
+                x: number
                 github: number
                 discord: number
                 telegram: number

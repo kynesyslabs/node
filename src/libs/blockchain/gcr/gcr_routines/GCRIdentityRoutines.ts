@@ -293,15 +293,15 @@ export default class GCRIdentityRoutines {
             /**
              * Only award points if this is the first time this identity is being connected
              */
-            if (context === "twitter") {
+            if (context === "x") {
                 const isFirst = await this.isFirstConnection(
-                    "twitter",
+                    "x",
                     { userId: data.userId },
                     gcrMainRepository,
                     editOperation.account,
                 )
                 if (isFirst) {
-                    await IncentiveManager.twitterLinked(
+                    await IncentiveManager.xLinked(
                         editOperation.account,
                         data.userId,
                         editOperation.referralCode,
@@ -398,10 +398,10 @@ export default class GCRIdentityRoutines {
             await gcrMainRepository.save(accountGCR)
 
             /**
-             * Deduct incentive points for Twitter unlinking
+             * Deduct incentive points for X unlinking
              */
-            if (context === "twitter") {
-                await IncentiveManager.twitterUnlinked(editOperation.account)
+            if (context === "x") {
+                await IncentiveManager.xUnlinked(editOperation.account)
             } else if (
                 context === "github" &&
                 removedIdentity &&
@@ -1234,7 +1234,7 @@ export default class GCRIdentityRoutines {
 
     private static async isFirstConnection(
         type:
-            | "twitter"
+            | "x"
             | "github"
             | "web3"
             | "telegram"
@@ -1244,7 +1244,7 @@ export default class GCRIdentityRoutines {
             | "humanpassport"
             | "ethos",
         data: {
-            userId?: string // for twitter/github/discord
+            userId?: string // for x/github/telegram/discord
             chain?: string // for web3
             subchain?: string // for web3
             address?: string // for web3/humanpassport
@@ -1267,7 +1267,7 @@ export default class GCRIdentityRoutines {
         }
 
         if (type !== "web3" && type !== "ud" && type !== "nomis" && type !== "ethos") {
-            // Handle web2 identity types: twitter, github, telegram, discord
+            // Handle web2 identity types: x, github, telegram, discord
             const queryTemplate = `
             EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(gcr.identities->'web2'->'${type}', '[]'::jsonb)) as ${type}_id WHERE ${type}_id->>'userId' = :userId)
         `
@@ -1816,6 +1816,10 @@ export default class GCRIdentityRoutines {
             server: "telegram-backend",
             pathPrefix: "/api/telegram/user",
         },
+        // X/Twitter API v2 user endpoint. X moved to pay-per-use pricing
+        // (per-resource cost, no $100/mo floor) — flow works end-to-end
+        // once an X/Twitter OAuth app is provisioned.
+        x: { server: "api.twitter.com", pathPrefix: "/2/users/me" },
     }
 
     /**

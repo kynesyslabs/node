@@ -670,7 +670,7 @@ export default class HandleGCR {
             breakdown: {
                 web3Wallets: {},
                 socialAccounts: {
-                    twitter: 0,
+                    x: 0,
                     github: 0,
                     discord: 0,
                 },

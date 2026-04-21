@@ -32,7 +32,7 @@ console.log(result)
 
 ### Award points
 
-The method call awards points to the accounts with the supplied list of twitter usernames. Only the first account to connect a twitter account is awarded points.
+The method call awards points to the accounts with the supplied list of X usernames. Only the first account to connect an X account is awarded points.
 
 ```ts
 interface Response {
@@ -48,7 +48,7 @@ const result = (await demos.call("awardPoints", [
     {
         username: "cwilvxi",
         points: 1,
-        platform: "twitter",
+        platform: "x",
     },
     {
         username: "@Randomblocker",

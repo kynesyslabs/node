@@ -1,5 +1,5 @@
 import { GithubProofParser } from "./web2/github"
-import { TwitterProofParser } from "./web2/twitter"
+import { XProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
@@ -175,13 +175,13 @@ export async function verifyWeb2Proof(
     sender: string,
 ) {
     let parser:
-        | typeof TwitterProofParser
+        | typeof XProofParser
         | typeof GithubProofParser
         | typeof DiscordProofParser
 
     switch (payload.context) {
-        case "twitter":
-            parser = TwitterProofParser
+        case "x":
+            parser = XProofParser
             break
         case "github":
             parser = GithubProofParser
@@ -199,8 +199,8 @@ export async function verifyWeb2Proof(
             }
     }
 
-    // INFO: Check if Twitter account is a bot
-    if (payload.context === "twitter") {
+    // INFO: Check if X account is a bot
+    if (payload.context === "x") {
         const isBot = await Twitter.getInstance().checkIsBot(
             payload.username,
             payload.userId,
@@ -208,14 +208,14 @@ export async function verifyWeb2Proof(
         if (isBot === undefined) {
             return {
                 success: false,
-                message: "Failed to verify Twitter/X account",
+                message: "Failed to verify X account",
             }
         }
 
         if (isBot) {
             return {
                 success: false,
-                message: "You cannot connect this Twitter/X account",
+                message: "You cannot connect this X account",
             }
         }
     }
@@ -258,4 +258,4 @@ export async function verifyWeb2Proof(
     }
 }
 
-export { TwitterProofParser, Web2ProofParser }
+export { XProofParser, Web2ProofParser }

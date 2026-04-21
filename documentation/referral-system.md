@@ -90,7 +90,7 @@ The PointSystem class orchestrates referral processing during point-earning acti
     - **New Accounts**: Always process referral if code provided
     - **Existing Accounts**: Process only if `Referrals.isEligibleForReferral()` returns true
 - **Flow**:
-    1. Award original points for action (wallet link, Twitter, etc.)
+    1. Award original points for action (wallet link, X, etc.)
     2. Call `Referrals.processReferral()` if referral code present
     3. Save account with all updates
 
@@ -103,7 +103,7 @@ The PointSystem class orchestrates referral processing during point-earning acti
 ##### Point Award Methods
 
 - `awardWeb3WalletPoints()` - Now accepts `referralCode` parameter
-- `awardTwitterPoints()` - Now accepts `referralCode` parameter
+- `awardXPoints()` - Now accepts `referralCode` parameter
 
 - Note: Deduct methods haven't been modified to handle referrals.
 
@@ -113,9 +113,9 @@ Identity linking operations trigger referral processing through the incentive sy
 
 #### Integration Flow
 
-On the SDK, the `inferXmIdentity` and `addTwitterIdentity` methods now accepts a `referralCode` parameter. The code is embedded in the payload and also in the `GCR_Edit` for the transaction.
+On the SDK, the `inferXmIdentity` and `addXIdentity` methods now accepts a `referralCode` parameter. The code is embedded in the payload and also in the `GCR_Edit` for the transaction.
 
-During the consensus, when the twitter or xm wallet point system hooks are triggered, the referral code is passed to the point system methods.
+During the consensus, when the x or xm wallet point system hooks are triggered, the referral code is passed to the point system methods.
 
 The flow looks something like this:
 
@@ -140,10 +140,10 @@ Referrals.processReferral(account, referralCode, repository)
 - **Change**: Passes `editOperation.referralCode` to `IncentiveManager.walletLinked()`
 - **Trigger**: Only on first wallet connection (`isFirstConnection()`)
 
-##### `applyWeb2IdentityAdd()` (Twitter Linking)
+##### `applyWeb2IdentityAdd()` (X Linking)
 
-- **Change**: Passes `editOperation.referralCode` to `IncentiveManager.twitterLinked()`
-- **Trigger**: Only on first Twitter connection for new accounts
+- **Change**: Passes `editOperation.referralCode` to `IncentiveManager.xLinked()`
+- **Trigger**: Only on first X connection for new accounts
 
 ## Testing Scenarios
 
@@ -151,7 +151,7 @@ Referrals.processReferral(account, referralCode, repository)
 
 1. User A gets referral code: `getUserPoints()` returns `referralCode`
 2. User B signs up with User A's code
-3. User B links first wallet/Twitter with `referralCode` in editOperation
+3. User B links first wallet/X with `referralCode` in editOperation
 4. System awards 3 points to both users
 5. Both accounts updated with referral relationship
 

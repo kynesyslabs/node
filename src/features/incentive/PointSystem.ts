@@ -9,12 +9,29 @@ import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUse
 import { Twitter } from "@/libs/identity/tools/twitter"
 import { UDIdentityManager } from "@/libs/blockchain/gcr/gcr_routines/udIdentityManager"
 import { SavedUdIdentity } from "@/model/entities/types/IdentityTypes"
-import { UserPoints } from "@kynesyslabs/demosdk/abstraction"
+import { UserPoints as SDKUserPoints } from "@kynesyslabs/demosdk/abstraction"
 import { NomisWalletIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
+
+type UserPoints = Omit<SDKUserPoints, "breakdown" | "linkedSocials"> & {
+    breakdown: Omit<SDKUserPoints["breakdown"], "socialAccounts"> & {
+        socialAccounts: {
+            x: number
+            github: number
+            discord: number
+            telegram?: number
+        }
+    }
+    linkedSocials: {
+        x?: string
+        github?: string
+        discord?: string
+        telegram?: string
+    }
+}
 
 const pointValues = {
     LINK_WEB3_WALLET: 0.5,
-    LINK_TWITTER: 2,
+    LINK_X: 2,
     LINK_GITHUB: 1,
     LINK_TELEGRAM: 1,
     FOLLOW_DEMOS: 1,
@@ -41,7 +58,12 @@ export class PointSystem {
      */
     private async getUserIdentitiesFromGCR(userId: string): Promise<{
         linkedWallets: string[]
-        linkedSocials: { twitter?: string; github?: string; discord?: string }
+        linkedSocials: {
+            x?: string
+            github?: string
+            discord?: string
+            telegram?: string
+        }
         linkedUDDomains: {
             [network: string]: string[]
         }
@@ -50,9 +72,9 @@ export class PointSystem {
         linkedEthos: EthosWalletIdentity[]
     }> {
         const identities = await IdentityManager.getIdentities(userId)
-        const twitterIdentities = await IdentityManager.getWeb2Identities(
+        const xIdentities = await IdentityManager.getWeb2Identities(
             userId,
-            "twitter",
+            "x",
         )
 
         const githubIdentities = await IdentityManager.getWeb2Identities(
@@ -148,14 +170,14 @@ export class PointSystem {
         }
 
         const linkedSocials: {
-            twitter?: string
+            x?: string
             github?: string
             discord?: string
             telegram?: string
         } = {}
 
-        if (Array.isArray(twitterIdentities) && twitterIdentities.length > 0) {
-            linkedSocials.twitter = twitterIdentities[0].username
+        if (Array.isArray(xIdentities) && xIdentities.length > 0) {
+            linkedSocials.x = xIdentities[0].username
         }
 
         if (Array.isArray(githubIdentities) && githubIdentities.length > 0) {
@@ -236,8 +258,7 @@ export class PointSystem {
             breakdown: {
                 web3Wallets: account.points.breakdown?.web3Wallets || {},
                 socialAccounts: {
-                    twitter:
-                        account.points.breakdown?.socialAccounts?.twitter ?? 0,
+                    x: account.points.breakdown?.socialAccounts?.x ?? 0,
                     github:
                         account.points.breakdown?.socialAccounts?.github ?? 0,
                     telegram:
@@ -280,7 +301,7 @@ export class PointSystem {
             | "humanPassport",
         platform: string,
         referralCode?: string,
-        twitterUserId?: string,
+        xUserId?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
@@ -290,7 +311,7 @@ export class PointSystem {
         // REVIEW: Ensure breakdown structure is properly initialized before assignment
         account.points.breakdown = account.points.breakdown || {
             web3Wallets: {},
-            socialAccounts: { twitter: 0, github: 0, telegram: 0, discord: 0 },
+            socialAccounts: { x: 0, github: 0, telegram: 0, discord: 0 },
             referrals: 0,
             demosFollow: 0,
             nomisScores: {},
@@ -302,7 +323,7 @@ export class PointSystem {
 
         if (
             type === "socialAccounts" &&
-            (platform === "twitter" ||
+            (platform === "x" ||
                 platform === "github" ||
                 platform === "telegram" ||
                 platform === "discord")
@@ -390,20 +411,20 @@ export class PointSystem {
 
         const shouldCheckFollow =
             type === "socialAccounts" &&
-            platform === "twitter" &&
+            platform === "x" &&
             points > 0 &&
-            twitterUserId
+            xUserId
 
         if (shouldCheckFollow) {
-            const twitter = Twitter.getInstance()
-            const twitterUser = (account.identities.web2["twitter"] || []).find(
-                (twitterIdentity: Web2GCRData["data"]) =>
-                    twitterIdentity.userId === twitterUserId,
+            const xClient = Twitter.getInstance()
+            const xUser = (account.identities.web2["x"] || []).find(
+                (xIdentity: Web2GCRData["data"]) =>
+                    xIdentity.userId === xUserId,
             )
 
-            if (twitterUser && twitterUser.username) {
-                const isFollowingDemos = await twitter.checkFollow(
-                    twitterUser.username,
+            if (xUser && xUser.username) {
+                const isFollowingDemos = await xClient.checkFollow(
+                    xUser.username,
                 )
                 if (
                     isFollowingDemos &&
@@ -472,10 +493,10 @@ export class PointSystem {
             const userPointsWithIdentities =
                 await this.getUserPointsInternal(userId)
 
-            if (!userPointsWithIdentities.linkedSocials.twitter) {
+            if (!userPointsWithIdentities.linkedSocials.x) {
                 return {
                     result: 400,
-                    response: "Twitter account not linked. Not awarding points",
+                    response: "X account not linked. Not awarding points",
                     require_reply: false,
                     extra: null,
                 }
@@ -545,28 +566,28 @@ export class PointSystem {
     }
 
     /**
-     * Award points for linking a Twitter account
+     * Award points for linking an X account
      * @param userId The user's Demos address
      * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async awardTwitterPoints(
+    async awardXPoints(
         userId: string,
-        twitterUserId: string,
+        xUserId: string,
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities =
                 await this.getUserPointsInternal(userId)
 
-            // Check if user already has Twitter points specifically
-            if (userPointsWithIdentities.breakdown.socialAccounts.twitter > 0) {
+            // Check if user already has X points specifically
+            if (userPointsWithIdentities.breakdown.socialAccounts.x > 0) {
                 return {
                     result: 200,
                     response: {
                         pointsAwarded: 0,
                         totalPoints: userPointsWithIdentities.totalPoints,
-                        message: "Twitter points already awarded",
+                        message: "X points already awarded",
                     },
                     require_reply: false,
                     extra: {},
@@ -575,11 +596,11 @@ export class PointSystem {
 
             await this.addPointsToGCR(
                 userId,
-                pointValues.LINK_TWITTER,
+                pointValues.LINK_X,
                 "socialAccounts",
-                "twitter",
+                "x",
                 referralCode,
-                twitterUserId,
+                xUserId,
             )
 
             const updatedPoints = await this.getUserPointsInternal(userId)
@@ -587,9 +608,9 @@ export class PointSystem {
             return {
                 result: 200,
                 response: {
-                    pointsAwarded: pointValues.LINK_TWITTER,
+                    pointsAwarded: pointValues.LINK_X,
                     totalPoints: updatedPoints.totalPoints,
-                    message: "Points awarded for linking Twitter",
+                    message: "Points awarded for linking X",
                 },
                 require_reply: false,
                 extra: {},
@@ -742,26 +763,26 @@ export class PointSystem {
     }
 
     /**
-     * Deduct points for unlinking a Twitter account
+     * Deduct points for unlinking an X account
      * @param userId The user's Demos address
      * @param referralCode Optional referral code
      * @returns RPCResponse
      */
-    async deductTwitterPoints(userId: string): Promise<RPCResponse> {
+    async deductXPoints(userId: string): Promise<RPCResponse> {
         try {
             const userPointsWithIdentities =
                 await this.getUserPointsInternal(userId)
 
-            // Check if user has Twitter points to deduct
-            const currentTwitter =
-                userPointsWithIdentities.breakdown.socialAccounts?.twitter ?? 0
-            if (currentTwitter <= 0) {
+            // Check if user has X points to deduct
+            const currentX =
+                userPointsWithIdentities.breakdown.socialAccounts?.x ?? 0
+            if (currentX <= 0) {
                 return {
                     result: 200,
                     response: {
                         pointsDeducted: 0,
                         totalPoints: userPointsWithIdentities.totalPoints,
-                        message: "No Twitter points to deduct",
+                        message: "No X points to deduct",
                     },
                     require_reply: false,
                     extra: {},
@@ -770,9 +791,9 @@ export class PointSystem {
 
             await this.addPointsToGCR(
                 userId,
-                -pointValues.LINK_TWITTER,
+                -pointValues.LINK_X,
                 "socialAccounts",
-                "twitter",
+                "x",
             )
 
             const currentFollow =
@@ -792,9 +813,9 @@ export class PointSystem {
             return {
                 result: 200,
                 response: {
-                    pointsDeducted: pointValues.LINK_TWITTER,
+                    pointsDeducted: pointValues.LINK_X,
                     totalPoints: updatedPoints.totalPoints,
-                    message: "Points deducted for unlinking Twitter",
+                    message: "Points deducted for unlinking X",
                 },
                 require_reply: false,
                 extra: {},
@@ -1508,10 +1529,10 @@ export class PointSystem {
             const userPointsWithIdentities =
                 await this.getUserPointsInternal(userId)
 
-            if (!userPointsWithIdentities.linkedSocials.twitter) {
+            if (!userPointsWithIdentities.linkedSocials.x) {
                 return {
                     result: 400,
-                    response: "Twitter account not linked. Not awarding points",
+                    response: "X account not linked. Not awarding points",
                     require_reply: false,
                     extra: null,
                 }
@@ -1864,10 +1885,10 @@ export class PointSystem {
                 userId,
             )
 
-            if (!userPointsWithIdentities.linkedSocials.twitter) {
+            if (!userPointsWithIdentities.linkedSocials.x) {
                 return {
                     result: 400,
-                    response: "Twitter account not linked. Not awarding points",
+                    response: "X account not linked. Not awarding points",
                     require_reply: false,
                     extra: null,
                 }

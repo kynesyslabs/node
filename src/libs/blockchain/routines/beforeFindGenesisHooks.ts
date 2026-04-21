@@ -14,7 +14,7 @@ import { SavedXmIdentity } from "@/model/entities/types/IdentityTypes"
  */
 export class BeforeFindGenesisHooks {
     /**
-     * Award demos follow points to all users who have a twitter identity
+        * Award demos follow points to all users who have an x identity
      * but don't have the demosFollow property
      */
     async awardDemosFollowPoints() {
@@ -24,10 +24,10 @@ export class BeforeFindGenesisHooks {
 
         const seenAccounts = new Set<string>()
 
-        // Use JSONB query to fetch accounts that have Twitter identities
-        const accountsWithTwitter = await gcrMainRepository
+        // Use JSONB query to fetch accounts that have X identities
+        const accountsWithX = await gcrMainRepository
             .createQueryBuilder("gcr")
-            .where("gcr.identities->'web2'->'twitter' IS NOT NULL")
+            .where("gcr.identities->'web2'->'x' IS NOT NULL")
             .andWhere({
                 flaggedReason: Not(
                     In(["manualFlag", "referrerFlagged", "twitter_bot"]),
@@ -36,21 +36,21 @@ export class BeforeFindGenesisHooks {
             .getMany()
 
         log.only(
-            `[DEMOS FOLLOW] Found ${accountsWithTwitter.length} accounts with Twitter identities`,
+            `[DEMOS FOLLOW] Found ${accountsWithX.length} accounts with X identities`,
         )
 
         log.only(
-            `[DEMOS FOLLOW] ${accountsWithTwitter.length} accounts need processing`,
+            `[DEMOS FOLLOW] ${accountsWithX.length} accounts need processing`,
         )
 
         // Process accounts in batches
         const batchSize = 10
-        for (let i = 0; i < accountsWithTwitter.length; i += batchSize) {
-            const batch = accountsWithTwitter.slice(i, i + batchSize)
+        for (let i = 0; i < accountsWithX.length; i += batchSize) {
+            const batch = accountsWithX.slice(i, i + batchSize)
             log.only(
                 `[DEMOS FOLLOW] Processing batch ${
                     Math.floor(i / batchSize) + 1
-                }/${Math.ceil(accountsWithTwitter.length / batchSize)} (${
+                }/${Math.ceil(accountsWithX.length / batchSize)} (${
                     batch.length
                 } accounts)`,
             )
@@ -71,7 +71,7 @@ export class BeforeFindGenesisHooks {
     }
 
     /**
-     * Award demos follow points to a single account if they follow demos on Twitter
+        * Award demos follow points to a single account if they follow demos on X
      */
     async awardDemosFollowPointsToSingleAccount(
         account: GCRMain,
@@ -87,36 +87,36 @@ export class BeforeFindGenesisHooks {
                 return
             }
 
-            // Get the first Twitter identity for this account
-            const twitterIdentities = account.identities.web2["twitter"]
+            // Get the first X identity for this account
+            const xIdentities = account.identities.web2["x"]
             if (
-                !twitterIdentities ||
-                !Array.isArray(twitterIdentities) ||
-                twitterIdentities.length === 0
+                !xIdentities ||
+                !Array.isArray(xIdentities) ||
+                xIdentities.length === 0
             ) {
                 return
             }
 
-            const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
-            if (!twitterIdentity.username || !twitterIdentity.userId) {
+            const xIdentity = xIdentities[0] as Web2GCRData["data"]
+            if (!xIdentity.username || !xIdentity.userId) {
                 return
             }
 
-            // Skip if we've already processed this Twitter user
-            if (seenAccounts.has(twitterIdentity.userId)) {
+            // Skip if we've already processed this X user
+            if (seenAccounts.has(xIdentity.userId)) {
                 return
             }
-            seenAccounts.add(twitterIdentity.userId)
+            seenAccounts.add(xIdentity.userId)
 
             const twitter = Twitter.getInstance()
 
             // Check if the user follows demos
             const isFollowingDemos = await twitter.checkFollow(
-                twitterIdentity.username,
+                xIdentity.username,
             )
 
             log.only(
-                `[DEMOS FOLLOW] User ${twitterIdentity.username} ${
+                `[DEMOS FOLLOW] User ${xIdentity.username} ${
                     isFollowingDemos ? "follows" : "does not follow"
                 } demos`,
             )
@@ -133,7 +133,7 @@ export class BeforeFindGenesisHooks {
             await gcrMainRepository.save(account)
 
             log.only(
-                `[DEMOS FOLLOW] Awarded point to user ${account.pubkey} (Twitter: @${twitterIdentity.username})`,
+                `[DEMOS FOLLOW] Awarded point to user ${account.pubkey} (X: @${xIdentity.username})`,
             )
         } catch (error) {
             log.error(
@@ -158,23 +158,23 @@ export class BeforeFindGenesisHooks {
             // }
             log.only("reviewing account: " + account.pubkey)
 
-            // INFO: Review Twitter identity
-            // const twitterIdentities = account.identities.web2["twitter"]
+            // INFO: Review X identity
+            // const xIdentities = account.identities.web2["x"]
 
-            // if (twitterIdentities && twitterIdentities.length > 0) {
-            //     const twitterIdentity = twitterIdentities[0] as Web2GCRData["data"]
-            //     if (twitterIdentity.username) {
+            // if (xIdentities && xIdentities.length > 0) {
+            //     const xIdentity = xIdentities[0] as Web2GCRData["data"]
+            //     if (xIdentity.username) {
             //         log.only(
-            //             "Checking Twitter identity: " + twitterIdentity.username,
+            //             "Checking X identity: " + xIdentity.username,
             //         )
             //         const isBot = await Twitter.getInstance().checkIsBot(
-            //             twitterIdentity.username,
-            //             twitterIdentity.userId,
+            //             xIdentity.username,
+            //             xIdentity.userId,
             //         )
 
             //         if (isBot) {
             //             log.only("Flagged account: " + account.pubkey)
-            //             log.only("Twitter identity: " + twitterIdentity.username)
+            //             log.only("X identity: " + xIdentity.username)
             //             account.flagged = true
             //             account.flaggedReason = "twitter_bot"
             //             account.reviewed = true
@@ -184,7 +184,7 @@ export class BeforeFindGenesisHooks {
             //     }
             // } else {
             //     // log.only("Flagged account: " + account.pubkey)
-            //     // log.only("No Twitter identity")
+            //     // log.only("No X identity")
             //     // account.flagged = true
             //     // account.reviewed = true
             //     // await gcrMainRepository.save(account)
