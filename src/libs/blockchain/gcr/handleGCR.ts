@@ -37,7 +37,12 @@ import { assignWeb2 } from "./gcr_routines/assignWeb2"
 import IdentityManager from "./gcr_routines/identityManager"
 import manageNative from "./gcr_routines/manageNative"
 import { GCREdit, GCREditStorageProgram } from "@kynesyslabs/demosdk/types"
-import { GCREditTLSNotary } from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
+import {
+    GCREditBalance,
+    GCREditIdentity,
+    GCREditNonce,
+    GCREditTLSNotary,
+} from "node_modules/@kynesyslabs/demosdk/build/types/blockchain/GCREdit"
 import log from "src/utilities/logger"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
@@ -109,19 +114,14 @@ export interface GCRApplyResult {
 }
 
 /**
- * Type for GCREdit that has an account property (balance, nonce types)
- */
-type GCREditWithAccount = GCREdit & {
-    account: string | Uint8Array
-}
-
-/**
  * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
  * Returns true for balance and nonce types which have the 'account' property
  */
-export function isBatchableGCREdit(edit: GCREdit): edit is GCREditWithAccount {
-    // @ts-expect-error - edit.account is not available in GCREditStorageProgram type
-    return edit.account !== undefined && edit.account !== null
+export function isGCRMainEdit(
+    edit: GCREdit,
+): edit is GCREditBalance | GCREditNonce | GCREditIdentity {
+    const gcrMainEdits = new Set(["balance", "nonce", "identity"])
+    return gcrMainEdits.has(edit.type)
 }
 
 /**
@@ -153,9 +153,8 @@ export default class HandleGCR {
         "balance",
         "nonce",
         "identity",
+
         // These ⌄⌄⌄ are here because they don't have implemented handlers
-        "storageProgram",
-        "tlsnotary",
         "subnetsTx",
         "assign",
         "escrow",
@@ -361,7 +360,7 @@ export default class HandleGCR {
 
             for (const edit of gcrEdits) {
                 const editType = edit.type
-                if (isBatchableGCREdit(edit)) {
+                if (isGCRMainEdit(edit)) {
                     const pubkey = normalizePubkey(edit.account)
                     affectedPubkeys.add(pubkey)
                 } else if (editType === "storageProgram") {
@@ -509,7 +508,7 @@ export default class HandleGCR {
         const editPubkeys = new Set<string>()
 
         for (const edit of gcrEdits) {
-            if (isBatchableGCREdit(edit)) {
+            if (isGCRMainEdit(edit)) {
                 const pubkey = normalizePubkey(edit.account)
                 if (!editPubkeys.has(pubkey)) {
                     editPubkeys.add(pubkey)
@@ -609,62 +608,233 @@ export default class HandleGCR {
     }
 
     /**
-     * Apply transactions in bulk and save the changes to the database
+     * Partition transactions into groups such that no two groups share any
+     * affected entity (pubkey, storage address, or TLS token id). Uses
+     * union-find over namespaced entity keys. Transactions with no touched
+     * entity each become their own independent group.
+     *
+     * Within a group, sequential application preserves ordering semantics
+     * (e.g. nonce increments on a shared account). Across groups,
+     * application is safe to run concurrently.
+     *
+     * Exposed (not private) to enable direct unit testing.
+     */
+    static partitionIndependentTxs(txs: Transaction[]): Transaction[][] {
+        const parent = new Map<string, string>()
+        const addKey = (k: string) => {
+            if (!parent.has(k)) parent.set(k, k)
+        }
+        const find = (x: string): string => {
+            let root = x
+            while (parent.get(root) !== root) {
+                root = parent.get(root)!
+            }
+            let cur = x
+            while (parent.get(cur) !== root) {
+                const next = parent.get(cur)!
+                parent.set(cur, root)
+                cur = next
+            }
+            return root
+        }
+        const union = (a: string, b: string) => {
+            const ra = find(a)
+            const rb = find(b)
+            if (ra !== rb) parent.set(ra, rb)
+        }
+
+        const txKeys: string[][] = new Array(txs.length)
+        for (let i = 0; i < txs.length; i++) {
+            const tx = txs[i]
+            const keys: string[] = []
+
+            const gcrEdits = tx.content.gcr_edits
+            if (Array.isArray(gcrEdits)) {
+                for (const edit of gcrEdits) {
+                    // NOTE: `assign`, `subnetsTx`, `escrow`, `smartContract`
+                    // are NOT matched by isGCRMainEdit. They are currently
+                    // stubbed in applyGCREdit and touch no entity caches.
+                    // Grouping by tx sender alone is sufficient today. When
+                    // implemented, extend this extractor if they touch any
+                    // entity cache.
+                    if (isGCRMainEdit(edit)) {
+                        keys.push("acc:" + normalizePubkey(edit.account))
+                    } else if (edit.type === "storageProgram") {
+                        const spEdit =
+                            edit as unknown as GCREditStorageProgram
+                        keys.push("sp:" + spEdit.target)
+                        // Conservative: key by context.sender in case the
+                        // routine ever touches the sender's account.
+                        if (spEdit.context?.sender) {
+                            keys.push("acc:" + spEdit.context.sender)
+                        }
+                    } else if (edit.type === "tlsnotary") {
+                        const tlsEdit =
+                            edit as unknown as GCREditTLSNotary
+                        keys.push("tls:" + tlsEdit.data.tokenId)
+                        // Conservative: tlsnotary edits carry an account
+                        // field; key it even though today's routine only
+                        // touches entities.tlsNotaries.
+                        if (tlsEdit.account) {
+                            keys.push(
+                                "acc:" + normalizePubkey(tlsEdit.account),
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (tx.content?.from_ed25519_address) {
+                keys.push(
+                    "acc:" + normalizePubkey(tx.content.from_ed25519_address),
+                )
+            }
+
+            for (const k of keys) addKey(k)
+            for (let j = 1; j < keys.length; j++) union(keys[0], keys[j])
+            txKeys[i] = keys
+        }
+
+        const groups = new Map<string, Transaction[]>()
+        for (let i = 0; i < txs.length; i++) {
+            const keys = txKeys[i]
+            const bucket =
+                keys.length > 0 ? find(keys[0]) : `__independent_${i}__`
+            let group = groups.get(bucket)
+            if (!group) {
+                group = []
+                groups.set(bucket, group)
+            }
+            group.push(txs[i])
+        }
+
+        return [...groups.values()]
+    }
+
+    /**
+     * Apply transactions in bulk and save the changes to the database.
+     * Transactions touching disjoint entities are executed concurrently
+     * (bounded by CONCURRENCY to protect the DB pool); transactions sharing
+     * any entity are serialized within their group to preserve ordering.
      *
      * @param txs The transactions to apply
      * @param isRollback Whether the operation is a rollback
-     * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
      *
-     * @returns The successful and failed transactions
+     * @returns The successful and failed transactions (in original order)
      */
     static async applyTransactions(txs: Transaction[], isRollback: boolean) {
-        log.debug("Applying GCR Edits for merged mempool (batched)")
+        log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
 
-        const successfulTxs: string[] = []
-        const failedTxs: string[] = []
         const entities = await this.prepareEntities(txs)
+        const groups = this.partitionIndependentTxs(txs)
 
-        // Track assignedTxs updates for bulk SQL later
-        const sideEffects: (() => Promise<void>)[] = []
-        const assignedTxsUpdates = new Map<string, string[]>()
+        log.debug(
+            `[applyTransactions] Partitioned ${txs.length} txs into ${groups.length} independent groups`,
+        )
 
-        // Sequential tx processing (in-memory for all entity types)
-        for (const tx of txs) {
-            const applyResult = await HandleGCR.applyTransaction(
-                entities,
-                tx,
-                isRollback,
-                false,
-            )
-            if (!applyResult.success) {
-                failedTxs.push(tx.hash)
-                continue
-            }
+        // Map from tx.hash to original index, used to restore side-effect
+        // ordering across groups during merge.
+        const txIndex = new Map<string, number>()
+        for (let i = 0; i < txs.length; i++) txIndex.set(txs[i].hash, i)
 
-            sideEffects.push(...applyResult.sideEffects)
+        type IndexedSideEffect = {
+            txIndex: number
+            fn: () => Promise<void>
+        }
 
-            // Track assignedTxs update
-            const sender = normalizePubkey(
-                tx.content?.from_ed25519_address || tx.content.from,
-            )
-            if (sender && tx.hash) {
-                if (!assignedTxsUpdates.has(sender)) {
-                    assignedTxsUpdates.set(sender, [])
+        // Within a group, apply sequentially; across groups, apply in
+        // parallel with bounded fan-out to protect the DB connection pool.
+        // The ZK attestation handler opens its own queryRunner per tx.
+        const runGroup = async (group: Transaction[]) => {
+            const successful: string[] = []
+            const failed: string[] = []
+            const sideEffects: IndexedSideEffect[] = []
+            const assignedTxs = new Map<string, string[]>()
+
+            for (const tx of group) {
+                const applyResult = await HandleGCR.applyTransaction(
+                    entities,
+                    tx,
+                    isRollback,
+                    false,
+                )
+                if (!applyResult.success) {
+                    failed.push(tx.hash)
+                    continue
                 }
 
-                assignedTxsUpdates.get(sender).push(tx.hash)
+                const idx = txIndex.get(tx.hash)!
+                for (const fn of applyResult.sideEffects) {
+                    sideEffects.push({ txIndex: idx, fn })
+                }
+
+                const sender = normalizePubkey(
+                    tx.content?.from_ed25519_address || tx.content.from,
+                )
+                if (sender && tx.hash) {
+                    let bucket = assignedTxs.get(sender)
+                    if (!bucket) {
+                        bucket = []
+                        assignedTxs.set(sender, bucket)
+                    }
+                    bucket.push(tx.hash)
+                }
+
+                successful.push(tx.hash)
             }
 
-            successfulTxs.push(tx.hash)
+            return { successful, failed, sideEffects, assignedTxs }
+        }
+
+        // Tune against DB pool size; keep below pool size with safety margin.
+        const CONCURRENCY = 8
+        const groupResults: Awaited<ReturnType<typeof runGroup>>[] = []
+        for (let i = 0; i < groups.length; i += CONCURRENCY) {
+            const slice = groups.slice(i, i + CONCURRENCY)
+            const sliceResults = await Promise.all(slice.map(runGroup))
+            groupResults.push(...sliceResults)
+        }
+
+        // Merge group results. Senders only appear in one group (sender
+        // pubkey unions all their txs), so assignedTxs keys are disjoint.
+        const successfulSet = new Set<string>()
+        const failedSet = new Set<string>()
+        const allIndexedSideEffects: IndexedSideEffect[] = []
+        const assignedTxsUpdates = new Map<string, string[]>()
+
+        for (const r of groupResults) {
+            for (const h of r.successful) successfulSet.add(h)
+            for (const h of r.failed) failedSet.add(h)
+            allIndexedSideEffects.push(...r.sideEffects)
+            for (const [sender, hashes] of r.assignedTxs) {
+                const existing = assignedTxsUpdates.get(sender)
+                if (existing) {
+                    existing.push(...hashes)
+                } else {
+                    assignedTxsUpdates.set(sender, hashes)
+                }
+            }
+        }
+
+        // Restore original tx-order of side effects so downstream execution
+        // matches the sequential baseline.
+        allIndexedSideEffects.sort((a, b) => a.txIndex - b.txIndex)
+        const mergedSideEffects = allIndexedSideEffects.map(s => s.fn)
+
+        // Preserve original tx order in returned arrays.
+        const successfulTxs: string[] = []
+        const failedTxs: string[] = []
+        for (const tx of txs) {
+            if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
+            else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
         }
 
         await HandleGCR.gcrWriteMutex.runExclusive(async () => {
-            await this.saveGCREditChanges(entities, sideEffects)
-            // Bulk update assignedTxs via raw SQL
+            await this.saveGCREditChanges(entities, mergedSideEffects)
             if (assignedTxsUpdates.size > 0) {
                 log.debug(
-                    `[applyGCREditsFromMergedMempool] Updating ${assignedTxsUpdates.size} assignedTxs`,
+                    `[applyTransactions] Updating ${assignedTxsUpdates.size} assignedTxs`,
                 )
                 await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
             }
@@ -672,7 +842,7 @@ export default class HandleGCR {
 
         const end = Date.now()
         log.debug(
-            `[applyGCREditsFromMergedMempool] Time taken: ${(end - now) / 1000} seconds to apply GCR edits for ${txs.length} txs`,
+            `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${txs.length} txs across ${groups.length} groups`,
         )
 
         return { successfulTxs, failedTxs }
@@ -798,7 +968,7 @@ export default class HandleGCR {
 
         // Resolve the account for GCRMain-based edits
         let account: GCRMain | null = null
-        if (isBatchableGCREdit(editOperation)) {
+        if (isGCRMainEdit(editOperation)) {
             const pubkey = normalizePubkey(editOperation.account)
             account = entities.accounts.get(pubkey) ?? null
         }
