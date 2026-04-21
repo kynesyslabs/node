@@ -354,17 +354,36 @@ async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
-    const ourMempool = await Mempool.getMempool(blockRef)
-    await mergeMempools(ourMempool, shard)
+    // Fetch mempool, check chain for executed txs.
+    const preMempool = await Mempool.getMempool(blockRef)
+    const preHashes = preMempool.map(tx => tx.hash)
+    const preExisting =
+        preHashes.length > 0
+            ? await Chain.getExistingTransactionHashes(preHashes)
+            : new Set<string>()
+    const outboundPool = preMempool.filter(tx => !preExisting.has(tx.hash))
+
+    // Merge with peers
+    await mergeMempools(outboundPool, shard)
     await updateValidatorPhase(3, blockRef)
 
-    const mempool = await Mempool.getMempool(blockRef)
-    const hashes = mempool.map(tx => tx.hash)
-    const existingHashes = await Chain.getExistingTransactionHashes(hashes)
+    const postMempool = await Mempool.getMempool(blockRef)
+    const preChecked = new Set(preHashes)
+    const newHashes = postMempool
+        .map(tx => tx.hash)
+        .filter(h => !preChecked.has(h))
+    const newlyExisting =
+        newHashes.length > 0
+            ? await Chain.getExistingTransactionHashes(newHashes)
+            : new Set<string>()
+
+    const existingHashes = preExisting.union(newlyExisting)
+    const finalMempool = postMempool.filter(
+        tx => !existingHashes.has(tx.hash),
+    )
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    const finalMempool = mempool.filter(tx => !existingHashes.has(tx.hash))
 
     // Log transaction type breakdown
     const typeCounts: Record<string, number> = {}
@@ -373,7 +392,8 @@ async function mergeAndOrderMempools(
         typeCounts[txType] = (typeCounts[txType] || 0) + 1
     }
     log.debug(
-        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs (removed ${existingHashes.size} existing)`,
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs ` +
+            `(removed ${existingHashes.size}: pre-merge ${preExisting.size}, delta ${newlyExisting.size})`,
     )
     for (const [type, count] of Object.entries(typeCounts)) {
         log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)

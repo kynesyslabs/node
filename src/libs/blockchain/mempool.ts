@@ -277,6 +277,72 @@ export default class Mempool {
             throw error
         }
     }
-}
 
-// await Mempool.init()
+    /**
+     * Removes old and executed transactions from the mempool.
+     *
+     * Old: reference_block falls outside the allowed window
+     * (lastBlock - referenceBlockRoom ..= lastBlock) — same rule enforced by
+     * isReferenceBlockAllowed on inbound RPC.
+     *
+     * Executed: already committed to the chain.
+     */
+    static async cleanMempool(): Promise<{
+        staleRemoved: number
+        executedRemoved: number
+    }> {
+        const all = await this.repo.find({
+            select: ["hash", "reference_block"],
+        })
+        if (all.length === 0) {
+            log.debug("[Mempool.cleanMempool] Mempool is empty")
+            return { staleRemoved: 0, executedRemoved: 0 }
+        }
+
+        const lastBlock = await Chain.getLastBlockNumber()
+        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+
+        const staleHashes: string[] = []
+        const survivorHashes: string[] = []
+        for (const tx of all) {
+            if (tx.reference_block < cutoff) staleHashes.push(tx.hash)
+            else survivorHashes.push(tx.hash)
+        }
+
+        const existing =
+            survivorHashes.length > 0
+                ? await Chain.getExistingTransactionHashes(survivorHashes)
+                : new Set<string>()
+        const executedHashes = survivorHashes.filter(h => existing.has(h))
+
+        log.debug(
+            `[Mempool.cleanMempool] Stale (${staleHashes.length}): ${staleHashes.join(", ")}`,
+        )
+        log.debug(
+            `[Mempool.cleanMempool] Executed (${executedHashes.length}): ${executedHashes.join(", ")}`,
+        )
+
+        const toDelete = [...staleHashes, ...executedHashes]
+        if (toDelete.length === 0) {
+            log.debug("[Mempool.cleanMempool] Nothing to delete")
+            return { staleRemoved: 0, executedRemoved: 0 }
+        }
+
+        if (toDelete.length === all.length) {
+            await this.repo.createQueryBuilder().delete().execute()
+            log.debug(
+                `[Mempool.cleanMempool] Cleared entire mempool (${toDelete.length} txs)`,
+            )
+        } else {
+            await this.repo.delete({ hash: In(toDelete) })
+            log.debug(
+                `[Mempool.cleanMempool] Deleted ${toDelete.length} txs by hash`,
+            )
+        }
+
+        return {
+            staleRemoved: staleHashes.length,
+            executedRemoved: executedHashes.length,
+        }
+    }
+}

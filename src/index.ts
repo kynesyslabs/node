@@ -781,6 +781,7 @@ async function main() {
             }
         }
 
+        await Mempool.cleanMempool()
         await fastSync([], "index.ts")
         getSharedState.isInitialized = true
         // ANCHOR Starting the main loop

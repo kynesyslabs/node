@@ -50,41 +50,4 @@ export default class GCRNonceRoutines {
 
         return { success: true, message: "Nonce applied", entity: accountGCR }
     }
-
-    /**
-     * Applies a nonce edit directly to an entity without database operations.
-     * Used for batch processing where DB operations are deferred.
-     *
-     * @param editOperation The GCR edit to apply
-     * @param entity The GCRMain entity to modify (mutated in place)
-     * @returns Result indicating success/failure
-     */
-    static applyToEntity(
-        editOperation: GCREdit,
-        entity: GCRMain,
-    ): { success: boolean; message: string } {
-        if (editOperation.type !== "nonce") {
-            return { success: false, message: "Invalid GCREdit type" }
-        }
-
-        // Determine operation (handle rollback)
-        let operation = editOperation.operation
-        if (editOperation.isRollback) {
-            operation = operation === "add" ? "remove" : "add"
-        }
-
-        const actualNonce = entity.nonce
-
-        if (operation === "add") {
-            entity.nonce += editOperation.amount
-        } else if (operation === "remove") {
-            // Safeguarding the operation
-            if (actualNonce < editOperation.amount) {
-                return { success: false, message: "Insufficient nonce" }
-            }
-            entity.nonce -= editOperation.amount
-        }
-
-        return { success: true, message: "Nonce applied" }
-    }
 }

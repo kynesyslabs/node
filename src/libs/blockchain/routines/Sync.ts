@@ -37,6 +37,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import Mempool from "../mempool"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -857,6 +858,8 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     if (getSharedState.fastSyncCount === 0) {
+        await Mempool.cleanMempool()
+
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
             if (getSharedState.isShuttingDown) return false
@@ -883,12 +886,12 @@ export async function fastSync(
     getSharedState.inSyncLoop = true
     try {
         const synced = await fastSyncRoutine(peers)
-        log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+        log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
         log.debug("[fastSync] Sync status: " + synced)
         getSharedState.syncStatus = synced
         await BroadcastManager.broadcastOurSyncData()
 
-        log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+        log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")
         const lastBlockNumber = await Chain.getLastBlockNumber()
         log.debug(
             "[fastSync] DB Last block number after sync: " +
@@ -900,6 +903,6 @@ export async function fastSync(
         return true
     } finally {
         getSharedState.inSyncLoop = false
-        log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
+        log.debug("[fastSync] Sync loop ended")
     }
 }
