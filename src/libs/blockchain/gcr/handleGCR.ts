@@ -24,7 +24,11 @@ import _ from "lodash"
 // NOTE This will replace gcr.ts methods for calling the native tables
 import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
 import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
-import { RPCResponse, Transaction } from "@kynesyslabs/demosdk/types"
+import {
+    RPCResponse,
+    Transaction,
+    TransactionContent,
+} from "@kynesyslabs/demosdk/types"
 import Datasource, { dataSource } from "src/model/datasource"
 import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
@@ -111,6 +115,11 @@ export interface GCRApplyResult {
     message: string
     sideEffects: (() => Promise<void>)[]
     appliedEditsCount: number
+}
+
+type IndexedSideEffect = {
+    txIndex: number
+    fn: () => Promise<void>
 }
 
 /**
@@ -620,6 +629,7 @@ export default class HandleGCR {
      * Exposed (not private) to enable direct unit testing.
      */
     static partitionIndependentTxs(txs: Transaction[]): Transaction[][] {
+        const now = Date.now()
         const parent = new Map<string, string>()
         const addKey = (k: string) => {
             if (!parent.has(k)) parent.set(k, k)
@@ -627,11 +637,11 @@ export default class HandleGCR {
         const find = (x: string): string => {
             let root = x
             while (parent.get(root) !== root) {
-                root = parent.get(root)!
+                root = parent.get(root)
             }
             let cur = x
             while (parent.get(cur) !== root) {
-                const next = parent.get(cur)!
+                const next = parent.get(cur)
                 parent.set(cur, root)
                 cur = next
             }
@@ -660,8 +670,7 @@ export default class HandleGCR {
                     if (isGCRMainEdit(edit)) {
                         keys.push("acc:" + normalizePubkey(edit.account))
                     } else if (edit.type === "storageProgram") {
-                        const spEdit =
-                            edit as unknown as GCREditStorageProgram
+                        const spEdit = edit as unknown as GCREditStorageProgram
                         keys.push("sp:" + spEdit.target)
                         // Conservative: key by context.sender in case the
                         // routine ever touches the sender's account.
@@ -669,16 +678,13 @@ export default class HandleGCR {
                             keys.push("acc:" + spEdit.context.sender)
                         }
                     } else if (edit.type === "tlsnotary") {
-                        const tlsEdit =
-                            edit as unknown as GCREditTLSNotary
+                        const tlsEdit = edit as unknown as GCREditTLSNotary
                         keys.push("tls:" + tlsEdit.data.tokenId)
                         // Conservative: tlsnotary edits carry an account
                         // field; key it even though today's routine only
                         // touches entities.tlsNotaries.
                         if (tlsEdit.account) {
-                            keys.push(
-                                "acc:" + normalizePubkey(tlsEdit.account),
-                            )
+                            keys.push("acc:" + normalizePubkey(tlsEdit.account))
                         }
                     }
                 }
@@ -708,7 +714,58 @@ export default class HandleGCR {
             group.push(txs[i])
         }
 
+        const end = Date.now()
+        log.debug(
+            `[partitionIndependentTxs] Time taken: ${end - now}ms for ${txs.length} txs`,
+        )
+
         return [...groups.values()]
+    }
+
+    static async runGroup(
+        group: Transaction[],
+        entities: GCREntityCaches,
+        isRollback: boolean,
+        txIndex: Map<string, number>,
+    ) {
+        const successful: string[] = []
+        const failed: string[] = []
+        const sideEffects: IndexedSideEffect[] = []
+        const assignedTxs = new Map<string, string[]>()
+
+        for (const tx of group) {
+            const applyResult = await HandleGCR.applyTransaction(
+                entities,
+                tx,
+                isRollback,
+                false,
+            )
+            if (!applyResult.success) {
+                failed.push(tx.hash)
+                continue
+            }
+
+            const idx = txIndex.get(tx.hash)
+            for (const fn of applyResult.sideEffects) {
+                sideEffects.push({ txIndex: idx, fn })
+            }
+
+            const sender = normalizePubkey(
+                tx.content?.from_ed25519_address || tx.content.from,
+            )
+            if (sender && tx.hash) {
+                let bucket = assignedTxs.get(sender)
+                if (!bucket) {
+                    bucket = []
+                    assignedTxs.set(sender, bucket)
+                }
+                bucket.push(tx.hash)
+            }
+
+            successful.push(tx.hash)
+        }
+
+        return { successful, failed, sideEffects, assignedTxs }
     }
 
     /**
@@ -726,73 +783,64 @@ export default class HandleGCR {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
 
-        const entities = await this.prepareEntities(txs)
-        const groups = this.partitionIndependentTxs(txs)
+        const assignedTxsUpdates = new Map<string, string[]>()
+
+        // filter out txs that don't mutate entities
+        const toFilter = new Set<TransactionContent["type"]>([
+            "web2Request",
+            "storage",
+            "escrow",
+        ])
+        const finalTxs = []
+
+        for (const tx of txs) {
+            if (toFilter.has(tx.content.type)) {
+                // add the tx to the assignedTxsUpdates map
+                const sender = normalizePubkey(
+                    tx.content.from_ed25519_address || tx.content.from,
+                )
+
+                if (sender) {
+                    const bucket = assignedTxsUpdates.get(sender) || []
+                    bucket.push(tx.hash)
+                    assignedTxsUpdates.set(sender, bucket)
+                }
+            } else {
+                finalTxs.push(tx)
+            }
+        }
 
         log.debug(
-            `[applyTransactions] Partitioned ${txs.length} txs into ${groups.length} independent groups`,
+            `[applyTransactions] Filtered ${txs.length} txs to ${finalTxs.length} txs`,
+        )
+
+        const entities = await this.prepareEntities(finalTxs)
+        const groups = this.partitionIndependentTxs(finalTxs)
+
+        log.debug(
+            `[applyTransactions] Partitioned ${finalTxs.length} txs into ${groups.length} independent groups`,
         )
 
         // Map from tx.hash to original index, used to restore side-effect
         // ordering across groups during merge.
         const txIndex = new Map<string, number>()
-        for (let i = 0; i < txs.length; i++) txIndex.set(txs[i].hash, i)
-
-        type IndexedSideEffect = {
-            txIndex: number
-            fn: () => Promise<void>
-        }
+        for (let i = 0; i < finalTxs.length; i++)
+            txIndex.set(finalTxs[i].hash, i)
 
         // Within a group, apply sequentially; across groups, apply in
         // parallel with bounded fan-out to protect the DB connection pool.
         // The ZK attestation handler opens its own queryRunner per tx.
-        const runGroup = async (group: Transaction[]) => {
-            const successful: string[] = []
-            const failed: string[] = []
-            const sideEffects: IndexedSideEffect[] = []
-            const assignedTxs = new Map<string, string[]>()
 
-            for (const tx of group) {
-                const applyResult = await HandleGCR.applyTransaction(
-                    entities,
-                    tx,
-                    isRollback,
-                    false,
-                )
-                if (!applyResult.success) {
-                    failed.push(tx.hash)
-                    continue
-                }
-
-                const idx = txIndex.get(tx.hash)!
-                for (const fn of applyResult.sideEffects) {
-                    sideEffects.push({ txIndex: idx, fn })
-                }
-
-                const sender = normalizePubkey(
-                    tx.content?.from_ed25519_address || tx.content.from,
-                )
-                if (sender && tx.hash) {
-                    let bucket = assignedTxs.get(sender)
-                    if (!bucket) {
-                        bucket = []
-                        assignedTxs.set(sender, bucket)
-                    }
-                    bucket.push(tx.hash)
-                }
-
-                successful.push(tx.hash)
-            }
-
-            return { successful, failed, sideEffects, assignedTxs }
-        }
-
-        // Tune against DB pool size; keep below pool size with safety margin.
         const CONCURRENCY = 8
-        const groupResults: Awaited<ReturnType<typeof runGroup>>[] = []
+        const groupResults: Awaited<ReturnType<typeof HandleGCR.runGroup>>[] =
+            []
         for (let i = 0; i < groups.length; i += CONCURRENCY) {
             const slice = groups.slice(i, i + CONCURRENCY)
-            const sliceResults = await Promise.all(slice.map(runGroup))
+            const sliceResults = await Promise.all(
+                slice.map(group =>
+                    HandleGCR.runGroup(group, entities, isRollback, txIndex),
+                ),
+            )
             groupResults.push(...sliceResults)
         }
 
@@ -801,7 +849,6 @@ export default class HandleGCR {
         const successfulSet = new Set<string>()
         const failedSet = new Set<string>()
         const allIndexedSideEffects: IndexedSideEffect[] = []
-        const assignedTxsUpdates = new Map<string, string[]>()
 
         for (const r of groupResults) {
             for (const h of r.successful) successfulSet.add(h)
@@ -825,7 +872,7 @@ export default class HandleGCR {
         // Preserve original tx order in returned arrays.
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
-        for (const tx of txs) {
+        for (const tx of finalTxs) {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
         }
@@ -842,7 +889,7 @@ export default class HandleGCR {
 
         const end = Date.now()
         log.debug(
-            `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${txs.length} txs across ${groups.length} groups`,
+            `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${txs.length} txs across ${groups.length} groups (${txs.length - finalTxs.length} non-state-mutating skipped)`,
         )
 
         return { successfulTxs, failedTxs }
