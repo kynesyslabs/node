@@ -65,7 +65,7 @@ Then create a `demos_peerlist.json` file. This should contain a JSON map of an a
 
 ```json
 {
-  "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:20002"
+  "0x680464e81ff8a088611d91eb97c40326dc3d8981bd29cf2721b47daa60f56274": "http://node3.demos.sh:60001"
 }
 ```
 
