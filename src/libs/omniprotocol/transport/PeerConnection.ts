@@ -570,21 +570,19 @@ export class PeerConnection extends EventEmitter {
         }
 
         const messageBuffer = MessageFramer.encodeMessage(header, payload)
-        return new Promise((resolve, reject) => {
-            socket.write(messageBuffer, (error: any) => {
+        return new Promise<void>(resolve => {
+            socket.write(messageBuffer, error => {
                 if (error) {
-                    log.error(
-                        `Error while sending response via [${
-                            socketId === this.socketId ? "primary" : "secondary"
-                        }] socket ID: ${socketId} `,
+                    log.warning(
+                        `[PeerConnection] Peer: ${this._peerIdentity}, ` +
+                            `response write failed on [${
+                                socketId === this.socketId
+                                    ? "primary"
+                                    : "secondary"
+                            }] socket ${socketId}: ${error.message}`,
                     )
-                    log.error(
-                        `[PeerConnection] Peer: ${this._peerIdentity}, write error: ${error}`,
-                    )
-                    reject(error)
-                } else {
-                    resolve()
                 }
+                resolve()
             })
         })
     }
@@ -718,11 +716,17 @@ export class PeerConnection extends EventEmitter {
             // Extract all complete messages
             let message = this.framer.extractMessage()
             while (message) {
-                this.handleMessage(message)
+                this.handleMessage(message).catch(error => {
+                    handleError(error, "NETWORK", {
+                        source: "OmniProtocol PeerConnection.handleMessage",
+                    })
+                })
                 message = this.framer.extractMessage()
             }
         } catch (error) {
-            handleError(error, "NETWORK", { source: "OmniProtocol PeerConnection.handleIncomingData" })
+            handleError(error, "NETWORK", {
+                source: "OmniProtocol PeerConnection.handleIncomingData",
+            })
             if (error instanceof InvalidAuthBlockFormatError) {
                 return
             }
