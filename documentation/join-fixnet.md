@@ -107,7 +107,7 @@ Finally, run the node script to start your node:
 ./fnode.sh
 ```
 
-Your node should start and join the network. You can confirm that by checking the [`/info` endpoint of the anchor node](http://node3.demos.sh:20002/info) or any other node on the network. It should take some time to sync existing blocks depending on the block height. After the blocks have synced, your node will be eligible to contribute to the consensus.
+Your node should start and join the network. You can confirm that by checking the [`/info` endpoint of the anchor node](http://node3.demos.sh:60001/info) or any other node on the network. It should take some time to sync existing blocks depending on the block height. After the blocks have synced, your node will be eligible to contribute to the consensus.
 
 ---
 
