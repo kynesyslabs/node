@@ -20,8 +20,8 @@ export class AbortConsensusError extends Error {
 
 // ANCHOR SecretaryManager
 export default class SecretaryManager {
-    private _greenlight_timeout = 30_000 // 15 seconds
-    private _set_validator_phase_timeout = 15_000 // 10 seconds
+    private _greenlight_timeout = 60_000 // 60 seconds
+    private _set_validator_phase_timeout = 30_000 // 30 seconds
 
     // A map of block numbers to SecretaryManager instances
     private static instances: Map<number, SecretaryManager> = new Map()

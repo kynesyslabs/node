@@ -889,8 +889,10 @@ export default class HandleGCR {
 
         const end = Date.now()
         log.debug(
-            `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${txs.length} txs across ${groups.length} groups (${txs.length - finalTxs.length} non-state-mutating skipped)`,
+            `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${finalTxs.length} txs across ${groups.length} groups (${txs.length - finalTxs.length} non-state-mutating skipped)`,
         )
+        log.debug(`[applyTransactions] Non-state-mutating skipped: ${txs.length - finalTxs.length}`)
+        log.debug(`[applyTransactions] Total txs: ${txs.length}`)
 
         return { successfulTxs, failedTxs }
     }
