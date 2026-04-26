@@ -32,12 +32,12 @@ export default async function mainLoop() {
         } catch (error) {
             log.only("Error in mainloop cycle:")
             console.error(error)
-            // Reset flags that may be stuck due to the failed cycle
-            await sleep(getSharedState.mainLoopSleepTime)
         } finally {
-            log.error("[MAIN LOOP] ✅ Terminated")
+            // Reset flags
+            getSharedState.inMainLoop = false
             getSharedState.inSyncLoop = false
             getSharedState.inPeerRecheckLoop = false
+            await sleep(getSharedState.mainLoopSleepTime)
         }
     }
 }
