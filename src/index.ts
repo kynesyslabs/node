@@ -787,6 +787,7 @@ async function main() {
         // ANCHOR Starting the main loop
         mainLoop()
             .catch((error: Error) => {
+                console.error(error)
                 log.error("[CORE] Error in main loop: " + error)
                 handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
             })
