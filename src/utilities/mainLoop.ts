@@ -38,8 +38,6 @@ export default async function mainLoop() {
             log.error("[MAIN LOOP] ✅ Terminated")
             getSharedState.inSyncLoop = false
             getSharedState.inPeerRecheckLoop = false
-            log.error("[MAIN LOOP] ❌ Terminated")
-            process.exit(1)
         }
     }
 }
