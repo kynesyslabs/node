@@ -65,6 +65,7 @@ export const ErrorSource = {
 
     // --- Node Calls ---
     GET_TXS_BY_HASHES: "getTxsByHashes",
+    MAIN_LOOP: "MAINLOOP",
 } as const
 
 export type ErrorSource = (typeof ErrorSource)[keyof typeof ErrorSource]

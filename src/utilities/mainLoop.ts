@@ -31,17 +31,15 @@ export default async function mainLoop() {
             await mainLoopCycle()
         } catch (error) {
             log.only("Error in mainloop cycle:")
-            const msg = error instanceof Error ? error.message : String(error)
-            log.error(`[MAIN LOOP] Cycle failed: ${msg}`)
-            if (error instanceof Error && error.stack) {
-                log.error(`[MAIN LOOP] Stack: ${error.stack}`)
-            }
-
             console.error(error)
             // Reset flags that may be stuck due to the failed cycle
+            await sleep(getSharedState.mainLoopSleepTime)
+        } finally {
+            log.error("[MAIN LOOP] ✅ Terminated")
             getSharedState.inSyncLoop = false
             getSharedState.inPeerRecheckLoop = false
-            await sleep(getSharedState.mainLoopSleepTime)
+            log.error("[MAIN LOOP] ❌ Terminated")
+            process.exit(1)
         }
     }
 }

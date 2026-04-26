@@ -785,7 +785,16 @@ async function main() {
         await fastSync([], "index.ts")
         getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
-        mainLoop() // Is an async function so running without waiting send that to the background
+        mainLoop()
+            .catch((error: Error) => {
+                log.error("[CORE] Error in main loop: " + error)
+                handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
+            })
+            .finally(() => {
+                log.error("[CORE] Main loop terminated, exiting for debug ... ")
+                process.exit(1)
+                log.info("[CORE] Main loop finished")
+            }) // Is an async function so running without waiting send that to the background
 
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
