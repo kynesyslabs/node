@@ -7,6 +7,7 @@ import {
     InferFromSignaturePayload,
 } from "@kynesyslabs/demosdk/abstraction"
 import {
+    APTOS,
     EVM,
     IBC,
     MULTIVERSX,
@@ -50,6 +51,8 @@ const chains: { [key: string]: typeof DefaultChain } = {
     near: NEAR,
     // @ts-expect-error - BTC module contains more fields than the DefaultChain type
     btc: BTC,
+    // @ts-expect-error - APTOS module contains more fields than the DefaultChain type
+    aptos: APTOS,
 }
 
 export default class IdentityManager {
@@ -211,7 +214,8 @@ export default class IdentityManager {
                 chainId === "ton" ||
                 chainId === "ibc" ||
                 chainId === "atom" ||
-                chainId === "near"
+                chainId === "near" ||
+                chainId === "aptos"
             ) {
                 messageVerified = await sdk.verifyMessage(
                     signedData,
