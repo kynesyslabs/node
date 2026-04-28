@@ -17,11 +17,6 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
-// Helper function to yield control back to the event loop
-function yieldToEventLoop(): Promise<void> {
-    return new Promise(resolve => setImmediate(resolve))
-}
-
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     // return await consensusRoutine()
@@ -50,7 +45,7 @@ async function mainLoopCycle() {
     )
     // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
     // await getSharedState.getUTCTime()
-    log.info(`[MAIN LOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
+    log.info(`[MAINLOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
 
     // Check if the main loop is paused
     if (getSharedState.mainLoopPaused) {
@@ -61,7 +56,7 @@ async function mainLoopCycle() {
     getSharedState.inMainLoop = true
 
     // Diagnostic logging
-    log.info("[MAIN LOOP] Logging current diagnostics", false)
+    log.info("[MAIN LOOP] Logging current diagnostics")
     // logCurrentDiagnostics()
     // await yieldToEventLoop()
 
@@ -70,12 +65,14 @@ async function mainLoopCycle() {
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // await peerRoutine()
+    log.info("[MAINLOOP]: checking offline peers")
     checkOfflinePeers()
     // await yieldToEventLoop()
 
     // await peerGossip()
     // await yieldToEventLoop()
 
+    log.info("[MAINLOOP]: Running Sync routine")
     await fastSync([], "mainloop") // REVIEW Test here
     // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
@@ -134,10 +131,8 @@ async function mainLoopCycle() {
         //         break
         //     }
         // }
-        await yieldToEventLoop()
         // ANCHOR Calling the consensus routine if is time for it
-        await consensusRoutine()
-        await yieldToEventLoop()
+        consensusRoutine()
     } else if (!getSharedState.syncStatus) {
         // ? This is a bit redundant, isn't it?
         log.warning(
@@ -145,6 +140,8 @@ async function mainLoopCycle() {
             true,
         )
     }
+
+    // greenLight21167281
 }
 
 // ANCHOR Unified peer routine

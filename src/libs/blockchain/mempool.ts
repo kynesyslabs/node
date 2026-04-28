@@ -201,11 +201,6 @@ export default class Mempool {
             tx => !existingHashes[tx.hash],
         )
 
-        // for test only
-        // duplicate transactions to test the orIgnore() behavior
-        const duplicateTransactions = newTransactions.slice(0, 10)
-        newTransactions.push(...duplicateTransactions)
-
         if (newTransactions.length > 0) {
             try {
                 const insertResult = await this.repo

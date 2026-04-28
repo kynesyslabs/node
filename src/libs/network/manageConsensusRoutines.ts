@@ -263,7 +263,7 @@ export default async function manageConsensusRoutines(
                     // }, 500)
                     // INFO: Logs parts used to create the current CVSA
                     await getCommonValidatorSeed(null, (message: string) => {
-                        log.only(message)
+                        log.error(message)
                     })
 
                     return {

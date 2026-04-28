@@ -764,6 +764,7 @@ export default class SecretaryManager {
             return await this.secretary.longCall(request, true, {
                 retries,
                 sleepTime: 250,
+                allowedCodes: [400],
             })
         }
 
@@ -834,7 +835,14 @@ export default class SecretaryManager {
         }
 
         // INFO: Send the request and handle the response non-blocking
-        sendStatus().then(handleSendStatusRes)
+        sendStatus()
+            .then(handleSendStatusRes)
+            .catch((error: Error) => {
+                log.error(
+                    `Error sending our validator phase to the secretary: ${error}`,
+                )
+                console.error(error)
+            })
 
         try {
             // INFO: Wait for the green light
