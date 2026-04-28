@@ -914,9 +914,6 @@ export default class SecretaryManager {
         if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
             log.debug("deleting the instance")
             SecretaryManager.instances.delete(this.shard.blockRef)
-        } else {
-            log.error("this instance is not doing that thing")
-            process.exit(1)
         }
 
         // SecretaryManager.instance = null
