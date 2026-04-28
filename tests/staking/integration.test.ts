@@ -42,6 +42,12 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: { getGCRValidatorStatus: jest.fn() },
 }))
 
+// sharedState pulls in the whole framework — substitute a minimal stand-in.
+jest.mock("@/utilities/sharedState", () => ({
+    __esModule: true,
+    getSharedState: { networkParameters: null },
+}))
+
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {
@@ -140,6 +146,46 @@ function exitTx(hash = "0xhash_exit") {
     } as any
 }
 
+/**
+ * Mirrors what `SDK GCRGeneration.generate()` does for staking txs —
+ * attaches the `validatorStake` edit before signing. Tests bypass the
+ * SDK so we replay this step inline.
+ */
+function attachStakingEdit(tx: any) {
+    const data = tx.content?.data
+    const payload = Array.isArray(data) ? data[1] : null
+    if (tx.content.type === "validatorStake") {
+        tx.content.gcr_edits.push({
+            type: "validatorStake",
+            isRollback: false,
+            account: tx.content.from_ed25519_address,
+            operation: "stake",
+            amount: payload?.amount ?? "0",
+            connectionUrl: payload?.connectionUrl ?? "",
+            txhash: tx.hash,
+        })
+    } else if (tx.content.type === "validatorUnstake") {
+        tx.content.gcr_edits.push({
+            type: "validatorStake",
+            isRollback: false,
+            account: tx.content.from_ed25519_address,
+            operation: "unstake",
+            amount: "0",
+            txhash: tx.hash,
+        })
+    } else if (tx.content.type === "validatorExit") {
+        tx.content.gcr_edits.push({
+            type: "validatorStake",
+            isRollback: false,
+            account: tx.content.from_ed25519_address,
+            operation: "exit",
+            amount: "0",
+            txhash: tx.hash,
+        })
+    }
+    return tx
+}
+
 // ---------- scenario ----------
 
 describe("staking integration: tx -> gcr_edits -> Validators row", () => {
@@ -163,7 +209,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         return repo.rows.get(SENDER)
     }
 
-    it("entrance: handleStakingTx attaches a stake edit that creates an ACTIVE row", async () => {
+    it("entrance: validation passes + edit (synthesized SDK-side) creates an ACTIVE row", async () => {
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
@@ -171,6 +217,9 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
         const handled = await handleStakingTx(tx)
         expect(handled.success).toBe(true)
+        // Edit is the SDK's responsibility (GCRGeneration.generate); we
+        // simulate it here.
+        attachStakingEdit(tx)
         expect(tx.content.gcr_edits).toHaveLength(1)
         expect(tx.content.gcr_edits[0]).toMatchObject({
             type: "validatorStake",
@@ -203,6 +252,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         // 1. Initial stake at block 100.
         const t1 = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE, "0xtx1")
         await handleStakingTx(t1)
+        attachStakingEdit(t1)
         let row = await apply(t1, 100)
         expect(row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
         expect(row?.staked_amount).toBe(DEFAULT_MIN_VALIDATOR_STAKE)
@@ -215,6 +265,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         } as never)
         const t2 = stakeTx("500", "0xtx2")
         await handleStakingTx(t2)
+        attachStakingEdit(t2)
         row = await apply(t2, 200)
         expect(row?.staked_amount).toBe(
             (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) + 500n).toString(),
@@ -228,6 +279,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         } as never)
         const t3 = unstakeTx("0xtx3")
         await handleStakingTx(t3)
+        attachStakingEdit(t3)
         row = await apply(t3, 300)
         expect(row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
         expect(row?.unstake_requested_at).toBe(300)
@@ -255,29 +307,31 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         const t5 = exitTx("0xtx5")
         const handled5 = await handleStakingTx(t5)
         expect(handled5.success).toBe(true)
-        expect(t5.content.gcr_edits).toHaveLength(1)
+        attachStakingEdit(t5)
         row = await apply(t5, unlockBlock)
         expect(row?.status).toBe(VALIDATOR_STATUS_EXITED)
         expect(row?.staked_amount).toBe("0")
     })
 
-    it("rejected validatorStake does not attach a gcr_edit", async () => {
+    it("rejected validatorStake — handler returns failure (edit synthesis is the SDK's responsibility, but tx with no validation pass shouldn't be broadcast)", async () => {
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const tx = stakeTx("1") // below minimum
         const handled = await handleStakingTx(tx)
         expect(handled.success).toBe(false)
-        expect(tx.content.gcr_edits).toHaveLength(0)
     })
 
-    it("handleStakingTx is idempotent — re-running does not duplicate the edit", async () => {
+    it("handler is pure validation — running it twice doesn't mutate tx", async () => {
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
-        await handleStakingTx(tx)
-        await handleStakingTx(tx)
-        expect(tx.content.gcr_edits).toHaveLength(1)
+        const r1 = await handleStakingTx(tx)
+        const r2 = await handleStakingTx(tx)
+        expect(r1.success).toBe(true)
+        expect(r2.success).toBe(true)
+        // Handler is no-mutation; gcr_edits stays empty.
+        expect(tx.content.gcr_edits).toHaveLength(0)
     })
 })

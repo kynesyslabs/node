@@ -84,6 +84,23 @@ testing/devnet/postgres-data/
 testing/runs/
 local_tests/
 
+# ---- Local devnet identities (private keys / mnemonics) ----
+.devnet/
+.manual-test-mnemonic
+
+# ---- Vendored SDK (linked via file:./sdks_ref) ----
+# sdks_ref is a separate @kynesyslabs/demosdk git repository cloned locally.
+# Devs must clone it into ./sdks_ref themselves; see UPGRADABLE_NETWORK_README.md.
+sdks_ref/
+
+# ---- Sibling apps that landed in this tree ----
+oracle-app/
+pack-app/
+
+# ---- Local upgradable-network manual test artifacts ----
+scripts/check_fee_test.ts
+e2e-runs/
+
 # ---- Documentation Artifacts ----
 documentation/internal-docs/
 documentation/*.html

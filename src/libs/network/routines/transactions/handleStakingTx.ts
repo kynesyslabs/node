@@ -1,6 +1,5 @@
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagement"
-import type { GCREditValidatorStake } from "@/features/staking/types"
 import log from "src/utilities/logger"
 
 interface StakingTxResult {
@@ -9,78 +8,52 @@ interface StakingTxResult {
 }
 
 /**
- * Handles validatorStake / validatorUnstake / validatorExit transactions.
+ * Phase 0 staking dispatcher — **policy-only validation**.
  *
- * Performs policy-level validation and synthesizes the GCREditValidatorStake
- * edit that HandleGCR will apply at block confirmation.
+ * Returns valid/invalid + a message. Does NOT mutate `tx.content.gcr_edits`.
+ * Edits are derived deterministically from tx content by
+ * `GCRGeneration.generate()` (shared between SDK clients and server) so that
+ * the server-side hash comparison in `handleValidateTransaction` agrees
+ * with the client's signature. Persistence happens at block-confirmation
+ * via `GCRValidatorStakeRoutines.apply()` on every node.
  *
- * **Why we synthesize the edit here**: SDK Batch 1 has not yet shipped, so
- * clients cannot build a `GCREditValidatorStake` themselves. Until it does,
- * the node derives the edit from the tx payload+sender. When the SDK starts
- * emitting client-built edits, this module should prefer the client-supplied
- * edit and fall back to synthesis only if absent — or assert the two match.
+ * Called from `confirmTransaction` (RPC entry, before signing) so bad
+ * tx is rejected before validityData is signed and broadcast.
  */
 export async function handleStakingTx(
     tx: Transaction,
 ): Promise<StakingTxResult> {
-    const type = tx.content.type as string
+    const type = tx.content.type
     const sender = requireSender(tx)
     if (!sender) {
         return { success: false, message: "Missing sender" }
     }
 
+    const nodeTx = tx as unknown as Parameters<
+        typeof ValidatorsManagement.manageValidatorStakeTx
+    >[0]
+
     switch (type) {
         case "validatorStake": {
-            const r = await ValidatorsManagement.manageValidatorStakeTx(
-                tx as unknown as Parameters<
-                    typeof ValidatorsManagement.manageValidatorStakeTx
-                >[0],
-            )
-            log.debug(
-                `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
-            )
-            if (!r.valid) return { success: false, message: r.message }
-
             const payload = extractStakePayload(tx)
             if (!payload) {
                 return { success: false, message: "Missing stake payload" }
             }
-            attachEdit(
-                tx,
-                ValidatorsManagement.buildStakeEdit(
-                    sender,
-                    payload.amount,
-                    payload.connectionUrl,
-                    tx.hash ?? "",
-                ),
+            const r = await ValidatorsManagement.manageValidatorStakeTx(nodeTx)
+            log.debug(
+                `[handleStakingTx] validatorStake ${tx.hash ?? ""} → ${r.valid}: ${r.message}`,
             )
-            return { success: true, message: r.message }
+            return { success: r.valid, message: r.message }
         }
         case "validatorUnstake": {
             const r = await ValidatorsManagement.manageValidatorUnstakeTx(
-                tx as unknown as Parameters<
-                    typeof ValidatorsManagement.manageValidatorUnstakeTx
-                >[0],
+                nodeTx,
             )
-            if (!r.valid) return { success: false, message: r.message }
-            attachEdit(
-                tx,
-                ValidatorsManagement.buildUnstakeEdit(sender, tx.hash ?? ""),
-            )
-            return { success: true, message: r.message }
+            return { success: r.valid, message: r.message }
         }
         case "validatorExit": {
-            const r = await ValidatorsManagement.manageValidatorExitTx(
-                tx as unknown as Parameters<
-                    typeof ValidatorsManagement.manageValidatorExitTx
-                >[0],
-            )
-            if (!r.valid) return { success: false, message: r.message }
-            attachEdit(
-                tx,
-                ValidatorsManagement.buildExitEdit(sender, tx.hash ?? ""),
-            )
-            return { success: true, message: r.message }
+            const r = await ValidatorsManagement.manageValidatorExitTx(nodeTx)
+            return { success: r.valid, message: r.message }
         }
         default:
             return {
@@ -110,22 +83,4 @@ function requireSender(tx: Transaction): string | null {
     const ed = tx.content?.from_ed25519_address
     if (typeof ed === "string" && ed.length > 0) return ed
     return null
-}
-
-function attachEdit(tx: Transaction, edit: GCREditValidatorStake): void {
-    // Push onto the existing gcr_edits array (preserve any client-supplied
-    // edits the SDK may already have put there once Batch 1 ships). Dedup on
-    // (type, operation, account) so re-runs through the dispatcher are idempotent.
-    const edits = (tx.content.gcr_edits ??
-        []) as unknown as GCREditValidatorStake[]
-    const duplicate = edits.some(
-        e =>
-            e?.type === "validatorStake" &&
-            e?.operation === edit.operation &&
-            e?.account === edit.account,
-    )
-    if (!duplicate) {
-        edits.push(edit)
-    }
-    tx.content.gcr_edits = edits as unknown as typeof tx.content.gcr_edits
 }

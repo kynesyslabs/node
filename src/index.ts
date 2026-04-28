@@ -32,6 +32,7 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
@@ -362,6 +363,12 @@ async function preMainLoop() {
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
+
+    // ANCHOR Governance: fold the latest `active` upgrades over genesis
+    // defaults into `sharedState.networkParameters`. Called once here; the
+    // post-block hook in chainBlocks.insertBlock refreshes it after each
+    // new activation.
+    await loadNetworkParameters()
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(

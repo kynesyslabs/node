@@ -134,12 +134,32 @@ export async function createOperation(
     operation.params = transaction.content.data
     operation.status = true // TODO Get it from the content itself somehow
 
-    // TODO Fee calculation logic here
-    operation.fees.network_fee = 0
-    operation.fees.rpc_fee = 0
+    const { networkFee, rpcFee } = resolveDynamicFees()
+    operation.fees.network_fee = networkFee
+    operation.fees.rpc_fee = rpcFee
     operation.fees.additional_fee = 0
 
     return operation
+}
+
+// Reads governance-driven fees from sharedState.networkParameters. Falls back
+// to 0 / legacy flat sharedState.rpcFee if the loader hasn't run yet.
+export function resolveDynamicFees(): {
+    networkFee: number
+    rpcFee: number
+} {
+    const params = (
+        getSharedState as unknown as {
+            networkParameters?: { networkFee?: number; rpcFee?: number }
+        }
+    ).networkParameters
+    const networkFee =
+        typeof params?.networkFee === "number" ? params.networkFee : 0
+    const rpcFee =
+        typeof params?.rpcFee === "number"
+            ? params.rpcFee
+            : getSharedState.rpcFee ?? 0
+    return { networkFee, rpcFee }
 }
 
 async function createTransactionProxy(data: any): Promise<Transaction> {

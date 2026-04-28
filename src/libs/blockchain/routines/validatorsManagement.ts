@@ -9,6 +9,7 @@ import Chain from "src/libs/blockchain/chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import log from "src/utilities/logger"
+import { getSharedState } from "src/utilities/sharedState"
 import type {
     ValidatorStakePayload,
     GCREditValidatorStake,
@@ -24,10 +25,23 @@ import {
 /**
  * Current minimum stake required to register as a validator.
  *
- * Reads `getSharedState.networkParameters.minValidatorStake` once Phase 1
- * (governance) lands; for now returns the Phase-0 default.
+ * Prefers the governance-driven value in `sharedState.networkParameters`;
+ * falls back to the Phase-0 default when governance has not loaded yet
+ * (e.g. during bootstrap before `loadNetworkParameters()` completes).
  */
 export function getMinValidatorStake(): bigint {
+    const governed = (
+        getSharedState.networkParameters as {
+            minValidatorStake?: string
+        } | null
+    )?.minValidatorStake
+    if (typeof governed === "string" && governed.length > 0) {
+        try {
+            return BigInt(governed)
+        } catch {
+            /* fall through */
+        }
+    }
     return BigInt(DEFAULT_MIN_VALIDATOR_STAKE)
 }
 

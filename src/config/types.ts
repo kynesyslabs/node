@@ -46,6 +46,8 @@ export interface CoreConfig {
     mcpEnabled: boolean
     restore: boolean
     rpcFee: number
+    networkFee: number
+    minValidatorStake: string
 }
 
 // --- TLSNotary ---

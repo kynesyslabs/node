@@ -29,6 +29,14 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: { getGCRValidatorStatus: jest.fn() },
 }))
 
+// sharedState pulls in the whole framework (Chain → Peer → SDK/utils);
+// substitute a minimal stand-in so validatorsManagement's
+// getMinValidatorStake() has something to read.
+jest.mock("@/utilities/sharedState", () => ({
+    __esModule: true,
+    getSharedState: { networkParameters: null },
+}))
+
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {

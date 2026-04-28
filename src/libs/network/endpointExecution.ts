@@ -297,21 +297,18 @@ export async function handleExecuteTransaction(
             break
         }
 
-        // Phase 0: staking lifecycle. Routed via tx.content.type; validation
-        // is delegated to ValidatorsManagement, and the GCR edit embedded in
-        // the tx mutates the Validators table on confirmation.
-        case "validatorStake" as unknown as typeof tx.content.type:
-        case "validatorUnstake" as unknown as typeof tx.content.type:
-        case "validatorExit" as unknown as typeof tx.content.type: {
-            const { handleStakingTx } = await import(
-                "./routines/transactions/handleStakingTx"
-            )
-            const stakingResult = await handleStakingTx(tx)
-            result.success = stakingResult.success
-            result.response = { message: stakingResult.message }
-            if (!stakingResult.success) {
-                result.extra = { error: stakingResult.message }
-            }
+        // Staking + governance type-specific validation + edit attachment
+        // moved into confirmTransaction() (pre-sign) so the synthesized
+        // gcr_edit becomes part of the signed validityData and survives
+        // through DTR relay + consensus + block sync. By the time we get
+        // here, the dispatcher has already run; nothing extra to do for
+        // these tx types at execute/broadcast time.
+        case "validatorStake":
+        case "validatorUnstake":
+        case "validatorExit":
+        case "networkUpgrade":
+        case "networkUpgradeVote": {
+            // No-op — dispatcher already ran in confirmTransaction.
             break
         }
     }

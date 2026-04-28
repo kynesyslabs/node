@@ -577,6 +577,13 @@ export class DTRManager {
                 }
             }
 
+            // Note: staking/governance type dispatcher runs in
+            // confirmTransaction() before validityData is signed, so by
+            // the time we reach this point on the relay receiver, the tx
+            // already carries any synthesized gcr_edit and signature
+            // verification above attests to it. No additional dispatcher
+            // call is needed here.
+
             // Add validated transaction to mempool
             const { confirmationBlock, error } = await Mempool.addTransaction(
                 {

@@ -9,6 +9,22 @@ import type { NodeCallHandler } from "./types"
  * exist in gcr.ts but were node-internal; these wrappers expose them so the
  * SDK (and wallets/explorers) can read validator state.
  */
+/**
+ * Look up a validator by address, tolerating the `0x` prefix either way.
+ * Addresses from the SDK/client may come with or without the prefix; the
+ * Validators table stores whatever was in `tx.content.from` (which SDK
+ * sign() normalizes to 0x-prefixed). Try both so the handler is client-
+ * format-agnostic.
+ */
+async function lookupValidator(address: string) {
+    const direct = await GCR.getGCRValidatorStatus(address)
+    if (direct) return direct
+    const flipped = address.startsWith("0x")
+        ? address.slice(2)
+        : "0x" + address
+    return GCR.getGCRValidatorStatus(flipped)
+}
+
 export const validatorHandlers: Record<string, NodeCallHandler> = {
     getValidatorInfo: async (data, response) => {
         const address = extractAddress(data)
@@ -17,7 +33,7 @@ export const validatorHandlers: Record<string, NodeCallHandler> = {
             response.response = { error: "address required" }
             return response
         }
-        const validator = await GCR.getGCRValidatorStatus(address)
+        const validator = await lookupValidator(address)
         response.response = validator ? serializeValidator(validator) : null
         return response
     },
@@ -46,7 +62,7 @@ export const validatorHandlers: Record<string, NodeCallHandler> = {
             response.response = { error: "address required" }
             return response
         }
-        const validator = await GCR.getGCRValidatorStatus(address)
+        const validator = await lookupValidator(address)
         if (!validator) {
             response.response = "0"
             return response

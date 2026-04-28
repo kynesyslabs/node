@@ -210,6 +210,17 @@ export default class SharedState {
 
     // SECTION Configuration
     rpcFee: number = Config.getInstance().core.rpcFeePercent
+
+    /**
+     * Active network parameters. Loaded once at startup by
+     * `loadNetworkParameters()` — either from the latest `active` NetworkUpgrade
+     * in the DB, or from GENESIS_NETWORK_PARAMETERS when no upgrade has
+     * activated. Re-read at each post-block activation hook.
+     *
+     * Typed loosely here to avoid a circular import between sharedState and
+     * features/networkUpgrade/types.ts.
+     */
+    networkParameters: unknown = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile

@@ -16,10 +16,10 @@ export const VALIDATOR_STATUS_ACTIVE = "2"
 export const VALIDATOR_STATUS_UNSTAKING = "3" // unstake requested, still active
 export const VALIDATOR_STATUS_EXITED = "0"
 
-/** Default minimum stake (bigint-as-string, 10M DEM with 18 decimals).
- *  Matches the legacy hardcoded `minToStake` in validatorsManagement.ts.
- *  Phase 1 governance will replace this with a dynamic value loaded from the
- *  NetworkParameters table.
+/** Default minimum stake. Bigint-as-string, raw int64 value (no sub-unit
+ *  scaling — Demos balances are stored as plain integers).
+ *  Constrained by `GCRMain.balance` being Postgres int64 (max ~9.2×10^18);
+ *  the legacy `minToStake = 10^25` value was unreachable on real state.
  */
 export const DEFAULT_MIN_VALIDATOR_STAKE =
-    "10000000000000000000000000"
+    "1000000000000000000"

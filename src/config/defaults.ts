@@ -33,6 +33,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         mainLoopSleepTime: 1000,
         rpcFeePercent: 10,
         rpcFee: 10,
+        networkFee: 10,
+        minValidatorStake: "1000000000000000000",
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
         exposedUrl: "",  // calculated from serverPort if empty

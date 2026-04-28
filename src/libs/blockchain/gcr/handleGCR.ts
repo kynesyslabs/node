@@ -722,13 +722,39 @@ export default class HandleGCR {
                 break
             // Phase 0 staking: mutates the Validators table outside of the
             // batched GCRMain save path.
-            case "validatorStake" as unknown as typeof editOperation.type:
+            case "validatorStake":
                 if (simulate) {
                     // Validation already ran during handleStakingTx; we don't
                     // mutate state during mempool simulation.
                     result = { success: true, message: "Simulated" }
                 } else {
                     result = await GCRValidatorStakeRoutines.apply(editOperation)
+                }
+                break
+            // Phase 1 governance: persists proposal/vote rows on every
+            // node at block-confirmation time. Idempotent.
+            case "networkUpgrade":
+                if (simulate) {
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    const { default: GCRNetworkUpgradeRoutines } = await import(
+                        "./gcr_routines/GCRNetworkUpgradeRoutines"
+                    )
+                    result = await GCRNetworkUpgradeRoutines.applyProposal(
+                        editOperation,
+                    )
+                }
+                break
+            case "networkUpgradeVote":
+                if (simulate) {
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    const { default: GCRNetworkUpgradeRoutines } = await import(
+                        "./gcr_routines/GCRNetworkUpgradeRoutines"
+                    )
+                    result = await GCRNetworkUpgradeRoutines.applyVote(
+                        editOperation,
+                    )
                 }
                 break
             default:

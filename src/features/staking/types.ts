@@ -1,37 +1,16 @@
-// Phase-0 staking types.
-//
-// Scoped to the node for now; the plan (`planning/adversarial_review/
-// staking_research/plan/plan.md`) migrates these into @kynesyslabs/demosdk in
-// SDK Batch 1. When that ships, re-export from the SDK path and delete the
-// local definitions here.
+// Re-exports from the SDK. Phase 0 types were originally authored here
+// before SDK Batch 1 landed; they're now owned by @kynesyslabs/demosdk and
+// this module is a thin surface to keep existing node-side imports stable.
 
-/** Payload for a `validatorStake` tx. */
-export interface ValidatorStakePayload {
-    amount: string // bigint-as-string
-    connectionUrl: string
-}
+export type {
+    ValidatorStakePayload,
+    ValidatorUnstakePayload,
+    ValidatorExitPayload,
+} from "@kynesyslabs/demosdk/types"
 
-/** Payload for a `validatorUnstake` tx. Sender is implicit. */
-export type ValidatorUnstakePayload = Record<string, never>
+export type { GCREditValidatorStake } from "@kynesyslabs/demosdk/types"
 
-/** Payload for a `validatorExit` tx. Sender is implicit. */
-export type ValidatorExitPayload = Record<string, never>
-
-/**
- * GCR edit emitted by validator-staking transactions.
- * Applied by GCRValidatorStakeRoutines against the Validators table.
- */
-export interface GCREditValidatorStake {
-    type: "validatorStake"
-    isRollback: boolean
-    account: string // validator ed25519 pubkey hex
-    operation: "stake" | "unstake" | "exit"
-    amount: string // bigint-as-string (ignored for unstake/exit)
-    connectionUrl?: string // only meaningful for the initial stake
-    txhash: string
-}
-
-/** The string literal tx-type values for Phase 0 staking. */
+/** String-literal tx-type values for Phase 0 staking. */
 export type StakingTxType =
     | "validatorStake"
     | "validatorUnstake"
