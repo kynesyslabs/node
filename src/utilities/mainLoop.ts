@@ -140,8 +140,6 @@ async function mainLoopCycle() {
             true,
         )
     }
-
-    // greenLight21167281
 }
 
 // ANCHOR Unified peer routine
