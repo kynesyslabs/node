@@ -52,6 +52,8 @@ const latestBlock = () =>
 const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
+const FAST_SYNC_TIMEOUT_MS = 30_000
+
 /**
  * @deprecated
  * Get the highest block number and peer from the network. If we're synced
@@ -850,7 +852,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        if (getSharedState.isShuttingDown) return false
+        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -862,7 +864,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
-            if (getSharedState.isShuttingDown) return false
+            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )
@@ -884,12 +886,30 @@ export async function fastSync(
     }
 
     getSharedState.inSyncLoop = true
+    getSharedState.fastSyncAborted = false
     try {
-        const synced = await fastSyncRoutine(peers)
+        let synced: boolean
+        if (getSharedState.fastSyncCount > 0) {
+            const result = await Promise.race([
+                fastSyncRoutine(peers).then((v) => ({ kind: "done" as const, value: v })),
+                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({ kind: "timeout" as const, value: false })),
+            ])
+
+            if (result.kind === "timeout") {
+                getSharedState.fastSyncAborted = true
+                log.warn("[fastSync] Timed out after 30s, aborting")
+                return false
+            }
+
+            synced = result.value
+        } else {
+            synced = await fastSyncRoutine(peers)
+        }
+
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
         log.debug("[fastSync] Sync status: " + synced)
         getSharedState.syncStatus = synced
-        await BroadcastManager.broadcastOurSyncData()
+        BroadcastManager.broadcastOurSyncData()
 
         log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")
         const lastBlockNumber = await Chain.getLastBlockNumber()
@@ -902,6 +922,7 @@ export async function fastSync(
 
         return true
     } finally {
+        getSharedState.fastSyncAborted = false
         getSharedState.inSyncLoop = false
         log.debug("[fastSync] Sync loop ended")
     }

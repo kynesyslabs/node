@@ -17,7 +17,6 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 
-
 /* INFO
 # Semaphore system
 
@@ -233,9 +232,19 @@ export async function consensusRoutine(): Promise<void> {
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
         ) {
-            log.info(
+            // INFO: If we're past merge mempools phase
+            log.warn(
+                "[consensusRoutine] Aborted consensus routine at phase: " +
+                    manager.ourValidatorPhase.currentPhase,
+            )
+            if (manager.ourValidatorPhase.currentPhase <= 3) {
+                return
+            }
+
+            log.warn(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
+
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
@@ -368,9 +377,7 @@ async function mergeAndOrderMempools(
             : new Set<string>()
 
     const existingHashes = preExisting.union(newlyExisting)
-    const finalMempool = postMempool.filter(
-        tx => !existingHashes.has(tx.hash),
-    )
+    const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
@@ -624,6 +631,11 @@ async function updateValidatorPhase(
             2,
         )}`,
     )
+
+    if (res === ("abortConsensus" as any)) {
+        log.error("[consensusRoutine] Abort consensus routine")
+        throw new AbortConsensusError("500 error received from secretary")
+    }
 
     return res
 }

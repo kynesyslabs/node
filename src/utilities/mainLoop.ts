@@ -67,13 +67,10 @@ async function mainLoopCycle() {
     // await peerRoutine()
     log.info("[MAINLOOP]: checking offline peers")
     checkOfflinePeers()
-    // await yieldToEventLoop()
-
     // await peerGossip()
-    // await yieldToEventLoop()
 
     log.info("[MAINLOOP]: Running Sync routine")
-    await fastSync([], "mainloop") // REVIEW Test here
+    fastSync([], "mainloop") // REVIEW Test here
     // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
 

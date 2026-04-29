@@ -44,7 +44,7 @@ export default async function manageConsensusRoutines(
     log.debug("Sender: " + peer.connection.string)
     log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
-    let response = _.cloneDeep(emptyResponse)
+    const response = _.cloneDeep(emptyResponse)
 
     /* REVIEW
     We allow incoming requests when we are within the consensus time window.

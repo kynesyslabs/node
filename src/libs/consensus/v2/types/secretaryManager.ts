@@ -226,7 +226,7 @@ export default class SecretaryManager {
                 }
 
                 if (error instanceof AbortError) {
-                    log.debug(
+                    log.warn(
                         "[SECRETARY ROUTINE] AbortError for SET_WAIT_STATUS caught, exiting the secretary routine",
                     )
 
@@ -783,7 +783,7 @@ export default class SecretaryManager {
                 return null
             }
 
-            if (res.result === 500 || res.result === 400) {
+            if ([400, 500].includes(res.result)) {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
                 )
@@ -794,12 +794,9 @@ export default class SecretaryManager {
                 // lower than the secretary's block reference
                 // await this.handleSecretaryGoneOffline()
                 // await sendStatus()
-            }
 
-            if (res.result === 401) {
-                log.debug("received a 401")
-                log.debug(JSON.stringify(res))
-                process.exit(1)
+                // INFO: EXIT CONSENSUS ROUTINE
+                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
             }
 
             log.debug(
@@ -817,8 +814,8 @@ export default class SecretaryManager {
             }
 
             // INFO: Extract the greenlight status and resolve the waiter
-            const greenlight = res.extra.greenlight
-            const timestamp = res.extra.timestamp
+            const greenlight = Boolean(res.extra.greenlight) || false
+            const timestamp = Number(res.extra.timestamp) || null
             // const blockRef = res.extra.blockRef
 
             if (greenlight) {
@@ -835,16 +832,16 @@ export default class SecretaryManager {
         }
 
         // INFO: Send the request and handle the response non-blocking
-        sendStatus()
-            .then(handleSendStatusRes)
-            .catch((error: Error) => {
-                log.error(
-                    `Error sending our validator phase to the secretary: ${error}`,
-                )
-                console.error(error)
-            })
 
         try {
+            sendStatus()
+                .then(handleSendStatusRes)
+                .catch((error: Error) => {
+                    log.error(
+                        `Error sending our validator phase to the secretary: ${error}`,
+                    )
+                    console.error(error)
+                })
             // INFO: Wait for the green light
             log.debug("[SEND OUR VALIDATOR PHASE] Waiting for the green light")
             const greenlightRes = await greenlight
@@ -910,6 +907,8 @@ export default class SecretaryManager {
 
         log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
+
+        Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
 
         if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
             log.debug("deleting the instance")
