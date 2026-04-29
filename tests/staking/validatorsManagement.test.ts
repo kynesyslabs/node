@@ -96,11 +96,11 @@ function exitTx() {
 describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     beforeEach(() => {
         jest.clearAllMocks()
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(100 as never)
+        jest.mocked(Chain.getLastBlockNumber).mockResolvedValue(100 as never)
     })
 
     it("accepts a first-time stake at the minimum", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
@@ -110,7 +110,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("rejects a first-time stake below the minimum", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
@@ -121,7 +121,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("rejects a first-time stake missing connectionUrl", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
@@ -132,7 +132,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("rejects a negative or zero amount", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(stakeTx("0"))
@@ -141,7 +141,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("rejects an unparseable amount", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
@@ -152,7 +152,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("allows a top-up on an already active validator below the minimum amount", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
             staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
@@ -162,7 +162,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("allows a top-up on an unstaking validator (top-up does not cancel unstake)", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
@@ -174,7 +174,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     })
 
     it("rejects a stake coming from an exited validator", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_EXITED,
         } as never)
@@ -182,7 +182,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
         )
         expect(r.valid).toBe(false)
-        expect(r.message).toContain("exited")
+        expect(r.message).toContain("not eligible")
     })
 
     it("rejects when sender is missing", async () => {
@@ -198,11 +198,11 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
 describe("ValidatorsManagement.manageValidatorUnstakeTx", () => {
     beforeEach(() => {
         jest.clearAllMocks()
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(100 as never)
+        jest.mocked(Chain.getLastBlockNumber).mockResolvedValue(100 as never)
     })
 
     it("accepts an unstake from an active validator with no pending unstake", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
             unstake_requested_at: null,
@@ -214,7 +214,7 @@ describe("ValidatorsManagement.manageValidatorUnstakeTx", () => {
     })
 
     it("rejects an unstake from a non-validator", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorUnstakeTx(
@@ -225,7 +225,7 @@ describe("ValidatorsManagement.manageValidatorUnstakeTx", () => {
     })
 
     it("rejects an unstake when status is not ACTIVE", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             unstake_requested_at: 50,
@@ -238,7 +238,7 @@ describe("ValidatorsManagement.manageValidatorUnstakeTx", () => {
     })
 
     it("rejects a duplicate unstake request", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
             unstake_requested_at: 50,
@@ -257,24 +257,24 @@ describe("ValidatorsManagement.manageValidatorExitTx", () => {
     })
 
     it("rejects an exit without a prior unstake request", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
             unstake_available_at: null,
         } as never)
         const r = await ValidatorsManagement.manageValidatorExitTx(exitTx())
         expect(r.valid).toBe(false)
-        expect(r.message).toContain("validatorUnstake first")
+        expect(r.message).toMatch(/unstaking|validatorUnstake/i)
     })
 
     it("rejects an exit before the lock has elapsed", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             unstake_requested_at: 10,
             unstake_available_at: 10 + UNSTAKE_LOCK_BLOCKS,
         } as never)
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(500 as never)
+        jest.mocked(Chain.getLastBlockNumber).mockResolvedValue(500 as never)
         const r = await ValidatorsManagement.manageValidatorExitTx(exitTx())
         expect(r.valid).toBe(false)
         expect(r.message).toContain("Lock not elapsed")
@@ -282,13 +282,13 @@ describe("ValidatorsManagement.manageValidatorExitTx", () => {
 
     it("accepts an exit exactly at unstake_available_at", async () => {
         const availableAt = 10 + UNSTAKE_LOCK_BLOCKS
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_UNSTAKING,
             unstake_requested_at: 10,
             unstake_available_at: availableAt,
         } as never)
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
+        jest.mocked(Chain.getLastBlockNumber).mockResolvedValue(
             availableAt as never,
         )
         const r = await ValidatorsManagement.manageValidatorExitTx(exitTx())
@@ -296,7 +296,7 @@ describe("ValidatorsManagement.manageValidatorExitTx", () => {
     })
 
     it("rejects an exit from a non-validator", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorExitTx(exitTx())

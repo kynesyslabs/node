@@ -201,9 +201,8 @@ describe("governanceHandlers.getProposalVotes", () => {
         expect(tally.approveWeight).toBe("40")
         expect(tally.rejectWeight).toBe("10")
         expect(tally.totalStakedWeight).toBe("100")
-        // 2/3 of 100 = 66 (bigint floor division)
-        expect(tally.threshold).toBe("66")
-        // 40 approve < 66 threshold → NOT passed
+        // ceil(2 * 100 / 3) = 67
+        expect(tally.threshold).toBe("67")
         expect(tally.passed).toBe(false)
     })
 })

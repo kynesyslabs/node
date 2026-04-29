@@ -93,6 +93,16 @@ async function handleUpgradeProposal(
         }
     }
 
+    if (
+        typeof payload.effectiveAtBlock !== "number" ||
+        !Number.isInteger(payload.effectiveAtBlock) ||
+        payload.effectiveAtBlock <= 0
+    ) {
+        return {
+            success: false,
+            message: "effectiveAtBlock must be a positive integer",
+        }
+    }
     const currentBlock = await Chain.getLastBlockNumber()
     const minEffective =
         currentBlock + VOTING_WINDOW_BLOCKS + GRACE_PERIOD_BLOCKS

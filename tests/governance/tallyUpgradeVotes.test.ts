@@ -104,7 +104,7 @@ describe("tallyUpgradeVotes", () => {
             p1: [
                 { approve: true, weight: "60" },
                 { approve: true, weight: "10" },
-                // 2/3 of 100 = 66; approve=70 ≥ 66 → pass
+                // ceil(2*100/3) = 67; approve=70 ≥ 67 → pass
             ],
         })
         const outcomes = await tallyUpgradeVotes(
@@ -116,7 +116,7 @@ describe("tallyUpgradeVotes", () => {
         expect(outcomes[0].status).toBe("approved")
         expect(outcomes[0].approveWeight).toBe(70n)
         expect(outcomes[0].snapshotWeight).toBe(100n)
-        expect(outcomes[0].threshold).toBe(66n)
+        expect(outcomes[0].threshold).toBe(67n)
         expect(proposals._rows[0].status).toBe("activating")
     })
 
@@ -135,7 +135,7 @@ describe("tallyUpgradeVotes", () => {
         ])
         const votes = makeVoteRepo({
             p1: [
-                { approve: true, weight: "65" }, // 2/3 of 100 = 66; 65 < 66
+                { approve: true, weight: "65" }, // ceil(2*100/3) = 67; 65 < 67
             ],
         })
         const outcomes = await tallyUpgradeVotes(

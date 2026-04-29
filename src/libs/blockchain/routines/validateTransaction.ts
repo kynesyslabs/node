@@ -108,7 +108,17 @@ export async function confirmTransaction(
 
     // Must run before signValidityData(): any gcr_edit attached here
     // becomes part of the signed hash, so peers compute the same hash.
-    const dispatchResult = await runTypeDispatcher(tx)
+    let dispatchResult: { ok: true } | { ok: false; message: string }
+    try {
+        dispatchResult = await runTypeDispatcher(tx)
+    } catch (e) {
+        dispatchResult = {
+            ok: false,
+            message:
+                "Dispatcher crashed: " +
+                (e instanceof Error ? e.message : String(e)),
+        }
+    }
     if (dispatchResult.ok === false) {
         validityData.data.valid = false
         validityData.data.message =

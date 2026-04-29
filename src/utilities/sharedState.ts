@@ -210,6 +210,7 @@ export default class SharedState {
 
     // SECTION Configuration
     rpcFee: number = Config.getInstance().core.rpcFeePercent
+    networkFee: number = Config.getInstance().core.networkFee
 
     /**
      * Active network parameters. Loaded once at startup by

@@ -171,8 +171,11 @@ export function tallyVotes(
     }
     const totalForThreshold =
         snapshotTotalWeight ?? approveWeight + rejectWeight
+    // Ceiling division — must agree with tallyUpgradeVotes.
     const threshold =
-        (totalForThreshold * SUPERMAJORITY_NUMERATOR) /
+        (totalForThreshold * SUPERMAJORITY_NUMERATOR +
+            SUPERMAJORITY_DENOMINATOR -
+            1n) /
         SUPERMAJORITY_DENOMINATOR
     return {
         proposalId,
@@ -197,21 +200,15 @@ export function tallyVotes(
 async function computeSnapshotWeight(
     snapshotBlock: number,
 ): Promise<bigint> {
-    try {
-        const validators =
-            (await GCR.getGCRValidatorsAtBlock(snapshotBlock)) as Validators[]
-        let total = 0n
-        for (const v of validators) {
-            total += safeBigInt(v.staked_amount)
-        }
-        return total
-    } catch (e) {
-        log.error(
-            "governanceHandlers",
-            `computeSnapshotWeight(${snapshotBlock}): ${(e as Error).message}`,
-        )
-        return 0n
+    // Throws on validator-set lookup failure so callers can surface the
+    // error instead of silently producing a passed-with-zero-weight tally.
+    const validators =
+        (await GCR.getGCRValidatorsAtBlock(snapshotBlock)) as Validators[]
+    let total = 0n
+    for (const v of validators) {
+        total += safeBigInt(v.staked_amount)
     }
+    return total
 }
 
 function safeBigInt(s: string | null | undefined): bigint {

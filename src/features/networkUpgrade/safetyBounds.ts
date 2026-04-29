@@ -12,7 +12,7 @@
 // unit-tested below.
 
 import {
-    BIGINT_BOUNDS,
+    getBigintBounds,
     MAX_CHANGE_PERCENT,
     NUMERIC_BOUNDS,
     PHASE_1_GOVERNABLE_KEYS,
@@ -121,8 +121,12 @@ function checkNumericBounds(
     current: number,
     proposed: number,
 ): BoundsCheck {
-    if (!Number.isFinite(proposed)) {
-        return { ok: false, key, reason: "non-finite proposed value" }
+    if (!Number.isFinite(proposed) || !Number.isInteger(proposed)) {
+        return {
+            ok: false,
+            key,
+            reason: "proposed must be a finite integer",
+        }
     }
     const bounds = NUMERIC_BOUNDS[key]
     if (bounds) {
@@ -165,7 +169,7 @@ function checkBigintBounds(
         return { ok: false, key, reason: "non-numeric bigint string" }
     }
 
-    const bounds = BIGINT_BOUNDS[key]
+    const bounds = getBigintBounds()[key]
     if (bounds) {
         const floor = BigInt(bounds.floor)
         if (proposedBig < floor) {

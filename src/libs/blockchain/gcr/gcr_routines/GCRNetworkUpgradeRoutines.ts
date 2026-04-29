@@ -127,12 +127,19 @@ export default class GCRNetworkUpgradeRoutines {
         }
         const blockNumber = await Chain.getLastBlockNumber()
 
-        // Voter weight from snapshot validator set.
+        // Voter must be in the snapshot validator set; otherwise the vote
+        // would be persisted with weight="0", contaminating tallies.
         const snapshotValidators = (await GCR.getGCRValidatorsAtBlock(
             proposal.snapshotBlock,
         )) as Validators[]
         const v = snapshotValidators.find(x => x.address === e.account)
-        const weight = v?.staked_amount ?? "0"
+        if (!v || !v.staked_amount) {
+            return {
+                success: true,
+                message: `Vote skipped: ${e.account} not in snapshot validator set for ${e.proposalId}`,
+            }
+        }
+        const weight = v.staked_amount
 
         const row = votes.create({
             proposalId: e.proposalId,

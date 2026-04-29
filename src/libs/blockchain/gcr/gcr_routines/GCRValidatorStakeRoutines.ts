@@ -72,7 +72,12 @@ export default class GCRValidatorStakeRoutines {
             case "unstake":
                 return applyUnstake(resolvedRepo, existing, resolvedBlock)
             case "exit":
-                return applyExit(resolvedRepo, existing)
+                return applyExit(
+                    resolvedRepo,
+                    existing,
+                    resolvedBlock,
+                    stakeEdit.isRollback === true,
+                )
             default:
                 return { success: false, message: `Unknown op: ${operation}` }
         }
@@ -166,9 +171,31 @@ async function applyUnstake(
 async function applyExit(
     repo: Repository<Validators>,
     existing: Validators | null,
+    currentBlock: number,
+    isRollback: boolean,
 ): Promise<GCRResult> {
     if (!existing) {
         return { success: false, message: "Validator not found" }
+    }
+    // Lifecycle invariants only apply to user-initiated exits. Rollback
+    // path (stake → exit inversion) bypasses them by design.
+    if (!isRollback) {
+        if (existing.status !== VALIDATOR_STATUS_UNSTAKING) {
+            return {
+                success: false,
+                message: `Cannot exit — must be UNSTAKING (status=${existing.status})`,
+            }
+        }
+        if (
+            existing.unstake_available_at === null ||
+            existing.unstake_available_at === undefined ||
+            currentBlock < existing.unstake_available_at
+        ) {
+            return {
+                success: false,
+                message: `Lock not elapsed: ${currentBlock} < ${existing.unstake_available_at}`,
+            }
+        }
     }
     existing.status = VALIDATOR_STATUS_EXITED
     existing.staked_amount = "0"

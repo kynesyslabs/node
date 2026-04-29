@@ -720,8 +720,11 @@ export default class HandleGCR {
                     simulate,
                 )
                 break
-            // Phase 0 staking: mutates the Validators table outside of the
-            // batched GCRMain save path.
+            // KNOWN GAP: these branches persist via the default datasource
+            // (not the transactionalEntityManager that wraps insertBlock),
+            // so a partially-failed block leaves orphaned rows. Threading
+            // the EM through HandleGCR + every routine is a separate
+            // refactor — tracked in the upgradable-network testing doc.
             case "validatorStake":
                 if (simulate) {
                     // Validation already ran during handleStakingTx; we don't

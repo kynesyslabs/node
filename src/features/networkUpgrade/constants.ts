@@ -102,12 +102,32 @@ export const NUMERIC_BOUNDS: Partial<Record<NetworkParameterKey, NumericBounds>>
     shardSize: { floor: 3, ceiling: 100 },
 }
 
+// Floor for `minValidatorStake` is 1% of the **resolved** genesis value
+// (Config-derived if env set, hardcoded fallback otherwise) rather than the
+// static default — so an operator that sets MIN_VALIDATOR_STAKE in env gets
+// a proportional floor instead of one frozen at the source-default.
+export function getBigintBounds(): Partial<
+    Record<NetworkParameterKey, BigintBounds>
+> {
+    const genesisStake = getGenesisNetworkParameters().minValidatorStake
+    let floorStake: string
+    try {
+        floorStake = (BigInt(genesisStake) / 100n).toString()
+    } catch {
+        floorStake = (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) / 100n).toString()
+    }
+    return {
+        minValidatorStake: {
+            floor: floorStake,
+            ceiling: null,
+        },
+    }
+}
+
+/** @deprecated Use `getBigintBounds()` — env-resolved at call time. */
 export const BIGINT_BOUNDS: Partial<Record<NetworkParameterKey, BigintBounds>> = {
     minValidatorStake: {
-        // 1% of genesis default.
-        floor: (
-            BigInt(DEFAULT_MIN_VALIDATOR_STAKE) / 100n
-        ).toString(),
+        floor: (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) / 100n).toString(),
         ceiling: null,
     },
 }

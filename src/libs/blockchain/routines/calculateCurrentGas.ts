@@ -5,16 +5,15 @@ import Chain from "../chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 
-// INFO Calculating transaction fees based on the size of the transaction and the status of the chain
 async function calculateComposedGas(): Promise<number> {
     const lastBlockBaseGas: number = await GCR.getGCRLastBlockBaseGas()
-    // Congestion check
     const factor = await adaptGasToCongestion()
     const adaptedGas = lastBlockBaseGas * factor
-    // Adding the fee for the rpc
-    // TODO Set limits for the fee
-    const composedGas = adaptedGas + getSharedState.rpcFee
-    // TODO Add dApp fees
+    // Both fees are governable via NetworkParameters and mirrored onto
+    // sharedState by loadNetworkParameters(); they sum into the per-byte
+    // gas price.
+    const composedGas =
+        adaptedGas + getSharedState.rpcFee + getSharedState.networkFee
     return composedGas
 }
 

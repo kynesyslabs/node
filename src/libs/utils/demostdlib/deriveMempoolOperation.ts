@@ -200,9 +200,14 @@ export async function createTransaction(
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
-    // TODO Fees
-    transaction.content.transaction_fee.network_fee = derivable.fees.networkFee
-    transaction.content.transaction_fee.rpc_fee = derivable.fees.rpcFee
+    // Prefer governance-driven fees from sharedState.networkParameters; fall
+    // back to whatever the caller passed in `derivable.fees`. This keeps the
+    // signed transaction in sync with the same fees the node would deduct.
+    const dynamic = resolveDynamicFees()
+    transaction.content.transaction_fee.network_fee =
+        dynamic.networkFee ?? derivable.fees.networkFee
+    transaction.content.transaction_fee.rpc_fee =
+        dynamic.rpcFee ?? derivable.fees.rpcFee
     transaction.content.transaction_fee.additional_fee =
         derivable.fees.additionalFee
     // Adding data

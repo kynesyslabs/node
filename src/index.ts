@@ -358,17 +358,16 @@ async function preMainLoop() {
 
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
-    // INFO Now ensuring we have an initialized chain or initializing the genesis block
-    await peerBootstrap(indexState.PeerList)
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
 
-    // ANCHOR Governance: fold the latest `active` upgrades over genesis
-    // defaults into `sharedState.networkParameters`. Called once here; the
-    // post-block hook in chainBlocks.insertBlock refreshes it after each
-    // new activation.
+    // Governance state must be in sharedState BEFORE any inbound traffic
+    // hits a handler that reads networkParameters / fees. Order matters:
+    // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
+
+    await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(

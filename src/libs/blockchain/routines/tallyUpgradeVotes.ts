@@ -51,9 +51,13 @@ export default async function tallyUpgradeVotes(
         for (const v of voteRows) {
             if (v.approve) approve += safeBigInt(v.weight)
         }
-        const threshold =
-            (snapshotWeight * SUPERMAJORITY_NUMERATOR) /
-            SUPERMAJORITY_DENOMINATOR
+        // Ceiling division so threshold meets/exceeds 2/3 even when
+        // snapshotWeight isn't divisible by 3 — floor would let proposals
+        // pass below the supermajority bar.
+        const threshold = ceilDiv(
+            snapshotWeight * SUPERMAJORITY_NUMERATOR,
+            SUPERMAJORITY_DENOMINATOR,
+        )
         const passed = snapshotWeight > 0n && approve >= threshold
 
         if (passed) {
@@ -96,6 +100,10 @@ async function computeSnapshotWeight(snapshotBlock: number): Promise<bigint> {
         )
         return 0n
     }
+}
+
+function ceilDiv(num: bigint, den: bigint): bigint {
+    return (num + den - 1n) / den
 }
 
 function safeBigInt(s: string | null | undefined): bigint {

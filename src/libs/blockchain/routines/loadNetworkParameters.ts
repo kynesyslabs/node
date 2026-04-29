@@ -59,8 +59,10 @@ export async function loadNetworkParameters(
     }
 
     getSharedState.networkParameters = params
-    // Mirror onto legacy flat fields still read by calculateCurrentGas / getShard.
+    // Mirror onto flat fields read by calculateCurrentGas / getShard.
     ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
+    ;(getSharedState as unknown as { networkFee: number }).networkFee =
+        params.networkFee
     ;(getSharedState as unknown as { shardSize: number }).shardSize =
         params.shardSize
     log.info(

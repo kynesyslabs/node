@@ -97,14 +97,15 @@ export default class ValidatorsManagement {
             return { valid: true, message: "Validator entrance valid" }
         }
 
-        if (existing.status === VALIDATOR_STATUS_EXITED) {
+        if (
+            existing.status !== VALIDATOR_STATUS_ACTIVE &&
+            existing.status !== VALIDATOR_STATUS_UNSTAKING
+        ) {
             return {
                 valid: false,
-                message:
-                    "Validator has exited; register again with a fresh keypair",
+                message: `Validator not eligible for stake top-up (status=${existing.status})`,
             }
         }
-        // Stake increase is always allowed on an active or unstaking validator.
         return { valid: true, message: "Validator stake increase valid" }
     }
 
@@ -150,6 +151,12 @@ export default class ValidatorsManagement {
         const validator = await GCR.getGCRValidatorStatus(sender)
         if (!validator) {
             return { valid: false, message: "Not a validator" }
+        }
+        if (validator.status !== VALIDATOR_STATUS_UNSTAKING) {
+            return {
+                valid: false,
+                message: `Validator must be unstaking before exit (status=${validator.status})`,
+            }
         }
         const availableAt = validator.unstake_available_at
         if (availableAt === null || availableAt === undefined) {

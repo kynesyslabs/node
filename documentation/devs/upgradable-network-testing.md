@@ -173,6 +173,22 @@ enough to run on every PR. The full E2E (`test:upgradable:e2e:fast`)
 should run at least nightly or on merges to `testnet`/`main`. The CI
 runner needs Docker + ~3 GB free disk for the devnet image.
 
+## Architectural debt (tracked, not blocking)
+
+- **Side-table writes from `HandleGCR` are not atomic with block commit.**
+  The `validatorStake` / `networkUpgrade` / `networkUpgradeVote` cases in
+  `handleGCR.ts` use the default datasource. Threading the
+  `transactionalEntityManager` from `chainBlocks.insertBlock` through
+  `HandleGCR.applyTransactions → applyTransaction → applyGCREdit → routine.apply`
+  is a separate refactor. Today the post-block governance hooks
+  (`tallyUpgradeVotes`, `applyNetworkUpgrade`) are atomic with the block,
+  but the upstream `applyProposal` / `applyVote` row inserts are not.
+- **`networkFee` is decorative on its own.** `compositeFeeAmount` in
+  `calculateCurrentGas` now sums both `rpcFee` and `networkFee` from
+  sharedState, so governance changes to either are reflected in actual
+  deductions. The spec also defines them as basis points but the runtime
+  treats them as flat addends to gas — bps math is not implemented.
+
 ## Known limitations / things to watch
 
 - Native `pay` tx propagation across the 4-node mesh is occasionally

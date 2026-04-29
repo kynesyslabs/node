@@ -67,7 +67,7 @@ async function cmdNewWallet(file?: string) {
     const addr = await demos.getEd25519Address()
     console.log(`✅ new wallet saved to ${target}`)
     console.log(`   address: ${addr}`)
-    console.log(`   mnemonic: ${mnemonic}`)
+    console.log(`   mnemonic: (written to ${target}, mode 0600 — never printed)`)
     console.log(
         "\n⚠️  Fund this address in the genesis before staking: it needs " +
             "at least DEFAULT_MIN_VALIDATOR_STAKE to register as a validator.",
@@ -202,7 +202,11 @@ function coerceValue(key: string, raw: string): unknown {
 
 async function cmdVote(proposalId: string, approveRaw: string) {
     if (!proposalId) exitWith("proposalId is required")
-    const approve = /^(1|y|yes|true)$/i.test(approveRaw)
+    if (approveRaw === undefined) exitWith("vote value is required (yes|no)")
+    let approve: boolean
+    if (/^(1|y|yes|true)$/i.test(approveRaw)) approve = true
+    else if (/^(0|n|no|false)$/i.test(approveRaw)) approve = false
+    else exitWith(`invalid vote value: ${approveRaw} (expected yes|no)`)
     const demos = await connect()
     const tx = await DemosTransactions.voteOnUpgrade(proposalId, approve, demos)
     const validation = await demos.confirm(tx)

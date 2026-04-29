@@ -318,9 +318,17 @@ export default class GCR {
             })
 
             let total = 0n
-            stakes.forEach(v => {
-                total += BigInt(v.staked_amount ?? "0")
-            })
+            for (const v of stakes) {
+                const raw = v.staked_amount ?? "0"
+                try {
+                    total += BigInt(raw)
+                } catch {
+                    log.warning(
+                        "GCR",
+                        `getGCRHashedStakes: dropping malformed staked_amount=${raw} on validator ${v.address}`,
+                    )
+                }
+            }
 
             return Hashing.sha256(total.toString())
         } catch (e) {
