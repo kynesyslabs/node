@@ -177,3 +177,6 @@ documentation/demos_yp_v5.odt
 documentation/demos_yp_v5.pdf
 better_testing/runs/*
 !better_testing/runs/.gitkeep
+/documentation/tokens/AUDIT.md
+/documentation/tokens/TEAM.md
+/myc.json
