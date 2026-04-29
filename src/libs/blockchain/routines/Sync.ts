@@ -255,32 +255,52 @@ async function verifyLastBlockIntegrity(
     ourLastBlockNumber: number,
     ourLastBlockHash: string,
 ) {
-    // INFO: Verify genesis hash matches our genesis hash
-    const genesisBlock = await getRemoteBlock(peer, 0)
-
-    if (!genesisBlock) {
-        log.error("[fastSync] Could not get genesis block from peer")
-        process.exit(1)
-    }
-
     const ourGenesisHash = await Chain.getGenesisBlockHash()
+    const seenPeers = new Set<string>()
+    let currentPeer: Peer | null = peer
 
-    if (genesisBlock.hash !== ourGenesisHash) {
-        log.error("[fastSync] Genesis hash is not coherent")
-        log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
-        log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
-        process.exit(1)
+    while (currentPeer) {
+        seenPeers.add(currentPeer.identity)
+
+        // INFO: Verify genesis hash matches our genesis hash
+        const genesisBlock = await getRemoteBlock(currentPeer, 0)
+
+        if (!genesisBlock) {
+            log.error(
+                `[fastSync] Could not get genesis block from peer ${currentPeer.identity}, trying next peer`,
+            )
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
+        }
+
+        if (genesisBlock.hash !== ourGenesisHash) {
+            log.error("[fastSync] Genesis hash is not coherent")
+            log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
+            log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
+            process.exit(1)
+        }
+
+        // Verify if the last block hash is coherent
+        const lastSyncedBlock = await getRemoteBlock(
+            currentPeer,
+            ourLastBlockNumber,
+        )
+
+        if (!lastSyncedBlock) {
+            log.error(
+                `[fastSync] Could not get last block from peer ${currentPeer.identity}, trying next peer`,
+            )
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
+        }
+
+        return lastSyncedBlock.hash === ourLastBlockHash
     }
 
-    // Verify if the last block hash is coherent
-    const lastSyncedBlock = await getRemoteBlock(peer, ourLastBlockNumber)
-
-    if (!lastSyncedBlock) {
-        log.error("[fastSync] Could not get last block from peer")
-        process.exit(1)
-    }
-
-    return lastSyncedBlock.hash === ourLastBlockHash
+    log.error(
+        "[fastSync] Exhausted all peers, could not verify last block integrity",
+    )
+    process.exit(1)
 }
 
 /**
@@ -621,22 +641,6 @@ function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
             highestBlockPeers[0].connection.string,
     )
     return highestBlockPeers[0]
-}
-
-/**
- * Handle peer unreachable error during block sync
- */
-function handlePeerUnreachable(
-    peer: Peer,
-    seenPeers: Set<string>,
-): Peer | null {
-    log.debug(
-        "[fastSync] Peer " +
-            peer.identity +
-            " is unreachable. Switching to the next peer.",
-    )
-    seenPeers.add(peer.identity)
-    return findNextAvailablePeer(seenPeers)
 }
 
 /**
