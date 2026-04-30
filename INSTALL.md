@@ -167,26 +167,30 @@ The compose file splits optional services into profiles so you only run what you
 
 | Profile | What it adds |
 |---------|--------------|
-| _(none)_ | postgres + tlsnotary + node — the minimum runnable stack |
+| _(none)_ | postgres + node — the bare minimum stack |
+| `tlsnotary` | TLSNotary sidecar (HTTPS attestation). Pair with `TLSNOTARY_ENABLED=true` |
 | `monitoring` | prometheus + grafana |
 | `full` | node-exporter (host CPU/RAM/disk metrics) — pair with `monitoring` |
 | `neo4j` | neo4j (only needed for CGC/KYC features) |
 
+`.env.example` ships with `COMPOSE_PROFILES=monitoring,tlsnotary` so a plain `docker compose up` brings up the recommended full stack.
+
 Concrete commands:
 
 ```bash
-# Default — everything except node-exporter and neo4j
-# (monitoring is enabled by default via COMPOSE_PROFILES in .env.example)
+# Default — postgres + node + tlsnotary + monitoring
+# (uses COMPOSE_PROFILES from .env.example)
 docker compose up
 
-# Minimal — node + postgres + tlsnotary only, no Prometheus/Grafana
+# Minimal — only node + postgres, no sidecars
+# Also set TLSNOTARY_ENABLED=false in .env to silence the node-side warnings
 COMPOSE_PROFILES= docker compose up
 
 # Add host-level metrics (node-exporter)
-COMPOSE_PROFILES=monitoring,full docker compose up
+COMPOSE_PROFILES=monitoring,tlsnotary,full docker compose up
 
 # Add Neo4j (only if you actually need CGC/KYC)
-COMPOSE_PROFILES=monitoring,neo4j docker compose up
+COMPOSE_PROFILES=monitoring,tlsnotary,neo4j docker compose up
 ```
 
 ### Where data lives
@@ -453,7 +457,7 @@ Set `EXPOSED_URL` based on your setup:
 - Remote machine: `http://YOUR_PUBLIC_IP:53550`
 - Behind proxy: `https://demos.example.com`
 
-Set `TLSNOTARY_SIGNING_KEY`, or set `TLSNOTARY_ENABLED=false` to skip TLSNotary.
+If you're using FFI mode (`TLSNOTARY_MODE=ffi`), set `TLSNOTARY_SIGNING_KEY` in `.env` to a 64-char hex secp256k1 key — or leave it empty and the node auto-generates one into `.tlsnotary-key` on first boot. To skip TLSNotary entirely, set `TLSNOTARY_ENABLED=false`.
 
 ### 8. Joining a Network
 

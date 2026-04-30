@@ -2,18 +2,24 @@
 # Demos Network Node — Unified Docker Compose
 # =============================================================================
 # One-command bring-up:
-#   cp .env.example .env       # then set TLSNOTARY_SIGNING_KEY (or disable it)
+#   cp .env.example .env
 #   docker compose up
 #
-# Profiles:
-#   (default)            postgres + node + tlsnotary  -> minimum runnable node
-#   --profile monitoring add prometheus + grafana
-#   --profile full       add node-exporter (host metrics)
-#   --profile neo4j      add neo4j (only needed for CGC/KYC features)
+# Profiles (every optional service is gated; .env.example sets COMPOSE_PROFILES
+# = monitoring,tlsnotary by default so a plain `docker compose up` brings up
+# the recommended full stack):
 #
-# Persistent state lives in named volumes:
-#   pgdata, node_data, node_logs, node_identity,
-#   prometheus_data, grafana_data, neo4j_data, neo4j_logs
+#   No profile             postgres + node               -> minimum stack
+#   tlsnotary              + tlsnotary sidecar           -> notarization
+#                            (pair with TLSNOTARY_ENABLED in .env)
+#   monitoring             + prometheus + grafana        -> dashboards
+#   full                   + node-exporter               -> host metrics
+#   neo4j                  + neo4j                       -> CGC/KYC only
+#
+# Persistent state lives in named volumes (prefixed `demos_`):
+#   demos_pgdata, demos_node_data, demos_node_logs, demos_node_state,
+#   demos_prometheus_data, demos_grafana_data, demos_neo4j_data,
+#   demos_neo4j_logs
 #
 # Wipe everything (DANGER): docker compose down -v
 # =============================================================================
@@ -52,6 +58,10 @@ services:
     container_name: demos-tlsnotary
     restart: unless-stopped
     platform: linux/amd64
+    # Profile-gated so COMPOSE_PROFILES=...,tlsnotary actually controls the
+    # sidecar. Drop 'tlsnotary' from COMPOSE_PROFILES to skip it; pair that
+    # with TLSNOTARY_ENABLED=false in .env so the node doesn't try to call it.
+    profiles: [tlsnotary]
     environment:
       NS_NOTARIZATION__MAX_SENT_DATA: ${TLSNOTARY_MAX_SENT_DATA:-32768}
     ports:
@@ -86,8 +96,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # tlsnotary is profile-gated; if its profile is off, Compose drops
+      # this dependency silently and the node starts without it. Make sure
+      # to also set TLSNOTARY_ENABLED=false in .env in that case.
       tlsnotary:
         condition: service_started
+        required: false
     environment:
       # Network & ports
       RPC_PORT: ${RPC_PORT:-53550}

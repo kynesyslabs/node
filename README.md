@@ -157,20 +157,20 @@ After installation, configure your node by editing:
 
 ## Network Ports
 
-The following ports must be open for the node to function properly.
+For the docker-compose path see [INSTALL.md → Network Exposure](INSTALL.md#network-exposure) — that section has the canonical inbound/outbound rules and a `ufw` example for VPS deployments.
 
-> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+For the bare-metal `./run` path:
 
-### Required Ports
+### Required Ports (bare metal)
 
 | Port        | Protocol | Description                    |
 | ----------- | -------- | ------------------------------ |
 | 53550       | TCP      | Node RPC API                   |
-| 53551       | TCP/UDP  | OmniProtocol P2P communication |
-| 7047        | TCP      | TLSNotary server               |
-| 55000-60000 | TCP/UDP  | WebSocket proxy for TLSNotary  |
+| 53551       | TCP      | OmniProtocol P2P communication |
+| 7047        | TCP      | TLSNotary server (FFI/docker)  |
+| 55000-60000 | TCP      | WebSocket proxy for TLSNotary FFI mode |
 
-### Optional Ports
+### Optional Ports (bare metal)
 
 | Port | Protocol | Description                                       |
 | ---- | -------- | ------------------------------------------------- |
@@ -184,9 +184,9 @@ The following ports must be open for the node to function properly.
 ```bash
 # Required
 sudo ufw allow 53550/tcp        # Node RPC
-sudo ufw allow 53551            # OmniProtocol (TCP+UDP)
+sudo ufw allow 53551/tcp        # OmniProtocol
 sudo ufw allow 7047/tcp         # TLSNotary
-sudo ufw allow 55000:60000      # TLSNotary WS proxy (TCP+UDP)
+sudo ufw allow 55000:60000/tcp  # TLSNotary WS proxy (FFI mode)
 ```
 
 ## Security
