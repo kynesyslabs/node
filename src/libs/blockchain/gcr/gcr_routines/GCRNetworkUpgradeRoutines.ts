@@ -21,6 +21,7 @@ export default class GCRNetworkUpgradeRoutines {
     static async applyProposal(
         edit: GCREdit,
         repo?: Repository<NetworkUpgrade>,
+        currentBlock?: number,
     ): Promise<GCRResult> {
         const e = edit as unknown as GCREditNetworkUpgrade
         if (e.type !== "networkUpgrade") {
@@ -61,7 +62,11 @@ export default class GCRNetworkUpgradeRoutines {
             }
         }
 
-        const snapshotBlock = await Chain.getLastBlockNumber()
+        // Caller-provided block context > chain tip: when this runs as
+        // part of applying block N, Chain.getLastBlockNumber() may return
+        // N-1 (block not yet committed) and snapshotBlock would drift.
+        const snapshotBlock =
+            currentBlock ?? (await Chain.getLastBlockNumber())
         const tallyBlock = snapshotBlock + VOTING_WINDOW_BLOCKS
         const nextVersion = await computeNextVersion(resolved)
 
@@ -88,6 +93,7 @@ export default class GCRNetworkUpgradeRoutines {
         edit: GCREdit,
         voteRepo?: Repository<NetworkUpgradeVote>,
         proposalRepo?: Repository<NetworkUpgrade>,
+        currentBlock?: number,
     ): Promise<GCRResult> {
         const e = edit as unknown as GCREditNetworkUpgradeVote
         if (e.type !== "networkUpgradeVote") {

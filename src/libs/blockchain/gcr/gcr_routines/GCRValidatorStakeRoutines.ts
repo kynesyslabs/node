@@ -133,14 +133,25 @@ async function applyStake(
         return { success: true, message: "Validator entered" }
     }
 
-    const prev = BigInt(existing.staked_amount ?? "0")
+    let prev: bigint
+    try {
+        prev = BigInt(existing.staked_amount ?? "0")
+    } catch {
+        return {
+            success: false,
+            message: `Invalid persisted staked_amount=${existing.staked_amount}`,
+        }
+    }
     existing.staked_amount = (prev + amount).toString()
     if (edit.connectionUrl) {
         existing.connection_url = edit.connectionUrl
     }
-    if (existing.status !== VALIDATOR_STATUS_UNSTAKING) {
-        existing.status = VALIDATOR_STATUS_ACTIVE
-    }
+    // A new stake re-activates the validator and clears any pending
+    // unstake. Letting UNSTAKING persist would let an attacker top up,
+    // then exit using the old (already-elapsed) lock window.
+    existing.status = VALIDATOR_STATUS_ACTIVE
+    existing.unstake_requested_at = null
+    existing.unstake_available_at = null
     await repo.save(existing)
     log.info(
         "VALIDATORS",
