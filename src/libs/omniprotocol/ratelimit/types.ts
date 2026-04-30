@@ -72,6 +72,11 @@ export interface RateLimitEntry {
      * When the block expires
      */
     blockExpiry?: number
+
+    /**
+     * Reason for rejection
+     */
+    rejectionReason?: string
 }
 
 export interface RateLimitResult {

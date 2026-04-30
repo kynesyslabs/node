@@ -40,8 +40,8 @@ export class Transactions {
     @Column("varchar", { name: "to" })
     to: string
 
-    @Column("integer", { name: "amount" })
-    amount: number
+    @Column("bigint", { name: "amount", nullable: true })
+    amount: bigint
 
     @Column("bigint", { name: "nonce", nullable: true, default: 0 })
     nonce: number

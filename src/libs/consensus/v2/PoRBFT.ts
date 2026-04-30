@@ -7,30 +7,15 @@ import { getSharedState } from "src/utilities/sharedState"
 import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
-import mergePeerlist from "./routines/mergePeerlist"
 import { createBlock } from "./routines/createBlock"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
-import averageTimestamps from "./routines/averageTimestamp"
-import { fastSync } from "src/libs/blockchain/routines/Sync"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import applyGCROperation from "src/libs/blockchain/gcr/gcr_routines/applyGCROperation"
-import { txToGCROperation } from "src/libs/blockchain/gcr/gcr_routines/txToGCROperation"
 import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
-import {
-    BlockInvalidError,
-    ForgingEndedError,
-    NotInShardError,
-} from "@/errors"
+import { BlockInvalidError, ForgingEndedError, NotInShardError } from "@/errors"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
-import { Waiter } from "@/utilities/waiter"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-import { In } from "typeorm"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { forgeToHex } from "src/libs/crypto/forgeUtils"
-import Datasource, { dataSource } from "src/model/datasource"
-import { GCREdit } from "@kynesyslabs/demosdk/types"
 
 /* INFO
 # Semaphore system
@@ -105,9 +90,19 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        log.debug("[consensusRoutine] Merging and ordering the mempools...")
         tempMempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
+        )
+
+        log.debug(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
+        log.debug(
+            `[consensusRoutine] Our mempool: ${JSON.stringify(
+                tempMempool.map(tx => tx.hash),
+                null,
+                2,
+            )}`,
         )
 
         // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
@@ -204,9 +199,10 @@ export async function consensusRoutine(): Promise<void> {
             await finalizeBlock(block, pro)
 
             // REVIEW: Should we await this?
-            if (manager.checkIfWeAreSecretary()) {
-                BroadcastManager.broadcastNewBlock(block)
-            }
+            // REVIEW: All nodes broadcast the block for redundancy
+            // if (manager.checkIfWeAreSecretary()) {
+            BroadcastManager.broadcastNewBlock(block)
+            // }
 
             // INFO: Release DTR transaction relay waiter
             await DTRManager.releaseDTRWaiter(block)
@@ -236,9 +232,19 @@ export async function consensusRoutine(): Promise<void> {
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
         ) {
-            log.info(
+            // INFO: If we're past merge mempools phase
+            log.warn(
+                "[consensusRoutine] Aborted consensus routine at phase: " +
+                    manager.ourValidatorPhase.currentPhase,
+            )
+            if (manager.ourValidatorPhase.currentPhase <= 3) {
+                return
+            }
+
+            log.warn(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
+
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
@@ -347,17 +353,50 @@ async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
 ): Promise<(Transaction & { reference_block: number })[]> {
-    const ourMempool = await Mempool.getMempool(blockRef)
-    await mergeMempools(ourMempool, shard)
+    // Fetch mempool, check chain for executed txs.
+    const preMempool = await Mempool.getMempool(blockRef)
+    const preHashes = preMempool.map(tx => tx.hash)
+    const preExisting =
+        preHashes.length > 0
+            ? await Chain.getExistingTransactionHashes(preHashes)
+            : new Set<string>()
+    const outboundPool = preMempool.filter(tx => !preExisting.has(tx.hash))
+
+    // Merge with peers
+    await mergeMempools(outboundPool, shard)
     await updateValidatorPhase(3, blockRef)
 
-    const mempool = await Mempool.getMempool(blockRef)
-    const hashes = mempool.map(tx => tx.hash)
-    const existingHashes = await Chain.getExistingTransactionHashes(hashes)
+    const postMempool = await Mempool.getMempool(blockRef)
+    const preChecked = new Set(preHashes)
+    const newHashes = postMempool
+        .map(tx => tx.hash)
+        .filter(h => !preChecked.has(h))
+    const newlyExisting =
+        newHashes.length > 0
+            ? await Chain.getExistingTransactionHashes(newHashes)
+            : new Set<string>()
+
+    const existingHashes = preExisting.union(newlyExisting)
+    const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
-    return mempool.filter(tx => !existingHashes.has(tx.hash))
+
+    // Log transaction type breakdown
+    const typeCounts: Record<string, number> = {}
+    for (const tx of finalMempool) {
+        const txType = tx.content.type ?? "unknown"
+        typeCounts[txType] = (typeCounts[txType] || 0) + 1
+    }
+    log.debug(
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs ` +
+            `(removed ${existingHashes.size}: pre-merge ${preExisting.size}, delta ${newlyExisting.size})`,
+    )
+    for (const [type, count] of Object.entries(typeCounts)) {
+        log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)
+    }
+
+    return finalMempool
 }
 
 /**
@@ -581,7 +620,7 @@ async function updateValidatorPhase(
 
     // INFO: If it's the first phase, the secretary might not have started the consensus routine yet,
     // Increase retry steps to 10 to wait for the secretary to start
-    const retries = phase === 1 ? 10 : 3
+    const retries = phase === 1 ? 5 : 2
     const res = await manager.sendOurValidatorPhaseToSecretary(retries)
 
     preventForgingEnded(blockRef)
@@ -592,6 +631,11 @@ async function updateValidatorPhase(
             2,
         )}`,
     )
+
+    if (res === ("abortConsensus" as any)) {
+        log.error("[consensusRoutine] Abort consensus routine")
+        throw new AbortConsensusError("500 error received from secretary")
+    }
 
     return res
 }

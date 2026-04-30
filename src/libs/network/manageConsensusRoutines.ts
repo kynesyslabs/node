@@ -44,7 +44,7 @@ export default async function manageConsensusRoutines(
     log.debug("Sender: " + peer.connection.string)
     log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
-    let response = _.cloneDeep(emptyResponse)
+    const response = _.cloneDeep(emptyResponse)
 
     /* REVIEW
     We allow incoming requests when we are within the consensus time window.
@@ -201,7 +201,7 @@ export default async function manageConsensusRoutines(
             // TODO
             // compare the block hash with the one we have and reply
             try {
-                response = await manageProposeBlockHash(
+                return await manageProposeBlockHash(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     payload.params[2] as string,
@@ -263,7 +263,7 @@ export default async function manageConsensusRoutines(
                     // }, 500)
                     // INFO: Logs parts used to create the current CVSA
                     await getCommonValidatorSeed(null, (message: string) => {
-                        log.only(message)
+                        log.error(message)
                     })
 
                     return {

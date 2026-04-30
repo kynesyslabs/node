@@ -153,57 +153,81 @@ export default class Mempool {
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
-        for (const tx of incoming) {
+
+        const blockNumber = SecretaryManager.lastBlockRef
+        const existingHashes = await this.getMempoolHashMap(blockNumber)
+
+        const unseenTransactions = incoming.filter(
+            tx => !existingHashes[tx.hash],
+        )
+
+        if (unseenTransactions.length === 0) {
+            const finalPool = await this.getMempool(blockNumber)
+            const final = finalPool.filter(
+                tx => tx.blockNumber === blockNumber,
+            )
+            return {
+                success: true,
+                mempool: final,
+            }
+        }
+
+        const validateOne = async (
+            tx: Transaction,
+        ): Promise<Transaction | null> => {
             const isCoherent = TxUtils.isCoherent(tx)
             if (!isCoherent) {
                 log.error(
                     "[Mempool.receive] Transaction is not coherent: " + tx.hash,
                 )
-                return {
-                    success: false,
-                    mempool: [],
-                }
+                return null
             }
 
-            const { success: signatureValid } = await TxUtils.validateSignature(tx)
+            const { success: signatureValid } =
+                await TxUtils.validateSignature(tx)
             if (!signatureValid) {
                 log.error(
                     "[Mempool.receive] Transaction signature is not valid: " +
                         tx.hash,
                 )
-                return {
-                    success: false,
-                    mempool: [],
-                }
+                return null
             }
 
+            return tx
+        }
+
+        const BATCH_SIZE = 16
+        const validationResults: (Transaction | null)[] = []
+        for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
+            const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
+            const results = await Promise.all(batch.map(validateOne))
+            validationResults.push(...results)
+        }
+
+        const validTransactions = validationResults.filter(
+            (tx): tx is Transaction => tx !== null,
+        )
+
+        for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
         }
 
-        const blockNumber = SecretaryManager.lastBlockRef
-        const existingHashes = await this.getMempoolHashMap(blockNumber)
-        // REVIEW: Should we save each tx individually?
-        // await this.repo.save(incoming)
-        for (const tx of incoming) {
-            if (existingHashes[tx.hash]) {
-                log.info(`tx already exists: ${tx.hash}`)
-                continue
-            }
-
+        if (validTransactions.length > 0) {
             try {
-                await this.repo.save(tx)
-            } catch (error) {
-                if (
-                    error instanceof QueryFailedError &&
-                    error.message.includes(
-                        "duplicate key value violates unique constraint",
-                    )
-                ) {
-                    noSendBackTxs.set(tx.hash, tx.hash)
-                    continue
-                }
+                const insertResult = await this.repo
+                    .createQueryBuilder()
+                    .insert()
+                    .into(MempoolTx)
+                    .values(validTransactions)
+                    .orIgnore()
+                    .execute()
 
-                // INFO: Log other errors
+                const insertedCount = insertResult.identifiers.length
+                log.debug(
+                    `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
+                )
+            } catch (error) {
+                log.error("[Mempool.receive] Error saving received mempool:")
                 console.error(error)
             }
         }
@@ -259,6 +283,72 @@ export default class Mempool {
             throw error
         }
     }
-}
 
-// await Mempool.init()
+    /**
+     * Removes old and executed transactions from the mempool.
+     *
+     * Old: reference_block falls outside the allowed window
+     * (lastBlock - referenceBlockRoom ..= lastBlock) — same rule enforced by
+     * isReferenceBlockAllowed on inbound RPC.
+     *
+     * Executed: already committed to the chain.
+     */
+    static async cleanMempool(): Promise<{
+        staleRemoved: number
+        executedRemoved: number
+    }> {
+        const all = await this.repo.find({
+            select: ["hash", "reference_block"],
+        })
+        if (all.length === 0) {
+            log.debug("[Mempool.cleanMempool] Mempool is empty")
+            return { staleRemoved: 0, executedRemoved: 0 }
+        }
+
+        const lastBlock = await Chain.getLastBlockNumber()
+        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+
+        const staleHashes: string[] = []
+        const survivorHashes: string[] = []
+        for (const tx of all) {
+            if (tx.reference_block < cutoff) staleHashes.push(tx.hash)
+            else survivorHashes.push(tx.hash)
+        }
+
+        const existing =
+            survivorHashes.length > 0
+                ? await Chain.getExistingTransactionHashes(survivorHashes)
+                : new Set<string>()
+        const executedHashes = survivorHashes.filter(h => existing.has(h))
+
+        log.debug(
+            `[Mempool.cleanMempool] Stale (${staleHashes.length}): ${staleHashes.join(", ")}`,
+        )
+        log.debug(
+            `[Mempool.cleanMempool] Executed (${executedHashes.length}): ${executedHashes.join(", ")}`,
+        )
+
+        const toDelete = [...staleHashes, ...executedHashes]
+        if (toDelete.length === 0) {
+            log.debug("[Mempool.cleanMempool] Nothing to delete")
+            return { staleRemoved: 0, executedRemoved: 0 }
+        }
+
+        if (toDelete.length === all.length) {
+            await this.repo.createQueryBuilder().delete().execute()
+            log.debug(
+                `[Mempool.cleanMempool] Cleared entire mempool (${toDelete.length} txs)`,
+            )
+        } else {
+            await this.repo.delete({ hash: In(toDelete) })
+            log.debug(
+                `[Mempool.cleanMempool] Deleted ${toDelete.length} txs by hash`,
+            )
+        }
+
+        return {
+            staleRemoved: staleHashes.length,
+            executedRemoved: executedHashes.length,
+        }
+    }
+}

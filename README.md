@@ -31,23 +31,64 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 
 ## Installation
 
-For detailed installation instructions, please refer to [INSTALL.md](INSTALL.md). The installation guide covers:
+Docker Compose is now the recommended way to run a Demos node. For full installation instructions — both the Docker path and the bare-metal `./run` path — see [INSTALL.md](INSTALL.md). The guide covers:
 
-- System prerequisites and dependencies
-- Docker and container setup
+- Docker Compose quickstart (recommended)
+- Bare-metal install with Bun + Postgres (alternative)
 - Node configuration and key generation
 - Network peer configuration
 - Troubleshooting common issues
 
-## Quick Start
+## Quick Start (Docker)
 
-1. Install prerequisites (Docker, Bun runtime)
-2. Clone this repository
-3. Install dependencies with `bun install`
-4. Configure your node settings
-5. Run `./run` to start the node
+```bash
+git clone https://github.com/kynesyslabs/node.git && cd node
+cp .env.example .env  # defaults are fine; edit only if you want to override
+docker compose up
+```
 
-For complete step-by-step instructions, see [INSTALL.md](INSTALL.md).
+Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (default `admin` / `demos`).
+
+See [INSTALL.md](INSTALL.md) for profiles, env vars, volumes, upgrades, and troubleshooting.
+
+## Publishing the Image
+
+The compose file uses `${IMAGE_NAME}:${IMAGE_TAG}` (default `demos-node:local`) for the node service, so the same compose can either build locally or pull from a registry by switching `.env`.
+
+**Build and tag for a registry:**
+
+```bash
+# Pick your registry coordinates
+export IMAGE_NAME=ghcr.io/kynesyslabs/node     # or docker.io/<user>/demos-node, etc.
+export IMAGE_TAG=v0.9.8                         # or git sha, or 'latest'
+
+docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
+docker push "$IMAGE_NAME:$IMAGE_TAG"
+```
+
+**Multi-arch (recommended for public registries):**
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t "$IMAGE_NAME:$IMAGE_TAG" \
+  --push .
+```
+
+**Pull on a target host** — write `IMAGE_NAME` and `IMAGE_TAG` into that host's `.env`, then:
+
+```bash
+docker compose pull node
+docker compose up -d
+```
+
+For private registries, run `docker login <registry>` first.
+
+## Advanced / Bare-Metal Run
+
+If you'd rather run the node directly on the host (no Docker for the node itself), the legacy `./run` shell script is still supported. It installs Bun, runs Postgres in a sidecar container, and starts the node natively — useful for development, debugging, and TUI-based operation.
+
+See [INSTALL.md → Track 2: Bare metal with `./run`](INSTALL.md) for the full walkthrough.
 
 ## Terminal User Interface (TUI)
 
@@ -81,32 +122,11 @@ For debugging and development, you can disable the TUI and use traditional scrol
 
 This provides linear console output that can be easily piped, searched with grep, or redirected to files.
 
-## Monitoring with Prometheus & Grafana
+## Monitoring
 
-The node includes a full monitoring stack with Prometheus metrics and pre-built Grafana dashboards.
+Prometheus + Grafana are part of the unified compose (default profile). Once `docker compose up` is healthy, Grafana is at http://localhost:3000 (`admin` / `demos`) with pre-provisioned dashboards. Configuration knobs (`GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_RETENTION`, etc.) live in `.env` — see [INSTALL.md → Track 1](INSTALL.md) for the full list.
 
-### Enabling Metrics
-
-Metrics are enabled by default. To configure, add to your `.env` file:
-
-```env
-METRICS_ENABLED=true
-METRICS_PORT=9090
-```
-
-The node will expose metrics at `http://localhost:9090/metrics`.
-
-### Starting the Monitoring Stack
-
-```bash
-cd monitoring
-docker compose up -d
-```
-
-**Access Grafana**: http://localhost:3000
-**Default credentials**: admin / demos
-
-### Available Metrics
+Available node-side metrics (scraped at `node:9090/metrics`):
 
 | Metric                              | Description             |
 | ----------------------------------- | ----------------------- |
@@ -117,25 +137,7 @@ docker compose up -d
 | `demos_system_memory_usage_percent` | Memory utilization      |
 | `demos_service_docker_container_up` | Container health status |
 
-### Configuration
-
-The node and monitoring stack are configurable via environment variables:
-
-**Node metrics (in `.env`):**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `METRICS_ENABLED` | `true` | Enable/disable metrics endpoint |
-| `METRICS_PORT` | `9090` | Node metrics endpoint port |
-
-**Monitoring stack (in `monitoring/.env`):**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PROMETHEUS_PORT` | `9091` | Prometheus server port |
-| `GRAFANA_PORT` | `3000` | Grafana dashboard port |
-| `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password |
-| `PROMETHEUS_RETENTION` | `15d` | Data retention period |
-
-For detailed monitoring documentation, see [monitoring/README.md](monitoring/README.md).
+For dashboard internals and customization, see [monitoring/README.md](monitoring/README.md).
 
 ## Technology Stack
 
@@ -155,20 +157,20 @@ After installation, configure your node by editing:
 
 ## Network Ports
 
-The following ports must be open for the node to function properly.
+For the docker-compose path see [INSTALL.md → Network Exposure](INSTALL.md#network-exposure) — that section has the canonical inbound/outbound rules and a `ufw` example for VPS deployments.
 
-> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+For the bare-metal `./run` path:
 
-### Required Ports
+### Required Ports (bare metal)
 
 | Port        | Protocol | Description                    |
 | ----------- | -------- | ------------------------------ |
 | 53550       | TCP      | Node RPC API                   |
-| 53551       | TCP/UDP  | OmniProtocol P2P communication |
-| 7047        | TCP      | TLSNotary server               |
-| 55000-60000 | TCP/UDP  | WebSocket proxy for TLSNotary  |
+| 53551       | TCP      | OmniProtocol P2P communication |
+| 7047        | TCP      | TLSNotary server (FFI/docker)  |
+| 55000-60000 | TCP      | WebSocket proxy for TLSNotary FFI mode |
 
-### Optional Ports
+### Optional Ports (bare metal)
 
 | Port | Protocol | Description                                       |
 | ---- | -------- | ------------------------------------------------- |
@@ -182,9 +184,9 @@ The following ports must be open for the node to function properly.
 ```bash
 # Required
 sudo ufw allow 53550/tcp        # Node RPC
-sudo ufw allow 53551            # OmniProtocol (TCP+UDP)
+sudo ufw allow 53551/tcp        # OmniProtocol
 sudo ufw allow 7047/tcp         # TLSNotary
-sudo ufw allow 55000:60000      # TLSNotary WS proxy (TCP+UDP)
+sudo ufw allow 55000:60000/tcp  # TLSNotary WS proxy (FFI mode)
 ```
 
 ## Security

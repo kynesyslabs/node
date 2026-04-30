@@ -133,6 +133,7 @@ export default class SharedState {
 
     // Sync
     fastSyncCount = 0
+    fastSyncAborted = false
     _syncStatus = false
 
     // Batch sync configuration

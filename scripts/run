@@ -296,10 +296,10 @@ check_system_requirements() {
 	is_port_in_use() {
 		local port=$1
 		if command -v lsof >/dev/null; then
-			lsof -i :"$port" >/dev/null 2>&1
+			lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
 			return $?
 		elif command -v netstat >/dev/null; then
-			netstat -an | grep ":${port} " >/dev/null 2>&1
+			netstat -an | grep LISTEN | grep ":${port} " >/dev/null 2>&1
 			return $?
 		else
 			# Cannot check, assume not in use

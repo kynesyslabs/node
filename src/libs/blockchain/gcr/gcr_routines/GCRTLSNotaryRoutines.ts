@@ -8,7 +8,7 @@ import {
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
 import log from "@/utilities/logger"
 
-import { GCRResult } from "../handleGCR"
+import { GCRTLSNotaryResult } from "../handleGCR"
 
 // REVIEW: TLSNotary proof storage routines for GCR
 /**
@@ -19,16 +19,20 @@ export class GCRTLSNotaryRoutines {
     /**
      * Apply a TLSNotary GCR edit operation (store proof)
      * @param editOperation - The GCREditTLSNotary operation
-     * @param gcrTLSNotaryRepository - TypeORM repository for GCRTLSNotary
-     * @param simulate - If true, don't persist changes
+     * @param entity - The in-memory GCRTLSNotary entity (null if not yet stored)
+     * @param simulate - If true, don't mutate the entity
      */
     static async apply(
         editOperation: GCREdit,
-        gcrTLSNotaryRepository: Repository<GCRTLSNotary>,
+        entity: GCRTLSNotary | null,
         simulate: boolean,
-    ): Promise<GCRResult> {
+    ): Promise<GCRTLSNotaryResult> {
         if (editOperation.type !== "tlsnotary") {
-            return { success: false, message: "Invalid GCREdit type" }
+            return {
+                success: false,
+                message: "Invalid GCREdit type",
+                tlsNotary: null,
+            }
         }
 
         const tlsnEdit = editOperation as GCREditTLSNotary
@@ -38,45 +42,34 @@ export class GCRTLSNotaryRoutines {
                 `(${tlsnEdit.isRollback ? "ROLLBACK" : "NORMAL"})`,
         )
 
-        // Handle rollback: delete the stored proof
+        // Handle rollback: mark for deletion (handled by caller)
         if (tlsnEdit.isRollback) {
-            if (!simulate) {
-                try {
-                    await gcrTLSNotaryRepository.delete({
-                        tokenId: tlsnEdit.data.tokenId,
-                    })
-                    log.info(
-                        `[TLSNotary] Rolled back proof for token ${tlsnEdit.data.tokenId}`,
-                    )
-                } catch (error) {
-                    log.error(`[TLSNotary] Failed to rollback proof: ${error}`)
-                    return {
-                        success: false,
-                        message: "Failed to rollback TLSNotary proof",
-                    }
-                }
+            entity = null
+            log.info(
+                `[TLSNotary] Rolled back proof for token ${tlsnEdit.data.tokenId}`,
+            )
+            return {
+                success: true,
+                message: "TLSNotary proof rolled back",
+                tlsNotary: null,
             }
-            return { success: true, message: "TLSNotary proof rolled back" }
         }
 
         // Handle store operation
         if (tlsnEdit.operation === "store") {
             // Check if proof already exists for this token
-            const existing = await gcrTLSNotaryRepository.findOneBy({
-                tokenId: tlsnEdit.data.tokenId,
-            })
-
-            if (existing) {
+            if (entity) {
                 log.warning(
                     `[TLSNotary] Proof already exists for token ${tlsnEdit.data.tokenId}`,
                 )
                 return {
                     success: false,
                     message: "Proof already stored for this token",
+                    tlsNotary: entity,
                 }
             }
 
-            // Create new proof entry
+            // Create new proof entry in-memory
             const proofEntry = new GCRTLSNotary()
             proofEntry.tokenId = tlsnEdit.data.tokenId
             proofEntry.owner = tlsnEdit.account
@@ -87,27 +80,23 @@ export class GCRTLSNotaryRoutines {
             proofEntry.proofTimestamp = String(tlsnEdit.data.timestamp)
 
             if (!simulate) {
-                try {
-                    await gcrTLSNotaryRepository.save(proofEntry)
-                    log.info(
-                        `[TLSNotary] Stored proof for token ${tlsnEdit.data.tokenId}, ` +
-                            `domain: ${tlsnEdit.data.domain}, type: ${tlsnEdit.data.storageType}`,
-                    )
-                } catch (error) {
-                    log.error(`[TLSNotary] Failed to store proof: ${error}`)
-                    return {
-                        success: false,
-                        message: "Failed to store TLSNotary proof",
-                    }
-                }
+                log.info(
+                    `[TLSNotary] Stored proof for token ${tlsnEdit.data.tokenId}, ` +
+                        `domain: ${tlsnEdit.data.domain}, type: ${tlsnEdit.data.storageType}`,
+                )
             }
 
-            return { success: true, message: "TLSNotary proof stored" }
+            return {
+                success: true,
+                message: "TLSNotary proof stored",
+                tlsNotary: proofEntry,
+            }
         }
 
         return {
             success: false,
             message: `Unknown TLSNotary operation: ${tlsnEdit.operation}`,
+            tlsNotary: null,
         }
     }
 

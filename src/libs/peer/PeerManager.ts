@@ -420,7 +420,8 @@ export default class PeerManager {
             true,
             {
                 sleepTime: 250,
-                retries: 3,
+                retries: 1,
+                allowedCodes: [500, 504],
             },
         )
 

@@ -37,6 +37,7 @@ import {
 } from "@/libs/l2ps/L2PSConcurrentSync"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
+import Mempool from "../mempool"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -50,6 +51,8 @@ const latestBlock = () =>
 
 const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peer.sync.block === latestBlock())
+
+const FAST_SYNC_TIMEOUT_MS = 30_000
 
 /**
  * @deprecated
@@ -252,32 +255,52 @@ async function verifyLastBlockIntegrity(
     ourLastBlockNumber: number,
     ourLastBlockHash: string,
 ) {
-    // INFO: Verify genesis hash matches our genesis hash
-    const genesisBlock = await getRemoteBlock(peer, 0)
-
-    if (!genesisBlock) {
-        log.error("[fastSync] Could not get genesis block from peer")
-        process.exit(1)
-    }
-
     const ourGenesisHash = await Chain.getGenesisBlockHash()
+    const seenPeers = new Set<string>()
+    let currentPeer: Peer | null = peer
 
-    if (genesisBlock.hash !== ourGenesisHash) {
-        log.error("[fastSync] Genesis hash is not coherent")
-        log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
-        log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
-        process.exit(1)
+    while (currentPeer) {
+        seenPeers.add(currentPeer.identity)
+
+        // INFO: Verify genesis hash matches our genesis hash
+        const genesisBlock = await getRemoteBlock(currentPeer, 0)
+
+        if (!genesisBlock) {
+            log.error(
+                `[fastSync] Could not get genesis block from peer ${currentPeer.identity}, trying next peer`,
+            )
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
+        }
+
+        if (genesisBlock.hash !== ourGenesisHash) {
+            log.error("[fastSync] Genesis hash is not coherent")
+            log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
+            log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
+            process.exit(1)
+        }
+
+        // Verify if the last block hash is coherent
+        const lastSyncedBlock = await getRemoteBlock(
+            currentPeer,
+            ourLastBlockNumber,
+        )
+
+        if (!lastSyncedBlock) {
+            log.error(
+                `[fastSync] Could not get last block from peer ${currentPeer.identity}, trying next peer`,
+            )
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
+        }
+
+        return lastSyncedBlock.hash === ourLastBlockHash
     }
 
-    // Verify if the last block hash is coherent
-    const lastSyncedBlock = await getRemoteBlock(peer, ourLastBlockNumber)
-
-    if (!lastSyncedBlock) {
-        log.error("[fastSync] Could not get last block from peer")
-        process.exit(1)
-    }
-
-    return lastSyncedBlock.hash === ourLastBlockHash
+    log.error(
+        "[fastSync] Exhausted all peers, could not verify last block integrity",
+    )
+    process.exit(1)
 }
 
 /**
@@ -621,22 +644,6 @@ function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
 }
 
 /**
- * Handle peer unreachable error during block sync
- */
-function handlePeerUnreachable(
-    peer: Peer,
-    seenPeers: Set<string>,
-): Peer | null {
-    log.debug(
-        "[fastSync] Peer " +
-            peer.identity +
-            " is unreachable. Switching to the next peer.",
-    )
-    seenPeers.add(peer.identity)
-    return findNextAvailablePeer(seenPeers)
-}
-
-/**
  * Request the blocks from the peer
  *
  * @returns True if the blocks were synced successfully, false otherwise
@@ -849,7 +856,7 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        if (getSharedState.isShuttingDown) return false
+        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -857,9 +864,11 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     if (getSharedState.fastSyncCount === 0) {
+        await Mempool.cleanMempool()
+
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
-            if (getSharedState.isShuttingDown) return false
+            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )
@@ -881,22 +890,44 @@ export async function fastSync(
     }
 
     getSharedState.inSyncLoop = true
-    const synced = await fastSyncRoutine(peers)
-    log.debug("[fastSync] Fast sync routine ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    log.debug("[fastSync] Sync status: " + synced)
-    getSharedState.syncStatus = synced
-    await BroadcastManager.broadcastOurSyncData()
+    getSharedState.fastSyncAborted = false
+    try {
+        let synced: boolean
+        if (getSharedState.fastSyncCount > 0) {
+            const result = await Promise.race([
+                fastSyncRoutine(peers).then((v) => ({ kind: "done" as const, value: v })),
+                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({ kind: "timeout" as const, value: false })),
+            ])
 
-    log.debug("[fastSync] Broadcasted our sync data 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    log.debug(
-        "[fastSync] DB Last block number after sync: " +
-            lastBlockNumber +
-            " from: " +
-            from,
-    )
+            if (result.kind === "timeout") {
+                getSharedState.fastSyncAborted = true
+                log.warn("[fastSync] Timed out after 30s, aborting")
+                return false
+            }
 
-    getSharedState.inSyncLoop = false
-    log.debug("[fastSync] Sync loop ended 🔥🔥🔥🔥🔥🔥🔥🔥🔥")
-    return true
+            synced = result.value
+        } else {
+            synced = await fastSyncRoutine(peers)
+        }
+
+        log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
+        log.debug("[fastSync] Sync status: " + synced)
+        getSharedState.syncStatus = synced
+        BroadcastManager.broadcastOurSyncData()
+
+        log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")
+        const lastBlockNumber = await Chain.getLastBlockNumber()
+        log.debug(
+            "[fastSync] DB Last block number after sync: " +
+                lastBlockNumber +
+                " from: " +
+                from,
+        )
+
+        return true
+    } finally {
+        getSharedState.fastSyncAborted = false
+        getSharedState.inSyncLoop = false
+        log.debug("[fastSync] Sync loop ended")
+    }
 }

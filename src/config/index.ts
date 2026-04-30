@@ -103,6 +103,10 @@ export class Config {
     get all(): Readonly<AppConfig> {
         return this.data
     }
+
+    set omniPort(port: number) {
+        this.data.omni.port = port
+    }
 }
 
 // Re-exports

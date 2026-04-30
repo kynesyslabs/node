@@ -16,7 +16,7 @@
 
 import L2PSProofManager from "./L2PSProofManager"
 import { L2PSProof } from "@/model/entities/L2PSProofs"
-import HandleGCR, { isBatchableGCREdit } from "@/libs/blockchain/gcr/handleGCR"
+import HandleGCR, { isGCRMainEdit } from "@/libs/blockchain/gcr/handleGCR"
 import Chain from "@/libs/blockchain/chain"
 import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
@@ -301,7 +301,7 @@ export default class L2PSConsensus {
 
         // loop through the proof.gcr_edits and find an account
         for (const edit of proof.gcr_edits) {
-            if (isBatchableGCREdit(edit)) {
+            if (isGCRMainEdit(edit)) {
                 account = edit.account as string
                 break
             }
@@ -313,9 +313,9 @@ export default class L2PSConsensus {
         }
 
         const mockTx = this.createMockTx(proof, account)
-        const accounts = await HandleGCR.prepareAccounts([mockTx])
+        const entities = await HandleGCR.prepareEntities([mockTx])
         const editResult = await HandleGCR.applyTransaction(
-            accounts,
+            entities,
             mockTx,
             false,
             simulate,
@@ -339,7 +339,7 @@ export default class L2PSConsensus {
         if (!simulate) {
             await HandleGCR.gcrWriteMutex.runExclusive(async () => {
                 await HandleGCR.saveGCREditChanges(
-                    editResult.accounts,
+                    editResult.entities,
                     editResult.sideEffects,
                 )
             })
@@ -599,7 +599,7 @@ export default class L2PSConsensus {
                 // loop through the proof.gcr_edits and find an account
                 let account = ""
                 for (const edit of proof.gcr_edits) {
-                    if (isBatchableGCREdit(edit)) {
+                    if (isGCRMainEdit(edit)) {
                         account = edit.account as string
                         break
                     }
@@ -613,9 +613,9 @@ export default class L2PSConsensus {
                 }
 
                 const mockTx = this.createMockTx(proof, account)
-                const accounts = await HandleGCR.prepareAccounts([mockTx])
+                const entities = await HandleGCR.prepareEntities([mockTx])
                 const editResult = await HandleGCR.applyTransaction(
-                    accounts,
+                    entities,
                     mockTx,
                     true,
                     false,
@@ -629,7 +629,7 @@ export default class L2PSConsensus {
                 }
 
                 await HandleGCR.saveGCREditChanges(
-                    editResult.accounts,
+                    editResult.entities,
                     editResult.sideEffects,
                 )
 

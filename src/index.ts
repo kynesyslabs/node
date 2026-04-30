@@ -278,12 +278,11 @@ async function warmup() {
     indexState.OMNI_ENABLED = cfg.omni.enabled
     indexState.OMNI_PORT = await getNextAvailablePort(cfg.omni.port)
 
-    // Setting the server port to the shared state
+    getSharedState.omniConfig.port = indexState.OMNI_PORT
     getSharedState.serverPort = indexState.SERVER_PORT
-    // Exposed URL
     getSharedState.connectionString = cfg.core.exposedUrl
-    /* !SECTION Environment variables loading and configuration */
 
+    /* !SECTION Environment variables loading and configuration */
     log.info("[MAIN] = Configured environment variables =")
     log.info("[MAIN] PG_PORT: " + indexState.PG_PORT)
     log.info("[MAIN] RPC_FEE: " + indexState.RPC_FEE)
@@ -331,6 +330,39 @@ async function preMainLoop() {
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
+    // REVIEW: Warn operators when EXPOSED_URL points at a loopback/unroutable
+    // host so they don't silently run an unreachable node on the public network.
+    try {
+        const exposedUrl = Config.getInstance().core.exposedUrl
+        const loopbackHosts = new Set([
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "::1",
+            "host.docker.internal",
+        ])
+        const exposedHost = new URL(exposedUrl).hostname
+        if (loopbackHosts.has(exposedHost)) {
+            log.warning(
+                "\n============================================================\n" +
+                    "⚠️  EXPOSED_URL is set to a loopback/unroutable address:\n" +
+                    `     ${exposedUrl}\n` +
+                    "     Other peers cannot reach this node at this address.\n" +
+                    "     For real network participation, set EXPOSED_URL in .env\n" +
+                    "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
+                    "     See INSTALL.md → \"Joining the network\".\n" +
+                    "============================================================",
+            )
+        }
+    } catch (err) {
+        // Malformed EXPOSED_URL — surface it so the operator can fix .env,
+        // but don't crash the node over a config quirk.
+        const message = err instanceof Error ? err.message : String(err)
+        log.warning(
+            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+                `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
+        )
+    }
     // And saves the public key file
     await fs.promises.writeFile(
         "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
@@ -466,7 +498,9 @@ async function main() {
                 getSharedState.omniConfig,
             )
             indexState.omniServer = omniServer
-            log.info(`[CORE] OmniProtocol server started on port ${indexState.OMNI_PORT}`)
+            log.info(
+                `[CORE] OmniProtocol server started on port ${indexState.OMNI_PORT}`,
+            )
 
             // REVIEW: Initialize OmniProtocol client adapter for outbound peer communication
             // Use OMNI_ONLY mode for testing, OMNI_PREFERRED for production gradual rollout
@@ -476,7 +510,9 @@ async function main() {
                     | "OMNI_PREFERRED"
                     | "OMNI_ONLY") || "OMNI_ONLY"
             getSharedState.initOmniProtocol(omniMode)
-            log.info(`[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`)
+            log.info(
+                `[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`,
+            )
         } catch (error) {
             handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
             // Continue without OmniProtocol (failsafe - falls back to HTTP)
@@ -487,7 +523,9 @@ async function main() {
             process.exit(1)
         }
     } else {
-        log.info("[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)")
+        log.info(
+            "[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
+        )
     }
     // INFO Preparing the main loop
     await preMainLoop()
@@ -782,10 +820,21 @@ async function main() {
             }
         }
 
+        await Mempool.cleanMempool()
         await fastSync([], "index.ts")
         getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
-        mainLoop() // Is an async function so running without waiting send that to the background
+        mainLoop()
+            .catch((error: Error) => {
+                console.error(error)
+                log.error("[CORE] Error in main loop: " + error)
+                handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
+            })
+            .finally(() => {
+                log.error("[CORE] Main loop terminated, exiting for debug ... ")
+                process.exit(1)
+                log.info("[CORE] Main loop finished")
+            }) // Is an async function so running without waiting send that to the background
 
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing

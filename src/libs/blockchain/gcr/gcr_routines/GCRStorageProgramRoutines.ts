@@ -414,12 +414,12 @@ export class GCRStorageProgramRoutines {
     /**
      * Apply a StorageProgram GCR edit operation
      * @param editOperation - The GCREditStorageProgram operation
-     * @param gcrStorageProgramRepository - TypeORM repository for GCRStorageProgram
-     * @param simulate - If true, don't persist changes
+     * @param program - The in-memory GCRStorageProgram entity (null for CREATE)
+     * @param simulate - If true, don't mutate the entity
      */
     static async apply(
         editOperation: GCREdit,
-        gcrStorageProgramRepository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const spEdit = editOperation as GCREditStorageProgram
@@ -447,28 +447,28 @@ export class GCRStorageProgramRoutines {
             case "CREATE_STORAGE_PROGRAM": {
                 return this.handleCreate(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "WRITE_STORAGE": {
                 return this.handleWrite(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "UPDATE_ACCESS_CONTROL": {
                 return this.handleUpdateAcl(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "DELETE_STORAGE_PROGRAM": {
                 return this.handleDelete(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
@@ -476,35 +476,35 @@ export class GCRStorageProgramRoutines {
             case "SET_FIELD": {
                 return this.handleSetField(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "SET_ITEM": {
                 return this.handleSetItem(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "APPEND_ITEM": {
                 return this.handleAppendItem(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "DELETE_FIELD": {
                 return this.handleDeleteField(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
             case "DELETE_ITEM": {
                 return this.handleDeleteItem(
                     spEdit,
-                    gcrStorageProgramRepository,
+                    program,
                     simulate,
                 )
             }
@@ -529,7 +529,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleCreate(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -546,8 +546,7 @@ export class GCRStorageProgramRoutines {
         }
 
         // Check if storage program already exists
-        const existing = await repository.findOneBy({ storageAddress })
-        if (existing && !existing.isDeleted) {
+        if (program && !program.isDeleted) {
             return {
                 success: false,
                 message: `Storage program already exists: ${storageAddress}`,
@@ -594,8 +593,8 @@ export class GCRStorageProgramRoutines {
             return { success: true, message: "Simulated create successful" }
         }
 
-        // Create new storage program
-        const program = new GCRStorageProgram()
+        // Create new storage program in-memory
+        program = new GCRStorageProgram()
         program.storageAddress = storageAddress
         program.owner = sender
         program.programName = variables.programName || ""
@@ -630,12 +629,12 @@ export class GCRStorageProgramRoutines {
         program.isDeleted = false
         program.deletedByTx = null
 
-        await repository.save(program)
         log.info(`[StorageProgram] Created: ${storageAddress}`)
 
         return {
             success: true,
             message: `Storage program created: ${storageAddress}`,
+            storageProgram: program,
         }
     }
 
@@ -644,7 +643,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleWrite(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -658,9 +657,6 @@ export class GCRStorageProgramRoutines {
                 message: "Missing data.variables for write operation",
             }
         }
-
-        // Find existing storage program
-        const program = await repository.findOneBy({ storageAddress })
 
         if (!program) {
             return {
@@ -729,7 +725,7 @@ export class GCRStorageProgramRoutines {
             return { success: true, message: "Simulated write successful" }
         }
 
-        // Update data
+        // Update data in-place
         program.data = variables.data ?? program.data
         program.sizeBytes = newSizeBytes
         program.encoding = encoding
@@ -766,12 +762,12 @@ export class GCRStorageProgramRoutines {
             )
         }
 
-        await repository.save(program)
         log.info(`[StorageProgram] Updated: ${storageAddress}`)
 
         return {
             success: true,
             message: `Storage program updated: ${storageAddress}`,
+            storageProgram: program,
         }
     }
 
@@ -780,7 +776,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleUpdateAcl(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -796,8 +792,6 @@ export class GCRStorageProgramRoutines {
                     "Missing acl in data.variables for updateAcl operation",
             }
         }
-
-        const program = await repository.findOneBy({ storageAddress })
 
         if (!program) {
             return {
@@ -835,10 +829,13 @@ export class GCRStorageProgramRoutines {
             edit.txhash,
         ]
 
-        await repository.save(program)
         log.info(`[StorageProgram] ACL updated: ${storageAddress}`)
 
-        return { success: true, message: `ACL updated: ${storageAddress}` }
+        return {
+            success: true,
+            message: `ACL updated: ${storageAddress}`,
+            storageProgram: program,
+        }
     }
 
     /**
@@ -846,13 +843,11 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleDelete(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
         const sender = edit.context.sender
-
-        const program = await repository.findOneBy({ storageAddress })
 
         if (!program) {
             return {
@@ -885,7 +880,7 @@ export class GCRStorageProgramRoutines {
             return { success: true, message: "Simulated delete successful" }
         }
 
-        // Soft delete
+        // Soft delete in-place
         program.isDeleted = true
         program.deletedByTx = edit.txhash
         program.lastModifiedByTx = edit.txhash
@@ -894,12 +889,12 @@ export class GCRStorageProgramRoutines {
             edit.txhash,
         ]
 
-        await repository.save(program)
         log.info(`[StorageProgram] Deleted: ${storageAddress}`)
 
         return {
             success: true,
             message: `Storage program deleted: ${storageAddress}`,
+            storageProgram: program,
         }
     }
 
@@ -1053,7 +1048,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleSetField(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -1069,7 +1064,6 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const program = await repository.findOneBy({ storageAddress })
         if (!program) {
             return {
                 success: false,
@@ -1103,20 +1097,13 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        if (simulate) {
-            log.debug(
-                `[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`,
-            )
-            return { success: true, message: "Simulated SET_FIELD successful" }
-        }
-
         // Get current data or initialize empty object
         const currentData = (program.data as Record<string, unknown>) || {}
         const oldSizeBytes = calculateDataSize(currentData, "json")
 
-        // Set the field value
-        currentData[variables.field] = variables.value
-        const newSizeBytes = calculateDataSize(currentData, "json")
+        // Compute the new field value to validate size before simulate
+        const testData = { ...currentData, [variables.field]: variables.value }
+        const newSizeBytes = calculateDataSize(testData, "json")
 
         // Check size limit
         if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
@@ -1125,6 +1112,16 @@ export class GCRStorageProgramRoutines {
                 message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
             }
         }
+
+        if (simulate) {
+            log.debug(
+                `[StorageProgram] Simulated SET_FIELD: ${storageAddress}.${variables.field}`,
+            )
+            return { success: true, message: "Simulated SET_FIELD successful" }
+        }
+
+        // Set the field value
+        currentData[variables.field] = variables.value
 
         // Calculate delta-based fee (only charge if size increased)
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
@@ -1136,7 +1133,7 @@ export class GCRStorageProgramRoutines {
                 ? BigInt(deltaChunks) * STORAGE_PROGRAM_FEE_PER_CHUNK
                 : 0n
 
-        // Update program
+        // Update entity in-place
         program.data = currentData
         program.sizeBytes = newSizeBytes
         program.lastModifiedByTx = edit.txhash
@@ -1146,7 +1143,6 @@ export class GCRStorageProgramRoutines {
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
-        await repository.save(program)
         log.info(
             `[StorageProgram] SET_FIELD: ${storageAddress}.${variables.field} (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
         )
@@ -1154,6 +1150,7 @@ export class GCRStorageProgramRoutines {
         return {
             success: true,
             message: `Field ${variables.field} set successfully`,
+            storageProgram: program,
         }
     }
 
@@ -1162,7 +1159,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleSetItem(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -1183,7 +1180,6 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const program = await repository.findOneBy({ storageAddress })
         if (!program) {
             return {
                 success: false,
@@ -1231,23 +1227,31 @@ export class GCRStorageProgramRoutines {
             }
         }
 
+        // Validate size before simulate by computing with the new value
+        const oldSizeBytes = calculateDataSize(currentData, "json")
+        const savedValue = fieldValue[variables.index]
+        fieldValue[variables.index] = variables.value
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            // Restore original value since we're rejecting
+            fieldValue[variables.index] = savedValue
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
+        }
+
         if (simulate) {
+            // Restore original value since we're simulating
+            fieldValue[variables.index] = savedValue
             log.debug(
                 `[StorageProgram] Simulated SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}]`,
             )
             return { success: true, message: "Simulated SET_ITEM successful" }
         }
 
-        const oldSizeBytes = calculateDataSize(currentData, "json")
-        fieldValue[variables.index] = variables.value
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            return {
-                success: false,
-                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
-            }
-        }
+        // Value is already set in-place from the size check above
 
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
         const deltaChunks = Math.ceil(
@@ -1267,7 +1271,6 @@ export class GCRStorageProgramRoutines {
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
-        await repository.save(program)
         log.info(
             `[StorageProgram] SET_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
         )
@@ -1275,6 +1278,7 @@ export class GCRStorageProgramRoutines {
         return {
             success: true,
             message: `Item at ${variables.field}[${variables.index}] set successfully`,
+            storageProgram: program,
         }
     }
 
@@ -1283,7 +1287,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleAppendItem(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -1299,7 +1303,6 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const program = await repository.findOneBy({ storageAddress })
         if (!program) {
             return {
                 success: false,
@@ -1347,7 +1350,23 @@ export class GCRStorageProgramRoutines {
             }
         }
 
+        // Validate size with appended item before simulate
+        const oldSizeBytes = calculateDataSize(currentData, "json")
+        fieldValue.push(variables.value)
+        const newSizeBytes = calculateDataSize(currentData, "json")
+
+        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
+            // Restore original array since we're rejecting
+            fieldValue.pop()
+            return {
+                success: false,
+                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
+            }
+        }
+
         if (simulate) {
+            // Restore original array since we're simulating
+            fieldValue.pop()
             log.debug(
                 `[StorageProgram] Simulated APPEND_ITEM: ${storageAddress}.${variables.field}`,
             )
@@ -1357,16 +1376,7 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const oldSizeBytes = calculateDataSize(currentData, "json")
-        fieldValue.push(variables.value)
-        const newSizeBytes = calculateDataSize(currentData, "json")
-
-        if (newSizeBytes > STORAGE_PROGRAM_MAX_SIZE_BYTES) {
-            return {
-                success: false,
-                message: `Data size ${newSizeBytes} bytes exceeds maximum ${STORAGE_PROGRAM_MAX_SIZE_BYTES} bytes (1MB)`,
-            }
-        }
+        // Value is already appended in-place from the size check above
 
         const deltaBytes = Math.max(0, newSizeBytes - oldSizeBytes)
         const deltaChunks = Math.ceil(
@@ -1386,7 +1396,6 @@ export class GCRStorageProgramRoutines {
         ]
         program.totalFeesPaid = program.totalFeesPaid + fee
 
-        await repository.save(program)
         log.info(
             `[StorageProgram] APPEND_ITEM: ${storageAddress}.${variables.field} (new length: ${fieldValue.length}, delta: +${deltaBytes} bytes, fee: ${fee} DEM)`,
         )
@@ -1394,6 +1403,7 @@ export class GCRStorageProgramRoutines {
         return {
             success: true,
             message: `Item appended to ${variables.field} successfully (new length: ${fieldValue.length})`,
+            storageProgram: program,
         }
     }
 
@@ -1402,7 +1412,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleDeleteField(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -1418,7 +1428,6 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const program = await repository.findOneBy({ storageAddress })
         if (!program) {
             return {
                 success: false,
@@ -1483,7 +1492,6 @@ export class GCRStorageProgramRoutines {
         ]
         // No fee added for deletions
 
-        await repository.save(program)
         log.info(
             `[StorageProgram] DELETE_FIELD: ${storageAddress}.${variables.field} (new size: ${newSizeBytes} bytes)`,
         )
@@ -1491,6 +1499,7 @@ export class GCRStorageProgramRoutines {
         return {
             success: true,
             message: `Field ${variables.field} deleted successfully`,
+            storageProgram: program,
         }
     }
 
@@ -1499,7 +1508,7 @@ export class GCRStorageProgramRoutines {
      */
     private static async handleDeleteItem(
         edit: GCREditStorageProgram,
-        repository: Repository<GCRStorageProgram>,
+        program: GCRStorageProgram | null,
         simulate: boolean,
     ): Promise<GCRResult> {
         const storageAddress = edit.target
@@ -1516,7 +1525,6 @@ export class GCRStorageProgramRoutines {
             }
         }
 
-        const program = await repository.findOneBy({ storageAddress })
         if (!program) {
             return {
                 success: false,
@@ -1588,7 +1596,6 @@ export class GCRStorageProgramRoutines {
         ]
         // No fee added for deletions
 
-        await repository.save(program)
         log.info(
             `[StorageProgram] DELETE_ITEM: ${storageAddress}.${variables.field}[${variables.index}] (new length: ${fieldValue.length})`,
         )
@@ -1596,6 +1603,7 @@ export class GCRStorageProgramRoutines {
         return {
             success: true,
             message: `Item at ${variables.field}[${variables.index}] deleted successfully (new length: ${fieldValue.length})`,
+            storageProgram: program,
         }
     }
 }

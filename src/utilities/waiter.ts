@@ -97,7 +97,7 @@ export class Waiter {
     static resolve<T = null>(id: string, data: T = null): T {
         const entry = Waiter.waitList.get(id)
         if (!entry) {
-            log.error(`[WAITER] No wait entry found for ${id}`)
+            log.warn(`[WAITER] No wait entry found for ${id}`)
             return null
         }
 
