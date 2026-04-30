@@ -43,8 +43,15 @@ RUN bun install --frozen-lockfile \
 # when the lockfile considers them optional peers.
 RUN bun add bufferutil utf-8-validate
 
-# Bring in the rest of the source tree.
-COPY . .
+# Bring in the runtime payload. Explicit allow-list (rather than `COPY . .`)
+# so host-only files (run wrapper, captraf.sh, jest config, etc.) and any
+# new top-level files added later don't silently land in the image.
+COPY src/         ./src/
+COPY scripts/     ./scripts/
+COPY data/        ./data/
+COPY sdk/         ./sdk/
+COPY libs/        ./libs/
+COPY tsconfig.json bunfig.toml ormconfig.json ./
 
 # Patch falcon-sign so uncaught WASM exceptions are logged before rethrow.
 # Mirrors scripts/run::patch_falcon_sign. Idempotent and tolerant of a
@@ -148,16 +155,21 @@ RUN groupmod --new-name demos bun \
 
 WORKDIR /app
 
-# Copy the built tree from the builder stage with correct ownership in one go.
-COPY --from=builder --chown=demos:demos /app /app
-
-# WORKDIR /app is owned by root by default. Hand it (and the volume mount
-# points) to demos so the node can create .demos_identity, demos_peerlist.json,
-# log files, and chain data on first boot. Empty named volumes that mount
-# over these dirs inherit the directory ownership at first mount.
-RUN chown demos:demos /app \
+# Copy the built tree from the builder stage. Defense-in-depth: the
+# application's source and node_modules are owned by root with no
+# write permission for the demos runtime user, so a code-execution
+# exploit at runtime cannot rewrite the app itself. The demos user
+# only gets write access on:
+#   - /app                     (entrypoint creates symlinks here)
+#   - /app/data, logs, state   (volume mount points)
+COPY --from=builder /app /app
+RUN chown -R root:demos /app \
+    && find /app -mindepth 1 -type d -exec chmod 0755 {} + \
+    && find /app -type f -exec chmod 0644 {} + \
+    && chmod 0755 /app/scripts/docker-entrypoint.sh \
     && mkdir -p /app/data /app/logs /app/state \
-    && chown demos:demos /app/data /app/logs /app/state
+    && chown demos:demos /app /app/data /app/logs /app/state \
+    && chmod 0755 /app /app/data /app/logs /app/state
 
 # Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
 # IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
