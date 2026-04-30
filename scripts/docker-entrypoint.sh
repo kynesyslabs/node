@@ -21,11 +21,11 @@ LOGS_DIR="${LOGS_DIR:-/app/logs}"
 
 mkdir -p "$STATE_DIR" "$LOGS_DIR"
 
-# Files: create on volume if absent, then symlink from /app
+# Files: create on volume if absent, then symlink from /app.
+# The node generates these on demand on first boot — we don't pre-create.
 for f in .demos_identity demos_peerlist.json .tlsnotary-key; do
     target="$STATE_DIR/$f"
     link="/app/$f"
-    [ -e "$target" ] || : > /dev/null  # do not pre-create — let node generate on demand
     # If /app already has a real file (e.g. baked from image), move it once
     if [ -e "$link" ] && [ ! -L "$link" ]; then
         if [ ! -e "$target" ]; then
@@ -39,9 +39,14 @@ for f in .demos_identity demos_peerlist.json .tlsnotary-key; do
 done
 
 # Directory: output/
+# rmdir would only work on an empty dir, and 'ln -sfn TARGET /app/output'
+# does NOT replace a real directory — it creates output/output inside it.
+# So if /app/output exists as a non-symlink directory, blow it away first.
 if [ ! -L /app/output ]; then
     mkdir -p "$STATE_DIR/output"
-    [ -d /app/output ] && [ ! -L /app/output ] && rmdir /app/output 2>/dev/null || true
+    if [ -d /app/output ]; then
+        rm -rf /app/output
+    fi
     ln -sfn "$STATE_DIR/output" /app/output
 fi
 

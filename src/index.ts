@@ -353,8 +353,14 @@ async function preMainLoop() {
                     "============================================================",
             )
         }
-    } catch {
-        // Malformed EXPOSED_URL — skip the warning rather than crashing the node.
+    } catch (err) {
+        // Malformed EXPOSED_URL — surface it so the operator can fix .env,
+        // but don't crash the node over a config quirk.
+        const message = err instanceof Error ? err.message : String(err)
+        log.warning(
+            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+                `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
+        )
     }
     // And saves the public key file
     await fs.promises.writeFile(
