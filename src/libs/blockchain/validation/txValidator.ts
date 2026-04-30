@@ -1,7 +1,7 @@
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
-import Hashing from "@/libs/crypto/hashing"
+import Hashing from "../../crypto/hashing"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
 
 /**
