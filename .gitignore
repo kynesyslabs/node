@@ -63,6 +63,7 @@ history/tmp/
 # ---- AI Tooling (local-only) ----
 CLAUDE.md
 AGENTS.md
+TEAM.md
 mcp.json
 .serena/
 .serena-backup/
