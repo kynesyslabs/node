@@ -8,13 +8,15 @@ import {
 } from "typeorm"
 import Datasource from "@/model/datasource"
 
-import TxUtils from "./transaction"
 import log from "src/utilities/logger"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
+import prefetchIdentities from "./validation/prefetchIdentities"
+import { validateTx } from "./validation/txValidator"
+import type { TxValidationResult } from "./validation/types"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -168,41 +170,29 @@ export default class Mempool {
             }
         }
 
-        const validateOne = async (
-            tx: Transaction,
-        ): Promise<Transaction | null> => {
-            const isCoherent = TxUtils.isCoherent(tx)
-            if (!isCoherent) {
-                log.error(
-                    "[Mempool.receive] Transaction is not coherent: " + tx.hash,
-                )
-                return null
-            }
-
-            const { success: signatureValid } =
-                await TxUtils.validateSignature(tx)
-            if (!signatureValid) {
-                log.error(
-                    "[Mempool.receive] Transaction signature is not valid: " +
-                        tx.hash,
-                )
-                return null
-            }
-
-            return tx
-        }
+        const hints = await prefetchIdentities(unseenTransactions)
 
         const BATCH_SIZE = 16
-        const validationResults: (Transaction | null)[] = []
+        const results: TxValidationResult[] = []
         for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
             const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
-            const results = await Promise.all(batch.map(validateOne))
-            validationResults.push(...results)
+            const batchResults = await Promise.all(
+                batch.map(tx => validateTx(tx, hints[tx.hash] ?? null)),
+            )
+            results.push(...batchResults)
         }
 
-        const validTransactions = validationResults.filter(
-            (tx): tx is Transaction => tx !== null,
-        )
+        const validTransactions: Transaction[] = []
+        for (let i = 0; i < unseenTransactions.length; i++) {
+            const r = results[i]
+            if (!r.valid) {
+                log.error(
+                    `[Mempool.receive] Invalid tx ${r.hash}: ${r.reason}`,
+                )
+                continue
+            }
+            validTransactions.push(unseenTransactions[i])
+        }
 
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
