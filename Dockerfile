@@ -18,7 +18,7 @@
 # Installs build toolchain, resolves dependencies, compiles native modules,
 # and patches falcon-sign to log uncaught exceptions before rethrowing.
 # =============================================================================
-FROM oven/bun:1.2-debian AS builder
+FROM oven/bun:1.3-debian AS builder
 
 # Build-time deps for native modules (bufferutil, utf-8-validate, etc.).
 # python3-setuptools is required for node-gyp on newer Pythons.
@@ -34,10 +34,12 @@ WORKDIR /app
 # Copy manifests first to maximise layer cache reuse on dep installs.
 COPY package.json bun.lock ./
 
-# Resolve all dependencies. `bun pm trust --all` runs lifecycle scripts for
-# packages that explicitly opt-in (e.g. native module postinstalls).
-RUN bun install --frozen-lockfile \
-    && bun pm trust --all || true
+# Resolve all dependencies. Split into two RUN steps so `|| true` only
+# tolerates `bun pm trust` failures (some packages have no postinstall
+# script to trust), not `bun install` failures — a failed install must
+# fail the build, otherwise we'd build a silently broken image.
+RUN bun install --frozen-lockfile
+RUN bun pm trust --all || true
 
 # Native websocket accelerators - explicit install so they are not skipped
 # when the lockfile considers them optional peers.
@@ -133,7 +135,7 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Stage 2: runtime
 # Minimal image with only what the node needs at run time. Runs as non-root.
 # =============================================================================
-FROM oven/bun:1.2-debian AS runtime
+FROM oven/bun:1.3-debian AS runtime
 
 # OCI image metadata.
 LABEL org.opencontainers.image.source="https://github.com/kynesyslabs/node" \
@@ -162,11 +164,11 @@ WORKDIR /app
 # only gets write access on:
 #   - /app                     (entrypoint creates symlinks here)
 #   - /app/data, logs, state   (volume mount points)
-COPY --from=builder /app /app
-RUN chown -R root:demos /app \
-    && find /app -mindepth 1 -type d -exec chmod 0755 {} + \
-    && find /app -type f -exec chmod 0644 {} + \
-    && chmod 0755 /app/scripts/docker-entrypoint.sh \
+#
+# COPY --chown bakes ownership into the same layer as the copy itself,
+# avoiding a 2 GB chown layer that would otherwise duplicate the tree.
+COPY --from=builder --chown=root:demos /app /app
+RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && mkdir -p /app/data /app/logs /app/state \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
