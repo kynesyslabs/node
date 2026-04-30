@@ -108,7 +108,10 @@ services:
       PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}
       # Monitoring
       METRICS_ENABLED: ${METRICS_ENABLED:-true}
-      METRICS_PORT: ${METRICS_PORT:-9090}
+      # METRICS_PORT is pinned to 9090 inside the container so the
+      # prometheus.yml scrape target (node:9090) stays valid. Use
+      # METRICS_HOST_PORT in the ports stanza to remap on the host.
+      METRICS_PORT: 9090
       METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
       # TLSNotary — service name from this compose
       TLSNOTARY_ENABLED: ${TLSNOTARY_ENABLED:-true}
@@ -136,11 +139,17 @@ services:
       - node_logs:/app/logs       # all node logs
       - node_state:/app/state     # identity, peerlist, tlsnotary key, output/
     ports:
-      - "${RPC_PORT:-53550}:53550"
-      - "${OMNI_PORT:-53551}:53551"
-      - "${RPC_SIGNALING_PORT:-3005}:3005"
-      - "${RPC_MCP_PORT:-3001}:3001"
-      - "${METRICS_PORT:-9090}:9090"
+      # Both sides of each mapping must use the same variable, otherwise
+      # overriding RPC_PORT (etc.) routes the host port to a container
+      # port where nothing is listening.
+      - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
+      - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
+      - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
+      # METRICS_PORT — keep container port pinned to 9090 so the
+      # prometheus.yml scrape target (node:9090) stays valid. The
+      # host-side port is independently configurable via METRICS_HOST_PORT.
+      - "${METRICS_HOST_PORT:-9090}:9090"
     networks:
       - demos-network
 
@@ -264,11 +273,23 @@ networks:
     driver: bridge
 
 volumes:
+  # Explicit `name:` overrides Compose's project-name prefix so the volumes
+  # have predictable identifiers that match what the docs reference.
+  # Without this, `node_state` would actually be `<projectname>_node_state`,
+  # silently breaking seeding commands like `docker run -v node_state:/state`.
   pgdata:
+    name: demos_pgdata
   node_data:
+    name: demos_node_data
   node_logs:
+    name: demos_node_logs
   node_state:
+    name: demos_node_state
   prometheus_data:
+    name: demos_prometheus_data
   grafana_data:
+    name: demos_grafana_data
   neo4j_data:
+    name: demos_neo4j_data
   neo4j_logs:
+    name: demos_neo4j_logs

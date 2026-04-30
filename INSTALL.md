@@ -106,7 +106,7 @@ If running behind NAT, port-forward `53550` (RPC) and `53551` (OmniProtocol TCP)
 
 **2. Provide a bootstrap peerlist.**
 
-The node persists its peerlist in the `node_state` volume at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write one or more known peer URLs into that volume before first start:
+The node persists its peerlist in the `demos_node_state` volume at `demos_peerlist.json`. On a brand-new node this file is empty (only the node itself), so it cannot discover other peers. To bootstrap, write one or more known peer URLs into that volume before first start:
 
 ```bash
 # Create a bootstrap peerlist on your host
@@ -115,9 +115,11 @@ cat > /tmp/demos_peerlist.json <<EOF
  "http://bootstrap2.demos.network:53550": null}
 EOF
 
-# Seed it into the volume (one-shot)
+# Seed it into the volume (one-shot). The volume is named demos_node_state
+# explicitly in docker-compose.yml so this exact name works regardless of
+# the directory you run compose from.
 docker run --rm \
-  -v node_state:/state \
+  -v demos_node_state:/state \
   -v /tmp/demos_peerlist.json:/seed/demos_peerlist.json:ro \
   alpine sh -c 'cp /seed/demos_peerlist.json /state/ && chown 1000:1000 /state/demos_peerlist.json'
 
@@ -193,30 +195,30 @@ State is stored in named Docker volumes, not bind mounts. They survive `docker c
 
 | Volume | Holds |
 |--------|-------|
-| `pgdata` | PostgreSQL data directory (chain state, indexes) |
-| `node_state` | Your `.demos_identity` (private key), `demos_peerlist.json`, `.tlsnotary-key`, `output/` |
-| `node_data` | Bundled bootstrap data (genesis.json, evmChains, l2ps) plus chain runtime artifacts |
-| `node_logs` | Node logs |
-| `prometheus_data` | Prometheus TSDB |
-| `grafana_data` | Grafana dashboards, users, settings |
-| `neo4j_data` / `neo4j_logs` | Neo4j (only if `neo4j` profile is on) |
+| `demos_pgdata` | PostgreSQL data directory (chain state, indexes) |
+| `demos_node_state` | Your `.demos_identity` (private key), `demos_peerlist.json`, `.tlsnotary-key`, `output/` |
+| `demos_node_data` | Bundled bootstrap data (genesis.json, evmChains, l2ps) plus chain runtime artifacts |
+| `demos_node_logs` | Node logs |
+| `demos_prometheus_data` | Prometheus TSDB |
+| `demos_grafana_data` | Grafana dashboards, users, settings |
+| `demos_neo4j_data` / `demos_neo4j_logs` | Neo4j (only if `neo4j` profile is on) |
 
-Inspect a volume:
+The `demos_` prefix is set explicitly in `docker-compose.yml` so the names are stable regardless of the project directory name. Inspect a volume:
 
 ```bash
-docker volume inspect node_state
+docker volume inspect demos_node_state
 ```
 
 ### Backup the node identity
 
-Your `.demos_identity` is the private key — losing it means losing your node's network identity. Back up the entire `node_state` volume:
+Your `.demos_identity` is the private key — losing it means losing your node's network identity. Back up the entire `demos_node_state` volume:
 
 ```bash
-docker run --rm -v node_state:/src -v "$PWD":/dst alpine \
+docker run --rm -v demos_node_state:/src -v "$PWD":/dst alpine \
   tar czf /dst/node-state-backup.tar.gz -C /src .
 ```
 
-That writes `node-state-backup.tar.gz` into your current directory. To restore, do the reverse: stop the stack, recreate an empty `node_state` volume, and `tar xzf` the backup back into it.
+That writes `node-state-backup.tar.gz` into your current directory. To restore, do the reverse: stop the stack, recreate an empty `demos_node_state` volume, and `tar xzf` the backup back into it.
 
 ### View logs
 
@@ -279,7 +281,7 @@ This deletes your identity, chain data, Prometheus history, Grafana dashboards �
 > You have the legacy Python `docker-compose` instead of the v2 plugin. Install the plugin per [https://docs.docker.com/compose/install/](https://docs.docker.com/compose/install/).
 
 **Grafana password change doesn't take effect**
-> Grafana persists the password in `grafana_data` after first boot. To change it, either edit it in the Grafana UI, or `docker compose down && docker volume rm grafana_data && docker compose up -d` (resets dashboards too).
+> Grafana persists the password in `demos_grafana_data` after first boot. To change it, either edit it in the Grafana UI, or `docker compose down && docker volume rm demos_grafana_data && docker compose up -d` (resets dashboards too).
 
 ---
 
@@ -394,7 +396,7 @@ Press `Ctrl+C` (or `Q` in the TUI) to stop the node so you can edit the configur
 
 ### Run script usage
 
-```
+```text
 Demos Network Node Runner
 
 USAGE:
