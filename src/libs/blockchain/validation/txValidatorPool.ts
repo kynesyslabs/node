@@ -36,6 +36,32 @@ function workerScriptUrl(): URL {
 }
 
 /**
+ * Strip `-r tsconfig-paths/register` (and the `--require ...` form) from the
+ * parent's execArgv before passing it to a worker. The preloader pulls in a
+ * NAPI-backed resolver (oxc-resolver) whose Linux .node binding does not
+ * survive re-registration inside Bun worker isolates, crashing the worker with
+ * `Cannot destructure property 'mod' from null or undefined value`.
+ *
+ * Worker-loaded files use only relative imports and node_modules packages, so
+ * the path-alias resolver is unnecessary in workers.
+ */
+function workerExecArgv(): string[] {
+    const argv = process.execArgv
+    const out: string[] = []
+    for (let i = 0; i < argv.length; i++) {
+        const cur = argv[i]
+        if ((cur === "-r" || cur === "--require") && i + 1 < argv.length) {
+            if (argv[i + 1].includes("tsconfig-paths")) {
+                i++
+                continue
+            }
+        }
+        out.push(cur)
+    }
+    return out
+}
+
+/**
  * Split items into `buckets` contiguous chunks, distributing remainder to the
  * lower-indexed buckets. Reorder is a simple flatten.
  */
@@ -92,8 +118,9 @@ export default class TxValidatorPool {
 
     private spawnWorker(slot: number): void {
         const worker = new Worker(workerScriptUrl(), {
-            // Inherit loader/runtime flags from the parent (tsx, tsconfig-paths, etc.)
-            execArgv: process.execArgv,
+            // Inherit loader/runtime flags from the parent, but strip the
+            // tsconfig-paths preloader — see `workerExecArgv` for rationale.
+            execArgv: workerExecArgv(),
         })
         const handle: WorkerHandle = { worker, pending: new Map() }
         worker.on("message", (msg: WorkerResponse) =>
