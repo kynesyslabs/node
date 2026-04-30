@@ -1099,6 +1099,7 @@ export default class HandleGCR {
                     )
                 }
                 break
+            }
             // KNOWN GAP: these branches persist via the default datasource
             // (not the transactionalEntityManager that wraps insertBlock),
             // so a partially-failed block leaves orphaned rows. Threading
