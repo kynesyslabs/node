@@ -154,6 +154,24 @@ export default class Mempool {
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
 
+        const blockNumber = SecretaryManager.lastBlockRef
+        const existingHashes = await this.getMempoolHashMap(blockNumber)
+
+        const unseenTransactions = incoming.filter(
+            tx => !existingHashes[tx.hash],
+        )
+
+        if (unseenTransactions.length === 0) {
+            const finalPool = await this.getMempool(blockNumber)
+            const final = finalPool.filter(
+                tx => tx.blockNumber === blockNumber,
+            )
+            return {
+                success: true,
+                mempool: final,
+            }
+        }
+
         const validateOne = async (
             tx: Transaction,
         ): Promise<Transaction | null> => {
@@ -180,8 +198,8 @@ export default class Mempool {
 
         const BATCH_SIZE = 16
         const validationResults: (Transaction | null)[] = []
-        for (let i = 0; i < incoming.length; i += BATCH_SIZE) {
-            const batch = incoming.slice(i, i + BATCH_SIZE)
+        for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
+            const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
             const results = await Promise.all(batch.map(validateOne))
             validationResults.push(...results)
         }
@@ -194,26 +212,19 @@ export default class Mempool {
             noSendBackTxs.set(tx.hash, tx.hash)
         }
 
-        const blockNumber = SecretaryManager.lastBlockRef
-        const existingHashes = await this.getMempoolHashMap(blockNumber)
-
-        const newTransactions = validTransactions.filter(
-            tx => !existingHashes[tx.hash],
-        )
-
-        if (newTransactions.length > 0) {
+        if (validTransactions.length > 0) {
             try {
                 const insertResult = await this.repo
                     .createQueryBuilder()
                     .insert()
                     .into(MempoolTx)
-                    .values(newTransactions)
+                    .values(validTransactions)
                     .orIgnore()
                     .execute()
 
                 const insertedCount = insertResult.identifiers.length
                 log.debug(
-                    `[Mempool.receive] Inserted ${insertedCount}/${newTransactions.length} transactions`,
+                    `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
                 )
             } catch (error) {
                 log.error("[Mempool.receive] Error saving received mempool:")
