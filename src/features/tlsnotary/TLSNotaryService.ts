@@ -36,6 +36,8 @@ export type TLSNotaryMode = "ffi" | "docker"
  * Service configuration options
  */
 export interface TLSNotaryServiceConfig {
+    /** Hostname of the notary in docker mode. Defaults to 'localhost'. */
+    host?: string
     /** Port to run the notary WebSocket server on */
     port: number
     /** 32-byte secp256k1 private key (hex string or Uint8Array) - only used in FFI mode */
@@ -206,6 +208,7 @@ export function getConfigFromEnv(): TLSNotaryServiceConfig | null {
     }
 
     return {
+        host: process.env.TLSNOTARY_HOST ?? "localhost",
         port: parseInt(process.env.TLSNOTARY_PORT ?? "7047", 10),
         signingKey,
         maxSentData: parseInt(
@@ -439,14 +442,15 @@ export class TLSNotaryService {
     private async startDockerMode(): Promise<void> {
         const debug = isTLSNotaryDebug()
         const fatal = isTLSNotaryFatal()
+        const host = this.config.host ?? "localhost"
 
         log.info(
-            `[TLSNotary] Docker mode: checking container on port ${this.config.port}...`,
+            `[TLSNotary] Docker mode: checking container at ${host}:${this.config.port}...`,
         )
 
         try {
             // Try to fetch /info endpoint to verify container is running
-            const infoUrl = `http://localhost:${this.config.port}/info`
+            const infoUrl = `http://${host}:${this.config.port}/info`
             const response = await fetch(infoUrl, {
                 signal: AbortSignal.timeout(5000),
             })
@@ -477,11 +481,14 @@ export class TLSNotaryService {
             const message =
                 error instanceof Error ? error.message : String(error)
             log.error(
-                `[TLSNotary] Failed to connect to Docker notary on port ${this.config.port}: ${message}`,
+                `[TLSNotary] Failed to connect to Docker notary at ${host}:${this.config.port}: ${message}`,
             )
             log.error("[TLSNotary] Make sure the Docker container is running:")
             log.error(
-                "[TLSNotary]   cd tlsnotary && TLSNOTARY_PORT=${TLSNOTARY_PORT} docker compose up -d",
+                "[TLSNotary]   docker compose up -d tlsnotary    (root compose)",
+            )
+            log.error(
+                "[TLSNotary]   cd tlsnotary && docker compose up -d   (legacy standalone)",
             )
 
             if (fatal) {

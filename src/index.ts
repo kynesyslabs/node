@@ -329,6 +329,39 @@ async function preMainLoop() {
     const ourselves = "http://127.0.0.1:" + indexState.SERVER_PORT
     getSharedState.connectionString = ourselves
     log.info("Our connection string is: " + ourselves)
+    // REVIEW: Warn operators when EXPOSED_URL points at a loopback/unroutable
+    // host so they don't silently run an unreachable node on the public network.
+    try {
+        const exposedUrl = Config.getInstance().core.exposedUrl
+        const loopbackHosts = new Set([
+            "localhost",
+            "127.0.0.1",
+            "0.0.0.0",
+            "::1",
+            "host.docker.internal",
+        ])
+        const exposedHost = new URL(exposedUrl).hostname
+        if (loopbackHosts.has(exposedHost)) {
+            log.warning(
+                "\n============================================================\n" +
+                    "⚠️  EXPOSED_URL is set to a loopback/unroutable address:\n" +
+                    `     ${exposedUrl}\n` +
+                    "     Other peers cannot reach this node at this address.\n" +
+                    "     For real network participation, set EXPOSED_URL in .env\n" +
+                    "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
+                    "     See INSTALL.md → \"Joining the network\".\n" +
+                    "============================================================",
+            )
+        }
+    } catch (err) {
+        // Malformed EXPOSED_URL — surface it so the operator can fix .env,
+        // but don't crash the node over a config quirk.
+        const message = err instanceof Error ? err.message : String(err)
+        log.warning(
+            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+                `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
+        )
+    }
     // And saves the public key file
     await fs.promises.writeFile(
         "publickey_" + getSharedState.signingAlgorithm + "_" + publicKeyHex,
