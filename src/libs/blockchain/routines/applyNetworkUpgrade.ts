@@ -28,19 +28,21 @@ export default async function applyNetworkUpgrade(
     const ready = due.filter(p => p.effectiveAtBlock <= currentBlock)
     if (ready.length === 0) return []
 
-    const outcomes: ActivationOutcome[] = []
-    for (const proposal of ready) {
-        const patch = proposal.proposedParameters ?? {}
-        proposal.status = "active"
-        await repo.save(proposal)
-        outcomes.push({
-            proposalId: proposal.proposalId,
-            effectiveAtBlock: proposal.effectiveAtBlock,
-            applied: patch,
-        })
+    // Atomicity here comes from the caller's wrapping transaction
+    // (chainBlocks.insertBlock passes a transactionalEntityManager-scoped
+    // repo). A batched save further guarantees no partial activation set
+    // inside this routine: either all `ready` rows flip to active or none.
+    const outcomes: ActivationOutcome[] = ready.map(p => ({
+        proposalId: p.proposalId,
+        effectiveAtBlock: p.effectiveAtBlock,
+        applied: p.proposedParameters ?? {},
+    }))
+    for (const p of ready) p.status = "active"
+    await repo.save(ready)
+    for (const o of outcomes) {
         log.info(
             "GOVERNANCE",
-            `[activate] ${proposal.proposalId} (effectiveAtBlock=${proposal.effectiveAtBlock}): ${JSON.stringify(patch)}`,
+            `[activate] ${o.proposalId} (effectiveAtBlock=${o.effectiveAtBlock}): ${JSON.stringify(o.applied)}`,
         )
     }
     return outcomes

@@ -102,8 +102,8 @@ export function checkSafetyBounds(
 function checkFeatureFlags(
     flags: Record<string, boolean> | undefined,
 ): { ok: true } | { ok: false; reason: string } {
-    if (!flags || typeof flags !== "object") {
-        return { ok: false, reason: "featureFlags must be an object" }
+    if (!flags || typeof flags !== "object" || Array.isArray(flags)) {
+        return { ok: false, reason: "featureFlags must be a plain object" }
     }
     for (const [k, v] of Object.entries(flags)) {
         if (typeof v !== "boolean") {

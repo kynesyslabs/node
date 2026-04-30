@@ -108,9 +108,16 @@ function ceilDiv(num: bigint, den: bigint): bigint {
 
 function safeBigInt(s: string | null | undefined): bigint {
     if (!s) return 0n
+    let v: bigint
     try {
-        return BigInt(s)
+        v = BigInt(s)
     } catch {
+        log.warning("GOVERNANCE", `[tally] dropping malformed weight=${s}`)
         return 0n
     }
+    if (v < 0n) {
+        log.warning("GOVERNANCE", `[tally] dropping negative weight=${s}`)
+        return 0n
+    }
+    return v
 }

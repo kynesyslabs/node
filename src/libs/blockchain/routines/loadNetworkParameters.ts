@@ -17,21 +17,23 @@ export async function loadNetworkParameters(
             : never
         : never,
 ): Promise<NetworkParameters> {
-    let resolvedRepo = repo as
-        | import("typeorm").Repository<NetworkUpgrade>
-        | undefined
-    if (!resolvedRepo) {
-        const db = await Datasource.getInstance()
-        resolvedRepo = db.getDataSource().getRepository(NetworkUpgrade)
-    }
-
     let active: NetworkUpgrade[] = []
     try {
+        let resolvedRepo = repo as
+            | import("typeorm").Repository<NetworkUpgrade>
+            | undefined
+        if (!resolvedRepo) {
+            const db = await Datasource.getInstance()
+            resolvedRepo = db.getDataSource().getRepository(NetworkUpgrade)
+        }
         active = await resolvedRepo.find({
             where: { status: "active" },
             order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
         })
     } catch (e) {
+        // Both datasource acquisition and the find() are inside this try
+        // so a missing/uninitialised datasource also falls through to
+        // genesis defaults instead of bubbling.
         log.error(
             "NETWORK_PARAMETERS",
             `Failed to read active upgrades; falling back to genesis defaults: ${(e as Error).message}`,

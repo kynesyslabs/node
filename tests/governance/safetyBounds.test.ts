@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@jest/globals"
 import {
-    BIGINT_BOUNDS,
+    getBigintBounds,
     GENESIS_NETWORK_PARAMETERS,
     MAX_CHANGE_PERCENT,
     NUMERIC_BOUNDS,
@@ -96,7 +96,7 @@ describe("safetyBounds — absolute floors/ceilings (numeric)", () => {
 })
 
 describe("safetyBounds — bigint bounds (minValidatorStake)", () => {
-    const floor = BIGINT_BOUNDS.minValidatorStake!.floor
+    const floor = getBigintBounds().minValidatorStake!.floor
 
     it("accepts a stake increase of 50% exactly", () => {
         // current = "10_000_000..." — +50% is still in range.

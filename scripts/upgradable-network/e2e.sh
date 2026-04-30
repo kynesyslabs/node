@@ -141,7 +141,9 @@ if [[ "${FAST:-0}" == "1" ]]; then
     cp src/features/networkUpgrade/constants.ts "${RUN_DIR}/constants.ts.orig"
     sed -i "s/^export const VOTING_WINDOW_BLOCKS = 100$/export const VOTING_WINDOW_BLOCKS = ${VOTING_WINDOW}/" src/features/networkUpgrade/constants.ts
     sed -i "s/^export const GRACE_PERIOD_BLOCKS = 50$/export const GRACE_PERIOD_BLOCKS = ${GRACE_PERIOD}/" src/features/networkUpgrade/constants.ts
-    trap 'mv "${RUN_DIR}/constants.ts.orig" src/features/networkUpgrade/constants.ts; cleanup ${?:-1}' EXIT
+    # Capture the script's exit code BEFORE mv overwrites $? with mv's status,
+    # then forward it to cleanup.
+    trap '_ec=${?:-1}; mv "${RUN_DIR}/constants.ts.orig" src/features/networkUpgrade/constants.ts || true; cleanup "$_ec"' EXIT
 fi
 
 log "building devnet image..."

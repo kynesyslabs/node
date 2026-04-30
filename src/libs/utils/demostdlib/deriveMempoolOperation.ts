@@ -142,8 +142,10 @@ export async function createOperation(
     return operation
 }
 
-// Reads governance-driven fees from sharedState.networkParameters. Falls back
-// to 0 / legacy flat sharedState.rpcFee if the loader hasn't run yet.
+// Reads governance-driven fees from sharedState.networkParameters. If
+// loadNetworkParameters() hasn't run yet, fall back to the env-derived flat
+// fields on sharedState (rpcFee/networkFee) — never to a hard 0, which
+// would silently zero fees for the bootstrap window.
 export function resolveDynamicFees(): {
     networkFee: number
     rpcFee: number
@@ -153,12 +155,18 @@ export function resolveDynamicFees(): {
             networkParameters?: { networkFee?: number; rpcFee?: number }
         }
     ).networkParameters
+    const flat = getSharedState as unknown as {
+        rpcFee?: number
+        networkFee?: number
+    }
     const networkFee =
-        typeof params?.networkFee === "number" ? params.networkFee : 0
+        typeof params?.networkFee === "number"
+            ? params.networkFee
+            : flat.networkFee ?? 0
     const rpcFee =
         typeof params?.rpcFee === "number"
             ? params.rpcFee
-            : getSharedState.rpcFee ?? 0
+            : flat.rpcFee ?? 0
     return { networkFee, rpcFee }
 }
 

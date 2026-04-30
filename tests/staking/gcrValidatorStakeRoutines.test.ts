@@ -175,11 +175,17 @@ describe("GCRValidatorStakeRoutines", () => {
             expect(r.message).toContain("Invalid stake amount")
         })
 
-        it("preserves UNSTAKING status when stake tops up an unstaking validator", async () => {
+        it("re-activates an UNSTAKING validator on top-up and clears the unstake window", async () => {
+            // Restake of an unstaking validator must reset to ACTIVE and
+            // clear unstake_*_at — otherwise an attacker could top up
+            // freshly-added stake and exit using the old (already-elapsed)
+            // lock window, bypassing the safety period for the new stake.
             const existing = validatorRow({
                 status: VALIDATOR_STATUS_UNSTAKING,
                 staked_amount: "10",
-            })
+                unstake_requested_at: 50,
+                unstake_available_at: 1050,
+            } as any)
             const repo = createMockRepo(existing)
             const r = await GCRValidatorStakeRoutines.apply(
                 stakeEdit({ amount: "3" }) as any,
@@ -187,8 +193,10 @@ describe("GCRValidatorStakeRoutines", () => {
                 100,
             )
             expect(r.success).toBe(true)
-            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_UNSTAKING)
+            expect(repo.state.row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
             expect(repo.state.row?.staked_amount).toBe("13")
+            expect(repo.state.row?.unstake_requested_at).toBeNull()
+            expect(repo.state.row?.unstake_available_at).toBeNull()
         })
     })
 

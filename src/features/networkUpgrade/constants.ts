@@ -124,10 +124,3 @@ export function getBigintBounds(): Partial<
     }
 }
 
-/** @deprecated Use `getBigintBounds()` — env-resolved at call time. */
-export const BIGINT_BOUNDS: Partial<Record<NetworkParameterKey, BigintBounds>> = {
-    minValidatorStake: {
-        floor: (BigInt(DEFAULT_MIN_VALIDATOR_STAKE) / 100n).toString(),
-        ceiling: null,
-    },
-}

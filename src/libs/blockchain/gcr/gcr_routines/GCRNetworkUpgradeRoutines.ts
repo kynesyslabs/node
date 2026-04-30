@@ -131,7 +131,13 @@ export default class GCRNetworkUpgradeRoutines {
                 message: `Vote skipped: proposal ${e.proposalId} not found`,
             }
         }
-        const blockNumber = await Chain.getLastBlockNumber()
+        if (proposal.status !== "pending") {
+            return {
+                success: true,
+                message: `Vote skipped: proposal ${e.proposalId} status=${proposal.status}, voting closed`,
+            }
+        }
+        const blockNumber = currentBlock ?? (await Chain.getLastBlockNumber())
 
         // Voter must be in the snapshot validator set; otherwise the vote
         // would be persisted with weight="0", contaminating tallies.

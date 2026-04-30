@@ -213,9 +213,22 @@ async function computeSnapshotWeight(
 
 function safeBigInt(s: string | null | undefined): bigint {
     if (!s) return 0n
+    let v: bigint
     try {
-        return BigInt(s)
+        v = BigInt(s)
     } catch {
+        log.warning(
+            "governanceHandlers",
+            `safeBigInt: dropping malformed weight=${s}`,
+        )
         return 0n
     }
+    if (v < 0n) {
+        log.warning(
+            "governanceHandlers",
+            `safeBigInt: dropping negative weight=${s}`,
+        )
+        return 0n
+    }
+    return v
 }

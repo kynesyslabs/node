@@ -183,11 +183,24 @@ runner needs Docker + ~3 GB free disk for the devnet image.
   is a separate refactor. Today the post-block governance hooks
   (`tallyUpgradeVotes`, `applyNetworkUpgrade`) are atomic with the block,
   but the upstream `applyProposal` / `applyVote` row inserts are not.
+- **DB migration for `Validators` columns missing.** `staked_amount`,
+  `unstake_requested_at`, `unstake_available_at` are declared in the
+  TypeORM entity. Devnet relies on `synchronize: true` to auto-create
+  columns; production deployments need a hand-written migration that
+  also backfills `staked_amount` from legacy `staked` / `stake`.
 - **`networkFee` is decorative on its own.** `compositeFeeAmount` in
   `calculateCurrentGas` now sums both `rpcFee` and `networkFee` from
   sharedState, so governance changes to either are reflected in actual
   deductions. The spec also defines them as basis points but the runtime
   treats them as flat addends to gas — bps math is not implemented.
+- **`forge.pki.ed25519.BinaryBuffer` conversions in
+  `validatorsManagement.ts` use `Buffer.from(...).toString("hex")`** —
+  pre-existing convention elsewhere in the repo. CodeRabbit flagged it
+  but it's the same pattern used in `validateTransaction`,
+  `executeNativeTransaction`, `handleGCR` etc; switching to a shared
+  `forgeToHex` utility is a repo-wide refactor, not specific to this PR.
+- **`jest@^29.7.0` vs `@jest/globals@^30.2.0` major-version skew** in
+  `package.json` is pre-existing. Aligning them is a separate dep bump.
 
 ## Known limitations / things to watch
 

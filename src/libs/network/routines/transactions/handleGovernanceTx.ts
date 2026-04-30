@@ -275,10 +275,14 @@ function extractVotePayload(
 }
 
 function requireSender(tx: Transaction): string | null {
-    const from = tx.content?.from
-    if (typeof from === "string" && from.length > 0) return from
-    const ed = tx.content?.from_ed25519_address
-    if (typeof ed === "string" && ed.length > 0) return ed
-    return null
+    const raw =
+        (typeof tx.content?.from === "string" && tx.content.from) ||
+        (typeof tx.content?.from_ed25519_address === "string" &&
+            tx.content.from_ed25519_address) ||
+        ""
+    // Lowercase for case-insensitive membership checks. We don't add an
+    // 0x prefix here because the validator set may be stored without one
+    // — equality must match the stored form.
+    return raw ? raw.toLowerCase() : null
 }
 

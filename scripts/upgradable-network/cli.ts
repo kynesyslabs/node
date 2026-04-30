@@ -76,8 +76,18 @@ async function cmdNewWallet(file?: string) {
 
 async function cmdStake(amount?: string, url?: string) {
     const demos = await connect()
-    const stakeAmount = amount ?? "1000000000000000000" // 10^18 = DEFAULT_MIN_VALIDATOR_STAKE
-    const connUrl = url ?? `http://localhost:${RPC_URL.split(":").pop()}`
+    if (amount !== undefined) {
+        try {
+            if (BigInt(amount) <= 0n) {
+                exitWith(`stake amount must be a positive integer: ${amount}`)
+            }
+        } catch {
+            exitWith(`invalid stake amount: ${amount}`)
+        }
+    }
+    const stakeAmount = amount ?? "1000000000000000000"
+    // Reuse the configured RPC host so non-localhost devnets work.
+    const connUrl = url ?? RPC_URL
     const addr = await address(demos)
     console.log(`staking ${stakeAmount} from ${addr} with url=${connUrl}`)
     const tx = await DemosTransactions.stake(stakeAmount, connUrl, demos)
@@ -192,10 +202,22 @@ function coerceValue(key: string, raw: string): unknown {
     if (key === "featureFlags") {
         return JSON.parse(raw)
     }
+    // bigint params: validate before any other parse so an unrepresentable
+    // value can't slip through Number().
+    if (key === "minValidatorStake") {
+        try {
+            const big = BigInt(raw)
+            if (big < 0n) exitWith(`${key} must be non-negative: ${raw}`)
+        } catch {
+            exitWith(`${key} must be a bigint string: ${raw}`)
+        }
+        return raw
+    }
     // numeric bps / block values
     const n = Number(raw)
-    if (!Number.isNaN(n) && /^-?\d+$/.test(raw)) return n
-    // bigint string (e.g. minValidatorStake)
+    if (!Number.isNaN(n) && /^-?\d+$/.test(raw) && Number.isSafeInteger(n)) {
+        return n
+    }
     if (/^\d{10,}$/.test(raw)) return raw
     return raw
 }
