@@ -37,7 +37,6 @@ import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
-import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
 import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
@@ -439,11 +438,6 @@ async function main() {
 
     await Chain.setup()
     await Mempool.init()
-    try {
-        await TxValidatorPool.getInstance().start()
-    } catch (error) {
-        handleError(error, "CORE", { source: ErrorSource.WORKER_POOL_STARTUP })
-    }
     // INFO Warming up the node (including arguments digesting)
     await warmup()
 
@@ -798,7 +792,9 @@ async function main() {
                 handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
             })
             .finally(() => {
-                log.only("[CORE] Main loop terminated")
+                log.error("[CORE] Main loop terminated, exiting for debug ... ")
+                process.exit(1)
+                log.info("[CORE] Main loop finished")
             }) // Is an async function so running without waiting send that to the background
 
         // Start DTR relay retry service after background loop initialization
@@ -904,16 +900,6 @@ async function gracefulShutdown(signal: string) {
             ])
         } catch (error) {
             handleError(error, "CORE", { source: ErrorSource.L2PS_SHUTDOWN })
-        }
-
-        // Stop TxValidatorPool workers
-        try {
-            log.info("[CORE] Stopping TxValidatorPool...")
-            await TxValidatorPool.getInstance().stop(2_000)
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.WORKER_POOL_SHUTDOWN,
-            })
         }
 
         // Stop OmniProtocol server if running
