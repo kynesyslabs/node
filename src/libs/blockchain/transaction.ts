@@ -34,6 +34,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import IdentityManager from "./gcr/gcr_routines/identityManager"
 import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
+import { serializeTransactionContent } from "@/forks"
 
 interface TransactionResponse {
     status: string
@@ -81,14 +82,23 @@ export default class Transaction implements ITransaction {
 
 
     // INFO Given a transaction, sign it with the private key of the sender
-    public static async sign(tx: Transaction): Promise<[boolean, any]> {
+    public static async sign(
+        tx: Transaction,
+        blockHeight?: number,
+    ): Promise<[boolean, any]> {
         // Check sanity of the structure of the tx object
         if (!tx.content) {
             return [false, "Missing tx.content"]
         }
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), preserving
+        // signatures bit-for-bit.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
         const signature_ = await ucrypto.sign(
             getSharedState.signingAlgorithm,
-            new TextEncoder().encode(JSON.stringify(tx.content)),
+            new TextEncoder().encode(
+                serializeTransactionContent(tx.content, height),
+            ),
         )
 
         if (!signature_) {
@@ -104,8 +114,14 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Hashing the content of a transaction
-    static hash(tx: Transaction): any {
-        const hash = Hashing.sha256(JSON.stringify(tx.content))
+    static hash(tx: Transaction, blockHeight?: number): any {
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), so every
+        // existing tx hash is preserved exactly.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        const hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, height),
+        )
         if (!hash) {
             return false
         } else {
@@ -264,9 +280,17 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
-    public static isCoherent(tx: Transaction) {
+    public static isCoherent(tx: Transaction, blockHeight?: number) {
         log.debug(`[TX] isCoherent - Checking coherence of tx hash: ${tx.hash}`)
-        const derivedHash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), so legacy
+        // tx hashes still match when re-derived. When a caller has the
+        // owning block context, it should pass `block.number`; otherwise
+        // we fall back to the chain head.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        const derivedHash = Hashing.sha256(
+            serializeTransactionContent(tx.content, height),
+        )
         log.debug(
             `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash === tx.hash}`,
         )

@@ -1,4 +1,5 @@
 import Hashing from "src/libs/crypto/hashing"
+import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "@/utilities/logger"
 
@@ -6,6 +7,7 @@ import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { serializeTransactionContent } from "@/forks"
 
 export interface DerivableNative {
     from: string
@@ -188,8 +190,14 @@ export async function createTransaction(
     // Adding data
     transaction.content.data = derivable.data
     transaction.content.timestamp = derivable.timestamp
+    // REVIEW: P2 — route through fork-aware serializer. Async fetch of the
+    // current chain head is the canonical reference height for a derived
+    // mempool tx. Bit-identical to JSON.stringify in P2.
+    const referenceHeight = await Chain.getLastBlockNumber()
     // Hashing the content and signing the transaction
-    transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+    transaction.hash = Hashing.sha256(
+        serializeTransactionContent(transaction.content, referenceHeight),
+    )
     const signature = await ucrypto.sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(transaction.hash),

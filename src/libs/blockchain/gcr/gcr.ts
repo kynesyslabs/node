@@ -71,6 +71,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
+import { serializeTransactionContent } from "@/forks"
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -1143,7 +1144,13 @@ export default class GCR {
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
         tx.content.data = ["awardPoints", accounts]
-        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — fork-aware serialization for the awardPoints tx hash.
+        // The chain head is the correct reference; this tx is created at
+        // runtime, not bound to a specific block.
+        const referenceHeight = await Chain.getLastBlockNumber()
+        tx.hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, referenceHeight),
+        )
 
         const signature = await ucrypto.sign(
             getSharedState.signingAlgorithm,
