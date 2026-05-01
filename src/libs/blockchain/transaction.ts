@@ -568,9 +568,14 @@ export default class Transaction implements ITransaction {
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,
             transaction_fee: {
-                network_fee: rawTx.networkFee,
-                rpc_fee: rawTx.rpcFee,
-                additional_fee: rawTx.additionalFee,
+                // REVIEW The Transactions entity stores fees as `bigint` columns;
+                // TypeORM hands them back to us as JS strings (or bigint) on
+                // some drivers. The SDK's TxFee type is still `number` (wire
+                // format unchanged in P-1), so explicitly coerce at the
+                // boundary to keep callers seeing the documented shape.
+                network_fee: Number(rawTx.networkFee ?? 0),
+                rpc_fee: Number(rawTx.rpcFee ?? 0),
+                additional_fee: Number(rawTx.additionalFee ?? 0),
             },
 
             data: JSON.parse(rawTx.content).data,

@@ -63,11 +63,17 @@ export default class SubOperations {
         transaction.nonce = 0
         transaction.timestamp = genesisTx.content.timestamp ?? Date.now()
         transaction.ed25519_signature = genesisTx.ed25519_signature
-        transaction.networkFee =
-            genesisTx.content.transaction_fee?.network_fee ?? 0
-        transaction.rpcFee = genesisTx.content.transaction_fee?.rpc_fee ?? 0
-        transaction.additionalFee =
-            genesisTx.content.transaction_fee?.additional_fee ?? 0
+        // REVIEW Fee columns are now `bigint`; SDK still serialises fees as
+        // `number` on the wire, so coerce at the entity boundary.
+        transaction.networkFee = BigInt(
+            genesisTx.content.transaction_fee?.network_fee ?? 0,
+        )
+        transaction.rpcFee = BigInt(
+            genesisTx.content.transaction_fee?.rpc_fee ?? 0,
+        )
+        transaction.additionalFee = BigInt(
+            genesisTx.content.transaction_fee?.additional_fee ?? 0,
+        )
 
         // Save the new transaction
         await transactionRepository.save(transaction)

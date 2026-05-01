@@ -49,12 +49,19 @@ export class Transactions {
     @Column("bigint", { name: "timestamp" })
     timestamp: number
 
-    @Column("integer", { name: "networkFee" })
-    networkFee: number
+    // REVIEW Widened from `integer` (32-bit) to `bigint` so OS-denominated
+    // fees (post-migration) cannot be silently truncated. Pre-migration the
+    // values still fit in 32 bits, so the migration is a pure widening with
+    // no data conversion required. TypeORM returns bigint columns as JS
+    // strings unless a transformer is supplied; callers around
+    // toRawTransaction/fromRawTransaction (the only consumers) coerce via
+    // BigInt() at the boundary.
+    @Column("bigint", { name: "networkFee" })
+    networkFee: bigint
 
-    @Column("integer", { name: "rpcFee" })
-    rpcFee: number
+    @Column("bigint", { name: "rpcFee" })
+    rpcFee: bigint
 
-    @Column("integer", { name: "additionalFee" })
-    additionalFee: number
+    @Column("bigint", { name: "additionalFee" })
+    additionalFee: bigint
 }
