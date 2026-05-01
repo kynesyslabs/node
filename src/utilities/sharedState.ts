@@ -16,6 +16,11 @@ import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
+import {
+    cloneDefaultForkConfig,
+    type ForkConfig,
+    type ForkName,
+} from "@/forks/forkConfig"
 import { Config } from "src/config"
 import {
     APP_VERSION,
@@ -224,6 +229,14 @@ export default class SharedState {
 
     // TODO The following variables should be in the genesis
     maxMessageSize = Config.getInstance().core.maxMessageSize
+
+    // SECTION Forks (P2)
+    // REVIEW: Hard-fork activation registry. Hydrated from `data/genesis.json`
+    // at startup (see findGenesisBlock.ts). Default is all forks inactive
+    // (`activationHeight: null`), so a node booting without a `forks` section
+    // in genesis is bit-identical to a pre-P2 node.
+    forkConfig: Record<ForkName, ForkConfig> = cloneDefaultForkConfig()
+    // !SECTION Forks
 
     constructor() {
         this.identity = Identity.getInstance()

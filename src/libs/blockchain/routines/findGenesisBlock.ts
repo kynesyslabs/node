@@ -14,6 +14,7 @@ import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
+import { loadForkConfigFromGenesis } from "@/forks"
 
 function getLatestGCRRecoveryData() {
     if (!Config.getInstance().core.restore) {
@@ -40,6 +41,30 @@ function getLatestGCRRecoveryData() {
 export default async function findGenesisBlock() {
     // INFO: Maintenance hooks here!
     // await new BeforeFindGenesisHooks().awardDemosFollowPoints()
+
+    // REVIEW: P2 — load fork config from data/genesis.json (when present)
+    // BEFORE the genesis-already-present early return, so a node that has
+    // already initialized its chain still picks up its fork activation
+    // heights at every boot. Absent `forks` field leaves
+    // SharedState.forkConfig at its inactive default, matching pre-P2
+    // behavior bit-for-bit.
+    if (fs.existsSync("data/genesis.json")) {
+        try {
+            let cfgGenesisData = JSON.parse(
+                fs.readFileSync("data/genesis.json", "utf8"),
+            )
+            if (typeof cfgGenesisData === "string") {
+                cfgGenesisData = JSON.parse(cfgGenesisData)
+            }
+            loadForkConfigFromGenesis(cfgGenesisData)
+        } catch (e) {
+            log.warning(
+                `[FORKS] Failed to read fork config from data/genesis.json: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            )
+        }
+    }
 
     log.info("[GENESIS] Looking for the genesis block...")
     const genesisBlockHash = await Chain.getGenesisBlockHash()

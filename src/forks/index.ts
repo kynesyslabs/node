@@ -9,4 +9,5 @@ export {
     DEFAULT_FORK_CONFIG,
     cloneDefaultForkConfig,
 } from "./forkConfig"
+export { loadForkConfigFromGenesis } from "./loadForkConfig"
 export type { ForkName, ForkConfig } from "./forkConfig"
