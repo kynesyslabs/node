@@ -8,6 +8,7 @@ import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { serializeBlockContent } from "@/forks"
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -35,7 +36,9 @@ export async function createBlock(
     block.content.native_tables_hashes = await hashNativeTables()
     block.content.timestamp = getSharedState.lastConsensusTime
     block.content.timestamp = getSharedState.lastConsensusTime
-    block.hash = Hashing.sha256(JSON.stringify(block.content))
+    // REVIEW: P2 — route block hashing through the fork-aware serializer.
+    // The block's own number is the correct height for gating.
+    block.hash = Hashing.sha256(serializeBlockContent(block.content, blockNumber))
     // Signing the block and adding the signature to the block validation data
 
     const blockSignature = await ucrypto.sign(
