@@ -78,9 +78,11 @@ export default class SubOperations {
             const balanceOperation = balances[i]
             const receiver = balanceOperation[0]
             const amount = balanceOperation[1]
+            // REVIEW Use BigInt to avoid silent truncation on amounts > 2^53
+            // that parseInt() would otherwise hide.
             await GCR.setGCRNativeBalance(
                 receiver,
-                parseInt(amount),
+                BigInt(amount),
                 operation.hash,
             )
         }
@@ -93,10 +95,14 @@ export default class SubOperations {
     ): Promise<OperationResult> {
         const from: string = operation.params.from
         const to: string = operation.params.to
-        const amount = parseInt(operation.params.amount, 10)
-
-        // Check if amount is a valid number
-        if (isNaN(amount)) {
+        // REVIEW Use BigInt to avoid silent truncation on amounts > 2^53.
+        // BigInt() throws on invalid input (instead of returning NaN like
+        // parseInt did), so we wrap and translate the failure to the same
+        // OperationResult shape the caller already handled.
+        let amount: bigint
+        try {
+            amount = BigInt(operation.params.amount)
+        } catch {
             return {
                 success: false,
                 message: "Invalid amount",
@@ -106,7 +112,7 @@ export default class SubOperations {
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
-        if (amount === 0) {
+        if (amount === 0n) {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -144,7 +150,17 @@ export default class SubOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        const newBalanceTo = balanceTo + parseInt(amount)
+        // REVIEW BigInt() to avoid silent truncation on amounts > 2^53.
+        let parsedAmount: bigint
+        try {
+            parsedAmount = BigInt(amount)
+        } catch {
+            return {
+                success: false,
+                message: "Invalid amount",
+            }
+        }
+        const newBalanceTo = balanceTo + parsedAmount
         await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
         return SubOperations.result
     }
@@ -160,7 +176,18 @@ export default class SubOperations {
                 success: false,
                 message: "Amount cannot be 0",
             }
-        } else if (balanceTo < parseInt(amount)) {
+        }
+        // REVIEW BigInt() to avoid silent truncation on amounts > 2^53.
+        let parsedAmount: bigint
+        try {
+            parsedAmount = BigInt(amount)
+        } catch {
+            return {
+                success: false,
+                message: "Invalid amount",
+            }
+        }
+        if (balanceTo < parsedAmount) {
             return {
                 success: false,
                 message: "Insufficient funds",
@@ -168,7 +195,7 @@ export default class SubOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        const newBalanceTo = balanceTo - parseInt(amount)
+        const newBalanceTo = balanceTo - parsedAmount
         await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
         return SubOperations.result
     }

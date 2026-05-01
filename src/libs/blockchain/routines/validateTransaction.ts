@@ -164,7 +164,10 @@ async function defineGas(
         }
         return [false, validityData]
     }
-    let fromBalance = 0
+    // REVIEW getGCRNativeBalance returns bigint; keep this binding bigint
+    // to make the comparison against compositeFeeAmount (number) explicit
+    // via BigInt() coercion below.
+    let fromBalance = 0n
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
@@ -189,7 +192,7 @@ async function defineGas(
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
     // FIXME Overriding for testing
-    if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
+    if (fromBalance < BigInt(compositeFeeAmount) && getSharedState.PROD) {
         log.error(
             "TX",
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +

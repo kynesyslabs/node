@@ -53,7 +53,9 @@ export default async function executeNativeTransaction(
                 : forgeToHex(transaction.content.to)
         const receiverBalance = await GCR.getGCRNativeBalance(receiver)
         // Refuse transaction if GCR is not in shape
-        if (senderBalance < transaction.content.amount) {
+        // REVIEW senderBalance is bigint; coerce content.amount (currently
+        // number on the wire) to bigint for a type-safe comparison.
+        if (senderBalance < BigInt(transaction.content.amount)) {
             success = false
             message = "Insufficient funds"
             return [success, message]
