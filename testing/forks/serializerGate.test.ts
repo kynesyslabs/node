@@ -1,12 +1,18 @@
 /**
- * Bit-identical regression test for the P2 serializer gate.
+ * Bit-identical regression test for the serializer gate (default config).
  *
- * Contract (SPEC.md §3 P2): landing P2 must not change the bytes produced
- * by any hash site. With every fork's `activationHeight` defaulting to
- * `null`, both the legacy and post-fork branches in
- * `serializerGate.ts` must return exactly `JSON.stringify(content)`.
+ * Contract (SPEC.md §3 P2 / P3a): with every fork's `activationHeight`
+ * defaulting to `null`, the serializer must return exactly
+ * `JSON.stringify(content)`. This guarantees a node booting with the
+ * default fork config is bit-identical to the pre-P2 / pre-P3a code path
+ * — every existing transaction hash and block hash is preserved.
  *
- * If this test ever fails, P2 has a bug — STOP and report.
+ * If any of the "default config" tests below ever fails, the gate has a
+ * bug — STOP and report.
+ *
+ * The fork-active expectations live in `postForkSerializer.test.ts`
+ * (P3a transformations) and `forkBoundary.test.ts` (P3a height
+ * dispatch).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
@@ -65,7 +71,7 @@ function makeSampleBlockContent(): BlockContent {
     }
 }
 
-describe("serializerGate — bit-identical to JSON.stringify in P2", () => {
+describe("serializerGate — bit-identical to JSON.stringify with default config", () => {
     let snapshot: Record<ForkName, ForkConfig>
 
     beforeEach(() => {
@@ -84,7 +90,7 @@ describe("serializerGate — bit-identical to JSON.stringify in P2", () => {
         expect(serializeTransactionContent(content, 0)).toBe(direct)
         expect(serializeTransactionContent(content, 1)).toBe(direct)
         expect(serializeTransactionContent(content, 1_000_000)).toBe(direct)
-        // P2 default: activationHeight === null → fork never active even at
+        // Default: activationHeight === null → fork never active even at
         // absurdly high heights.
         expect(serializeTransactionContent(content, 999_999_999)).toBe(direct)
     })
@@ -99,20 +105,10 @@ describe("serializerGate — bit-identical to JSON.stringify in P2", () => {
         expect(serializeBlockContent(content, 999_999_999)).toBe(direct)
     })
 
-    it("transaction content: even with fork ACTIVE, P2 placeholder branch is bit-identical", () => {
-        // P2 contract: both branches return the same bytes. P3 is what
-        // differentiates them. Setting an activation height proves we
-        // didn't accidentally diverge in P2.
-        getSharedState.forkConfig.osDenomination.activationHeight = 0
-        const content = makeSampleTransactionContent()
-        const direct = JSON.stringify(content)
-
-        expect(serializeTransactionContent(content, 0)).toBe(direct)
-        expect(serializeTransactionContent(content, 1)).toBe(direct)
-        expect(serializeTransactionContent(content, 1_000_000)).toBe(direct)
-    })
-
-    it("block content: even with fork ACTIVE, P2 placeholder branch is bit-identical", () => {
+    it("block content: even with fork ACTIVE, branches are bit-identical", () => {
+        // BlockContent has no amount/fee fields, so the post-fork branch
+        // must remain a no-op. This is the explicit P3a contract for
+        // blocks (see comment in `serializerGate.ts#serializeBlockContent`).
         getSharedState.forkConfig.osDenomination.activationHeight = 0
         const content = makeSampleBlockContent()
         const direct = JSON.stringify(content)
@@ -122,28 +118,14 @@ describe("serializerGate — bit-identical to JSON.stringify in P2", () => {
         expect(serializeBlockContent(content, 1_000_000)).toBe(direct)
     })
 
-    it("transaction content: legacy and post-fork branches return identical bytes for the same input", () => {
-        const content = makeSampleTransactionContent()
-
-        // Pre-fork (default config: activationHeight null)
-        const preFork = serializeTransactionContent(content, 50)
-
-        // Post-fork (activated at 0, evaluating at any height)
-        getSharedState.forkConfig.osDenomination.activationHeight = 0
-        const postFork = serializeTransactionContent(content, 50)
-
-        expect(preFork).toBe(postFork)
-    })
-
-    it("transaction content: gating boundary preserves identity in P2", () => {
+    it("transaction content: pre-fork branch unchanged at the gating boundary", () => {
         getSharedState.forkConfig.osDenomination.activationHeight = 100
         const content = makeSampleTransactionContent()
         const direct = JSON.stringify(content)
 
-        // Just below the boundary (legacy branch).
+        // Just below the boundary (legacy branch) → must equal the
+        // legacy bytes verbatim.
         expect(serializeTransactionContent(content, 99)).toBe(direct)
-        // At and above the boundary (placeholder branch).
-        expect(serializeTransactionContent(content, 100)).toBe(direct)
-        expect(serializeTransactionContent(content, 101)).toBe(direct)
+        expect(serializeTransactionContent(content, 0)).toBe(direct)
     })
 })
