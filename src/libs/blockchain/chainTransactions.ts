@@ -1,4 +1,4 @@
-import { ILike, In, LessThan, EntityManager, FindManyOptions } from "typeorm"
+import { ILike, In, LessThan, EntityManager, FindManyOptions, QueryFailedError } from "typeorm"
 import log from "src/utilities/logger"
 import Transaction from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
@@ -187,13 +187,59 @@ export async function insertTransaction(
 export async function insertTransactionsFromSync(
     transactions: Transaction[],
 ): Promise<boolean> {
-    for (const tx of transactions) {
-        try {
-            await insertTransaction(tx)
-        } catch (error) {
-            handleError(error, "CHAIN", { source: "ChainDB sync insertion" })
-        }
-    }
+    if (transactions.length === 0) return true
 
-    return true
+    const datasourceModule = (await import("src/model/datasource")).default
+    const transactionsRepo = getTransactionsRepo()
+
+    const db = await datasourceModule.getInstance()
+    const dataSource = db.getDataSource()
+
+    try {
+        await dataSource.transaction(async transactionalEntityManager => {
+            const queryRunner = transactionalEntityManager.queryRunner
+            for (let i = 0; i < transactions.length; i++) {
+                const tx = transactions[i]
+                const savepoint = `sync_tx_insert_${i}`
+
+                await queryRunner.query(`SAVEPOINT ${savepoint}`)
+                try {
+                    const rawTransaction = Transaction.toRawTransaction(
+                        tx,
+                        "confirmed",
+                    )
+                    await transactionalEntityManager.save(
+                        transactionsRepo.target,
+                        rawTransaction,
+                    )
+                    await queryRunner.query(
+                        `RELEASE SAVEPOINT ${savepoint}`,
+                    )
+                } catch (error) {
+                    await queryRunner.query(
+                        `ROLLBACK TO SAVEPOINT ${savepoint}`,
+                    )
+                    if (error instanceof QueryFailedError) {
+                        log.error(
+                            `[insertTransactionsFromSync] Failed to insert transaction ${tx.hash}. Skipping ...`,
+                        )
+                        log.error(`Message: ${error.message}`)
+                        continue
+                    }
+
+                    handleError(error, "CHAIN", {
+                        source: "ChainDB sync insertion",
+                    })
+                    throw error
+                }
+            }
+        })
+
+        return true
+    } catch (error) {
+        log.error(
+            `[insertTransactionsFromSync] Transaction batch failed: ${error}`,
+        )
+        return false
+    }
 }
