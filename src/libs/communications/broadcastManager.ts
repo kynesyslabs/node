@@ -118,7 +118,7 @@ export class BroadcastManager {
         const manager = SecretaryManager.getInstance(block.number)
 
         if (manager) {
-            log.only("Received block while in consensus")
+            log.debug("Received block while in consensus")
 
             return {
                 result: 200,
