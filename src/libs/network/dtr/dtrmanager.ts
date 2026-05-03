@@ -639,7 +639,7 @@ export class DTRManager {
         // eslint-disable-next-line no-constant-condition
         while (true) {
             try {
-                cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 30_000)
+                cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 120_000)
                 log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
                 break
             } catch (error) {

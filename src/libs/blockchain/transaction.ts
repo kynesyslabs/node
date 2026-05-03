@@ -502,10 +502,6 @@ export default class Transaction implements ITransaction {
         tx: Transaction,
         status = "confirmed",
     ): RawTransaction {
-        log.debug(
-            `[TX] toRawTransaction - Creating raw tx: hash=${tx.hash}, type=${tx.content.type}, status=${status}, blockNumber=${tx.blockNumber}`,
-        )
-
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
             tx.content.to = tx.content.to["data"]?.toString("hex")
@@ -514,9 +510,6 @@ export default class Transaction implements ITransaction {
             tx.content.from = tx.content.from["data"]?.toString("hex")
         }
 
-        log.debug(
-            `[TX] toRawTransaction - From: ${tx.content.from}, To: ${tx.content.to}`,
-        )
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works

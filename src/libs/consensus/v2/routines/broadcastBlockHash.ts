@@ -34,6 +34,7 @@ export async function broadcastBlockHash(
             ), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         )
     }
+
     // See manageConsensusRoutine.ts for more details on the response format and mechanism
     for (const promise of promises) {
         // Work asynchronously

@@ -38,6 +38,7 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -653,6 +654,11 @@ async function requestBlocks(): Promise<boolean> {
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
+        if (latestBlock() === SecretaryManager.lastBlockRef) {
+            log.debug("Attempting to sync consensus block, returning ...")
+            return true
+        }
+
         log.debug("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
         const startBlock = getSharedState.lastBlockNumber + 1
         const endBlock = latestBlock()
@@ -856,7 +862,8 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
+        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
+            return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -868,7 +875,8 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
-            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
+            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
+                return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )
@@ -895,8 +903,14 @@ export async function fastSync(
         let synced: boolean
         if (getSharedState.fastSyncCount > 0) {
             const result = await Promise.race([
-                fastSyncRoutine(peers).then((v) => ({ kind: "done" as const, value: v })),
-                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({ kind: "timeout" as const, value: false })),
+                fastSyncRoutine(peers).then(v => ({
+                    kind: "done" as const,
+                    value: v,
+                })),
+                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
+                    kind: "timeout" as const,
+                    value: false,
+                })),
             ])
 
             if (result.kind === "timeout") {

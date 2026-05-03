@@ -6,6 +6,7 @@ import { syncBlock } from "../blockchain/routines/Sync"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
+import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
 /**
  * Manages the broadcasting of messages to the network
@@ -81,7 +82,7 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Block received while waiting for next block",
-                syncData: PeerManager.getInstance().ourSyncDataString,
+                syncData: peerman.ourSyncDataString,
             }
         }
 
@@ -89,7 +90,7 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Cannot handle new block. Node is not initialized",
-                syncData: PeerManager.getInstance().ourSyncDataString,
+                syncData: peerman.ourSyncDataString,
             }
         }
 
@@ -110,6 +111,20 @@ export class BroadcastManager {
                 result: 200,
                 message: "Block already exists",
                 syncData: peerman.ourSyncDataString,
+            }
+        }
+
+        // check if we're in the consensus for received block
+        const manager = SecretaryManager.getInstance(block.number)
+
+        if (manager) {
+            log.only("Received block while in consensus")
+            process.exit(0)
+
+            return {
+                result: 200,
+                message: "Cannot process block, still in consensus",
+                syncData: peerman.ourSyncData,
             }
         }
 

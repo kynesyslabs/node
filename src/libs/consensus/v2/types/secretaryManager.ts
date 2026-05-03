@@ -489,7 +489,7 @@ export default class SecretaryManager {
         // INFO: Check if that peer was the one holding the green light
         if (shouldRelease) {
             // INFO: If we are in the last phase, stop the secretary routine
-            if (this.ourValidatorPhase.currentPhase === 7) {
+            if (this.ourValidatorPhase.currentPhase === 6) {
                 this.runSecretaryRoutine = false
             }
 
