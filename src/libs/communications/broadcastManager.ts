@@ -124,7 +124,7 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Cannot process block, still in consensus",
-                syncData: peerman.ourSyncData,
+                syncData: peerman.ourSyncDataString,
             }
         }
 
