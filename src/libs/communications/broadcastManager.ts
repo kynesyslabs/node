@@ -119,7 +119,6 @@ export class BroadcastManager {
 
         if (manager) {
             log.only("Received block while in consensus")
-            process.exit(0)
 
             return {
                 result: 200,
