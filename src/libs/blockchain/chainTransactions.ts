@@ -224,7 +224,6 @@ export async function insertTransactionsFromSync(
                             `[insertTransactionsFromSync] Failed to insert transaction ${tx.hash}. Skipping ...`,
                         )
                         log.error(`Message: ${error.message}`)
-                        process.exit(1)
                         continue
                     }
 

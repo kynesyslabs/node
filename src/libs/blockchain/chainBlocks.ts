@@ -244,7 +244,6 @@ export async function insertBlock(
                                 `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
                             )
                             log.error(`Message: ${error.message}`)
-                            process.exit(1)
                             continue
                         }
 
