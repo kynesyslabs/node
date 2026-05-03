@@ -349,7 +349,7 @@ async function preMainLoop() {
                     "     Other peers cannot reach this node at this address.\n" +
                     "     For real network participation, set EXPOSED_URL in .env\n" +
                     "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
-                    "     See INSTALL.md → \"Joining the network\".\n" +
+                    '     See INSTALL.md → "Joining the network".\n' +
                     "============================================================",
             )
         }
@@ -825,9 +825,7 @@ async function main() {
                 handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
             })
             .finally(() => {
-                log.error("[CORE] Main loop terminated, exiting for debug ... ")
-                process.exit(1)
-                log.info("[CORE] Main loop finished")
+                log.info("[CORE] Main loop terminated")
             }) // Is an async function so running without waiting send that to the background
 
         // Start DTR relay retry service after background loop initialization
