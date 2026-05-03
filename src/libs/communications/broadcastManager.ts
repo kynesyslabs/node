@@ -71,6 +71,7 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        log.debug("handleNewBlock called with block: " + block.number)
         const peerman = PeerManager.getInstance()
 
         if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {
@@ -194,7 +195,10 @@ export class BroadcastManager {
      * @param syncData The sync data to update
      */
     static async handleUpdatePeerSyncData(sender: string, syncData: string) {
-        log.debug("handleUpdatePeerSyncData called with syncData: " + JSON.stringify(syncData))
+        log.debug(
+            "handleUpdatePeerSyncData called with syncData: " +
+                JSON.stringify(syncData),
+        )
         const peerman = PeerManager.getInstance()
         const ePeer = peerman.getPeer(sender)
 
