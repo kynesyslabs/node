@@ -914,7 +914,7 @@ export default class SecretaryManager {
 
         Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
 
-        if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
+        if (manager && manager === this) {
             log.debug("deleting the instance")
             SecretaryManager.instances.delete(this.shard.blockRef)
         }
