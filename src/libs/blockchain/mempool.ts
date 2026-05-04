@@ -142,12 +142,12 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
-        if (!getSharedState.inConsensusLoop) {
-            return {
-                success: false,
-                mempool: [],
-            }
-        }
+        // if (!getSharedState.inConsensusLoop) {
+        //     return {
+        //         success: false,
+        //         mempool: [],
+        //     }
+        // }
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
