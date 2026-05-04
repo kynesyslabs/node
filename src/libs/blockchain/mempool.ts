@@ -166,6 +166,8 @@ export default class Mempool {
             tx => !existingHashes[tx.hash],
         )
 
+        log.only(`[Mempool.receive] Unseen transactions: ${unseenTransactions.length}`)
+
         if (unseenTransactions.length === 0) {
             const finalPool = await this.getMempool(blockNumber)
             const final = finalPool.filter(tx => tx.blockNumber === blockNumber)
@@ -193,6 +195,8 @@ export default class Mempool {
             validTransactions.push(unseenTransactions[i])
         }
 
+        log.only(`[Mempool.receive] Valid transactions: ${validTransactions.length}`)
+
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
         }
@@ -208,7 +212,7 @@ export default class Mempool {
                     .execute()
 
                 const insertedCount = insertResult.identifiers.length
-                log.debug(
+                log.only(
                     `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
                 )
             } catch (error) {

@@ -715,7 +715,7 @@ export default class HandleGCR {
         }
 
         const end = Date.now()
-        log.debug(
+        log.only(
             `[partitionIndependentTxs] Time taken: ${end - now}ms for ${txs.length} txs`,
         )
 
@@ -888,11 +888,13 @@ export default class HandleGCR {
         })
 
         const end = Date.now()
-        log.debug(
+        log.only(
             `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${finalTxs.length} txs across ${groups.length} groups (${txs.length - finalTxs.length} non-state-mutating skipped)`,
         )
-        log.debug(`[applyTransactions] Non-state-mutating skipped: ${txs.length - finalTxs.length}`)
-        log.debug(`[applyTransactions] Total txs: ${txs.length}`)
+        log.only(
+            `[applyTransactions] Non-state-mutating skipped: ${txs.length - finalTxs.length}`,
+        )
+        log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
         return { successfulTxs, failedTxs }
     }
@@ -907,6 +909,7 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         sideEffects: (() => Promise<void>)[],
     ) {
+        const now = Date.now()
         // Save GCRMain entities
         const entitiesToSave = entities.accounts.values().toArray()
         entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
@@ -982,6 +985,11 @@ export default class HandleGCR {
                 )
             }
         }
+
+        const end = Date.now()
+        log.only(
+            `[saveGCREditChanges] Time taken: ${(end - now) / 1000}s for ${sideEffects.length} side effects`,
+        )
     }
 
     // REVIEW Implement the execution of GCREdit objects

@@ -36,6 +36,7 @@ function withTimeout(
 }
 
 export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
+    const now = Date.now()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
     if (shard.length === 0) {
@@ -103,4 +104,8 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         `[mergeMempools] Forwarding ${merged.size} unique txs to Mempool.receive`,
     )
     await Mempool.receive(Array.from(merged.values()))
+    const end = Date.now()
+    log.only(
+        `[mergeMempools] Time taken: ${(end - now) / 1000}s with ${shard.length} peers`,
+    )
 }

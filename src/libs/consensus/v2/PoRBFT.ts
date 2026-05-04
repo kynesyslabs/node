@@ -83,9 +83,9 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.debug(`Forgin block: ${manager.shard.blockRef}`)
-        log.debug("[consensusRoutine] We are in the shard, creating the block")
-        log.debug(
+        log.only(`Forgin block: ${manager.shard.blockRef}`)
+        log.only("[consensusRoutine] We are in the shard, creating the block")
+        log.only(
             `[consensusRoutine] shard: ${JSON.stringify(
                 manager.shard.members.map(m => m.connection.string),
                 null,
@@ -102,14 +102,14 @@ export async function consensusRoutine(): Promise<void> {
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        log.debug("[consensusRoutine] Merging and ordering the mempools...")
+        log.only("[consensusRoutine] Merging and ordering the mempools...")
         tempMempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
         )
 
-        log.debug(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
-        log.debug(
+        log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
+        log.only(
             `[consensusRoutine] Our mempool: ${JSON.stringify(
                 tempMempool.map(tx => tx.hash),
                 null,
@@ -576,14 +576,19 @@ async function voteOnBlock(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    log.debug(
+    const now = Date.now()
+    log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
-    log.debug(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    log.only(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    const end = Date.now()
+    log.only(
+        `[consensusRoutine] Time taken: ${(end - now) / 1000}s for voting on the block`,
+    )
 
     return [pro, con]
 }
