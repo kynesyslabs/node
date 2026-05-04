@@ -74,7 +74,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
-        blockRef?: number,
+        // blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -92,16 +92,14 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number = blockRef ?? undefined
+        const blockNumber = getSharedState.lastBlockNumber + 2
 
         // INFO: If we're in consensus, move tx to next block
-        if (getSharedState.inConsensusLoop && !blockNumber) {
-            blockNumber = SecretaryManager.lastBlockRef + 1
-        }
-
-        if (!blockNumber) {
-            blockNumber = (await Chain.getLastBlockNumber()) + 1
-        }
+        // if (getSharedState.inConsensusLoop) {
+        //     blockNumber = SecretaryManager.lastBlockRef + 1
+        // } else {
+        //     blockNumber = getSharedState.lastBlockNumber + 1
+        // }
 
         try {
             const saved = await this.repo.save({
@@ -163,9 +161,7 @@ export default class Mempool {
 
         if (unseenTransactions.length === 0) {
             const finalPool = await this.getMempool(blockNumber)
-            const final = finalPool.filter(
-                tx => tx.blockNumber === blockNumber,
-            )
+            const final = finalPool.filter(tx => tx.blockNumber === blockNumber)
             return {
                 success: true,
                 mempool: final,

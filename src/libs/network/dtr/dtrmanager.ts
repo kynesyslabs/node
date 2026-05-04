@@ -583,9 +583,6 @@ export class DTRManager {
                     ...tx,
                     reference_block: validityData.data.reference_block,
                 },
-
-                // INFO: Enforce block ref
-                getSharedState.lastBlockNumber + 1,
             )
 
             log.debug(
