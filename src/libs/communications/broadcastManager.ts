@@ -105,6 +105,28 @@ export class BroadcastManager {
             }
         }
 
+        // If we signed the block, exit
+        if (block.validation_data.signatures[getSharedState.publicKeyHex]) {
+            log.only("Block is already signed by us, ignoring it")
+            return {
+                result: 200,
+                message: "Block is already signed by us, ignoring it",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
+        // If block is greater than our last block + 1, exit
+        if (block.number > getSharedState.lastBlockNumber + 1) {
+            log.only("Block is greater than our last block + 1, ignoring it")
+
+            return {
+                result: 200,
+                message:
+                    "Block is greater than our last block + 1, ignoring it",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
         // check if we already have the block
         const existing = await Chain.getBlockByHash(block.hash)
         if (existing) {

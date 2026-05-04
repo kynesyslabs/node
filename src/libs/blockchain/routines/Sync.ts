@@ -897,10 +897,14 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 export async function fastSync(
     peers: Peer[] = [],
     from: string,
-): Promise<boolean> {
+): Promise<{ latestChainBlock: number; ourLatestBlock: number }> {
     if (getSharedState.inSyncLoop) {
         log.debug("[fastSync] Sync loop already running, skipping")
-        return
+
+        return {
+            latestChainBlock: latestBlock(),
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
     }
 
     log.debug("[fastSync] Starting sync loop")
@@ -924,7 +928,10 @@ export async function fastSync(
             if (result.kind === "timeout") {
                 getSharedState.fastSyncAborted = true
                 log.warn("[fastSync] Timed out after 30s, aborting")
-                return false
+                return {
+                    latestChainBlock: latestBlock(),
+                    ourLatestBlock: getSharedState.lastBlockNumber,
+                }
             }
 
             synced = result.value
@@ -946,7 +953,10 @@ export async function fastSync(
                 from,
         )
 
-        return true
+        return {
+            latestChainBlock: lastBlockNumber,
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
     } finally {
         getSharedState.fastSyncAborted = false
         getSharedState.inSyncLoop = false
