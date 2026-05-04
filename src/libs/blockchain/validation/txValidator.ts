@@ -1,6 +1,16 @@
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
-import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+// Import unifiedCrypto.js directly instead of "@kynesyslabs/demosdk/encryption":
+// the package index re-exports zK, which transitively loads ffjavascript →
+// web-worker. web-worker auto-runs its workerThread() startup against the host
+// worker's workerData and throws TypeError: Cannot destructure property 'mod'
+// from null, killing the worker before any handlers run. Going straight to
+// unifiedCrypto.js avoids zK (and FHE/SEAL) and keeps this file safe to load
+// inside a worker_threads / Bun Worker.
+import {
+    unifiedCrypto as ucrypto,
+    hexToUint8Array,
+} from "../../../../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto.js"
 import Hashing from "../../crypto/hashing"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
 
