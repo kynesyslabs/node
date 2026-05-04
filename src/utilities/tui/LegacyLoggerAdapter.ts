@@ -65,7 +65,7 @@ export default class LegacyLoggerAdapter {
     private static logger = CategorizedLogger.getInstance()
 
     // Preserve old static properties for compatibility
-    static LOG_ONLY_ENABLED = true
+    static LOG_ONLY_ENABLED = false
     static LOGS_DIR = "logs"
     static LOG_INFO_FILE = "logs/info.log"
     static LOG_ERROR_FILE = "logs/error.log"
