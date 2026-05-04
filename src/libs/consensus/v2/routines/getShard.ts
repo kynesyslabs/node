@@ -14,8 +14,18 @@ import Chain from "src/libs/blockchain/chain"
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
+    log.only(
+        `[getShard] All peers: ${allPeers.map(peer => peer.connection.string)}`,
+    )
     const peers = allPeers.filter(
-        peer => peer.status.online && peer.sync.status && Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
+        peer =>
+            peer.status.online &&
+            peer.sync.status &&
+            Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
+    )
+
+    log.only(
+        `[getShard] Final Peers: ${peers.map(peer => peer.connection.string)}`,
     )
 
     // Select up to 10 peers from the list using the seed as a source of randomness
@@ -42,6 +52,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
+
+    log.only(`[getShard] Shard: ${shard.map(peer => peer.connection.string)}`)
 
     // Setting the last shard
     // getSharedState.lastShard = shard.map(peer => peer.identity)
