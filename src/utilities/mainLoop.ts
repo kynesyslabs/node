@@ -30,7 +30,6 @@ export default async function mainLoop() {
         } finally {
             // Reset flags
             getSharedState.inMainLoop = false
-            getSharedState.inSyncLoop = false
             getSharedState.inPeerRecheckLoop = false
             await sleep(getSharedState.mainLoopSleepTime)
         }

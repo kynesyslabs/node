@@ -34,8 +34,6 @@ import { getSharedState } from "@/utilities/sharedState"
 import IdentityManager from "./gcr/gcr_routines/identityManager"
 import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
-import prefetchIdentities from "./validation/prefetchIdentities"
-import { validateTxSignature } from "./validation/txValidator"
 
 interface TransactionResponse {
     status: string
@@ -192,18 +190,76 @@ export default class Transaction implements ITransaction {
             }
         }
 
-        // Delegate the actual coherence-skipping signature verification to the
-        // pure validator so this method and Mempool.receive share one source of
-        // truth for the crypto rules. The DB lookup that the PQC-no-co-signature
-        // branch needs is pre-resolved here as a single-tx prefetch.
-        const hints = await prefetchIdentities([tx])
-        const result = await validateTxSignature(tx, hints[tx.hash] ?? null)
+        let ed25519SignatureVerified = false
+
+        // INFO: If a PQC signer is used, make sure identity is in the GCR
+        // or there's an ed25519 signature to verify ownership of ed25519 address
+        if (tx.signature.type !== "ed25519") {
+            // INFO: check if sender's PQC pubkey is indexed in the GCR
+            if (!tx.ed25519_signature) {
+                const identities =
+                    (await IdentityManager.getIdentities(
+                        tx.content.from_ed25519_address,
+                        "pqc",
+                    )) || {}
+
+                // INFO: Get all the indexed pubkeys for the PQC signer type (eg. falcon, etc.)
+                const indexedPubKeys: SavedPqcIdentity[] =
+                    identities[tx.signature.type] || []
+
+                // INFO: Check if sender's PQC pubkey is indexed in PQC identities
+                const found = indexedPubKeys.find(
+                    identity => identity.address === tx.content.from,
+                )
+
+                if (!found) {
+                    return {
+                        success: false,
+                        message:
+                            "Transaction is missing ed25519 signature, and the PQC signer is not added as an identity. Please provide an ed25519 signature or add the PQC signer as an identity for " +
+                            tx.content.from_ed25519_address,
+                    }
+                }
+
+                // Verify the found key's signature with the tx's ed25519 address
+                ed25519SignatureVerified = await ucrypto.verify({
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(found.address),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
+                    signature: hexToUint8Array(found.signature),
+                })
+            } else {
+                // INFO: Verify ed25519 signature
+                ed25519SignatureVerified = await ucrypto.verify({
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(tx.hash),
+                    publicKey: hexToUint8Array(tx.content.from_ed25519_address),
+                    signature: hexToUint8Array(tx.ed25519_signature),
+                })
+            }
+        } else {
+            ed25519SignatureVerified = true
+        }
+
+        if (!ed25519SignatureVerified) {
+            return {
+                success: false,
+                message: "Ed25519 signature verification failed",
+            }
+        }
+
+        const mainSignatureVerified = await ucrypto.verify({
+            algorithm: tx.signature.type as SigningAlgorithm,
+            message: new TextEncoder().encode(tx.hash),
+            publicKey: hexToUint8Array(tx.content.from as string),
+            signature: hexToUint8Array(tx.signature.data),
+        })
 
         return {
-            success: result.valid,
-            message: result.valid
+            success: mainSignatureVerified,
+            message: mainSignatureVerified
                 ? "Transaction signature verified"
-                : result.reason,
+                : "Transaction signature verification failed",
         }
     }
 
@@ -446,10 +502,6 @@ export default class Transaction implements ITransaction {
         tx: Transaction,
         status = "confirmed",
     ): RawTransaction {
-        log.debug(
-            `[TX] toRawTransaction - Creating raw tx: hash=${tx.hash}, type=${tx.content.type}, status=${status}, blockNumber=${tx.blockNumber}`,
-        )
-
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
             tx.content.to = tx.content.to["data"]?.toString("hex")
@@ -458,9 +510,6 @@ export default class Transaction implements ITransaction {
             tx.content.from = tx.content.from["data"]?.toString("hex")
         }
 
-        log.debug(
-            `[TX] toRawTransaction - From: ${tx.content.from}, To: ${tx.content.to}`,
-        )
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works

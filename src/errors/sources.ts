@@ -59,8 +59,6 @@ export const ErrorSource = {
     METRICS_SHUTDOWN: "Metrics shutdown",
     RPC_SHUTDOWN: "RPC shutdown",
     SIGNALING_SHUTDOWN: "Signaling shutdown",
-    WORKER_POOL_STARTUP: "TxValidatorPool startup",
-    WORKER_POOL_SHUTDOWN: "TxValidatorPool shutdown",
 
     // --- Identity ---
     IDENTITY_VERIFICATION: "identity verification",

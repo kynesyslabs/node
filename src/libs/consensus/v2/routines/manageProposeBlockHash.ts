@@ -54,11 +54,12 @@ export default async function manageProposeBlockHash(
             "[manageProposeBlockHash] Candidate block not formed: refusing the block hash",
         )
 
-        response.result = 401
+        response.result = 404
         response.response = getSharedState.publicKeyHex
         response.extra = "Candidate block not formed"
         return response
     }
+
     const ourCandidateHash = getSharedState.candidateBlock.hash
     if (ourCandidateHash === blockHash) {
         log.info(

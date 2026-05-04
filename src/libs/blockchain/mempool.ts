@@ -8,13 +8,13 @@ import {
 } from "typeorm"
 import Datasource from "@/model/datasource"
 
+import TxUtils from "./transaction"
 import log from "src/utilities/logger"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
-import TxValidatorPool from "./validation/txValidatorPool"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -74,7 +74,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
-        blockRef?: number,
+        // blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -92,16 +92,14 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number = blockRef ?? undefined
+        const blockNumber = getSharedState.lastBlockNumber + 2
 
         // INFO: If we're in consensus, move tx to next block
-        if (getSharedState.inConsensusLoop && !blockNumber) {
-            blockNumber = SecretaryManager.lastBlockRef + 1
-        }
-
-        if (!blockNumber) {
-            blockNumber = (await Chain.getLastBlockNumber()) + 1
-        }
+        // if (getSharedState.inConsensusLoop) {
+        //     blockNumber = SecretaryManager.lastBlockRef + 1
+        // } else {
+        //     blockNumber = getSharedState.lastBlockNumber + 1
+        // }
 
         try {
             const saved = await this.repo.save({
@@ -144,63 +142,85 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
-        if (!getSharedState.inConsensusLoop) {
-            return {
-                success: false,
-                mempool: [],
-            }
-        }
-
-        if (incoming.length === 0) {
-            return {
-                success: true,
-                mempool: [],
-            }
-        }
+        // if (!getSharedState.inConsensusLoop) {
+        //     return {
+        //         success: false,
+        //         mempool: [],
+        //     }
+        // }
 
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
-        const now = Date.now()
-        const results = await TxValidatorPool.getInstance().validate(incoming)
-        const end = Date.now()
-        log.only(
-            `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${incoming.length} transactions`,
+
+        const blockNumber = SecretaryManager.lastBlockRef
+        const existingHashes = await this.getMempoolHashMap(blockNumber)
+
+        const unseenTransactions = incoming.filter(
+            tx => !existingHashes[tx.hash],
         )
 
-        const validTransactions: Transaction[] = []
-        for (let i = 0; i < incoming.length; i++) {
-            const r = results[i]
-            if (!r.valid) {
-                log.error(`[Mempool.receive] Invalid tx ${r.hash}: ${r.reason}`)
-                continue
+        if (unseenTransactions.length === 0) {
+            const finalPool = await this.getMempool(blockNumber)
+            const final = finalPool.filter(tx => tx.blockNumber === blockNumber)
+            return {
+                success: true,
+                mempool: final,
             }
-            validTransactions.push(incoming[i])
         }
+
+        const validateOne = async (
+            tx: Transaction,
+        ): Promise<Transaction | null> => {
+            const isCoherent = TxUtils.isCoherent(tx)
+            if (!isCoherent) {
+                log.error(
+                    "[Mempool.receive] Transaction is not coherent: " + tx.hash,
+                )
+                return null
+            }
+
+            const { success: signatureValid } =
+                await TxUtils.validateSignature(tx)
+            if (!signatureValid) {
+                log.error(
+                    "[Mempool.receive] Transaction signature is not valid: " +
+                        tx.hash,
+                )
+                return null
+            }
+
+            return tx
+        }
+
+        const BATCH_SIZE = 16
+        const validationResults: (Transaction | null)[] = []
+        for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
+            const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
+            const results = await Promise.all(batch.map(validateOne))
+            validationResults.push(...results)
+        }
+
+        const validTransactions = validationResults.filter(
+            (tx): tx is Transaction => tx !== null,
+        )
 
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
         }
 
-        const blockNumber = SecretaryManager.lastBlockRef
-        const existingHashes = await this.getMempoolHashMap(blockNumber)
-
-        const newTransactions = validTransactions.filter(
-            tx => !existingHashes[tx.hash],
-        )
-
-        if (newTransactions.length > 0) {
+        if (validTransactions.length > 0) {
             try {
                 const insertResult = await this.repo
                     .createQueryBuilder()
                     .insert()
                     .into(MempoolTx)
-                    .values(newTransactions)
+                    .values(validTransactions)
                     .orIgnore()
                     .execute()
 
                 const insertedCount = insertResult.identifiers.length
                 log.debug(
-                    `[Mempool.receive] Inserted ${insertedCount}/${newTransactions.length} transactions`,
+                    `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
                 )
             } catch (error) {
                 log.error("[Mempool.receive] Error saving received mempool:")

@@ -38,6 +38,7 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -312,6 +313,12 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
+    const exists = await Chain.getBlockByNumber(block.number)
+    if (exists) {
+        log.debug("Block already exists, skipping ...")
+        return true
+    }
+
     await Chain.insertBlock(block, [], null, false)
     log.debug("Block inserted successfully")
     log.debug(
@@ -348,62 +355,62 @@ export async function syncBlock(block: Block, peer: Peer) {
     return true
 }
 
-/**
- *
- * @param peer The peer to download the block from
- * @param blockToAsk The block number to download
- * @returns The block if downloaded successfully, false otherwise
- */
-async function downloadBlock(peer: Peer, blockToAsk: number) {
-    const blockRequest: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getBlockByNumber",
-                data: { blockNumber: blockToAsk.toString() },
-                muid: null,
-            },
-        ],
-    }
+// /**
+//  *
+//  * @param peer The peer to download the block from
+//  * @param blockToAsk The block number to download
+//  * @returns The block if downloaded successfully, false otherwise
+//  */
+// async function downloadBlock(peer: Peer, blockToAsk: number) {
+//     const blockRequest: RPCRequest = {
+//         method: "nodeCall",
+//         params: [
+//             {
+//                 message: "getBlockByNumber",
+//                 data: { blockNumber: blockToAsk.toString() },
+//                 muid: null,
+//             },
+//         ],
+//     }
 
-    const blockResponse = await peer.longCall(blockRequest, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-    log.debug("Block response: " + blockResponse.result)
+//     const blockResponse = await peer.longCall(blockRequest, true, {
+//         protocol: "http",
+//         sleepTime: 1000,
+//         retries: 3,
+//     })
+//     log.debug("Block response: " + blockResponse.result)
 
-    // INFO: Handle max retries reached
-    if (blockResponse.result === 400) {
-        log.info("[fastSync] Peer is offline")
-        // TODO: Test this!
-        throw new PeerUnreachableError("Peer is offline")
-    }
+//     // INFO: Handle max retries reached
+//     if (blockResponse.result === 400) {
+//         log.info("[fastSync] Peer is offline")
+//         // TODO: Test this!
+//         throw new PeerUnreachableError("Peer is offline")
+//     }
 
-    if (blockResponse.result === 404) {
-        log.error("[fastSync] Block not found")
-        log.error("BLOCK TO ASK: " + blockToAsk)
-        log.error("PEER: " + peer.connection.string)
+//     if (blockResponse.result === 404) {
+//         log.error("[fastSync] Block not found")
+//         log.error("BLOCK TO ASK: " + blockToAsk)
+//         log.error("PEER: " + peer.connection.string)
 
-        throw new BlockNotFoundError("Block not found")
-    }
+//         throw new BlockNotFoundError("Block not found")
+//     }
 
-    if (blockResponse.result === 200) {
-        log.debug(
-            `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
-        )
-        const block = blockResponse.response as Block
+//     if (blockResponse.result === 200) {
+//         log.debug(
+//             `[SYNC] downloadBlock - Block response received for block: ${blockToAsk}`,
+//         )
+//         const block = blockResponse.response as Block
 
-        if (!block) {
-            log.error("[downloadBlock] Block not received")
-            return false
-        }
+//         if (!block) {
+//             log.error("[downloadBlock] Block not received")
+//             return false
+//         }
 
-        return await syncBlock(block, peer)
-    }
+//         return await syncBlock(block, peer)
+//     }
 
-    return false
-}
+//     return false
+// }
 
 // Helper function to ask for transactions in batches
 export async function askTxsForBlocksBatch(
@@ -653,6 +660,11 @@ async function requestBlocks(): Promise<boolean> {
     let peer = highestBlockPeer()
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
+        if (latestBlock() === SecretaryManager.lastBlockRef) {
+            log.debug("Attempting to sync consensus block, returning ...")
+            return true
+        }
+
         log.debug("[requestBlocks] Requesting blocks ... 🔄🔄🔄🔄🔄🔄🔄🔄🔄")
         const startBlock = getSharedState.lastBlockNumber + 1
         const endBlock = latestBlock()
@@ -856,7 +868,8 @@ async function fastSyncRoutine(peers: Peer[] = []) {
     }
 
     while (!(await requestBlocks())) {
-        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
+        if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
+            return false
         log.debug(
             "[fastSync] Request blocks failed, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
         )
@@ -868,7 +881,8 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
         // await waitForNextBlock()
         while (!(await waitForNextBlock())) {
-            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted) return false
+            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
+                return false
             log.debug(
                 "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
             )
@@ -886,17 +900,25 @@ export async function fastSync(
 ): Promise<boolean> {
     if (getSharedState.inSyncLoop) {
         log.debug("[fastSync] Sync loop already running, skipping")
-        return true
+        return
     }
 
+    log.debug("[fastSync] Starting sync loop")
     getSharedState.inSyncLoop = true
     getSharedState.fastSyncAborted = false
+
     try {
         let synced: boolean
         if (getSharedState.fastSyncCount > 0) {
             const result = await Promise.race([
-                fastSyncRoutine(peers).then((v) => ({ kind: "done" as const, value: v })),
-                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({ kind: "timeout" as const, value: false })),
+                fastSyncRoutine(peers).then(v => ({
+                    kind: "done" as const,
+                    value: v,
+                })),
+                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
+                    kind: "timeout" as const,
+                    value: false,
+                })),
             ])
 
             if (result.kind === "timeout") {
