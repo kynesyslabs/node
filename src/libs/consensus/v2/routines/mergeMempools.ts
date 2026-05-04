@@ -48,7 +48,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     }
 
     const promises = shard.map(peer => {
-        log.debug(
+        log.only(
             `[mergeMempools] Merging mempool with ${peer.connection.string}`,
         )
         return withTimeout(
@@ -85,7 +85,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         }
 
         const txs = response.response as Transaction[]
-        log.debug(
+        log.only(
             `[mergeMempools] Received ${txs.length} transactions from ${peer.connection.string}`,
         )
         for (const tx of txs) {
@@ -99,7 +99,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         return
     }
 
-    log.debug(
+    log.only(
         `[mergeMempools] Forwarding ${merged.size} unique txs to Mempool.receive`,
     )
     await Mempool.receive(Array.from(merged.values()))

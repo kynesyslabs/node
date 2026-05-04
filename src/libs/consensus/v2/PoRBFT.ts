@@ -380,6 +380,8 @@ async function mergeAndOrderMempools(
 ): Promise<(Transaction & { reference_block: number })[]> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.getMempool(blockRef)
+
+    log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
     const preExisting =
         preHashes.length > 0
@@ -413,12 +415,12 @@ async function mergeAndOrderMempools(
         const txType = tx.content.type ?? "unknown"
         typeCounts[txType] = (typeCounts[txType] || 0) + 1
     }
-    log.debug(
+    log.only(
         `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs ` +
             `(removed ${existingHashes.size}: pre-merge ${preExisting.size}, delta ${newlyExisting.size})`,
     )
     for (const [type, count] of Object.entries(typeCounts)) {
-        log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)
+        log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
     return finalMempool
