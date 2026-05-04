@@ -26,9 +26,51 @@ const numWorkers = Math.max(1, os.cpus().length - 1);
 const workerUrl = new URL("./sign-verify.worker.ts", import.meta.url);
 
 console.log(`Spawning ${numWorkers} workers...`);
-const workers = Array.from(
-    { length: numWorkers },
-    () => new Worker(workerUrl.href),
+const workerReady = new Array<Promise<void>>(numWorkers);
+const workers = Array.from({ length: numWorkers }, (_, i) => {
+    const w = new Worker(workerUrl.href);
+    workerReady[i] = new Promise<void>((resolve) => {
+        const onReadyMsg = (e: MessageEvent) => {
+            if ((e.data as any)?.type === "ready") {
+                console.log(`[main] worker ${i} ready`);
+                w.removeEventListener("message", onReadyMsg);
+                resolve();
+            }
+        };
+        w.addEventListener("message", onReadyMsg);
+    });
+    w.addEventListener("error", (e: ErrorEvent) => {
+        console.error(
+            `[main] worker ${i} error event:`,
+            e.message ?? e,
+            (e as any).error?.stack ?? "",
+        );
+    });
+    w.addEventListener("messageerror", (e: MessageEvent) => {
+        console.error(`[main] worker ${i} messageerror:`, e.data ?? e);
+    });
+    w.addEventListener("close", (e: CloseEvent) => {
+        console.error(`[main] worker ${i} close (code=${e.code})`);
+    });
+    w.addEventListener("open", () => {
+        console.log(`[main] worker ${i} open`);
+    });
+    return w;
+});
+
+console.log("Waiting for all workers to import demosdk and signal ready...");
+const tReadyStart = Bun.nanoseconds();
+const readyTimeoutMs = 60_000;
+const readyTimer = setTimeout(() => {
+    console.error(
+        `[main] TIMEOUT: workers not ready after ${readyTimeoutMs / 1000}s. Likely import hang.`,
+    );
+}, readyTimeoutMs);
+readyTimer.unref();
+await Promise.all(workerReady);
+clearTimeout(readyTimer);
+console.log(
+    `All workers ready in ${((Bun.nanoseconds() - tReadyStart) / 1e6).toFixed(2)}ms`,
 );
 
 let shuttingDown = false;
@@ -143,9 +185,19 @@ await new Promise<void>((resolve) => {
         worker.postMessage(msg);
     };
 
-    for (const w of workers) {
+    workers.forEach((w, idx) => {
         w.addEventListener("message", (e: MessageEvent) => {
-            const data = e.data as BatchResult;
+            const data = e.data as
+                | BatchResult
+                | { type: "worker-error"; batchId?: number; message: string; stack?: string };
+            if (data?.type === "worker-error") {
+                console.error(
+                    `[main] worker ${idx} reported error (batch ${data.batchId ?? "n/a"}):`,
+                    data.message,
+                );
+                if (data.stack) console.error(data.stack);
+                return;
+            }
             if (data?.type !== "batch-result") return;
             totalVerified += data.verified;
             totalFailed += data.failed;
@@ -157,7 +209,7 @@ await new Promise<void>((resolve) => {
             }
         });
         dispatchTo(w);
-    }
+    });
 });
 const verifyMs = (Bun.nanoseconds() - tVerifyStart) / 1e6;
 
