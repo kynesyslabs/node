@@ -116,6 +116,24 @@ export async function broadcastBlockHash(
                 )
 
                 if (response.extra.ourBlock) {
+                    const theirTxHashes: string[] =
+                        response.extra.ourBlock.txHashes ??
+                        response.extra.ourBlock.ordered_transactions ??
+                        []
+                    const ourTxHashes: string[] =
+                        getSharedState.candidateBlock.content
+                            .ordered_transactions
+
+                    const theirSet = new Set(theirTxHashes)
+                    const ourSet = new Set(ourTxHashes)
+
+                    const missingFromUs = theirTxHashes.filter(
+                        h => !ourSet.has(h),
+                    )
+                    const missingFromThem = ourTxHashes.filter(
+                        h => !theirSet.has(h),
+                    )
+
                     log.error(
                         "Their block: " +
                             JSON.stringify(response.extra.ourBlock, null, 2),
@@ -130,16 +148,18 @@ export async function broadcastBlockHash(
                                     timestamp:
                                         getSharedState.candidateBlock.content
                                             .timestamp,
-                                    txCount:
-                                        getSharedState.candidateBlock.content
-                                            .ordered_transactions.length,
-                                    txHashes:
-                                        getSharedState.candidateBlock.content
-                                            .ordered_transactions,
+                                    txCount: ourTxHashes.length,
+                                    txHashes: ourTxHashes,
                                 },
                                 null,
                                 2,
                             ),
+                    )
+                    log.error(
+                        `[broadcastBlockHash] Missing from us (${missingFromUs.length}): ${JSON.stringify(missingFromUs)}`,
+                    )
+                    log.error(
+                        `[broadcastBlockHash] Missing from them (${missingFromThem.length}): ${JSON.stringify(missingFromThem)}`,
                     )
                 }
                 con++
