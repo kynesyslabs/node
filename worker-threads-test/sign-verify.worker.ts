@@ -4,12 +4,21 @@ const workerId = Math.random().toString(36).slice(2, 6);
 console.log(`[worker ${workerId}] booted, importing demosdk encryption...`);
 
 const t0 = Bun.nanoseconds();
-const { ucrypto, hexToUint8Array } = await import(
-    "@kynesyslabs/demosdk/encryption"
+// Bypass @kynesyslabs/demosdk/encryption (the index re-exports zK and FHE, which
+// transitively pull in ffjavascript → web-worker. web-worker's startup path
+// crashes inside Bun Workers because Bun doesn't populate node:worker_threads
+// `workerData` the way the polyfill expects, killing the worker before our
+// handlers can run.) Loading unifiedCrypto.js directly skips both modules.
+const unifiedCryptoUrl = new URL(
+    "../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto.js",
+    import.meta.url,
+);
+const { unifiedCrypto: ucrypto, hexToUint8Array } = await import(
+    unifiedCryptoUrl.href
 );
 const importMs = (Bun.nanoseconds() - t0) / 1e6;
 console.log(
-    `[worker ${workerId}] demosdk imported in ${importMs.toFixed(1)}ms`,
+    `[worker ${workerId}] unifiedCrypto imported in ${importMs.toFixed(1)}ms`,
 );
 
 type VerifyItem = { hashHex: string; sigHex: string };
