@@ -875,7 +875,11 @@ export default class SecretaryManager {
 
     public async endConsensusRoutine() {
         log.debug("Ending the consensus routine")
-        const manager = SecretaryManager.instances.get(this.shard.blockRef)
+        let manager: SecretaryManager = null
+
+        if (this.shard) {
+            manager = SecretaryManager.instances.get(this.shard.blockRef)
+        }
 
         if (manager) {
             manager.runSecretaryRoutine = false
