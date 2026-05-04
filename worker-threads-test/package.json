@@ -1,0 +1,8 @@
+{
+    "name": "worker-threads-test",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test:workers": "bun run main.ts"
+    }
+}
