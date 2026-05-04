@@ -14,9 +14,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
-import prefetchIdentities from "./validation/prefetchIdentities"
-import { validateTx } from "./validation/txValidator"
-import type { TxValidationResult } from "./validation/types"
+import TxValidatorPool from "./validation/txValidatorPool"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -151,6 +149,13 @@ export default class Mempool {
         //     }
         // }
 
+        if (incoming.length === 0) {
+            return {
+                success: true,
+                mempool: [],
+            }
+        }
+
         // INFO: Transactions not to send back back
         const noSendBackTxs = new Map<string, string>()
 
@@ -170,25 +175,19 @@ export default class Mempool {
             }
         }
 
-        const hints = await prefetchIdentities(unseenTransactions)
-
-        const BATCH_SIZE = 16
-        const results: TxValidationResult[] = []
-        for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
-            const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
-            const batchResults = await Promise.all(
-                batch.map(tx => validateTx(tx, hints[tx.hash] ?? null)),
-            )
-            results.push(...batchResults)
-        }
+        const now = Date.now()
+        const results =
+            await TxValidatorPool.getInstance().validate(unseenTransactions)
+        const end = Date.now()
+        log.only(
+            `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,
+        )
 
         const validTransactions: Transaction[] = []
         for (let i = 0; i < unseenTransactions.length; i++) {
             const r = results[i]
             if (!r.valid) {
-                log.error(
-                    `[Mempool.receive] Invalid tx ${r.hash}: ${r.reason}`,
-                )
+                log.error(`[Mempool.receive] Invalid tx ${r.hash}: ${r.reason}`)
                 continue
             }
             validTransactions.push(unseenTransactions[i])
