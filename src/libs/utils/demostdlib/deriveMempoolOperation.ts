@@ -6,6 +6,7 @@ import { Operation } from "@kynesyslabs/demosdk/types"
 /* eslint-disable no-unused-vars */
 import Transaction from "../../blockchain/transaction"
 import { ucrypto } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 export interface DerivableNative {
     from: string
@@ -190,7 +191,7 @@ export async function createTransaction(
     transaction.content.timestamp = derivable.timestamp
     // Hashing the content and signing the transaction
     transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
-    const signature = await ucrypto.sign(
+    const signature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(transaction.hash),
     )

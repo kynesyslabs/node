@@ -22,6 +22,7 @@ import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "../validation/txValidatorPool"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -112,7 +113,7 @@ async function signValidityData(data: ValidityData): Promise<ValidityData> {
     const hash = Hashing.sha256(JSON.stringify(data.data))
     // return data
 
-    const signature = await ucrypto.sign(
+    const signature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(hash),
     )
@@ -153,7 +154,7 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )
@@ -176,7 +177,7 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )
@@ -206,7 +207,7 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )

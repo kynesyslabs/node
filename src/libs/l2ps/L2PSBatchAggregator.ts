@@ -13,6 +13,7 @@ import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN } from "./constants"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 // Re-export for backward compatibility
 export type { L2PSBatchPayload } from "./types"
@@ -706,7 +707,7 @@ export class L2PSBatchAggregator {
             // Sign with domain separation to prevent cross-protocol signature reuse
             // Domain prefix ensures this signature cannot be replayed in other contexts
             const domainSeparatedMessage = `${this.SIGNATURE_DOMAIN}:${contentString}`
-            const signature = await ucrypto.sign(
+            const signature = await TxValidatorPool.getInstance().sign(
                 sharedState.signingAlgorithm,
                 new TextEncoder().encode(domainSeparatedMessage),
             )

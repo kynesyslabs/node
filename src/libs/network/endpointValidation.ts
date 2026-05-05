@@ -13,6 +13,7 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 export async function handleValidateTransaction(
     tx: Transaction,
@@ -104,7 +105,7 @@ export async function handleValidateTransaction(
         const hashedValidationData = Hashing.sha256(
             JSON.stringify(validationData.data),
         )
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hashedValidationData),
         )

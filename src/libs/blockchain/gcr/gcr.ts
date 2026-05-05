@@ -71,6 +71,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
+import TxValidatorPool from "../validation/txValidatorPool"
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -1124,7 +1125,7 @@ export default class GCR {
         tx.content.data = ["awardPoints", accounts]
         tx.hash = Hashing.sha256(JSON.stringify(tx.content))
 
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(tx.hash),
         )

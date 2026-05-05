@@ -36,6 +36,7 @@ import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
+import TxValidatorPool from "./validation/txValidatorPool"
 
 interface TransactionResponse {
     status: string
@@ -79,30 +80,6 @@ export default class Transaction implements ITransaction {
             blockNumber: null,
             ...data,
         })
-    }
-
-
-    // INFO Given a transaction, sign it with the private key of the sender
-    public static async sign(tx: Transaction): Promise<[boolean, any]> {
-        // Check sanity of the structure of the tx object
-        if (!tx.content) {
-            return [false, "Missing tx.content"]
-        }
-        const signature_ = await ucrypto.sign(
-            getSharedState.signingAlgorithm,
-            new TextEncoder().encode(JSON.stringify(tx.content)),
-        )
-
-        if (!signature_) {
-            return [false, "Failed to sign transaction"]
-        }
-        return [
-            true,
-            {
-                type: getSharedState.signingAlgorithm,
-                data: uint8ArrayToHex(signature_.signature),
-            },
-        ]
     }
 
     // INFO Hashing the content of a transaction
@@ -153,7 +130,7 @@ export default class Transaction implements ITransaction {
         confirmation.data.validator = getSharedState.keypair
             .publicKey as Uint8Array
         confirmation.data.tx_hash_validated = tx.hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(JSON.stringify(confirmation.data)),
         )

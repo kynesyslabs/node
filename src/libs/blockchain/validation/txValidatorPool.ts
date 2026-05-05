@@ -365,9 +365,7 @@ export default class TxValidatorPool {
     }
 
     /**
-     * Drop-in replacement for `await ucrypto.sign(algorithm, data)` that
-     * runs in a worker so the main event loop stays free. Same input and
-     * output shape as the underlying ucrypto.sign.
+     * Drop-in replacement for `ucrypto.sign(algorithm, data)`
      *
      * If the pool isn't started, throws — callers should treat unstarted
      * pool as a programming error rather than silently signing on main.
@@ -395,9 +393,7 @@ export default class TxValidatorPool {
     }
 
     /**
-     * Drop-in replacement for `await ucrypto.verify(signedObject)` that
-     * runs in a worker so the main event loop stays free. Same input and
-     * output shape as the underlying ucrypto.verify.
+     * Drop-in replacement for `ucrypto.verify(signedObject)`
      */
     async verify(signed: signedObject): Promise<boolean> {
         if (!this.started || this.workers.length === 0) {
