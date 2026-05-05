@@ -47,7 +47,8 @@ export default async function searchStoragePrograms(
         const query = data.query.trim()
 
         const requesterAddress =
-            typeof data?.requesterAddress === "string"
+            typeof data?.requesterAddress === "string" &&
+            data.requesterAddress.length > 0
                 ? data.requesterAddress
                 : undefined
 
@@ -63,20 +64,17 @@ export default async function searchStoragePrograms(
                   ? opts.exact
                   : false
 
+        // ACL filtering happens in SQL so LIMIT/OFFSET produce full pages
+        // (no post-fetch JS filter that would silently shorten them).
         const repository = await getStorageProgramRepository()
         const programs =
             await GCRStorageProgramRoutines.searchStorageProgramsByName(
                 query,
                 repository,
-                { limit, offset, exactMatch },
+                { limit, offset, exactMatch, requesterAddress },
             )
 
-        // Filter to programs the requester can read.
-        const accessiblePrograms = programs.filter(p =>
-            GCRStorageProgramRoutines.checkReadPermission(p, requesterAddress),
-        )
-
-        return rpc(200, accessiblePrograms.map(toStorageProgramListItem))
+        return rpc(200, programs.map(toStorageProgramListItem))
     } catch (error) {
         log.error("[searchStoragePrograms] Error:", error)
         return rpcInternalError(error)

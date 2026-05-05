@@ -629,37 +629,32 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
             return jsonResponse(response, 400)
         }
 
-        // Get requester identity from header
+        // Get requester identity from header. Empty string and missing
+        // identity both map to undefined so the SQL ACL filter sees a true
+        // anonymous caller (not a falsy owner-bypass).
         const identity = req.headers.get("identity")
         let requesterAddress: string | undefined
 
-        if (identity) {
+        if (identity && identity.length > 0) {
             const splits = identity.split(":")
-            requesterAddress = splits.length > 1 ? splits[1] : identity
+            const candidate = splits.length > 1 ? splits[1] : identity
+            requesterAddress =
+                candidate && candidate.length > 0 ? candidate : undefined
         }
 
         // Get repository
         const db = await Datasource.getInstance()
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
-        // Fetch all programs by owner
-        const programs =
+        // ACL filtering happens in SQL. The owner-fast-path is internal:
+        // when requesterAddress === owner, the routine skips the jsonb
+        // predicate and uses the owner index directly.
+        const accessiblePrograms =
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                 owner,
                 repository,
+                requesterAddress,
             )
-
-        // Owner always sees all their own programs.
-        // For other requesters, filter by read permission.
-        const isOwnerRequest = !requesterAddress || requesterAddress === owner
-        const accessiblePrograms = isOwnerRequest
-            ? programs
-            : programs.filter(program =>
-                  GCRStorageProgramRoutines.checkReadPermission(
-                      program,
-                      requesterAddress,
-                  ),
-              )
 
         // Map to response format
         const response: StorageProgramsListResponse = {
@@ -736,26 +731,18 @@ async function searchByNameHandler(req: Request): Promise<Response> {
         const db = await Datasource.getInstance()
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
-        // Search programs by name
+        // ACL filtering happens in SQL so LIMIT/OFFSET produce full pages.
         const programs =
             await GCRStorageProgramRoutines.searchStorageProgramsByName(
                 query.trim(),
                 repository,
-                { limit, offset, exactMatch },
+                { limit, offset, exactMatch, requesterAddress },
             )
-
-        // Filter to only programs the requester can read
-        const accessiblePrograms = programs.filter(program =>
-            GCRStorageProgramRoutines.checkReadPermission(
-                program,
-                requesterAddress,
-            ),
-        )
 
         // Map to response format
         const response: StorageProgramsListResponse = {
             success: true,
-            programs: accessiblePrograms.map(p => ({
+            programs: programs.map(p => ({
                 storageAddress: p.storageAddress,
                 programName: p.programName,
                 encoding: p.encoding,
@@ -766,11 +753,11 @@ async function searchByNameHandler(req: Request): Promise<Response> {
                 createdAt: p.createdAt.toISOString(),
                 updatedAt: p.updatedAt.toISOString(),
             })),
-            count: accessiblePrograms.length,
+            count: programs.length,
         }
 
         log.debug(
-            `[StorageProgram] Search "${query}" found ${accessiblePrograms.length} programs`,
+            `[StorageProgram] Search "${query}" found ${programs.length} programs`,
         )
         return jsonResponse(response)
     } catch (error) {

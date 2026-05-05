@@ -49,26 +49,17 @@ export default async function getStorageProgramsByOwner(
         const rawOffset = typeof data?.offset === "number" ? data.offset : 0
         const offset = Math.max(0, Math.floor(rawOffset))
 
+        // ACL filtering happens in SQL — GCRStorageProgramRoutines handles
+        // the owner-fast-path internally when requesterAddress === owner.
+        // Anonymous and non-owner requesters get the SQL ACL predicate so
+        // pagination produces full pages and never leaks restricted rows.
         const repository = await getStorageProgramRepository()
-        const programs =
+        const accessiblePrograms =
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                 owner,
                 repository,
+                requesterAddress,
             )
-
-        // Owner always sees all their own programs; others (including
-        // anonymous) get ACL-filtered. Anonymous callers MUST NOT be treated
-        // as owner — bypassing the filter would leak owner/restricted programs.
-        const isOwnerRequest =
-            requesterAddress !== undefined && requesterAddress === owner
-        const accessiblePrograms = isOwnerRequest
-            ? programs
-            : programs.filter(p =>
-                  GCRStorageProgramRoutines.checkReadPermission(
-                      p,
-                      requesterAddress,
-                  ),
-              )
 
         const paginated = accessiblePrograms.slice(offset, offset + limit)
         return rpc(200, paginated.map(toStorageProgramListItem))
