@@ -50,6 +50,16 @@ export default class Mempool {
     }
 
     /**
+     * Returns the number of transactions in the mempool.
+     *
+     * Cheap count via TypeORM `repo.count()` — does NOT materialize rows.
+     * Prefer this over `getMempool().length`.
+     */
+    public static async count(): Promise<number> {
+        return await this.repo.count()
+    }
+
+    /**
      * Returns a map of mempool hashes (for lookup only)
      */
     public static async getMempoolHashMap(blockNumber: number) {

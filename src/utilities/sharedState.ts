@@ -177,8 +177,18 @@ export default class SharedState {
     // TODO The following variables should be in the genesis
     maxMessageSize = Number.parseInt(process.env.MAX_MESSAGE_SIZE ?? "0", 10) // TODO Implement // 5 GB just for debug purpose
 
+    // Node start time (ms epoch). Used by /health endpoint for uptime reporting.
+    nodeStartTime: number = Date.now()
+
     constructor() {
         this.identity = Identity.getInstance()
+    }
+
+    /**
+     * Returns the node uptime in seconds (integer).
+     */
+    public getUptimeSeconds(): number {
+        return Math.floor((Date.now() - this.nodeStartTime) / 1000)
     }
 
     public static getInstance(): SharedState {

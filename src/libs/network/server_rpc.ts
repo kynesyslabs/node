@@ -25,6 +25,7 @@ import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { bridge } from "@kynesyslabs/demosdk"
 import { manageNativeBridge } from "./manageNativeBridge"
 import Chain from "../blockchain/chain"
+import Mempool from "../blockchain/mempool_v2"
 import { RateLimiter } from "./middleware/rateLimiter"
 import { getAuthContext } from "./authContext"
 import GCR, { AccountParams } from "../blockchain/gcr/gcr"
@@ -447,6 +448,20 @@ export async function serverRpcBun() {
             version: getSharedState.version,
             version_name: getSharedState.version_name,
             ...info,
+        })
+    })
+
+    server.get("/health", async () => {
+        // Accepting traffic only when fully synced and not in the middle of a sync loop.
+        const accepting =
+            getSharedState.syncStatus && !getSharedState.inSyncLoop
+        const mempool_size = await Mempool.count()
+        return jsonResponse({
+            version: getSharedState.version,
+            version_name: getSharedState.version_name,
+            accepting,
+            mempool_size,
+            uptime_s: getSharedState.getUptimeSeconds(),
         })
     })
 
