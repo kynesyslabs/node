@@ -75,7 +75,9 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        log.only("[consensusRoutine] Initializing the consensus state")
         await initializeConsensusState()
+        log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
         // Initialize the consensus state and check if the local node is in the shard
@@ -312,7 +314,7 @@ export async function consensusRoutine(): Promise<void> {
         cleanupConsensusState()
         manager.endConsensusRoutine()
 
-        log.debug("[consensusRoutine] Consensus routine ended")
+        log.only("[consensusRoutine] Consensus routine ended")
     }
 }
 
