@@ -250,7 +250,8 @@ export function withFieldRead(
             const field = data.field
 
             const requesterAddress =
-                typeof data?.requesterAddress === "string"
+                typeof data?.requesterAddress === "string" &&
+                data.requesterAddress.length > 0
                     ? data.requesterAddress
                     : undefined
 
