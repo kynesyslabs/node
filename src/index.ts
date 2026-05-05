@@ -245,6 +245,7 @@ async function warmup() {
 
     log.info("[MAIN] Starting the node")
 
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
     indexState.enough_peers = true // ? Review this
 
     // ANCHOR Overrides
@@ -318,8 +319,6 @@ async function preMainLoop() {
     getSharedState.rpcFee = indexState.RPC_FEE
 
     // INFO: Initialize Unified Crypto with ed25519 private key
-    getSharedState.keypair = await getSharedState.identity.loadIdentity()
-
     log.info("[BOOTSTRAP] Our identity is ready")
     // Log identity
     const publicKeyHex = uint8ArrayToHex(
@@ -350,7 +349,7 @@ async function preMainLoop() {
                     "     Other peers cannot reach this node at this address.\n" +
                     "     For real network participation, set EXPOSED_URL in .env\n" +
                     "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
-                    '     See INSTALL.md → "Joining the network".\n' +
+                    "     See INSTALL.md → \"Joining the network\".\n" +
                     "============================================================",
             )
         }
@@ -359,7 +358,7 @@ async function preMainLoop() {
         // but don't crash the node over a config quirk.
         const message = err instanceof Error ? err.message : String(err)
         log.warning(
-            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+            "[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. " +
                 `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
         )
     }
@@ -472,6 +471,12 @@ async function main() {
 
     await Chain.setup()
     await Mempool.init()
+    // INFO Warming up the node (including arguments digesting)
+    await warmup()
+
+    // TxValidatorPool spawns workers that need the node's master seed to
+    // sign as the node, so it must start AFTER warmup() (which calls
+    // identity.loadIdentity() and populates getSharedState.identity.masterSeed).
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {
@@ -481,8 +486,6 @@ async function main() {
         )
         process.exit(1)
     }
-    // INFO Warming up the node (including arguments digesting)
-    await warmup()
 
     // Update TUI with port info after warmup
     if (indexState.TUI_ENABLED && indexState.tuiManager) {
@@ -1030,6 +1033,7 @@ async function gracefulShutdown(signal: string) {
 
         // Stop HTTP rate limiter cleanup interval
         try {
+            // eslint-disable-next-line @typescript-eslint/naming-convention
             const { RateLimiter: HttpRateLimiter } =
                 await import("./libs/network/middleware/rateLimiter")
             HttpRateLimiter.getInstance().destroy()

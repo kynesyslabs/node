@@ -1,24 +1,39 @@
 import { Worker } from "worker_threads"
 import os from "os"
 import { randomUUID } from "crypto"
-import { Transaction } from "@kynesyslabs/demosdk/types"
+import {
+    SigningAlgorithm,
+    Transaction,
+} from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
+import { getSharedState } from "@/utilities/sharedState"
 import prefetchIdentities from "./prefetchIdentities"
 import { validateTx } from "./txValidator"
 import type {
     IdentityHintMap,
     TxValidationResult,
+    WorkerInitData,
     WorkerRequest,
     WorkerResponse,
 } from "./types"
+import type { signedObject } from "../../../../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto"
 
-const SMALL_BATCH_THRESHOLD = 16
+// Validate batches of every size go through the pool. The point of the pool
+// is to keep crypto work off the main event loop, not to amortize IPC; a
+// single ed25519/PQC verify on the main thread can block the loop for tens
+// of ms and that's exactly what we want to avoid. The inline path stays as a
+// safety net for "validate() called before start()", but with start()
+// blocking on identity load it should never fire in practice.
+const SMALL_BATCH_THRESHOLD = 1
 const PER_CHUNK_TIMEOUT_MS = 30_000
+const PER_REQUEST_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_DEFAULT_MS = 2_000
 const READY_TIMEOUT_DEFAULT_MS = 30_000
 
 interface PendingRequest {
-    resolve: (results: TxValidationResult[]) => void
+    // One resolver type for all request kinds; public methods cast at
+    // dispatch time. Validated by message type in handleMessage.
+    resolve: (value: any) => void
     reject: (err: Error) => void
     timeout: ReturnType<typeof setTimeout>
 }
@@ -98,13 +113,24 @@ export default class TxValidatorPool {
     ): Promise<void> {
         if (this.started) return
 
+        // Workers need the node's master seed to call ucrypto.sign() as the
+        // node. Identity is loaded inside warmup() → preMainLoop() →
+        // identity.loadIdentity(); start() must be invoked after that.
+        const masterSeed = getSharedState.identity?.masterSeed
+        if (!masterSeed) {
+            throw new Error(
+                "TxValidatorPool.start() called before identity is loaded; getSharedState.identity.masterSeed is empty",
+            )
+        }
+        const initData: WorkerInitData = { masterSeed }
+
         const startedAt = Date.now()
         log.info(
             `[TxValidatorPool] Spawning ${workerCount} workers; waiting up to ${readyTimeoutMs}ms for ready...`,
         )
 
         for (let slot = 0; slot < workerCount; slot++) {
-            this.spawnWorker(slot)
+            this.spawnWorker(slot, initData)
         }
 
         const allReady = Promise.all(this.workers.map(h => h.ready))
@@ -139,7 +165,7 @@ export default class TxValidatorPool {
         )
     }
 
-    private spawnWorker(slot: number): void {
+    private spawnWorker(slot: number, initData: WorkerInitData): void {
         let markReady!: () => void
         let markReadyFailed!: (err: Error) => void
         const ready = new Promise<void>((resolve, reject) => {
@@ -150,6 +176,7 @@ export default class TxValidatorPool {
         const worker = new Worker(workerScriptUrl(), {
             // Inherit loader/runtime flags from the parent (tsx, tsconfig-paths, etc.)
             execArgv: process.execArgv,
+            workerData: initData,
         })
         const handle: WorkerHandle = {
             worker,
@@ -200,20 +227,6 @@ export default class TxValidatorPool {
             handle.markReady()
             return
         }
-        if (msg.type === "validateResult") {
-            log.debug("[TxValidatorPool] validateResult received")
-            const pending = handle.pending.get(msg.requestId)
-            if (!pending) {
-                log.warning(
-                    `[TxValidatorPool] Result for unknown requestId ${msg.requestId}`,
-                )
-                return
-            }
-            handle.pending.delete(msg.requestId)
-            clearTimeout(pending.timeout)
-            pending.resolve(msg.results)
-            return
-        }
         if (msg.type === "fatal") {
             log.error(`[TxValidatorPool] Worker fatal: ${msg.error}`)
             if (msg.requestId) {
@@ -224,6 +237,23 @@ export default class TxValidatorPool {
                     pending.reject(new Error(`worker fatal: ${msg.error}`))
                 }
             }
+            return
+        }
+        const pending = handle.pending.get(msg.requestId)
+        if (!pending) {
+            log.warning(
+                `[TxValidatorPool] Result for unknown requestId ${msg.requestId}`,
+            )
+            return
+        }
+        handle.pending.delete(msg.requestId)
+        clearTimeout(pending.timeout)
+        if (msg.type === "validateResult") {
+            pending.resolve(msg.results)
+        } else if (msg.type === "signResult") {
+            pending.resolve(msg.signedObject)
+        } else if (msg.type === "verifyResult") {
+            pending.resolve(msg.result)
         }
     }
 
@@ -332,6 +362,89 @@ export default class TxValidatorPool {
         const end = Date.now()
         log.only(`[TxValidatorPool] validate() took ${end - now}ms`)
         return out
+    }
+
+    /**
+     * Drop-in replacement for `await ucrypto.sign(algorithm, data)` that
+     * runs in a worker so the main event loop stays free. Same input and
+     * output shape as the underlying ucrypto.sign.
+     *
+     * If the pool isn't started, throws — callers should treat unstarted
+     * pool as a programming error rather than silently signing on main.
+     */
+    async sign(
+        algorithm: SigningAlgorithm,
+        data: Uint8Array,
+    ): Promise<signedObject> {
+        if (!this.started || this.workers.length === 0) {
+            throw new Error(
+                "TxValidatorPool.sign() called but pool is not started",
+            )
+        }
+        const handle = this.pickWorker()
+        if (!handle) {
+            throw new Error("no workers available")
+        }
+        const requestId = randomUUID()
+        return this.dispatchOne<signedObject>(handle, requestId, {
+            type: "sign",
+            requestId,
+            algorithm,
+            data,
+        })
+    }
+
+    /**
+     * Drop-in replacement for `await ucrypto.verify(signedObject)` that
+     * runs in a worker so the main event loop stays free. Same input and
+     * output shape as the underlying ucrypto.verify.
+     */
+    async verify(signed: signedObject): Promise<boolean> {
+        if (!this.started || this.workers.length === 0) {
+            throw new Error(
+                "TxValidatorPool.verify() called but pool is not started",
+            )
+        }
+        const handle = this.pickWorker()
+        if (!handle) {
+            throw new Error("no workers available")
+        }
+        const requestId = randomUUID()
+        return this.dispatchOne<boolean>(handle, requestId, {
+            type: "verify",
+            requestId,
+            signedObject: signed,
+        })
+    }
+
+    /**
+     * Generic single-request dispatcher used by sign() and verify(). Wraps
+     * the postMessage in the same pending/timeout machinery as dispatchChunk
+     * but for one request whose result type is known by the caller.
+     */
+    private dispatchOne<T>(
+        handle: WorkerHandle,
+        requestId: string,
+        req: WorkerRequest,
+    ): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                handle.pending.delete(requestId)
+                reject(
+                    new Error(
+                        `validator request ${requestId} timed out after ${PER_REQUEST_TIMEOUT_MS}ms`,
+                    ),
+                )
+            }, PER_REQUEST_TIMEOUT_MS)
+            handle.pending.set(requestId, { resolve, reject, timeout })
+            try {
+                handle.worker.postMessage(req)
+            } catch (err) {
+                handle.pending.delete(requestId)
+                clearTimeout(timeout)
+                reject(err instanceof Error ? err : new Error(String(err)))
+            }
+        })
     }
 
     private async validateInline(
