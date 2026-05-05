@@ -1126,8 +1126,17 @@ describe("GCRStorageProgramRoutines", () => {
 
             expect(repo.find).not.toHaveBeenCalled()
             expect(repo.createQueryBuilder).toHaveBeenCalledWith("sp")
-            // Anonymous gets the public-only branch, no requesterAddress param.
-            expect(findAndWhereCall(qb, "'public'")).toBeDefined()
+            // Anonymous gets the public-only branch — must contain 'public'
+            // AND must NOT bind requesterAddress (the identified branch also
+            // contains 'public', so a less strict assertion would pass for
+            // the wrong branch).
+            const hasPublicOnly = qb.andWhere.mock.calls.some(
+                (c: unknown[]) =>
+                    typeof c[0] === "string" &&
+                    (c[0] as string).includes("'public'") &&
+                    !(c[0] as string).includes(":requesterAddress"),
+            )
+            expect(hasPublicOnly).toBe(true)
         })
 
         it("getStorageProgramsByOwner non-owner requester binds requesterAddress to ACL predicate", async () => {
