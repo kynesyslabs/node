@@ -234,6 +234,7 @@ export default class Mempool {
         }
 
         const finalPool = await this.getMempool(blockNumber)
+        log.only("[Mempool.receive] Final pool size: " + finalPool.length)
 
         // INFO: Redundancy
         // INFO: Return the difference to the caller node

@@ -406,17 +406,21 @@ async function mergeAndOrderMempools(
     await updateValidatorPhase(3, blockRef)
 
     const postMempool = await Mempool.getMempool(blockRef)
+    log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
     const preChecked = new Set(preHashes)
     const newHashes = postMempool
         .map(tx => tx.hash)
         .filter(h => !preChecked.has(h))
+    log.only(`[mergeAndOrderMempools] New hashes: ${newHashes.length}`)
     const newlyExisting =
         newHashes.length > 0
             ? await Chain.getExistingTransactionHashes(newHashes)
             : new Set<string>()
 
     const existingHashes = preExisting.union(newlyExisting)
+    log.only(`[mergeAndOrderMempools] Existing hashes: ${existingHashes.size}`)
     const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    log.only(`[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`)
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
