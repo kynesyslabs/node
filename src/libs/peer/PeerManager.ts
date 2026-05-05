@@ -385,13 +385,13 @@ export default class PeerManager {
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
-        const signedConnectionString = await ucrypto.sign(
+        const signedConnectionString = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(connectionString),
         )
 
-        log.debug("[Hello Peer] Signing connection string: " + connectionString)
-        log.debug(
+        log.only("[Hello Peer] Signing connection string: " + connectionString)
+        log.only(
             "[Hello Peer] Signed connection string: " +
                 uint8ArrayToHex(signedConnectionString.signature),
         )
