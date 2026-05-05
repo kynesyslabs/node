@@ -76,9 +76,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         log.only("[consensusRoutine] Initializing the consensus state")
-        preventForgingEnded(blockRef)
         await initializeConsensusState()
-        preventForgingEnded(blockRef)
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
