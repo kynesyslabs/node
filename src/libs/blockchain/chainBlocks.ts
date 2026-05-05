@@ -146,9 +146,7 @@ export async function insertBlock(
     position?: number,
     cleanMempool = true,
 ): Promise<Blocks> {
-    const insertBlockStart = Date.now()
     const blocksRepo = getBlocksRepo()
-    const transactionsRepo = getTransactionsRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
 
     const newBlock = new Blocks()
@@ -213,6 +211,11 @@ export async function insertBlock(
                     blocksRepo.target,
                     newBlock,
                 )
+                if (block.number > getSharedState.lastBlockNumber) {
+                    getSharedState.lastBlockNumber = block.number
+                    getSharedState.lastBlockHash = block.hash
+                }
+
                 const saveBlockEnd = Date.now()
                 log.only(
                     `[insertBlock] Save block took ${saveBlockEnd - saveBlockStart}ms`,
@@ -312,11 +315,6 @@ export async function insertBlock(
                 return savedBlock
             },
         )
-
-        if (block.number > getSharedState.lastBlockNumber) {
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
-        }
 
         log.debug(
             "[insertBlock] lastBlockNumber: " + getSharedState.lastBlockNumber,
