@@ -221,6 +221,7 @@ export default class Mempool {
                     .insert()
                     .into(MempoolTx)
                     .values(validTransactions)
+                    .orIgnore()
                     .execute()
 
                 const insertedCount = insertResult.identifiers.length
