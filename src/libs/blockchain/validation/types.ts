@@ -34,3 +34,4 @@ export type WorkerResponse =
           requestId?: string
           error: string
       }
+    | { type: "ready" }

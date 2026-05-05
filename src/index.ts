@@ -476,6 +476,10 @@ async function main() {
         await TxValidatorPool.getInstance().start()
     } catch (error) {
         handleError(error, "CORE", { source: ErrorSource.WORKER_POOL_STARTUP })
+        log.error(
+            "[CORE] TxValidatorPool failed to start; aborting node startup.",
+        )
+        process.exit(1)
     }
     // INFO Warming up the node (including arguments digesting)
     await warmup()

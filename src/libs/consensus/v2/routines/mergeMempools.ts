@@ -8,7 +8,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 
-const PEER_CALL_TIMEOUT_MS = 15_000
+const PEER_CALL_TIMEOUT_MS = 10_000
 
 function withTimeout(
     promise: Promise<RPCResponse>,
@@ -17,16 +17,16 @@ function withTimeout(
 ): Promise<RPCResponse> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const timeoutPromise = new Promise<RPCResponse>(resolve => {
-        timeoutId = setTimeout(
-            () =>
-                resolve({
-                    result: 504,
-                    response: "mergeMempools peer timeout",
-                    require_reply: false,
-                    extra: peer.identity,
-                }),
-            ms,
-        )
+        timeoutId = setTimeout(() => {
+            log.error(`[withTimeout] Peer ${peer.connection.string} timed out`)
+
+            return resolve({
+                result: 504,
+                response: "mergeMempools peer timeout",
+                require_reply: false,
+                extra: peer.identity,
+            })
+        }, ms)
     })
 
     return Promise.race([

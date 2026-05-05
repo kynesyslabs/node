@@ -43,3 +43,17 @@ port.on("message", async (msg: WorkerRequest) => {
         port.postMessage(res)
     }
 })
+
+// Surfaces structured-clone failures on inbound messages. The worker is still
+// alive but a request was lost — exit non-zero so the parent treats it as a
+// crash and tears the node down.
+port.on("messageerror", err => {
+    console.error("[txValidatorWorker] messageerror:", err)
+    process.exit(1)
+})
+
+// Signal readiness only after the module has fully loaded (all imports
+// resolved, listeners registered). The pool blocks `start()` until every
+// worker emits this, so a worker that fails to import surfaces as a startup
+// timeout instead of a silent hang on the first validate() call.
+port.postMessage({ type: "ready" } satisfies WorkerResponse)

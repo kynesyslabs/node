@@ -15,6 +15,7 @@ import type {
 const SMALL_BATCH_THRESHOLD = 16
 const PER_CHUNK_TIMEOUT_MS = 30_000
 const STOP_TIMEOUT_DEFAULT_MS = 2_000
+const READY_TIMEOUT_DEFAULT_MS = 30_000
 
 interface PendingRequest {
     resolve: (results: TxValidationResult[]) => void
@@ -25,6 +26,10 @@ interface PendingRequest {
 interface WorkerHandle {
     worker: Worker
     pending: Map<string, PendingRequest>
+    ready: Promise<void>
+    markReady: () => void
+    markReadyFailed: (err: Error) => void
+    isReady: boolean
 }
 
 function defaultWorkerCount(): number {
@@ -62,45 +67,106 @@ function chunkContiguous<T>(items: T[], buckets: number): T[][] {
  *   - `stop(timeoutMs?)` — drain or terminate (call from gracefulShutdown).
  *
  * Behaviour:
+ *   - `start()` blocks until every worker has signalled "ready", or rejects
+ *     after `READY_TIMEOUT_DEFAULT_MS` if any worker fails to import.
  *   - Batches `< SMALL_BATCH_THRESHOLD` skip the pool and run inline.
  *   - Larger batches are split into N contiguous chunks (one per worker).
  *   - Each chunk dispatch is wrapped in a `PER_CHUNK_TIMEOUT_MS` defense timer.
- *   - Worker crashes reject the in-flight requests for that worker and a
- *     replacement worker is spawned; the process keeps running.
- *   - If the pool is not started or has no workers, `validate()` falls back to
- *     inline execution and logs a warning.
+ *   - Worker crashes (error event, non-zero exit, messageerror) are treated
+ *     as fatal: in-flight requests reject and the node is sent SIGTERM so
+ *     `gracefulShutdown` runs. We do NOT respawn — a crashing validator
+ *     means a bug we want surfaced, not a degraded fallback.
+ *   - If the pool is not started or has no workers, `validate()` falls back
+ *     to inline execution and logs a warning. (Defensive only; `start()`
+ *     succeeding implies all workers are ready.)
  */
 export default class TxValidatorPool {
     private static _instance: TxValidatorPool | null = null
     private workers: WorkerHandle[] = []
     private started = false
     private stopping = false
+    private nodeShutdownTriggered = false
 
     static getInstance(): TxValidatorPool {
         if (!this._instance) this._instance = new TxValidatorPool()
         return this._instance
     }
 
-    async start(workerCount: number = defaultWorkerCount()): Promise<void> {
+    async start(
+        workerCount: number = defaultWorkerCount(),
+        readyTimeoutMs: number = READY_TIMEOUT_DEFAULT_MS,
+    ): Promise<void> {
         if (this.started) return
+
+        const startedAt = Date.now()
+        log.info(
+            `[TxValidatorPool] Spawning ${workerCount} workers; waiting up to ${readyTimeoutMs}ms for ready...`,
+        )
+
         for (let slot = 0; slot < workerCount; slot++) {
             this.spawnWorker(slot)
         }
+
+        const allReady = Promise.all(this.workers.map(h => h.ready))
+        let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+        const timeout = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+                const stragglers = this.workers
+                    .map((h, i) => (h.isReady ? null : i))
+                    .filter((i): i is number => i !== null)
+                reject(
+                    new Error(
+                        `workers did not signal ready within ${readyTimeoutMs}ms (slots not ready: ${stragglers.join(", ")})`,
+                    ),
+                )
+            }, readyTimeoutMs)
+        })
+
+        try {
+            await Promise.race([allReady, timeout])
+        } catch (err) {
+            // Tear down any workers we did spawn before propagating.
+            await this.terminateAll().catch(() => undefined)
+            this.workers = []
+            throw err
+        } finally {
+            if (timeoutHandle) clearTimeout(timeoutHandle)
+        }
+
         this.started = true
-        log.info(`[TxValidatorPool] Started with ${workerCount} workers`)
+        log.info(
+            `[TxValidatorPool] Started with ${workerCount} workers in ${Date.now() - startedAt}ms`,
+        )
     }
 
     private spawnWorker(slot: number): void {
+        let markReady!: () => void
+        let markReadyFailed!: (err: Error) => void
+        const ready = new Promise<void>((resolve, reject) => {
+            markReady = resolve
+            markReadyFailed = reject
+        })
+
         const worker = new Worker(workerScriptUrl(), {
             // Inherit loader/runtime flags from the parent (tsx, tsconfig-paths, etc.)
             execArgv: process.execArgv,
         })
-        const handle: WorkerHandle = { worker, pending: new Map() }
+        const handle: WorkerHandle = {
+            worker,
+            pending: new Map(),
+            ready,
+            markReady: () => {
+                handle.isReady = true
+                markReady()
+            },
+            markReadyFailed,
+            isReady: false,
+        }
         worker.on("message", (msg: WorkerResponse) =>
             this.handleMessage(handle, msg),
         )
         worker.on("error", err =>
-            this.handleWorkerFailure(
+            this.handleWorkerCrash(
                 slot,
                 handle,
                 err instanceof Error ? err : new Error(String(err)),
@@ -108,17 +174,32 @@ export default class TxValidatorPool {
         )
         worker.on("exit", code => {
             if (code !== 0 && !this.stopping) {
-                this.handleWorkerFailure(
+                this.handleWorkerCrash(
                     slot,
                     handle,
                     new Error(`worker exited with code ${code}`),
                 )
             }
         })
+        worker.on("messageerror", err =>
+            this.handleWorkerCrash(
+                slot,
+                handle,
+                new Error(
+                    `messageerror (failed to deserialize parent→worker message): ${
+                        err instanceof Error ? err.message : String(err)
+                    }`,
+                ),
+            ),
+        )
         this.workers[slot] = handle
     }
 
     private handleMessage(handle: WorkerHandle, msg: WorkerResponse): void {
+        if (msg.type === "ready") {
+            handle.markReady()
+            return
+        }
         if (msg.type === "validateResult") {
             log.debug("[TxValidatorPool] validateResult received")
             const pending = handle.pending.get(msg.requestId)
@@ -146,31 +227,53 @@ export default class TxValidatorPool {
         }
     }
 
-    private handleWorkerFailure(
+    /**
+     * A worker should never crash. If one does, surface the cause loudly and
+     * tear the node down via SIGTERM so the existing gracefulShutdown path
+     * runs (DB/RPC/L2PS/etc. drain). Pre-ready crashes also reject the
+     * `start()` promise so the node fails to boot rather than running with
+     * a degraded validator.
+     */
+    private handleWorkerCrash(
         slot: number,
         handle: WorkerHandle,
         err: Error,
     ): void {
+        if (this.stopping) return
         log.error(
-            `[TxValidatorPool] Worker ${slot} failed: ${err.message}. Recycling.`,
+            `[TxValidatorPool] Worker ${slot} crashed: ${err.message}`,
         )
+        if (err.stack) log.error(err.stack)
+
         for (const pending of handle.pending.values()) {
             clearTimeout(pending.timeout)
-            pending.reject(new Error(`worker crashed: ${err.message}`))
+            pending.reject(new Error(`worker ${slot} crashed: ${err.message}`))
         }
         handle.pending.clear()
-        if (this.stopping) return
-        try {
-            this.spawnWorker(slot)
-        } catch (spawnErr) {
-            log.error(
-                `[TxValidatorPool] Failed to respawn worker ${slot}: ${
-                    spawnErr instanceof Error
-                        ? spawnErr.message
-                        : String(spawnErr)
-                }`,
-            )
+
+        // If we're still booting, fail start() instead of triggering shutdown.
+        if (!handle.isReady) {
+            handle.markReadyFailed(err)
+            return
         }
+
+        this.triggerNodeShutdown(`worker ${slot} crashed: ${err.message}`)
+    }
+
+    private triggerNodeShutdown(reason: string): void {
+        if (this.nodeShutdownTriggered) return
+        this.nodeShutdownTriggered = true
+        log.error(
+            `[TxValidatorPool] Initiating node shutdown via SIGTERM: ${reason}`,
+        )
+        process.kill(process.pid, "SIGTERM")
+    }
+
+    private async terminateAll(): Promise<void> {
+        const terminations = this.workers
+            .filter((h): h is WorkerHandle => Boolean(h))
+            .map(h => h.worker.terminate().catch(() => undefined))
+        await Promise.all(terminations)
     }
 
     async validate(txs: Transaction[]): Promise<TxValidationResult[]> {
@@ -328,10 +431,7 @@ export default class TxValidatorPool {
         }
         await Promise.all(drainPromises)
 
-        const terminations = this.workers
-            .filter(h => h)
-            .map(h => h.worker.terminate().catch(() => undefined))
-        await Promise.all(terminations)
+        await this.terminateAll()
 
         this.workers = []
         this.started = false
