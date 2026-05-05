@@ -67,27 +67,6 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 const privateKey = this.getPrivateKey()
                 const publicKey = this.getPublicKey()
 
-                log.only(
-                    "[PeerOmniAdapter] Private key: " +
-                        uint8ArrayToHex(privateKey),
-                )
-                log.only(
-                    "[PeerOmniAdapter] Public key: " +
-                        uint8ArrayToHex(publicKey),
-                )
-                log.only(
-                    "[PeerOmniAdapter] Node private key: " +
-                        uint8ArrayToHex(
-                            getSharedState.keypair.privateKey as Uint8Array,
-                        ),
-                )
-                log.only(
-                    "[PeerOmniAdapter] Node public key: " +
-                        uint8ArrayToHex(
-                            getSharedState.keypair.publicKey as Uint8Array,
-                        ),
-                )
-
                 if (!privateKey || !publicKey) {
                     log.warning(
                         "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
