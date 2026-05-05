@@ -40,7 +40,7 @@ export default async function getStorageProgramFields(
         const fields = Object.keys(program.data as Record<string, unknown>)
         return rpc(200, { fields, count: fields.length })
     } catch (error) {
-        log.error("[getStorageProgramFields] Error: " + error)
+        log.error("[getStorageProgramFields] Error:", error)
         return rpcInternalError(error)
     }
 }

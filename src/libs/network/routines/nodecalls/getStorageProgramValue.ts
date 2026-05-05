@@ -57,7 +57,7 @@ export default async function getStorageProgramValue(
         const value = obj[field]
         return rpc(200, { field, value, type: getValueType(value) })
     } catch (error) {
-        log.error("[getStorageProgramValue] Error: " + error)
+        log.error("[getStorageProgramValue] Error:", error)
         return rpcInternalError(error)
     }
 }

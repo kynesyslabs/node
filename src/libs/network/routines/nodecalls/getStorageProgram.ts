@@ -41,7 +41,7 @@ export default async function getStorageProgram(
 
         return rpc(200, toStorageProgramData(result.program!))
     } catch (error) {
-        log.error("[getStorageProgram] Error: " + error)
+        log.error("[getStorageProgram] Error:", error)
         return rpcInternalError(error)
     }
 }

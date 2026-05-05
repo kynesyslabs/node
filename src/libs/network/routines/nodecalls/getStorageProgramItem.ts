@@ -82,7 +82,7 @@ export default async function getStorageProgramItem(
             arrayLength: arr.length,
         })
     } catch (error) {
-        log.error("[getStorageProgramItem] Error: " + error)
+        log.error("[getStorageProgramItem] Error:", error)
         return rpcInternalError(error)
     }
 }

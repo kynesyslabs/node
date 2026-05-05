@@ -250,6 +250,15 @@ export class RateLimiter {
                 return await next()
             }
 
+            // Skip rate limiting for infra/probe endpoints. LB and k8s
+            // liveness/readiness probes hit /health frequently from a single
+            // source IP and should never be 429-throttled. /version is small
+            // and equally cheap to serve unconditionally.
+            const path = new URL(req.url).pathname
+            if (path === "/health" || path === "/version") {
+                return await next()
+            }
+
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")

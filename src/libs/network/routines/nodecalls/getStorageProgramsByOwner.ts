@@ -39,7 +39,8 @@ export default async function getStorageProgramsByOwner(
         const owner = data.owner
 
         const requesterAddress =
-            typeof data?.requesterAddress === "string"
+            typeof data?.requesterAddress === "string" &&
+            data.requesterAddress.length > 0
                 ? data.requesterAddress
                 : undefined
 
@@ -55,8 +56,11 @@ export default async function getStorageProgramsByOwner(
                 repository,
             )
 
-        // Owner always sees all their own programs; others get ACL-filtered.
-        const isOwnerRequest = !requesterAddress || requesterAddress === owner
+        // Owner always sees all their own programs; others (including
+        // anonymous) get ACL-filtered. Anonymous callers MUST NOT be treated
+        // as owner — bypassing the filter would leak owner/restricted programs.
+        const isOwnerRequest =
+            requesterAddress !== undefined && requesterAddress === owner
         const accessiblePrograms = isOwnerRequest
             ? programs
             : programs.filter(p =>
@@ -69,7 +73,7 @@ export default async function getStorageProgramsByOwner(
         const paginated = accessiblePrograms.slice(offset, offset + limit)
         return rpc(200, paginated.map(toStorageProgramListItem))
     } catch (error) {
-        log.error("[getStorageProgramsByOwner] Error: " + error)
+        log.error("[getStorageProgramsByOwner] Error:", error)
         return rpcInternalError(error)
     }
 }

@@ -133,9 +133,11 @@ export const jsonResponse = (
     status = 200,
     extraHeaders?: Record<string, string>,
 ): Response => {
+    // Spread caller-provided headers first, then force Content-Type so it
+    // can't be accidentally overridden away from application/json.
     const headers: Record<string, string> = {
+        ...extraHeaders,
         "Content-Type": "application/json",
-        ...(extraHeaders ?? {}),
     }
     return new Response(JSON.stringify(body), {
         status,

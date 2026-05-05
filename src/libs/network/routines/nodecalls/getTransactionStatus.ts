@@ -1,5 +1,8 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
+import log from "src/utilities/logger"
+
+const TX_HASH_REGEX = /^[0-9a-fA-F]{64}$/
 
 interface InterfaceGetTransactionStatusData {
     hash: unknown
@@ -16,7 +19,7 @@ export default async function getTransactionStatus(
     data: InterfaceGetTransactionStatusData,
 ): Promise<RPCResponse> {
     const hash = data?.hash
-    if (typeof hash !== "string" || hash.length === 0) {
+    if (typeof hash !== "string" || !TX_HASH_REGEX.test(hash)) {
         return {
             result: 400,
             response: { error: "Missing or invalid 'hash' field" },
@@ -24,9 +27,10 @@ export default async function getTransactionStatus(
             require_reply: false,
         }
     }
+    const normalizedHash = hash.toLowerCase()
 
     try {
-        const status = await Chain.getTransactionStatus(hash)
+        const status = await Chain.getTransactionStatus(normalizedHash)
         return {
             result: 200,
             response: status,
@@ -34,7 +38,7 @@ export default async function getTransactionStatus(
             require_reply: false,
         }
     } catch (error) {
-        console.error(
+        log.error(
             "[getTransactionStatus] Error fetching tx status:",
             error,
         )

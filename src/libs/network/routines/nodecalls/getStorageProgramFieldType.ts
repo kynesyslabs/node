@@ -57,7 +57,7 @@ export default async function getStorageProgramFieldType(
 
         return rpc(200, { field, type: getValueType(obj[field]) })
     } catch (error) {
-        log.error("[getStorageProgramFieldType] Error: " + error)
+        log.error("[getStorageProgramFieldType] Error:", error)
         return rpcInternalError(error)
     }
 }

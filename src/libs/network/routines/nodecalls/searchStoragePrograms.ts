@@ -78,7 +78,7 @@ export default async function searchStoragePrograms(
 
         return rpc(200, accessiblePrograms.map(toStorageProgramListItem))
     } catch (error) {
-        log.error("[searchStoragePrograms] Error: " + error)
+        log.error("[searchStoragePrograms] Error:", error)
         return rpcInternalError(error)
     }
 }

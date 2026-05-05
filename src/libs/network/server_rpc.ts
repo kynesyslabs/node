@@ -374,7 +374,7 @@ async function processPayload(
                 // 2. Verify cryptography only
                 const isValid = await ProofVerifier.verifyProofOnly(
                     attestation.proof,
-                    attestation.publicSignals
+                    attestation.publicSignals,
                 )
 
                 return {
@@ -455,14 +455,28 @@ export async function serverRpcBun() {
         // Accepting traffic only when fully synced and not in the middle of a sync loop.
         const accepting =
             getSharedState.syncStatus && !getSharedState.inSyncLoop
-        const mempool_size = await Mempool.count()
-        return jsonResponse({
+
+        // Mempool.count() hits the DB; isolate failures so a transient DB
+        // outage doesn't 500 the health probe.
+        let mempoolSize: number | null = null
+        try {
+            mempoolSize = await Mempool.count()
+        } catch (err) {
+            log.error("[/health] Mempool.count() failed:", err)
+        }
+
+        const body = {
             version: getSharedState.version,
             version_name: getSharedState.version_name,
             accepting,
-            mempool_size,
+            mempool_size: mempoolSize,
             uptime_s: getSharedState.getUptimeSeconds(),
-        })
+        }
+
+        // Surface health via HTTP status so LB/k8s probes can detect an
+        // unhealthy node without parsing the JSON body.
+        const healthy = accepting && mempoolSize !== null
+        return jsonResponse(body, healthy ? 200 : 503)
     })
 
     server.get("/version", () => jsonResponse(getSharedState.version))

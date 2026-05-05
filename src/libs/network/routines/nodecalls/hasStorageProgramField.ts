@@ -53,7 +53,7 @@ export default async function hasStorageProgramField(
 
         return rpc(200, { field, exists })
     } catch (error) {
-        log.error("[hasStorageProgramField] Error: " + error)
+        log.error("[hasStorageProgramField] Error:", error)
         return rpcInternalError(error)
     }
 }
