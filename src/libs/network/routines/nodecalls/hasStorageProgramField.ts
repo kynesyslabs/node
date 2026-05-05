@@ -47,8 +47,13 @@ export default async function hasStorageProgramField(
             program.data &&
             typeof program.data === "object" &&
             !Array.isArray(program.data)
+        // Use own-property check so prototype keys (toString, __proto__,
+        // hasOwnProperty, ...) don't masquerade as user fields.
         const exists = isJsonObject
-            ? field in (program.data as Record<string, unknown>)
+            ? Object.prototype.hasOwnProperty.call(
+                  program.data as Record<string, unknown>,
+                  field,
+              )
             : false
 
         return rpc(200, { field, exists })
