@@ -942,6 +942,15 @@ export class GCRStorageProgramRoutines {
         requesterAddress: string | undefined,
         alias = "sp",
     ): { sql: string; params: Record<string, unknown> } {
+        // Defense-in-depth: alias is interpolated directly into SQL, so
+        // reject anything outside a normal SQL identifier shape. Today the
+        // only caller uses the default "sp", but a future caller passing
+        // user-derived input would otherwise be a SQL-injection vector.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+            throw new Error(
+                `Invalid SQL alias for readReachablePredicate: ${alias}`,
+            )
+        }
         const a = alias
         if (requesterAddress === undefined) {
             // Anonymous: only public programs are visible. Blacklist applies
