@@ -209,7 +209,7 @@ export async function consensusRoutine(): Promise<void> {
                     " votes",
             )
             await finalizeBlock(block, pro)
-
+            log.only("[consensusRoutine] Block finalized")
             // REVIEW: Should we await this?
             // REVIEW: All nodes broadcast the block for redundancy
             // if (manager.checkIfWeAreSecretary()) {
@@ -217,7 +217,7 @@ export async function consensusRoutine(): Promise<void> {
             // }
 
             // INFO: Release DTR transaction relay waiter
-            await DTRManager.releaseDTRWaiter(block)
+            DTRManager.releaseDTRWaiter(block)
         } else {
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -308,7 +308,7 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
         if (DTRManager.poolSize > 0) {
-            await DTRManager.releaseDTRWaiter()
+            DTRManager.releaseDTRWaiter()
         }
 
         cleanupConsensusState()
