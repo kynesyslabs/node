@@ -181,18 +181,27 @@ export async function consensusRoutine(): Promise<void> {
                 )
                 //  Prune the mempool of the failed txs
                 // NOTE The mempool should now be updated with only the successful txs
+                const pruneStart = Date.now()
                 for (const tx of failedTxs) {
                     log.debug(`Failed tx: ${tx}`)
                     await Mempool.removeTransactionsByHashes([tx])
                 }
+                const pruneEnd = Date.now()
+                log.only(
+                    `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms`,
+                )
             }
 
             // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+            const l2psStart = Date.now()
             const l2psResult = await L2PSConsensus.applyPendingProofs(
                 blockRef,
                 false,
             )
+            const l2psEnd = Date.now()
+            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+
             if (l2psResult.proofsApplied > 0) {
                 log.info(
                     `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
@@ -208,7 +217,12 @@ export async function consensusRoutine(): Promise<void> {
                     pro +
                     " votes",
             )
+            const finalizeStart = Date.now()
             await finalizeBlock(block, pro)
+            const finalizeEnd = Date.now()
+            log.only(
+                `[consensusRoutine] Finalize took ${finalizeEnd - finalizeStart}ms`,
+            )
             log.only("[consensusRoutine] Block finalized")
             // REVIEW: Should we await this?
             // REVIEW: All nodes broadcast the block for redundancy
@@ -422,7 +436,9 @@ async function mergeAndOrderMempools(
     const existingHashes = preExisting.union(newlyExisting)
     log.only(`[mergeAndOrderMempools] Existing hashes: ${existingHashes.size}`)
     const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
-    log.only(`[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`)
+    log.only(
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`,
+    )
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
