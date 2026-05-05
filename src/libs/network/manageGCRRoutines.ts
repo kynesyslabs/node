@@ -377,19 +377,16 @@ export default async function manageGCRRoutines(
                     .getDataSource()
                     .getRepository(GCRStorageProgram)
 
-                const programs =
+                // ACL filtering happens in SQL.
+                const accessiblePrograms =
                     await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                         owner,
                         repository,
+                        typeof requesterAddress === "string" &&
+                            requesterAddress.length > 0
+                            ? requesterAddress
+                            : undefined,
                     )
-
-                // Filter to only programs the requester can read
-                const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    ),
-                )
 
                 response.response = accessiblePrograms.map(p => ({
                     storageAddress: p.storageAddress,
@@ -432,7 +429,10 @@ export default async function manageGCRRoutines(
                     .getDataSource()
                     .getRepository(GCRStorageProgram)
 
-                const programs =
+                // ACL filtering happens in SQL so LIMIT/OFFSET produce full
+                // pages (no post-fetch JS filter that would silently shorten
+                // them).
+                const accessiblePrograms =
                     await GCRStorageProgramRoutines.searchStorageProgramsByName(
                         typeof query === "string"
                             ? query.trim()
@@ -442,16 +442,13 @@ export default async function manageGCRRoutines(
                             limit: options.limit || 50,
                             offset: options.offset || 0,
                             exactMatch: options.exactMatch || false,
+                            requesterAddress:
+                                typeof requesterAddress === "string" &&
+                                requesterAddress.length > 0
+                                    ? requesterAddress
+                                    : undefined,
                         },
                     )
-
-                // Filter to only programs the requester can read
-                const accessiblePrograms = programs.filter(program =>
-                    GCRStorageProgramRoutines.checkReadPermission(
-                        program,
-                        requesterAddress,
-                    ),
-                )
 
                 response.response = accessiblePrograms.map(p => ({
                     storageAddress: p.storageAddress,
