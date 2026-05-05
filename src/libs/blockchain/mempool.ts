@@ -74,7 +74,7 @@ export default class Mempool {
 
     public static async addTransaction(
         transaction: Transaction & { reference_block: number },
-        // blockRef?: number,
+        blockRef?: number,
     ) {
         const txExists = await Chain.checkTxExists(transaction.hash)
         if (txExists) {
@@ -92,8 +92,9 @@ export default class Mempool {
             }
         }
 
-        const blockNumber = getSharedState.lastBlockNumber + 2
-
+        if (!blockRef) {
+            blockRef = getSharedState.lastBlockNumber + 2
+        }
         // INFO: If we're in consensus, move tx to next block
         // if (getSharedState.inConsensusLoop) {
         //     blockNumber = SecretaryManager.lastBlockRef + 1
@@ -106,7 +107,7 @@ export default class Mempool {
                 ...transaction,
                 timestamp: BigInt(transaction.content.timestamp),
                 nonce: transaction.content.nonce,
-                blockNumber: blockNumber,
+                blockNumber: blockRef,
             })
 
             return {
@@ -220,7 +221,6 @@ export default class Mempool {
                     .insert()
                     .into(MempoolTx)
                     .values(validTransactions)
-                    .orIgnore()
                     .execute()
 
                 const insertedCount = insertResult.identifiers.length
@@ -232,6 +232,8 @@ export default class Mempool {
                 console.error(error)
             }
         }
+
+        // DEBUG: Confirm all inserted transactions are in the mempool
 
         const finalPool = await this.getMempool(blockNumber)
         log.only("[Mempool.receive] Final pool size: " + finalPool.length)

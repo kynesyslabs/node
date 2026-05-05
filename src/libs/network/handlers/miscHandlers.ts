@@ -5,9 +5,10 @@ import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 
 export const miscHandlers: Record<string, NodeCallHandler> = {
+    // eslint-disable-next-line @typescript-eslint/naming-convention
     RELAY_TX: async (data, _response) => {
         return await DTRManager.receiveRelayedTransactions(
-            data as ValidityData[],
+            data as {payload: ValidityData[], blockNumber: number},
         )
     },
 

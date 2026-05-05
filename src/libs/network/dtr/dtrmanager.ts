@@ -162,9 +162,7 @@ export class DTRManager {
             const availableValidators = await this.getValidatorsOptimized()
 
             if (availableValidators.length === 0) {
-                log.warn(
-                    "[DTR RetryService] No validators available for relay",
-                )
+                log.warn("[DTR RetryService] No validators available for relay")
                 return
             }
 
@@ -247,7 +245,10 @@ export class DTRManager {
                 params: [
                     {
                         message: "RELAY_TX",
-                        data: payload,
+                        data: {
+                            payload,
+                            blockNumber: getSharedState.lastBlockNumber + 1,
+                        },
                     },
                 ],
             }
@@ -265,10 +266,7 @@ export class DTRManager {
                 },
             }
         } catch (error) {
-            log.error(
-                "[DTR] Error relaying transaction to validator: " +
-                error,
-            )
+            log.error("[DTR] Error relaying transaction to validator: " + error)
             return {
                 result: 500,
                 response: {
@@ -352,7 +350,8 @@ export class DTRManager {
                     `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... rejected ${txHash}: ${result.response}`,
                 )
             } catch (error) {
-                const errorMsg = error instanceof Error ? error.message : String(error)
+                const errorMsg =
+                    error instanceof Error ? error.message : String(error)
                 log.debug(
                     `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... error for ${txHash}: ${errorMsg}`,
                 )
@@ -367,11 +366,14 @@ export class DTRManager {
         )
     }
 
-    static async receiveRelayedTransactions(
-        payloads: ValidityData[],
-    ): Promise<RPCResponse> {
+    static async receiveRelayedTransactions(data: {
+        payload: ValidityData[]
+        blockNumber: number
+    }): Promise<RPCResponse> {
         const response = await Promise.all(
-            payloads.map(payload => this.receiveRelayedTransaction(payload)),
+            data.payload.map(payload =>
+                this.receiveRelayedTransaction(payload, data.blockNumber),
+            ),
         )
 
         return {
@@ -427,7 +429,10 @@ export class DTRManager {
      *
      * @returns RPCResponse
      */
-    static async receiveRelayedTransaction(validityData: ValidityData) {
+    static async receiveRelayedTransaction(
+        validityData: ValidityData,
+        blockNumber: number,
+    ) {
         const response: RPCResponse = {
             result: 200,
             response: null,
@@ -508,14 +513,19 @@ export class DTRManager {
             }
 
             // 3. Verify validity data against sender signature
-            const isSignatureValid = await TxValidatorPool.getInstance().verify({
-                algorithm: validityData.rpc_public_key.type as SigningAlgorithm,
-                message: new TextEncoder().encode(
-                    Hashing.sha256(JSON.stringify(validityData.data)),
-                ),
-                publicKey: hexToUint8Array(validityData.rpc_public_key.data),
-                signature: hexToUint8Array(validityData.signature.data),
-            })
+            const isSignatureValid = await TxValidatorPool.getInstance().verify(
+                {
+                    algorithm: validityData.rpc_public_key
+                        .type as SigningAlgorithm,
+                    message: new TextEncoder().encode(
+                        Hashing.sha256(JSON.stringify(validityData.data)),
+                    ),
+                    publicKey: hexToUint8Array(
+                        validityData.rpc_public_key.data,
+                    ),
+                    signature: hexToUint8Array(validityData.signature.data),
+                },
+            )
 
             log.debug("[DTR] Relayed tx isSignatureValid: " + isSignatureValid)
             log.debug(
@@ -584,6 +594,7 @@ export class DTRManager {
                     ...tx,
                     reference_block: validityData.data.reference_block,
                 },
+                blockNumber,
             )
 
             log.debug(
@@ -637,7 +648,10 @@ export class DTRManager {
         // eslint-disable-next-line no-constant-condition
         while (true) {
             try {
-                cvsa = await Waiter.wait(Waiter.keys.DTR_WAIT_FOR_BLOCK, 120_000)
+                cvsa = await Waiter.wait(
+                    Waiter.keys.DTR_WAIT_FOR_BLOCK,
+                    120_000,
+                )
                 log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
                 break
             } catch (error) {
@@ -670,10 +684,13 @@ export class DTRManager {
             )
             return await Promise.all(
                 txsToRelay.map(tx => {
-                    Mempool.addTransaction({
-                        ...tx.data.transaction,
-                        reference_block: tx.data.reference_block,
-                    })
+                    Mempool.addTransaction(
+                        {
+                            ...tx.data.transaction,
+                            reference_block: tx.data.reference_block,
+                        },
+                        getSharedState.lastBlockNumber + 1,
+                    )
 
                     // INFO: Remove tx from cache
                     DTRManager.validityDataCache.delete(
