@@ -1,5 +1,6 @@
 import Chain from "../../blockchain/chain"
 import getTransactions from "../routines/nodecalls/getTransactions"
+import getTransactionStatus from "../routines/nodecalls/getTransactionStatus"
 import getTxsByHashes from "../routines/nodecalls/getTxsByHashes"
 import Mempool from "../../blockchain/mempool"
 import log from "src/utilities/logger"
@@ -8,6 +9,10 @@ import type { NodeCallHandler } from "./types"
 export const transactionHandlers: Record<string, NodeCallHandler> = {
     getTransactions: async (data, _response) => {
         return await getTransactions(data)
+    },
+
+    getTransactionStatus: async (data, _response) => {
+        return await getTransactionStatus(data)
     },
 
     getTxByHash: async (data, response) => {
