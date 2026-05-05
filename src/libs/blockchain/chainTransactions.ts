@@ -53,6 +53,7 @@ export async function persistConfirmedTransactionProjection(
 
 export async function getTxByHash(hash: string): Promise<Transaction | null> {
     try {
+        const getTxByHashStart = Date.now()
         const rawTx = await getTransactionsRepo().findOneBy({
             hash: ILike(hash),
         })
@@ -61,7 +62,17 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
             return null
         }
 
-        return Transaction.fromRawTransaction(rawTx)
+        const convertToTransactionStart = Date.now()
+        const tx = Transaction.fromRawTransaction(rawTx)
+        const convertToTransactionEnd = Date.now()
+        log.only(
+            `[getTxByHash] Convert to transaction took ${convertToTransactionEnd - convertToTransactionStart}ms`,
+        )
+        const getTxByHashEnd = Date.now()
+        log.only(
+            `[getTxByHash] Get tx by hash took ${getTxByHashEnd - getTxByHashStart}ms`,
+        )
+        return tx
     } catch (error) {
         log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(error)}`)
         throw error
@@ -163,9 +174,7 @@ export async function insertTransaction(
     transaction: Transaction,
     status = "confirmed",
 ): Promise<boolean> {
-    log.debug(
-        "[insertTransaction] Inserting transaction: " + transaction.hash,
-    )
+    log.debug("[insertTransaction] Inserting transaction: " + transaction.hash)
     const rawTransaction = Transaction.toRawTransaction(transaction, status)
     log.debug("[insertTransaction] Raw transaction: ")
     log.debug(JSON.stringify(rawTransaction))
@@ -209,9 +218,7 @@ export async function insertTransactionsFromSync(
 
             const skippedCount =
                 rawTransactions.length -
-                insertResult.identifiers.filter(
-                    id => id !== undefined,
-                ).length
+                insertResult.identifiers.filter(id => id !== undefined).length
             if (skippedCount > 0) {
                 log.warn(
                     `[insertTransactionsFromSync] Skipped ${skippedCount} duplicate transaction(s)`,
