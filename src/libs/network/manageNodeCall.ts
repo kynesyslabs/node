@@ -28,7 +28,15 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
         return await handler(data, response)
     }
 
-    log.warning("[SERVER] Received unknown message")
-    response.response = '{ error: "Unknown message"}'
+    // Return a real 404 with a structured error body so SDK clients can
+    // detect unsupported methods. The previous implementation returned 200
+    // with a Python-dict-shaped string, which the SDK couldn't distinguish
+    // from a successful response.
+    log.warning(`[SERVER] Received unknown message: ${content?.message}`)
+    response.result = 404
+    response.response = {
+        error: "Unknown message",
+        message: content?.message,
+    }
     return response
 }
