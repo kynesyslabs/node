@@ -1,6 +1,7 @@
 import {
     EntityManager,
     FindManyOptions,
+    ILike,
     In,
     LessThanOrEqual,
     QueryFailedError,
@@ -80,6 +81,15 @@ export default class Mempool {
 
     public static async checkTransactionByHash(hash: string) {
         return await this.repo.exists({ where: { hash: hash } })
+    }
+
+    /**
+     * Returns the mempool transaction matching `hash`, or null if not present.
+     *
+     * Case-insensitive lookup via `ILike`, mirroring `Chain.getTxByHash`.
+     */
+    public static async findByHash(hash: string): Promise<MempoolTx | null> {
+        return await this.repo.findOneBy({ hash: ILike(hash) })
     }
 
     public static async addTransaction(

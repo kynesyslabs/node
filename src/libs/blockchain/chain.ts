@@ -40,6 +40,11 @@ import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistr
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import HandleGCR from "./gcr/handleGCR"
 
+export type TxStatus = {
+    state: "pending" | "included" | "failed" | "unknown"
+    blockNumber?: number
+}
+
 export default class Chain {
     static blocks: Repository<Blocks>
     static transactions: Repository<Transactions>
@@ -88,6 +93,29 @@ export default class Chain {
             log.error("[ChainDB] [ ERROR ]: " + JSON.stringify(error))
             throw error // It does not crash the node, as it is caught by the endpoint handler
         }
+    }
+
+    /**
+     * Lifecycle status of a transaction by hash.
+     *
+     * Cheap: 1 mempool lookup, then 1 transactions lookup if not in mempool.
+     *
+     * Note: "failed" is reserved — currently the node does not record
+     * execution failures, so failed txs surface as "unknown".
+     */
+    static async getTransactionStatus(hash: string): Promise<TxStatus> {
+        const inMempool = await Mempool.findByHash(hash)
+        if (inMempool) return { state: "pending" }
+
+        const tx = await this.getTxByHash(hash)
+        if (tx) {
+            return {
+                state: "included",
+                blockNumber: tx.blockNumber ?? undefined,
+            }
+        }
+
+        return { state: "unknown" }
     }
 
     static async getTransactionHistory(
