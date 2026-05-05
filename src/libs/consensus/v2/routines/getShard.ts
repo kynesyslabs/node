@@ -3,7 +3,6 @@ import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
-import Chain from "src/libs/blockchain/chain"
 
 /**
  * Retrieve the current list of online peers.

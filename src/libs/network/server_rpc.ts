@@ -27,6 +27,17 @@ export async function serverRpcBun() {
     const rateLimiter = RateLimiter.getInstance()
 
     // Apply middlewares
+    server.use(async (req, next) => {
+        const url = new URL(req.url)
+        const requestStart = performance.now()
+        const response = await next()
+        const durationMs = (performance.now() - requestStart).toFixed(2)
+        log.only(
+            `[HTTP] ${req.method} ${url.pathname} -> ${response.status} (${durationMs}ms)`,
+            false,
+        )
+        return response
+    })
     server.use(cors())
     server.use(rateLimiter.createMiddleware())
     server.use(json())
