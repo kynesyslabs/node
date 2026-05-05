@@ -652,6 +652,20 @@ export async function serverRpcBun() {
             const authCtx = getAuthContext(req)
             const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
+
+            // Phase 1 item 2: surface backpressure state to SDK clients so
+            // they can self-throttle before hitting 429. Headers are best-
+            // effort: skip them when we don't yet have data for the IP
+            // (e.g. very first request, or whitelisted/unknown IPs).
+            const limits = rateLimiter.getCurrentLimits(clientIP)
+            if (limits) {
+                const rlHeaders: Record<string, string> = {
+                    "X-RateLimit-Limit": String(limits.limit),
+                    "X-RateLimit-Remaining": String(limits.remaining),
+                    "X-RateLimit-Reset": String(limits.resetEpochSeconds),
+                }
+                return jsonResponse(response, 200, rlHeaders)
+            }
             return jsonResponse(response)
         } catch (e) {
             console.error("Error in serverRpcBun: " + e)

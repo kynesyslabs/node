@@ -128,11 +128,17 @@ export const text = (body: string, status = 200): Response => {
     return new Response(body, { status })
 }
 
-export const jsonResponse = (body: any, status = 200): Response => {
+export const jsonResponse = (
+    body: any,
+    status = 200,
+    extraHeaders?: Record<string, string>,
+): Response => {
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        ...(extraHeaders ?? {}),
+    }
     return new Response(JSON.stringify(body), {
         status,
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers,
     })
 }

@@ -407,6 +407,36 @@ export class RateLimiter {
         }
     }
 
+    /**
+     * Snapshot of the current rate-limit budget for an IP, so handlers can
+     * surface backpressure to clients via X-RateLimit-* response headers.
+     *
+     * Mirrors the lookup the middleware uses for POST `/` (the main RPC entry).
+     * Returns null when there is no recorded data for the IP yet — caller
+     * should skip emitting headers in that case.
+     */
+    public getCurrentLimits(ip: string): {
+        limit: number
+        remaining: number
+        resetEpochSeconds: number
+    } | null {
+        const ipData = this.ipRequests.get(ip)
+        if (!ipData) {
+            return null
+        }
+
+        // Match middleware: POST `/` resolves to the "POST" method bucket,
+        // falling back to defaultLimit when not configured explicitly.
+        const limitConfig = this.getLimitForMethod("POST")
+        const limit = limitConfig.maxRequests
+        const remaining = Math.max(0, limit - ipData.count)
+        const resetEpochSeconds = Math.floor(
+            (ipData.firstRequest + limitConfig.windowMs) / 1000,
+        )
+
+        return { limit, remaining, resetEpochSeconds }
+    }
+
     public getStats(): {
         totalIPs: number
         blockedIPs: number
