@@ -19,6 +19,7 @@ import type {
     HistoryMessage,
     ErrorCode,
 } from "./types"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 /** Max raw WebSocket message size (256 KB) */
 const MAX_MESSAGE_SIZE = 256 * 1024
@@ -138,7 +139,7 @@ export class L2PSMessagingServer {
         // Verify proof of key ownership: sign("register:{publicKey}:{timestamp}")
         const proofMessage = `register:${publicKey}:${msg.timestamp}`
         try {
-            const valid = await ucrypto.verify({
+            const valid = await TxValidatorPool.getInstance().verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(publicKey),
@@ -288,7 +289,7 @@ export class L2PSMessagingServer {
         // Verify proof: sign("history:{peerKey}:{timestamp}")
         const proofMessage = `history:${peerKey}:${msg.timestamp}`
         try {
-            const valid = await ucrypto.verify({
+            const valid = await TxValidatorPool.getInstance().verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(myKey),

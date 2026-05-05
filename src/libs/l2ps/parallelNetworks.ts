@@ -307,7 +307,7 @@ export default class ParallelNetworks {
 
         // Verify signature before decrypting
         if (encryptedTx.signature) {
-            const isValid = await ucrypto.verify({
+            const isValid = await TxValidatorPool.getInstance().verify({
                 algorithm: encryptedTx.signature.type as SigningAlgorithm,
                 message: new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
                 publicKey: hexToUint8Array(encryptedTx.content.from as string),

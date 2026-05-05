@@ -324,7 +324,7 @@ export class SignalingServer {
             const signingPublicKey = deserializedProof.publicKey
 
             // Validate the proof
-            const verified = await ucrypto.verify(deserializedProof)
+            const verified = await TxValidatorPool.getInstance().verify(deserializedProof)
 
             if (!verified) {
                 this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")

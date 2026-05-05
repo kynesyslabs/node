@@ -15,6 +15,7 @@ import crypto from "node:crypto"
 import Peer from "../Peer"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 type BufferPayload = {
     type: "Buffer"
@@ -159,7 +160,7 @@ async function verifyChallenge(
             : signature
 
         // Perform proper ed25519 signature verification
-        const isValid = await ucrypto.verify({
+        const isValid = await TxValidatorPool.getInstance().verify({
             algorithm: "ed25519",
             message: new TextEncoder().encode(expectedMessage),
             publicKey: hexToUint8Array(normalizedPubKey),

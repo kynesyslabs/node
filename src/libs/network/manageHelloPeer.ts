@@ -7,6 +7,7 @@ import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 export interface HelloPeerRequest {
     url: string
@@ -50,7 +51,7 @@ export async function manageHelloPeer(
 
     // Check if the authentication info is valid based on the sender info from the headers
     log.info("[Hello Peer Listener] Verifying authentication info...")
-    const signatureValid = await ucrypto.verify({
+    const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: content.signature.type,
         message: new TextEncoder().encode(content.url),
         signature: hexToUint8Array(content.signature.data as string),

@@ -21,6 +21,7 @@ import TxUtils from "../../blockchain/transaction"
 import { Waiter } from "@/utilities/waiter"
 import Block from "@/libs/blockchain/block"
 import Chain from "@/libs/blockchain/chain"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -507,7 +508,7 @@ export class DTRManager {
             }
 
             // 3. Verify validity data against sender signature
-            const isSignatureValid = await ucrypto.verify({
+            const isSignatureValid = await TxValidatorPool.getInstance().verify({
                 algorithm: validityData.rpc_public_key.type as SigningAlgorithm,
                 message: new TextEncoder().encode(
                     Hashing.sha256(JSON.stringify(validityData.data)),

@@ -5,6 +5,7 @@ import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 export async function broadcastBlockHash(
     block: Block,
@@ -66,7 +67,7 @@ export async function broadcastBlockHash(
                 const signatureVerificationPromises = Object.entries(
                     incomingSignatures,
                 ).map(async ([identity, signature]) => {
-                    const isValid = await ucrypto.verify({
+                    const isValid = await TxValidatorPool.getInstance().verify({
                         algorithm: getSharedState.signingAlgorithm,
                         message: new TextEncoder().encode(block.hash),
                         signature: hexToUint8Array(signature),

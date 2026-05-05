@@ -8,6 +8,7 @@
 import { ucrypto, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { Ed25519SignedObject, signedObject } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 export interface VerificationResult {
     /**
@@ -102,7 +103,7 @@ export async function verifySignature(
             } as Ed25519SignedObject
         }
 
-        const isValid = await ucrypto.verify(signatureObj)
+        const isValid = await TxValidatorPool.getInstance().verify(signatureObj)
 
         if (isValid) {
             log.debug(`[verifySignature] Valid signature for: ${identity}`)

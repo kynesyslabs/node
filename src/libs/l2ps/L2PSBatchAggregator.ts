@@ -335,7 +335,7 @@ export class L2PSBatchAggregator {
                         aggregatedEdits,
                         totalAffectedAccountsCount,
                         batchTransactions.length,
-                        transactionHashes
+                        transactionHashes,
                     )
 
                     if (proofResult.success) {
@@ -350,6 +350,7 @@ export class L2PSBatchAggregator {
                 const updated = await L2PSMempool.updateStatusBatch(hashes, L2PS_STATUS.BATCHED)
 
                 // Update transaction statuses in l2ps_transactions table (history)
+                // eslint-disable-next-line @typescript-eslint/naming-convention
                 const L2PSTransactionExecutor = (await import("./L2PSTransactionExecutor")).default
                 for (const txHash of hashes) {
                     try {
@@ -357,7 +358,7 @@ export class L2PSBatchAggregator {
                             txHash,
                             "batched",
                             undefined,
-                            `Included in unconfirmed L1 batch`
+                            "Included in unconfirmed L1 batch",
                         )
                     } catch (err) {
                         log.warning(`[L2PS Batch Aggregator] Failed to update tx status for ${txHash.slice(0, 16)}...`)
@@ -401,7 +402,7 @@ export class L2PSBatchAggregator {
             }
 
             // Sum affected accounts counts (privacy-preserving)
-            if (tx.affected_accounts_count && typeof tx.affected_accounts_count === 'number') {
+            if (tx.affected_accounts_count && typeof tx.affected_accounts_count === "number") {
                 totalAffectedAccountsCount += tx.affected_accounts_count
             }
         }
@@ -410,7 +411,7 @@ export class L2PSBatchAggregator {
 
         return {
             aggregatedEdits,
-            totalAffectedAccountsCount
+            totalAffectedAccountsCount,
         }
     }
 
@@ -490,8 +491,8 @@ export class L2PSBatchAggregator {
      */
     private async generateZkProofForBatch(
         transactions: L2PSMempoolTx[],
-        batchHash: string
-    ): Promise<L2PSBatchPayload['zk_proof'] | undefined> {
+        batchHash: string,
+    ): Promise<L2PSBatchPayload["zk_proof"] | undefined> {
         if (!this.zkEnabled || !this.zkProver) {
             return undefined
         }
@@ -530,7 +531,7 @@ export class L2PSBatchAggregator {
             // Use batch hash as initial state root
             let initialStateRoot: bigint
             try {
-                initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % (2n ** 253n)
+                initialStateRoot = BigInt("0x" + batchHash.slice(0, 32)) % (2n ** 253n)
             } catch {
                 initialStateRoot = 0n
             }
@@ -617,7 +618,7 @@ export class L2PSBatchAggregator {
             // Store in shared state for persistence
             sharedState.l2psBatchNonce = nonce
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
             log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${errorMessage}`)
         }
     }
@@ -651,7 +652,7 @@ export class L2PSBatchAggregator {
                     finalStateRootBigInt = BigInt(finalStateRoot)
                     totalVolumeBigInt = BigInt(totalVolume)
                 } catch {
-                    log.error(`[L2PS Batch Aggregator] Invalid BigInt values in ZK proof`)
+                    log.error("[L2PS Batch Aggregator] Invalid BigInt values in ZK proof")
                     return false
                 }
 

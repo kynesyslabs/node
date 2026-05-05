@@ -30,6 +30,7 @@ import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -90,7 +91,7 @@ export async function handleExecuteTransaction(
     }
 
     const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
-    const signatureValid = await ucrypto.verify({
+    const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: validatedData.signature.type as SigningAlgorithm,
         message: new TextEncoder().encode(hashedData),
         publicKey: hexToUint8Array(validatedData.rpc_public_key.data) as any,
