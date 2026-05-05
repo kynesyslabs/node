@@ -994,9 +994,9 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
             break
 
         default:
-            log.warning("[SERVER] Received unknown message")
-            // eslint-disable-next-line quotes
-            response.response = '{ error: "Unknown message"}'
+            log.warning(`[SERVER] Received unknown message: ${content?.message}`)
+            response.result = 404
+            response.response = { error: "Unknown message", message: content?.message }
             break
     }
 
