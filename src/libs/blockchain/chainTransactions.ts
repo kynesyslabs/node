@@ -1,9 +1,8 @@
-import { ILike, In, LessThan, EntityManager, FindManyOptions, QueryFailedError } from "typeorm"
+import { ILike, In, LessThan, EntityManager, FindManyOptions } from "typeorm"
 import log from "src/utilities/logger"
 import Transaction from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
-import { handleError } from "src/errors"
 import { getTransactionsRepo } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload } from "./chainTypes"
@@ -190,48 +189,33 @@ export async function insertTransactionsFromSync(
     if (transactions.length === 0) return true
 
     const datasourceModule = (await import("src/model/datasource")).default
-    const transactionsRepo = getTransactionsRepo()
 
     const db = await datasourceModule.getInstance()
     const dataSource = db.getDataSource()
 
     try {
         await dataSource.transaction(async transactionalEntityManager => {
-            const queryRunner = transactionalEntityManager.queryRunner
-            for (let i = 0; i < transactions.length; i++) {
-                const tx = transactions[i]
-                const savepoint = `sync_tx_insert_${i}`
+            const rawTransactions = transactions.map(tx =>
+                Transaction.toRawTransaction(tx, "confirmed"),
+            )
 
-                await queryRunner.query(`SAVEPOINT ${savepoint}`)
-                try {
-                    const rawTransaction = Transaction.toRawTransaction(
-                        tx,
-                        "confirmed",
-                    )
-                    await transactionalEntityManager.save(
-                        transactionsRepo.target,
-                        rawTransaction,
-                    )
-                    await queryRunner.query(
-                        `RELEASE SAVEPOINT ${savepoint}`,
-                    )
-                } catch (error) {
-                    await queryRunner.query(
-                        `ROLLBACK TO SAVEPOINT ${savepoint}`,
-                    )
-                    if (error instanceof QueryFailedError) {
-                        log.error(
-                            `[insertTransactionsFromSync] Failed to insert transaction ${tx.hash}. Skipping ...`,
-                        )
-                        log.error(`Message: ${error.message}`)
-                        continue
-                    }
+            const insertResult = await transactionalEntityManager
+                .createQueryBuilder()
+                .insert()
+                .into(Transactions)
+                .values(rawTransactions as any[])
+                .orIgnore()
+                .execute()
 
-                    handleError(error, "CHAIN", {
-                        source: "ChainDB sync insertion",
-                    })
-                    throw error
-                }
+            const skippedCount =
+                rawTransactions.length -
+                insertResult.identifiers.filter(
+                    id => id !== undefined,
+                ).length
+            if (skippedCount > 0) {
+                log.warn(
+                    `[insertTransactionsFromSync] Skipped ${skippedCount} duplicate transaction(s)`,
+                )
             }
         })
 

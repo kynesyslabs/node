@@ -1,14 +1,14 @@
-import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
+import { ILike, LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
 import Transaction from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
+import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import { handleError } from "src/errors"
 import { getBlocksRepo, getTransactionsRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import type { FindManyOptions } from "typeorm"
@@ -219,48 +219,40 @@ export async function insertBlock(
                 )
 
                 const insertTransactionsStart = Date.now()
-                const queryRunner = transactionalEntityManager.queryRunner
-                for (let i = 0; i < transactionEntities.length; i++) {
-                    const tx = transactionEntities[i]
-                    const savepoint = `tx_insert_${i}`
 
-                    await queryRunner.query(`SAVEPOINT ${savepoint}`)
-                    try {
-                        const rawTransaction = Transaction.toRawTransaction(
-                            tx,
-                            "confirmed",
+                if (transactionEntities.length > 0) {
+                    const rawTransactions = transactionEntities.map(tx =>
+                        Transaction.toRawTransaction(tx, "confirmed"),
+                    )
+
+                    const insertResult = await transactionalEntityManager
+                        .createQueryBuilder()
+                        .insert()
+                        .into(Transactions)
+                        .values(rawTransactions as any[])
+                        .orIgnore()
+                        .execute()
+
+                    const skippedCount =
+                        rawTransactions.length -
+                        insertResult.identifiers.filter(
+                            id => id !== undefined,
+                        ).length
+                    if (skippedCount > 0) {
+                        log.warn(
+                            `[ChainDB] Skipped ${skippedCount} duplicate transaction(s) in block ${block.number}`,
                         )
-                        await transactionalEntityManager.save(
-                            transactionsRepo.target,
-                            rawTransaction,
-                        )
+                    }
+
+                    const l2psTxs = transactionEntities.filter(
+                        tx => tx.content?.type === "l2ps_hash_update",
+                    )
+                    for (const tx of l2psTxs) {
                         await persistConfirmedTransactionProjection(
                             tx,
                             block.number,
                             transactionalEntityManager,
                         )
-                        await queryRunner.query(
-                            `RELEASE SAVEPOINT ${savepoint}`,
-                        )
-                    } catch (error) {
-                        await queryRunner.query(
-                            `ROLLBACK TO SAVEPOINT ${savepoint}`,
-                        )
-                        if (error instanceof QueryFailedError) {
-                            log.error(
-                                `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
-                            )
-                            log.error(`Message: ${error.message}`)
-                            continue
-                        }
-
-                        log.error(
-                            "Unexpected error while inserting tx: " + tx.hash,
-                        )
-                        handleError(error, "CHAIN", {
-                            source: "transaction insertion",
-                        })
-                        throw error
                     }
                 }
 
