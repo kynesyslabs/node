@@ -146,6 +146,7 @@ export async function insertBlock(
     position?: number,
     cleanMempool = true,
 ): Promise<Blocks> {
+    const insertBlockStart = Date.now()
     const blocksRepo = getBlocksRepo()
     const transactionsRepo = getTransactionsRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
@@ -207,11 +208,17 @@ export async function insertBlock(
     try {
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
+                const saveBlockStart = Date.now()
                 const savedBlock = await transactionalEntityManager.save(
                     blocksRepo.target,
                     newBlock,
                 )
+                const saveBlockEnd = Date.now()
+                log.only(
+                    `[insertBlock] Save block took ${saveBlockEnd - saveBlockStart}ms`,
+                )
 
+                const insertTransactionsStart = Date.now()
                 const queryRunner = transactionalEntityManager.queryRunner
                 for (let i = 0; i < transactionEntities.length; i++) {
                     const tx = transactionEntities[i]
@@ -257,13 +264,24 @@ export async function insertBlock(
                     }
                 }
 
+                const insertTransactionsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Insert transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
+                )
+
+                const removeTransactionsStart = Date.now()
                 if (cleanMempool) {
                     await Mempool.removeTransactionsByHashes(
                         transactionEntities.map(tx => tx.hash),
                         transactionalEntityManager,
                     )
                 }
+                const removeTransactionsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Remove transactions took ${removeTransactionsEnd - removeTransactionsStart}ms`,
+                )
 
+                const commitmentsStart = Date.now()
                 const committedTxHashes = transactionEntities.map(tx => tx.hash)
                 if (committedTxHashes.length > 0) {
                     await transactionalEntityManager
@@ -278,7 +296,12 @@ export async function insertBlock(
                         })
                         .execute()
                 }
+                const commitmentsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Commitments took ${commitmentsEnd - commitmentsStart}ms`,
+                )
 
+                const updateMerkleTreeStart = Date.now()
                 const commitmentsAdded = await updateMerkleTreeAfterBlock(
                     dataSource,
                     block.number,
@@ -289,6 +312,10 @@ export async function insertBlock(
                         `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
                     )
                 }
+                const updateMerkleTreeEnd = Date.now()
+                log.only(
+                    `[insertBlock] Update Merkle tree took ${updateMerkleTreeEnd - updateMerkleTreeStart}ms`,
+                )
 
                 return savedBlock
             },
