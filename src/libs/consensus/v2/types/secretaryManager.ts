@@ -883,31 +883,32 @@ export default class SecretaryManager {
 
         if (manager) {
             manager.runSecretaryRoutine = false
-        }
-        const filter = (key: string) =>
-            key.includes("greenLight" + this.shard.blockRef)
+            const filter = (key: string) =>
+                key.includes("greenLight" + this.shard.blockRef)
 
-        const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
-        const waiters = waiterKeys.map(key => Waiter.wait(key))
+            const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
+            const waiters = waiterKeys.map(key => Waiter.wait(key))
 
-        log.debug(
-            "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
-        )
-        log.debug(`Waiter keys: ${JSON.stringify(waiterKeys)}`)
-        try {
-            await Promise.all(waiters)
-        } catch (error) {
-            log.error(
-                `[SECRETARY] Error waiting for hanging greenlights: ${error}`,
+            log.debug(
+                "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
             )
-            process.exit(1)
+            log.debug(`Waiter keys: ${JSON.stringify(waiterKeys)}`)
+            try {
+                await Promise.all(waiters)
+            } catch (error) {
+                log.error(
+                    `[SECRETARY] Error waiting for hanging greenlights: ${error}`,
+                )
+                process.exit(1)
+            }
+
+            Waiter.preHeld
+                .keys()
+                .filter(filter)
+                .forEach(key => Waiter.preHeld.delete(key))
         }
 
         // INFO: Delete pre-held keys for ended consensus round
-        Waiter.preHeld
-            .keys()
-            .filter(filter)
-            .forEach(key => Waiter.preHeld.delete(key))
 
         log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
