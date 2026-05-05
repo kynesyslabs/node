@@ -58,9 +58,10 @@ export async function manageHelloPeer(
         publicKey: hexToUint8Array(content.publicKey),
     })
 
-    log.debug("[Hello Peer Listener] Signature valid: " + signatureValid)
-    log.debug("[Hello Peer Listener] Sender: " + sender)
-    log.debug("[Hello Peer Listener] Public key: " + content.publicKey)
+    log.only("[Hello Peer Listener] Signature valid: " + signatureValid)
+    log.only("[Hello Peer Listener] Sender: " + sender)
+    log.only("[Hello Peer Listener] Public key: " + content.publicKey)
+    log.only("[Hello Peer Listener] Signature: " + content.signature.data)
 
     const isValid = sender === content.publicKey && signatureValid
 

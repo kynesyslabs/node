@@ -244,7 +244,10 @@ export default class PeerManager {
                     peer.connection.string,
             )
             log.error("[PEERMANAGER] Peer not added: " + peer.identity)
-            return [false, "Invalid connection string: " + peer.connection.string]
+            return [
+                false,
+                "Invalid connection string: " + peer.connection.string,
+            ]
         }
 
         // REVIEW check for duplicates
@@ -389,12 +392,34 @@ export default class PeerManager {
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(connectionString),
         )
+        const signedConnectionStringUcrypto = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(connectionString),
+        )
+
+        log.only("==== UCRYPTO SIGNED ====")
+        log.only("Signing algorithm: " + getSharedState.signingAlgorithm)
+        log.only("Message: " + connectionString)
+        log.only(
+            "Public key: " +
+                uint8ArrayToHex(signedConnectionStringUcrypto.publicKey),
+        )
+        log.only(
+            "Signature: " +
+                uint8ArrayToHex(signedConnectionStringUcrypto.signature),
+        )
 
         log.only("[Hello Peer] Signing connection string: " + connectionString)
+        log.only("==== TX VALIDATOR POOL SIGNED ====")
+        log.only("Signing algorithm: " + getSharedState.signingAlgorithm)
+        log.only("Message: " + connectionString)
         log.only(
-            "[Hello Peer] Signed connection string: " +
-                uint8ArrayToHex(signedConnectionString.signature),
+            "Public key: " + uint8ArrayToHex(signedConnectionString.publicKey),
         )
+        log.only(
+            "Signature: " + uint8ArrayToHex(signedConnectionString.signature),
+        )
+        log.only("==================================================")
 
         // Sending the transmission to the peer
         const helloRequest: HelloPeerRequest = {
