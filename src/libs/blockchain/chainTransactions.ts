@@ -1,4 +1,4 @@
-import { ILike, In, LessThan, EntityManager, FindManyOptions } from "typeorm"
+import { In, LessThan, EntityManager, FindManyOptions } from "typeorm"
 import log from "src/utilities/logger"
 import Transaction from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
@@ -55,7 +55,7 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
     try {
         const getTxByHashStart = Date.now()
         const rawTx = await getTransactionsRepo().findOneBy({
-            hash: ILike(hash),
+            hash: hash,
         })
 
         if (!rawTx) {
@@ -115,7 +115,7 @@ export async function getBlockTransactions(
 export async function getTransactionFromHash(
     hash: string,
 ): Promise<Transaction | null> {
-    const rawTx = await getTransactionsRepo().findOneBy({ hash: ILike(hash) })
+    const rawTx = await getTransactionsRepo().findOneBy({ hash: hash })
     if (!rawTx) {
         return null
     }

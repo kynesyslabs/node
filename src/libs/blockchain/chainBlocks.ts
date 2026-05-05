@@ -1,4 +1,4 @@
-import { ILike, LessThan, MoreThan } from "typeorm"
+import { LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
@@ -78,7 +78,7 @@ export async function getBlockByNumber(number: number): Promise<Blocks> {
 }
 
 export async function getBlockByHash(hash: string): Promise<Blocks> {
-    return await getBlocksRepo().findOneBy({ hash: ILike(hash) })
+    return await getBlocksRepo().findOneBy({ hash: hash })
 }
 
 export async function getGenesisBlock(): Promise<Blocks> {
