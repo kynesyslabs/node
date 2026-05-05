@@ -9,14 +9,11 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
-import forge from "node-forge"
 import crypto from "crypto"
 
 export default class Hashing {
     static sha256(message: string) {
-        const md = forge.sha256.create()
-        md.update(message)
-        return md.digest().toHex()
+        return crypto.createHash("sha256").update(message).digest("hex")
     }
 
     // New: hash exact bytes deterministically
