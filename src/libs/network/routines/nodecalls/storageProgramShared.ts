@@ -2,6 +2,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Datasource from "src/model/datasource"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
 import { GCRStorageProgramRoutines } from "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+import log from "src/utilities/logger"
 
 export type StorageFieldType =
     | "string"
@@ -192,4 +193,89 @@ export function requireJsonObject(
         })
     }
     return undefined
+}
+
+/**
+ * Input shape consumed by every JSON-object field-read handler.
+ */
+export interface FieldReadInput {
+    storageAddress?: unknown
+    field?: unknown
+    requesterAddress?: unknown
+}
+
+/**
+ * Context handed to a field-read reducer once all the envelope checks pass.
+ */
+export interface FieldReadContext {
+    field: string
+    value: unknown
+    program: GCRStorageProgram
+}
+
+/**
+ * Higher-order helper that handles the common envelope shared by the
+ * "single JSON field read" RPC handlers (getStorageProgramValue,
+ * getStorageProgramFieldType, ...).
+ *
+ * The envelope is identical across these handlers:
+ *   1. validate `field` arg (non-empty string) -> 400 / INVALID_REQUEST
+ *   2. coerce `requesterAddress` to string|undefined
+ *   3. resolve the program with ACL enforcement (404/403/null already
+ *      handled inside getAccessibleProgram)
+ *   4. require JSON object data -> 400 / INVALID_FIELD_TYPE
+ *   5. confirm the requested field exists on the object -> 404 /
+ *      FIELD_NOT_FOUND
+ *   6. delegate the response shape to the reducer
+ *   7. catch + log + 500 / INTERNAL_ERROR
+ *
+ * The reducer is the only thing that varies between handlers, so we keep
+ * it tiny: it receives the resolved {field, value, program} and returns
+ * the RPCResponse the handler wants to ship.
+ *
+ * @param handlerName - Used for the log prefix (e.g. "getStorageProgramValue")
+ * @param reducer - Builds the success RPCResponse from the resolved field
+ */
+export function withFieldRead(
+    handlerName: string,
+    reducer: (ctx: FieldReadContext) => RPCResponse,
+): (data: FieldReadInput) => Promise<RPCResponse> {
+    return async function fieldReadHandler(
+        data: FieldReadInput,
+    ): Promise<RPCResponse> {
+        try {
+            if (typeof data?.field !== "string" || data.field.length === 0) {
+                return rpcBadRequest("Missing or invalid 'field' field")
+            }
+            const field = data.field
+
+            const requesterAddress =
+                typeof data?.requesterAddress === "string"
+                    ? data.requesterAddress
+                    : undefined
+
+            const result = await getAccessibleProgram(
+                data?.storageAddress,
+                requesterAddress,
+            )
+            if (result.error) return result.error
+
+            const program = result.program!
+            const typeError = requireJsonObject(program)
+            if (typeError) return typeError
+
+            const obj = program.data as Record<string, unknown>
+            if (!(field in obj)) {
+                return rpc(404, {
+                    error: `Field not found: ${field}`,
+                    errorCode: "FIELD_NOT_FOUND",
+                })
+            }
+
+            return reducer({ field, value: obj[field], program })
+        } catch (error) {
+            log.error(`[${handlerName}] Error:`, error)
+            return rpcInternalError(error)
+        }
+    }
 }

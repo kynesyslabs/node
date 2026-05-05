@@ -36,9 +36,10 @@ const entityFixtures = JSON.parse(
 let GCRStorageProgramRoutines: typeof import("src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines")["GCRStorageProgramRoutines"]
 
 beforeAll(async () => {
-    ;({ GCRStorageProgramRoutines } = await import(
+    const mod = await import(
         "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
-    ))
+    )
+    GCRStorageProgramRoutines = mod.GCRStorageProgramRoutines
 })
 
 function createMockRepository() {
@@ -55,6 +56,55 @@ function createMockRepository() {
             getMany: jest.fn().mockResolvedValue([]),
         })),
     }
+}
+
+/**
+ * Build a chainable QueryBuilder mock. The chain methods return `this`, and
+ * `getMany` resolves with the rows the test wants the DB to "return".
+ *
+ * `withPagination: true` adds the `take`/`skip` chain methods used by the
+ * search routine (the by-owner routine's QueryBuilder path doesn't paginate).
+ */
+type MockQB = {
+    where: jest.Mock
+    andWhere: jest.Mock
+    orderBy: jest.Mock
+    getMany: jest.Mock
+    take?: jest.Mock
+    skip?: jest.Mock
+}
+function makeMockQueryBuilder(options?: {
+    rows?: unknown[]
+    withPagination?: boolean
+}): MockQB {
+    const qb: MockQB = {
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest
+            .fn<() => Promise<unknown[]>>()
+            .mockResolvedValue(options?.rows ?? []),
+    }
+    if (options?.withPagination) {
+        qb.take = jest.fn().mockReturnThis()
+        qb.skip = jest.fn().mockReturnThis()
+    }
+    return qb
+}
+
+/**
+ * Find the andWhere() call whose SQL fragment matches a substring. Returns
+ * the [sql, params] tuple or undefined. Used to assert that a specific ACL
+ * branch was added to the QueryBuilder.
+ */
+function findAndWhereCall(
+    qb: MockQB,
+    sqlFragment: string,
+): [string, Record<string, unknown> | undefined] | undefined {
+    return qb.andWhere.mock.calls.find(
+        (c: unknown[]) =>
+            typeof c[0] === "string" && (c[0] as string).includes(sqlFragment),
+    ) as [string, Record<string, unknown> | undefined] | undefined
 }
 
 function makeEdit(
@@ -1066,14 +1116,7 @@ describe("GCRStorageProgramRoutines", () => {
         it("getStorageProgramsByOwner anonymous goes through SQL ACL filter (not repo.find)", async () => {
             // Anonymous caller: must NOT take the owner fast-path. The
             // QueryBuilder is invoked with the public-only ACL predicate.
-            const qb = {
-                where: jest.fn().mockReturnThis(),
-                andWhere: jest.fn().mockReturnThis(),
-                orderBy: jest.fn().mockReturnThis(),
-                getMany: jest
-                    .fn<() => Promise<unknown[]>>()
-                    .mockResolvedValue([]),
-            }
+            const qb = makeMockQueryBuilder()
             repo.createQueryBuilder = jest.fn(() => qb) as any
 
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
@@ -1084,23 +1127,11 @@ describe("GCRStorageProgramRoutines", () => {
             expect(repo.find).not.toHaveBeenCalled()
             expect(repo.createQueryBuilder).toHaveBeenCalledWith("sp")
             // Anonymous gets the public-only branch, no requesterAddress param.
-            const aclCall = qb.andWhere.mock.calls.find(
-                (c: unknown[]) =>
-                    typeof c[0] === "string" &&
-                    (c[0] as string).includes("'public'"),
-            )
-            expect(aclCall).toBeDefined()
+            expect(findAndWhereCall(qb, "'public'")).toBeDefined()
         })
 
         it("getStorageProgramsByOwner non-owner requester binds requesterAddress to ACL predicate", async () => {
-            const qb = {
-                where: jest.fn().mockReturnThis(),
-                andWhere: jest.fn().mockReturnThis(),
-                orderBy: jest.fn().mockReturnThis(),
-                getMany: jest
-                    .fn<() => Promise<unknown[]>>()
-                    .mockResolvedValue([]),
-            }
+            const qb = makeMockQueryBuilder()
             repo.createQueryBuilder = jest.fn(() => qb) as any
 
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
@@ -1111,11 +1142,7 @@ describe("GCRStorageProgramRoutines", () => {
 
             // ACL predicate is added with requesterAddress bound as a
             // parameter — this protects against SQL injection.
-            const aclCall = qb.andWhere.mock.calls.find(
-                (c: unknown[]) =>
-                    typeof c[0] === "string" &&
-                    (c[0] as string).includes(":requesterAddress"),
-            )
+            const aclCall = findAndWhereCall(qb, ":requesterAddress")
             expect(aclCall).toBeDefined()
             expect(aclCall?.[1]).toMatchObject({
                 requesterAddress: "addr_allowed_1",
@@ -1128,16 +1155,10 @@ describe("GCRStorageProgramRoutines", () => {
             // filtered out by the SQL ACL predicate), we should pass that
             // through unchanged — pagination is the DB's job, not JS's.
             const accessibleRow = entityFixtures.public_json_program
-            const qb = {
-                where: jest.fn().mockReturnThis(),
-                andWhere: jest.fn().mockReturnThis(),
-                orderBy: jest.fn().mockReturnThis(),
-                take: jest.fn().mockReturnThis(),
-                skip: jest.fn().mockReturnThis(),
-                getMany: jest
-                    .fn<() => Promise<unknown[]>>()
-                    .mockResolvedValue([accessibleRow]),
-            }
+            const qb = makeMockQueryBuilder({
+                rows: [accessibleRow],
+                withPagination: true,
+            })
             repo.createQueryBuilder = jest.fn(() => qb) as any
 
             const results =
@@ -1156,25 +1177,11 @@ describe("GCRStorageProgramRoutines", () => {
             expect(qb.take).toHaveBeenCalledWith(10)
             expect(qb.skip).toHaveBeenCalledWith(0)
             // ACL predicate is applied with requesterAddress.
-            const aclCall = qb.andWhere.mock.calls.find(
-                (c: unknown[]) =>
-                    typeof c[0] === "string" &&
-                    (c[0] as string).includes(":requesterAddress"),
-            )
-            expect(aclCall).toBeDefined()
+            expect(findAndWhereCall(qb, ":requesterAddress")).toBeDefined()
         })
 
         it("searchStorageProgramsByName anonymous receives only public branch", async () => {
-            const qb = {
-                where: jest.fn().mockReturnThis(),
-                andWhere: jest.fn().mockReturnThis(),
-                orderBy: jest.fn().mockReturnThis(),
-                take: jest.fn().mockReturnThis(),
-                skip: jest.fn().mockReturnThis(),
-                getMany: jest
-                    .fn<() => Promise<unknown[]>>()
-                    .mockResolvedValue([]),
-            }
+            const qb = makeMockQueryBuilder({ withPagination: true })
             repo.createQueryBuilder = jest.fn(() => qb) as any
 
             await GCRStorageProgramRoutines.searchStorageProgramsByName(
@@ -1185,8 +1192,7 @@ describe("GCRStorageProgramRoutines", () => {
 
             // Anonymous SQL is just `acl->>'mode' = 'public'` — no requester
             // bind, no jsonb_each subquery for groups.
-            const calls = qb.andWhere.mock.calls
-            const hasPublicOnly = calls.some(
+            const hasPublicOnly = qb.andWhere.mock.calls.some(
                 (c: unknown[]) =>
                     typeof c[0] === "string" &&
                     (c[0] as string).includes("'public'") &&
