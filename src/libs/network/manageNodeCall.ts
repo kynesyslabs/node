@@ -16,6 +16,19 @@ import getBlocks from "./routines/nodecalls/getBlocks"
 import getTransactions from "./routines/nodecalls/getTransactions"
 import getTxsByHashes from "./routines/nodecalls/getTxsByHashes"
 import getTransactionStatus from "./routines/nodecalls/getTransactionStatus"
+// Storage program read RPC methods (Phase 2 item 7).
+// These mirror the HTTP routes at features/storageprogram/routes.ts but as
+// JSON-RPC handlers, so SDK clients calling StorageProgram.* via nodeCall
+// receive populated responses instead of "Unknown message" 404s.
+import getStorageProgram from "./routines/nodecalls/getStorageProgram"
+import getStorageProgramsByOwner from "./routines/nodecalls/getStorageProgramsByOwner"
+import searchStoragePrograms from "./routines/nodecalls/searchStoragePrograms"
+import getStorageProgramFields from "./routines/nodecalls/getStorageProgramFields"
+import getStorageProgramValue from "./routines/nodecalls/getStorageProgramValue"
+import getStorageProgramItem from "./routines/nodecalls/getStorageProgramItem"
+import hasStorageProgramField from "./routines/nodecalls/hasStorageProgramField"
+import getStorageProgramFieldType from "./routines/nodecalls/getStorageProgramFieldType"
+import getStorageProgramAll from "./routines/nodecalls/getStorageProgramAll"
 import Hashing from "../crypto/hashing"
 import log from "src/utilities/logger"
 import HandleGCR from "../blockchain/gcr/handleGCR"
@@ -188,6 +201,32 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
         case "getTransactionStatus":
             return await getTransactionStatus(data)
+
+        // ====================================================================
+        // Storage program read RPC methods (Phase 2 item 7).
+        // Each handler enforces ACL via checkReadPermission and converts Date
+        // fields to ISO 8601 strings to match the SDK's StorageProgramData
+        // shape. Single reads return 200/null on missing/soft-deleted; list
+        // reads always return arrays (empty when nothing matches).
+        // ====================================================================
+        case "getStorageProgram":
+            return await getStorageProgram(data)
+        case "getStorageProgramsByOwner":
+            return await getStorageProgramsByOwner(data)
+        case "searchStoragePrograms":
+            return await searchStoragePrograms(data)
+        case "getStorageProgramFields":
+            return await getStorageProgramFields(data)
+        case "getStorageProgramValue":
+            return await getStorageProgramValue(data)
+        case "getStorageProgramItem":
+            return await getStorageProgramItem(data)
+        case "hasStorageProgramField":
+            return await hasStorageProgramField(data)
+        case "getStorageProgramFieldType":
+            return await getStorageProgramFieldType(data)
+        case "getStorageProgramAll":
+            return await getStorageProgramAll(data)
 
         case "getBlockTransactions": {
             if (!data.blockHash) {
