@@ -966,8 +966,12 @@ export class GCRStorageProgramRoutines {
                     AND ${a}.acl->'allowed' @> to_jsonb(:requesterAddress::text)
                     AND NOT COALESCE(${a}.acl->'blacklisted' @> to_jsonb(:requesterAddress::text), false))
                 -- restricted mode, requester is a member of a group with read permission
+                -- jsonb_typeof guard avoids "cannot call jsonb_each on a non-object"
+                -- when acl.groups is missing/null/non-object (allowed by the schema —
+                -- StorageProgramACL.groups is optional)
                 OR (${a}.acl->>'mode' = 'restricted'
                     AND NOT COALESCE(${a}.acl->'blacklisted' @> to_jsonb(:requesterAddress::text), false)
+                    AND jsonb_typeof(${a}.acl->'groups') = 'object'
                     AND EXISTS (
                         SELECT 1 FROM jsonb_each(${a}.acl->'groups') AS grp(name, def)
                         WHERE def->'members' @> to_jsonb(:requesterAddress::text)
