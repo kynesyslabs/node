@@ -55,7 +55,7 @@ export async function manageHelloPeer(
         algorithm: content.signature.type,
         message: new TextEncoder().encode(content.url),
         signature: hexToUint8Array(content.signature.data as string),
-        publicKey: hexToUint8Array(content.publicKey),
+        publicKey: hexToUint8Array(sender),
     })
 
     log.only("[Hello Peer Listener] Signature valid: " + signatureValid)

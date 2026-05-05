@@ -17,6 +17,7 @@ import {
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
 import { getSharedState } from "@/utilities/sharedState"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export type AdapterOptions = BaseAdapterOptions
 
@@ -66,6 +67,27 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 const privateKey = this.getPrivateKey()
                 const publicKey = this.getPublicKey()
 
+                log.only(
+                    "[PeerOmniAdapter] Private key: " +
+                        uint8ArrayToHex(privateKey),
+                )
+                log.only(
+                    "[PeerOmniAdapter] Public key: " +
+                        uint8ArrayToHex(publicKey),
+                )
+                log.only(
+                    "[PeerOmniAdapter] Node private key: " +
+                        uint8ArrayToHex(
+                            getSharedState.keypair.privateKey as Uint8Array,
+                        ),
+                )
+                log.only(
+                    "[PeerOmniAdapter] Node public key: " +
+                        uint8ArrayToHex(
+                            getSharedState.keypair.publicKey as Uint8Array,
+                        ),
+                )
+
                 if (!privateKey || !publicKey) {
                     log.warning(
                         "[PeerOmniAdapter] Node keys not available, falling back to HTTP",
@@ -108,7 +130,9 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
-            handleError(error, "NETWORK", { source: "OmniProtocol PeerAdapter.adaptCall" })
+            handleError(error, "NETWORK", {
+                source: "OmniProtocol PeerAdapter.adaptCall",
+            })
             // Check for fatal mode - will exit if OMNI_FATAL=true
             this.handleFatalError(
                 error,
