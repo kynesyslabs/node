@@ -247,7 +247,7 @@ export class DTRManager {
                         message: "RELAY_TX",
                         data: {
                             payload,
-                            blockNumber: getSharedState.lastBlockNumber + 1,
+                            blockNumber: getSharedState.lastBlockNumber,
                         },
                     },
                 ],
