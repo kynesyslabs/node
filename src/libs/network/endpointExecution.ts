@@ -321,54 +321,54 @@ export async function handleExecuteTransaction(
         }
 
         log.debug("PROD: " + getSharedState.PROD)
-        const { isValidator, validators } = await isValidatorForNextBlock()
+        // const { isValidator, validators } = await isValidatorForNextBlock()
 
-        if (!isValidator) {
-            log.debug(
-                "[DTR] Non-validator node: attempting relay to all validators",
-            )
-            const availableValidators = validators.sort(
-                () => Math.random() - 0.5,
-            )
+        // if (!isValidator) {
+        //     log.debug(
+        //         "[DTR] Non-validator node: attempting relay to all validators",
+        //     )
+        //     const availableValidators = validators.sort(
+        //         () => Math.random() - 0.5,
+        //     )
 
-            log.debug(
-                `[DTR] Found ${availableValidators.length} available validators, trying all`,
-            )
+        //     log.debug(
+        //         `[DTR] Found ${availableValidators.length} available validators, trying all`,
+        //     )
 
-            const results = await Promise.allSettled(
-                availableValidators.map(validator =>
-                    DTRManager.relayTransactions(validator, [validatedData]),
-                ),
-            )
+        //     const results = await Promise.allSettled(
+        //         availableValidators.map(validator =>
+        //             DTRManager.relayTransactions(validator, [validatedData]),
+        //         ),
+        //     )
 
-            for (const result of results) {
-                if (result.status === "fulfilled") {
-                    const response = result.value
-                    if (response.result === 200) {
-                        continue
-                    }
-                    DTRManager.validityDataCache.set(
-                        validatedData.data.transaction.hash,
-                        validatedData,
-                    )
-                }
-            }
+        //     for (const result of results) {
+        //         if (result.status === "fulfilled") {
+        //             const response = result.value
+        //             if (response.result === 200) {
+        //                 continue
+        //             }
+        //             DTRManager.validityDataCache.set(
+        //                 validatedData.data.transaction.hash,
+        //                 validatedData,
+        //             )
+        //         }
+        //     }
 
-            return {
-                success: true,
-                response: {
-                    message: "Transaction relayed to validators",
-                },
-                extra: {
-                    confirmationBlock: getSharedState.lastBlockNumber + 1,
-                },
-                require_reply: false,
-            }
-        }
+        //     return {
+        //         success: true,
+        //         response: {
+        //             message: "Transaction relayed to validators",
+        //         },
+        //         extra: {
+        //             confirmationBlock: getSharedState.lastBlockNumber + 1,
+        //         },
+        //         require_reply: false,
+        //     }
+        // }
 
-        if (getSharedState.inConsensusLoop) {
-            return await DTRManager.inConsensusHandler(validatedData)
-        }
+        // if (getSharedState.inConsensusLoop) {
+        //     return await DTRManager.inConsensusHandler(validatedData)
+        // }
 
         log.debug("--------------------------------")
         log.debug("In consensus loop: " + getSharedState.inConsensusLoop)
