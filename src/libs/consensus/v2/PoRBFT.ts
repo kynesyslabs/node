@@ -76,7 +76,9 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         log.only("[consensusRoutine] Initializing the consensus state")
+        preventForgingEnded(blockRef)
         await initializeConsensusState()
+        preventForgingEnded(blockRef)
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
@@ -85,6 +87,7 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
+        preventForgingEnded(blockRef)
         log.only(`Forgin block: ${manager.shard.blockRef}`)
         log.only("[consensusRoutine] We are in the shard, creating the block")
         log.only(
@@ -98,7 +101,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: Broadcast our validation phase to the secretary
         await updateValidatorPhase(1, blockRef)
-
+        preventForgingEnded(blockRef)
         // synchronize and average the time
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
@@ -109,6 +112,7 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
+        preventForgingEnded(blockRef)
 
         log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
         log.only(
@@ -133,6 +137,7 @@ export async function consensusRoutine(): Promise<void> {
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+            preventForgingEnded(blockRef)
 
             if (blockTimestamp) {
                 getSharedState.lastConsensusTime = blockTimestamp
@@ -146,6 +151,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 5: Forge the block
         const block = await forgeBlock(tempMempool, []) // NOTE The GCR hash is calculated here and added to the block
+        preventForgingEnded(blockRef)
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
