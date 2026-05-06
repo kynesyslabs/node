@@ -99,13 +99,29 @@ interface StorageProgramGranularResponse {
         | "INVALID_FIELD_TYPE"
 }
 
+/**
+ * Extract the requester's address from the `identity` header.
+ *
+ * Identity can be either a bare address or a `prefix:address` form
+ * (e.g. `ed25519:<addr>`). Returns `undefined` when:
+ *   - the header is missing or empty
+ *   - the post-colon segment is empty (e.g. `"ed25519:"`)
+ *
+ * Returning `undefined` for an empty post-colon segment is semantically
+ * equivalent to anonymous in `checkReadPermission` — every branch either
+ * already guards on falsy requesterAddress or compares it against a real
+ * value that an empty string can't match. The change ensures consistent
+ * behaviour with the SQL ACL filter and other call sites that distinguish
+ * `""` from `undefined`.
+ */
 function getRequesterAddress(req: Request): string | undefined {
     const identity = req.headers.get("identity")
-    if (!identity) {
+    if (!identity || identity.length === 0) {
         return undefined
     }
     const splits = identity.split(":")
-    return splits.length > 1 ? splits[1] : identity
+    const candidate = splits.length > 1 ? splits[1] : identity
+    return candidate && candidate.length > 0 ? candidate : undefined
 }
 
 function getValueType(
@@ -641,18 +657,10 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
             parseInt(url.searchParams.get("offset") || "0", 10),
         )
 
-        // Get requester identity from header. Empty string and missing
-        // identity both map to undefined so the SQL ACL filter sees a true
-        // anonymous caller (not a falsy owner-bypass).
-        const identity = req.headers.get("identity")
-        let requesterAddress: string | undefined
-
-        if (identity && identity.length > 0) {
-            const splits = identity.split(":")
-            const candidate = splits.length > 1 ? splits[1] : identity
-            requesterAddress =
-                candidate && candidate.length > 0 ? candidate : undefined
-        }
+        // Empty string and missing identity both map to undefined so the
+        // SQL ACL filter sees a true anonymous caller (not a falsy
+        // owner-bypass).
+        const requesterAddress = getRequesterAddress(req)
 
         // Get repository
         const db = await Datasource.getInstance()
@@ -732,14 +740,7 @@ async function searchByNameHandler(req: Request): Promise<Response> {
             return jsonResponse(response, 400)
         }
 
-        // Get requester identity from header
-        const identity = req.headers.get("identity")
-        let requesterAddress: string | undefined
-
-        if (identity) {
-            const splits = identity.split(":")
-            requesterAddress = splits.length > 1 ? splits[1] : identity
-        }
+        const requesterAddress = getRequesterAddress(req)
 
         // Get repository
         const db = await Datasource.getInstance()
