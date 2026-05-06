@@ -10,7 +10,11 @@ import GCR from "@/libs/blockchain/gcr/gcr"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import { Validators } from "@/model/entities/Validators"
-import { VOTING_WINDOW_BLOCKS } from "@/features/networkUpgrade/constants"
+import {
+    GRACE_PERIOD_BLOCKS,
+    VOTING_WINDOW_BLOCKS,
+} from "@/features/networkUpgrade/constants"
+import { canonicalAddress } from "@/libs/network/utils/txHelpers"
 import type { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import log from "src/utilities/logger"
 
@@ -27,6 +31,9 @@ export default class GCRNetworkUpgradeRoutines {
         if (e.type !== "networkUpgrade") {
             return { success: false, message: "Invalid GCREdit type" }
         }
+        // Canonicalise the proposer key before persistence so RPC reads
+        // (which match against the lower-cased sender) line up.
+        const proposerKey = canonicalAddress(e.account)
         const resolved =
             repo ??
             (await Datasource.getInstance())
@@ -68,12 +75,27 @@ export default class GCRNetworkUpgradeRoutines {
         const snapshotBlock =
             currentBlock ?? (await Chain.getLastBlockNumber())
         const tallyBlock = snapshotBlock + VOTING_WINDOW_BLOCKS
+        // Re-validate effectiveAtBlock against the server-computed snapshotBlock.
+        // RPC validation only checks the invariant against the chain tip at
+        // submission time; mempool delay can leave a stale effectiveAtBlock
+        // that violates the grace-period floor at confirmation time.
+        const minEffectiveAtBlock = tallyBlock + GRACE_PERIOD_BLOCKS
+        if (e.effectiveAtBlock < minEffectiveAtBlock) {
+            log.warning(
+                "GOVERNANCE",
+                `[gcr-edit] proposal ${e.proposalId} rejected: effectiveAtBlock=${e.effectiveAtBlock} < minEffective=${minEffectiveAtBlock} (snapshot=${snapshotBlock} tally=${tallyBlock} +grace=${GRACE_PERIOD_BLOCKS})`,
+            )
+            return {
+                success: false,
+                message: `effectiveAtBlock ${e.effectiveAtBlock} below minimum ${minEffectiveAtBlock} (snapshot+window+grace)`,
+            }
+        }
         const nextVersion = await computeNextVersion(resolved)
 
         const row = resolved.create({
             proposalId: e.proposalId,
             version: nextVersion,
-            proposerPublicKey: e.account,
+            proposerPublicKey: proposerKey,
             proposedParameters: e.proposedParameters,
             status: "pending",
             snapshotBlock,
@@ -99,6 +121,9 @@ export default class GCRNetworkUpgradeRoutines {
         if (e.type !== "networkUpgradeVote") {
             return { success: false, message: "Invalid GCREdit type" }
         }
+        // Canonicalise voter address for both the snapshot lookup and the
+        // persisted row so RPC reads (which lower-case the sender) match.
+        const voterAddress = canonicalAddress(e.account)
         let votes = voteRepo
         let proposals = proposalRepo
         if (!votes || !proposals) {
@@ -110,13 +135,13 @@ export default class GCRNetworkUpgradeRoutines {
         const existing = await votes.findOne({
             where: {
                 proposalId: e.proposalId,
-                voterAddress: e.account,
+                voterAddress,
             },
         })
         if (existing) {
             return {
                 success: true,
-                message: `Vote ${e.account}→${e.proposalId} already persisted`,
+                message: `Vote ${voterAddress}→${e.proposalId} already persisted`,
             }
         }
 
@@ -141,21 +166,23 @@ export default class GCRNetworkUpgradeRoutines {
 
         // Voter must be in the snapshot validator set; otherwise the vote
         // would be persisted with weight="0", contaminating tallies.
+        // Validator rows are stored lower-cased (see GCRValidatorStakeRoutines)
+        // so the comparison uses the canonical voter address.
         const snapshotValidators = (await GCR.getGCRValidatorsAtBlock(
             proposal.snapshotBlock,
         )) as Validators[]
-        const v = snapshotValidators.find(x => x.address === e.account)
+        const v = snapshotValidators.find(x => x.address === voterAddress)
         if (!v || !v.staked_amount) {
             return {
                 success: true,
-                message: `Vote skipped: ${e.account} not in snapshot validator set for ${e.proposalId}`,
+                message: `Vote skipped: ${voterAddress} not in snapshot validator set for ${e.proposalId}`,
             }
         }
         const weight = v.staked_amount
 
         const row = votes.create({
             proposalId: e.proposalId,
-            voterAddress: e.account,
+            voterAddress,
             approve: e.approve,
             weight,
             blockNumber,
@@ -163,7 +190,7 @@ export default class GCRNetworkUpgradeRoutines {
         await votes.save(row)
         log.info(
             "GOVERNANCE",
-            `[gcr-edit] vote ${e.account} → ${e.proposalId} approve=${e.approve} weight=${weight}`,
+            `[gcr-edit] vote ${voterAddress} → ${e.proposalId} approve=${e.approve} weight=${weight}`,
         )
         return { success: true, message: "Vote persisted" }
     }
