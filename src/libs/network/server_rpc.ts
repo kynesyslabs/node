@@ -4,6 +4,7 @@ import log from "src/utilities/logger"
 import sharedState, { getSharedState } from "src/utilities/sharedState"
 import { PeerManager } from "../peer"
 import Chain from "../blockchain/chain"
+import Mempool from "../blockchain/mempool"
 import { BunServer, cors, json, jsonResponse } from "./bunServer"
 import { RateLimiter } from "./middleware/rateLimiter"
 import { getAuthContext } from "./authContext"
@@ -49,6 +50,35 @@ export async function serverRpcBun() {
             version_name: getSharedState.version_name,
             ...info,
         })
+    })
+
+    server.get("/health", async () => {
+        // Accepting traffic only when fully synced and not in the middle of
+        // a sync loop.
+        const accepting =
+            getSharedState.syncStatus && !getSharedState.inSyncLoop
+
+        // Mempool.count() hits the DB; isolate failures so a transient DB
+        // outage doesn't 500 the health probe.
+        let mempoolSize: number | null = null
+        try {
+            mempoolSize = await Mempool.count()
+        } catch (err) {
+            log.error("[/health] Mempool.count() failed:", err)
+        }
+
+        const body = {
+            version: getSharedState.version,
+            version_name: getSharedState.version_name,
+            accepting,
+            mempool_size: mempoolSize,
+            uptime_s: getSharedState.getUptimeSeconds(),
+        }
+
+        // Surface health via HTTP status so LB/k8s probes can detect an
+        // unhealthy node without parsing the JSON body.
+        const healthy = accepting && mempoolSize !== null
+        return jsonResponse(body, healthy ? 200 : 503)
     })
 
     server.get("/version", () => jsonResponse(getSharedState.version))
@@ -126,7 +156,18 @@ export async function serverRpcBun() {
             const authCtx = getAuthContext(req)
             const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
-            return jsonResponse(response)
+
+            // Surface current rate-limit window so SDK clients can
+            // self-throttle (best-effort: skip when no IP data yet).
+            const limits = rateLimiter.getCurrentLimits(clientIP)
+            const extraHeaders = limits
+                ? {
+                      "X-RateLimit-Limit": String(limits.limit),
+                      "X-RateLimit-Remaining": String(limits.remaining),
+                      "X-RateLimit-Reset": String(limits.resetEpochSeconds),
+                  }
+                : undefined
+            return jsonResponse(response, 200, extraHeaders)
         } catch (e) {
             handleError(e, "NETWORK", { source: "serverRpcBun" })
             return jsonResponse({ error: "Invalid request format" }, 400)
