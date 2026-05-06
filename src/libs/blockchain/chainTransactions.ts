@@ -5,7 +5,7 @@ import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
 import {
     CHUNK_TRANSACTIONS,
-    chunkedInsertOrIgnore,
+    chunkedInsert,
     getTransactionsRepo,
 } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
@@ -211,7 +211,7 @@ export async function insertTransactionsFromSync(
             const rawTransactions = transactions.map(tx =>
                 Transaction.toRawTransaction(tx, "confirmed"),
             )
-            const { skipped } = await chunkedInsertOrIgnore(
+            const { skipped } = await chunkedInsert(
                 em,
                 Transactions,
                 rawTransactions as any[],

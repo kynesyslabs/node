@@ -11,9 +11,8 @@ import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import {
     CHUNK_TRANSACTIONS,
-    chunkedInsertOrIgnore,
+    chunkedInsert,
     getBlocksRepo,
-    getTransactionsRepo,
 } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import type { FindManyOptions } from "typeorm"
@@ -233,7 +232,7 @@ export async function insertBlock(
                         Transaction.toRawTransaction(tx, "confirmed"),
                     )
 
-                    const { skipped } = await chunkedInsertOrIgnore(
+                    const { skipped } = await chunkedInsert(
                         transactionalEntityManager,
                         Transactions,
                         rawTransactions as any[],

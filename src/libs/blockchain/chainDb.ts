@@ -1,9 +1,4 @@
-import {
-    EntityManager,
-    EntityTarget,
-    ObjectLiteral,
-    Repository,
-} from "typeorm"
+import { EntityManager, EntityTarget, ObjectLiteral, Repository } from "typeorm"
 import log from "src/utilities/logger"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
@@ -62,23 +57,33 @@ export interface ChunkedInsertResult {
  * Bulk INSERT ... ON CONFLICT DO NOTHING in chunks that stay under the
  * Postgres 65,535 bind-parameter wire-protocol limit.
  */
-export async function chunkedInsertOrIgnore<T extends ObjectLiteral>(
+export async function chunkedInsert<T extends ObjectLiteral>(
     runner: EntityManager | Repository<T>,
     target: EntityTarget<T>,
     rows: any[],
     chunkSize: number,
+    orUpdate?: {
+        conflictTarget?: string | string[]
+        overwrite: string[]
+    },
 ): Promise<ChunkedInsertResult> {
     let inserted = 0
     let skipped = 0
     for (let i = 0; i < rows.length; i += chunkSize) {
         const chunk = rows.slice(i, i + chunkSize)
-        const result = await runner
+        const query = runner
             .createQueryBuilder()
             .insert()
             .into(target)
             .values(chunk)
-            .orIgnore()
-            .execute()
+
+        if (orUpdate) {
+            query.orUpdate(orUpdate.overwrite, orUpdate.conflictTarget)
+        } else {
+            query.orIgnore()
+        }
+
+        const result = await query.execute()
         const chunkInserted = result.identifiers.filter(
             id => id !== undefined,
         ).length

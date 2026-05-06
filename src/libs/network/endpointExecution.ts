@@ -1,6 +1,6 @@
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
-import type { Transaction, L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -8,12 +8,10 @@ import {
     ExecutionResult,
     ValidityData,
     XMScript,
-    RPCResponse,
     IWeb2Payload,
     SigningAlgorithm,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import isValidatorForNextBlock from "src/libs/consensus/v2/routines/isValidator"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"

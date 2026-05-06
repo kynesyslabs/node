@@ -15,7 +15,7 @@ import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
 import TxValidatorPool from "./validation/txValidatorPool"
-import { CHUNK_MEMPOOL_TX, chunkedInsertOrIgnore } from "./chainDb"
+import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -144,13 +144,6 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
-        // if (!getSharedState.inConsensusLoop) {
-        //     return {
-        //         success: false,
-        //         mempool: [],
-        //     }
-        // }
-
         if (incoming.length === 0) {
             return {
                 success: true,
@@ -181,8 +174,14 @@ export default class Mempool {
         )
 
         if (unseenTransactions.length === 0) {
+            const incomingHashes = new Set(incoming.map(tx => tx.hash))
             const finalPool = await this.getMempool(blockNumber)
-            const final = finalPool.filter(tx => tx.blockNumber === blockNumber)
+            const final = finalPool.filter(
+                tx =>
+                    tx.blockNumber <= blockNumber &&
+                    !incomingHashes.has(tx.hash),
+            )
+
             return {
                 success: true,
                 mempool: final,
@@ -217,11 +216,15 @@ export default class Mempool {
 
         if (validTransactions.length > 0) {
             try {
-                const { inserted } = await chunkedInsertOrIgnore(
+                const { inserted } = await chunkedInsert(
                     this.repo,
                     MempoolTx,
                     validTransactions as any[],
                     CHUNK_MEMPOOL_TX,
+                    {
+                        conflictTarget: ["hash"],
+                        overwrite: ["blockNumber"],
+                    },
                 )
                 log.only(
                     `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
