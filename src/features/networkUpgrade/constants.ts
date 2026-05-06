@@ -28,13 +28,18 @@ export const PHASE_1_GOVERNABLE_KEYS: ReadonlySet<NetworkParameterKey> =
 
 /** Hardcoded last-resort fallback for NetworkParameters. Real precedence is
  *  governance (DB) > env (Config) > these values. Use `getGenesisNetworkParameters()`
- *  to get the env-resolved view. */
+ *  to get the env-resolved view.
+ *
+ *  Fee defaults sum to 1 (networkFee) + 1 (rpcFee) + 1 (burnFee, node-local
+ *  config) = 3. Once decimals land (Mycelium E#3) and the SDK's
+ *  NetworkParameters gains a `burnFee` field, the three governable values
+ *  must total exactly 1 DEM. */
 export const HARDCODED_FALLBACK_NETWORK_PARAMETERS: NetworkParameters = {
     blockTimeMs: 1000,
     shardSize: 4,
     minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE,
-    networkFee: 10,
-    rpcFee: 10,
+    networkFee: 1,
+    rpcFee: 1,
     featureFlags: {
         l2ps: true,
         tlsn: true,

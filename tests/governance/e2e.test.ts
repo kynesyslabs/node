@@ -100,7 +100,7 @@ let applyNetworkUpgrade: typeof import("@/libs/blockchain/routines/applyNetworkU
 let loadNetworkParameters: typeof import("@/libs/blockchain/routines/loadNetworkParameters").loadNetworkParameters
 
 beforeAll(async () => {
-    ;({ handleStakingTx } = await import(
+    ({ handleStakingTx } = await import(
         "@/libs/network/routines/transactions/handleStakingTx"
     ))
     ;({ handleGovernanceTx } = await import(
@@ -189,6 +189,13 @@ function makeProposalRepo() {
             }
             if (typeof w.tallyBlock === "number") {
                 filtered = filtered.filter(r => r.tallyBlock === w.tallyBlock)
+            } else if (
+                w.tallyBlock &&
+                typeof w.tallyBlock._value === "number"
+            ) {
+                // TypeORM LessThanOrEqual operator passed by tallyUpgradeVotes.
+                const cap = w.tallyBlock._value as number
+                filtered = filtered.filter(r => r.tallyBlock <= cap)
             }
             const order = opts?.order
             if (order?.effectiveAtBlock) {
@@ -324,11 +331,11 @@ function voteTxFrom(voter: string, proposalId: string, approve: boolean) {
 // ---------- helpers to drive the pipeline ----------
 
 function setBlock(n: number) {
-    ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(n as never)
+    (Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(n as never)
 }
 
 function setActiveValidator(address: string) {
-    ;(GCR.getGCRValidatorStatus as jest.Mock).mockImplementation(
+    (GCR.getGCRValidatorStatus as jest.Mock).mockImplementation(
         async (addr: string) => {
             const row = validatorsRepo._rows.get(addr)
             if (!row) return null
@@ -338,7 +345,7 @@ function setActiveValidator(address: string) {
 }
 
 function setSnapshot() {
-    ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue(
+    (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue(
         Array.from(validatorsRepo._rows.values()).filter(
             r => r.status !== VALIDATOR_STATUS_EXITED,
         ),
@@ -488,10 +495,16 @@ describe("E2E: staking + governance happy path", () => {
     it("three validators stake, one proposes fee change, two vote yes, proposal activates and sharedState updates", async () => {
         // ---------------- 1. STARTUP ----------------
         // preMainLoop equivalent: load params from empty DB → genesis.
+        // Genesis defaults are 1/1/1; we stage a higher networkFee so the
+        // 50% percent cap leaves room for a meaningful upgrade proposal
+        // below (current=10 → propose 15 stays within cap).
         await loadNetworkParameters(proposalRepo as any)
+        ;(
+            sharedStateStub.networkParameters as NetworkParameters
+        ).networkFee = 10
         expect(
             (sharedStateStub.networkParameters as NetworkParameters).networkFee,
-        ).toBe(GENESIS_NETWORK_PARAMETERS.networkFee)
+        ).toBe(10)
 
         // ---------------- 2. STAKING ----------------
         setActiveValidator("")
@@ -599,7 +612,12 @@ describe("E2E: staking + governance happy path", () => {
 
     it("below-threshold proposal is rejected at tallyBlock and never activates", async () => {
         // two validators; one votes yes, one votes no → 1/2 approve < 2/3
+        // Stage networkFee=10 (above genesis default of 1) so the proposed
+        // delta to 5 sits inside the 50% percent cap.
         await loadNetworkParameters(proposalRepo as any)
+        ;(
+            sharedStateStub.networkParameters as NetworkParameters
+        ).networkFee = 10
         setActiveValidator("")
         for (const [sender, block] of [
             [V1, 100],
@@ -636,7 +654,11 @@ describe("E2E: staking + governance happy path", () => {
         await postBlockHooks(tallyBlock)
         expect(proposalRepo._rows.get("p_rej").status).toBe("rejected")
 
-        // Activation pass does nothing — parameters unchanged.
+        // Activation pass does nothing — parameters fall back to genesis
+        // because no upgrade ever activated. (We staged networkFee=10 in
+        // sharedState before the proposal so the percent-cap check would
+        // accept the 5 target; postBlockHooks → loadNetworkParameters
+        // resets to genesis since no active row exists in proposalRepo.)
         setBlock(effectiveAtBlock)
         await postBlockHooks(effectiveAtBlock)
         expect(

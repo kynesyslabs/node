@@ -95,6 +95,7 @@ export function loadConfig(): Readonly<AppConfig> {
             rpcFeePercent: envInt(EnvKey.RPC_FEE_PERCENT, d.core.rpcFeePercent),
             rpcFee: envInt(EnvKey.RPC_FEE, d.core.rpcFee),
             networkFee: envInt(EnvKey.NETWORK_FEE, d.core.networkFee),
+            burnFee: envInt(EnvKey.BURN_FEE, d.core.burnFee),
             minValidatorStake: envStr(EnvKey.MIN_VALIDATOR_STAKE, d.core.minValidatorStake),
             identityFile: envStr(EnvKey.IDENTITY_FILE, d.core.identityFile),
             peerListFile: envStr(EnvKey.PEER_LIST_FILE, d.core.peerListFile),

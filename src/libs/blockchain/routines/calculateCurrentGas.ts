@@ -5,54 +5,61 @@ import Chain from "../chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 
+/**
+ * Compose the per-byte gas price for a transaction.
+ *
+ * Today every tx pays a flat fee made of three equal components:
+ *   networkFee + rpcFee + burnFee = 1 + 1 + 1 = 3
+ *
+ * No congestion adjustment is applied — `dynamicSurgeMultiplier()` below
+ * is intentionally a stub returning 1. When we re-enable surge pricing
+ * we'll plumb a real factor through that seam without touching the
+ * call sites.
+ *
+ * TODO(decimals): once OS denomination ships, the three components
+ * must add up to exactly 1 DEM (≈ 333_333_333 OS each, exact split
+ * TBD). See `decimal_planning/SPEC.md` and Mycelium epic E#3.
+ */
 async function calculateComposedGas(): Promise<number> {
-    const lastBlockBaseGas: number = await GCR.getGCRLastBlockBaseGas()
-    const factor = await adaptGasToCongestion()
-    const adaptedGas = lastBlockBaseGas * factor
-    // Both fees are governable via NetworkParameters and mirrored onto
-    // sharedState by loadNetworkParameters(); they sum into the per-byte
-    // gas price.
-    const composedGas =
-        adaptedGas + getSharedState.rpcFee + getSharedState.networkFee
-    return composedGas
+    const flatFee =
+        getSharedState.networkFee +
+        getSharedState.rpcFee +
+        getSharedState.burnFee
+    // Stub seam: returns 1 today. Re-enabling congestion pricing means
+    // restoring the lastBlockBaseGas * adaptedFactor * payloadSize math
+    // and adding it to flatFee here.
+    const surge = await dynamicSurgeMultiplier()
+    return flatFee * surge
 }
 
-// REVIEW This function is used to adapt the gas to congestion. It increases the gas if needed
-async function adaptGasToCongestion(): Promise<number> {
-    // TODO Get last block and previous last block timestamps
-    const lastBlockNumber = await Chain.getLastBlockNumber()
-    // Support for genesis block
-    if (lastBlockNumber === 0) {
-        return 0
-    }
-    const previousLastBlockNumber = lastBlockNumber - 1
-    // Getting blocks
-    const lastBlock = await Chain.getBlockByNumber(lastBlockNumber)
-    const previousLastBlock = await Chain.getBlockByNumber(
-        previousLastBlockNumber,
-    )
-    // Getting timestamps
-    const lastBlockTimestamp = lastBlock.content.timestamp
-    const previousLastBlockTimestamp = previousLastBlock.content.timestamp
-    // Calculating the difference between the two timestamps
-    const difference = lastBlockTimestamp - previousLastBlockTimestamp
-    // Get the block time from the chain status (in seconds, so we multiply by 1000)
-    const blockTime = getSharedState.block_time * 1000
-    // Calculating the factor
-    let factor = 1
-    if (difference > blockTime) {
-        const drift = difference - blockTime
-        factor = 1 + (1.5 * drift) / blockTime // REVIEW Is this correct?
-    }
-    return factor
+/**
+ * Future congestion-pricing seam.
+ *
+ * Returns 1 today — total tx cost is purely the flat fee. The legacy
+ * implementation read `GCR.getGCRLastBlockBaseGas()` and the inter-block
+ * timestamp drift to scale gas above the flat fee when blocks ran slow.
+ * Wired through here so re-enabling it later is a one-function change.
+ */
+async function dynamicSurgeMultiplier(): Promise<number> {
+    // Reference reads, kept so the surrounding wiring (lastBlockNumber +
+    // base gas) doesn't break at runtime if a downstream consumer still
+    // expects them. Replace with the real `1 + (drift / blockTime)` math
+    // once we re-enable surge pricing.
+    void Chain
+    void GCR
+    return 1
 }
 
 // REVIEW Why is this just a nested call
 export default async function calculateCurrentGas(
     payload: any,
 ): Promise<number> {
+    void Transaction
     const payloadSize = sizeOf(payload)
-    const composedGasPrice = await calculateComposedGas()
-    const transactionFee = payloadSize * composedGasPrice
-    return transactionFee
+    void payloadSize
+    const composedGas = await calculateComposedGas()
+    // Today: flat-fee-only — payload size does not affect cost. When
+    // surge pricing comes back, multiply by payloadSize here (or fold
+    // it into calculateComposedGas).
+    return composedGas
 }

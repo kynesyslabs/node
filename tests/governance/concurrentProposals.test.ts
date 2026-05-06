@@ -70,6 +70,7 @@ jest.mock("@/model/datasource", () => ({
 import Chain from "@/libs/blockchain/chain"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import {
+    GENESIS_NETWORK_PARAMETERS,
     GRACE_PERIOD_BLOCKS,
     VOTING_WINDOW_BLOCKS,
 } from "@/features/networkUpgrade/constants"
@@ -78,7 +79,7 @@ import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
 let handleGovernanceTx: typeof import("@/libs/network/routines/transactions/handleGovernanceTx").handleGovernanceTx
 
 beforeAll(async () => {
-    ;({ handleGovernanceTx } = await import(
+    ({ handleGovernanceTx } = await import(
         "@/libs/network/routines/transactions/handleGovernanceTx"
     ))
 })
@@ -173,7 +174,12 @@ describe("Concurrent proposals", () => {
     beforeEach(() => {
         jest.clearAllMocks()
         proposalRepo._rows.clear()
-        sharedStateStub.networkParameters = null
+        // Stage networkFee=10 above the genesis default of 1 so the
+        // existing fixtures (proposing 12-14) stay within the 50% cap.
+        sharedStateStub.networkParameters = {
+            ...GENESIS_NETWORK_PARAMETERS,
+            networkFee: 10,
+        }
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(1000 as never)
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockImplementation(
             async () => ({
@@ -261,7 +267,12 @@ describe("Rejection + re-proposal", () => {
     beforeEach(() => {
         jest.clearAllMocks()
         proposalRepo._rows.clear()
-        sharedStateStub.networkParameters = null
+        // Stage networkFee=10 above the genesis default of 1 so the
+        // existing fixtures (proposing 12-14) stay within the 50% cap.
+        sharedStateStub.networkParameters = {
+            ...GENESIS_NETWORK_PARAMETERS,
+            networkFee: 10,
+        }
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(1000 as never)
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockImplementation(
             async () => ({

@@ -83,7 +83,7 @@ import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
 let handleGovernanceTx: typeof import("@/libs/network/routines/transactions/handleGovernanceTx").handleGovernanceTx
 
 beforeAll(async () => {
-    ;({ handleGovernanceTx } = await import(
+    ({ handleGovernanceTx } = await import(
         "@/libs/network/routines/transactions/handleGovernanceTx"
     ))
 })
@@ -139,7 +139,14 @@ function voteTx(
 describe("handleGovernanceTx — networkUpgrade", () => {
     beforeEach(() => {
         jest.clearAllMocks()
-        sharedStateStub.networkParameters = null
+        // Stage a non-genesis networkFee so proposalTx()'s default of 15
+        // sits inside the 50% percent cap. Genesis defaults are 1/1/1
+        // (post-#62), too low to express meaningful fee proposals
+        // without changing every fixture.
+        sharedStateStub.networkParameters = {
+            ...GENESIS_NETWORK_PARAMETERS,
+            networkFee: 10,
+        }
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             CURRENT_BLOCK as never,
         )
@@ -168,7 +175,7 @@ describe("handleGovernanceTx — networkUpgrade", () => {
     })
 
     it("rejects a proposal from a non-validator", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const r = await handleGovernanceTx(proposalTx())
@@ -292,7 +299,7 @@ describe("handleGovernanceTx — networkUpgradeVote", () => {
     })
 
     it("rejects a vote after the voting window closes", async () => {
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
+        (Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             (TALLY + 1) as never,
         )
         const r = await handleGovernanceTx(voteTx("p1", true))
@@ -301,7 +308,7 @@ describe("handleGovernanceTx — networkUpgradeVote", () => {
     })
 
     it("rejects a vote from a non-snapshot validator", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { address: "other", staked_amount: "100" },
         ] as never)
         const r = await handleGovernanceTx(voteTx("p1", false))
@@ -362,7 +369,7 @@ describe("handleGovernanceTx — networkUpgradeVote", () => {
     it("rejects a vote cast at or before the snapshot block (voting window not yet open)", async () => {
         // Vote describe-block seeds snapshotBlock=900. currentBlock<=snapshot
         // is the "window not yet open" boundary.
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
+        (Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             900 as never,
         )
         const r = await handleGovernanceTx(voteTx("p1", true))
