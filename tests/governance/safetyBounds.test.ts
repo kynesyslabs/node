@@ -37,8 +37,11 @@ describe("safetyBounds — pre-flight (empty / unsupported)", () => {
 
 describe("safetyBounds — percentage cap (50%)", () => {
     it("accepts a 50% increase exactly at the cap", () => {
-        const r = checkSafetyBounds(current, {
-            networkFee: current.networkFee + current.networkFee / 2,
+        // current.networkFee=1 (genesis default); use a pinned non-trivial
+        // current so the cap math is meaningful (1+1/2=1 with integer division).
+        const c: NetworkParameters = { ...current, networkFee: 100 }
+        const r = checkSafetyBounds(c, {
+            networkFee: c.networkFee + c.networkFee / 2,
         })
         expect(r.ok).toBe(true)
     })
@@ -63,9 +66,21 @@ describe("safetyBounds — percentage cap (50%)", () => {
         expect(r.ok).toBe(false)
     })
 
-    it("rejects any change from a 0 baseline (unbounded-growth)", () => {
+    it("accepts non-negative changes from a 0 baseline (G-3: prevents zero-freeze)", () => {
+        // Percent cap is undefined when current=0; the absolute
+        // floor/ceiling per key still apply. Without this, an operator
+        // that set NETWORK_FEE=0 via env could never raise it via
+        // governance.
         const c: NetworkParameters = { ...current, networkFee: 0 }
         const r = checkSafetyBounds(c, { networkFee: 1 })
+        expect(r.ok).toBe(true)
+    })
+
+    it("still enforces absolute ceiling when current=0", () => {
+        const c: NetworkParameters = { ...current, networkFee: 0 }
+        const r = checkSafetyBounds(c, {
+            networkFee: NUMERIC_BOUNDS.networkFee!.ceiling + 1,
+        })
         expect(r.ok).toBe(false)
     })
 
@@ -159,8 +174,13 @@ describe("safetyBounds — featureFlags", () => {
 
 describe("safetyBounds — multi-key proposals", () => {
     it("rejects if any key fails", () => {
-        const r = checkSafetyBounds(current, {
-            networkFee: current.networkFee + 1, // good
+        // Pin networkFee=100 so a +1 proposal is well within the 50% cap;
+        // the genesis default of 1 makes networkFee+1 a 100% jump that
+        // would shadow the minValidatorStake floor failure we want to
+        // assert here.
+        const c: NetworkParameters = { ...current, networkFee: 100 }
+        const r = checkSafetyBounds(c, {
+            networkFee: c.networkFee + 1, // good
             minValidatorStake: "0", // below floor
         })
         expect(r.ok).toBe(false)

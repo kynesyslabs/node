@@ -205,12 +205,16 @@ function checkBigintBounds(
  * Bigint-only to avoid floating-point drift.
  *
  * Edge cases:
- * - current = 0: any non-zero proposed value is unbounded-growth and rejected.
- *   A proposed value of 0 is allowed.
+ * - current = 0: percent cap is undefined (delta / 0). Allow any non-negative
+ *   proposed value so governance can lift a parameter that was initialised
+ *   at zero (e.g. operator set NETWORK_FEE=0 via env). A purely
+ *   percent-based cap would lock the parameter at 0 forever — the
+ *   absolute-value caps (e.g. MAX_NETWORK_FEE) still apply at the
+ *   per-key check sites.
  */
 function withinPercentCap(current: bigint, proposed: bigint): boolean {
     const absCurrent = current < 0n ? -current : current
-    if (absCurrent === 0n) return proposed === 0n
+    if (absCurrent === 0n) return proposed >= 0n
     const delta =
         proposed >= current ? proposed - current : current - proposed
     // delta * 100 <= absCurrent * MAX_CHANGE_PERCENT
