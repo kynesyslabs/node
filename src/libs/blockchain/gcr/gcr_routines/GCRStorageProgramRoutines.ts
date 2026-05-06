@@ -942,6 +942,18 @@ export class GCRStorageProgramRoutines {
         requesterAddress: string | undefined,
         alias = "sp",
     ): { sql: string; params: Record<string, unknown> } {
+        // Normalize empty-string requester to undefined so this primitive
+        // matches checkReadPermission's anonymous semantics (every branch
+        // there treats falsy requesterAddress as anonymous via falsy
+        // checks). All current callers already gate on .length > 0, so
+        // this is defense-in-depth — but the function should be
+        // self-protecting against future callers.
+        const r =
+            typeof requesterAddress === "string" &&
+            requesterAddress.length > 0
+                ? requesterAddress
+                : undefined
+
         // Defense-in-depth: alias is interpolated directly into SQL, so
         // reject anything outside a normal SQL identifier shape. Today the
         // only caller uses the default "sp", but a future caller passing
@@ -952,7 +964,7 @@ export class GCRStorageProgramRoutines {
             )
         }
         const a = alias
-        if (requesterAddress === undefined) {
+        if (r === undefined) {
             // Anonymous: only public programs are visible. Blacklist applies
             // only to identified callers (we have no identity to test
             // against), matching checkReadPermission.
@@ -987,7 +999,7 @@ export class GCRStorageProgramRoutines {
                           AND def->'permissions' @> '"read"'::jsonb
                     ))
             )`,
-            params: { requesterAddress },
+            params: { requesterAddress: r },
         }
     }
 
