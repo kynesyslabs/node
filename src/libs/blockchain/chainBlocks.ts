@@ -16,6 +16,11 @@ import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
+import {
+    isOsDenominationMigrationApplied,
+    runOsDenominationMigration,
+} from "@/forks/migrations/osDenomination"
+import { isForkActive } from "@/forks/forkGates"
 import type { FindManyOptions } from "typeorm"
 
 export function isGenesis(block: Block): boolean {
@@ -212,6 +217,28 @@ export async function insertBlock(
     try {
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
+                // REVIEW: P3b — fork-activation hook. Runs *before* the
+                // block is persisted so balances are migrated atomically
+                // with the triggering block. Either both commit or both
+                // roll back. Idempotency is enforced by `fork_state`.
+                //
+                // No-op when the fork is inactive (default in production:
+                // activationHeight === null in DEFAULT_FORK_CONFIG).
+                if (
+                    isForkActive("osDenomination", block.number) &&
+                    !(await isOsDenominationMigrationApplied(
+                        transactionalEntityManager,
+                    ))
+                ) {
+                    log.info(
+                        `[forks][osDenomination] activation hook firing at block ${block.number}`,
+                    )
+                    await runOsDenominationMigration(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
                 const savedBlock = await transactionalEntityManager.save(
                     blocksRepo.target,
                     newBlock,
