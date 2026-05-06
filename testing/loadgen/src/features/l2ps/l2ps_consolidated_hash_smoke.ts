@@ -7,7 +7,7 @@ export async function runL2psConsolidatedHashSmoke() {
   const seenOptions: any[] = []
 
   try {
-    ;(L2PSMempool as any).repo = {
+    (L2PSMempool as any).repo = {
       find: async (options: any) => {
         seenOptions.push(options)
         if (options?.where?.l2ps_uid === "uid-hash" && options?.where?.block_number === 7) {
@@ -56,7 +56,7 @@ export async function runL2psConsolidatedHashSmoke() {
       throw new Error("l2ps_consolidated_hash_smoke failed: consolidated hash behavior drifted")
     }
   } finally {
-    ;(L2PSMempool as any).repo = previousRepo
+    (L2PSMempool as any).repo = previousRepo
   }
 }
 

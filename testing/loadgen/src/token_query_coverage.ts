@@ -109,7 +109,7 @@ export async function runTokenQueryCoverage() {
   const perNode: PerNodeReport[] = []
   for (const target of targets) {
     const tokenGet = await nodeCall(target, "token.get", { tokenAddress }, `token.get:${tokenAddress}`)
-    const tokenGetMissing = await nodeCall(target, "token.get", { tokenAddress: missingTokenAddress }, `token.get:missing`)
+    const tokenGetMissing = await nodeCall(target, "token.get", { tokenAddress: missingTokenAddress }, "token.get:missing")
 
     const balances: Record<string, { result: any; balance: string | null; raw?: any }> = {}
     for (const a of normalizedAddresses) {

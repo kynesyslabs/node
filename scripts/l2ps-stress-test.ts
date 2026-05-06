@@ -209,7 +209,7 @@ async function sendTransaction(
         if (broadcastResponse.response?.extra) {
             failureReason = broadcastResponse.response.extra
         } else if (broadcastResponse.extra) {
-            failureReason = typeof broadcastResponse.extra === 'string'
+            failureReason = typeof broadcastResponse.extra === "string"
                 ? broadcastResponse.extra
                 : JSON.stringify(broadcastResponse.extra)
         } else if (broadcastResponse.response?.response?.extra) {
@@ -225,7 +225,7 @@ async function sendTransaction(
 async function main() {
     const options = parseArgs(process.argv)
 
-    console.log(`\n🚀 L2PS Stress Test`)
+    console.log("\n🚀 L2PS Stress Test")
     console.log(`   Node: ${options.nodeUrl}`)
     console.log(`   UID: ${options.uid}`)
     console.log(`   Total transactions: ${options.count}`)
@@ -256,7 +256,7 @@ async function main() {
     const ivBytes = forge.util.hexToBytes(hexIv)
 
     // Initialize wallet connections
-    console.log(`\n🔌 Connecting wallets...`)
+    console.log("\n🔌 Connecting wallets...")
     const walletConnections: { demos: Demos; l2ps: L2PS; address: string; nonce: number }[] = []
 
     for (const wallet of wallets) {
@@ -281,7 +281,7 @@ async function main() {
     }
 
     // Run stress test
-    console.log(`\n🔥 Starting stress test...`)
+    console.log("\n🔥 Starting stress test...")
     const startTime = Date.now()
     const results: TxResult[] = []
     let successCount = 0
@@ -290,7 +290,7 @@ async function main() {
     for (let i = 0; i < options.count; i++) {
         // Pick random sender and receiver (different wallets)
         const senderIdx = i % walletConnections.length
-        let receiverIdx = (senderIdx + 1 + Math.floor(Math.random() * (walletConnections.length - 1))) % walletConnections.length
+        const receiverIdx = (senderIdx + 1 + Math.floor(Math.random() * (walletConnections.length - 1))) % walletConnections.length
 
         const sender = walletConnections[senderIdx]
         const receiver = walletConnections[receiverIdx]
@@ -344,8 +344,8 @@ async function main() {
     const totalTime = (Date.now() - startTime) / 1000
     const avgDuration = results.reduce((sum, r) => sum + r.duration, 0) / results.length
 
-    console.log(`\n🎉 Stress Test Complete!`)
-    console.log(`\n📊 Results:`)
+    console.log("\n🎉 Stress Test Complete!")
+    console.log("\n📊 Results:")
     console.log(`   Total transactions: ${options.count}`)
     console.log(`   Successful: ${successCount} (${(successCount / options.count * 100).toFixed(1)}%)`)
     console.log(`   Failed: ${failCount} (${(failCount / options.count * 100).toFixed(1)}%)`)
@@ -354,7 +354,7 @@ async function main() {
     console.log(`   Avg tx duration: ${avgDuration.toFixed(0)}ms`)
 
     if (failCount > 0) {
-        console.log(`\n❌ Failed transactions:`)
+        console.log("\n❌ Failed transactions:")
         results.filter(r => !r.success).slice(0, 5).forEach(r => {
             console.log(`   Wallet ${r.fromWallet} → ${r.toWallet}: ${r.error}`)
         })
@@ -363,7 +363,7 @@ async function main() {
         }
     }
 
-    console.log(`\n💡 Check the database for proof count:`)
+    console.log("\n💡 Check the database for proof count:")
     console.log(`   Expected: ~${Math.ceil(successCount / 10)} proofs (1 per batch of up to 10 txs)`)
     console.log(`   Before fix: Would have been ${successCount} proofs (1 per tx)`)
 }

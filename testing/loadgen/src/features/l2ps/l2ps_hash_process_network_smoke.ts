@@ -81,7 +81,7 @@ export async function runL2psHashProcessNetworkSmoke() {
       throw new Error("l2ps_hash_process_network_smoke failed: processL2PSNetwork live-path behavior drifted")
     }
   } finally {
-    ;(L2PSMempool as any).getHashForL2PS = previousGetHashForL2PS
+    (L2PSMempool as any).getHashForL2PS = previousGetHashForL2PS
     ;(L2PSMempool as any).getByUID = previousGetByUID
     ;(DemosTransactions as any).createL2PSHashUpdate = previousCreateL2PSHashUpdate
     service.relayToValidators = previousRelayToValidators

@@ -85,6 +85,14 @@ testing/devnet/postgres-data/
 testing/runs/
 local_tests/
 
+# ---- Local devnet identities (private keys / mnemonics) ----
+.devnet/
+.manual-test-mnemonic
+
+# ---- Local upgradable-network manual test artifacts ----
+scripts/check_fee_test.ts
+e2e-runs/
+
 # ---- Documentation Artifacts ----
 documentation/internal-docs/
 documentation/*.html
@@ -174,4 +182,7 @@ src/GTAGS
 /.serena
 node*.sh
 yarn.lock
+/TEAM.md
+/documentation/tokens/TEAM.md
+/documentation/tokens/AUDIT.md
 ISSUES.md

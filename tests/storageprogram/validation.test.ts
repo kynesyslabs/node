@@ -21,7 +21,7 @@ jest.mock("@kynesyslabs/demosdk", () => ({
 let validateStorageProgramPayload: typeof import("src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines")["validateStorageProgramPayload"]
 
 beforeAll(async () => {
-    ;({ validateStorageProgramPayload } = await import(
+    ({ validateStorageProgramPayload } = await import(
         "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
     ))
 })

@@ -41,7 +41,7 @@ const entityFixtures = JSON.parse(
 let GCRStorageProgramRoutines: typeof import("src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines")["GCRStorageProgramRoutines"]
 
 beforeAll(async () => {
-    ;({ GCRStorageProgramRoutines } = await import(
+    ({ GCRStorageProgramRoutines } = await import(
         "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
     ))
 })

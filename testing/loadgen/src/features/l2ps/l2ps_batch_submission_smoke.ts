@@ -75,7 +75,7 @@ export async function runL2psBatchSubmissionSmoke() {
       throw new Error("l2ps_batch_submission_smoke failed: batch submission shape drifted")
     }
   } finally {
-    ;(Mempool as any).addTransaction = previousAddTransaction
+    (Mempool as any).addTransaction = previousAddTransaction
     ;(ucrypto as any).ed25519KeyPair = previousEd25519KeyPair
     ;(ucrypto as any).masterSeed = previousMasterSeed
     getSharedState.keypair = previousKeypair

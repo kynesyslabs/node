@@ -134,12 +134,40 @@ export async function createOperation(
     operation.params = transaction.content.data
     operation.status = true // TODO Get it from the content itself somehow
 
-    // TODO Fee calculation logic here
-    operation.fees.network_fee = 0
-    operation.fees.rpc_fee = 0
+    const { networkFee, rpcFee } = resolveDynamicFees()
+    operation.fees.network_fee = networkFee
+    operation.fees.rpc_fee = rpcFee
     operation.fees.additional_fee = 0
 
     return operation
+}
+
+// Reads governance-driven fees from sharedState.networkParameters. If
+// loadNetworkParameters() hasn't run yet, fall back to the env-derived flat
+// fields on sharedState (rpcFee/networkFee) — never to a hard 0, which
+// would silently zero fees for the bootstrap window.
+export function resolveDynamicFees(): {
+    networkFee: number
+    rpcFee: number
+} {
+    const params = (
+        getSharedState as unknown as {
+            networkParameters?: { networkFee?: number; rpcFee?: number }
+        }
+    ).networkParameters
+    const flat = getSharedState as unknown as {
+        rpcFee?: number
+        networkFee?: number
+    }
+    const networkFee =
+        typeof params?.networkFee === "number"
+            ? params.networkFee
+            : flat.networkFee ?? 0
+    const rpcFee =
+        typeof params?.rpcFee === "number"
+            ? params.rpcFee
+            : flat.rpcFee ?? 0
+    return { networkFee, rpcFee }
 }
 
 async function createTransactionProxy(data: any): Promise<Transaction> {
@@ -180,9 +208,14 @@ export async function createTransaction(
     transaction.content.to = derivable.to
     transaction.content.amount = 0
     transaction.content.nonce = 0
-    // TODO Fees
-    transaction.content.transaction_fee.network_fee = derivable.fees.networkFee
-    transaction.content.transaction_fee.rpc_fee = derivable.fees.rpcFee
+    // Prefer governance-driven fees from sharedState.networkParameters; fall
+    // back to whatever the caller passed in `derivable.fees`. This keeps the
+    // signed transaction in sync with the same fees the node would deduct.
+    const dynamic = resolveDynamicFees()
+    transaction.content.transaction_fee.network_fee =
+        dynamic.networkFee ?? derivable.fees.networkFee
+    transaction.content.transaction_fee.rpc_fee =
+        dynamic.rpcFee ?? derivable.fees.rpcFee
     transaction.content.transaction_fee.additional_fee =
         derivable.fees.additionalFee
     // Adding data

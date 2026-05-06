@@ -46,6 +46,13 @@ export interface CoreConfig {
     mcpEnabled: boolean
     restore: boolean
     rpcFee: number
+    networkFee: number
+    /** Per-tx burn — sat/lamport-style integer for now.
+     *  TODO(decimals): once OS denomination lands, networkFee + rpcFee +
+     *  burnFee must sum to 1 DEM (≈ 333_333_333 OS each, exact split TBD).
+     *  See `decimal_planning/SPEC.md` and Mycelium epic E#3. */
+    burnFee: number
+    minValidatorStake: string
 }
 
 // --- TLSNotary ---

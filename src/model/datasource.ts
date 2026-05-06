@@ -35,6 +35,9 @@ import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
+// Stackable-genesis governance entities
+import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
+import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -68,6 +71,9 @@ export const dataSource = new DataSource({
         L2PSMempoolTx,
         L2PSTransaction,
         L2PSProof,
+        // Stackable-genesis governance entities
+        NetworkUpgrade,
+        NetworkUpgradeVote,
     ],
     synchronize: true,
     logging: false,

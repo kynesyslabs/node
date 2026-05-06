@@ -222,6 +222,23 @@ export default class SharedState {
 
     // SECTION Configuration
     rpcFee: number = Config.getInstance().core.rpcFeePercent
+    networkFee: number = Config.getInstance().core.networkFee
+    // Per-tx burn — third component of the flat fee. Mirrored onto sharedState
+    // by the node's startup config load. Once governance owns burnFee (after
+    // the SDK adds it to NetworkParameters) this will also be refreshed by
+    // loadNetworkParameters() like rpcFee/networkFee.
+    burnFee: number = Config.getInstance().core.burnFee
+
+    /**
+     * Active network parameters. Loaded once at startup by
+     * `loadNetworkParameters()` — either from the latest `active` NetworkUpgrade
+     * in the DB, or from GENESIS_NETWORK_PARAMETERS when no upgrade has
+     * activated. Re-read at each post-block activation hook.
+     *
+     * Typed loosely here to avoid a circular import between sharedState and
+     * features/networkUpgrade/types.ts.
+     */
+    networkParameters: unknown = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile

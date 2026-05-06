@@ -32,6 +32,7 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
@@ -358,7 +359,7 @@ async function preMainLoop() {
         // but don't crash the node over a config quirk.
         const message = err instanceof Error ? err.message : String(err)
         log.warning(
-            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+            "[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. " +
                 `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
         )
     }
@@ -389,11 +390,16 @@ async function preMainLoop() {
 
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
-    // INFO Now ensuring we have an initialized chain or initializing the genesis block
-    await peerBootstrap(indexState.PeerList)
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
+
+    // Governance state must be in sharedState BEFORE any inbound traffic
+    // hits a handler that reads networkParameters / fees. Order matters:
+    // findGenesisBlock → loadNetworkParameters → peerBootstrap.
+    await loadNetworkParameters()
+
+    await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
