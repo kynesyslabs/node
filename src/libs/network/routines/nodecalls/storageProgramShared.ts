@@ -273,7 +273,9 @@ export function withFieldRead(
             if (typeError) return typeError
 
             const obj = program.data as Record<string, unknown>
-            if (!(field in obj)) {
+            // Use own-property check so prototype keys (toString, __proto__,
+            // hasOwnProperty, ...) don't masquerade as user fields.
+            if (!Object.prototype.hasOwnProperty.call(obj, field)) {
                 return rpc(404, {
                     error: `Field not found: ${field}`,
                     errorCode: "FIELD_NOT_FOUND",
