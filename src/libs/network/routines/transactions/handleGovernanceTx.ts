@@ -20,6 +20,10 @@ import { checkSafetyBounds } from "@/features/networkUpgrade/safetyBounds"
 import type { NetworkParameters } from "@/features/networkUpgrade/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { VALIDATOR_STATUS_ACTIVE } from "@/features/staking/constants"
+import {
+    canonicalAddress,
+    requireSender,
+} from "@/libs/network/utils/txHelpers"
 import log from "@/utilities/logger"
 import { In } from "typeorm"
 
@@ -274,15 +278,4 @@ function extractVotePayload(
     return p as NetworkUpgradeVotePayload
 }
 
-function requireSender(tx: Transaction): string | null {
-    const raw =
-        (typeof tx.content?.from === "string" && tx.content.from) ||
-        (typeof tx.content?.from_ed25519_address === "string" &&
-            tx.content.from_ed25519_address) ||
-        ""
-    // Lowercase for case-insensitive membership checks. We don't add an
-    // 0x prefix here because the validator set may be stored without one
-    // — equality must match the stored form.
-    return raw ? raw.toLowerCase() : null
-}
 

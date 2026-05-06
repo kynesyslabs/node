@@ -62,7 +62,7 @@ let handleStakingTx: typeof import("@/libs/network/routines/transactions/handleS
 let GCRValidatorStakeRoutines: typeof import("@/libs/blockchain/gcr/gcr_routines/GCRValidatorStakeRoutines").default
 
 beforeAll(async () => {
-    ;({ handleStakingTx } = await import(
+    ({ handleStakingTx } = await import(
         "@/libs/network/routines/transactions/handleStakingTx"
     ))
     GCRValidatorStakeRoutines = (
@@ -210,7 +210,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
     }
 
     it("entrance: validation passes + edit (synthesized SDK-side) creates an ACTIVE row", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
 
@@ -245,7 +245,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
     })
 
     it("full lifecycle: stake -> top-up -> unstake -> wait lock -> exit", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
 
@@ -314,7 +314,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
     })
 
     it("rejected validatorStake — handler returns failure (edit synthesis is the SDK's responsibility, but tx with no validation pass shouldn't be broadcast)", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const tx = stakeTx("1") // below minimum
@@ -323,7 +323,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
     })
 
     it("handler is pure validation — running it twice doesn't mutate tx", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
@@ -333,5 +333,45 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         expect(r2.success).toBe(true)
         // Handler is no-mutation; gcr_edits stays empty.
         expect(tx.content.gcr_edits).toHaveLength(0)
+    })
+
+    // G-1 + G-4 regression: a validator submits a stake with a mixed-case
+    // address. The Validators row must land under the lower-cased key,
+    // so that governance lookups (which lowercase the sender) match.
+    it("persists validator addresses in lower-case (G-1+G-4 canonicalisation)", async () => {
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+            null as never,
+        )
+        const MIXED = "0xAaBbCc"
+        const lower = MIXED.toLowerCase()
+        const tx = {
+            hash: "0xhash_mixed",
+            content: {
+                type: "validatorStake",
+                from: MIXED,
+                from_ed25519_address: MIXED,
+                data: [
+                    "validatorStake",
+                    {
+                        amount: DEFAULT_MIN_VALIDATOR_STAKE,
+                        connectionUrl: "https://v.example",
+                    },
+                ],
+                gcr_edits: [],
+            },
+        } as any
+        const handled = await handleStakingTx(tx)
+        expect(handled.success).toBe(true)
+        attachStakingEdit(tx)
+
+        const edit = tx.content.gcr_edits[0]
+        const r = await GCRValidatorStakeRoutines.apply(
+            edit,
+            repo as any,
+            100,
+        )
+        expect(r.success).toBe(true)
+        expect(repo.rows.get(lower)).toBeDefined()
+        expect(repo.rows.get(MIXED)).toBeUndefined()
     })
 })

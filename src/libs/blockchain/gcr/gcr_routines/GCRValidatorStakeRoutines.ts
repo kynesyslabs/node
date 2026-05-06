@@ -4,6 +4,7 @@ import { Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { Validators } from "@/model/entities/Validators"
 import Chain from "@/libs/blockchain/chain"
+import { canonicalAddress } from "@/libs/network/utils/txHelpers"
 import type { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import log from "src/utilities/logger"
 import {
@@ -41,10 +42,17 @@ export default class GCRValidatorStakeRoutines {
         if (stakeEdit.type !== "validatorStake") {
             return { success: false, message: "Invalid GCREdit type" }
         }
-        const account =
+        // Canonicalise to lowercase at the persistence boundary: validator
+        // rows live keyed by `address` and governance comparisons use the
+        // lower-case form of the sender. Storing mixed-case here would
+        // re-introduce the G-1/G-4 lookup mismatch.
+        const account = canonicalAddress(
             typeof stakeEdit.account === "string"
                 ? stakeEdit.account
-                : Buffer.from(stakeEdit.account as unknown as Uint8Array).toString("hex")
+                : Buffer.from(
+                      stakeEdit.account as unknown as Uint8Array,
+                  ).toString("hex"),
+        )
 
         const operation = stakeEdit.isRollback
             ? invertOperation(stakeEdit.operation)

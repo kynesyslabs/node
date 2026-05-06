@@ -8,6 +8,7 @@ import forge from "node-forge"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
+import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import type {
@@ -264,10 +265,3 @@ function extractStakePayload(tx: Transaction): ValidatorStakePayload | null {
     }
 }
 
-function requireSender(tx: Transaction): string | null {
-    const from = tx.content?.from
-    if (typeof from === "string" && from.length > 0) return from
-    const ed = tx.content?.from_ed25519_address
-    if (typeof ed === "string" && ed.length > 0) return ed
-    return null
-}

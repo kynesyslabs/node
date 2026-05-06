@@ -1,5 +1,6 @@
 import type { Transaction } from "@kynesyslabs/demosdk/types"
 import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagement"
+import { requireSender } from "@/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 
 interface StakingTxResult {
@@ -77,10 +78,3 @@ function extractStakePayload(
     }
 }
 
-function requireSender(tx: Transaction): string | null {
-    const from = tx.content?.from
-    if (typeof from === "string" && from.length > 0) return from
-    const ed = tx.content?.from_ed25519_address
-    if (typeof ed === "string" && ed.length > 0) return ed
-    return null
-}
