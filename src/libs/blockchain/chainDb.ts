@@ -1,4 +1,9 @@
-import { Repository } from "typeorm"
+import {
+    EntityManager,
+    EntityTarget,
+    ObjectLiteral,
+    Repository,
+} from "typeorm"
 import log from "src/utilities/logger"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
@@ -39,4 +44,46 @@ export async function writeSql(sqlQuery: string) {
         log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(err)}`)
         throw err
     }
+}
+
+// Postgres caps bind parameters at 65535 (uint16). Chunk row counts so
+// rows * inserted-column-count stays under PG_BIND_BUDGET. If you add a
+// column to one of these entities, update its divisor.
+const PG_BIND_BUDGET = 65000
+export const CHUNK_TRANSACTIONS = Math.floor(PG_BIND_BUDGET / 16) // Transactions: 16 inserted cols
+export const CHUNK_MEMPOOL_TX = Math.floor(PG_BIND_BUDGET / 10) // MempoolTx: 10 inserted cols
+
+export interface ChunkedInsertResult {
+    inserted: number
+    skipped: number
+}
+
+/**
+ * Bulk INSERT ... ON CONFLICT DO NOTHING in chunks that stay under the
+ * Postgres 65,535 bind-parameter wire-protocol limit.
+ */
+export async function chunkedInsertOrIgnore<T extends ObjectLiteral>(
+    runner: EntityManager | Repository<T>,
+    target: EntityTarget<T>,
+    rows: any[],
+    chunkSize: number,
+): Promise<ChunkedInsertResult> {
+    let inserted = 0
+    let skipped = 0
+    for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize)
+        const result = await runner
+            .createQueryBuilder()
+            .insert()
+            .into(target)
+            .values(chunk)
+            .orIgnore()
+            .execute()
+        const chunkInserted = result.identifiers.filter(
+            id => id !== undefined,
+        ).length
+        inserted += chunkInserted
+        skipped += chunk.length - chunkInserted
+    }
+    return { inserted, skipped }
 }

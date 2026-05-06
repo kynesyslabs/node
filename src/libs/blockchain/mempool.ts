@@ -15,6 +15,7 @@ import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { CHUNK_MEMPOOL_TX, chunkedInsertOrIgnore } from "./chainDb"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -216,17 +217,14 @@ export default class Mempool {
 
         if (validTransactions.length > 0) {
             try {
-                const insertResult = await this.repo
-                    .createQueryBuilder()
-                    .insert()
-                    .into(MempoolTx)
-                    .values(validTransactions)
-                    .orIgnore()
-                    .execute()
-
-                const insertedCount = insertResult.identifiers.length
+                const { inserted } = await chunkedInsertOrIgnore(
+                    this.repo,
+                    MempoolTx,
+                    validTransactions as any[],
+                    CHUNK_MEMPOOL_TX,
+                )
                 log.only(
-                    `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
+                    `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
                 )
             } catch (error) {
                 log.error("[Mempool.receive] Error saving received mempool:")

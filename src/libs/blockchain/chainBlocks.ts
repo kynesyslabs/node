@@ -9,7 +9,12 @@ import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import { getBlocksRepo, getTransactionsRepo } from "./chainDb"
+import {
+    CHUNK_TRANSACTIONS,
+    chunkedInsertOrIgnore,
+    getBlocksRepo,
+    getTransactionsRepo,
+} from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import type { FindManyOptions } from "typeorm"
 
@@ -228,22 +233,15 @@ export async function insertBlock(
                         Transaction.toRawTransaction(tx, "confirmed"),
                     )
 
-                    const insertResult = await transactionalEntityManager
-                        .createQueryBuilder()
-                        .insert()
-                        .into(Transactions)
-                        .values(rawTransactions as any[])
-                        .orIgnore()
-                        .execute()
-
-                    const skippedCount =
-                        rawTransactions.length -
-                        insertResult.identifiers.filter(
-                            id => id !== undefined,
-                        ).length
-                    if (skippedCount > 0) {
+                    const { skipped } = await chunkedInsertOrIgnore(
+                        transactionalEntityManager,
+                        Transactions,
+                        rawTransactions as any[],
+                        CHUNK_TRANSACTIONS,
+                    )
+                    if (skipped > 0) {
                         log.warn(
-                            `[ChainDB] Skipped ${skippedCount} duplicate transaction(s) in block ${block.number}`,
+                            `[ChainDB] Skipped ${skipped} duplicate transaction(s) in block ${block.number}`,
                         )
                     }
 

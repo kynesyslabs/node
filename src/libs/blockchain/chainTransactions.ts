@@ -3,7 +3,11 @@ import log from "src/utilities/logger"
 import Transaction from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
-import { getTransactionsRepo } from "./chainDb"
+import {
+    CHUNK_TRANSACTIONS,
+    chunkedInsertOrIgnore,
+    getTransactionsRepo,
+} from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload } from "./chainTypes"
 
@@ -203,25 +207,19 @@ export async function insertTransactionsFromSync(
     const dataSource = db.getDataSource()
 
     try {
-        await dataSource.transaction(async transactionalEntityManager => {
+        await dataSource.transaction(async em => {
             const rawTransactions = transactions.map(tx =>
                 Transaction.toRawTransaction(tx, "confirmed"),
             )
-
-            const insertResult = await transactionalEntityManager
-                .createQueryBuilder()
-                .insert()
-                .into(Transactions)
-                .values(rawTransactions as any[])
-                .orIgnore()
-                .execute()
-
-            const skippedCount =
-                rawTransactions.length -
-                insertResult.identifiers.filter(id => id !== undefined).length
-            if (skippedCount > 0) {
+            const { skipped } = await chunkedInsertOrIgnore(
+                em,
+                Transactions,
+                rawTransactions as any[],
+                CHUNK_TRANSACTIONS,
+            )
+            if (skipped > 0) {
                 log.warn(
-                    `[insertTransactionsFromSync] Skipped ${skippedCount} duplicate transaction(s)`,
+                    `[insertTransactionsFromSync] Skipped ${skipped} duplicate transaction(s)`,
                 )
             }
         })

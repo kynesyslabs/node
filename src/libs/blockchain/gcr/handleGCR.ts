@@ -733,7 +733,12 @@ export default class HandleGCR {
         const sideEffects: IndexedSideEffect[] = []
         const assignedTxs = new Map<string, string[]>()
 
-        for (const tx of group) {
+        for (let j = 0; j < group.length; j++) {
+            if (j > 0 && j % 8 === 0) {
+                await new Promise<void>(resolve => setImmediate(resolve))
+            }
+
+            const tx = group[j]
             const applyResult = await HandleGCR.applyTransaction(
                 entities,
                 tx,
