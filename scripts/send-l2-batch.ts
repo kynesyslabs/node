@@ -78,7 +78,7 @@ function parseArgs(argv: string[]): CliOptions {
     const argsWithValues = new Set([
         "--node", "--uid", "--config", "--key", "--iv",
         "--mnemonic", "--mnemonic-file", "--from", "--to",
-        "--value", "--data", "--count", "--type"
+        "--value", "--data", "--count", "--type",
     ])
 
     const flagHandlers: Record<string, (value?: string) => void> = {
@@ -145,7 +145,7 @@ function parseArgs(argv: string[]): CliOptions {
     return options
 }
 
-function normalizeHex(address: string, label: string = "Address"): string {
+function normalizeHex(address: string, label = "Address"): string {
     if (!address) {
         throw new Error(`${label} is required`)
     }
@@ -262,7 +262,7 @@ async function buildInnerTransaction(
     tx.content.data = ["native", {
         nativeOperation: operation,
         args: [normalizeHex(to), amount],
-        ...payload  // Include l2ps_uid and other metadata
+        ...payload,  // Include l2ps_uid and other metadata
     }] as unknown as Transaction["content"]["data"]
     tx.content.timestamp = Date.now()
 

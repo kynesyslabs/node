@@ -36,7 +36,7 @@ export async function runMultichainDispatcherAggregation() {
 
   try {
     for (const testCase of cases) {
-      ;(XMParser as any).execute = async () => testCase.fakeResults
+      (XMParser as any).execute = async () => testCase.fakeResults
       const actual = await MultichainDispatcher.execute({ operations: {} } as any)
       results.push({
         label: testCase.label,
@@ -48,7 +48,7 @@ export async function runMultichainDispatcherAggregation() {
       })
     }
   } finally {
-    ;(XMParser as any).execute = originalExecute
+    (XMParser as any).execute = originalExecute
   }
 
   const ok = results.every(result => result.ok)

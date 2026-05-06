@@ -59,7 +59,7 @@ import ValidatorsManagement from "@/libs/blockchain/routines/validatorsManagemen
 let handleStakingTx: typeof import("@/libs/network/routines/transactions/handleStakingTx").handleStakingTx
 
 beforeAll(async () => {
-    ;({ handleStakingTx } = await import(
+    ({ handleStakingTx } = await import(
         "@/libs/network/routines/transactions/handleStakingTx"
     ))
 })
@@ -85,7 +85,7 @@ describe("handleStakingTx dispatcher", () => {
     beforeEach(() => jest.clearAllMocks())
 
     it("routes validatorStake to manageValidatorStakeTx", async () => {
-        ;(
+        (
             ValidatorsManagement.manageValidatorStakeTx as jest.Mock
         ).mockResolvedValue({ valid: true, message: "ok" } as never)
 
@@ -101,7 +101,7 @@ describe("handleStakingTx dispatcher", () => {
     })
 
     it("routes validatorUnstake to manageValidatorUnstakeTx", async () => {
-        ;(
+        (
             ValidatorsManagement.manageValidatorUnstakeTx as jest.Mock
         ).mockResolvedValue({ valid: true, message: "unstake ok" } as never)
 
@@ -114,7 +114,7 @@ describe("handleStakingTx dispatcher", () => {
     })
 
     it("routes validatorExit to manageValidatorExitTx", async () => {
-        ;(
+        (
             ValidatorsManagement.manageValidatorExitTx as jest.Mock
         ).mockResolvedValue({ valid: true, message: "exit ok" } as never)
 
@@ -124,7 +124,7 @@ describe("handleStakingTx dispatcher", () => {
     })
 
     it("bubbles validation failure from the underlying manager", async () => {
-        ;(
+        (
             ValidatorsManagement.manageValidatorStakeTx as jest.Mock
         ).mockResolvedValue({ valid: false, message: "below minimum" } as never)
 

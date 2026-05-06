@@ -194,7 +194,7 @@ async function setupLoadTestContext(options: CliOptions): Promise<LoadTestContex
     const keyBytes = forge.util.hexToBytes(hexKey)
     const ivBytes = forge.util.hexToBytes(hexIv)
 
-    console.log(`\n🔌 Connecting wallet...`)
+    console.log("\n🔌 Connecting wallet...")
     const demos = new Demos()
     await demos.connect(options.nodeUrl)
     await demos.connectWallet(mnemonic)
@@ -258,8 +258,8 @@ function logProgress(
 }
 
 function displayResults(options: CliOptions, results: LoadTestResults): void {
-    console.log(`\n🎉 Load Test Complete!`)
-    console.log(`\n📊 Results:`)
+    console.log("\n🎉 Load Test Complete!")
+    console.log("\n📊 Results:")
     console.log(`   Total transactions: ${options.count}`)
     console.log(`   Successful: ${results.successCount} (${(results.successCount / options.count * 100).toFixed(1)}%)`)
     console.log(`   Failed: ${results.failCount} (${(results.failCount / options.count * 100).toFixed(1)}%)`)
@@ -272,12 +272,12 @@ function displayResults(options: CliOptions, results: LoadTestResults): void {
     }
 
     const expectedBatches = Math.ceil(results.successCount / 10)
-    console.log(`\n💡 Expected results after batch aggregation:`)
+    console.log("\n💡 Expected results after batch aggregation:")
     console.log(`   Batches (max 10 tx each): ~${expectedBatches}`)
     console.log(`   Proofs in DB: ~${expectedBatches} (1 per batch)`)
     console.log(`   L1 transactions: ~${expectedBatches}`)
     console.log(`\n   ⚠️  Before fix: Would have been ${results.successCount} proofs!`)
-    console.log(`\n⏳ Wait ~15 seconds for batch aggregation, then check DB`)
+    console.log("\n⏳ Wait ~15 seconds for batch aggregation, then check DB")
 }
 
 async function runLoadTest(ctx: LoadTestContext): Promise<LoadTestResults> {
@@ -315,7 +315,7 @@ async function runLoadTest(ctx: LoadTestContext): Promise<LoadTestResults> {
 async function main() {
     const options = parseArgs(process.argv)
 
-    console.log(`\n🚀 L2PS Load Test`)
+    console.log("\n🚀 L2PS Load Test")
     console.log(`   Node: ${options.nodeUrl}`)
     console.log(`   UID: ${options.uid}`)
     console.log(`   Total transactions: ${options.count}`)
@@ -323,7 +323,7 @@ async function main() {
     console.log(`   Delay: ${options.delayMs}ms`)
 
     const ctx = await setupLoadTestContext(options)
-    console.log(`\n🔥 Starting load test...`)
+    console.log("\n🔥 Starting load test...")
 
     const results = await runLoadTest(ctx)
     displayResults(options, results)

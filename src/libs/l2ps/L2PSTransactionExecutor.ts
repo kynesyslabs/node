@@ -92,7 +92,7 @@ export default class L2PSTransactionExecutor {
         const repo = await this.getL1Repo()
 
         let account = await repo.findOne({
-            where: { pubkey }
+            where: { pubkey },
         })
 
         if (!account) {
@@ -121,7 +121,7 @@ export default class L2PSTransactionExecutor {
         l2psUid: string,
         tx: Transaction,
         l1BatchHash: string,
-        simulate: boolean = false
+        simulate = false,
     ): Promise<L2PSExecutionResult> {
         try {
             log.info(`[L2PS Executor] Processing tx ${tx.hash} from L2PS ${l2psUid} (type: ${tx.content.type})`)
@@ -143,7 +143,7 @@ export default class L2PSTransactionExecutor {
                     ? `Validated: ${gcrEdits.length} GCR edits would be generated`
                     : `Executed: ${gcrEdits.length} GCR edits generated (will be batched)`,
                 gcr_edits: gcrEdits,
-                affected_accounts_count: affectedAccountsCount
+                affected_accounts_count: affectedAccountsCount,
             }
 
         } catch (error) {
@@ -151,7 +151,7 @@ export default class L2PSTransactionExecutor {
             log.error(`[L2PS Executor] Error: ${message}`)
             return {
                 success: false,
-                message: `Execution failed: ${message}`
+                message: `Execution failed: ${message}`,
             }
         }
     }
@@ -161,7 +161,7 @@ export default class L2PSTransactionExecutor {
      */
     private static async generateGCREdits(
         tx: Transaction,
-        simulate: boolean
+        simulate: boolean,
     ): Promise<L2PSExecutionResult> {
         const gcrEdits: GCREdit[] = []
 
@@ -193,7 +193,7 @@ export default class L2PSTransactionExecutor {
      */
     private static async handleNativeTransaction(
         tx: Transaction,
-        simulate: boolean
+        simulate: boolean,
     ): Promise<L2PSExecutionResult> {
         const nativePayloadData = tx.content.data as ["native", INativePayload]
         const nativePayload = nativePayloadData[1]
@@ -205,7 +205,7 @@ export default class L2PSTransactionExecutor {
             const sender = tx.content.from as string
 
             // Validate amount (type check, integer, and positive)
-            if (typeof amount !== 'number' || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+            if (typeof amount !== "number" || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
                 return { success: false, message: "Invalid amount: must be a positive integer" }
             }
 
@@ -215,7 +215,7 @@ export default class L2PSTransactionExecutor {
             if (BigInt(senderAccount.balance) < totalRequired) {
                 return {
                     success: false,
-                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee)`
+                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee)`,
                 }
             }
 
@@ -232,7 +232,7 @@ export default class L2PSTransactionExecutor {
                 account: sender,
                 amount: L2PS_TX_FEE,
                 txhash: tx.hash,
-                isRollback: false
+                isRollback: false,
             })
 
             // 2. Transfer amount from sender to receiver
@@ -243,7 +243,7 @@ export default class L2PSTransactionExecutor {
                     account: sender,
                     amount: amount,
                     txhash: tx.hash,
-                    isRollback: false
+                    isRollback: false,
                 },
                 {
                     type: "balance",
@@ -251,8 +251,8 @@ export default class L2PSTransactionExecutor {
                     account: to,
                     amount: amount,
                     txhash: tx.hash,
-                    isRollback: false
-                }
+                    isRollback: false,
+                },
             )
 
             // Count unique accounts (sender and receiver)
@@ -262,7 +262,7 @@ export default class L2PSTransactionExecutor {
             return {
                 success: true,
                 message: `Native operation '${nativePayload.nativeOperation}' not implemented`,
-                affected_accounts_count: 1
+                affected_accounts_count: 1,
             }
         }
 
@@ -270,7 +270,7 @@ export default class L2PSTransactionExecutor {
             success: true,
             message: "Native transaction validated",
             gcr_edits: gcrEdits,
-            affected_accounts_count: affectedAccountsCount
+            affected_accounts_count: affectedAccountsCount,
         }
     }
 
@@ -279,7 +279,7 @@ export default class L2PSTransactionExecutor {
      */
     private static async validateGCREdit(
         edit: GCREdit,
-        simulate: boolean
+        simulate: boolean,
     ): Promise<L2PSExecutionResult> {
         // Ensure init is called before validation
         await this.init()
@@ -293,7 +293,7 @@ export default class L2PSTransactionExecutor {
                     if (currentBalance < BigInt(edit.amount)) {
                         return {
                             success: false,
-                            message: `Insufficient L1 balance for ${edit.account}: has ${currentBalance}, needs ${edit.amount}`
+                            message: `Insufficient L1 balance for ${edit.account}: has ${currentBalance}, needs ${edit.amount}`,
                         }
                     }
                 }
@@ -319,8 +319,8 @@ export default class L2PSTransactionExecutor {
         tx: Transaction,
         l1BatchHash: string,
         encryptedHash?: string,
-        batchIndex: number = 0,
-        initialStatus: "pending" | "batched" | "confirmed" | "failed" = "pending"
+        batchIndex = 0,
+        initialStatus: "pending" | "batched" | "confirmed" | "failed" = "pending",
     ): Promise<number> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -341,7 +341,7 @@ export default class L2PSTransactionExecutor {
             timestamp: BigInt(tx.content.timestamp || Date.now()),
             status: initialStatus,
             content: tx.content as Record<string, any>,
-            execution_message: null
+            execution_message: null,
         })
 
         const saved = await txRepo.save(l2psTx)
@@ -357,7 +357,7 @@ export default class L2PSTransactionExecutor {
         status: "pending" | "batched" | "confirmed" | "failed",
         l1BlockNumber?: number,
         message?: string,
-        l1BatchHash?: string
+        l1BatchHash?: string,
     ): Promise<void> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -390,8 +390,8 @@ export default class L2PSTransactionExecutor {
     static async getAccountTransactions(
         l2psUid: string,
         pubkey: string,
-        limit: number = 100,
-        offset: number = 0
+        limit = 100,
+        offset = 0,
     ): Promise<L2PSTransaction[]> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -416,7 +416,7 @@ export default class L2PSTransactionExecutor {
      */
     static async getTransactionByHash(
         l2psUid: string,
-        hash: string
+        hash: string,
     ): Promise<L2PSTransaction | null> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -424,7 +424,7 @@ export default class L2PSTransactionExecutor {
         const txRepo = ds.getRepository(L2PSTransaction)
 
         return txRepo.findOne({
-            where: { l2ps_uid: l2psUid, hash }
+            where: { l2ps_uid: l2psUid, hash },
         })
     }
 
@@ -470,7 +470,7 @@ export default class L2PSTransactionExecutor {
         return {
             totalTransactions: txCount,
             pendingProofs: proofStats.pending,
-            appliedProofs: proofStats.applied
+            appliedProofs: proofStats.applied,
         }
     }
 }

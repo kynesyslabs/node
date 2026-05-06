@@ -64,7 +64,7 @@ let handleGovernanceTx: typeof import("@/libs/network/routines/transactions/hand
 let tallyUpgradeVotes: typeof import("@/libs/blockchain/routines/tallyUpgradeVotes").default
 
 beforeAll(async () => {
-    ;({ handleGovernanceTx } = await import(
+    ({ handleGovernanceTx } = await import(
         "@/libs/network/routines/transactions/handleGovernanceTx"
     ))
     tallyUpgradeVotes = (
@@ -244,7 +244,7 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
         //   3. tallyUpgradeVotes — snapshot-total-weight for threshold
         // Mock all 3 with the SNAPSHOT_STAKE view, then a fallback for any
         // post-flow query (which we no longer use).
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
+        (Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             VOTING_BLOCK as never,
         )
         ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
@@ -278,7 +278,7 @@ describe("Snapshot-weight integrity (spec v2 §Verification #3)", () => {
     })
 
     it("if the stored vote weight were tampered post-hoc, tally would pick up the new value — confirms tally really reads from vote rows", async () => {
-        ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
+        (Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(
             VOTING_BLOCK as never,
         )
         ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([

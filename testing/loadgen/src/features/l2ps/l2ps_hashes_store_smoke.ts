@@ -8,7 +8,7 @@ export async function runL2psHashesStoreSmoke() {
   const saveCalls: any[] = []
 
   try {
-    ;(L2PSHashes as any).repo = {
+    (L2PSHashes as any).repo = {
       save: async (entry: any) => {
         saveCalls.push(entry)
         stored.set(entry.l2ps_uid, entry)
@@ -65,7 +65,7 @@ export async function runL2psHashesStoreSmoke() {
       throw new Error("l2ps_hashes_store_smoke failed: validator hash storage behavior drifted")
     }
   } finally {
-    ;(L2PSHashes as any).repo = previousRepo
+    (L2PSHashes as any).repo = previousRepo
   }
 }
 

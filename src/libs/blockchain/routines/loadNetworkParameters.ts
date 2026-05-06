@@ -55,7 +55,7 @@ export async function loadNetworkParameters(
                     value as Record<string, boolean>,
                 )
             } else {
-                ;(params as unknown as Record<string, unknown>)[key] = value
+                (params as unknown as Record<string, unknown>)[key] = value
             }
         }
     }

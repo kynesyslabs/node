@@ -359,7 +359,7 @@ async function preMainLoop() {
         // but don't crash the node over a config quirk.
         const message = err instanceof Error ? err.message : String(err)
         log.warning(
-            `[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. ` +
+            "[CONFIG] EXPOSED_URL is not a valid URL — loopback check skipped. " +
                 `Value: "${Config.getInstance().core.exposedUrl}". Error: ${message}`,
         )
     }

@@ -42,7 +42,7 @@ jest.mock("@/utilities/sharedState", () => ({
 let resolveDynamicFees: typeof import("@/libs/utils/demostdlib/deriveMempoolOperation").resolveDynamicFees
 
 beforeAll(async () => {
-    ;({ resolveDynamicFees } = await import(
+    ({ resolveDynamicFees } = await import(
         "@/libs/utils/demostdlib/deriveMempoolOperation"
     ))
 })

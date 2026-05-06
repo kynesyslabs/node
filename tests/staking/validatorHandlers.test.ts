@@ -36,7 +36,7 @@ import GCR from "@/libs/blockchain/gcr/gcr"
 let validatorHandlers: typeof import("@/libs/network/handlers/validatorHandlers").validatorHandlers
 
 beforeAll(async () => {
-    ;({ validatorHandlers } = await import(
+    ({ validatorHandlers } = await import(
         "@/libs/network/handlers/validatorHandlers"
     ))
 })
@@ -68,7 +68,7 @@ describe("validatorHandlers.getValidatorInfo", () => {
     beforeEach(() => jest.clearAllMocks())
 
     it("returns a serialized validator for a known address", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             validatorRow() as never,
         )
         const r = await validatorHandlers.getValidatorInfo(
@@ -86,7 +86,7 @@ describe("validatorHandlers.getValidatorInfo", () => {
     })
 
     it("returns null for an unknown address", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const r = await validatorHandlers.getValidatorInfo(
@@ -97,7 +97,7 @@ describe("validatorHandlers.getValidatorInfo", () => {
     })
 
     it("accepts a bare-string argument", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             validatorRow() as never,
         )
         const r = await validatorHandlers.getValidatorInfo(
@@ -118,7 +118,7 @@ describe("validatorHandlers.getValidators", () => {
     beforeEach(() => jest.clearAllMocks())
 
     it("serializes the full validator set", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             validatorRow(),
             validatorRow({ address: "ddeeff", staked_amount: "100" }),
         ] as never)
@@ -141,7 +141,7 @@ describe("validatorHandlers.getValidators", () => {
     })
 
     it("returns a 500 on repository error", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockRejectedValue(
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockRejectedValue(
             new Error("boom") as never,
         )
         const r = await validatorHandlers.getValidators({}, emptyResponse())
@@ -153,7 +153,7 @@ describe("validatorHandlers.getStakedAmount", () => {
     beforeEach(() => jest.clearAllMocks())
 
     it("returns staked_amount when set", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             validatorRow({ staked_amount: "123" }) as never,
         )
         const r = await validatorHandlers.getStakedAmount(
@@ -164,7 +164,7 @@ describe("validatorHandlers.getStakedAmount", () => {
     })
 
     it("returns \"0\" when staked_amount is null (new validator row or exited)", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             validatorRow({ staked_amount: null }) as never,
         )
         const r = await validatorHandlers.getStakedAmount(
@@ -175,7 +175,7 @@ describe("validatorHandlers.getStakedAmount", () => {
     })
 
     it("returns \"0\" for a non-validator", async () => {
-        ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
         const r = await validatorHandlers.getStakedAmount(

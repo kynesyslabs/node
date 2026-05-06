@@ -26,7 +26,7 @@ export function assertLoadgenResults(opts: {
   const errorRate = opts.totalOps > 0 ? opts.errorCount / opts.totalOps : 1
   if (errorRate > maxErrorRate) {
     failures.push(
-      `[${opts.label}] Error rate ${(errorRate * 100).toFixed(1)}% exceeds threshold ${(maxErrorRate * 100).toFixed(1)}%`
+      `[${opts.label}] Error rate ${(errorRate * 100).toFixed(1)}% exceeds threshold ${(maxErrorRate * 100).toFixed(1)}%`,
     )
   }
 

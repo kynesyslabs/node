@@ -48,7 +48,7 @@ export async function runMultichainParserExecuteSmoke() {
       throw new Error("multichain_parser_execute_smoke failed: XM parser execute aggregation did not match expectations")
     }
   } finally {
-    ;(XMParser as any).executeOperation = originalExecuteOperation
+    (XMParser as any).executeOperation = originalExecuteOperation
   }
 }
 

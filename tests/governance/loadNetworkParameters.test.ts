@@ -46,7 +46,7 @@ const GENESIS = getGenesisNetworkParameters()
 let loadNetworkParameters: typeof import("@/libs/blockchain/routines/loadNetworkParameters").loadNetworkParameters
 
 beforeAll(async () => {
-    ;({ loadNetworkParameters } = await import(
+    ({ loadNetworkParameters } = await import(
         "@/libs/blockchain/routines/loadNetworkParameters"
     ))
 })

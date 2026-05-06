@@ -93,7 +93,7 @@ export async function runL2psIncrementalSyncSmoke() {
       throw new Error("l2ps_incremental_sync_smoke failed: sync request or transaction processing behavior drifted")
     }
   } finally {
-    ;(L2PSMempool as any).getLastTransaction = previousGetLastTransaction
+    (L2PSMempool as any).getLastTransaction = previousGetLastTransaction
     ;(L2PSMempool as any).addTransaction = previousAddTransaction
   }
 }

@@ -11,7 +11,7 @@ export async function runL2psHashUpdateHandlerSmoke() {
   const storedCalls: any[] = []
 
   try {
-    ;(L2PSHashes as any).updateHash = async (...args: any[]) => {
+    (L2PSHashes as any).updateHash = async (...args: any[]) => {
       storedCalls.push(args)
     }
     parallelNetworks.getL2PS = async (uid: string) => (uid === "uid-joined" ? { uid } : undefined)
@@ -74,7 +74,7 @@ export async function runL2psHashUpdateHandlerSmoke() {
       throw new Error("l2ps_hash_update_handler_smoke failed: validator hash update handler behavior drifted")
     }
   } finally {
-    ;(L2PSHashes as any).updateHash = previousUpdateHash
+    (L2PSHashes as any).updateHash = previousUpdateHash
     parallelNetworks.getL2PS = previousGetL2PS
   }
 }
