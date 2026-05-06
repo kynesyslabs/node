@@ -282,6 +282,15 @@ export class RateLimiter {
                 return await next()
             }
 
+            // Skip rate limiting for infra/probe endpoints. LB and k8s
+            // liveness/readiness probes hit /health frequently from a single
+            // source IP and should never be 429-throttled. /version is small
+            // and equally cheap to serve unconditionally.
+            const path = new URL(req.url).pathname
+            if (path === "/health" || path === "/version") {
+                return await next()
+            }
+
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
@@ -435,6 +444,35 @@ export class RateLimiter {
 
             return await next()
         }
+    }
+
+    /**
+     * Return the current rate-limit window state for a given IP. Used by
+     * server_rpc to surface `X-RateLimit-{Limit,Remaining,Reset}` headers
+     * on POST `/` responses so SDK clients can self-throttle.
+     *
+     * Returns null when the IP has no active window yet (no requests seen).
+     */
+    public getCurrentLimits(ip: string): {
+        limit: number
+        remaining: number
+        resetEpochSeconds: number
+    } | null {
+        const ipData = this.ipRequests.get(ip)
+        if (!ipData) {
+            return null
+        }
+
+        // Match middleware: POST `/` resolves to the "POST" method bucket,
+        // falling back to defaultLimit when not configured explicitly.
+        const limitConfig = this.getLimitForMethod("POST")
+        const limit = limitConfig.maxRequests
+        const remaining = Math.max(0, limit - ipData.count)
+        const resetEpochSeconds = Math.floor(
+            (ipData.firstRequest + limitConfig.windowMs) / 1000,
+        )
+
+        return { limit, remaining, resetEpochSeconds }
     }
 
     public getStats(): {

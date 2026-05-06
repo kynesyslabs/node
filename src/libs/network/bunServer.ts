@@ -187,11 +187,19 @@ export const text = (body: string, status = 200): Response => {
     return new Response(body, { status })
 }
 
-export const jsonResponse = (body: any, status = 200): Response => {
+export const jsonResponse = (
+    body: any,
+    status = 200,
+    extraHeaders?: Record<string, string>,
+): Response => {
+    // Spread caller-provided headers first, then force Content-Type so it
+    // can't be accidentally overridden away from application/json.
+    const headers: Record<string, string> = {
+        ...extraHeaders,
+        "Content-Type": "application/json",
+    }
     return new Response(JSON.stringify(body), {
         status,
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers,
     })
 }

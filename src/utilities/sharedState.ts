@@ -47,6 +47,17 @@ export default class SharedState {
     version_name = APP_VERSION_NAME
     signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
+    // Node start time in milliseconds since epoch — set when this singleton
+    // is first imported. Used by /health to report uptime.
+    nodeStartTime = Date.now()
+
+    /**
+     * Seconds since the node process started, rounded down. Used by /health.
+     */
+    public getUptimeSeconds(): number {
+        return Math.floor((Date.now() - this.nodeStartTime) / 1000)
+    }
+
     block_time = DEFAULT_BLOCK_TIME // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp = 0

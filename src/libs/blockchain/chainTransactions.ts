@@ -5,8 +5,9 @@ import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
 import { handleError } from "src/errors"
 import { getTransactionsRepo } from "./chainDb"
+import Mempool from "./mempool"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
-import type { L2PSHashUpdatePayload } from "./chainTypes"
+import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -67,6 +68,29 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
         log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(error)}`)
         throw error
     }
+}
+
+/**
+ * Lifecycle status of a transaction by hash.
+ *
+ * Cheap: 1 mempool lookup, then 1 transactions lookup if not in mempool.
+ *
+ * "failed" is reserved — currently the node does not record execution
+ * failures, so failed txs surface as "unknown".
+ */
+export async function getTransactionStatus(hash: string): Promise<TxStatus> {
+    const inMempool = await Mempool.findByHash(hash)
+    if (inMempool) return { state: "pending" }
+
+    const tx = await getTxByHash(hash)
+    if (tx) {
+        return {
+            state: "included",
+            blockNumber: tx.blockNumber ?? undefined,
+        }
+    }
+
+    return { state: "unknown" }
 }
 
 export async function getTransactionHistory(

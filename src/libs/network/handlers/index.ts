@@ -7,6 +7,7 @@ import { l2psHandlers } from "./l2psHandlers"
 import { miscHandlers } from "./miscHandlers"
 import { validatorHandlers } from "./validatorHandlers"
 import { governanceHandlers } from "./governanceHandlers"
+import { storageProgramHandlers } from "./storageProgramHandlers"
 import type { NodeCallHandler } from "./types"
 
 export type { NodeCallHandler } from "./types"
@@ -21,4 +22,5 @@ export const handlerRegistry: Record<string, NodeCallHandler> = {
     ...miscHandlers,
     ...validatorHandlers,
     ...governanceHandlers,
+    ...storageProgramHandlers,
 }
