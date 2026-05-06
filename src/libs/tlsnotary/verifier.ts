@@ -124,14 +124,14 @@ function findBalancedJsonValue(text: string): string | null {
                     continue
                 }
 
-                if (ch === '"') {
+                if (ch === "\"") {
                     inString = false
                 }
 
                 continue
             }
 
-            if (ch === '"') {
+            if (ch === "\"") {
                 inString = true
                 continue
             }
@@ -190,14 +190,14 @@ function findBalancedJsonValueAt(
                 continue
             }
 
-            if (ch === '"') {
+            if (ch === "\"") {
                 inString = false
             }
 
             continue
         }
 
-        if (ch === '"') {
+        if (ch === "\"") {
             inString = true
             continue
         }

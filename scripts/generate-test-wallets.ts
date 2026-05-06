@@ -134,11 +134,11 @@ async function main() {
     writeFileSync(outputPath, JSON.stringify(walletsData, null, 2))
     console.log(`\n💾 Saved wallet mnemonics to: ${outputPath}`)
 
-    console.log(`\n⚠️  IMPORTANT: Restart your node for genesis changes to take effect!`)
-    console.log(`\n📋 Summary:`)
+    console.log("\n⚠️  IMPORTANT: Restart your node for genesis changes to take effect!")
+    console.log("\n📋 Summary:")
     console.log(`   New wallets: ${newWallets.length}`)
     console.log(`   Mnemonics saved to: ${outputPath}`)
-    console.log(`\n🧪 To run stress test after restart:`)
+    console.log("\n🧪 To run stress test after restart:")
     console.log(`   npx tsx scripts/l2ps-stress-test.ts --wallets-file ${options.outputPath} --count 100`)
 }
 

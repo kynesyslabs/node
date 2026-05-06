@@ -192,7 +192,7 @@ export class SignalingServer {
                     log.debug("[IM] Received a register message")
                     // Validate the message schema
                     log.debug(data)
-                    let registerMessage: ImRegisterMessage =
+                    const registerMessage: ImRegisterMessage =
                         data as ImRegisterMessage
                     if (
                         registerMessage.type !== "register" ||

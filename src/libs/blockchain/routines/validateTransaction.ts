@@ -105,8 +105,59 @@ export async function confirmTransaction(
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
+
+    // Must run before signValidityData(): any gcr_edit attached here
+    // becomes part of the signed hash, so peers compute the same hash.
+    let dispatchResult: { ok: true } | { ok: false; message: string }
+    try {
+        dispatchResult = await runTypeDispatcher(tx)
+    } catch (e) {
+        dispatchResult = {
+            ok: false,
+            message:
+                "Dispatcher crashed: " +
+                (e instanceof Error ? e.message : String(e)),
+        }
+    }
+    if (dispatchResult.ok === false) {
+        validityData.data.valid = false
+        validityData.data.message =
+            "[Tx Validation] [TYPE DISPATCH] " + dispatchResult.message + "\n"
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     validityData = await signValidityData(validityData)
     return validityData
+}
+
+async function runTypeDispatcher(
+    tx: Transaction,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+    const type = (tx?.content?.type ?? "") as string
+    if (
+        type === "validatorStake" ||
+        type === "validatorUnstake" ||
+        type === "validatorExit"
+    ) {
+        const { handleStakingTx } = await import(
+            "@/libs/network/routines/transactions/handleStakingTx"
+        )
+        const r = await handleStakingTx(tx as unknown as Parameters<
+            typeof handleStakingTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    if (type === "networkUpgrade" || type === "networkUpgradeVote") {
+        const { handleGovernanceTx } = await import(
+            "@/libs/network/routines/transactions/handleGovernanceTx"
+        )
+        const r = await handleGovernanceTx(tx as unknown as Parameters<
+            typeof handleGovernanceTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    return { ok: true }
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {

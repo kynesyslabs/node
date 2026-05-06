@@ -1,6 +1,7 @@
 import {
     EntityManager,
     FindManyOptions,
+    ILike,
     In,
     LessThanOrEqual,
     QueryFailedError,
@@ -70,6 +71,21 @@ export default class Mempool {
 
     public static async checkTransactionByHash(hash: string) {
         return await this.repo.exists({ where: { hash: hash } })
+    }
+
+    /**
+     * Cheap mempool size lookup — used by /health.
+     */
+    public static async count(): Promise<number> {
+        return await this.repo.count()
+    }
+
+    /**
+     * Case-insensitive mempool lookup by transaction hash. Returns the
+     * MempoolTx row or null if the hash is not in the mempool.
+     */
+    public static async findByHash(hash: string): Promise<MempoolTx | null> {
+        return await this.repo.findOne({ where: { hash: ILike(hash) } })
     }
 
     public static async addTransaction(

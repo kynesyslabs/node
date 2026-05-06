@@ -323,13 +323,20 @@ export default class GCR {
                 order: { first_seen: "DESC" },
             })
 
-            // Hashing
-            let total = 0
-            stakes.forEach(stake => {
-                total += stake.stake // Replace 'stake.stake' with the correct field name if different
-            })
+            let total = 0n
+            for (const v of stakes) {
+                const raw = v.staked_amount ?? "0"
+                try {
+                    total += BigInt(raw)
+                } catch {
+                    log.warning(
+                        "GCR",
+                        `getGCRHashedStakes: dropping malformed staked_amount=${raw} on validator ${v.address}`,
+                    )
+                }
+            }
 
-            return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
+            return Hashing.sha256(total.toString())
         } catch (e) {
             log.error(`Error fetching GCR hashed stakes: ${e}`)
         }

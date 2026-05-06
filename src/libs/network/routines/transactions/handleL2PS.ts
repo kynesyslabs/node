@@ -46,7 +46,7 @@ async function getL2PSInstance(l2psUid: string): Promise<L2PS | null> {
  */
 async function decryptAndValidate(
     l2psInstance: L2PS,
-    l2psTx: L2PSTransaction
+    l2psTx: L2PSTransaction,
 ): Promise<{ decryptedTx: Transaction | null; error: string | null }> {
     let decryptedTx
     try {
@@ -54,7 +54,7 @@ async function decryptAndValidate(
     } catch (error) {
         return {
             decryptedTx: null,
-            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`
+            error: `Decryption failed: ${error instanceof Error ? error.message : "Unknown error"}`,
         }
     }
 
@@ -123,7 +123,7 @@ async function processValidL2PSTransaction(
     l2psUid: string,
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
-    originalHash: string
+    originalHash: string,
 ): Promise<RPCResponse> {
     // Check for duplicates
     let alreadyProcessed
@@ -158,7 +158,7 @@ async function executeAndRecordL2PSTransaction(
     l2psUid: string,
     l2psTx: L2PSTransaction,
     decryptedTx: Transaction,
-    originalHash: string
+    originalHash: string,
 ): Promise<RPCResponse> {
     let executionResult
     try {
@@ -179,7 +179,7 @@ async function executeAndRecordL2PSTransaction(
         await L2PSMempool.updateGCREdits(
             l2psTx.hash,
             executionResult.gcr_edits,
-            executionResult.affected_accounts_count || 0
+            executionResult.affected_accounts_count || 0,
         )
     }
 
@@ -194,7 +194,7 @@ async function executeAndRecordL2PSTransaction(
             "", // l1BatchHash - empty initially, will be updated during consensus
             l2psTx.hash, // encrypted_hash
             0, // batch_index
-            "pending" // Initial status - executed locally, waiting for aggregation
+            "pending", // Initial status - executed locally, waiting for aggregation
         )
         log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
     } catch (recordError) {
@@ -213,8 +213,8 @@ async function executeAndRecordL2PSTransaction(
             success: executionResult.success,
             message: executionResult.message,
             affected_accounts_count: executionResult.affected_accounts_count,
-            gcr_edits_count: executionResult.gcr_edits?.length || 0
-        }
+            gcr_edits_count: executionResult.gcr_edits?.length || 0,
+        },
     }
     return response
 }

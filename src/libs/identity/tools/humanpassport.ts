@@ -78,7 +78,7 @@ export class HumanPassportProvider {
         // Early validation guard for API credentials
         if (!this.scorerId || !this.http.defaults.headers?.["X-API-KEY"]) {
             throw new Error(
-                "Human Passport API credentials missing: set HUMAN_PASSPORT_API_KEY and HUMAN_PASSPORT_SCORER_ID"
+                "Human Passport API credentials missing: set HUMAN_PASSPORT_API_KEY and HUMAN_PASSPORT_SCORER_ID",
             )
         }
 

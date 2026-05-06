@@ -462,7 +462,7 @@ export default class IdentityManager {
                 return {
                     success: false,
                     message: `Human Passport score ${verification.score} below threshold (${verification.threshold}). ` +
-                        `User needs to verify more stamps at https://app.passport.xyz/. Transaction not applied.`,
+                        "User needs to verify more stamps at https://app.passport.xyz/. Transaction not applied.",
                 }
             }
 

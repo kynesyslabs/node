@@ -913,24 +913,163 @@ export class GCRStorageProgramRoutines {
     }
 
     /**
-     * Get all storage programs owned by an address
+     * SQL predicate that mirrors {@link checkReadPermission} at the database
+     * layer. Evaluated against the alias `sp` (storage program) row.
+     *
+     * Produces an `(SQL, parameters)` pair the caller `.andWhere()`s into a
+     * QueryBuilder, so ACL filtering happens before LIMIT/OFFSET and pages
+     * stay full. Without this, post-fetch JS filtering produced short pages
+     * and silently hid accessible rows past the SQL window.
+     *
+     * Branches (all expressed as jsonb containment so they map to the natural
+     * Postgres operators and don't require value normalisation):
+     *   - public mode and not blacklisted (anonymous always sees public —
+     *     blacklist needs an identity to test)
+     *   - owner mode and requester is the owner
+     *   - restricted mode and requester is the owner (owner overrides
+     *     blacklist; matches checkReadPermission line 1006-1009)
+     *   - restricted mode and requester is in `acl.allowed` and not in
+     *     `acl.blacklisted`
+     *   - restricted mode and requester is a member of a group whose
+     *     `permissions` array contains "read", and not blacklisted
+     *
+     * Uses jsonb `@>` containment so Postgres can short-circuit on absent
+     * keys; no GIN index is required because the query is already gated by
+     * `programName ILIKE` / `owner` / `isDeleted` predicates that prune the
+     * candidate set heavily before this predicate runs.
+     */
+    private static readReachablePredicate(
+        requesterAddress: string | undefined,
+        alias = "sp",
+    ): { sql: string; params: Record<string, unknown> } {
+        // Normalize empty-string requester to undefined so this primitive
+        // matches checkReadPermission's anonymous semantics (every branch
+        // there treats falsy requesterAddress as anonymous via falsy
+        // checks). All current callers already gate on .length > 0, so
+        // this is defense-in-depth — but the function should be
+        // self-protecting against future callers.
+        const r =
+            typeof requesterAddress === "string" &&
+            requesterAddress.length > 0
+                ? requesterAddress
+                : undefined
+
+        // Defense-in-depth: alias is interpolated directly into SQL, so
+        // reject anything outside a normal SQL identifier shape. Today the
+        // only caller uses the default "sp", but a future caller passing
+        // user-derived input would otherwise be a SQL-injection vector.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
+            throw new Error(
+                `Invalid SQL alias for readReachablePredicate: ${alias}`,
+            )
+        }
+        const a = alias
+        if (r === undefined) {
+            // Anonymous: only public programs are visible. Blacklist applies
+            // only to identified callers (we have no identity to test
+            // against), matching checkReadPermission.
+            return {
+                sql: `(${a}.acl->>'mode' = 'public')`,
+                params: {},
+            }
+        }
+        return {
+            sql: `(
+                -- public mode, requester not in blacklist
+                (${a}.acl->>'mode' = 'public'
+                  AND NOT COALESCE(${a}.acl->'blacklisted' @> to_jsonb(:requesterAddress::text), false))
+                -- owner mode, requester is the owner
+                OR (${a}.acl->>'mode' = 'owner' AND ${a}.owner = :requesterAddress)
+                -- restricted mode, requester is the owner (owner overrides blacklist)
+                OR (${a}.acl->>'mode' = 'restricted' AND ${a}.owner = :requesterAddress)
+                -- restricted mode, requester is in allowed list and not blacklisted
+                OR (${a}.acl->>'mode' = 'restricted'
+                    AND ${a}.acl->'allowed' @> to_jsonb(:requesterAddress::text)
+                    AND NOT COALESCE(${a}.acl->'blacklisted' @> to_jsonb(:requesterAddress::text), false))
+                -- restricted mode, requester is a member of a group with read permission
+                -- jsonb_typeof guard avoids "cannot call jsonb_each on a non-object"
+                -- when acl.groups is missing/null/non-object (allowed by the schema —
+                -- StorageProgramACL.groups is optional)
+                OR (${a}.acl->>'mode' = 'restricted'
+                    AND NOT COALESCE(${a}.acl->'blacklisted' @> to_jsonb(:requesterAddress::text), false)
+                    AND jsonb_typeof(${a}.acl->'groups') = 'object'
+                    AND EXISTS (
+                        SELECT 1 FROM jsonb_each(${a}.acl->'groups') AS grp(name, def)
+                        WHERE def->'members' @> to_jsonb(:requesterAddress::text)
+                          AND def->'permissions' @> '"read"'::jsonb
+                    ))
+            )`,
+            params: { requesterAddress: r },
+        }
+    }
+
+    /**
+     * Get storage programs owned by an address, ACL-filtered for the
+     * requester and paginated at the SQL layer.
+     *
+     * When `requesterAddress` matches `owner`, ACL filtering is skipped (the
+     * owner sees everything, hits only the existing owner index). For any
+     * other requester, the SQL ACL predicate runs at the database layer.
+     *
+     * **Pagination:** SQL LIMIT/OFFSET are always applied to avoid
+     * materialising the full result set in memory for owners with many
+     * programs. `options.limit` defaults to **200** today and is clamped
+     * to [1, 200].
+     *
+     * **Default limit will drop to 100 in a future release** — callers that
+     * rely on the implicit cap should pass an explicit `options.limit`
+     * matching their expectation, or paginate via `options.offset`.
      */
     static async getStorageProgramsByOwner(
         owner: string,
         repository: Repository<GCRStorageProgram>,
+        requesterAddress?: string,
+        options?: { limit?: number; offset?: number },
     ): Promise<GCRStorageProgram[]> {
-        return repository.find({
-            where: { owner, isDeleted: false },
-            order: { createdAt: "DESC" },
-        })
+        const rawLimit = options?.limit ?? 200
+        const limit = Math.min(Math.max(1, Math.floor(rawLimit)), 200)
+        const rawOffset = options?.offset ?? 0
+        const offset = Math.max(0, Math.floor(rawOffset))
+
+        // Owner fast-path: same owner index as before, no jsonb evaluation.
+        if (requesterAddress === owner) {
+            return repository.find({
+                where: { owner, isDeleted: false },
+                order: { createdAt: "DESC" },
+                take: limit,
+                skip: offset,
+            })
+        }
+
+        const qb = repository
+            .createQueryBuilder("sp")
+            .where("sp.owner = :owner", { owner })
+            .andWhere("sp.isDeleted = false")
+
+        const acl = this.readReachablePredicate(requesterAddress)
+        qb.andWhere(acl.sql, acl.params)
+
+        return qb
+            .orderBy("sp.createdAt", "DESC")
+            .take(limit)
+            .skip(offset)
+            .getMany()
     }
 
     /**
-     * Search storage programs by name (supports partial matching)
+     * Search storage programs by name (partial or exact match), ACL-filtered
+     * for the requester at the SQL layer so LIMIT/OFFSET produce full pages.
+     *
+     * The previous implementation paginated first and ACL-filtered the
+     * already-truncated result, which produced short pages and hid accessible
+     * rows past the SQL window. Now the predicate is part of the WHERE clause
+     * so the database returns exactly the requested page of *accessible*
+     * rows.
+     *
      * @param namePattern - The name or partial name to search for
      * @param repository - TypeORM repository for GCRStorageProgram
-     * @param options - Search options (limit, offset, exactMatch)
-     * @returns Array of matching storage programs
+     * @param options - Search options (limit, offset, exactMatch, requesterAddress)
+     * @returns Array of matching storage programs the requester can read
      */
     static async searchStorageProgramsByName(
         namePattern: string,
@@ -939,28 +1078,28 @@ export class GCRStorageProgramRoutines {
             limit?: number
             offset?: number
             exactMatch?: boolean
+            requesterAddress?: string
         },
     ): Promise<GCRStorageProgram[]> {
         const limit = options?.limit ?? 50
         const offset = options?.offset ?? 0
         const exactMatch = options?.exactMatch ?? false
 
-        if (exactMatch) {
-            return repository.find({
-                where: { programName: namePattern, isDeleted: false },
-                order: { createdAt: "DESC" },
-                take: limit,
-                skip: offset,
-            })
-        }
+        const qb = repository.createQueryBuilder("sp")
 
-        // Partial match using ILIKE (case-insensitive)
-        return repository
-            .createQueryBuilder("sp")
-            .where("sp.programName ILIKE :pattern", {
+        if (exactMatch) {
+            qb.where("sp.programName = :name", { name: namePattern })
+        } else {
+            qb.where("sp.programName ILIKE :pattern", {
                 pattern: `%${namePattern}%`,
             })
-            .andWhere("sp.isDeleted = false")
+        }
+        qb.andWhere("sp.isDeleted = false")
+
+        const acl = this.readReachablePredicate(options?.requesterAddress)
+        qb.andWhere(acl.sql, acl.params)
+
+        return qb
             .orderBy("sp.createdAt", "DESC")
             .take(limit)
             .skip(offset)

@@ -11,6 +11,11 @@ import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTre
 import { handleError } from "src/errors"
 import { getBlocksRepo, getTransactionsRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
+import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
+import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
+import { loadNetworkParameters } from "./routines/loadNetworkParameters"
+import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
+import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import type { FindManyOptions } from "typeorm"
 
 export function isGenesis(block: Block): boolean {
@@ -290,6 +295,21 @@ export async function insertBlock(
                     )
                 }
 
+                // Governance hooks scoped to the block transaction so they
+                // commit/rollback atomically with it. sharedState refresh
+                // is deferred to post-commit (below) — RAM never ahead of DB.
+                const govProposalRepo =
+                    transactionalEntityManager.getRepository(NetworkUpgrade)
+                const govVoteRepo = transactionalEntityManager.getRepository(
+                    NetworkUpgradeVote,
+                )
+                await tallyUpgradeVotes(
+                    block.number,
+                    govProposalRepo,
+                    govVoteRepo,
+                )
+                await applyNetworkUpgrade(block.number, govProposalRepo)
+
                 return savedBlock
             },
         )
@@ -305,6 +325,18 @@ export async function insertBlock(
         log.debug(
             "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
         )
+
+        // Post-commit refresh: rolled-back tx → no-op; committed tx →
+        // picks up newly-active proposals. Failure is non-fatal — next
+        // block will re-derive.
+        try {
+            await loadNetworkParameters()
+        } catch (e) {
+            log.warning(
+                "GOVERNANCE",
+                `[insertBlock] sharedState refresh after block ${block.number} failed: ${(e as Error).message}`,
+            )
+        }
 
         return result
     } catch (error) {

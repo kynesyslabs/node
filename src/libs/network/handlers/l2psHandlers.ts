@@ -112,7 +112,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             response.response = "Authentication required. Provide signature and timestamp."
             response.extra = {
                 message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
-                example: `getL2PSHistory:${data.address}:${Date.now()}`
+                example: `getL2PSHistory:${data.address}:${Date.now()}`,
             }
             return response
         }
@@ -161,7 +161,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 data.l2psUid,
                 data.address,
                 limit,
-                offset
+                offset,
             )
 
             response.result = 200
@@ -186,11 +186,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                         status: tx.status,
                         timestamp: tx.timestamp?.toString() || "0",
                         l1_block_number: tx.l1_block_number,
-                        execution_message: txMessage
+                        execution_message: txMessage,
                     }
                 }),
                 count: transactions.length,
-                hasMore: transactions.length === limit
+                hasMore: transactions.length === limit,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)

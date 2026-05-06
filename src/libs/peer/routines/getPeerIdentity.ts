@@ -204,7 +204,7 @@ export default async function getPeerIdentity(
         // Extract identity and challenge signature from response
         const responseData = response.response
         const receivedIdentity = normalizeIdentity(
-            responseData?.identity || responseData?.publicKey || responseData
+            responseData?.identity || responseData?.publicKey || responseData,
         )
         const challengeSignature = responseData?.challenge_signature || responseData?.signature
         const expectedIdentity = normalizeExpectedIdentity(expectedKey)

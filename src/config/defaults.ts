@@ -32,7 +32,17 @@ export const DEFAULT_CONFIG: AppConfig = {
         shardSize: 4,
         mainLoopSleepTime: 1000,
         rpcFeePercent: 10,
-        rpcFee: 10,
+        // Flat per-tx fee components. Total cost of a tx today is the sum
+        // of these three: networkFee + rpcFee + burnFee = 1 + 1 + 1 = 3.
+        // No congestion adjustment — see calculateCurrentGas.ts for the
+        // (currently stubbed) dynamic-pricing seam.
+        // TODO(decimals): once OS denomination ships, the three components
+        // must add up to exactly 1 DEM (≈ 333_333_333 OS each, exact split
+        // TBD). See `decimal_planning/SPEC.md` / Mycelium E#3.
+        rpcFee: 1,
+        networkFee: 1,
+        burnFee: 1,
+        minValidatorStake: "1000000000000000000",
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
         exposedUrl: "",  // calculated from serverPort if empty

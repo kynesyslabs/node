@@ -52,6 +52,17 @@ export default class SharedState {
     version_name = APP_VERSION_NAME
     signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
+    // Node start time in milliseconds since epoch — set when this singleton
+    // is first imported. Used by /health to report uptime.
+    nodeStartTime = Date.now()
+
+    /**
+     * Seconds since the node process started, rounded down. Used by /health.
+     */
+    public getUptimeSeconds(): number {
+        return Math.floor((Date.now() - this.nodeStartTime) / 1000)
+    }
+
     block_time = DEFAULT_BLOCK_TIME // TODO Get it from the genesis (or see Consensus module)
 
     currentTimestamp = 0
@@ -216,6 +227,23 @@ export default class SharedState {
 
     // SECTION Configuration
     rpcFee: number = Config.getInstance().core.rpcFeePercent
+    networkFee: number = Config.getInstance().core.networkFee
+    // Per-tx burn — third component of the flat fee. Mirrored onto sharedState
+    // by the node's startup config load. Once governance owns burnFee (after
+    // the SDK adds it to NetworkParameters) this will also be refreshed by
+    // loadNetworkParameters() like rpcFee/networkFee.
+    burnFee: number = Config.getInstance().core.burnFee
+
+    /**
+     * Active network parameters. Loaded once at startup by
+     * `loadNetworkParameters()` — either from the latest `active` NetworkUpgrade
+     * in the DB, or from GENESIS_NETWORK_PARAMETERS when no upgrade has
+     * activated. Re-read at each post-block activation hook.
+     *
+     * Typed loosely here to avoid a circular import between sharedState and
+     * features/networkUpgrade/types.ts.
+     */
+    networkParameters: unknown = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile

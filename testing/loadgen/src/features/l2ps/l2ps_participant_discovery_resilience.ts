@@ -80,7 +80,7 @@ export async function runL2psParticipantDiscoveryResilience() {
       throw new Error("l2ps_participant_discovery_resilience failed: discovery did not tolerate mixed peer outcomes")
     }
   } finally {
-    ;(L2PSMempool as any).getLastTransaction = previousGetLastTransaction
+    (L2PSMempool as any).getLastTransaction = previousGetLastTransaction
     clearL2PSCache()
   }
 }
