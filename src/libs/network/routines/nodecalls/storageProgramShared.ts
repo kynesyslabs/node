@@ -53,13 +53,20 @@ export function rpcPermissionDenied(error = "Permission denied"): RPCResponse {
 
 /**
  * Internal error.
+ *
+ * Matches the `(error, errorCode)` envelope used by `rpcBadRequest` and
+ * `rpcPermissionDenied`: `error` carries the human-readable message and
+ * `errorCode` carries the stable machine identifier. SDK clients reading
+ * the standard envelope previously got `error === errorCode === "INTERNAL_ERROR"`
+ * and the actual message was buried in `extra` (which the SDK doesn't
+ * inspect on failure).
+ *
+ * Falls back to `String(error)` for non-Error throws so plain
+ * objects/numbers/null don't degrade to a generic "Unknown error".
  */
 export function rpcInternalError(error: unknown): RPCResponse {
-    return rpc(
-        500,
-        { error: "INTERNAL_ERROR", errorCode: "INTERNAL_ERROR" },
-        `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-    )
+    const message = error instanceof Error ? error.message : String(error)
+    return rpc(500, { error: message, errorCode: "INTERNAL_ERROR" })
 }
 
 /**
