@@ -75,19 +75,22 @@ type MockQB = {
 }
 function makeMockQueryBuilder(options?: {
     rows?: unknown[]
+    /**
+     * Retained for backward compatibility — `take`/`skip` are now always
+     * mocked because both `searchStorageProgramsByName` and
+     * `getStorageProgramsByOwner` apply SQL pagination.
+     */
     withPagination?: boolean
 }): MockQB {
     const qb: MockQB = {
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
         getMany: jest
             .fn<() => Promise<unknown[]>>()
             .mockResolvedValue(options?.rows ?? []),
-    }
-    if (options?.withPagination) {
-        qb.take = jest.fn().mockReturnThis()
-        qb.skip = jest.fn().mockReturnThis()
     }
     return qb
 }

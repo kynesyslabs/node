@@ -992,24 +992,40 @@ export class GCRStorageProgramRoutines {
     }
 
     /**
-     * Get all storage programs owned by an address, optionally ACL-filtered
-     * for a requester.
+     * Get storage programs owned by an address, ACL-filtered for the
+     * requester and paginated at the SQL layer.
      *
      * When `requesterAddress` matches `owner`, ACL filtering is skipped (the
      * owner sees everything, hits only the existing owner index). For any
-     * other requester, the SQL ACL predicate runs at the database layer so
-     * pagination — when the caller adds it — stays correct.
+     * other requester, the SQL ACL predicate runs at the database layer.
+     *
+     * **Pagination:** SQL LIMIT/OFFSET are always applied to avoid
+     * materialising the full result set in memory for owners with many
+     * programs. `options.limit` defaults to **200** today and is clamped
+     * to [1, 200].
+     *
+     * **Default limit will drop to 100 in a future release** — callers that
+     * rely on the implicit cap should pass an explicit `options.limit`
+     * matching their expectation, or paginate via `options.offset`.
      */
     static async getStorageProgramsByOwner(
         owner: string,
         repository: Repository<GCRStorageProgram>,
         requesterAddress?: string,
+        options?: { limit?: number; offset?: number },
     ): Promise<GCRStorageProgram[]> {
+        const rawLimit = options?.limit ?? 200
+        const limit = Math.min(Math.max(1, Math.floor(rawLimit)), 200)
+        const rawOffset = options?.offset ?? 0
+        const offset = Math.max(0, Math.floor(rawOffset))
+
         // Owner fast-path: same owner index as before, no jsonb evaluation.
         if (requesterAddress === owner) {
             return repository.find({
                 where: { owner, isDeleted: false },
                 order: { createdAt: "DESC" },
+                take: limit,
+                skip: offset,
             })
         }
 
@@ -1021,7 +1037,11 @@ export class GCRStorageProgramRoutines {
         const acl = this.readReachablePredicate(requesterAddress)
         qb.andWhere(acl.sql, acl.params)
 
-        return qb.orderBy("sp.createdAt", "DESC").getMany()
+        return qb
+            .orderBy("sp.createdAt", "DESC")
+            .take(limit)
+            .skip(offset)
+            .getMany()
     }
 
     /**

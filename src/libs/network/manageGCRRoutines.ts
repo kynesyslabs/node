@@ -363,6 +363,7 @@ export default async function manageGCRRoutines(
         case "getStorageProgramsByOwner": {
             const owner = params[0]
             const requesterAddress = params[1] // Optional identity for ACL filtering
+            const options = params[2] || {} // Optional { limit, offset }
 
             if (!owner) {
                 response.result = 400
@@ -377,7 +378,7 @@ export default async function manageGCRRoutines(
                     .getDataSource()
                     .getRepository(GCRStorageProgram)
 
-                // ACL filtering happens in SQL.
+                // ACL filtering and pagination both happen in SQL.
                 const accessiblePrograms =
                     await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                         owner,
@@ -386,6 +387,16 @@ export default async function manageGCRRoutines(
                             requesterAddress.length > 0
                             ? requesterAddress
                             : undefined,
+                        {
+                            limit:
+                                typeof options.limit === "number"
+                                    ? options.limit
+                                    : undefined,
+                            offset:
+                                typeof options.offset === "number"
+                                    ? options.offset
+                                    : undefined,
+                        },
                     )
 
                 response.response = accessiblePrograms.map(p => ({

@@ -17,15 +17,15 @@ interface GetStorageProgramsByOwnerData {
 }
 
 /**
- * List storage programs owned by an address, ACL-filtered for the requester.
+ * List storage programs owned by an address, ACL-filtered for the requester
+ * and paginated at the SQL layer.
  *
  * Owner sees all their own programs. Other requesters see only programs they
  * have read access to (per checkReadPermission).
  *
  * Pagination: limit clamped to [1, 200] (default 100), offset >= 0 (default 0).
- * Mirrors the HTTP route at features/storageprogram/routes.ts:617-696, but
- * paginates the post-filter list (HTTP route currently does not paginate this
- * endpoint).
+ * The default will drop to 100 in a future release — callers that rely on
+ * the implicit cap should pass an explicit `limit`.
  *
  * Always returns an array — never null.
  */
@@ -49,20 +49,20 @@ export default async function getStorageProgramsByOwner(
         const rawOffset = typeof data?.offset === "number" ? data.offset : 0
         const offset = Math.max(0, Math.floor(rawOffset))
 
-        // ACL filtering happens in SQL — GCRStorageProgramRoutines handles
-        // the owner-fast-path internally when requesterAddress === owner.
-        // Anonymous and non-owner requesters get the SQL ACL predicate so
-        // pagination produces full pages and never leaks restricted rows.
+        // SQL-level pagination: the routine applies LIMIT/OFFSET directly
+        // and never materialises the full owner result set in memory. The
+        // owner-fast-path (requesterAddress === owner) skips the jsonb ACL
+        // predicate and uses the existing owner index.
         const repository = await getStorageProgramRepository()
         const accessiblePrograms =
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                 owner,
                 repository,
                 requesterAddress,
+                { limit, offset },
             )
 
-        const paginated = accessiblePrograms.slice(offset, offset + limit)
-        return rpc(200, paginated.map(toStorageProgramListItem))
+        return rpc(200, accessiblePrograms.map(toStorageProgramListItem))
     } catch (error) {
         log.error("[getStorageProgramsByOwner] Error:", error)
         return rpcInternalError(error)

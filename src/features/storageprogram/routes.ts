@@ -629,6 +629,18 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
             return jsonResponse(response, 400)
         }
 
+        // Pagination via ?limit=&offset= — defaults match the GCR routine
+        // (200 limit today, will drop to 100 in a future release).
+        const rawLimit = parseInt(
+            url.searchParams.get("limit") || "200",
+            10,
+        )
+        const limit = Math.min(Math.max(1, rawLimit), 200)
+        const offset = Math.max(
+            0,
+            parseInt(url.searchParams.get("offset") || "0", 10),
+        )
+
         // Get requester identity from header. Empty string and missing
         // identity both map to undefined so the SQL ACL filter sees a true
         // anonymous caller (not a falsy owner-bypass).
@@ -646,14 +658,16 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
         const db = await Datasource.getInstance()
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
-        // ACL filtering happens in SQL. The owner-fast-path is internal:
-        // when requesterAddress === owner, the routine skips the jsonb
-        // predicate and uses the owner index directly.
+        // ACL filtering and pagination both happen in SQL. The
+        // owner-fast-path is internal: when requesterAddress === owner, the
+        // routine skips the jsonb predicate and uses the owner index
+        // directly.
         const accessiblePrograms =
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                 owner,
                 repository,
                 requesterAddress,
+                { limit, offset },
             )
 
         // Map to response format
