@@ -185,6 +185,46 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
         expect(r.message).toContain("not eligible")
     })
 
+    // CR-5 regression: stake-increase eligibility is an explicit allow-list
+    // (ACTIVE | UNSTAKING). Anything else — null, undefined, or a status
+    // string we haven't seen before — must be rejected so a future schema
+    // addition cannot silently grant top-up rights.
+    it("rejects a stake when existing validator status is null", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: null,
+        } as never)
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("not eligible")
+    })
+
+    it("rejects a stake when existing validator status is an unknown string", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: "FROZEN",
+        } as never)
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("not eligible")
+    })
+
+    it("rejects a stake when existing validator status is undefined", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: undefined,
+        } as never)
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("not eligible")
+    })
+
     it("rejects when sender is missing", async () => {
         const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
         tx.content.from = ""
