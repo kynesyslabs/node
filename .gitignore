@@ -174,3 +174,4 @@ src/GTAGS
 /.serena
 node*.sh
 yarn.lock
+ISSUES.md
