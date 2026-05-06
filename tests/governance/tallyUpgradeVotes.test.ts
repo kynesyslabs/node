@@ -44,9 +44,17 @@ function makeProposalRepo(rows: any[]) {
         _rows: store,
         find: jest.fn(async (opts: any) => {
             const status = opts.where.status
-            const tallyBlock = opts.where.tallyBlock
+            const tb = opts.where.tallyBlock
+            // tb may be a raw number (legacy tests) or a TypeORM
+            // LessThanOrEqual operator (now exposes ._value).
+            const tbCap =
+                typeof tb === "number"
+                    ? tb
+                    : (tb?._value as number | undefined)
             return store.filter(
-                r => r.status === status && r.tallyBlock === tallyBlock,
+                r =>
+                    r.status === status &&
+                    (tbCap === undefined || r.tallyBlock <= tbCap),
             )
         }),
         save: jest.fn(async (row: any) => {
@@ -86,7 +94,7 @@ describe("tallyUpgradeVotes", () => {
     })
 
     it("approves a proposal that crosses the 2/3 threshold on snapshot weight", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "60" },
             { staked_amount: "30" },
             { staked_amount: "10" },
@@ -121,7 +129,7 @@ describe("tallyUpgradeVotes", () => {
     })
 
     it("rejects one vote below the threshold (abstention = NO)", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "100" },
         ] as never)
         const proposals = makeProposalRepo([
@@ -148,7 +156,7 @@ describe("tallyUpgradeVotes", () => {
     })
 
     it("rejects when no validators exist in the snapshot (empty weight)", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue(
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue(
             [] as never,
         )
         const proposals = makeProposalRepo([
@@ -172,8 +180,37 @@ describe("tallyUpgradeVotes", () => {
         expect(outcomes[0].snapshotWeight).toBe(0n)
     })
 
+    it("tallies overdue proposals whose tallyBlock was skipped (G-5 regression)", async () => {
+        // Chain reaches block 205 without the post-block hook firing at 200
+        // (devnet reset, reorg around the exact tallyBlock, etc.). The
+        // proposal must still be tallied, not stuck in 'pending' forever.
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+            { staked_amount: "100" },
+        ] as never)
+        const proposals = makeProposalRepo([
+            {
+                proposalId: "p_overdue",
+                status: "pending",
+                snapshotBlock: 100,
+                tallyBlock: 200,
+                effectiveAtBlock: 300,
+            },
+        ])
+        const votes = makeVoteRepo({
+            p_overdue: [{ approve: true, weight: "100" }],
+        })
+        const outcomes = await tallyUpgradeVotes(
+            205,
+            proposals as any,
+            votes as any,
+        )
+        expect(outcomes).toHaveLength(1)
+        expect(outcomes[0].proposalId).toBe("p_overdue")
+        expect(outcomes[0].status).toBe("approved")
+    })
+
     it("ignores proposals not at tallyBlock even if status is pending", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "100" },
         ] as never)
         const proposals = makeProposalRepo([
@@ -195,7 +232,7 @@ describe("tallyUpgradeVotes", () => {
     })
 
     it("processes multiple proposals due at the same block independently", async () => {
-        ;(GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
+        (GCR.getGCRValidatorsAtBlock as jest.Mock).mockResolvedValue([
             { staked_amount: "30" },
         ] as never)
         const proposals = makeProposalRepo([

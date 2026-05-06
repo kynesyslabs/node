@@ -1,14 +1,16 @@
 import Datasource from "@/model/datasource"
-import GCR from "@/libs/blockchain/gcr/gcr"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
-import { Validators } from "@/model/entities/Validators"
 import { getSharedState } from "@/utilities/sharedState"
 import {
     getGenesisNetworkParameters,
     SUPERMAJORITY_DENOMINATOR,
     SUPERMAJORITY_NUMERATOR,
 } from "@/features/networkUpgrade/constants"
+import {
+    computeSnapshotWeight,
+    safeBigInt as sharedSafeBigInt,
+} from "@/features/networkUpgrade/governanceWeight"
 import type {
     NetworkParameters,
     ProposalVoteInfo,
@@ -192,43 +194,10 @@ export function tallyVotes(
     }
 }
 
-/**
- * Sums `staked_amount` across every validator that was active at
- * `snapshotBlock`. This is what the governance system calls "total staked
- * weight" for threshold math.
- */
-async function computeSnapshotWeight(
-    snapshotBlock: number,
-): Promise<bigint> {
-    // Throws on validator-set lookup failure so callers can surface the
-    // error instead of silently producing a passed-with-zero-weight tally.
-    const validators =
-        (await GCR.getGCRValidatorsAtBlock(snapshotBlock)) as Validators[]
-    let total = 0n
-    for (const v of validators) {
-        total += safeBigInt(v.staked_amount)
-    }
-    return total
-}
-
+// RPC handler policy: re-throw on validator-set lookup failure so the
+// caller sees the broken state instead of a silent passed-with-zero-weight
+// tally. The shared kernel already does this; we just re-export under
+// `safeBigInt` for callers within this module.
 function safeBigInt(s: string | null | undefined): bigint {
-    if (!s) return 0n
-    let v: bigint
-    try {
-        v = BigInt(s)
-    } catch {
-        log.warning(
-            "governanceHandlers",
-            `safeBigInt: dropping malformed weight=${s}`,
-        )
-        return 0n
-    }
-    if (v < 0n) {
-        log.warning(
-            "governanceHandlers",
-            `safeBigInt: dropping negative weight=${s}`,
-        )
-        return 0n
-    }
-    return v
+    return sharedSafeBigInt(s, "governanceHandlers")
 }

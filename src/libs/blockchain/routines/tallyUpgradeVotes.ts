@@ -1,13 +1,15 @@
-import { Repository } from "typeorm"
+import { LessThanOrEqual, Repository } from "typeorm"
 import Datasource from "@/model/datasource"
-import GCR from "@/libs/blockchain/gcr/gcr"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
-import { Validators } from "@/model/entities/Validators"
 import {
     SUPERMAJORITY_DENOMINATOR,
     SUPERMAJORITY_NUMERATOR,
 } from "@/features/networkUpgrade/constants"
+import {
+    computeSnapshotWeight as computeSnapshotWeightKernel,
+    safeBigInt as sharedSafeBigInt,
+} from "@/features/networkUpgrade/governanceWeight"
 import log from "@/utilities/logger"
 
 export interface TallyOutcome {
@@ -34,8 +36,12 @@ export default async function tallyUpgradeVotes(
         votes ??= db.getDataSource().getRepository(NetworkUpgradeVote)
     }
 
+    // LessThanOrEqual (not exact equality) so that a proposal whose
+    // tallyBlock was somehow skipped (devnet reset, reorg around the exact
+    // block height) still gets tallied on the next post-block pass instead
+    // of staying in "pending" forever.
     const due = await upgrades.find({
-        where: { status: "pending", tallyBlock: currentBlock },
+        where: { status: "pending", tallyBlock: LessThanOrEqual(currentBlock) },
     })
     if (due.length === 0) return []
 
@@ -85,14 +91,13 @@ export default async function tallyUpgradeVotes(
     return outcomes
 }
 
+// On-chain tally policy: must be deterministic on every node. If the
+// validator-set lookup fails, fall back to 0n weight — the threshold
+// check then rejects the proposal, which is safer than letting one
+// node disagree with the rest.
 async function computeSnapshotWeight(snapshotBlock: number): Promise<bigint> {
     try {
-        const validators = (await GCR.getGCRValidatorsAtBlock(
-            snapshotBlock,
-        )) as Validators[]
-        let total = 0n
-        for (const v of validators) total += safeBigInt(v.staked_amount)
-        return total
+        return await computeSnapshotWeightKernel(snapshotBlock)
     } catch (e) {
         log.error(
             "GOVERNANCE",
@@ -107,17 +112,5 @@ function ceilDiv(num: bigint, den: bigint): bigint {
 }
 
 function safeBigInt(s: string | null | undefined): bigint {
-    if (!s) return 0n
-    let v: bigint
-    try {
-        v = BigInt(s)
-    } catch {
-        log.warning("GOVERNANCE", `[tally] dropping malformed weight=${s}`)
-        return 0n
-    }
-    if (v < 0n) {
-        log.warning("GOVERNANCE", `[tally] dropping negative weight=${s}`)
-        return 0n
-    }
-    return v
+    return sharedSafeBigInt(s, "GOVERNANCE")
 }
