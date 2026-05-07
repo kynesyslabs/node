@@ -55,6 +55,132 @@
 - Hard fork over network reset confirmed (preserves history, reusable pattern, infrastructure ready).
 - Dual-format acceptance window ruled out (signatures commit to bytes; cannot validate same tx in two formats).
 
+## Session 14 (2026-05-07, SDK published as 3.1.0, P5 starting)
+
+### State
+- SDK shipped as **3.1.0** (skipped rc tag, promoted straight to release per user decision).
+- Node `package.json` updated to `"@kynesyslabs/demosdk": "3.1.0"` (exact pin).
+- PR-86 review queue fully drained (11 fixed, 2 dismissed, all GitHub threads resolved).
+- `bun run type-check-ts` shows **12 errors** post-bump — the expected boundary mismatches per SPEC P5 task list:
+  - `chainTransactions.ts` — `Transactions` entity `amount: bigint` vs SDK `RawTransaction.amount: string | number`
+  - `executeNativeTransaction.ts:42` — `>` on `string | number` and `number`
+  - `subOperations.ts:62` — `number` not assignable to `bigint`
+- All 52 tests in `testing/forks/` were green pre-bump; need to re-confirm post-bump as part of P5.
+
+### Outstanding workspace state
+- Unstaged: `package.json` (SDK bump), `decimal_planning/LOG.md` (this file), `.gitignore`, untracked `decimal_planning/SPEC_P4.md`. To commit at end of P5.
+
+### Next: P5
+- Fix the typecheck fallout from SDK 3.1.0 → 12 errors at the entity/SDK boundary (need explicit BigInt() conversions or update type signatures consistently)
+- Run all tests, confirm they're still green
+- Set testnet `forks.osDenomination.activationHeight` to a concrete near-future block
+- Run testnet through the fork height; observe migration runs, balances multiply, hashes align with SDK serializer
+
+## Session 13 (2026-05-07, P4 complete — awaiting publish)
+
+### State
+- P4 implemented on SDK branch `decimals-p4` (in `/Users/tcsenpai/kynesys/sdks/`). 4 commits, isolated from `main`.
+- Round-trip hash equality test PASSES against the node's serializer algorithm — strongest pre-testnet signal we have.
+- Sub-DEM precision rejection works.
+- RPC failure fallback warn-once verified.
+- 36 SDK files touched, 8 new files added, +2550/-205 lines, 76/76 tests pass.
+
+### P4 commits (SDK repo, `decimals-p4` branch)
+- `acf56a4 feat(types,construction): widen amount/fee/balance fields to OS string + bigint internal arithmetic`
+- `2fca411 feat(serializer): dual-format serializerGate matching node's wire format`
+- `6a1e485 feat(rpc): getNetworkInfo fork detection + sub-DEM guard + public API bigint`
+- `102d23e chore(release): tests + 3.0.0-rc.1 + jsdoc + migration guide`
+
+### Findings to remember
+1. **`bigint` in `tx.content.data`** — `JSON.stringify` rejects bigints, so `data` field is wire-shaped at construction time, not at serializer. Same pattern as `gcr_edits[]`. Caught by `wireFormat.spec.ts`.
+2. **Bun loader + type-only barrel re-exports** — type-only `export { Foo }` reachable through transitive imports trips Bun's runtime module loader. Senior split tests: Bun for pure unit, Jest for integration. Avoided a churny refactor of unrelated barrels. Documented in commit 4.
+3. **getAddressInfo zero-balance FIXME RESOLVED** — fixed in passing during P4 commit 4 JSDoc sweep (`info.balance ?? 0` before `BigInt(...)`). This was on our backlog from Session 4.
+4. **Round-trip hash equality** holds for 5 fixture variants (OS-string, legacy DEM-number, bigint-normalized, non-canonical-OS, pre-fork). Object spread idiom preserves key order: `[type, from, to, amount, data, nonce, timestamp, transaction_fee, from_ed25519_address, gcr_edits]`.
+
+### Awaiting
+P4 publish gate. User to:
+1. Optional review: `git diff main..decimals-p4` in SDK repo
+2. Merge `decimals-p4` into `main` (or chosen ship path)
+3. `bun publish --tag rc` (publishes as `3.0.0-rc.1` with rc tag — won't auto-pull via `^3.0.0`)
+4. Confirm published version → P5 unblocks
+
+### Next: P5
+Node bumps SDK pin to `3.0.0-rc.1` (exact pin, escape caret), sets testnet `forks.osDenomination.activationHeight`, runs testnet through fork height. First real integration test of the dual-format pipeline.
+
+## Session 12 (2026-05-06, P3 fully complete — switching to SDK side)
+
+### State
+- All four P3 sub-phases done: P3a (post-fork serializer), P3b (state migration), P3c (getNetworkInfo RPC), P3d (integration tests).
+- Mycelium #22 (P3) closed.
+- Branch `decimals` is now 21 commits ahead of main.
+- 52/52 tests in `testing/forks/` (49 unit + 3 integration). Lint clean, typecheck baseline (11) preserved. Bit-identical regression intact.
+- Production behavior bit-identical to pre-fork-machinery state (fork inactive by default).
+
+### Latent ESM circular import (out of scope, recorded)
+`forkHandlers → sharedState → Peer → manageNodeCall → handlers/index → forkHandlers`. Workaround: tests route via `handlerRegistry` instead of importing `forkHandlers` directly. Pre-existing in the codebase (governanceHandlers / peerHandlers do the same import pattern). Clean fix would be `import type { NodeCall }` in `Peer.ts`. Not chasing now.
+
+### Commits added in P3 (8 total)
+- `c6b91c57 feat(forks): add ForkState entity and TypeORM migration` (P3b)
+- `16732481 feat(forks): implement osDenomination state migration with cap policy` (P3b)
+- `f21e59e7 feat(forks): hook fork migrations into Chain.insertBlock` (P3b)
+- `fff62854 test(forks): osDenomination migration tests` (P3b)
+- `e497cd5a docs(decimal_planning): add post-staking-merge investigation report`
+- `e142bcce feat(forks): add getNetworkInfo RPC handler` (P3c)
+- `ee4254ea test(forks): getNetworkInfo handler tests` (P3c)
+- `af3b7a4b test(forks): integration tests for fork pipeline` (P3d)
+
+### Next: P4 — SDK v3.0.0-rc.1
+This is the next **publish gate**. Per SPEC option (a) dual-format SDK design:
+- SDK ships both serializers (DEM-number for pre-fork nodes, OS-string for post-fork)
+- SDK calls `getNetworkInfo` to detect node fork status, caches per `Demos` instance
+- Pre-fork transfer rejects sub-DEM precision with hard error (no silent value loss)
+- Collapses IDEA.md phases 1–7 into one shippable SDK release
+- Adds gcr_edits[] amount migration (the flag from Session 9)
+
+P4 is in the SDK repo (`/Users/tcsenpai/kynesys/sdks/`). When it ships → user publishes v3.0.0-rc.1 with `--tag rc` → P5 (node bumps SDK pin to RC, sets testnet fork height) → P6 (sustained testnet) → P7 (final v3.0.0) → P8 (production fork).
+
+## Session 11 (2026-05-06, P3b complete)
+
+### State
+- Stabilisation/staking PR merged into `decimals` (merge commit `4b099c5d`).
+- P3a regression confirmed intact post-merge (31/31 tests still pass).
+- Re-investigation report: `decimal_planning/audit_node_post_staking.md`. Headline: `Validators.stake` was renamed to `Validators.staked_amount` (text/bigint-as-string), DEM-denominated, written via `GCRValidatorStakeRoutines.apply()`. Migration must include this column.
+- User decisions locked:
+  - **Q1** — Cap policy for legacy GCR overflow (set to 90% of `Number.MAX_SAFE_INTEGER`, log every cap, record `cappedCount` and `totalValueLostOs` in fork_state audit row)
+  - **Q2** — Migration runs **inside** the same TypeORM transaction as block save (atomic)
+  - **Q3** — `NetworkUpgradeVote.weight` immutable at snapshot, no tally-time adjustment
+- P3b shipped in 4 commits (`c6b91c57`..`fff62854`):
+  - `feat(forks): add ForkState entity and TypeORM migration`
+  - `feat(forks): implement osDenomination state migration with cap policy`
+  - `feat(forks): hook fork migrations into Chain.insertBlock`
+  - `test(forks): osDenomination migration tests`
+- Plus `e497cd5a docs(decimal_planning): add post-staking-merge investigation report`.
+
+### What's verified
+- Cap value: `LEGACY_NUMBER_CAP = 8_106_479_329_266_892n` OS = `BigInt(Math.floor(Number.MAX_SAFE_INTEGER * 0.9))`
+- 11/11 new migration tests pass, including: cap behavior (test 4), idempotency throw (7), outer-transaction rollback (8), atomicity on poison row (9), empty-chain edge case (1)
+- 42/42 in `testing/forks/` overall (31 baseline + 11 new)
+- Lint clean, typecheck baseline (11) preserved, no new errors
+- Bit-identical regression PASS: production behavior unchanged when `activationHeight: null`
+- Hook integration: atomic per Q2, no invasive refactor needed (existing `dataSource.transaction(em => ...)` block in `chainBlocks.insertBlock:218` was already in place)
+- Migration runs **before** block transactions execute, so the triggering block's txs see post-fork (OS) balances
+
+### Test infrastructure note
+P3b introduced `placeholder()` helper for portable raw queries (Postgres `$N` / SQLite `?`). Tests use SQLite in-memory; production uses Postgres. `ON CONFLICT` syntax is identical across both for fork_state UPSERT.
+
+### Closed Mycelium tasks
+- #22 (P3) — close on next session start (P3a + P3b done; P3c and P3d still ahead in current session)
+
+Wait — P3 is task #22 covering all of P3a/b/c/d. P3c (`getNetworkInfo` RPC) and P3d (integration tests) still pending. Keep #22 open.
+
+### Next: P3c
+SDK-facing fork-status RPC. Per SPEC option (a) dual-format SDK design:
+- Endpoint: `getNetworkInfo` (or extend an existing one)
+- Returns: `{ forks: { osDenomination: { activationHeight: number | null, activated: boolean, currentHeight: number } } }`
+- `activated` = `currentHeight >= activationHeight && activationHeight !== null`
+- Reads from `SharedState` only — no DB query, must be cheap
+- Used by SDK v3 (P4) to decide which serializer to send
+
 ## Session 10 (2026-05-01, paused for staking PR)
 
 ### Why
