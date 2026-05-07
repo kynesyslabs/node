@@ -39,7 +39,10 @@ export default async function executeNativeTransaction(
     const operations: Operation[] = []
 
     // ANCHOR Managing simple value transfer
-    if (transaction.content.amount > 0) {
+    // REVIEW P5a: SDK 3.1.0 widened `amount` to `string | number` for the
+    // dual-format wire shape. Coerce to bigint for the comparison so
+    // pre-fork DEM-number and post-fork OS-string inputs both work.
+    if (BigInt(transaction.content.amount ?? 0) > 0n) {
         let operation: Operation
         // Handle both string and Buffer types for from/to fields
         const sender =

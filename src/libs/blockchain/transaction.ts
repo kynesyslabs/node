@@ -35,6 +35,7 @@ import IdentityManager from "./gcr/gcr_routines/identityManager"
 import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
 import { serializeTransactionContent } from "@/forks"
+import { Transactions } from "@/model/entities/Transactions"
 
 interface TransactionResponse {
     status: string
@@ -541,6 +542,14 @@ export default class Transaction implements ITransaction {
         log.debug(
             `[TX] toRawTransaction - From: ${tx.content.from}, To: ${tx.content.to}`,
         )
+        // REVIEW P5a: returns the SDK `RawTransaction` shape (`amount` and
+        // fees as `string | number`). Callers (`insertTransaction`,
+        // `chainBlocks.insertBlock`) pass this to TypeORM `save()`, which
+        // accepts `string | number` for `bigint` columns at runtime — but
+        // the entity's static type declares `bigint`, so we can't directly
+        // assign. The `saveTransactionEntity` helper below bridges the
+        // type without changing the runtime payload (`JSON.stringify` of
+        // the raw tx still works because no `bigint` is introduced).
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
@@ -565,7 +574,9 @@ export default class Transaction implements ITransaction {
         return rawTx
     }
 
-    public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+    public static fromRawTransaction(
+        rawTx: RawTransaction | Transactions,
+    ): Transaction {
         if (!rawTx) {
             return null
         }
@@ -588,18 +599,27 @@ export default class Transaction implements ITransaction {
             from: rawTx.from,
             to: rawTx.to,
             from_ed25519_address: rawTx.from_ed25519_address,
-            amount: rawTx.amount,
+            // REVIEW P5a: callers pass either the SDK `RawTransaction` shape
+            // (`amount: string | number`) or the TypeORM `Transactions`
+            // entity (`amount: bigint`). Coerce to the wire-format shape
+            // (`number`) the rest of the node still expects pre-fork; the
+            // serializerGate transforms to OS string when the fork
+            // activates. Bit-identical to pre-bump behavior: TypeORM
+            // historically returned `bigint` columns as JS strings/numbers
+            // depending on driver, and `Number(bigint | string | number)` is
+            // what the legacy code path produced.
+            amount: fromEntityToWireNumber(rawTx.amount),
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,
             transaction_fee: {
                 // REVIEW The Transactions entity stores fees as `bigint` columns;
                 // TypeORM hands them back to us as JS strings (or bigint) on
-                // some drivers. The SDK's TxFee type is still `number` (wire
-                // format unchanged in P-1), so explicitly coerce at the
-                // boundary to keep callers seeing the documented shape.
-                network_fee: Number(rawTx.networkFee ?? 0),
-                rpc_fee: Number(rawTx.rpcFee ?? 0),
-                additional_fee: Number(rawTx.additionalFee ?? 0),
+                // some drivers. The SDK's TxFee type is `string | number`
+                // post-3.1.0, so coerce to `number` (pre-fork wire shape) at
+                // the boundary to keep callers bit-identical to pre-bump.
+                network_fee: fromEntityToWireNumber(rawTx.networkFee),
+                rpc_fee: fromEntityToWireNumber(rawTx.rpcFee),
+                additional_fee: fromEntityToWireNumber(rawTx.additionalFee),
             },
 
             data: JSON.parse(rawTx.content).data,
@@ -608,5 +628,76 @@ export default class Transaction implements ITransaction {
         tx.ed25519_signature = rawTx.ed25519_signature
 
         return tx
+    }
+}
+
+/**
+ * Coerce a wire-shape amount/fee value (`string | number | bigint | null`)
+ * to a `bigint` suitable for the TypeORM `bigint` columns on the
+ * `Transactions` entity.
+ *
+ * P5a boundary helper. The SDK's `RawTransaction`/`TransactionContent`
+ * widened these fields to `string | number` (dual-format wire shape) but
+ * the entity columns are `bigint`. TypeORM's runtime would accept either
+ * shape, but the static type declares `bigint`, so we coerce explicitly
+ * here to keep the typecheck honest. `null`/`undefined` map to `0n` to
+ * match the zero-fee/zero-amount path that genesis and value-less
+ * transactions have always relied on.
+ */
+function toEntityBigint(
+    value: string | number | bigint | null | undefined,
+): bigint {
+    if (value === null || value === undefined) {
+        return 0n
+    }
+    if (typeof value === "bigint") {
+        return value
+    }
+    return BigInt(value)
+}
+
+/**
+ * Coerce an entity-shape amount/fee value back to the legacy wire shape
+ * (`number`) that downstream node code consumed pre-bump.
+ *
+ * P5a boundary helper. The TypeORM `bigint` columns surface as `string`
+ * (Postgres) or `bigint` (some drivers) at the JS level; the SDK's
+ * `TransactionContent.amount` and `TxFee.*` were widened to `string |
+ * number` in 3.1.0. We narrow back to `number` here to preserve the
+ * pre-bump observable behavior — the serializerGate is the single
+ * choke-point that converts to OS strings post-fork.
+ */
+function fromEntityToWireNumber(
+    value: string | number | bigint | null | undefined,
+): number {
+    if (value === null || value === undefined) {
+        return 0
+    }
+    return Number(value)
+}
+
+/**
+ * Convert a wire-shape `RawTransaction` (as produced by
+ * {@link Transaction.toRawTransaction}) into a `Transactions` entity row
+ * ready for TypeORM `save()`.
+ *
+ * P5a boundary helper. SDK 3.1.0 widened `RawTransaction.amount` and
+ * fee fields to `string | number`, but the TypeORM entity columns are
+ * `bigint`. Runtime behaviour is unchanged (TypeORM accepted the wire
+ * shape implicitly before the SDK bump); this helper only narrows the
+ * static types so `entityManager.save()` typechecks.
+ *
+ * @param rawTx - Wire-shape transaction record.
+ * @returns Entity-shape transaction row (`bigint` amount and fees).
+ */
+export function toTransactionsEntity(rawTx: RawTransaction): Transactions {
+    return {
+        ...rawTx,
+        amount: toEntityBigint(rawTx.amount),
+        networkFee: toEntityBigint(rawTx.networkFee),
+        rpcFee: toEntityBigint(rawTx.rpcFee),
+        additionalFee: toEntityBigint(rawTx.additionalFee),
+        // `nonce` on the entity is typed `number` while the SDK's
+        // `RawTransaction.nonce` is `number`; pass through.
     }
 }

@@ -2,7 +2,7 @@ import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
-import Transaction from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
@@ -255,9 +255,12 @@ export async function insertBlock(
                             tx,
                             "confirmed",
                         )
+                        // REVIEW P5a: bridge wire-shape `RawTransaction` to
+                        // entity-shape `Transactions` (bigint amount/fees).
+                        // Runtime payload unchanged.
                         await transactionalEntityManager.save(
                             transactionsRepo.target,
-                            rawTransaction,
+                            toTransactionsEntity(rawTransaction),
                         )
                         await persistConfirmedTransactionProjection(
                             tx,

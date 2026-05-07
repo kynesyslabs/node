@@ -59,7 +59,9 @@ export default class SubOperations {
         transaction.from_ed25519_address =
             genesisTx.content.from_ed25519_address ?? "0x0"
         transaction.to = genesisTx.content.to ?? "0x0"
-        transaction.amount = 0 // TODO: Maybe store the amount as defined in balances below here?
+        // REVIEW P-1 widened the entity to `bigint`; use a bigint literal
+        // so the assignment matches the column type.
+        transaction.amount = 0n // TODO: Maybe store the amount as defined in balances below here?
         transaction.nonce = 0
         transaction.timestamp = genesisTx.content.timestamp ?? Date.now()
         transaction.ed25519_signature = genesisTx.ed25519_signature
