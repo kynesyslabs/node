@@ -1,0 +1,48 @@
+{
+    "properties": {
+        "id": 1,
+        "name": "DEMOS",
+        "currency": "DEM"
+    },
+    "mutables": {
+        "minBlocksForValidationOnlineStatus": 4
+    },
+    "balances": [
+        [
+            "0x10bf4da38f753d53d811bcad22e0d6daa99a82f0ba0dbbee59830383ace2420c",
+            "1000000000000000000"
+        ],
+        [
+            "0x51322c62dcefdcc19a6f2a556a015c23ecb0ffeeb8b13c47e7422974616ff4ab",
+            "1000000000000000000"
+        ],
+        [
+            "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23",
+            "1000000000000000000"
+        ],
+        [
+            "0x3e0d0c734d52540842e104c6a3fc2316453adda9b6042492e74da9687ecc8caa",
+            "1000000000000000000"
+        ],
+        [
+            "0xbf5a666b92751be3e1731bb7be6551ff66fab39c796bc8f26ffaff83fc553b15",
+            "1000000000000000000"
+        ],
+        [
+            "0x6d06e0cbf2c245aa86f4b7416cb999e434ffc66d92fa40b67f721712592b4aac",
+            "1000000000000000000"
+        ],
+        [
+            "0xe2e3d3446aa2abc62f085ab82a3f459e817c8cc8b56c443409723b7a829a08c2",
+            "1000000000000000000"
+        ]
+    ],
+    "timestamp": "1692734616",
+    "status": "confirmed",
+    "forks": {
+        "osDenomination": {
+            "activationHeight": 5,
+            "description": "Rehearsal: low activation height for fast cross-over."
+        }
+    }
+}

@@ -1,0 +1,4 @@
+# Transient compose overrides written by the rehearsal harness in
+# testing/forks/rehearsal/. The override files are scenario-scoped and
+# regenerated on each run; never commit them.
+docker-compose.override.*.yml
