@@ -35,8 +35,13 @@ services:
     environment:
       NS_NOTARIZATION__MAX_SENT_DATA: 32768
     platform: linux/amd64
+    # Override TLSNOTARY_HOST_PORT in .env if 7047 conflicts with a
+    # developer's local tlsnotary instance (e.g. TLSNOTARY_HOST_PORT=7048),
+    # mirroring the POSTGRES_HOST_PORT pattern above. The container always
+    # binds 7047 internally so the in-network nodes can reach it via
+    # TLSNOTARY_PORT=7047.
     ports:
-      - "7047:7047"
+      - "${TLSNOTARY_HOST_PORT:-7047}:7047"
     networks:
       - demos-network
     restart: unless-stopped

@@ -19,6 +19,48 @@ The harness queries Postgres directly from the host. The host port is
 exposed by the devnet docker-compose (added together with the rehearsal
 infra under the `chore(devnet)` commit).
 
+### Required free host ports
+
+The devnet (and therefore every rehearsal scenario) binds the following
+host ports. All of them must be free on the host before running. Each
+one is overridable via `testing/devnet/.env` (or `export VAR=...` in the
+shell that launches the rehearsal):
+
+| Port | Service | Override variable | Default |
+|---|---|---|---|
+| Postgres | shared postgres-16 | `POSTGRES_HOST_PORT` | `5432` |
+| tlsnotary | notary-server | `TLSNOTARY_HOST_PORT` | `7047` |
+| node-1 RPC | HTTP RPC | `NODE1_PORT` | `53551` |
+| node-1 omni | P2P | `NODE1_OMNI_PORT` | `53552` |
+| node-2 RPC | HTTP RPC | `NODE2_PORT` | `53553` |
+| node-2 omni | P2P | `NODE2_OMNI_PORT` | `53554` |
+| node-3 RPC | HTTP RPC | `NODE3_PORT` | `53555` |
+| node-3 omni | P2P | `NODE3_OMNI_PORT` | `53556` |
+| node-4 RPC | HTTP RPC | `NODE4_PORT` | `53557` |
+| node-4 omni | P2P | `NODE4_OMNI_PORT` | `53558` |
+| node-5 RPC (rehearsal profile only) | HTTP RPC | `NODE5_PORT` | `53559` |
+| node-5 omni (rehearsal profile only) | P2P | `NODE5_OMNI_PORT` | `53560` |
+| node-1 signaling | WebRTC signaling | `NODE1_SIGNALING_PORT` | `3005` |
+| node-2 signaling | WebRTC signaling | `NODE2_SIGNALING_PORT` | `3006` |
+| node-3 signaling | WebRTC signaling | `NODE3_SIGNALING_PORT` | `3007` |
+| node-4 signaling | WebRTC signaling | `NODE4_SIGNALING_PORT` | `3008` |
+| node-5 signaling (rehearsal profile only) | WebRTC signaling | `NODE5_SIGNALING_PORT` | `3009` |
+
+Quick check: `lsof -nP -iTCP -sTCP:LISTEN | grep -E '5432|7047|5355[1-9]|5356[0-9]|3005|3006|3007|3008|3009'`.
+
+### Troubleshooting: port conflicts
+
+If a port above is already taken by another local service (e.g. you keep
+a long-running standalone `tlsnotary` at `0.0.0.0:7047`, or a developer
+Postgres at `0.0.0.0:5432`), set the corresponding `*_HOST_PORT` env var
+(or `.env` value) to a free port. Only the host side of the mapping
+changes; the in-container ports and inter-container hostnames are
+unaffected, so the rehearsal harness, the node containers, and the
+postgres readiness checks all continue to work without any further code
+change. The rehearsal driver reads `POSTGRES_HOST_PORT` from the
+environment to point its `pg` client at the right host port; the other
+variables only affect docker-compose's host-side bind.
+
 ## Running
 
 ```bash
