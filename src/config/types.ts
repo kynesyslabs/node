@@ -53,6 +53,7 @@ export interface CoreConfig {
 export interface TLSNotaryConfig {
     enabled: boolean
     exposedUrl: string
+    proxyUrl: string
     host: string
     port: number
     signingKey: string

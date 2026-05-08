@@ -112,6 +112,7 @@ export function loadConfig(): Readonly<AppConfig> {
             enabled: envBool(EnvKey.TLSNOTARY_ENABLED, d.tlsnotary.enabled),
             host: envStr(EnvKey.TLSNOTARY_HOST, d.tlsnotary.host),
             exposedUrl: envStr(EnvKey.TLSNOTARY_EXPOSED_URL, d.tlsnotary.exposedUrl),
+            proxyUrl: envStr(EnvKey.TLSNOTARY_PROXY_URL, d.tlsnotary.proxyUrl),
             port: envInt(EnvKey.TLSNOTARY_PORT, d.tlsnotary.port),
             signingKey: envStr(EnvKey.TLSNOTARY_SIGNING_KEY, d.tlsnotary.signingKey),
             fatal: envBool(EnvKey.TLSNOTARY_FATAL, d.tlsnotary.fatal),
