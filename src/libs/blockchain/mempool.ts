@@ -94,14 +94,12 @@ export default class Mempool {
         }
 
         if (!blockRef) {
-            blockRef = getSharedState.lastBlockNumber + 2
+            blockRef = getSharedState.lastBlockNumber + 1
+
+            if (getSharedState.inConsensusLoop) {
+                blockRef = SecretaryManager.lastBlockRef + 1
+            }
         }
-        // INFO: If we're in consensus, move tx to next block
-        // if (getSharedState.inConsensusLoop) {
-        //     blockNumber = SecretaryManager.lastBlockRef + 1
-        // } else {
-        //     blockNumber = getSharedState.lastBlockNumber + 1
-        // }
 
         try {
             const saved = await this.repo.save({

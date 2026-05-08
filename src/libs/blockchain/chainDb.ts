@@ -90,5 +90,6 @@ export async function chunkedInsert<T extends ObjectLiteral>(
         inserted += chunkInserted
         skipped += chunk.length - chunkInserted
     }
+
     return { inserted, skipped }
 }

@@ -65,7 +65,17 @@ export default async function getCommonValidatorSeed(
     const blockCount = 3
 
     if (!lastBlock) {
-        lastBlock = await Chain.getLastBlock()
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            lastBlock = await Chain.getLastBlock()
+            if (lastBlock) break
+            if (attempt < 3) await sleep(100)
+        }
+    }
+
+    if (!lastBlock) {
+        throw new Error(
+            `getCommonValidatorSeed: Chain.getLastBlock() returned null after 3 retries (sharedState.lastBlockNumber=${getSharedState.lastBlockNumber})`,
+        )
     }
 
     const lastBlockNumber = lastBlock.number
