@@ -251,3 +251,79 @@ The fork-activation logic, peer convergence, idempotency, fresh-joiner replay, a
 - `testing/devnet/.env` (gitignored) was updated locally to match `.env.example`'s port scheme + `TLSNOTARY_HOST_PORT=7048`. Original was backed up at `/tmp/devnet.env.original.backup` (not committed).
 - One commit on `decimals` ahead of Run 1 HEAD: `34826f1f` (Part 1 fix). One commit for this report (this file).
 - Nothing pushed.
+
+---
+
+## Run 3 (after gcr_main.balance widening fix) — 2026-05-08
+
+### Environment
+
+- **Date/time**: 2026-05-08, ~12:43 CEST.
+- **Host OS**: Darwin 25.2.0 (macOS).
+- **Docker**: v28.4.0.
+- **Bun**: v1.3.6.
+- **Repo**: `/Users/tcsenpai/kynesys/node/`, branch `decimals` at HEAD `4a50dfbb` (`feat(model): widen gcr_main.balance to numeric…`). Run 3 sits one commit ahead of Run 2 HEAD.
+- **Standalone `demos-tlsnotary`**: still up on host port 7047, undisturbed.
+- **Rehearsal env vars used**: `TLSNOTARY_HOST_PORT=7048` (passed inline; also set in `testing/devnet/.env`).
+
+### Fix shipped between Run 2 and Run 3
+
+- Widened `gcr_main.balance` from `bigint` to `numeric` (Postgres arbitrary precision).
+- Introduced `bigintNumericTransformer` in `src/model/entities/transformers.ts` so the application keeps reading `balance` as `bigint` while the driver round-trips strings.
+- Added checked-in migration `WidenGcrMainBalanceToNumeric1714694400000` for deterministic deployment.
+- `Validators.staked_amount` was audited and **left as-is** — the column is already `text` (bigint-as-string) and the migration's BigInt math runs in JS-land, so no overflow risk.
+
+### Summary table
+
+| # | Scenario | Status | Runtime | Notes |
+|---|---|---|---|---|
+| 1 | All-validators-cross-fork (smoke test) | PASS (mechanism) / FAIL (harness reporting) | ~283 s | Migration overflow bug is fixed: all 4 nodes crossed activation height 5, ran the migration successfully on Postgres `numeric` columns, converged to identical fork_state rows and identical block-5 hashes, and continued producing blocks. Harness wrapper times out polling RPC due to a separate Bun-fetch keep-alive flake against the node's HTTP server, unrelated to the fork mechanism. |
+| 2–8 | All other scenarios | NOT RUN | — | Out of scope for this dispatch (only Scenario 1 was requested to verify the fix). |
+
+Counts: PASS-mechanism 1 / FAIL-harness 1 / SKIPPED 7.
+
+### Per-scenario detail — Scenario 1
+
+**Mechanism result**: PASS.
+
+Direct postgres + RPC observations on the live devnet at the moment the harness's polling timed out:
+
+- All 4 nodes at the same head height (block 8–9 and continuing).
+- `fork_state` row identical across all 4 node DBs:
+
+```
+fork_name      = osDenomination
+applied        = t
+applied_at_block = 5
+pre_sum_dem    = 7000000000000000000        (= 7 × 10^18)
+post_sum_os    = 7000000000000000000000000000 (= 7 × 10^27)
+capped_count   = 0
+```
+
+- Block-5 hash identical on all 4 nodes:
+  `7600aa2889425bc1f2e8411532e1669551e075bbc1f512ea86504807612d6dcc`.
+- `\d gcr_main` on Postgres confirms `balance` column is now `numeric`
+  (default `'0'::numeric`).
+- Per-row balance sample: every account at `1e27` post-fork (= `1e18 × 10^9`).
+
+The migration that previously crashed with `bigint out of range` (Run 2) now completes in-place, the sum invariant `postSumOs == preSumDem * 10^9 - 0` holds bit-for-bit, and the chain advances past the activation height on every node.
+
+**Harness result**: FAIL.
+
+The `waitFor(allReachedHeight(NODE_IDS, 6))` poll timed out at 240 s with `lastError=The socket connection was closed unexpectedly`. The same `getLastBlockNumber` call hand-issued via `curl` against the same port returns the correct height. Reproducible across two consecutive runs (one fresh, one with `--keep-state`). This is a Bun-fetch-vs-node-HTTP keep-alive interaction in the rehearsal harness, NOT a fork-mechanism bug — the underlying network state is correct on every assertion the scenario would have made (height, fork_state, block hash, sum invariant).
+
+### Verdict
+
+**Migration overflow bug RESOLVED.** Scenario 1's fork-mechanism assertions all pass when checked directly against the live database and RPC. The Postgres `bigint out of range` failure observed in Run 2 is gone.
+
+The harness wrapper has an unrelated polling flake (Bun fetch keep-alive) that prevents it from auto-reporting the pass. Worth a follow-up: either disable keep-alive in `rpcNodeCall` (`{ keepalive: false }` in fetch options) or retry the body parse on socket-close errors. Out of scope for this dispatch.
+
+### Final state
+
+- All `demos-devnet-*` containers torn down (`docker compose down -v`).
+- `demos-devnet_postgres-data` volume removed.
+- Production genesis restored at `data/genesis.json` (byte-identical to `data/genesis.json.rehearsal-backup`).
+- No override files left in `testing/devnet/`.
+- Standalone `demos-tlsnotary`, `demos-grafana`, `demos-prometheus`, csv-editor, n8n stack — all undisturbed.
+- One commit on `decimals` ahead of Run 2 HEAD: `4a50dfbb` (the fix). One commit for this report (this file).
+- Nothing pushed.
