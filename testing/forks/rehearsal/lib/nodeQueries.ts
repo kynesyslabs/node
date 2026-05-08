@@ -41,6 +41,14 @@ export function dbForNode(nodeId: number): string {
  * Issues a `nodeCall` RPC. The devnet exposes a single HTTP endpoint
  * that dispatches by `params[0].message`.
  *
+ * Bun's fetch defaults to `keepalive: true`, which reuses TCP sockets
+ * across calls. The devnet node's HTTP server (raw `Bun.serve` with
+ * default keep-alive timeout) closes idle sockets faster than the
+ * harness's poll cadence reuses them, so a poll that arrives just as
+ * the server is closing the socket sees `socket connection was closed
+ * unexpectedly`. We disable keepalive on every RPC and retry once on
+ * the socket-close window to make polling robust.
+ *
  * @returns The unwrapped `response.response` payload from the node.
  */
 export async function rpcNodeCall<T = any>(
@@ -52,32 +60,99 @@ export async function rpcNodeCall<T = any>(
     const port = NODE_RPC_PORTS[nodeId]
     if (!port) throw new Error(`Unknown node id: ${nodeId}`)
     const url = `http://localhost:${port}`
-    const controller = new AbortController()
-    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs)
-    try {
-        const res = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                method: "nodeCall",
-                params: [{ message, ...extraParams }],
-            }),
-            signal: controller.signal,
-        })
-        if (!res.ok) {
-            throw new Error(
-                `RPC ${message} on node-${nodeId} returned HTTP ${res.status}`,
-            )
+    const body = JSON.stringify({
+        method: "nodeCall",
+        params: [{ message, ...extraParams }],
+    })
+
+    const attempt = async (): Promise<T> => {
+        const controller = new AbortController()
+        const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs)
+        try {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    // Belt-and-braces: even when Bun honours
+                    // `keepalive: false` we ask the server to close on
+                    // its side too (Bun issue #14538: keepalive is not
+                    // always respected by the fetch impl).
+                    Connection: "close",
+                },
+                body,
+                signal: controller.signal,
+                // Bun-specific: opt out of the connection-pool reuse.
+                keepalive: false,
+            } as RequestInit)
+            if (!res.ok) {
+                throw new Error(
+                    `RPC ${message} on node-${nodeId} returned HTTP ${res.status}`,
+                )
+            }
+            const parsed = (await res.json()) as {
+                response?: T | { response?: T }
+                result?: number | { response?: T }
+            }
+            // The devnet's nodeCall envelope is
+            //   { result: <httpStatus>, response: <handlerPayload>, ... }
+            // — `response` IS the payload. Older internal clients
+            // sometimes wrap the payload one level deeper; we accept
+            // both and unwrap iff the inner has a `.response` key. The
+            // pre-existing reader assumed the always-doubly-wrapped
+            // shape and silently returned `undefined` against the live
+            // node, which is why `getLastBlockNumber` reported 0 and
+            // every height poll timed out (Run 3 mis-diagnosed this as
+            // a pure socket-close flake; it is BOTH).
+            const r = parsed?.response
+            if (
+                r !== null &&
+                typeof r === "object" &&
+                "response" in (r as object)
+            ) {
+                return (r as { response: T }).response
+            }
+            return r as T
+        } finally {
+            clearTimeout(timeoutHandle)
         }
-        const body = (await res.json()) as { response?: { response?: T }; result?: { response?: T } }
-        // The on-the-wire envelope wraps the handler's response under
-        // `response.response`. Some clients see `result` instead — accept
-        // both.
-        const inner = body?.response?.response ?? body?.result?.response
-        return inner as T
-    } finally {
-        clearTimeout(timeoutHandle)
     }
+
+    // Retry on transient socket-close: each retry uses a fresh attempt
+    // (no shared socket / controller). Total of 4 tries with linear
+    // backoff is enough to clear the half-closed-pool window we hit on
+    // localhost devnet — see commit message for the upstream Bun bug.
+    let lastErr: unknown
+    const backoffsMs = [0, 200, 400, 800]
+    for (const wait of backoffsMs) {
+        if (wait > 0) {
+            await new Promise(r => setTimeout(r, wait))
+        }
+        try {
+            return await attempt()
+        } catch (e) {
+            lastErr = e
+            if (!isTransientSocketError(e)) throw e
+        }
+    }
+    throw lastErr
+}
+
+/**
+ * True for the Bun-fetch errors we observed when the node's HTTP server
+ * closes a keep-alive socket mid-request. We match on message text
+ * because Bun does not expose a stable error code/cause chain for
+ * these.
+ */
+function isTransientSocketError(e: unknown): boolean {
+    if (!(e instanceof Error)) return false
+    const msg = e.message.toLowerCase()
+    return (
+        msg.includes("socket connection was closed unexpectedly") ||
+        msg.includes("socket hang up") ||
+        msg.includes("connection closed") ||
+        msg.includes("econnreset") ||
+        msg.includes("fetch failed")
+    )
 }
 
 /** Fetches the latest block height a node has processed. */
