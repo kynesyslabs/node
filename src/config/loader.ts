@@ -213,8 +213,5 @@ export function loadConfig(): Readonly<AppConfig> {
         },
     }
 
-    console.log("TLSN exposed url: " + config.tlsnotary.exposedUrl)
-    process.exit(0)
-
     return deepFreeze(config)
 }
