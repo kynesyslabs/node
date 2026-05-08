@@ -8,10 +8,14 @@ NODE_DIR="$(dirname "${DEVNET_DIR}")"
 
 mkdir -p "${IDENTITIES_DIR}"
 
-echo "🔑 Generating devnet identities..."
+# Default to 4 identities; rehearsal scenarios that need a fresh joiner
+# can pass NODE_COUNT=5 (or any positive integer) to generate extras.
+NODE_COUNT="${NODE_COUNT:-4}"
 
-# Generate 4 identities using bun
-for i in 1 2 3 4; do
+echo "🔑 Generating devnet identities (count=${NODE_COUNT})..."
+
+# Generate identities using bun
+for i in $(seq 1 "${NODE_COUNT}"); do
 	echo "  Generating node${i} identity..."
 
 	# Use bun to generate mnemonic and derive pubkey
@@ -35,6 +39,6 @@ done
 rm -f /tmp/identity_*.txt
 
 echo ""
-echo "✅ Generated 4 identities in ${IDENTITIES_DIR}"
+echo "✅ Generated ${NODE_COUNT} identities in ${IDENTITIES_DIR}"
 echo ""
 echo "Next: Run ./scripts/generate-peerlist.sh to create demos_peerlist.json"

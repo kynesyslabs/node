@@ -15,42 +15,60 @@ NODE1_PORT=${NODE1_PORT:-53551}
 NODE2_PORT=${NODE2_PORT:-53553}
 NODE3_PORT=${NODE3_PORT:-53555}
 NODE4_PORT=${NODE4_PORT:-53557}
+NODE5_PORT=${NODE5_PORT:-53559}
 
-echo "📋 Generating devnet peerlist..."
+# NODE_COUNT mirrors generate-identities.sh — use 5 for the rehearsal
+# fresh-joiner scenario, 4 for the default 4-node devnet.
+NODE_COUNT="${NODE_COUNT:-4}"
 
-# Check if identities exist
-for i in 1 2 3 4; do
+# Map index → exposed port for the peerlist body. Add new entries here if
+# NODE_COUNT grows beyond 5.
+get_port() {
+	case "$1" in
+		1) echo "${NODE1_PORT}" ;;
+		2) echo "${NODE2_PORT}" ;;
+		3) echo "${NODE3_PORT}" ;;
+		4) echo "${NODE4_PORT}" ;;
+		5) echo "${NODE5_PORT}" ;;
+		*) echo "❌ Unknown node index $1" >&2 && exit 1 ;;
+	esac
+}
+
+echo "📋 Generating devnet peerlist (count=${NODE_COUNT})..."
+
+# Check identities exist
+for i in $(seq 1 "${NODE_COUNT}"); do
 	if [[ ! -f "${IDENTITIES_DIR}/node${i}.pubkey" ]]; then
-		echo "❌ Missing identity for node${i}. Run ./scripts/generate-identities.sh first."
+		echo "❌ Missing identity for node${i}. Run ./scripts/generate-identities.sh (with NODE_COUNT=${NODE_COUNT}) first."
 		exit 1
 	fi
 done
 
-# Read pubkeys
-PUBKEY1=$(cat "${IDENTITIES_DIR}/node1.pubkey")
-PUBKEY2=$(cat "${IDENTITIES_DIR}/node2.pubkey")
-PUBKEY3=$(cat "${IDENTITIES_DIR}/node3.pubkey")
-PUBKEY4=$(cat "${IDENTITIES_DIR}/node4.pubkey")
-
-# Generate peerlist JSON with Docker service names
-# Inside Docker network, nodes communicate via service names
-cat >"${DEVNET_DIR}/demos_peerlist.json" <<EOF
+# Build peerlist body line-by-line so adding nodes stays trivial.
+PEERLIST_FILE="${DEVNET_DIR}/demos_peerlist.json"
 {
-    "${PUBKEY1}": "http://node-1:${NODE1_PORT}",
-    "${PUBKEY2}": "http://node-2:${NODE2_PORT}",
-    "${PUBKEY3}": "http://node-3:${NODE3_PORT}",
-    "${PUBKEY4}": "http://node-4:${NODE4_PORT}"
-}
-EOF
+	echo "{"
+	for i in $(seq 1 "${NODE_COUNT}"); do
+		PUBKEY=$(cat "${IDENTITIES_DIR}/node${i}.pubkey")
+		PORT=$(get_port "${i}")
+		# trailing comma on every line except the last
+		if [[ "${i}" -lt "${NODE_COUNT}" ]]; then
+			echo "    \"${PUBKEY}\": \"http://node-${i}:${PORT}\","
+		else
+			echo "    \"${PUBKEY}\": \"http://node-${i}:${PORT}\""
+		fi
+	done
+	echo "}"
+} >"${PEERLIST_FILE}"
 
 echo ""
 echo "✅ Generated demos_peerlist.json:"
 echo ""
-cat "${DEVNET_DIR}/demos_peerlist.json"
+cat "${PEERLIST_FILE}"
 echo ""
 echo ""
 echo "Nodes will discover each other via Docker DNS:"
-echo "  node-1 → http://node-1:${NODE1_PORT}"
-echo "  node-2 → http://node-2:${NODE2_PORT}"
-echo "  node-3 → http://node-3:${NODE3_PORT}"
-echo "  node-4 → http://node-4:${NODE4_PORT}"
+for i in $(seq 1 "${NODE_COUNT}"); do
+	PORT=$(get_port "${i}")
+	echo "  node-${i} → http://node-${i}:${PORT}"
+done
