@@ -21,6 +21,7 @@ import {
     runOsDenominationMigration,
 } from "@/forks/migrations/osDenomination"
 import { isForkActive } from "@/forks/forkGates"
+import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
 
 export function isGenesis(block: Block): boolean {
@@ -223,8 +224,13 @@ export async function insertBlock(
                 // roll back. Idempotency is enforced by `fork_state`.
                 //
                 // No-op when the fork is inactive (default in production:
-                // activationHeight === null in DEFAULT_FORK_CONFIG).
+                // activationHeight === null in DEFAULT_FORK_CONFIG) OR when
+                // the rehearsal-only `DEMOS_DISABLE_FORK_MACHINERY` flag is
+                // set (used to simulate a pre-fork binary without
+                // maintaining a separate branch). Production must NEVER
+                // set that flag.
                 if (
+                    !isForkMachineryDisabled() &&
                     isForkActive("osDenomination", block.number) &&
                     !(await isOsDenominationMigrationApplied(
                         transactionalEntityManager,
