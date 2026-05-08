@@ -129,7 +129,9 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
             let nodeHost = "localhost"
             const wsScheme = (() => {
                 try {
-                    const exposedUrl = getSharedState.exposedUrl
+                    const exposedUrl =
+                        Config.getInstance().tlsnotary.exposedUrl ||
+                        getSharedState.exposedUrl
                     if (exposedUrl) {
                         const url = new URL(exposedUrl)
                         nodeHost = url.hostname

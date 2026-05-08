@@ -111,6 +111,7 @@ export function loadConfig(): Readonly<AppConfig> {
         tlsnotary: {
             enabled: envBool(EnvKey.TLSNOTARY_ENABLED, d.tlsnotary.enabled),
             host: envStr(EnvKey.TLSNOTARY_HOST, d.tlsnotary.host),
+            exposedUrl: envStr(EnvKey.TLSNOTARY_EXPOSED_URL, d.tlsnotary.exposedUrl),
             port: envInt(EnvKey.TLSNOTARY_PORT, d.tlsnotary.port),
             signingKey: envStr(EnvKey.TLSNOTARY_SIGNING_KEY, d.tlsnotary.signingKey),
             fatal: envBool(EnvKey.TLSNOTARY_FATAL, d.tlsnotary.fatal),
@@ -211,6 +212,9 @@ export function loadConfig(): Readonly<AppConfig> {
             apiPort: envInt(EnvKey.IPFS_API_PORT, d.ipfs.apiPort),
         },
     }
+
+    console.log("TLSN exposed url: " + config.tlsnotary.exposedUrl)
+    process.exit(0)
 
     return deepFreeze(config)
 }
