@@ -53,6 +53,22 @@ import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
 const NODE_IDS = [1, 2, 3, 4]
 const ACTIVATION_HEIGHT = 5
 
+/**
+ * Coerce a pg-returned `applied_at` value to epoch milliseconds. The pg
+ * driver may hydrate `TIMESTAMPTZ` columns to either a JS `Date` (default
+ * type parser) or an ISO string (when selected as text). We accept both
+ * shapes and collapse to a wall-clock-comparable number so the
+ * idempotency assertion does not fire on object-identity differences.
+ */
+function toEpochMs(value: string | Date): number {
+    if (value instanceof Date) return value.getTime()
+    const parsed = Date.parse(value)
+    if (Number.isNaN(parsed)) {
+        throw new Error(`Unparseable applied_at value: ${String(value)}`)
+    }
+    return parsed
+}
+
 async function scenario(ctx: ScenarioContext): Promise<void> {
     regenerateIdentities(4)
     stageGenesis(GENESIS_FORK_LOW)
@@ -112,7 +128,17 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     const fsAfter = await getForkStateRow(4)
     if (!fsAfter) throw new Error("fork_state row missing on node-4 post-restart")
     if (!fsAfter.applied) throw new Error("fork_state.applied=false post-restart")
-    if (fsAfter.applied_at !== fsBefore.applied_at) {
+    // The pg driver hydrates `TIMESTAMPTZ` columns into JS `Date` instances,
+    // so a naive `!==` always compares object identity and is *always* true
+    // even when the wall-clock matches. The migration writes `applied_at`
+    // via `new Date().toISOString()`, but on read we may also see a string
+    // depending on the driver path (e.g. when columns are selected via
+    // `*::text`). Coerce to a stable wall-clock representation before
+    // comparing — `.getTime()` for Dates, ISO string parse for strings —
+    // so the assertion correctly proves the timestamp did NOT change.
+    const beforeMs = toEpochMs(fsBefore.applied_at)
+    const afterMs = toEpochMs(fsAfter.applied_at)
+    if (beforeMs !== afterMs) {
         throw new Error(
             "fork_state.applied_at changed across restart: " +
                 `before=${fsBefore.applied_at} after=${fsAfter.applied_at}` +

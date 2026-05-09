@@ -235,7 +235,14 @@ export interface ForkStateRow {
     fork_name: string
     applied: boolean
     applied_at_block: string | number
-    applied_at: string
+    /**
+     * Pg-driver-hydrated value: `TIMESTAMPTZ` is parsed to a JS `Date` by
+     * the default `pg` type parser, but appears as an ISO string when
+     * cast to text in SQL (e.g. for forensics tooling). Both shapes are
+     * accepted; consumers should coerce to a stable representation
+     * before comparing — see scenario 8's `toEpochMs` helper.
+     */
+    applied_at: string | Date
     pre_sum_dem: string
     post_sum_os: string
     gcr_v2_row_count: number | string
