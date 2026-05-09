@@ -17,14 +17,68 @@ import type { ForkConfig, ForkName } from "./forkConfig"
  *
  * Truthy values: "true", "1", "yes" (case-insensitive). Anything else
  * (including unset) is treated as false.
+ *
+ * **Production guard** (myc#82, GH#3213217875): a misconfigured production
+ * validator with this flag set silently skips both the genesis fork
+ * loader and the block-N migration hook, causing a consensus split when
+ * peers cross the activation height. To surface that misconfiguration as
+ * a hard failure rather than a warning easily missed in noisy startup
+ * logs, when `NODE_ENV === 'production'` AND this function is about to
+ * return `true` we:
+ *
+ *  1. Emit a `log.error` line that explicitly names the consensus-split
+ *     risk and the variable that must be unset.
+ *  2. Throw a fatal `Error` so the node refuses to boot — UNLESS the
+ *     operator also sets `DEMOS_REHEARSAL=true`, which is the documented
+ *     opt-in escape hatch for the rehearsal harness when it
+ *     intentionally runs against a production-shaped image (NODE_ENV is
+ *     `development` for the harness today, but the escape hatch lets a
+ *     future operator pin `NODE_ENV=production` for a production-image
+ *     rehearsal without bricking the node).
+ *
+ * The pre-flight checklist in `RUNBOOK_FORK_ACTIVATION.md` is updated to
+ * grep `DEMOS_DISABLE_FORK_MACHINERY` in env files / docker-compose so
+ * this guard is the second line of defence, not the first.
  */
 export function isForkMachineryDisabled(): boolean {
     const raw = process.env.DEMOS_DISABLE_FORK_MACHINERY
     if (!raw) return false
     const normalized = raw.trim().toLowerCase()
-    return (
+    const disabled =
         normalized === "true" || normalized === "1" || normalized === "yes"
-    )
+    if (!disabled) return false
+
+    // Hard guard against production accidents.
+    if (process.env.NODE_ENV === "production") {
+        const rehearsalOptIn = (process.env.DEMOS_REHEARSAL ?? "")
+            .trim()
+            .toLowerCase()
+        const isRehearsalOptIn =
+            rehearsalOptIn === "true" ||
+            rehearsalOptIn === "1" ||
+            rehearsalOptIn === "yes"
+
+        log.error(
+            "[FORKS] DEMOS_DISABLE_FORK_MACHINERY is set in a NODE_ENV=" +
+                "production context. This DISABLES the genesis fork loader " +
+                "and the block-N migration hook, which will cause a " +
+                "consensus split the moment peers cross the fork activation " +
+                "height. Unset DEMOS_DISABLE_FORK_MACHINERY immediately " +
+                "(or set DEMOS_REHEARSAL=true if this is a deliberate " +
+                "production-image rehearsal). See RUNBOOK_FORK_ACTIVATION.md.",
+        )
+
+        if (!isRehearsalOptIn) {
+            throw new Error(
+                "[FORKS] Refusing to boot: DEMOS_DISABLE_FORK_MACHINERY is " +
+                    "set in NODE_ENV=production without DEMOS_REHEARSAL=true " +
+                    "opt-in. This combination would cause a consensus split " +
+                    "across the fork activation height. Unset " +
+                    "DEMOS_DISABLE_FORK_MACHINERY before restarting.",
+            )
+        }
+    }
+    return true
 }
 
 /**
