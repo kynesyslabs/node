@@ -107,6 +107,39 @@ P4 publish gate. User to:
 ### Next: P5
 Node bumps SDK pin to `3.0.0-rc.1` (exact pin, escape caret), sets testnet `forks.osDenomination.activationHeight`, runs testnet through fork height. First real integration test of the dual-format pipeline.
 
+## Session 15 (2026-05-09, P5b + P5c complete — ready to ship)
+
+### State
+- **Epic #7 (P5b rehearsal)** fully closed: 4/4 tasks done, all 8 rehearsal scenarios PASS in Run 5.
+- **Epic #8 (P5c runbook)** fully closed: 2/2 tasks done. RUNBOOK_FORK_ACTIVATION.md (2293 words, evidence-cited) and `testing/forks/preflight.ts` (197 lines, exits 1 on validator-unready).
+- Branch `decimals` is 28 commits ahead of origin. Nothing pushed.
+
+### What's empirically validated
+- Fork mechanism works on real Postgres at production-genesis magnitude (gcr_main.balance widened to numeric in P5a fix)
+- All 4 validators converge on identical block-N hashes
+- Fresh validator joins post-fork and replays through fork via Sync.ts → Chain.insertBlock → migration hook (Run 5 Scenario 3, the load-bearing one)
+- Cap policy fires loudly with `[forks][osDenomination] CAP applied: account=<addr>` log when triggered
+- Idempotent across crash + restart (fork_state.applied flag prevents re-run)
+- Genesis-hash invariance: adding `forks` field to genesis.json doesn't change BlockContent hash (Run 5 Scenario 4)
+
+### Two operational notes uncovered during P5c
+1. **No `bun run build` script in package.json** — runbook's §2 prerequisites mention it but it doesn't exist. Closest artifact is `tsconfig.tsbuildinfo`. Pre-flight script uses its mtime as freshness signal. Worth aligning runbook on next pass.
+2. **Env var inconsistency**: rehearsal harness uses `POSTGRES_USER` etc.; production node uses `PG_USER`. Pre-flight script uses production names. Operators should be aware when configuring.
+
+### What's missing to merge
+The migration is implementation-complete and validated. Remaining work is operational, not engineering:
+1. Open PR for `decimals` → `main` (or whatever the merge target is)
+2. Pick a fork height N (per runbook §3 framework)
+3. Validators run pre-flight script, confirm all-green
+4. Update each validator's `data/genesis.json` with the agreed N
+5. Coordinate restarts at T-1h
+6. Observe block N crossing per runbook §4
+
+### Closed Mycelium tasks
+- #71, #72, #73, #74 all closed in this session
+- Epic #7 + Epic #8 both at 0 open tasks
+- Epic #3 (master DEM→OS migration) still has tasks #23-#27 (P4-P8) open as bookkeeping; P4-P5 are functionally done (closing those tomorrow as cleanup)
+
 ## Session 12 (2026-05-06, P3 fully complete — switching to SDK side)
 
 ### State
