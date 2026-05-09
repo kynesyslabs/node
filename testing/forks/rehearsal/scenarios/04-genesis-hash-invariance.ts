@@ -124,13 +124,30 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
                 `pre=${preGenesisHash} post=${postGenesisHash}`,
         )
 
-        await sleep(15_000)
+        // myc#86, GH#3213220473: the previous assertion was a fixed-sleep
+        // followed by `postPostTip >= preTip`, which silently passes even
+        // if node-1 never advances after the genesis swap (the `>=` is
+        // satisfied by the prior tip alone). Replace with a bounded
+        // `waitFor` polling for *strict* progress so a stuck node fails
+        // loud, then assert strict inequality.
+        await waitFor(
+            async () => {
+                const tip = await getLastBlockNumber(1).catch(() => -1)
+                return tip > preTip ? tip : null
+            },
+            {
+                description:
+                    `node-1 advances strictly past pre-swap tip ${preTip}`,
+                timeoutMs: 60_000,
+                intervalMs: 2_000,
+            },
+        )
         const postPostTip = await getLastBlockNumber(1)
         assert(
-            postPostTip >= preTip,
-            `node-1 head regressed: pre=${preTip} post=${postPostTip}`,
+            postPostTip > preTip,
+            `node-1 head did not advance: pre=${preTip} post=${postPostTip}`,
         )
-        ctx.notes.push(`final tip: ${postPostTip} (expected >= ${preTip})`)
+        ctx.notes.push(`final tip: ${postPostTip} (expected > ${preTip})`)
     } finally {
         clearOverride(SCENARIO_ID)
         // Touch `compose` to silence the unused import in some builds.

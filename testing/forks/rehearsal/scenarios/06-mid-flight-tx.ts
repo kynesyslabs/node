@@ -104,6 +104,20 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     )
     const preStr = preBalances.map(([id, b]) => `node-${id}=${String(b)}`).join(", ")
     ctx.notes.push(`pre-fork balances of recipient: ${preStr}`)
+    // myc#86, GH#3213220475: previously the test caught RPC errors to `null`
+    // and only asserted cross-node equality of those nulls — meaning "all
+    // nodes failed" silently passed the test. Now we explicitly require
+    // every node to have produced a non-null balance before checking
+    // cross-node equality.
+    for (const [id, balance] of preBalances) {
+        if (balance === null || balance === undefined) {
+            throw new Error(
+                `node-${id} pre-fork getAddressInfo returned null/undefined ` +
+                    "for the recipient — RPC error or missing account, " +
+                    "cannot verify cross-node consistency.",
+            )
+        }
+    }
     const uniquePre = new Set(preBalances.map(([, b]) => String(b)))
     if (uniquePre.size !== 1) {
         throw new Error(
@@ -157,6 +171,18 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     )
     const postStr = postBalances.map(([id, b]) => `node-${id}=${String(b)}`).join(", ")
     ctx.notes.push(`post-fork balances of recipient: ${postStr}`)
+    // Same null-trap fix as the pre-fork branch above (myc#86,
+    // GH#3213220475): require every node to have produced a balance
+    // before asserting cross-node equality.
+    for (const [id, balance] of postBalances) {
+        if (balance === null || balance === undefined) {
+            throw new Error(
+                `node-${id} post-fork getAddressInfo returned null/undefined ` +
+                    "for the recipient — RPC error or missing account, " +
+                    "cannot verify cross-node consistency.",
+            )
+        }
+    }
     const uniquePost = new Set(postBalances.map(([, b]) => String(b)))
     if (uniquePost.size !== 1) {
         throw new Error(

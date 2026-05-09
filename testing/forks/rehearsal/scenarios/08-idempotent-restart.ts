@@ -107,11 +107,20 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     startService("node-4")
 
     // Wait for node-4 to come back and reach roughly the peer tip.
+    // myc#86, GH#3213220476: the previous predicate computed
+    // `Math.min(...tips.slice(0, 3))` directly — any peer lookup failure
+    // yielded -1, which made `peerTip = -1` and degenerated the check to
+    // `node4 >= ACTIVATION_HEIGHT`, masking peer outages. Filter out
+    // negative tips first; if any of the 4 lookups failed, return false
+    // so the poll keeps trying until every node responds.
     await waitFor(
         async () => {
             const tips = await Promise.all(
                 NODE_IDS.map(id => getLastBlockNumber(id).catch(() => -1)),
             )
+            // Bail early if any node failed to respond — the poll will
+            // retry. A successful predicate must observe ALL nodes.
+            if (tips.some(t => t < 0)) return false
             const peerTip = Math.min(...tips.slice(0, 3))
             const node4 = tips[3]
             return node4 >= peerTip - 2 && node4 >= ACTIVATION_HEIGHT

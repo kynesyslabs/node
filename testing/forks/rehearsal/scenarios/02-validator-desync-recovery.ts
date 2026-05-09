@@ -62,81 +62,87 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     regenerateIdentities(4)
     stageGenesis(GENESIS_FORK_LOW)
 
-    // Phase A: bring up all 4, with the disable flag on node-4.
-    writeOverride(
-        SCENARIO_ID,
-        envOverrideYaml({
-            "node-4": { DEMOS_DISABLE_FORK_MACHINERY: "true" },
-        }),
-    )
-    composeWithOverride(SCENARIO_ID, ["up", "-d", "--build"])
-
-    // Wait for nodes 1-3 to cross the fork.
-    await waitFor(
-        async () => allReachedHeight(HEALTHY_NODES, ACTIVATION_HEIGHT + 1),
-        {
-            description: `nodes 1-3 reach height >= ${ACTIVATION_HEIGHT + 1}`,
-            timeoutMs: 240_000,
-            intervalMs: 2_000,
-        },
-    )
-    ctx.notes.push("nodes 1-3 crossed fork")
-
-    // Verify node-4 is stuck at < activation height.
-    // Give it 30 seconds to attempt sync and fail.
-    await sleep(30_000)
-    const node4Tip = await getLastBlockNumber(4).catch(() => -1)
-    ctx.notes.push(`node-4 tip after 30s post-fork: ${node4Tip}`)
-
-    // Loud-error check: node-4's log should contain something explicit.
-    const node4Logs = logs("node-4", 800)
-    if (!LOUD_ERROR_REGEX.test(node4Logs)) {
-        throw new Error(
-            "Expected node-4 to log a loud error (hash/sig/fork/migration); " +
-                "found nothing matching. Sample:\n" +
-                node4Logs.slice(-2_000),
+    try {
+        // Phase A: bring up all 4, with the disable flag on node-4.
+        writeOverride(
+            SCENARIO_ID,
+            envOverrideYaml({
+                "node-4": { DEMOS_DISABLE_FORK_MACHINERY: "true" },
+            }),
         )
-    }
-    ctx.notes.push("node-4 logged a loud failure as expected (Phase A)")
+        composeWithOverride(SCENARIO_ID, ["up", "-d", "--build"])
 
-    // Phase B: stop node-4, wipe DB, drop the flag, restart.
-    composeWithOverride(SCENARIO_ID, ["stop", "node-4"])
-    await dropAndRecreateNodeDb(4)
-    writeOverride(
-        SCENARIO_ID,
-        envOverrideYaml({ "node-4": { DEMOS_DISABLE_FORK_MACHINERY: "" } }),
-    )
-    composeWithOverride(SCENARIO_ID, ["up", "-d", "--build", "node-4"])
+        // Wait for nodes 1-3 to cross the fork.
+        await waitFor(
+            async () => allReachedHeight(HEALTHY_NODES, ACTIVATION_HEIGHT + 1),
+            {
+                description: `nodes 1-3 reach height >= ${ACTIVATION_HEIGHT + 1}`,
+                timeoutMs: 240_000,
+                intervalMs: 2_000,
+            },
+        )
+        ctx.notes.push("nodes 1-3 crossed fork")
 
-    // Wait for node-4 to catch up to the rest of the network.
-    await waitFor(
-        async () => {
-            const tips = await Promise.all(
-                ALL_NODES.map(async id => [id, await getLastBlockNumber(id).catch(() => -1)] as const),
+        // Verify node-4 is stuck at < activation height.
+        // Give it 30 seconds to attempt sync and fail.
+        await sleep(30_000)
+        const node4Tip = await getLastBlockNumber(4).catch(() => -1)
+        ctx.notes.push(`node-4 tip after 30s post-fork: ${node4Tip}`)
+
+        // Loud-error check: node-4's log should contain something explicit.
+        const node4Logs = logs("node-4", 800)
+        if (!LOUD_ERROR_REGEX.test(node4Logs)) {
+            throw new Error(
+                "Expected node-4 to log a loud error (hash/sig/fork/migration); " +
+                    "found nothing matching. Sample:\n" +
+                    node4Logs.slice(-2_000),
             )
-            const peerTip = Math.min(...tips.filter(([id]) => id !== 4).map(([, t]) => t))
-            const node4 = tips.find(([id]) => id === 4)?.[1] ?? -1
-            return node4 >= peerTip - 2 && node4 >= ACTIVATION_HEIGHT + 1
-        },
-        {
-            description: "node-4 catches up to peer tip after wipe",
-            timeoutMs: 300_000,
-            intervalMs: 3_000,
-        },
-    )
-    ctx.notes.push("node-4 caught up after wipe")
+        }
+        ctx.notes.push("node-4 logged a loud failure as expected (Phase A)")
 
-    // Convergence: fork_state and block hashes match.
-    const fs = await assertForkStateConvergence(ALL_NODES)
-    ctx.notes.push(
-        "fork_state on all 4 nodes converged " +
-            `(applied_at_block=${fs.applied_at_block}, capped=${fs.capped_count})`,
-    )
-    const h = await assertBlockHashConvergence(ALL_NODES, ACTIVATION_HEIGHT)
-    ctx.notes.push(`block ${ACTIVATION_HEIGHT} hash converged: ${h}`)
+        // Phase B: stop node-4, wipe DB, drop the flag, restart.
+        composeWithOverride(SCENARIO_ID, ["stop", "node-4"])
+        await dropAndRecreateNodeDb(4)
+        writeOverride(
+            SCENARIO_ID,
+            envOverrideYaml({ "node-4": { DEMOS_DISABLE_FORK_MACHINERY: "" } }),
+        )
+        composeWithOverride(SCENARIO_ID, ["up", "-d", "--build", "node-4"])
 
-    assert(true, "Phase B converged")
-    clearOverride(SCENARIO_ID)
+        // Wait for node-4 to catch up to the rest of the network.
+        await waitFor(
+            async () => {
+                const tips = await Promise.all(
+                    ALL_NODES.map(async id => [id, await getLastBlockNumber(id).catch(() => -1)] as const),
+                )
+                const peerTip = Math.min(...tips.filter(([id]) => id !== 4).map(([, t]) => t))
+                const node4 = tips.find(([id]) => id === 4)?.[1] ?? -1
+                return node4 >= peerTip - 2 && node4 >= ACTIVATION_HEIGHT + 1
+            },
+            {
+                description: "node-4 catches up to peer tip after wipe",
+                timeoutMs: 300_000,
+                intervalMs: 3_000,
+            },
+        )
+        ctx.notes.push("node-4 caught up after wipe")
+
+        // Convergence: fork_state and block hashes match.
+        const fs = await assertForkStateConvergence(ALL_NODES)
+        ctx.notes.push(
+            "fork_state on all 4 nodes converged " +
+                `(applied_at_block=${fs.applied_at_block}, capped=${fs.capped_count})`,
+        )
+        const h = await assertBlockHashConvergence(ALL_NODES, ACTIVATION_HEIGHT)
+        ctx.notes.push(`block ${ACTIVATION_HEIGHT} hash converged: ${h}`)
+
+        assert(true, "Phase B converged")
+    } finally {
+        // myc#86, GH#3213220471: previously `clearOverride` was only called
+        // on the happy path. On any failure the compose env override leaked
+        // into subsequent scenarios. Always clear in `finally`.
+        clearOverride(SCENARIO_ID)
+    }
 }
 
 await runScenarioCli("02-validator-desync-recovery", scenario)
