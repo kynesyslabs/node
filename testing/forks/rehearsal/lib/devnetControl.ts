@@ -64,12 +64,20 @@ export const GENESIS_FORK_OVERFLOW = resolve(
  * Note: we use `spawnSync` for ergonomic top-to-bottom scripts. Wall
  * time is dominated by container boot/teardown, not Node IPC, so the
  * blocking model is fine and dramatically simplifies error handling.
+ *
+ * `maxBuffer` is bumped to 64 MiB to accommodate `docker compose logs`
+ * with no `--tail`: a multi-minute scenario can easily produce >1 MiB
+ * of node logs and the default 1 MiB cap manifests as the child being
+ * killed mid-stream (exit 130). Scenarios that need the full buffer
+ * (only scenario 5's CAP-applied scrape today) call `logsFull()` which
+ * routes through this same helper.
  */
 export function compose(args: string[], opts: { allowFail?: boolean } = {}): string {
     const result = spawnSync("docker", ["compose", ...args], {
         cwd: DEVNET_DIR,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
+        maxBuffer: 64 * 1024 * 1024,
     })
     if (result.status !== 0 && !opts.allowFail) {
         const out = result.stdout ?? ""
