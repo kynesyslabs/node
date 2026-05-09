@@ -496,3 +496,95 @@ None. Two harness false-positives encountered; neither was a real fork-mechanism
 - Standalone `demos-tlsnotary`, `demos-grafana`, `demos-prometheus`, csv-editor, n8n stack, host postgres — all undisturbed.
 - Two commits on `decimals` ahead of Run 3 HEAD: `1112c776` (Part 1 harness fix) + the commit for this report.
 - Nothing pushed.
+
+---
+
+## Run 5 (after harness bug fixes) — 2026-05-09
+
+### Environment
+
+- **Date/time**: 2026-05-09, ~12:00-13:30 CEST.
+- **Host OS**: Darwin 25.2.0 (macOS).
+- **Docker**: v28.4.0.
+- **Bun**: v1.3.6.
+- **Repo**: `/Users/tcsenpai/kynesys/node/`, branch `decimals` at HEAD `5ecd8c35` (the maxBuffer fix). Four commits ahead of Run 4 HEAD; one more commit will follow for this report.
+- **Standalone `demos-tlsnotary`**: still up on host port 7047, undisturbed.
+- **Rehearsal env vars used**: `TLSNOTARY_HOST_PORT=7048` (from `testing/devnet/.env`), `POSTGRES_HOST_PORT=5532` (passed inline to bun + present in `.env`).
+
+### Fixes shipped between Run 4 and Run 5
+
+Three commits, scoped per the dispatch:
+
+1. **`76e8bacb` — fix(rehearsal): scenario 8 Date comparison via getTime().** The pg driver hydrates `TIMESTAMPTZ` to a JS `Date`; comparing two `Date` instances with `!==` is always true regardless of wall-clock equality. Added a small `toEpochMs(value: string | Date)` helper in scenario 8 that returns `Date#getTime()` for `Date` instances and `Date.parse(...)` for strings, so the assertion only fires when wall-clocks actually differ. The `ForkStateRow.applied_at` type was widened to `string | Date` to match the driver's actual return shape.
+2. **`b64fd647` — fix(rehearsal): scenario 5 cap policy seeding race + add overflow genesis fixture.** Created `testing/forks/rehearsal/genesis/genesis-fork-overflow.json` with `activationHeight=10` (vs `genesis-fork-low.json`'s 5), explicitly documented in the fixture as the wider-window genesis for cap-policy seeding. Switched scenario 5 to use it. Tightened the seed precondition to `tip < ACTIVATION_HEIGHT - 3`. `seedCapOverflowFixture` now does verify-after-seed (Option ii in the dispatch) — after the INSERT round-trip, it polls `getLegacyGcrBalance` per node until the row is observable (250 ms cadence, 30 s ceiling). `getLegacyGcrBalance` is a new read helper in `nodeQueries.ts`.
+3. **`59456c01` — fix(rehearsal): scenario 5 use full log buffer for CAP applied scrape.** Empirical follow-up: scenario 5 reached the right `fork_state` (capped_count=1, total_value_lost_os=1893520670733108) but the harness still failed because `logs("node-1", 800)` returned the most recent 800 lines, far past the CAP banner emitted near activation height. A multi-minute devnet run easily produces 100k+ log lines. Added `logsFull(service)` to `devnetControl.ts` — `docker compose logs` with no `--tail` truncation — and used it for the cap-applied scrape.
+4. **`5ecd8c35` — fix(rehearsal): bump compose() maxBuffer to 64 MiB for full log scrapes.** Sibling fix to commit (3): the first `logsFull` call manifested as `docker compose logs --no-color node-1 failed (exit 130)` because `spawnSync`'s default `maxBuffer` is 1 MiB and the log stream exceeds that easily. Bumped `maxBuffer` to 64 MiB for every compose invocation. Synchronous, short-lived helper, so the larger ceiling is cheap.
+
+The dispatch allowed splitting commit 2 if the seeding fix were independent of the fixture — they share the same logical change, so they were kept together. Commits 3 and 4 were caught after the first `keep-state` run revealed the log-buffer limitations and are scoped to scenario 5's loud-cap assertion.
+
+### Summary table
+
+| # | Scenario | Status | Runtime | Notes |
+|---|---|---|---|---|
+| 1 | All-validators-cross-fork (smoke) | PASS | 166.2 s | Clean re-pass; no regression from harness changes. |
+| 2 | Validator desync recovery | PASS | 176.6 s | No regression. |
+| 3 | Fresh node post-fork (load-bearing) | PASS | 414.6 s | No regression. Static-trace still survives contact with Postgres + peer sync. |
+| 4 | Genesis-hash invariance | PASS | 111.5 s | No regression. |
+| 5 | Cap policy fires loud | PASS | 213.6 s (first PASS), 188.7 s (second PASS) | Fixed. `fork_state.capped_count=1`, `total_value_lost_os=1893520670733108` (matches the SQLite unit-test value bit-for-bit). Cap-on-Postgres rehearsed end-to-end for the first time. |
+| 6 | Mid-flight transactions | PASS | 183.8 s | No regression. |
+| 7 | Sum invariant audit | PASS | 160.1 s | No regression. |
+| 8 | Idempotent restart | PASS | 124.8 s (first PASS), 122.8 s (re-run after all others) | Fixed. Date comparison via `getTime()` no longer false-positives. |
+
+Counts: PASS 8 / FAIL 0 / SKIPPED 0 / ERROR 0 / TIMEOUT 0.
+
+### Per-scenario detail (scenarios 5 and 8 only — others were verbatim re-passes)
+
+#### Scenario 8 — PASS (was the Run 4 false positive)
+
+After commit `76e8bacb`, `applied_at` snapshots from before/after the ungraceful crash are coerced to epoch milliseconds before comparison. The migration writes `applied_at` once during the original cross-fork; the post-restart read returns the same wall-clock, so `beforeMs === afterMs` and the assertion does not fire. Mechanism (idempotency) confirmed correct on Postgres for the first time end-to-end. The harness's earlier `!==` on Date objects was fundamentally broken — every prior run that "passed" idempotency was actually being asked the wrong question.
+
+#### Scenario 5 — PASS (cap-on-Postgres rehearsed for the first time)
+
+After commits `b64fd647`, `59456c01`, `5ecd8c35`:
+
+- `genesis-fork-overflow.json` (act=10) gives the harness ~9 blocks of pre-fork lead time at CONSENSUS_TIME=10 — well over a minute. `seedCapOverflowFixture` returns only after every node observes the seed via a fresh SELECT.
+- Migration fires at block 10. Per-node `fork_state` rows agree:
+  ```
+  fork_name           = osDenomination
+  applied             = t
+  applied_at_block    = 10
+  capped_count        = 1
+  total_value_lost_os = 1893520670733108
+  ```
+- Legacy GCR row is correctly capped: `details.content.balance = 8106479329266892` (= LEGACY_NUMBER_CAP). Pre-cap value was `10_000_000 × 10^9 = 10^16`; cap floors it at `MAX_SAFE_INTEGER × 0.9 = 8106479329266892`. The post-cap forensic value matches the SQLite unit-test value bit-for-bit (`testing/forks/migrations/osDenomination.test.ts` logs `valueLostOs=1893520670733108`).
+- Sum invariant holds: `Σ(post) = Σ(pre) × 10^9 - total_value_lost_os` on every node.
+- Network advances ≥ 30 s past the cap event, no stall.
+
+This is the only rehearsal scenario whose mechanism had not been confirmed end-to-end on real Postgres before Run 5. SQLite unit-test parity gave high confidence; the rehearsal now closes that gap.
+
+### Verdict
+
+**P5b rehearsal complete; 8/8 scenarios PASS on real Postgres + real peer sync; harness no longer produces false positives.**
+
+The two Run 4 false positives are resolved at the harness layer without touching the fork mechanism. Cap-on-Postgres is now rehearsed end-to-end and matches the SQLite unit-test forensic values exactly.
+
+P5b is signed off. Ready for P5c (runbook).
+
+### STOP condition hit
+
+None.
+
+### Time spent
+
+~70 minutes total (~5 min reading the bugs, ~10 min implementing the two harness fixes, ~10 min on the empirical follow-up fixes for log-buffer and maxBuffer, ~40 min for the all-8 scenario run, ~5 min cleanup + writeup).
+
+### Final state
+
+- All `demos-devnet-*` containers torn down (`docker compose down -v`).
+- `demos-devnet_postgres-data` volume removed.
+- Production genesis restored at `data/genesis.json` (byte-identical to `data/genesis.json.rehearsal-backup`).
+- No override files left in `testing/devnet/`.
+- New checked-in fixture: `testing/forks/rehearsal/genesis/genesis-fork-overflow.json`.
+- Standalone `demos-tlsnotary`, `demos-grafana`, `demos-prometheus`, csv-editor, n8n stack, host postgres — all undisturbed.
+- Four commits on `decimals` ahead of Run 4 HEAD: `76e8bacb`, `b64fd647`, `59456c01`, `5ecd8c35`. One more commit will follow for this report.
+- Nothing pushed.
