@@ -1,6 +1,7 @@
 import type { TransactionContent, BlockContent } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
 import { isForkActive } from "./forkGates"
+import { canonicalizeAmountToOs } from "./amountCanonical"
 
 // REVIEW: P3a — post-fork branch implements the canonical OS-string
 // serializer for transactions. The pre-fork branch is unchanged
@@ -13,7 +14,8 @@ import { isForkActive } from "./forkGates"
 // individually upstream and only their hashes appear in `BlockContent`.
 
 /**
- * Coerce a wire-format amount/fee value to an OS `bigint`.
+ * Coerce a wire-format amount/fee value to an OS `bigint` using the
+ * shared canonicalization helper (myc#76, GH#3213223280).
  *
  * Pre-fork wire format encodes amounts as JS `number` in DEM. Post-fork
  * wire format encodes them as decimal strings in OS. The serializer must
@@ -35,19 +37,17 @@ import { isForkActive } from "./forkGates"
  * Throws when the input cannot be expressed as a non-negative OS amount
  * (e.g. a fractional `number` smaller than 1 OS, a non-numeric string).
  *
+ * Always called with `forkActive=true` from this file — the gate above
+ * (`isForkActive("osDenomination", blockHeight)`) is the only entry
+ * into `transformToOsTransactionContent`. The shared helper takes the
+ * flag so the executor can call the SAME helper at canonicalization
+ * time and stay self-consistent with this serializer.
+ *
  * @param value - DEM `number`, OS decimal `string`, or OS `bigint`.
  * @returns OS amount as `bigint`.
  */
 function toOsBigint(value: number | string | bigint): bigint {
-    if (typeof value === "bigint") {
-        return value
-    }
-    if (typeof value === "string") {
-        // Already in OS units on the wire.
-        return denomination.parseOsString(value)
-    }
-    // Treat raw numbers as DEM (pre-fork wire shape).
-    return denomination.demToOs(value)
+    return canonicalizeAmountToOs(value, /* forkActive */ true)
 }
 
 /**

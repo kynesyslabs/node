@@ -18,8 +18,12 @@ import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
 import { Operation } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
+import { denomination } from "@kynesyslabs/demosdk"
+import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
 
-/* NOTE 
+/* NOTE
 
 Rationale: transactions arrives with a nonce and a timestamp.
 
@@ -39,10 +43,27 @@ export default async function executeNativeTransaction(
     const operations: Operation[] = []
 
     // ANCHOR Managing simple value transfer
-    // REVIEW P5a: SDK 3.1.0 widened `amount` to `string | number` for the
-    // dual-format wire shape. Coerce to bigint for the comparison so
-    // pre-fork DEM-number and post-fork OS-string inputs both work.
-    if (BigInt(transaction.content.amount ?? 0) > 0n) {
+    // REVIEW myc#76 / GH#3213223280: mirror the serializer's
+    // canonicalization here so the bigint used for balance arithmetic
+    // matches the bigint the serializerGate hashed under for signing.
+    // The reference height is the chain head — same source as
+    // `Transaction.hash`/`Transaction.isCoherent` and as the mempool
+    // hash sites (`createTransaction`, `deriveMempoolOperation`,
+    // `signalingServer`), so all four producers of the canonical bigint
+    // agree on the same height when the tx is processed in mempool.
+    const referenceHeight = getSharedState.lastBlockNumber ?? 0
+    const forkActive = isForkActive("osDenomination", referenceHeight)
+    let amountCanonical: bigint
+    try {
+        amountCanonical = canonicalizeAmountToOs(
+            transaction.content.amount,
+            forkActive,
+        )
+    } catch (e) {
+        return [false, `Invalid amount: ${(e as Error).message}`]
+    }
+
+    if (amountCanonical > 0n) {
         let operation: Operation
         // Handle both string and Buffer types for from/to fields
         const sender =
@@ -54,20 +75,27 @@ export default async function executeNativeTransaction(
             typeof transaction.content.to === "string"
                 ? transaction.content.to
                 : forgeToHex(transaction.content.to)
-        const receiverBalance = await GCR.getGCRNativeBalance(receiver)
-        // Refuse transaction if GCR is not in shape
-        // REVIEW senderBalance is bigint; coerce content.amount (currently
-        // number on the wire) to bigint for a type-safe comparison.
-        if (senderBalance < BigInt(transaction.content.amount)) {
+        // Refuse transaction if GCR is not in shape.
+        // myc#76: comparison uses the canonicalised bigint so a
+        // post-fork legacy `number` wire shape is scaled DEM→OS exactly
+        // as the serializer's hash binding did.
+        if (senderBalance < amountCanonical) {
             success = false
             message = "Insufficient funds"
             return [success, message]
         }
+        // Emit operation params in the magnitude downstream subOperations
+        // expects. Post-fork that's the OS string (matching the wire
+        // shape the SDK 3.1.0+ produces). Pre-fork the legacy number is
+        // preserved bit-identically.
+        const paramsAmount: string | number = forkActive
+            ? denomination.toOsString(amountCanonical)
+            : (transaction.content.amount as number)
         // Add value to receiver's balance
         operation = {
             operator: "add_native",
             actor: receiver,
-            params: { amount: transaction.content.amount },
+            params: { amount: paramsAmount },
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
@@ -80,7 +108,7 @@ export default async function executeNativeTransaction(
         operation = {
             operator: "remove_native",
             actor: sender,
-            params: { amount: transaction.content.amount },
+            params: { amount: paramsAmount },
             hash: transaction.hash,
             nonce: transaction.content.nonce,
             timestamp: transaction.content.timestamp,
