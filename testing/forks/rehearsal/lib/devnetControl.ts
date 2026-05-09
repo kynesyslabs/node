@@ -144,6 +144,18 @@ export function logs(service: string, lines = 200): string {
 }
 
 /**
+ * Returns the FULL log buffer for a service (no tail truncation). Used
+ * by scenario 5 to find a `CAP applied` warning emitted near the
+ * fork-activation height — by the time the scenario asserts, hundreds
+ * of post-fork log lines have flushed past the migration banner so the
+ * `--tail 800` default in {@link logs} would miss it. The output can be
+ * tens of thousands of lines but is fine for one-shot grep.
+ */
+export function logsFull(service: string): string {
+    return compose(["logs", "--no-color", service])
+}
+
+/**
  * Stages a rehearsal genesis at the production genesis path.
  *
  * The devnet image bakes `data/genesis.json` at build time and bind-mounts

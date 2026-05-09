@@ -38,7 +38,7 @@
 
 import {
     GENESIS_FORK_OVERFLOW,
-    logs,
+    logsFull,
     regenerateIdentities,
     sleep,
     stageGenesis,
@@ -103,13 +103,19 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
     )
     ctx.notes.push("all nodes crossed fork")
 
-    // Loud-cap log check on every node.
+    // Loud-cap log check on every node. Use the FULL log buffer rather
+    // than `--tail`: by the time we assert here, the network has produced
+    // dozens of post-fork blocks and each is ~hundreds of log lines, so a
+    // tail of 800 (or even 5_000) reliably misses the CAP banner that
+    // was emitted near activation height. `logsFull` runs `docker
+    // compose logs` with no truncation; the grep below is O(buffer) but
+    // only runs once per node.
     for (const id of NODE_IDS) {
-        const l = logs(`node-${id}`, 800)
+        const l = logsFull(`node-${id}`)
         if (!/CAP applied/i.test(l)) {
             throw new Error(
                 `node-${id} did NOT log "CAP applied" near activation. ` +
-                    `Sample:\n${l.slice(-2_000)}`,
+                    `Tail sample:\n${l.slice(-2_000)}`,
             )
         }
     }
