@@ -66,7 +66,8 @@
         "testenv:gcr": "bun testing/scripts/run-suite.ts gcr-focus",
         "testenv:gcr:local": "bun testing/scripts/run-suite.ts gcr-focus --local",
         "testenv:gcr:routine:local": "bun testing/scripts/run-suite.ts gcr-routine --local",
-        "testenv:gcr-health:local": "bun testing/scripts/run-suite.ts gcr-focus --local"
+        "testenv:gcr-health:local": "bun testing/scripts/run-suite.ts gcr-focus --local",
+        "preflight:fork": "bun run testing/forks/preflight.ts"
     },
     "devDependencies": {
         "@jest/globals": "^30.2.0",
