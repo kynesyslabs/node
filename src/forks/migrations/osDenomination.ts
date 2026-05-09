@@ -77,6 +77,17 @@ export interface OsDenominationMigrationResult {
     validatorsRowCount: number
     cappedCount: number
     totalValueLostOs: bigint
+    /**
+     * Number of validator rows that could not be parsed as a `bigint`
+     * (e.g. malformed `staked_amount` text such as empty string, whitespace,
+     * non-numeric). These rows are SKIPPED — their `staked_amount` is left
+     * untouched and they are excluded from both the pre- and post-sum so
+     * the invariant remains valid.
+     *
+     * This counter is persisted into `fork_state.malformed_validators_count`
+     * for forensic auditing.
+     */
+    malformedValidatorsCount: number
 }
 
 /**
@@ -120,6 +131,40 @@ export async function isOsDenominationMigrationApplied(
 }
 
 /**
+ * Returns a parsed `bigint` for a validator row's `staked_amount`, or `null`
+ * if the value is missing or malformed (empty string, whitespace, non-numeric
+ * text). Wraps `BigInt()` in try/catch so a single poison row cannot abort
+ * the whole migration with an unhelpful SyntaxError.
+ *
+ * Caller decides what to do with `null`: the sum-helpers SKIP the row (it
+ * contributes nothing to either the pre- or post-sum), while the migration
+ * loop also SKIPS it but increments a forensic counter so the operator knows
+ * how many rows were left untouched.
+ *
+ * @internal Exported for test access.
+ */
+export function tryParseValidatorStake(
+    raw: string | null | undefined,
+): bigint | null {
+    if (raw === null || raw === undefined) return null
+    if (typeof raw !== "string") {
+        // Some drivers may hand back numbers; coerce safely.
+        try {
+            return BigInt(raw as never)
+        } catch {
+            return null
+        }
+    }
+    const trimmed = raw.trim()
+    if (trimmed === "") return null
+    try {
+        return BigInt(trimmed)
+    } catch {
+        return null
+    }
+}
+
+/**
  * Sums all balances across the three sources in their pre-fork (DEM) units.
  *
  * Uses `bigint` everywhere; never trusts JS number arithmetic on legacy
@@ -127,6 +172,11 @@ export async function isOsDenominationMigrationApplied(
  * `BigInt(Math.trunc(...))`. This is safe for legacy balances ≤ 2^53-1
  * (which is the implicit invariant for them existing in the JSONB column
  * at all).
+ *
+ * Validator rows whose `staked_amount` cannot be parsed as a `bigint`
+ * (empty/whitespace/non-numeric) are SKIPPED — they contribute nothing to
+ * the sum. This must mirror the migration loop's behavior so the post-sum
+ * invariant remains valid in the presence of malformed rows.
  *
  * @internal Exported for test access.
  */
@@ -167,17 +217,17 @@ export async function computePreSumDem(
         sum += BigInt(Math.trunc(balance))
     }
 
-    // Validators stake — text bigint-as-string.
+    // Validators stake — text bigint-as-string. Malformed rows are skipped
+    // so the post-sum invariant remains valid.
     const validatorRows: Array<{ staked_amount: string | null }> =
         await entityManager.query(
             "SELECT staked_amount FROM validators",
         )
     for (const row of validatorRows) {
         validatorsRowCount += 1
-        if (row.staked_amount === null || row.staked_amount === undefined) {
-            continue
-        }
-        sum += BigInt(row.staked_amount)
+        const parsed = tryParseValidatorStake(row.staked_amount)
+        if (parsed === null) continue
+        sum += parsed
     }
 
     return { sum, gcrV2RowCount, legacyRowCount, validatorsRowCount }
@@ -216,10 +266,11 @@ export async function computePostSumOs(
     const validatorRows: Array<{ staked_amount: string | null }> =
         await entityManager.query("SELECT staked_amount FROM validators")
     for (const row of validatorRows) {
-        if (row.staked_amount === null || row.staked_amount === undefined) {
-            continue
-        }
-        sum += BigInt(row.staked_amount)
+        // Mirror computePreSumDem: skip malformed/null staked_amounts so the
+        // sum-invariant comparison stays apples-to-apples.
+        const parsed = tryParseValidatorStake(row.staked_amount)
+        if (parsed === null) continue
+        sum += parsed
     }
 
     return sum
@@ -345,11 +396,33 @@ export async function runOsDenominationMigration(
         await entityManager.query(
             "SELECT address, staked_amount FROM validators",
         )
+    let malformedValidatorsCount = 0
     for (const row of validatorRows) {
         if (row.staked_amount === null || row.staked_amount === undefined) {
+            // Null is a tolerated shape (matches sum-helpers).
             continue
         }
-        const newStake = (BigInt(row.staked_amount) * OS_PER_DEM).toString()
+        // DEFENSIVE: a single poison row in `validators.staked_amount` (empty
+        // string, whitespace, alphanumeric) used to raise SyntaxError out of
+        // `BigInt()`, propagate through `runOsDenominationMigration` →
+        // `insertBlock`, and abort the activation block on every node
+        // permanently — meaning the fork could never activate. Wrap the
+        // per-row coercion + UPDATE so a malformed value is logged loudly,
+        // counted, and skipped (its `staked_amount` is left untouched). The
+        // sum-helpers above also skip the same shape so the post-sum
+        // invariant remains valid.
+        const parsed = tryParseValidatorStake(row.staked_amount)
+        if (parsed === null) {
+            malformedValidatorsCount += 1
+            log.error(
+                "[forks][osDenomination] MALFORMED validator stake — " +
+                    `address=${row.address} ` +
+                    `raw=${JSON.stringify(row.staked_amount)} ` +
+                    "skipping row (staked_amount left unchanged)",
+            )
+            continue
+        }
+        const newStake = (parsed * OS_PER_DEM).toString()
         const pStake = placeholder(entityManager, 1)
         const pAddr = placeholder(entityManager, 2)
         await entityManager.query(
@@ -358,7 +431,8 @@ export async function runOsDenominationMigration(
         )
     }
     log.info(
-        `[forks][osDenomination] validators migrated (rows=${validatorsRowCount})`,
+        `[forks][osDenomination] validators migrated (rows=${validatorsRowCount}, ` +
+            `malformed=${malformedValidatorsCount})`,
     )
 
     // 6. Compute post-sum.
@@ -398,8 +472,9 @@ export async function runOsDenominationMigration(
             fork_name, applied, applied_at_block, applied_at,
             pre_sum_dem, post_sum_os,
             gcr_v2_row_count, legacy_row_count, validators_row_count,
-            capped_count, total_value_lost_os
-        ) VALUES (${ph(1)}, ${ph(2)}, ${ph(3)}, ${ph(4)}, ${ph(5)}, ${ph(6)}, ${ph(7)}, ${ph(8)}, ${ph(9)}, ${ph(10)}, ${ph(11)})
+            capped_count, total_value_lost_os,
+            malformed_validators_count
+        ) VALUES (${ph(1)}, ${ph(2)}, ${ph(3)}, ${ph(4)}, ${ph(5)}, ${ph(6)}, ${ph(7)}, ${ph(8)}, ${ph(9)}, ${ph(10)}, ${ph(11)}, ${ph(12)})
         ON CONFLICT (fork_name) DO UPDATE SET
             applied = EXCLUDED.applied,
             applied_at_block = EXCLUDED.applied_at_block,
@@ -410,7 +485,8 @@ export async function runOsDenominationMigration(
             legacy_row_count = EXCLUDED.legacy_row_count,
             validators_row_count = EXCLUDED.validators_row_count,
             capped_count = EXCLUDED.capped_count,
-            total_value_lost_os = EXCLUDED.total_value_lost_os`,
+            total_value_lost_os = EXCLUDED.total_value_lost_os,
+            malformed_validators_count = EXCLUDED.malformed_validators_count`,
         [
             FORK_NAME,
             appliedValue,
@@ -423,6 +499,7 @@ export async function runOsDenominationMigration(
             validatorsRowCount,
             cappedCount,
             totalValueLostOs.toString(),
+            malformedValidatorsCount,
         ],
     )
     log.info(
@@ -437,6 +514,7 @@ export async function runOsDenominationMigration(
         validatorsRowCount,
         cappedCount,
         totalValueLostOs,
+        malformedValidatorsCount,
     }
 }
 

@@ -102,7 +102,8 @@ async function createTestDataSource(): Promise<DataSource> {
         legacy_row_count INTEGER,
         validators_row_count INTEGER,
         capped_count INTEGER,
-        total_value_lost_os TEXT
+        total_value_lost_os TEXT,
+        malformed_validators_count INTEGER
     )`)
     return ds
 }

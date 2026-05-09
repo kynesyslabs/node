@@ -61,4 +61,19 @@ export class ForkState {
 
     @Column("text", { name: "total_value_lost_os", nullable: true })
     totalValueLostOs: string | null
+
+    /**
+     * Number of `validators.staked_amount` rows that could not be parsed as
+     * a `bigint` during the activation-block migration (empty string,
+     * whitespace, alphanumeric). Each malformed row was logged loudly,
+     * SKIPPED (its `staked_amount` left untouched), and excluded from both
+     * the pre- and post-sum computations so the sum invariant remains
+     * valid. Non-zero here means an operator should investigate before
+     * trusting the post-fork validator set.
+     *
+     * Nullable for backwards compatibility with `fork_state` rows persisted
+     * before this column existed.
+     */
+    @Column("integer", { name: "malformed_validators_count", nullable: true })
+    malformedValidatorsCount: number | null
 }

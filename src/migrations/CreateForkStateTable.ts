@@ -41,8 +41,15 @@ export class CreateForkStateTable1714608000000 implements MigrationInterface {
                 "legacy_row_count" integer,
                 "validators_row_count" integer,
                 "capped_count" integer,
-                "total_value_lost_os" text
+                "total_value_lost_os" text,
+                "malformed_validators_count" integer
             )`,
+        )
+        // Defensive add for environments where the table existed before
+        // this column was introduced; harmless if the column already exists.
+        await queryRunner.query(
+            "ALTER TABLE \"fork_state\" ADD COLUMN IF NOT EXISTS " +
+                "\"malformed_validators_count\" integer",
         )
     }
 

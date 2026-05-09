@@ -80,7 +80,8 @@ async function createTestDataSource(): Promise<DataSource> {
         legacy_row_count INTEGER,
         validators_row_count INTEGER,
         capped_count INTEGER,
-        total_value_lost_os TEXT
+        total_value_lost_os TEXT,
+        malformed_validators_count INTEGER
     )`)
     return ds
 }
@@ -422,42 +423,56 @@ describe("osDenomination migration", () => {
         expect(balances.get("a")).toBe(100n)
     })
 
-    it("Test 9: atomicity — failure mid-validators rolls back all earlier writes", async () => {
+    it("Test 9: malformed validator stakes are SKIPPED loudly, migration completes (#75)", async () => {
+        // Defensive guard for myc#75 (GH#3213217901): a single poison row
+        // in `validators.staked_amount` (empty string, whitespace,
+        // alphanumeric) used to raise SyntaxError out of `BigInt()`,
+        // propagate up, and abort the activation block on every node —
+        // permanently bricking the fork. The new behavior is to log loudly,
+        // skip the row, and complete the migration. This test seeds three
+        // distinct poison shapes and asserts the migration completes
+        // successfully with `malformedValidatorsCount=3` recorded in
+        // `fork_state` and the well-formed row migrated normally.
         await dataSource.transaction(async em => {
             await seedGcrV2(em, [{ pubkey: "a", balance: 100n }])
             await seedLegacy(em, [
                 { publicKey: "leg", balanceDem: 50, identityKey: "id1" },
             ])
             await seedValidators(em, [
-                { address: "v1", stakedDem: 10n },
-                // Insert an INVALID staked_amount that will throw when
-                // BigInt() parses it. The migration must abort partway
-                // through, and the outer transaction must roll back.
-                { address: "v_bad", stakedDem: 7n },
+                { address: "v_good", stakedDem: 10n },
+                { address: "v_empty", stakedDem: 7n },
+                { address: "v_ws", stakedDem: 7n },
+                { address: "v_alpha", stakedDem: 7n },
             ])
-            // Replace v_bad's staked_amount with a non-numeric value.
+            // Three distinct poison shapes the guard must absorb.
             await em.query(
                 "UPDATE validators SET staked_amount = ? WHERE address = ?",
-                ["not-a-bigint", "v_bad"],
+                ["", "v_empty"],
+            )
+            await em.query(
+                "UPDATE validators SET staked_amount = ? WHERE address = ?",
+                ["   ", "v_ws"],
+            )
+            await em.query(
+                "UPDATE validators SET staked_amount = ? WHERE address = ?",
+                ["not-a-bigint", "v_alpha"],
             )
         })
 
-        await expect(
-            dataSource.transaction(em =>
-                runOsDenominationMigration(em, 5),
-            ),
-        ).rejects.toThrow()
+        const result = await dataSource.transaction(em =>
+            runOsDenominationMigration(em, 5),
+        )
 
-        // Rollback: all balances at pre-state, fork_state empty.
-        const balances = await getGcrV2Balances(dataSource.manager)
-        expect(balances.get("a")).toBe(100n)
+        expect(result.malformedValidatorsCount).toBe(3)
+        // 4 rows seen, but only 1 contributed to the sums.
+        expect(result.validatorsRowCount).toBe(4)
+        // pre = 100 (gcr_v2) + 50 (legacy) + 10 (only v_good) = 160 DEM
+        expect(result.preSumDem).toBe(160n)
+        expect(result.postSumOs).toBe(160n * 1_000_000_000n)
+        expect(result.cappedCount).toBe(0)
+        expect(result.totalValueLostOs).toBe(0n)
 
-        const legacy = await getLegacyBalances(dataSource.manager)
-        expect(legacy.get("leg")).toBe(50)
-
-        // v_bad's staked_amount is intentionally non-numeric (the seeded
-        // poison row); inspect raw rows so the test helper doesn't choke
-        // when re-reading them.
+        // Well-formed row migrated, malformed rows untouched.
         const rawStakeRows: Array<{ address: string; staked_amount: string }> =
             await dataSource.manager.query(
                 "SELECT address, staked_amount FROM validators ORDER BY address",
@@ -465,10 +480,54 @@ describe("osDenomination migration", () => {
         const stakeMap = new Map(
             rawStakeRows.map(r => [r.address, r.staked_amount]),
         )
-        // v1 stayed pre-state (still '10', not 10 * 10^9).
-        expect(stakeMap.get("v1")).toBe("10")
-        // v_bad's poison value is preserved post-rollback.
-        expect(stakeMap.get("v_bad")).toBe("not-a-bigint")
+        expect(stakeMap.get("v_good")).toBe(
+            (10n * 1_000_000_000n).toString(),
+        )
+        expect(stakeMap.get("v_empty")).toBe("")
+        expect(stakeMap.get("v_ws")).toBe("   ")
+        expect(stakeMap.get("v_alpha")).toBe("not-a-bigint")
+
+        // Forensic row records the malformed count alongside cap policy.
+        const fsRow = await getForkStateRow(dataSource.manager)
+        expect(fsRow!.applied).toBe(1)
+        expect(fsRow!.malformed_validators_count).toBe(3)
+
+        // GCRv2 + legacy still migrated normally.
+        const gcrV2 = await getGcrV2Balances(dataSource.manager)
+        expect(gcrV2.get("a")).toBe(100n * 1_000_000_000n)
+        const legacy = await getLegacyBalances(dataSource.manager)
+        expect(legacy.get("leg")).toBe(50 * 1e9)
+    })
+
+    it("Test 9b: atomicity — caller-side throw rolls back all migration writes", async () => {
+        // The original Test 9 verified atomicity by relying on a poison
+        // staked_amount to crash the migration; the #75 guard now absorbs
+        // that case. We still want to prove the outer-transaction rollback
+        // contract — so we let the migration succeed and then `throw` from
+        // the caller's transaction body, asserting every write is undone.
+        await dataSource.transaction(async em => {
+            await seedGcrV2(em, [{ pubkey: "a", balance: 100n }])
+            await seedLegacy(em, [
+                { publicKey: "leg", balanceDem: 50, identityKey: "id1" },
+            ])
+            await seedValidators(em, [{ address: "v1", stakedDem: 10n }])
+        })
+
+        await expect(
+            dataSource.transaction(async em => {
+                await runOsDenominationMigration(em, 5)
+                throw new Error("forced rollback to test atomicity")
+            }),
+        ).rejects.toThrow(/forced rollback/)
+
+        const balances = await getGcrV2Balances(dataSource.manager)
+        expect(balances.get("a")).toBe(100n)
+
+        const legacy = await getLegacyBalances(dataSource.manager)
+        expect(legacy.get("leg")).toBe(50)
+
+        const stakes = await getValidatorStakes(dataSource.manager)
+        expect(stakes.get("v1")).toBe(10n)
 
         const fsRow = await getForkStateRow(dataSource.manager)
         expect(fsRow).toBeNull()
