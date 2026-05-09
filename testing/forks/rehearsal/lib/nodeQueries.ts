@@ -362,6 +362,34 @@ export async function seedLegacyGcrRow(
     )
 }
 
+/**
+ * Returns the DEM balance of a previously-seeded legacy GCR row, or
+ * null if no row with that `public_key` exists yet on this node.
+ *
+ * Read-back of {@link seedLegacyGcrRow} writes; used by scenario 5 to
+ * deterministically confirm the seed has been replicated to every node's
+ * `global_change_registry` BEFORE the network is allowed to cross the
+ * fork-activation height. Without this verify-after-insert step, the
+ * migration could read an empty legacy GCR and never exercise the cap
+ * path (the symptom diagnosed in Run 4).
+ */
+export async function getLegacyGcrBalance(
+    nodeId: number,
+    publicKey: string,
+): Promise<number | null> {
+    const rows = await query<{ balance: string | number | null }>(
+        nodeId,
+        `SELECT (details->'content'->>'balance')::numeric AS balance
+         FROM global_change_registry
+         WHERE public_key = $1`,
+        [publicKey],
+    )
+    if (rows.length === 0) return null
+    const raw = rows[0]?.balance
+    if (raw === null || raw === undefined) return null
+    return Number(raw)
+}
+
 /** Drops and recreates a node's database. Used for scenario 2 (desync). */
 export async function dropAndRecreateNodeDb(nodeId: number): Promise<void> {
     // We cannot drop a DB while connected to it — connect to `postgres`.

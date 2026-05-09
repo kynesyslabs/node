@@ -51,6 +51,11 @@ export const GENESIS_FORK_MID = resolve(
     "genesis",
     "genesis-fork-mid.json",
 )
+export const GENESIS_FORK_OVERFLOW = resolve(
+    REHEARSAL_DIR,
+    "genesis",
+    "genesis-fork-overflow.json",
+)
 
 /**
  * Runs `docker compose` (cwd=DEVNET_DIR) with the supplied args.

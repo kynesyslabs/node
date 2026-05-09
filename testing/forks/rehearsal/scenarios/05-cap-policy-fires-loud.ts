@@ -14,8 +14,18 @@
  * behaviour rather than a hard abort.
  *
  * Setup:
- *  - 4 nodes on `genesis-fork-low.json` (act=5).
- *  - Before the network crosses height 5, seed each node's
+ *  - 4 nodes on `genesis-fork-overflow.json` (act=10). The higher
+ *    activation height (vs `genesis-fork-low.json`'s 5) buys us a
+ *    comfortable seeding window: with CONSENSUS_TIME=10, ~9 blocks of
+ *    pre-fork lead time means the harness has well over a minute to
+ *    insert the legacy GCR overflow row and confirm it landed before
+ *    the migration fires at block 10.
+ *  - The legacy GCR cannot be seeded from `balances` in the genesis
+ *    JSON (that path only feeds `gcr_main`), so we still INSERT the
+ *    row over SQL after node startup — but with verify-after-seed
+ *    (see `seedCapOverflowFixture`) so the harness no longer races
+ *    block production.
+ *  - Before the network crosses height 10, seed each node's
  *    `global_change_registry` with a single account holding 10M DEM.
  *    10M × 10^9 = 10^16, which exceeds LEGACY_NUMBER_CAP (~8.1×10^15).
  *
@@ -27,7 +37,7 @@
  */
 
 import {
-    GENESIS_FORK_LOW,
+    GENESIS_FORK_OVERFLOW,
     logs,
     regenerateIdentities,
     sleep,
@@ -45,34 +55,42 @@ import { seedCapOverflowFixture } from "../lib/fixtures"
 import { runScenarioCli, type ScenarioContext } from "../lib/scenario"
 
 const NODE_IDS = [1, 2, 3, 4]
-const ACTIVATION_HEIGHT = 5
+const ACTIVATION_HEIGHT = 10
 
 async function scenario(ctx: ScenarioContext): Promise<void> {
     regenerateIdentities(4)
-    stageGenesis(GENESIS_FORK_LOW)
+    stageGenesis(GENESIS_FORK_OVERFLOW)
     up({ build: true })
 
-    // Wait until each node has at least produced its genesis row in the
-    // blocks table (so the legacy GCR table exists / migrations applied),
-    // but BEFORE crossing height 5.
+    // Wait until each node has produced at least one block (so TypeORM's
+    // `synchronize: true` has materialised the `global_change_registry`
+    // table) but BEFORE crossing the activation height. With act=10 and
+    // CONSENSUS_TIME=10, we want all 4 nodes in [1, ACTIVATION_HEIGHT-3]
+    // before we touch the schema; that leaves ~3 blocks (~30 s real
+    // time) of pre-fork window to INSERT and verify the seed, with the
+    // verify-after-seed loop providing belt-and-braces against any
+    // Postgres replication or write-visibility delays.
+    const SEED_BY_HEIGHT = ACTIVATION_HEIGHT - 3
     await waitFor(
         async () => {
             const tips = await Promise.all(
                 NODE_IDS.map(id => getLastBlockNumber(id).catch(() => -1)),
             )
-            return tips.every(t => t >= 1 && t < ACTIVATION_HEIGHT)
+            return tips.every(t => t >= 1 && t < SEED_BY_HEIGHT)
         },
         {
-            description: "every node has booted past block 0 but before fork",
+            description: `every node booted past block 0 but tip < ${SEED_BY_HEIGHT}`,
             timeoutMs: 240_000,
             intervalMs: 1_500,
         },
     )
 
     // Seed the overflow row on every node. The migration will read it
-    // when it fires at height 5.
+    // when it fires at height 10. `seedCapOverflowFixture` does a
+    // verify-after-seed read-back per node, so this returns only when
+    // every node's `global_change_registry` has the row visible.
     await seedCapOverflowFixture(NODE_IDS)
-    ctx.notes.push("seeded cap-overflow legacy account on all nodes")
+    ctx.notes.push("seeded cap-overflow legacy account on all nodes (verified)")
 
     // Wait for fork crossing.
     await waitFor(
