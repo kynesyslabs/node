@@ -30,6 +30,7 @@ export class WidenFeeColumnsToBigint1714521600000
     name = "WidenFeeColumnsToBigint1714521600000"
 
     public async up(queryRunner: QueryRunner): Promise<void> {
+        // Widen type first.
         await queryRunner.query(
             "ALTER TABLE \"transactions\" ALTER COLUMN \"networkFee\" TYPE bigint USING \"networkFee\"::bigint",
         )
@@ -38,6 +39,31 @@ export class WidenFeeColumnsToBigint1714521600000
         )
         await queryRunner.query(
             "ALTER TABLE \"transactions\" ALTER COLUMN \"additionalFee\" TYPE bigint USING \"additionalFee\"::bigint",
+        )
+        // Backfill any NULL rows from older databases that predate the
+        // entity declaration. Without this, a `synchronize: true` boot
+        // against a legacy DB fails when TypeORM tries to enforce NOT
+        // NULL on rows containing nulls. The entity itself declares the
+        // columns `nullable: true, default: 0` so the boot path doesn't
+        // depend on this migration having run, but the migration sets
+        // the DB-side default for deterministic prod deploys.
+        await queryRunner.query(
+            "UPDATE \"transactions\" SET \"networkFee\" = 0 WHERE \"networkFee\" IS NULL",
+        )
+        await queryRunner.query(
+            "UPDATE \"transactions\" SET \"rpcFee\" = 0 WHERE \"rpcFee\" IS NULL",
+        )
+        await queryRunner.query(
+            "UPDATE \"transactions\" SET \"additionalFee\" = 0 WHERE \"additionalFee\" IS NULL",
+        )
+        await queryRunner.query(
+            "ALTER TABLE \"transactions\" ALTER COLUMN \"networkFee\" SET DEFAULT 0",
+        )
+        await queryRunner.query(
+            "ALTER TABLE \"transactions\" ALTER COLUMN \"rpcFee\" SET DEFAULT 0",
+        )
+        await queryRunner.query(
+            "ALTER TABLE \"transactions\" ALTER COLUMN \"additionalFee\" SET DEFAULT 0",
         )
     }
 

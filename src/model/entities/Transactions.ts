@@ -56,12 +56,19 @@ export class Transactions {
     // strings unless a transformer is supplied; callers around
     // toRawTransaction/fromRawTransaction (the only consumers) coerce via
     // BigInt() at the boundary.
-    @Column("bigint", { name: "networkFee" })
-    networkFee: bigint
+    //
+    // `nullable: true, default: 0` — older databases predate the entity
+    // declaration and may have NULL fee rows. With `synchronize: true` an
+    // implicit NOT NULL constraint would fail on startup against such
+    // rows. Allowing NULL + defaulting to 0 lets the node start; readers
+    // already coerce via `Number(rawTx.networkFee ?? 0)` and
+    // `BigInt(... ?? 0)` so a NULL is observed as 0 throughout the stack.
+    @Column("bigint", { name: "networkFee", nullable: true, default: 0 })
+    networkFee: bigint | null
 
-    @Column("bigint", { name: "rpcFee" })
-    rpcFee: bigint
+    @Column("bigint", { name: "rpcFee", nullable: true, default: 0 })
+    rpcFee: bigint | null
 
-    @Column("bigint", { name: "additionalFee" })
-    additionalFee: bigint
+    @Column("bigint", { name: "additionalFee", nullable: true, default: 0 })
+    additionalFee: bigint | null
 }
