@@ -147,8 +147,34 @@ export default class SubOperations {
         // If we are here, we have a valid operation
         const newBalanceFrom = balanceFrom - amount
         const newBalanceTo = balanceTo + amount
-        await GCR.setGCRNativeBalance(from, newBalanceFrom, operation.hash)
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        // GH#3214986124 (Greptile P2): legacy GCR backend's
+        // setGCRNativeBalance returns false when the new balance would
+        // exceed Number.MAX_SAFE_INTEGER (2^53-1). Post-fork, OS amounts
+        // can legitimately reach that range; silently dropping the write
+        // while returning {success:true} would corrupt balances. Treat a
+        // failed write as a failed operation.
+        const okFrom = await GCR.setGCRNativeBalance(
+            from,
+            newBalanceFrom,
+            operation.hash,
+        )
+        if (!okFrom) {
+            return {
+                success: false,
+                message: `transferNative: setGCRNativeBalance failed for sender ${from}; aborting transfer.`,
+            }
+        }
+        const okTo = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!okTo) {
+            return {
+                success: false,
+                message: `transferNative: setGCRNativeBalance failed for receiver ${to} after sender debit committed; balance state may be inconsistent.`,
+            }
+        }
         // Returning success
         return {
             success: true,
@@ -181,7 +207,18 @@ export default class SubOperations {
             }
         }
         const newBalanceTo = balanceTo + parsedAmount
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        // GH#3214986124 (Greptile P2): see transferNative for rationale.
+        const ok = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!ok) {
+            return {
+                success: false,
+                message: `addNative: setGCRNativeBalance failed for ${to}.`,
+            }
+        }
         return SubOperations.result
     }
 
@@ -216,7 +253,18 @@ export default class SubOperations {
         // TODO
         // If we are here, we have a valid operation
         const newBalanceTo = balanceTo - parsedAmount
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        // GH#3214986124 (Greptile P2): see transferNative for rationale.
+        const ok = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!ok) {
+            return {
+                success: false,
+                message: `removeNative: setGCRNativeBalance failed for ${to}.`,
+            }
+        }
         return SubOperations.result
     }
 
