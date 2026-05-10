@@ -190,6 +190,22 @@ async function scenario(ctx: ScenarioContext): Promise<void> {
         )
     }
 
+    // GH#3214964776: actually verify the ×10^9 multiplication, not just
+    // cross-node consistency. preBalance was already asserted unique above.
+    const preBalanceBig = BigInt(String(preBalances[0][1]))
+    const postBalanceBig = BigInt(String(postBalances[0][1]))
+    const expectedPostBig = preBalanceBig * 1_000_000_000n
+    if (postBalanceBig !== expectedPostBig) {
+        throw new Error(
+            "Post-fork recipient balance is not pre × 10^9: " +
+                `pre=${preBalanceBig}, post=${postBalanceBig}, ` +
+                `expected=${expectedPostBig}`,
+        )
+    }
+    ctx.notes.push(
+        `post-fork balance verified: ${preBalanceBig} × 10^9 == ${postBalanceBig}`,
+    )
+
     // Sanity: tip continues advancing.
     const tipBefore = await getLastBlockNumber(1)
     await sleep(20_000)

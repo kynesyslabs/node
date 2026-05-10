@@ -77,4 +77,34 @@ describe("bigintNumericTransformer.from", () => {
         expect(bigintNumericTransformer.to(null)).toBeNull()
         expect(bigintNumericTransformer.to(undefined)).toBeNull()
     })
+
+    // GH#3214964779: negative-number coverage. The transformer is
+    // symmetric — Number.isSafeInteger and BigInt() both accept negatives.
+    // Genesis balances are non-negative by spec, but the column type is
+    // not constrained at the DB layer, so a malformed migration or seed
+    // could produce a negative; the transformer must not crash and must
+    // round-trip lossy.
+    it("round-trips negative bigints through both directions", () => {
+        expect(bigintNumericTransformer.to(-1n)).toBe("-1")
+        expect(bigintNumericTransformer.to(-1_000_000_000n)).toBe(
+            "-1000000000",
+        )
+        expect(bigintNumericTransformer.from("-1")).toBe(-1n)
+        expect(bigintNumericTransformer.from("-1000000000")).toBe(
+            -1_000_000_000n,
+        )
+        expect(bigintNumericTransformer.from(-100)).toBe(-100n)
+        expect(
+            bigintNumericTransformer.from(Number.MIN_SAFE_INTEGER),
+        ).toBe(BigInt(Number.MIN_SAFE_INTEGER))
+    })
+
+    it("throws RangeError when sqlite returns a negative number < MIN_SAFE_INTEGER", () => {
+        expect(() =>
+            bigintNumericTransformer.from(Number.MIN_SAFE_INTEGER - 1),
+        ).toThrow(RangeError)
+        expect(() =>
+            bigintNumericTransformer.from(Number.MIN_SAFE_INTEGER - 1),
+        ).toThrow(/MAX_SAFE_INTEGER/)
+    })
 })

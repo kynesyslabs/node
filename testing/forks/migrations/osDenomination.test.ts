@@ -292,7 +292,7 @@ describe("osDenomination migration", () => {
         // The poor row was sub-cap; should be a clean × 10^9.
         expect(balances.get("poor")).toBe(5 * 1e9)
 
-        // Forensic forenscis recorded.
+        // Forensic data recorded.
         const row = await getForkStateRow(dataSource.manager)
         expect(row!.capped_count).toBe(1)
         expect(BigInt(row!.total_value_lost_os as string)).toBeGreaterThan(0n)
