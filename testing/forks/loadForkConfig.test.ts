@@ -56,17 +56,140 @@ describe("loadForkConfigFromGenesis", () => {
         ).toBe(12345)
     })
 
-    it("treats non-numeric activationHeight as null (defensive)", () => {
+    // myc#81 / GH#3213220458: malformed activationHeight throws rather
+    // than silently coercing to null. Silent coerce would turn a
+    // misconfigured genesis into a consensus-time surprise; the loader
+    // is the right place to refuse to boot.
+    it("throws on string activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: "not-a-number" },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws on negative activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: -1 },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws on fractional activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: 12.5 },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws on NaN activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: Number.NaN },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws on Infinity activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: {
+                        activationHeight: Number.POSITIVE_INFINITY,
+                    },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws on undefined-not-null activationHeight", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: undefined },
+                },
+            }),
+        ).toThrow(/non-negative integer or null/)
+    })
+
+    it("throws when fork entry is not an object", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: "active",
+                },
+            }),
+        ).toThrow(/must be an object/)
+    })
+
+    it("accepts null activationHeight (configured but inactive)", () => {
         loadForkConfigFromGenesis({
             forks: {
-                osDenomination: {
-                    activationHeight: "not-a-number",
-                },
+                osDenomination: { activationHeight: null },
             },
         })
         expect(
             getSharedState.forkConfig.osDenomination.activationHeight,
         ).toBeNull()
+    })
+
+    it("accepts a valid non-negative integer (boundary: 0)", () => {
+        loadForkConfigFromGenesis({
+            forks: {
+                osDenomination: { activationHeight: 0 },
+            },
+        })
+        expect(
+            getSharedState.forkConfig.osDenomination.activationHeight,
+        ).toBe(0)
+    })
+
+    it("ignores prototype-walking lookup attempts (e.g. __proto__)", () => {
+        // Object.hasOwn must reject inherited keys so a genesis cannot
+        // smuggle a write into Object.prototype keys.
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    __proto__: { activationHeight: 1 },
+                    osDenomination: { activationHeight: 999 },
+                },
+            }),
+        ).not.toThrow()
+        expect(
+            getSharedState.forkConfig.osDenomination.activationHeight,
+        ).toBe(999)
+        // The prototype's activationHeight must remain untouched.
+        expect(
+            (Object.prototype as unknown as { activationHeight?: unknown })
+                .activationHeight,
+        ).toBeUndefined()
+    })
+
+    it("drops a non-string description but does not throw", () => {
+        loadForkConfigFromGenesis({
+            forks: {
+                osDenomination: {
+                    activationHeight: 5,
+                    description: 42,
+                },
+            },
+        })
+        expect(
+            getSharedState.forkConfig.osDenomination.activationHeight,
+        ).toBe(5)
+        expect(
+            getSharedState.forkConfig.osDenomination.description,
+        ).toBeUndefined()
     })
 
     it("ignores unknown fork names without throwing", () => {

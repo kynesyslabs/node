@@ -114,23 +114,72 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
     if (!forks || typeof forks !== "object") return
 
     for (const [name, rawConfig] of Object.entries(forks)) {
-        if (!(name in getSharedState.forkConfig)) {
+        // myc#81 / GH#3213220458: use Object.hasOwn instead of `name in
+        // …` to avoid prototype-walking into Object.prototype keys
+        // (e.g. a malicious genesis with a `__proto__`/`toString`
+        // entry would otherwise pass the membership check and write
+        // into the shared registry).
+        if (!Object.hasOwn(getSharedState.forkConfig, name)) {
             log.warning(
                 `[FORKS] Genesis declares unknown fork "${name}" — ignoring`,
             )
             continue
         }
-        const config = rawConfig as Partial<ForkConfig>
-        const activationHeight =
-            typeof config.activationHeight === "number"
-                ? config.activationHeight
-                : null
-        getSharedState.forkConfig[name as ForkName] = {
-            activationHeight,
-            description: config.description,
-        }
+        // Strict validation: malformed entries throw rather than being
+        // silently coerced to `null` (inactive). Silent fallback would
+        // turn a misconfigured activation height into a consensus-time
+        // surprise; the loader is the right place to refuse to boot.
+        const config = validateForkEntry(name, rawConfig)
+        getSharedState.forkConfig[name as ForkName] = config
         log.info(
-            `[FORKS] Loaded fork "${name}" with activationHeight=${activationHeight}`,
+            `[FORKS] Loaded fork "${name}" with activationHeight=${config.activationHeight}`,
         )
     }
+}
+
+/**
+ * Validate a single `genesisData.forks.<name>` entry.
+ *
+ * Throws on any malformed shape — silent skip would defeat the purpose
+ * of the validation. The accepted contract:
+ *
+ *  - `rawConfig` MUST be a non-null object.
+ *  - `activationHeight` MUST be either `null` (fork configured but
+ *    inactive) or a non-negative finite integer. NaN, Infinity,
+ *    fractional, negative, undefined-not-null, and non-number values
+ *    are all hard errors.
+ *  - `description` is optional; when present it MUST be a string.
+ *    Non-string values are dropped (the field is operator-facing only,
+ *    not consensus-relevant) but logged via `log.warning`.
+ *
+ * myc#81 / GH#3213220458.
+ */
+function validateForkEntry(name: string, raw: unknown): ForkConfig {
+    if (typeof raw !== "object" || raw === null) {
+        throw new Error(
+            `[FORKS] Genesis fork "${name}" must be an object, got: ${typeof raw}`,
+        )
+    }
+    const entry = raw as Record<string, unknown>
+    const ah = entry.activationHeight
+    if (
+        ah !== null &&
+        (typeof ah !== "number" ||
+            !Number.isFinite(ah) ||
+            !Number.isInteger(ah) ||
+            ah < 0)
+    ) {
+        throw new Error(
+            `[FORKS] Genesis fork "${name}".activationHeight must be a non-negative integer or null, got: ${JSON.stringify(ah)}`,
+        )
+    }
+    let description: string | undefined
+    if (typeof entry.description === "string") {
+        description = entry.description
+    } else if (typeof entry.description !== "undefined") {
+        log.warning(
+            `[FORKS] Genesis fork "${name}".description must be a string when present, got: ${typeof entry.description}; ignoring`,
+        )
+    }
+    return { activationHeight: ah as number | null, description }
 }
