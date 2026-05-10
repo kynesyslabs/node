@@ -88,11 +88,23 @@ export default class SubOperations {
             const amount = balanceOperation[1]
             // REVIEW Use BigInt to avoid silent truncation on amounts > 2^53
             // that parseInt() would otherwise hide.
-            await GCR.setGCRNativeBalance(
+            // myc#78 / GH#3213223279: capture the boolean return and
+            // throw on `false`. Genesis is consensus-relevant: a partial
+            // load means this node's legacy GCR diverges from peers as
+            // soon as block 1 references one of the missing balances.
+            // Refusing to start is strictly safer than booting with a
+            // silently-corrupt ledger (locked decision Q1: do not widen
+            // the legacy JSONB cap; surface the failure instead).
+            const ok = await GCR.setGCRNativeBalance(
                 receiver,
                 BigInt(amount),
                 operation.hash,
             )
+            if (!ok) {
+                throw new Error(
+                    `Genesis balance load failed for receiver ${receiver}: setGCRNativeBalance returned false. Genesis is consensus-relevant; partial loads are forbidden.`,
+                )
+            }
         }
         return result
     }
