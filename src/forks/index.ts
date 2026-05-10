@@ -9,7 +9,10 @@ export {
     DEFAULT_FORK_CONFIG,
     cloneDefaultForkConfig,
 } from "./forkConfig"
-export { loadForkConfigFromGenesis } from "./loadForkConfig"
+export {
+    loadForkConfigFromGenesis,
+    ForkConfigValidationError,
+} from "./loadForkConfig"
 export type { ForkName, ForkConfig } from "./forkConfig"
 export {
     runOsDenominationMigration,

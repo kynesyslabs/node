@@ -5,6 +5,23 @@ import type { ForkConfig, ForkName } from "./forkConfig"
 // REVIEW: P2 — genesis loader for fork heights.
 
 /**
+ * Thrown by `loadForkConfigFromGenesis` (and the env-var production guard)
+ * when a configuration value is structurally or semantically invalid. The
+ * caller in `findGenesisBlock` discriminates on this class to refuse boot
+ * on validation failures while still warning-and-continuing on benign
+ * IO/parse errors.
+ *
+ * GH#3214986124 (Greptile P1): plain `Error` was being swallowed by the
+ * outer try/catch, silently leaving forks inactive on a typo.
+ */
+export class ForkConfigValidationError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "ForkConfigValidationError"
+    }
+}
+
+/**
  * Returns true iff the rehearsal-only feature flag
  * `DEMOS_DISABLE_FORK_MACHINERY` is set to a truthy value.
  *
@@ -69,7 +86,7 @@ export function isForkMachineryDisabled(): boolean {
         )
 
         if (!isRehearsalOptIn) {
-            throw new Error(
+            throw new ForkConfigValidationError(
                 "[FORKS] Refusing to boot: DEMOS_DISABLE_FORK_MACHINERY is " +
                     "set in NODE_ENV=production without DEMOS_REHEARSAL=true " +
                     "opt-in. This combination would cause a consensus split " +
@@ -156,7 +173,7 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
  */
 function validateForkEntry(name: string, raw: unknown): ForkConfig {
     if (typeof raw !== "object" || raw === null) {
-        throw new Error(
+        throw new ForkConfigValidationError(
             `[FORKS] Genesis fork "${name}" must be an object, got: ${typeof raw}`,
         )
     }
@@ -169,7 +186,7 @@ function validateForkEntry(name: string, raw: unknown): ForkConfig {
             !Number.isInteger(ah) ||
             ah < 0)
     ) {
-        throw new Error(
+        throw new ForkConfigValidationError(
             `[FORKS] Genesis fork "${name}".activationHeight must be a non-negative integer or null, got: ${JSON.stringify(ah)}`,
         )
     }

@@ -9,7 +9,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
-import { loadForkConfigFromGenesis } from "@/forks/loadForkConfig"
+import {
+    ForkConfigValidationError,
+    loadForkConfigFromGenesis,
+} from "@/forks/loadForkConfig"
 import {
     cloneDefaultForkConfig,
     type ForkConfig,
@@ -68,6 +71,24 @@ describe("loadForkConfigFromGenesis", () => {
                 },
             }),
         ).toThrow(/non-negative integer or null/)
+    })
+
+    // GH#3214986124 (Greptile P1): the throw must be a discriminable
+    // ForkConfigValidationError so the boot-time catch in
+    // findGenesisBlock can re-throw it (refusing to boot) while still
+    // warning-and-continuing on benign IO/parse errors.
+    it("throws ForkConfigValidationError (not generic Error) on validation failure", () => {
+        let caught: unknown = null
+        try {
+            loadForkConfigFromGenesis({
+                forks: {
+                    osDenomination: { activationHeight: "200" },
+                },
+            })
+        } catch (e) {
+            caught = e
+        }
+        expect(caught).toBeInstanceOf(ForkConfigValidationError)
     })
 
     it("throws on negative activationHeight", () => {

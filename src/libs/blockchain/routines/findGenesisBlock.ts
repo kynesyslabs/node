@@ -14,7 +14,7 @@ import log from "@/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
-import { loadForkConfigFromGenesis } from "@/forks"
+import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
 
 function getLatestGCRRecoveryData() {
     if (!Config.getInstance().core.restore) {
@@ -58,6 +58,20 @@ export default async function findGenesisBlock() {
             }
             loadForkConfigFromGenesis(cfgGenesisData)
         } catch (e) {
+            // GH#3214986124 (Greptile P1): never swallow validation
+            // failures. A malformed activationHeight is a consensus-level
+            // misconfiguration — booting without the fork active means
+            // diverging from peers at activation height. Re-throw so the
+            // caller halts startup.
+            if (e instanceof ForkConfigValidationError) {
+                log.error(
+                    `[FORKS] Refusing to boot — invalid fork config in data/genesis.json: ${e.message}`,
+                )
+                throw e
+            }
+            // Benign IO/parse failures (file missing, malformed JSON
+            // unrelated to the forks block) leave forks at their inactive
+            // default, matching pre-P2 behavior.
             log.warning(
                 `[FORKS] Failed to read fork config from data/genesis.json: ${
                     e instanceof Error ? e.message : String(e)
