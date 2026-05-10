@@ -51,6 +51,19 @@ export default async function executeNativeTransaction(
     // hash sites (`createTransaction`, `deriveMempoolOperation`,
     // `signalingServer`), so all four producers of the canonical bigint
     // agree on the same height when the tx is processed in mempool.
+    //
+    // myc#80 / GH#3213220466 — mempool activation-boundary canonicalization.
+    // Canonicalization mirror with src/forks/serializerGate.ts via the
+    // shared canonicalizeAmountToOs helper guarantees hash and balance
+    // arithmetic agree on the same bigint. Mempool transactions
+    // submitted pre-fork that land in a post-fork block are correctly
+    // handled because the serializer gate uses the **persisted block
+    // height**, not mempool-arrival height. Both this site
+    // (`getSharedState.lastBlockNumber`) and the serializer's callers
+    // (`Chain.getLastBlockNumber()` / the block's own number) read the
+    // same persisted tip the moment the tx is processed, so a tx that
+    // crosses the activation boundary is re-canonicalized under the
+    // post-fork rules before its hash binding is verified. See myc#80.
     const referenceHeight = getSharedState.lastBlockNumber ?? 0
     const forkActive = isForkActive("osDenomination", referenceHeight)
     let amountCanonical: bigint
