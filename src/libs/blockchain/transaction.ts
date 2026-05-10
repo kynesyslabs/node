@@ -667,14 +667,16 @@ function toEntityBigint(
  * pre-bump observable behavior — the serializerGate is the single
  * choke-point that converts to OS strings post-fork.
  *
- * **Fail-loud bound (myc#77, GH#3213223281, GH#3213220462)**: post-fork
- * OS amounts ≥ 100 DEM (= 1e11 OS) exceed `Number.MAX_SAFE_INTEGER` and
- * a silent `Number(big)` cast would round to the nearest double-precision
- * value — corrupting amounts that flow through `fromRawTransaction` into
- * `tx.content.amount` and `transaction_fee.*`. Throwing here surfaces a
- * wire-shape mismatch (pre-fork wire never carries OS-magnitude amounts;
- * a post-fork value showing up at this code path indicates a missing
- * canonicalization upstream).
+ * **Fail-loud bound (myc#77, GH#3213223281, GH#3213220462, GH#3215...
+ * post-iter-5)**: post-fork OS amounts > `Number.MAX_SAFE_INTEGER`
+ * (≈ 9.007e15 OS = ~9.007M DEM) cannot be represented as a JS `number`
+ * without precision loss; a silent `Number(big)` cast would round to
+ * the nearest double-precision value — corrupting amounts that flow
+ * through `fromRawTransaction` into `tx.content.amount` and
+ * `transaction_fee.*`. Throwing here surfaces a wire-shape mismatch
+ * (pre-fork wire never carries OS-magnitude amounts; a post-fork value
+ * showing up at this code path indicates a missing canonicalization
+ * upstream).
  */
 function fromEntityToWireNumber(
     value: string | number | bigint | null | undefined,
