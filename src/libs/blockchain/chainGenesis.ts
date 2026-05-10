@@ -8,6 +8,14 @@ import HandleGCR from "./gcr/handleGCR"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { insertBlock } from "./chainBlocks"
 import type { Operation } from "@kynesyslabs/demosdk/types"
+import {
+    serializeTransactionContent,
+    serializeBlockContent,
+} from "@/forks"
+
+// REVIEW: P2 — genesis is always block 0; route both genesis hashes through
+// the fork-aware serializer for symmetry. The gate is bit-identical in P2.
+const GENESIS_BLOCK_HEIGHT = 0
 
 export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     const genesisBlock = new Block()
@@ -42,7 +50,9 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     genesisTx.content.transaction_fee.rpc_fee = 0
     genesisTx.content.transaction_fee.additional_fee = 0
 
-    genesisTx.hash = Hashing.sha256(JSON.stringify(genesisTx.content))
+    genesisTx.hash = Hashing.sha256(
+        serializeTransactionContent(genesisTx.content, GENESIS_BLOCK_HEIGHT),
+    )
 
     genesisBlock.content.timestamp = genesisTx.content.timestamp
     genesisBlock.content.ordered_transactions.push(genesisTx.hash)
@@ -58,7 +68,9 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
             "0x000000000000000000000000": "0x0",
         },
     }
-    genesisBlock.hash = Hashing.sha256(JSON.stringify(genesisBlock.content))
+    genesisBlock.hash = Hashing.sha256(
+        serializeBlockContent(genesisBlock.content, GENESIS_BLOCK_HEIGHT),
+    )
 
     const { commonValidatorSeed } = await getCommonValidatorSeed(
         genesisBlock as any,

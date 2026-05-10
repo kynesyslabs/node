@@ -2,7 +2,7 @@ import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
-import Transaction from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
@@ -16,6 +16,12 @@ import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
+import {
+    isOsDenominationMigrationApplied,
+    runOsDenominationMigration,
+} from "@/forks/migrations/osDenomination"
+import { isForkActive } from "@/forks/forkGates"
+import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
 
 export function isGenesis(block: Block): boolean {
@@ -212,6 +218,33 @@ export async function insertBlock(
     try {
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
+                // REVIEW: P3b — fork-activation hook. Runs *before* the
+                // block is persisted so balances are migrated atomically
+                // with the triggering block. Either both commit or both
+                // roll back. Idempotency is enforced by `fork_state`.
+                //
+                // No-op when the fork is inactive (default in production:
+                // activationHeight === null in DEFAULT_FORK_CONFIG) OR when
+                // the rehearsal-only `DEMOS_DISABLE_FORK_MACHINERY` flag is
+                // set (used to simulate a pre-fork binary without
+                // maintaining a separate branch). Production must NEVER
+                // set that flag.
+                if (
+                    !isForkMachineryDisabled() &&
+                    isForkActive("osDenomination", block.number) &&
+                    !(await isOsDenominationMigrationApplied(
+                        transactionalEntityManager,
+                    ))
+                ) {
+                    log.info(
+                        `[forks][osDenomination] activation hook firing at block ${block.number}`,
+                    )
+                    await runOsDenominationMigration(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
                 const savedBlock = await transactionalEntityManager.save(
                     blocksRepo.target,
                     newBlock,
@@ -228,9 +261,12 @@ export async function insertBlock(
                             tx,
                             "confirmed",
                         )
+                        // REVIEW P5a: bridge wire-shape `RawTransaction` to
+                        // entity-shape `Transactions` (bigint amount/fees).
+                        // Runtime payload unchanged.
                         await transactionalEntityManager.save(
                             transactionsRepo.target,
-                            rawTransaction,
+                            toTransactionsEntity(rawTransaction),
                         )
                         await persistConfirmedTransactionProjection(
                             tx,

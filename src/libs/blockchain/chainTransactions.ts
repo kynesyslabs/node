@@ -1,6 +1,6 @@
 import { ILike, In, LessThan, EntityManager, FindManyOptions } from "typeorm"
 import log from "src/utilities/logger"
-import Transaction from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
 import { handleError } from "src/errors"
@@ -195,7 +195,9 @@ export async function insertTransaction(
     log.debug("[insertTransaction] Raw transaction: ")
     log.debug(JSON.stringify(rawTransaction))
     try {
-        await getTransactionsRepo().save(rawTransaction)
+        // REVIEW P5a: bridge wire-shape `RawTransaction` to entity-shape
+        // `Transactions` (bigint amount/fees). Runtime payload unchanged.
+        await getTransactionsRepo().save(toTransactionsEntity(rawTransaction))
         return true
     } catch (e) {
         log.error(

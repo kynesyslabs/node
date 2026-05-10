@@ -74,6 +74,7 @@ import { OfflineMessage } from "@/model/entities/OfflineMessages"
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 import log from "@/utilities/logger"
 import { handleError } from "@/errors"
+import { serializeTransactionContent } from "@/forks"
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -661,7 +662,13 @@ export class SignalingServer {
             }
             transaction.status = ""
 
-            transaction.hash = Hashing.sha256(JSON.stringify(transaction.content))
+            // REVIEW: P2 — fork-aware serialization for IM tx hash. Fetch
+            // the chain head once and reuse it as the mempool reference so
+            // gating and reference block stay consistent.
+            const referenceBlock = await Chain.getLastBlockNumber()
+            transaction.hash = Hashing.sha256(
+                serializeTransactionContent(transaction.content, referenceBlock),
+            )
             const signature = await ucrypto.sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(transaction.hash),
@@ -674,7 +681,6 @@ export class SignalingServer {
             // Add to mempool
             // REVIEW: PR Fix #13 - Add error handling for blockchain storage consistency
             try {
-                const referenceBlock = await Chain.getLastBlockNumber()
                 const { error } = await Mempool.addTransaction({
                     ...transaction,
                     reference_block: referenceBlock,

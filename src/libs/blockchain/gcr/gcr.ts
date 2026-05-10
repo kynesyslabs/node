@@ -71,6 +71,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
+import { serializeTransactionContent } from "@/forks"
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -214,7 +215,11 @@ export default class GCR {
 
     // ANCHOR Balances retrieval
 
-    static async getGCRNativeBalance(address: string) {
+    // REVIEW Returns bigint to keep the native-balance arithmetic chain
+    // bigint-consistent (subOperations.transferNative, addNative, removeNative
+    // all expect BigInt-safe values). Legacy JSONB storage still holds the
+    // value as a JS number, so we coerce on read.
+    static async getGCRNativeBalance(address: string): Promise<bigint> {
         const db = await Datasource.getInstance()
         const gcrRepository = db
             .getDataSource()
@@ -225,10 +230,11 @@ export default class GCR {
                 select: ["details"],
                 where: { publicKey: address },
             })
-            return response ? response.details.content.balance : 0
+            const stored = response ? response.details.content.balance : 0
+            return BigInt(stored ?? 0)
         } catch (e) {
             log.debug(`[GET BALANCE] No balance for: ${address}`)
-            return 0
+            return 0n
         }
     }
 
@@ -515,9 +521,13 @@ export default class GCR {
         return result
     }
 
+    // REVIEW Accepts bigint to keep the native-balance arithmetic chain
+    // bigint-consistent. The legacy JSONB column stores the value as a JS
+    // number, so we coerce here. Values exceeding Number.MAX_SAFE_INTEGER are
+    // rejected to make the precision-loss failure mode loud instead of silent.
     static async setGCRNativeBalance(
         address: string,
-        native: number,
+        native: bigint | number,
         txHash: string,
     ): Promise<boolean> {
         const db = await Datasource.getInstance()
@@ -526,6 +536,18 @@ export default class GCR {
             .getRepository(GlobalChangeRegistry)
 
         try {
+            const nativeBigInt = BigInt(native)
+            if (
+                nativeBigInt > BigInt(Number.MAX_SAFE_INTEGER) ||
+                nativeBigInt < BigInt(Number.MIN_SAFE_INTEGER)
+            ) {
+                log.error(
+                    `[GCR ERROR: NATIVE] Native balance ${nativeBigInt} for ${address} exceeds Number.MAX_SAFE_INTEGER; refusing to truncate into legacy JSONB storage`,
+                )
+                return false
+            }
+            const nativeNumber = Number(nativeBigInt)
+
             let nativeStatus = await gcrRepository.findOne({
                 select: ["details"],
                 where: { publicKey: address },
@@ -561,7 +583,7 @@ export default class GCR {
                     details: {
                         hash: "",
                         content: {
-                            balance: native,
+                            balance: nativeNumber,
                             txs: txList,
                             nonce: nativeStatus.details.content.nonce,
                         },
@@ -1129,7 +1151,13 @@ export default class GCR {
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
         tx.content.data = ["awardPoints", accounts]
-        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — fork-aware serialization for the awardPoints tx hash.
+        // The chain head is the correct reference; this tx is created at
+        // runtime, not bound to a specific block.
+        const referenceHeight = await Chain.getLastBlockNumber()
+        tx.hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, referenceHeight),
+        )
 
         const signature = await ucrypto.sign(
             getSharedState.signingAlgorithm,

@@ -215,7 +215,10 @@ async function defineGas(
         }
         return [false, validityData]
     }
-    let fromBalance = 0
+    // REVIEW getGCRNativeBalance returns bigint; keep this binding bigint
+    // to make the comparison against compositeFeeAmount (number) explicit
+    // via BigInt() coercion below.
+    let fromBalance = 0n
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
@@ -239,8 +242,32 @@ async function defineGas(
     }
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
+    // DEFENSIVE: `calculateCurrentGas` returns Promise<number>; if a future
+    // Config / surge multiplier produces a non-finite or fractional value,
+    // `BigInt(compositeFeeAmount)` would raise a generic RangeError inside
+    // the validation critical path. Validate explicitly so the error
+    // message names the offender and the validator-side caller can decide
+    // what to do, rather than relying on the bare-bones BigInt error.
+    // Currently `networkFee + rpcFee + burnFee = 1+1+1 = 3` so this guard
+    // is dormant in production, but the bare BigInt cast was load-bearing
+    // safety that needed naming.
+    // myc#84, GH#3213220459
+    if (
+        !Number.isFinite(compositeFeeAmount) ||
+        !Number.isInteger(compositeFeeAmount) ||
+        compositeFeeAmount < 0
+    ) {
+        throw new Error(
+            "[Native Tx Validation] calculateCurrentGas returned a value " +
+                "that cannot be represented as a non-negative bigint: " +
+                `${compositeFeeAmount} (typeof=${typeof compositeFeeAmount}). ` +
+                "This indicates a Config / surge-multiplier producing a " +
+                "fractional, NaN, Infinity, or negative fee — fees must be " +
+                "non-negative integers in the active denomination.",
+        )
+    }
     // FIXME Overriding for testing
-    if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
+    if (fromBalance < BigInt(compositeFeeAmount) && getSharedState.PROD) {
         log.error(
             "TX",
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +

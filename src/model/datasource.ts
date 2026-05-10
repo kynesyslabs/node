@@ -38,6 +38,8 @@ import { L2PSProof } from "./entities/L2PSProofs.js"
 // Stackable-genesis governance entities
 import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
 import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
+// Hard-fork bookkeeping (P3b — DEM→OS denomination migration)
+import { ForkState } from "./entities/ForkState.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -74,6 +76,8 @@ export const dataSource = new DataSource({
         // Stackable-genesis governance entities
         NetworkUpgrade,
         NetworkUpgradeVote,
+        // Hard-fork bookkeeping (P3b)
+        ForkState,
     ],
     synchronize: true,
     logging: false,

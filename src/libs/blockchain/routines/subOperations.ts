@@ -59,15 +59,23 @@ export default class SubOperations {
         transaction.from_ed25519_address =
             genesisTx.content.from_ed25519_address ?? "0x0"
         transaction.to = genesisTx.content.to ?? "0x0"
-        transaction.amount = 0 // TODO: Maybe store the amount as defined in balances below here?
+        // REVIEW P-1 widened the entity to `bigint`; use a bigint literal
+        // so the assignment matches the column type.
+        transaction.amount = 0n // TODO: Maybe store the amount as defined in balances below here?
         transaction.nonce = 0
         transaction.timestamp = genesisTx.content.timestamp ?? Date.now()
         transaction.ed25519_signature = genesisTx.ed25519_signature
-        transaction.networkFee =
-            genesisTx.content.transaction_fee?.network_fee ?? 0
-        transaction.rpcFee = genesisTx.content.transaction_fee?.rpc_fee ?? 0
-        transaction.additionalFee =
-            genesisTx.content.transaction_fee?.additional_fee ?? 0
+        // REVIEW Fee columns are now `bigint`; SDK still serialises fees as
+        // `number` on the wire, so coerce at the entity boundary.
+        transaction.networkFee = BigInt(
+            genesisTx.content.transaction_fee?.network_fee ?? 0,
+        )
+        transaction.rpcFee = BigInt(
+            genesisTx.content.transaction_fee?.rpc_fee ?? 0,
+        )
+        transaction.additionalFee = BigInt(
+            genesisTx.content.transaction_fee?.additional_fee ?? 0,
+        )
 
         // Save the new transaction
         await transactionRepository.save(transaction)
@@ -78,11 +86,25 @@ export default class SubOperations {
             const balanceOperation = balances[i]
             const receiver = balanceOperation[0]
             const amount = balanceOperation[1]
-            await GCR.setGCRNativeBalance(
+            // REVIEW Use BigInt to avoid silent truncation on amounts > 2^53
+            // that parseInt() would otherwise hide.
+            // myc#78 / GH#3213223279: capture the boolean return and
+            // throw on `false`. Genesis is consensus-relevant: a partial
+            // load means this node's legacy GCR diverges from peers as
+            // soon as block 1 references one of the missing balances.
+            // Refusing to start is strictly safer than booting with a
+            // silently-corrupt ledger (locked decision Q1: do not widen
+            // the legacy JSONB cap; surface the failure instead).
+            const ok = await GCR.setGCRNativeBalance(
                 receiver,
-                parseInt(amount),
+                BigInt(amount),
                 operation.hash,
             )
+            if (!ok) {
+                throw new Error(
+                    `Genesis balance load failed for receiver ${receiver}: setGCRNativeBalance returned false. Genesis is consensus-relevant; partial loads are forbidden.`,
+                )
+            }
         }
         return result
     }
@@ -93,10 +115,14 @@ export default class SubOperations {
     ): Promise<OperationResult> {
         const from: string = operation.params.from
         const to: string = operation.params.to
-        const amount = parseInt(operation.params.amount, 10)
-
-        // Check if amount is a valid number
-        if (isNaN(amount)) {
+        // REVIEW Use BigInt to avoid silent truncation on amounts > 2^53.
+        // BigInt() throws on invalid input (instead of returning NaN like
+        // parseInt did), so we wrap and translate the failure to the same
+        // OperationResult shape the caller already handled.
+        let amount: bigint
+        try {
+            amount = BigInt(operation.params.amount)
+        } catch {
             return {
                 success: false,
                 message: "Invalid amount",
@@ -106,7 +132,7 @@ export default class SubOperations {
         const balanceTo = await GCR.getGCRNativeBalance(to)
         // Sanity checks
 
-        if (amount === 0) {
+        if (amount === 0n) {
             return {
                 success: false,
                 message: "Amount cannot be 0",
@@ -121,8 +147,60 @@ export default class SubOperations {
         // If we are here, we have a valid operation
         const newBalanceFrom = balanceFrom - amount
         const newBalanceTo = balanceTo + amount
-        await GCR.setGCRNativeBalance(from, newBalanceFrom, operation.hash)
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        // GH#3214986124 (Greptile P1+P2): legacy GCR backend's
+        // setGCRNativeBalance returns false when the new balance would
+        // exceed Number.MAX_SAFE_INTEGER (2^53-1). Pre-validate BOTH
+        // sides before issuing any write; if either side would overflow,
+        // refuse the transfer atomically. Writing sender first and
+        // failing on receiver would permanently destroy funds.
+        const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER)
+        const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER)
+        if (
+            newBalanceFrom > MAX_SAFE ||
+            newBalanceFrom < MIN_SAFE ||
+            newBalanceTo > MAX_SAFE ||
+            newBalanceTo < MIN_SAFE
+        ) {
+            return {
+                success: false,
+                message: `transferNative: post-transfer balance for ${from} or ${to} would exceed legacy GCR safe-integer bounds; refusing to corrupt balances.`,
+            }
+        }
+        const okFrom = await GCR.setGCRNativeBalance(
+            from,
+            newBalanceFrom,
+            operation.hash,
+        )
+        if (!okFrom) {
+            return {
+                success: false,
+                message: `transferNative: setGCRNativeBalance failed for sender ${from}; aborting transfer.`,
+            }
+        }
+        const okTo = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!okTo) {
+            // Compensating re-credit. The sender debit already committed;
+            // restore it before returning failure so funds aren't
+            // destroyed. If the compensating write also fails, the
+            // node is in a degraded state and we propagate the failure
+            // — but the pre-check above should make this practically
+            // unreachable.
+            const restored = await GCR.setGCRNativeBalance(
+                from,
+                balanceFrom,
+                operation.hash,
+            )
+            return {
+                success: false,
+                message: restored
+                    ? `transferNative: receiver write failed for ${to}; sender balance restored.`
+                    : `transferNative: receiver write failed for ${to} AND sender restore failed; node state inconsistent — manual intervention required.`,
+            }
+        }
         // Returning success
         return {
             success: true,
@@ -144,8 +222,29 @@ export default class SubOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        const newBalanceTo = balanceTo + parseInt(amount)
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        // REVIEW BigInt() to avoid silent truncation on amounts > 2^53.
+        let parsedAmount: bigint
+        try {
+            parsedAmount = BigInt(amount)
+        } catch {
+            return {
+                success: false,
+                message: "Invalid amount",
+            }
+        }
+        const newBalanceTo = balanceTo + parsedAmount
+        // GH#3214986124 (Greptile P2): see transferNative for rationale.
+        const ok = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!ok) {
+            return {
+                success: false,
+                message: `addNative: setGCRNativeBalance failed for ${to}.`,
+            }
+        }
         return SubOperations.result
     }
 
@@ -160,7 +259,18 @@ export default class SubOperations {
                 success: false,
                 message: "Amount cannot be 0",
             }
-        } else if (balanceTo < parseInt(amount)) {
+        }
+        // REVIEW BigInt() to avoid silent truncation on amounts > 2^53.
+        let parsedAmount: bigint
+        try {
+            parsedAmount = BigInt(amount)
+        } catch {
+            return {
+                success: false,
+                message: "Invalid amount",
+            }
+        }
+        if (balanceTo < parsedAmount) {
             return {
                 success: false,
                 message: "Insufficient funds",
@@ -168,8 +278,19 @@ export default class SubOperations {
         }
         // TODO
         // If we are here, we have a valid operation
-        const newBalanceTo = balanceTo - parseInt(amount)
-        await GCR.setGCRNativeBalance(to, newBalanceTo, operation.hash)
+        const newBalanceTo = balanceTo - parsedAmount
+        // GH#3214986124 (Greptile P2): see transferNative for rationale.
+        const ok = await GCR.setGCRNativeBalance(
+            to,
+            newBalanceTo,
+            operation.hash,
+        )
+        if (!ok) {
+            return {
+                success: false,
+                message: `removeNative: setGCRNativeBalance failed for ${to}.`,
+            }
+        }
         return SubOperations.result
     }
 
