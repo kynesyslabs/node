@@ -666,6 +666,15 @@ function toEntityBigint(
  * number` in 3.1.0. We narrow back to `number` here to preserve the
  * pre-bump observable behavior — the serializerGate is the single
  * choke-point that converts to OS strings post-fork.
+ *
+ * **Fail-loud bound (myc#77, GH#3213223281, GH#3213220462)**: post-fork
+ * OS amounts ≥ 100 DEM (= 1e11 OS) exceed `Number.MAX_SAFE_INTEGER` and
+ * a silent `Number(big)` cast would round to the nearest double-precision
+ * value — corrupting amounts that flow through `fromRawTransaction` into
+ * `tx.content.amount` and `transaction_fee.*`. Throwing here surfaces a
+ * wire-shape mismatch (pre-fork wire never carries OS-magnitude amounts;
+ * a post-fork value showing up at this code path indicates a missing
+ * canonicalization upstream).
  */
 function fromEntityToWireNumber(
     value: string | number | bigint | null | undefined,
@@ -673,7 +682,15 @@ function fromEntityToWireNumber(
     if (value === null || value === undefined) {
         return 0
     }
-    return Number(value)
+    const big: bigint =
+        typeof value === "bigint" ? value : BigInt(value as string | number)
+    const max = BigInt(Number.MAX_SAFE_INTEGER)
+    if (big > max || big < -max) {
+        throw new Error(
+            `fromEntityToWireNumber: value ${big.toString()} exceeds Number.MAX_SAFE_INTEGER (~9.007e15). This indicates a wire-shape mismatch — pre-fork wire should never carry OS-magnitude amounts. See myc#77 / GH#3213223281.`,
+        )
+    }
+    return Number(big)
 }
 
 /**
