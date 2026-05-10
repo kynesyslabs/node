@@ -147,12 +147,25 @@ export default class SubOperations {
         // If we are here, we have a valid operation
         const newBalanceFrom = balanceFrom - amount
         const newBalanceTo = balanceTo + amount
-        // GH#3214986124 (Greptile P2): legacy GCR backend's
+        // GH#3214986124 (Greptile P1+P2): legacy GCR backend's
         // setGCRNativeBalance returns false when the new balance would
-        // exceed Number.MAX_SAFE_INTEGER (2^53-1). Post-fork, OS amounts
-        // can legitimately reach that range; silently dropping the write
-        // while returning {success:true} would corrupt balances. Treat a
-        // failed write as a failed operation.
+        // exceed Number.MAX_SAFE_INTEGER (2^53-1). Pre-validate BOTH
+        // sides before issuing any write; if either side would overflow,
+        // refuse the transfer atomically. Writing sender first and
+        // failing on receiver would permanently destroy funds.
+        const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER)
+        const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER)
+        if (
+            newBalanceFrom > MAX_SAFE ||
+            newBalanceFrom < MIN_SAFE ||
+            newBalanceTo > MAX_SAFE ||
+            newBalanceTo < MIN_SAFE
+        ) {
+            return {
+                success: false,
+                message: `transferNative: post-transfer balance for ${from} or ${to} would exceed legacy GCR safe-integer bounds; refusing to corrupt balances.`,
+            }
+        }
         const okFrom = await GCR.setGCRNativeBalance(
             from,
             newBalanceFrom,
@@ -170,9 +183,22 @@ export default class SubOperations {
             operation.hash,
         )
         if (!okTo) {
+            // Compensating re-credit. The sender debit already committed;
+            // restore it before returning failure so funds aren't
+            // destroyed. If the compensating write also fails, the
+            // node is in a degraded state and we propagate the failure
+            // — but the pre-check above should make this practically
+            // unreachable.
+            const restored = await GCR.setGCRNativeBalance(
+                from,
+                balanceFrom,
+                operation.hash,
+            )
             return {
                 success: false,
-                message: `transferNative: setGCRNativeBalance failed for receiver ${to} after sender debit committed; balance state may be inconsistent.`,
+                message: restored
+                    ? `transferNative: receiver write failed for ${to}; sender balance restored.`
+                    : `transferNative: receiver write failed for ${to} AND sender restore failed; node state inconsistent — manual intervention required.`,
             }
         }
         // Returning success
