@@ -645,23 +645,17 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
                 const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
 
-                // Build a public WS URL for a TLSN port. When exposedUrl has
-                // a path, route through a reverse proxy that maps
-                // `<path>/<port>` to the local port (single nginx rule).
+                const { buildWsUrl } = await import(
+                    "@/features/tlsnotary/proxyManager"
+                )
                 const buildUrl = (p: number | string) => {
-                    try {
-                        const exposedUrl = getSharedState.exposedUrl
-                        if (exposedUrl) {
-                            const url = new URL(exposedUrl)
-                            const wsScheme =
-                                url.protocol === "https:" ? "wss" : "ws"
-                            const path = url.pathname.replace(/\/+$/, "")
-                            return path
-                                ? `${wsScheme}://${url.host}${path}/${p}/`
-                                : `${wsScheme}://${url.hostname}:${p}`
+                    const exposedUrl = getSharedState.exposedUrl
+                    if (exposedUrl) {
+                        try {
+                            return buildWsUrl(exposedUrl, p)
+                        } catch {
+                            // Fall back to localhost if URL parsing fails
                         }
-                    } catch {
-                        // Fall back to localhost if URL parsing fails
                     }
                     return `ws://localhost:${p}`
                 }
