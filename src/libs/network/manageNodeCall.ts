@@ -645,28 +645,29 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
 
                 const proxyPort = process.env.TLSNOTARY_PROXY_PORT ?? "55688"
 
-                // Extract host and determine WebSocket scheme from exposedUrl
-                // The node's host is used - SDK connects to the same host it's already connected to
-                let nodeHost = "localhost"
-                const wsScheme = (() => {
+                // Build a public WS URL for a TLSN port. When exposedUrl has
+                // a path, route through a reverse proxy that maps
+                // `<path>/<port>` to the local port (single nginx rule).
+                const buildUrl = (p: number | string) => {
                     try {
                         const exposedUrl = getSharedState.exposedUrl
                         if (exposedUrl) {
                             const url = new URL(exposedUrl)
-                            nodeHost = url.hostname
-                            return url.protocol === "https:" ? "wss" : "ws"
+                            const wsScheme =
+                                url.protocol === "https:" ? "wss" : "ws"
+                            const path = url.pathname.replace(/\/+$/, "")
+                            return path
+                                ? `${wsScheme}://${url.host}${path}/${p}/`
+                                : `${wsScheme}://${url.hostname}:${p}`
                         }
                     } catch {
-                        // Fall back to localhost and ws if URL parsing fails
+                        // Fall back to localhost if URL parsing fails
                     }
-                    return "ws"
-                })()
+                    return `ws://localhost:${p}`
+                }
 
-                // Build the notary WebSocket URL - Port is the TLSNotary WebSocket port
-                const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
-
-                // WebSocket proxy URL for TCP tunneling
-                const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+                const notaryUrl = buildUrl(port)
+                const proxyUrl = buildUrl(proxyPort)
 
                 response.response = {
                     notaryUrl,

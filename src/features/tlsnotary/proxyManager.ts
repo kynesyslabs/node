@@ -181,7 +181,12 @@ export function getPublicUrl(
     const build = (base: string) => {
         const url = new URL(base)
         const wsScheme = url.protocol === "https:" ? "wss" : "ws"
-        return `${wsScheme}://${url.hostname}:${localPort}`
+        const path = url.pathname.replace(/\/+$/, "")
+        // When EXPOSED_URL has a path, route through a reverse proxy that
+        // maps `<path>/<port>` to the local port (single nginx rule).
+        return path
+            ? `${wsScheme}://${url.host}${path}/${localPort}/`
+            : `${wsScheme}://${url.hostname}:${localPort}`
     }
 
     // 1. Try auto-detect from request origin (if available in headers)
