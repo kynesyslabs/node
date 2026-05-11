@@ -5,6 +5,60 @@
 
 ---
 
+## ⚠️ As-shipped status (read first)
+
+The plan below is the original DEM-665 specification text. **The implementation that landed deviates intentionally** based on findings during execution (Linear DEM-665 design comment, 2026-05-11). Read the deviations before working from the spec verbatim.
+
+### Final design (locked 2026-05-11)
+
+- **Combined fork**: `gasFeeSeparation` rides on the **same `activationHeight`** as `osDenomination`. One coordinated event, one coordinated chain wipe.
+- **`fee_config` does NOT live at the top level of `genesis.json`.** The original plan's §2 was rejected after verifying `chainGenesis.ts:60-73` — `block.content.extra` is part of the hashed payload, so a top-level `fee_config` would change the genesis hash and break re-sync. The plan claim that "adding `fee_config` doesn't change the hash" is wrong.
+- **Split storage**:
+  - `treasuryAddress` ships as **fork-payload** under `forks.gasFeeSeparation` (fork-fixed, immutable for the chain's lifetime).
+  - `burnAddress` is a **code constant** in `src/forks/migrations/gasFeeSeparation.ts:BURN_ADDRESS` (`0x` + 64 zeros). Not in genesis. Never rotates.
+  - Distribution percentages (50/50, 25/75, 25/50/25) ship as **governance-mutable `NetworkParameters` keys** from day 1, with tighter safety bounds (±10% per proposal, sum-100 cross-key invariant).
+- **rpc_address tx field**: fork-gated. Pre-fork: `null` on all txs. Post-fork: stamped by the validating node in `confirmTransaction` (DEM-665 P6).
+- **`burnFee` scalar**: retired. Replaced by per-component burn-percentage fields.
+- **SDK companion**: 4.0.0-rc.1 (pending publish; user owns).
+
+### Where in the code
+
+| Concern | File:line |
+|---|---|
+| Fork registry + treasury fork-payload | `src/forks/forkConfig.ts` |
+| Validation (treasury lowercase hex, placeholder rejection) | `src/forks/loadForkConfig.ts:validateGasFeeSeparationEntry` |
+| State migration (burn + treasury account creation) | `src/forks/migrations/gasFeeSeparation.ts` |
+| Activation hook | `src/libs/blockchain/chainBlocks.ts:235-260` |
+| Per-component fee math | `src/libs/blockchain/routines/calculateCurrentGas.ts:calculateFeeBreakdown` |
+| Fee-distribution edit generator | `src/libs/blockchain/gcr/gcr_routines/feeDistribution.ts` |
+| `confirmTransaction` wiring | `src/libs/blockchain/routines/validateTransaction.ts:applyGasFeeSeparation` |
+| TLSN fork-gated branches | `src/libs/blockchain/gcr/gcr_routines/handleNativeOperations.ts` (`tlsn_request`, `tlsn_store`) |
+| Burn-address spend prevention | `src/libs/blockchain/gcr/gcr_routines/GCRBalanceRoutines.ts` |
+| Governance keys + cross-key sum-100 invariant | `src/features/networkUpgrade/constants.ts`, `src/features/networkUpgrade/safetyBounds.ts` |
+| Activation runbook | `decimal_planning/RUNBOOK_FORK_ACTIVATION.md` §9 |
+
+### Test coverage
+
+| Suite | File | Tests |
+|---|---|---|
+| Fork loader | `testing/forks/loadForkConfig.test.ts` | 29 |
+| State migration | `testing/forks/migrations/gasFeeSeparation.test.ts` | 16 |
+| Per-component math | `tests/governance/calculateCurrentGas.test.ts` | 8 |
+| Governance bounds | `tests/governance/safetyBounds.test.ts` | 31 |
+| Fee-distribution edit generator | `tests/blockchain/feeDistribution.test.ts` | 16 |
+| Burn-address spend prevention | `tests/blockchain/GCRBalanceRoutines.test.ts` | 8 |
+| TLSN fork-gating | `tests/blockchain/handleNativeOperations.test.ts` | 5 |
+
+Total: **113 DEM-665-specific tests across 7 suites**. Pre-fork legacy behaviour is preserved in every branch (verified by the "pre-fork" arm of each fork-gated test).
+
+### Deferred (filed as follow-ups)
+
+- **myc#100 (P10b)** — devnet integration rehearsal scenarios 09 (fee-distribution boundary cross) and 10 (burn-spend rejection).
+- **myc#101 (P10c)** — extract `applyGasFeeSeparation` from `validateTransaction.ts` for direct unit testing.
+- **DEM-665 P9** — publish SDK 4.0.0-rc.1 (user-owned), bump node `package.json` pin from 3.1.0 to 4.0.0-rc.1, drop the local `node_modules/@kynesyslabs/demosdk/build` overlay.
+
+---
+
 ## Table of Contents
 
 1. [Architecture Overview](#1-architecture-overview)

@@ -408,3 +408,129 @@ A validator joining after `T-0` spins up normally with the agreed binary and `da
 ---
 
 **Last updated**: 2026-05-09. Source-branch: `decimals` @ `b06f488b`.
+
+---
+
+## 9. DEM-665 — `gasFeeSeparation` co-activation
+
+> **Source branch**: `claude/gas-fee-separation-aDJK5`. Linear: DEM-665. Mycelium epic #10.
+>
+> **TL;DR**: a second fork named `gasFeeSeparation` rides on the **same `activationHeight`** as `osDenomination`. One coordinated event, one coordinated chain wipe, two state migrations.
+
+### 9.1 Why bundle
+
+The plan analysis (see Linear DEM-665 design comment) ruled out putting `fee_config` at the top level of `genesis.json` once `chainGenesis.ts:60-73` was verified to hash `block.content.extra`. Any change to the hashed payload changes the genesis hash and breaks every existing `chain.db`. Since `osDenomination` already requires a coordinated wipe, `gasFeeSeparation` rides on the same wipe with zero extra operator friction.
+
+### 9.2 What changes in `data/genesis.json`
+
+Add a second entry under `forks`, at the **same** `activationHeight` as `osDenomination`:
+
+```json
+{
+  "forks": {
+    "osDenomination": { "activationHeight": <N>, "description": "..." },
+    "gasFeeSeparation": {
+      "activationHeight": <N>,
+      "description": "Gas fee separation (DEM-665). ...",
+      "treasuryAddress": "0x<ed25519 pubkey, lowercase hex, 64 chars>"
+    }
+  }
+}
+```
+
+Validation rules (`src/forks/loadForkConfig.ts:validateGasFeeSeparationEntry`):
+- `activationHeight` MUST equal the `osDenomination` activation height (operator policy, not yet auto-enforced; misalignment is a bug).
+- `treasuryAddress` MUST match `/^0x[0-9a-f]{64}$/` — strict lowercase, no mixed case (PR #778 G-1/G-4 lesson, myc#6). Mixed case = node refuses to boot with `ForkConfigValidationError`.
+- `treasuryAddress` MUST NOT equal `BURN_ADDRESS` (the all-zeros placeholder) when `activationHeight !== null`. Sealing genesis with the placeholder is the most likely operator mistake; the loader fails closed.
+
+### 9.3 Treasury key custody (ops-owned)
+
+The placeholder treasury address shipped in `DEFAULT_FORK_CONFIG.gasFeeSeparation.treasuryAddress` is `0x` + 64 zeros. **Replace it with the real treasury ed25519 pubkey before sealing genesis.** The keypair itself lives outside the node repo — ops owns generation, storage, and rotation custody. A production sealing checklist:
+
+1. Generate a fresh ed25519 keypair (`npm run keygen` or the standalone Demos keymaker).
+2. Hex-encode the public key, lowercase, with `0x` prefix.
+3. Paste into `genesis.json` under `forks.gasFeeSeparation.treasuryAddress`.
+4. Store the private key per the ops key-custody SOP (cold storage / multisig — out of scope for this runbook).
+
+### 9.4 What the activation hook does
+
+`src/libs/blockchain/chainBlocks.ts:235-260` runs `osDenomination` FIRST, then `gasFeeSeparation`. The ordering is documented in code: `osDenomination` scales every existing balance × 10^9 to OS units, then `gasFeeSeparation` creates two fresh **OS-denominated** accounts at balance 0:
+
+- **Burn account** at `0x` + 64 zeros (code constant from `src/forks/migrations/gasFeeSeparation.ts:BURN_ADDRESS`). Spending FROM it is blocked at the GCRBalanceRoutines layer post-fork. Adds to it = burned supply.
+- **Treasury account** at the genesis-supplied `treasuryAddress`. Receives the treasury share of every fee distribution. Owned by ops.
+
+Both creations are idempotent: a pre-seeded account at either pubkey is left untouched.
+
+The migration writes a row into `fork_state` with `fork_name = "gasFeeSeparation"`, `applied = true`, `applied_at_block = N`. Idempotency on restart works the same way as `osDenomination` — the hook short-circuits if the row exists.
+
+### 9.5 Pre-flight checklist additions
+
+On top of §2 of this runbook, add:
+
+```bash
+# 9.5.1 treasuryAddress format check — strict lowercase 0x+64hex
+jq -r '.forks.gasFeeSeparation.treasuryAddress' data/genesis.json \
+  | grep -E '^0x[0-9a-f]{64}$' \
+  || echo "FAIL: treasuryAddress malformed"
+
+# 9.5.2 same activationHeight as osDenomination
+OS_N=$(jq -r '.forks.osDenomination.activationHeight' data/genesis.json)
+GFS_N=$(jq -r '.forks.gasFeeSeparation.activationHeight' data/genesis.json)
+[ "$OS_N" = "$GFS_N" ] || echo "FAIL: activation heights differ ($OS_N vs $GFS_N)"
+
+# 9.5.3 treasuryAddress is not the placeholder zero address
+TA=$(jq -r '.forks.gasFeeSeparation.treasuryAddress' data/genesis.json)
+[ "$TA" = "0x$(printf '0%.0s' {1..64})" ] && echo "FAIL: still on placeholder treasury"
+```
+
+### 9.6 Post-activation verification
+
+After block `N` is final on every validator:
+
+```bash
+# Burn account exists with balance 0
+curl -s http://localhost:8079/getAddressInfo \
+  -X POST -H 'Content-Type: application/json' \
+  -d '{"address":"0x'"$(printf '0%.0s' {1..64})"'"}' \
+  | jq '.balance'   # expect "0"
+
+# Treasury account exists with balance 0 (pre-traffic)
+TA=$(jq -r '.forks.gasFeeSeparation.treasuryAddress' data/genesis.json)
+curl -s http://localhost:8079/getAddressInfo \
+  -X POST -H 'Content-Type: application/json' \
+  -d "{\"address\":\"$TA\"}" \
+  | jq '.balance'   # expect "0"
+
+# fork_state row persisted
+psql -c "SELECT fork_name, applied, applied_at_block \
+         FROM fork_state \
+         WHERE fork_name = 'gasFeeSeparation'"
+# expect: gasFeeSeparation | t | N
+```
+
+After the first post-fork transaction lands, the burn/treasury balances should move per the distribution percentages governed by `NetworkParameters` (see §9.8).
+
+### 9.7 Rollback
+
+The activation hook runs inside the same TypeORM transaction as the block insert (`chainBlocks.ts:dataSource.transaction(...)`). If the `gasFeeSeparation` migration throws, the outer transaction rolls back and the activation block is not persisted — same atomicity contract as `osDenomination`. No special node-level rollback procedure; the existing osDenomination one applies verbatim.
+
+### 9.8 Governable percentages (DEM-665 P13)
+
+Distribution percentages live in `NetworkParameters`, **not** in the fork payload. Treasury address and burn address are immutable fork-level constants; the per-component splits (50/50, 25/75, 25/50/25 by default) are governance-mutable from day 1 with tighter safety bounds:
+
+- Per-proposal change cap: **±10%** (vs the ±50% default).
+- Per-key absolute bounds: `[0, 100]` on every `*Pct` field.
+- Cross-key invariant: each distribution group's percentages must sum to **exactly 100** on the merged (current ⊕ proposed) view.
+
+A proposal touching only `networkFeeBurnPct` without also adjusting `networkFeeTreasuryPct` is rejected because the merged sum != 100. Proposers must move both keys in the same proposal so the invariant holds.
+
+### 9.9 Don't-do list additions (gasFeeSeparation-specific)
+
+- **Don't seal genesis with the placeholder treasury** (`0x` + 64 zeros). The loader refuses to boot. The check exists precisely to catch this operator mistake — overriding it is unsafe.
+- **Don't desync the two `activationHeight` values** between `osDenomination` and `gasFeeSeparation`. The chainBlocks hook runs them sequentially in the same block; running them on different heights means osDenomination scales balances at one height and gasFeeSeparation creates OS-denominated accounts at another, which is a recoverable but pointless state confusion.
+- **Don't manually edit the burn or treasury rows in `gcr_main`.** Burn balance is reachable only via `add` edits (and rollback inversions of those). Treasury balance is governance-mutated indirectly through fee distribution. Manual SQL edits are not consensus-replayed and will desync the validator.
+- **Don't propose to change every distribution percentage in one go.** Even though the bounds permit ±10% per proposal, large simultaneous shifts give observers no window to react. A multi-cycle gradient is safer governance hygiene.
+
+---
+
+**DEM-665 status**: design and implementation merged. Source-branch: `claude/gas-fee-separation-aDJK5`. SDK companion: 4.0.0-rc.1 (pending publish; user owns).
