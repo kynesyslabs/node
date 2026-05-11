@@ -658,7 +658,15 @@ export class SignalingServer {
                 gcr_edits: [],
                 nonce,
                 timestamp,
-                transaction_fee: { network_fee: 0, rpc_fee: 0, additional_fee: 0 },
+                transaction_fee: {
+                    network_fee: 0,
+                    rpc_fee: 0,
+                    additional_fee: 0,
+                    // DEM-665: IM signaling tx is signed client-side;
+                    // a validating node populates rpc_address during
+                    // confirmTransaction (P6).
+                    rpc_address: null,
+                },
             }
             transaction.status = ""
 

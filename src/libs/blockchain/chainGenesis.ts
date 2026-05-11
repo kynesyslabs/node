@@ -89,6 +89,10 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
             network_fee: 0,
             rpc_fee: 0,
             additional_fee: 0,
+            // DEM-665: Operations are internal — they do not carry a
+            // routing rpc_address. The field is structurally required
+            // by the SDK's TxFee interface so we set `null`.
+            rpc_address: null,
         },
     }
 

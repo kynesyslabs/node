@@ -363,6 +363,7 @@ describe("forks integration (P3d)", () => {
                 network_fee: 1,
                 rpc_fee: 1,
                 additional_fee: 1,
+                rpc_address: null,
             },
         }
 

@@ -70,6 +70,11 @@ export default class Transaction implements ITransaction {
                     network_fee: null,
                     rpc_fee: null,
                     additional_fee: null,
+                    // DEM-665: populated post-fork by the validating
+                    // node in confirmTransaction (P6). Pre-fork rows
+                    // and freshly-constructed unsent transactions
+                    // carry `null`.
+                    rpc_address: null,
                 },
             },
             signature: null,
@@ -568,6 +573,10 @@ export default class Transaction implements ITransaction {
             networkFee: tx.content.transaction_fee.network_fee,
             rpcFee: tx.content.transaction_fee.rpc_fee,
             additionalFee: tx.content.transaction_fee.additional_fee,
+            // DEM-665: rpcAddress is null on pre-fork rows and on
+            // freshly-constructed transactions before confirmTransaction
+            // runs (P6). The DB column is nullable.
+            rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
         }
 
@@ -620,6 +629,13 @@ export default class Transaction implements ITransaction {
                 network_fee: fromEntityToWireNumber(rawTx.networkFee),
                 rpc_fee: fromEntityToWireNumber(rawTx.rpcFee),
                 additional_fee: fromEntityToWireNumber(rawTx.additionalFee),
+                // DEM-665: rpc_address is plain varchar — no numeric
+                // coercion. `?? null` normalises undefined (an older
+                // RawTransaction without the field) to the explicit
+                // `null` declared by TxFee.
+                rpc_address:
+                    (rawTx as { rpcAddress?: string | null }).rpcAddress ??
+                    null,
             },
 
             data: JSON.parse(rawTx.content).data,

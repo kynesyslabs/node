@@ -47,6 +47,7 @@ function makeSampleTransactionContent(): TransactionContent {
             network_fee: 10,
             rpc_fee: 5,
             additional_fee: 0,
+            rpc_address: null,
         },
     }
 }

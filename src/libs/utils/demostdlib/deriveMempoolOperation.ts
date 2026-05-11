@@ -127,6 +127,7 @@ export async function createOperation(
             network_fee: null,
             rpc_fee: null,
             additional_fee: null,
+            rpc_address: null,
         },
     }
 
@@ -194,6 +195,7 @@ export async function createTransaction(
                 network_fee: null,
                 rpc_fee: null,
                 additional_fee: null,
+                rpc_address: null,
             },
         },
         signature: null,

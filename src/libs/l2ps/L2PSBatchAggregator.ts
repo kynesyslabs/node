@@ -696,6 +696,7 @@ export class L2PSBatchAggregator {
                     network_fee: 0,
                     rpc_fee: 0,
                     additional_fee: 0,
+                    rpc_address: null,
                 },
             }
 

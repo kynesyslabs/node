@@ -49,6 +49,7 @@ function makeSampleTransactionContent(
             network_fee: 1,
             rpc_fee: 2,
             additional_fee: 3,
+            rpc_address: null,
         },
         ...overrides,
     }
@@ -85,6 +86,7 @@ describe("serializerGate — post-fork transaction transformer (P3a)", () => {
                 network_fee: 1,
                 rpc_fee: 2,
                 additional_fee: 3,
+                rpc_address: null,
             },
         })
         const wire = serializeTransactionContent(content, 0)
@@ -102,6 +104,7 @@ describe("serializerGate — post-fork transaction transformer (P3a)", () => {
                 network_fee: 0,
                 rpc_fee: 0,
                 additional_fee: 0,
+                rpc_address: null,
             },
         })
         const wire = serializeTransactionContent(content, 0)
@@ -123,6 +126,7 @@ describe("serializerGate — post-fork transaction transformer (P3a)", () => {
                 network_fee: "1000000000" as unknown as number,
                 rpc_fee: "2000000000" as unknown as number,
                 additional_fee: "3000000000" as unknown as number,
+                rpc_address: null,
             },
         })
 

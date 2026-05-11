@@ -311,6 +311,8 @@ async function defineGas(
             network_fee: 0,
             rpc_fee: 0,
             additional_fee: 0,
+            // DEM-665: internal gas Operation; no rpc routing here.
+            rpc_address: null,
         }, // This is the gas operation so it doesn't have additional fees
     }
     log.debug("[TX] defineGas - Gas Operation derived")

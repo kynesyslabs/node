@@ -97,6 +97,10 @@ function transformToOsTransactionContent(
             additional_fee: denomination.toOsString(
                 toOsBigint(fee.additional_fee as number | string | bigint),
             ) as unknown as number,
+            // DEM-665: rpc_address is plain varchar — no numeric
+            // canonicalisation. Pass through unchanged (null on
+            // pre-fork txs, lowercase hex on post-fork).
+            rpc_address: fee.rpc_address ?? null,
         }
     }
 
