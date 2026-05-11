@@ -67,6 +67,36 @@ export async function loadNetworkParameters(
         params.networkFee
     ;(getSharedState as unknown as { shardSize: number }).shardSize =
         params.shardSize
+
+    // DEM-665: fold governance-mutable distribution percentages onto
+    // SharedState.feeDistribution. Addresses (burnAddress,
+    // treasuryAddress) were primed earlier by loadForkConfigFromGenesis
+    // (P2) — preserve them and only overwrite the percentage groups.
+    //
+    // A node that has not yet called loadForkConfigFromGenesis (rare —
+    // tests, partial-init paths) has feeDistribution === null; build
+    // the object from scratch in that case, using zero-string addresses
+    // as a placeholder. Real fees never route through this code path
+    // because `feeDistribution.ts` (P5) is fork-gated.
+    const existingFee = getSharedState.feeDistribution
+    getSharedState.feeDistribution = {
+        burnAddress: existingFee?.burnAddress ?? "",
+        treasuryAddress: existingFee?.treasuryAddress ?? "",
+        networkFee: {
+            burnPct: params.networkFeeBurnPct,
+            treasuryPct: params.networkFeeTreasuryPct,
+        },
+        additionalFee: {
+            burnPct: params.additionalFeeBurnPct,
+            treasuryPct: params.additionalFeeTreasuryPct,
+        },
+        specialOps: {
+            burnPct: params.specialOpsBurnPct,
+            rpcPct: params.specialOpsRpcPct,
+            treasuryPct: params.specialOpsTreasuryPct,
+        },
+    }
+
     log.info(
         "NETWORK_PARAMETERS",
         `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,

@@ -198,3 +198,102 @@ describe("safetyBounds — multi-key proposals", () => {
         expect(r.ok).toBe(true)
     })
 })
+
+// =========================================================================
+// DEM-665 — distribution-percentage governance bounds.
+// =========================================================================
+//
+// Three layers under test:
+//   1. PHASE_1_GOVERNABLE_KEYS contains the new keys (additionalFee +
+//      every distribution percentage).
+//   2. NUMERIC_BOUNDS pins each *Pct field to [0, 100].
+//   3. Tighter per-proposal cap (DISTRIBUTION_MAX_CHANGE_PERCENT = 10%)
+//      applies to distribution keys.
+//   4. Cross-key sum-100 invariant on the merged (current ⊕ proposed)
+//      view of each distribution group.
+
+describe("safetyBounds — DEM-665 distribution-percentage governance", () => {
+    it("accepts additionalFee within bounds", () => {
+        const c: NetworkParameters = { ...current, additionalFee: 100 }
+        const r = checkSafetyBounds(c, { additionalFee: 110 }) // +10%
+        expect(r.ok).toBe(true)
+    })
+
+    it("rejects additionalFee above ceiling (5000)", () => {
+        const c: NetworkParameters = { ...current, additionalFee: 5000 }
+        const r = checkSafetyBounds(c, { additionalFee: 5001 })
+        expect(r.ok).toBe(false)
+    })
+
+    it("rejects a single-key distribution proposal that breaks sum-100", () => {
+        // Touch only networkFeeBurnPct — sibling stays at 50, sum becomes
+        // 55+50=105, fails sum invariant.
+        const r = checkSafetyBounds(current, { networkFeeBurnPct: 55 })
+        expect(r.ok).toBe(false)
+        if (!r.ok) {
+            expect(r.reason).toMatch(/network_fee/)
+            expect(r.reason).toMatch(/sum/)
+        }
+    })
+
+    it("accepts a balanced two-key network_fee shift within 10% cap", () => {
+        // 50→55 burn, 50→45 treasury: sum=100, each delta=5 (10% of 50).
+        const r = checkSafetyBounds(current, {
+            networkFeeBurnPct: 55,
+            networkFeeTreasuryPct: 45,
+        })
+        expect(r.ok).toBe(true)
+    })
+
+    it("rejects a balanced two-key shift exceeding the 10% distribution cap", () => {
+        // 50→56 (12% jump) breaks DISTRIBUTION_MAX_CHANGE_PERCENT even
+        // though the sum still equals 100.
+        const r = checkSafetyBounds(current, {
+            networkFeeBurnPct: 56,
+            networkFeeTreasuryPct: 44,
+        })
+        expect(r.ok).toBe(false)
+        if (!r.ok) expect(r.reason).toMatch(/10% change/)
+    })
+
+    it("rejects a *Pct value above 100", () => {
+        const c: NetworkParameters = {
+            ...current,
+            networkFeeBurnPct: 90,
+            networkFeeTreasuryPct: 10,
+        }
+        const r = checkSafetyBounds(c, { networkFeeBurnPct: 101 })
+        expect(r.ok).toBe(false)
+    })
+
+    it("validates a balanced three-key special_ops rebalance", () => {
+        // Start at 25/25/50; shift to 25/27/48 (each delta ≤ 10% relative
+        // to the larger pre-value 50).
+        const r = checkSafetyBounds(current, {
+            specialOpsBurnPct: 25,
+            specialOpsTreasuryPct: 27,
+            specialOpsRpcPct: 48,
+        })
+        expect(r.ok).toBe(true)
+    })
+
+    it("rejects a special_ops rebalance whose merged sum != 100", () => {
+        const r = checkSafetyBounds(current, {
+            specialOpsBurnPct: 25,
+            specialOpsTreasuryPct: 26,
+            specialOpsRpcPct: 48, // sum = 99
+        })
+        expect(r.ok).toBe(false)
+        if (!r.ok) expect(r.reason).toMatch(/special_ops/)
+    })
+
+    it("ignores groups that the proposal does not touch", () => {
+        // additional_fee group untouched — sum invariant must NOT fire
+        // even though the network_fee group changed.
+        const r = checkSafetyBounds(current, {
+            networkFeeBurnPct: 55,
+            networkFeeTreasuryPct: 45,
+        })
+        expect(r.ok).toBe(true)
+    })
+})
