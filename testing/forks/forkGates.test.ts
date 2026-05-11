@@ -12,13 +12,12 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { isForkActive } from "@/forks/forkGates"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
 describe("isForkActive — truth table", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
 
     beforeEach(() => {
         // REVIEW: Snapshot the singleton config so each test starts from

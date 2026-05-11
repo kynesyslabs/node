@@ -23,8 +23,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { serializeTransactionContent } from "@/forks/serializerGate"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
@@ -56,7 +55,7 @@ function makeSampleTransactionContent(
 }
 
 describe("serializerGate — post-fork transaction transformer (P3a)", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
 
     beforeEach(() => {
         snapshot = cloneDefaultForkConfig()

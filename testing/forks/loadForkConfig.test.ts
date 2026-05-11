@@ -11,25 +11,32 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import {
     ForkConfigValidationError,
+    GAS_FEE_SEPARATION_BURN_ADDRESS,
     loadForkConfigFromGenesis,
 } from "@/forks/loadForkConfig"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    PLACEHOLDER_TREASURY_ADDRESS,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
+const VALID_TREASURY = "0x" + "ab".repeat(32)
+
 describe("loadForkConfigFromGenesis", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
+    let feeDistSnapshot: typeof getSharedState.feeDistribution
 
     beforeEach(() => {
         snapshot = cloneDefaultForkConfig()
+        feeDistSnapshot = getSharedState.feeDistribution
         getSharedState.forkConfig = cloneDefaultForkConfig()
+        getSharedState.feeDistribution = null
     })
 
     afterEach(() => {
         getSharedState.forkConfig = snapshot
+        getSharedState.feeDistribution = feeDistSnapshot
     })
 
     it("is a no-op for genesis with no `forks` field", () => {
@@ -238,5 +245,210 @@ describe("loadForkConfigFromGenesis", () => {
         expect(
             getSharedState.forkConfig.osDenomination.activationHeight,
         ).toBeNull()
+    })
+
+    // ------------------------------------------------------------------
+    // DEM-665 — gasFeeSeparation fork payload validation.
+    // ------------------------------------------------------------------
+
+    it("hydrates gasFeeSeparation with treasuryAddress + activationHeight", () => {
+        loadForkConfigFromGenesis({
+            forks: {
+                gasFeeSeparation: {
+                    activationHeight: 5000,
+                    treasuryAddress: VALID_TREASURY,
+                },
+            },
+        })
+        const gfs = getSharedState.forkConfig.gasFeeSeparation
+        expect(gfs.activationHeight).toBe(5000)
+        expect(gfs.treasuryAddress).toBe(VALID_TREASURY)
+    })
+
+    it("primes feeDistribution.burnAddress and treasuryAddress from fork payload", () => {
+        loadForkConfigFromGenesis({
+            forks: {
+                gasFeeSeparation: {
+                    activationHeight: 5000,
+                    treasuryAddress: VALID_TREASURY,
+                },
+            },
+        })
+        const fd = getSharedState.feeDistribution
+        expect(fd).not.toBeNull()
+        expect(fd!.burnAddress).toBe(GAS_FEE_SEPARATION_BURN_ADDRESS)
+        expect(fd!.treasuryAddress).toBe(VALID_TREASURY)
+    })
+
+    it("primes feeDistribution even when genesis has no forks block", () => {
+        loadForkConfigFromGenesis({
+            properties: { id: 1, name: "DEMOS", currency: "DEM" },
+            balances: [],
+        })
+        const fd = getSharedState.feeDistribution
+        expect(fd).not.toBeNull()
+        expect(fd!.burnAddress).toBe(GAS_FEE_SEPARATION_BURN_ADDRESS)
+        // Placeholder treasury comes from the default fork config; the
+        // loader does not reject the placeholder until activationHeight
+        // is non-null.
+        expect(fd!.treasuryAddress).toBe(PLACEHOLDER_TREASURY_ADDRESS)
+    })
+
+    it("throws when gasFeeSeparation.treasuryAddress is missing", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: { activationHeight: 5000 },
+                },
+            }),
+        ).toThrow(/treasuryAddress must be a string/)
+    })
+
+    it("throws when gasFeeSeparation.treasuryAddress is not a string", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: 12345,
+                    },
+                },
+            }),
+        ).toThrow(/treasuryAddress must be a string/)
+    })
+
+    it("throws on mixed-case hex treasuryAddress (PR #778 G-1/G-4 lesson)", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: "0x" + "Ab".repeat(32),
+                    },
+                },
+            }),
+        ).toThrow(/0x \+ 64 hex chars/)
+    })
+
+    it("throws on missing 0x prefix in treasuryAddress", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: "a".repeat(64),
+                    },
+                },
+            }),
+        ).toThrow(/0x \+ 64 hex chars/)
+    })
+
+    it("throws on too-short treasuryAddress", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: "0xabcd",
+                    },
+                },
+            }),
+        ).toThrow(/0x \+ 64 hex chars/)
+    })
+
+    it("throws when scheduled fork uses placeholder zero treasury", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: GAS_FEE_SEPARATION_BURN_ADDRESS,
+                    },
+                },
+            }),
+        ).toThrow(/placeholder zero address but activationHeight=5000/)
+    })
+
+    it("accepts placeholder treasury when activationHeight is null (unscheduled)", () => {
+        expect(() =>
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: null,
+                        treasuryAddress: GAS_FEE_SEPARATION_BURN_ADDRESS,
+                    },
+                },
+            }),
+        ).not.toThrow()
+        expect(
+            getSharedState.forkConfig.gasFeeSeparation.treasuryAddress,
+        ).toBe(GAS_FEE_SEPARATION_BURN_ADDRESS)
+    })
+
+    it("treats validation error on gasFeeSeparation as ForkConfigValidationError", () => {
+        let caught: unknown = null
+        try {
+            loadForkConfigFromGenesis({
+                forks: {
+                    gasFeeSeparation: {
+                        activationHeight: 5000,
+                        treasuryAddress: "not-hex",
+                    },
+                },
+            })
+        } catch (e) {
+            caught = e
+        }
+        expect(caught).toBeInstanceOf(ForkConfigValidationError)
+    })
+
+    it("loads osDenomination and gasFeeSeparation at same activationHeight (combined-fork scenario)", () => {
+        loadForkConfigFromGenesis({
+            forks: {
+                osDenomination: { activationHeight: 5000 },
+                gasFeeSeparation: {
+                    activationHeight: 5000,
+                    treasuryAddress: VALID_TREASURY,
+                },
+            },
+        })
+        expect(
+            getSharedState.forkConfig.osDenomination.activationHeight,
+        ).toBe(5000)
+        expect(
+            getSharedState.forkConfig.gasFeeSeparation.activationHeight,
+        ).toBe(5000)
+        expect(
+            getSharedState.forkConfig.gasFeeSeparation.treasuryAddress,
+        ).toBe(VALID_TREASURY)
+        expect(getSharedState.feeDistribution!.treasuryAddress).toBe(
+            VALID_TREASURY,
+        )
+    })
+
+    it("primeFeeDistribution preserves prior percentage groups across re-loads", () => {
+        // Simulate loadNetworkParameters having folded governance percentages
+        // onto feeDistribution before a hypothetical re-load of the fork
+        // config (e.g. test harness or mid-session reset).
+        getSharedState.feeDistribution = {
+            burnAddress: GAS_FEE_SEPARATION_BURN_ADDRESS,
+            treasuryAddress: PLACEHOLDER_TREASURY_ADDRESS,
+            networkFee: { burnPct: 50, treasuryPct: 50 },
+            additionalFee: { burnPct: 25, treasuryPct: 75 },
+            specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
+        }
+        loadForkConfigFromGenesis({
+            forks: {
+                gasFeeSeparation: {
+                    activationHeight: 5000,
+                    treasuryAddress: VALID_TREASURY,
+                },
+            },
+        })
+        const fd = getSharedState.feeDistribution!
+        expect(fd.treasuryAddress).toBe(VALID_TREASURY)
+        expect(fd.networkFee.burnPct).toBe(50)
+        expect(fd.additionalFee.treasuryPct).toBe(75)
+        expect(fd.specialOps.rpcPct).toBe(50)
     })
 })

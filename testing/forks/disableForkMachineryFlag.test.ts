@@ -20,13 +20,12 @@ import {
 } from "@/forks/loadForkConfig"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
 describe("DEMOS_DISABLE_FORK_MACHINERY (rehearsal flag)", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
     let priorEnv: string | undefined
     let priorNodeEnv: string | undefined
     let priorRehearsal: string | undefined

@@ -18,8 +18,7 @@ import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { Config } from "src/config"
 import {
@@ -42,6 +41,30 @@ import {
 } from "./constants"
 
 dotenv.config()
+
+/**
+ * Combined fee-distribution runtime view (DEM-665).
+ *
+ * `burnAddress` and `treasuryAddress` come from the `gasFeeSeparation` fork
+ * payload / migration code constants (consensus-significant, fork-fixed).
+ * The percentage groups come from governance NetworkParameters (mutable
+ * via on-chain proposals, day 1).
+ *
+ * Stored on `SharedState.feeDistribution` (nullable until the post-genesis
+ * bootstrap completes). The shape mirrors the genesis SPEC distribution
+ * table exactly: each component lists every recipient with a non-zero
+ * share — fields with zero share are omitted, so `network_fee` has no
+ * `rpcPct`, `rpc_fee` is implicit 100% to the rpc operator (no entry
+ * here), `additional_fee` has no `rpcPct`, `special_ops` carries all
+ * three.
+ */
+export interface FeeDistributionRuntime {
+    burnAddress: string
+    treasuryAddress: string
+    networkFee: { burnPct: number; treasuryPct: number }
+    additionalFee: { burnPct: number; treasuryPct: number }
+    specialOps: { burnPct: number; rpcPct: number; treasuryPct: number }
+}
 
 export default class SharedState {
     private static instance: SharedState
@@ -258,13 +281,34 @@ export default class SharedState {
     // TODO The following variables should be in the genesis
     maxMessageSize = Config.getInstance().core.maxMessageSize
 
-    // SECTION Forks (P2)
+    // SECTION Forks (P2 + DEM-665)
     // REVIEW: Hard-fork activation registry. Hydrated from `data/genesis.json`
     // at startup (see findGenesisBlock.ts). Default is all forks inactive
     // (`activationHeight: null`), so a node booting without a `forks` section
-    // in genesis is bit-identical to a pre-P2 node.
-    forkConfig: Record<ForkName, ForkConfig> = cloneDefaultForkConfig()
+    // in genesis is bit-identical to a pre-fork node.
+    //
+    // Typed as `ForkConfigByName` (per-fork narrowed map) so consumers can
+    // read fork-specific payload fields without runtime narrowing — e.g.
+    // `forkConfig.gasFeeSeparation.treasuryAddress` is statically typed.
+    forkConfig: ForkConfigByName = cloneDefaultForkConfig()
     // !SECTION Forks
+
+    // SECTION Fee distribution (DEM-665)
+    // Combined runtime view of fee-distribution config, populated in two
+    // stages:
+    //   1) loadForkConfigFromGenesis writes burnAddress (code constant from
+    //      `migrations/gasFeeSeparation.ts`) and treasuryAddress (from the
+    //      `gasFeeSeparation` fork payload).
+    //   2) loadNetworkParameters folds the governance-mutable distribution
+    //      percentages (per fee component) onto this object after the
+    //      genesis bootstrap completes.
+    //
+    // Consumers (`gcr_routines/feeDistribution.ts`) dereference this at call
+    // time so a governance proposal touching percentages takes effect on
+    // the next tx without a node restart. `null` before the bootstrap
+    // (tests, partial-init code paths) — callers MUST guard.
+    feeDistribution: FeeDistributionRuntime | null = null
+    // !SECTION Fee distribution
 
     constructor() {
         this.identity = Identity.getInstance()
