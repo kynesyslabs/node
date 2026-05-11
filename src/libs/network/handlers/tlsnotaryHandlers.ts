@@ -126,23 +126,23 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
             const proxyPort = Config.getInstance().tlsnotary.proxyPort
 
-            let nodeHost = "localhost"
-            const wsScheme = (() => {
-                try {
-                    const exposedUrl = getSharedState.exposedUrl
-                    if (exposedUrl) {
-                        const url = new URL(exposedUrl)
-                        nodeHost = url.hostname
-                        return url.protocol === "https:" ? "wss" : "ws"
+            const { buildWsUrl } = await import(
+                "@/features/tlsnotary/proxyManager"
+            )
+            const buildUrl = (p: number | string) => {
+                const exposedUrl = getSharedState.exposedUrl
+                if (exposedUrl) {
+                    try {
+                        return buildWsUrl(exposedUrl, p)
+                    } catch {
+                        // Fall back to localhost if URL parsing fails
                     }
-                } catch {
-                    // Fall back to localhost and ws if URL parsing fails
                 }
-                return "ws"
-            })()
+                return `ws://localhost:${p}`
+            }
 
-            const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
-            const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+            const notaryUrl = buildUrl(port)
+            const proxyUrl = buildUrl(proxyPort)
 
             response.response = {
                 notaryUrl,
