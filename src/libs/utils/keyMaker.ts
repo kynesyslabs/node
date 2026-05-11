@@ -1,10 +1,9 @@
-import { cryptography } from "../crypto"
+import { cryptography, type Ed25519KeyPair } from "../crypto"
 import fs from "fs"
-import { pki } from "node-forge"
 import log from "src/utilities/logger"
 
-async function ensureIdentity(): Promise<pki.KeyPair> {
-    let ed25519: pki.KeyPair
+async function ensureIdentity(): Promise<Ed25519KeyPair> {
+    let ed25519: Ed25519KeyPair
     if (fs.existsSync(".demos_identity")) {
         // Loading the identity
         // TODO Add load with cryptography
@@ -39,7 +38,10 @@ async function main() {
     await fs.promises.writeFile("public.key", publicKey)
     await fs.promises.writeFile(".demos_identity", "0x" + privateKey)
     // Logging
-    log.info("KEYMAKER", "Identity saved (or kept) to .demos_identity and public.key")
+    log.info(
+        "KEYMAKER",
+        "Identity saved (or kept) to .demos_identity and public.key",
+    )
 }
 
 main()

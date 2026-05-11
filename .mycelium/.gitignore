@@ -1,0 +1,6 @@
+# Mycelium database
+# The database file is git-trackable but WAL files are not
+*.db-wal
+*.db-shm
+# Temporary files
+*.tmp

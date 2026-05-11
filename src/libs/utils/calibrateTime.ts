@@ -32,7 +32,10 @@ async function getMeasuredTimeDelta(): Promise<number> {
 
     const halfTripTime = Math.floor(roundTripTime / 2)
     const halfTripTimeInSeconds = Math.floor(halfTripTime / 1000)
-    log.debug("Half trip time (ntp correction in seconds):", halfTripTimeInSeconds)
+    log.debug(
+        "Half trip time (ntp correction in seconds):",
+        halfTripTimeInSeconds,
+    )
 
     const ntpTimeConsideringRoundTripTime = ntpTime - halfTripTimeInSeconds
     const localTime = Math.floor(Date.now() / 1000)

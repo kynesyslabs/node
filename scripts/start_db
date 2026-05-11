@@ -1,0 +1,267 @@
+#!/bin/bash
+
+PG_PORT=5332
+CLEAN="false"
+VERBOSE=false
+
+# Detect platform for cross-platform compatibility
+PLATFORM=$(uname -s)
+case ${PLATFORM} in
+"Darwin")
+	PLATFORM_NAME="macOS"
+	;;
+"Linux")
+	PLATFORM_NAME="Linux"
+	;;
+*)
+	PLATFORM_NAME="Unknown"
+	;;
+esac
+
+# Verbose logging function
+log_verbose() {
+	if [[ "${VERBOSE}" = true ]]; then
+		echo "[VERBOSE] $1"
+	fi
+}
+
+# Help documentation function
+show_help() {
+	cat <<EOF
+🗄️  Demos Network Database Manager
+
+USAGE:
+    ./start_db [OPTIONS]
+
+This script starts only the PostgreSQL database for inspection and external tool access.
+
+OPTIONS:
+    -d <port>       PostgreSQL port (default: 5332)
+    -c              Clean database on startup (fresh start)
+    -v              Verbose logging
+    -h              Show this help message
+
+EXAMPLES:
+    ./start_db                     # Start database on default port 5332
+    ./start_db -d 5333            # Start on custom port 5333
+    ./start_db -c                 # Clean start (fresh database)
+    ./start_db -v                 # Verbose output for troubleshooting
+
+DATABASE ACCESS:
+    Host: localhost
+    Port: ${PG_PORT} (or specified port)
+    Database: demos
+    Username: demosuser
+    Password: demospassword
+
+EXTERNAL TOOLS:
+    psql -h localhost -p ${PG_PORT} -U demosuser -d demos
+    pgAdmin, DBeaver, or other PostgreSQL clients
+
+Press Ctrl+C to stop the database safely.
+
+For support: https://demos.network
+EOF
+}
+
+# trap ctrl-c and call ctrl_c()
+trap ctrl_c INT
+
+HAS_BEEN_INTERRUPTED=false
+
+function ctrl_c() {
+	HAS_BEEN_INTERRUPTED=true
+	echo ""
+	echo "🛑 Stopping PostgreSQL database..."
+	cd postgres_${PG_PORT} || exit
+	if docker compose down; then
+		echo "✅ PostgreSQL stopped successfully"
+	else
+		echo "⚠️  Warning: Failed to stop PostgreSQL gracefully"
+	fi
+	cd ..
+	echo ""
+	echo "🏁 Database session completed"
+	echo ""
+	exit 0
+}
+
+# Getting arguments
+while getopts "d:cvh" opt; do
+	case ${opt} in
+	d) PG_PORT=${OPTARG} ;;
+	c) CLEAN="true" ;;
+	v) VERBOSE=true ;;
+	h)
+		show_help
+		exit 0
+		;;
+	*)
+		echo "Invalid option. Use -h for help."
+		exit 1
+		;;
+	esac
+done
+shift $((OPTIND - 1))
+
+echo ""
+echo "🗄️  Demos Network Database Manager"
+echo "⚙️  Database Configuration:"
+echo "   🌐 PostgreSQL Por${: $PG_P}ORT"
+if [[ "${CLEAN}" = "true" ]]; then
+	echo "   🧹 Mode: Clean start (fresh database)"
+else
+	echo "   ▶️  Mode: Normal start"
+fi
+log_verbose "Platform: ${PLATFORM_NAME}"
+echo ""
+
+# Check Docker
+echo "🔍 Checking Docker..."
+if ! command -v docker &>/dev/null; then
+	echo "❌ Docker is not installed"
+	echo "💡 Install Docker from: https://docs.docker.com/get-docker/"
+	if [[ "${PLATFORM_NAME}" = "macOS" ]]; then
+		echo "🍎 On macOS: Download Docker Desktop from https://docker.com/products/docker-desktop"
+	elif [[ "${PLATFORM_NAME}" = "Linux" ]]; then
+		echo "🐧 On Linux: Use your package manager or install script"
+	fi
+	exit 1
+fi
+
+if ! docker compose version &>/dev/null; then
+	echo "❌ Docker Compose is not available"
+	echo "💡 Make sure Docker Desktop is running or install docker-compose-plugin"
+	exit 1
+fi
+
+# Check if Docker daemon is running
+if ! docker info &>/dev/null; then
+	echo "❌ Docker daemon is not running"
+	echo "💡 Start Docker Desktop or run: sudo systemctl start docker"
+	exit 1
+fi
+
+echo "✅ Docker and Docker Compose are ready"
+
+# Check port availability
+log_verbose "Checking port availability"
+if command -v lsof >/dev/null; then
+	if lsof -i :"$PG_PORT" >/dev/null 2>&1; then
+		echo "❌ PostgreSQL por${ $PG_PO}RT is already in use"
+		echo "💡 Use -d flag to specify a different port, or stop the existing service"
+		exit 1
+	else
+		echo "✅ PostgreSQL por${ $PG_PO}RT is available"
+	fi
+elif command -v netstat >/dev/null; then
+	if netstat -an | grep ":${PG_PORT} " >/dev/null 2>&1; then
+		echo "❌ PostgreSQL por${ $PG_PO}RT is already in use"
+		echo "💡 Use -d flag to specify a different port, or stop the existing service"
+		exit 1
+	else
+		echo "✅ PostgreSQL por${ $PG_PO}RT is available"
+	fi
+else
+	echo "⚠️  Cannot check port availability - lsof and netstat not available"
+fi
+
+# Create unique postgres folder for this instance
+PG_FOLDER="postgres_${PG_PORT}"
+
+# If the folder doesn't exist yet, create it by copying the base postgres folder
+if [[ ! -d "${PG_FOLDER}" ]]; then
+	echo "🔧 Setting up database instance for po${t $PG_P}ORT..."
+	cp -r postgres "$PG_FOLDER"
+	echo "✅ Database instance created"
+fi
+
+cd $PG_FOLDER || exit
+
+# If we are cleaning, we need to remove the database
+if [[ "${CLEAN}" == "true" ]]; then
+	echo "🧹 Cleaning the database..."
+	log_verbose "Removing existing database data for clean start"
+	sleep 1
+	rm -rf data_*
+	mkdir data_"${PG_PORT}"
+	echo "✅ Database cleaned"
+fi
+
+# Ensure any existing database is stopped first
+log_verbose "Ensuring any existing database instance is stopped"
+docker compose down >/dev/null 2>&1
+
+if [[ "${CLEAN}" == "true" ]]; then
+	rm -rf data_"${PG_PORT}" || rm -rf data_"${PG_PORT}"
+	mkdir data_"${PG_PORT}"
+fi
+
+# Export the port for docker compose
+export PG_PORT=${PG_PORT}
+
+# Start the database
+echo "🗄️  Starting PostgreSQL database..."
+log_verbose "Running docker compose up -d in ${PG_FOLDER}"
+if ! docker compose up -d; then
+	echo "❌ Failed to start PostgreSQL database"
+	echo "💡 Check Docker Desktop is running and try again"
+	exit 1
+fi
+echo "✅ PostgreSQL container started"
+
+# Function to wait for database availability
+function wait_for_database() {
+	local port=$1
+	local timeout=30
+
+	echo "⏳ Waiting for PostgreSQL to be available on por${ $po}rt..."
+	log_verbose "Checking database connectivity with timeout of ${timeout}s"
+	local count=0
+	while ! nc -z localhost "$port"; do
+		if [[ $((count % 5)) -eq 0 ]]; then
+			echo "   Still waiting... (${count}s elapsed)"
+		fi
+		count=$((count + 1))
+		if [[ "$count" -gt "$timeout" ]]; then
+			echo "❌ Timeout waiting for PostgreSQL to be available after ${timeout}s"
+			echo "💡 Try increasing resources or check Docker logs"
+			return 1
+		fi
+		sleep 1
+	done
+	echo "✅ PostgreSQL is accepting connections"
+	return 0
+}
+
+# Wait for database to be ready
+if ! wait_for_database "$PG_PORT"; then
+	echo "❌ Failed to connect to PostgreSQL database"
+	echo "💡 Try restarting Docker or check system resources"
+	cd ..
+	exit 1
+fi
+
+cd ..
+
+echo ""
+echo "🎉 PostgreSQL database is ready!"
+echo "📊 Database Connection Details:"
+echo "   🌐 Host: localhost"
+echo "   🔌 Por${: $PG_P}ORT"
+echo "   🗄️  Database: demos"
+echo "   👤 Username: demosuser"
+echo "   🔑 Password: demospassword"
+echo ""
+echo "💡 External Access Examples:"
+echo "   psql -h localhost -p ${PG_PORT} -U demosuser -d demos"
+echo "   Or use pgAdmin, DBeaver, TablePlus, etc."
+echo ""
+echo "🛑 Press Ctrl+C to stop the database safely"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Keep the script running until Ctrl+C
+log_verbose "Database is running. Waiting for Ctrl+C..."
+while true; do
+	sleep 1
+done

@@ -1,0 +1,309 @@
+# =============================================================================
+# Demos Network Node — Unified Docker Compose
+# =============================================================================
+# One-command bring-up:
+#   cp .env.example .env
+#   docker compose up
+#
+# Profiles (every optional service is gated; .env.example sets COMPOSE_PROFILES
+# = monitoring,tlsnotary by default so a plain `docker compose up` brings up
+# the recommended full stack):
+#
+#   No profile             postgres + node               -> minimum stack
+#   tlsnotary              + tlsnotary sidecar           -> notarization
+#                            (pair with TLSNOTARY_ENABLED in .env)
+#   monitoring             + prometheus + grafana        -> dashboards
+#   full                   + node-exporter               -> host metrics
+#   neo4j                  + neo4j                       -> CGC/KYC only
+#
+# Persistent state lives in named volumes (prefixed `demos_`):
+#   demos_pgdata, demos_node_data, demos_node_logs, demos_node_state,
+#   demos_prometheus_data, demos_grafana_data, demos_neo4j_data,
+#   demos_neo4j_logs
+#
+# Wipe everything (DANGER): docker compose down -v
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — primary datastore for the node (TypeORM with synchronize=true)
+  # Internal-only by default. Uncomment the ports stanza below to expose to host.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: demos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-demosuser}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-demospassword}
+      POSTGRES_DB: ${PG_DATABASE:-demos}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-demosuser} -d ${PG_DATABASE:-demos}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - demos-network
+    # ports:
+    #   - "${PG_HOST_PORT:-5332}:5432"   # uncomment to access DB from host
+
+  # ---------------------------------------------------------------------------
+  # TLSNotary — provides cryptographic attestation of HTTPS responses.
+  # Healthcheck uses localhost INSIDE the container (correct — it's its own loopback).
+  # ---------------------------------------------------------------------------
+  tlsnotary:
+    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+    container_name: demos-tlsnotary
+    restart: unless-stopped
+    platform: linux/amd64
+    # Profile-gated so COMPOSE_PROFILES=...,tlsnotary actually controls the
+    # sidecar. Drop 'tlsnotary' from COMPOSE_PROFILES to skip it; pair that
+    # with TLSNOTARY_ENABLED=false in .env so the node doesn't try to call it.
+    profiles: [tlsnotary]
+    environment:
+      NS_NOTARIZATION__MAX_SENT_DATA: ${TLSNOTARY_MAX_SENT_DATA:-32768}
+    ports:
+      - "${TLSNOTARY_PORT:-7047}:7047"
+    # The upstream image has no curl/wget so its packaged HTTP healthcheck
+    # always fails. Use bash's /dev/tcp pseudo-device to verify the notary
+    # is listening — bash IS in the image, the default sh (dash) is not enough.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7047"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Demos node itself.
+  # Reads env from .env. PG_HOST=postgres and TLSNOTARY_HOST=tlsnotary are the
+  # in-network service names — DO NOT override to localhost when using compose.
+  # ---------------------------------------------------------------------------
+  node:
+    # IMAGE_NAME / IMAGE_TAG let you pull a pre-built image from a registry
+    # instead of building locally. See README → "Publishing the image" for
+    # the push/pull workflow. Defaults to a local build tagged demos-node:local.
+    image: ${IMAGE_NAME:-demos-node}:${IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: demos-node
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # tlsnotary is profile-gated; if its profile is off, Compose drops
+      # this dependency silently and the node starts without it. Make sure
+      # to also set TLSNOTARY_ENABLED=false in .env in that case.
+      tlsnotary:
+        condition: service_started
+        required: false
+    environment:
+      # Network & ports
+      RPC_PORT: ${RPC_PORT:-53550}
+      EXPOSED_URL: ${EXPOSED_URL:-http://localhost:53550}
+      OMNI_ENABLED: ${OMNI_ENABLED:-true}
+      OMNI_PORT: ${OMNI_PORT:-53551}
+      OMNI_MODE: ${OMNI_MODE:-OMNI_PREFERRED}
+      RPC_SIGNALING_PORT: ${RPC_SIGNALING_PORT:-3005}
+      RPC_MCP_PORT: ${RPC_MCP_PORT:-3001}
+      # Database — service name from this compose
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: ${PG_USER:-demosuser}
+      PG_PASSWORD: ${PG_PASSWORD:-demospassword}
+      PG_DATABASE: ${PG_DATABASE:-demos}
+      # Identity & peers — entrypoint symlinks these into /app/state on boot
+      IDENTITY_FILE: ${IDENTITY_FILE:-.demos_identity}
+      PEER_LIST_FILE: ${PEER_LIST_FILE:-demos_peerlist.json}
+      # Monitoring
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      # METRICS_PORT is pinned to 9090 inside the container so the
+      # prometheus.yml scrape target (node:9090) stays valid. Use
+      # METRICS_HOST_PORT in the ports stanza to remap on the host.
+      METRICS_PORT: 9090
+      METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
+      # TLSNotary — service name from this compose
+      TLSNOTARY_ENABLED: ${TLSNOTARY_ENABLED:-true}
+      TLSNOTARY_HOST: tlsnotary
+      TLSNOTARY_PORT: 7047
+      TLSNOTARY_MODE: ${TLSNOTARY_MODE:-docker}
+      TLSNOTARY_FATAL: ${TLSNOTARY_FATAL:-false}
+      TLSNOTARY_SIGNING_KEY: ${TLSNOTARY_SIGNING_KEY:-}
+      # Logging & misc
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      PROD: ${PROD:-false}
+      L2PS_ZK_ENABLED: ${L2PS_ZK_ENABLED:-false}
+      # Optional external API keys (passed through if set in .env)
+      SOLANA_RPC: ${SOLANA_RPC:-}
+      ETHERSCAN_API_KEY: ${ETHERSCAN_API_KEY:-}
+      HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+      NOMIS_API_KEY: ${NOMIS_API_KEY:-}
+      NOMIS_CLIENT_ID: ${NOMIS_CLIENT_ID:-}
+      RAPID_API_KEY: ${RAPID_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      HUMAN_PASSPORT_API_KEY: ${HUMAN_PASSPORT_API_KEY:-}
+    volumes:
+      - node_data:/app/data       # bundled bootstrap (genesis.json, evmChains, l2ps) + chain.db
+      - node_logs:/app/logs       # all node logs
+      - node_state:/app/state     # identity, peerlist, tlsnotary key, output/
+    ports:
+      # Both sides of each mapping must use the same variable, otherwise
+      # overriding RPC_PORT (etc.) routes the host port to a container
+      # port where nothing is listening.
+      - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
+      - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
+      - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
+      # METRICS_PORT — keep container port pinned to 9090 so the
+      # prometheus.yml scrape target (node:9090) stays valid. The
+      # host-side port is independently configurable via METRICS_HOST_PORT.
+      - "${METRICS_HOST_PORT:-9090}:9090"
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — metrics scraping. Reads ./monitoring/prometheus/prometheus.yml.
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: demos-prometheus
+    restart: unless-stopped
+    profiles: [monitoring]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+      - --web.console.libraries=/etc/prometheus/console_libraries
+      - --web.console.templates=/etc/prometheus/consoles
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Grafana — dashboards. Provisioned datasource points at prometheus:9090.
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.2
+    container_name: demos-grafana
+    restart: unless-stopped
+    profiles: [monitoring]
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-demos}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_USERS_DEFAULT_THEME: dark
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_BRANDING_APP_TITLE: Demos Network
+      GF_BRANDING_LOGIN_TITLE: Demos Network
+      GF_BRANDING_LOGIN_SUBTITLE: Node Monitoring
+      GF_BRANDING_LOGIN_LOGO: /public/img/demos-logo.svg
+      GF_BRANDING_MENU_LOGO: /public/img/demos-logo.svg
+      GF_BRANDING_FAV_ICON: /public/img/favicon.png
+      GF_BRANDING_HIDE_VERSION: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/demos-overview.json
+      GF_FEATURE_TOGGLES_ENABLE: publicDashboards,topnav,newPanelChromeUI
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_SECURITY_DISABLE_GRAVATAR: "true"
+      GF_DATE_FORMATS_USE_BROWSER_LOCALE: "true"
+      GF_DATE_FORMATS_DEFAULT_TIMEZONE: browser
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./monitoring/grafana/branding/demos-logo-white.svg:/usr/share/grafana/public/img/demos-logo.svg:ro
+      - ./monitoring/grafana/branding/demos-icon.svg:/usr/share/grafana/public/img/demos-icon.svg:ro
+      - ./monitoring/grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # node-exporter — host-level metrics (CPU/RAM/disk/network). Optional.
+  # Enable with: docker compose --profile monitoring --profile full up
+  # ---------------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: demos-node-exporter
+    restart: unless-stopped
+    profiles: [full]
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100"
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Neo4j — only needed if CGC/KYC features are in use. Opt-in.
+  # Enable with: docker compose --profile neo4j up
+  # ---------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5.21
+    container_name: demos-neo4j
+    restart: unless-stopped
+    profiles: [neo4j]
+    environment:
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/changeme-please}
+      NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    networks:
+      - demos-network
+
+networks:
+  demos-network:
+    name: demos-network
+    driver: bridge
+
+volumes:
+  # Explicit `name:` overrides Compose's project-name prefix so the volumes
+  # have predictable identifiers that match what the docs reference.
+  # Without this, `node_state` would actually be `<projectname>_node_state`,
+  # silently breaking seeding commands like `docker run -v node_state:/state`.
+  pgdata:
+    name: demos_pgdata
+  node_data:
+    name: demos_node_data
+  node_logs:
+    name: demos_node_logs
+  node_state:
+    name: demos_node_state
+  prometheus_data:
+    name: demos_prometheus_data
+  grafana_data:
+    name: demos_grafana_data
+  neo4j_data:
+    name: demos_neo4j_data
+  neo4j_logs:
+    name: demos_neo4j_logs

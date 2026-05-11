@@ -1,28 +1,10 @@
 import axios, { AxiosInstance } from "axios"
 import log from "@/utilities/logger"
+import { EthosScorePayload } from "./types"
+import { ETHOS_API_BASE_URL, ETHOS_API_TIMEOUT_MS } from "./constants"
 
-export interface EthosScorePayload {
-    score: number
-    profileId?: number
-    displayName?: string
-    username?: string
-}
-
-interface EthosScoreResponse {
-    score: number
-}
-
-interface EthosProfileResponse {
-    id: number
-    profileId: number
-    displayName?: string
-    username?: string
-    score: number
-    status: string
-    avatarUrl?: string
-}
-
-const BASE_URL = "https://api.ethos.network/api/v2"
+// backward-compatible re-export
+export type { EthosScorePayload } from "./types"
 
 export class EthosApiClient {
     private static instance: EthosApiClient
@@ -30,8 +12,8 @@ export class EthosApiClient {
 
     private constructor() {
         this.http = axios.create({
-            baseURL: BASE_URL,
-            timeout: 10_000,
+            baseURL: ETHOS_API_BASE_URL,
+            timeout: ETHOS_API_TIMEOUT_MS,
             headers: {
                 Accept: "application/json",
             },
@@ -76,18 +58,20 @@ export class EthosApiClient {
             }
 
             return result
-        } catch (error: any) {
+        } catch (error) {
+            const axiosError = error as { response?: { status?: number }; code?: string }
+
             // Check if it's a 404 - wallet has no Ethos profile
-            if (error?.response?.status === 404) {
+            if (axiosError.response?.status === 404) {
                 throw new Error(
                     "This wallet does not have an Ethos profile. Please create one at ethos.network first.",
                 )
             }
 
-            const statusCode = error?.response?.status ?? "unknown"
-            const errorType = error?.code === "ECONNREFUSED"
+            const statusCode = axiosError.response?.status ?? "unknown"
+            const errorType = axiosError.code === "ECONNREFUSED"
                 ? "connection_refused"
-                : error?.code === "ETIMEDOUT"
+                : axiosError.code === "ETIMEDOUT"
                     ? "timeout"
                     : "api_error"
             log.error(

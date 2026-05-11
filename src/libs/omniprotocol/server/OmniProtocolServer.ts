@@ -1,27 +1,32 @@
 import log from "src/utilities/logger"
 import { Server as NetServer, Socket } from "net"
 import { EventEmitter } from "events"
-import { ServerConnectionManager } from "./ServerConnectionManager"
+import { ConnectionPool } from "../transport/ConnectionPool"
 import { RateLimiter, RateLimitConfig } from "../ratelimit"
 
 export interface ServerConfig {
-    host: string                    // Listen address (default: "0.0.0.0")
-    port: number                    // Listen port (default: node.port + 1)
-    maxConnections: number          // Max concurrent connections (default: 1000)
-    connectionTimeout: number       // Idle connection timeout (default: 10 min)
-    authTimeout: number             // Auth handshake timeout (default: 5 sec)
-    backlog: number                 // TCP backlog queue (default: 511)
-    enableKeepalive: boolean        // TCP keepalive (default: true)
-    keepaliveInitialDelay: number   // Keepalive delay (default: 60 sec)
+    host: string // Listen address (default: "0.0.0.0")
+    port: number // Listen port (default: node.port + 1)
+    maxConnections: number // Max concurrent connections (default: 1000)
+    connectionTimeout: number // Idle connection timeout (default: 10 min)
+    authTimeout: number // Auth handshake timeout (default: 5 sec)
+    backlog: number // TCP backlog queue (default: 511)
+    enableKeepalive: boolean // TCP keepalive (default: true)
+    keepaliveInitialDelay: number // Keepalive delay (default: 60 sec)
     rateLimit?: Partial<RateLimitConfig> // Rate limiting configuration
+    maxConnectionsPerPeer?: number // Max connections per peer identity (default: 2)
 }
 
 /**
  * OmniProtocolServer - Main TCP server for accepting incoming OmniProtocol connections
+ *
+ * Uses ConnectionPool as the single source of truth for all connections (both inbound and outbound).
+ * Inbound connections are handled via connectionPool.handleInboundSocket() which creates
+ * bidirectional PeerConnection instances that can be used for both receiving and sending messages.
  */
 export class OmniProtocolServer extends EventEmitter {
     private server: NetServer | null = null
-    private connectionManager: ServerConnectionManager
+    public readonly connectionPool: ConnectionPool
     private config: ServerConfig
     private isRunning = false
     private rateLimiter: RateLimiter
@@ -39,17 +44,23 @@ export class OmniProtocolServer extends EventEmitter {
             enableKeepalive: config.enableKeepalive ?? true,
             keepaliveInitialDelay: config.keepaliveInitialDelay ?? 60000,
             rateLimit: config.rateLimit,
+            maxConnectionsPerPeer: config.maxConnectionsPerPeer ?? 2,
         }
 
-        // Initialize rate limiter
-        this.rateLimiter = new RateLimiter(this.config.rateLimit ?? { enabled: true })
+        this.rateLimiter = RateLimiter.getInstance()
+        this.connectionPool = ConnectionPool.getInstance(this.rateLimiter)
 
-        this.connectionManager = new ServerConnectionManager({
-            maxConnections: this.config.maxConnections,
-            connectionTimeout: this.config.connectionTimeout,
-            authTimeout: this.config.authTimeout,
-            rateLimiter: this.rateLimiter,
-        })
+        // // Initialize connection pool as single source of truth for all connections
+        // this.connectionPool = new ConnectionPool(
+        //     {
+        //         maxTotalConnections: this.config.maxConnections,
+        //         maxConnectionsPerPeer: this.config.maxConnectionsPerPeer,
+        //         idleTimeout: this.config.connectionTimeout,
+        //         connectTimeout: this.config.authTimeout,
+        //         authTimeout: this.config.authTimeout,
+        //     },
+        //     this.rateLimiter,
+        // )
     }
 
     /**
@@ -116,14 +127,14 @@ export class OmniProtocolServer extends EventEmitter {
 
         // Stop accepting new connections
         await new Promise<void>((resolve, reject) => {
-            this.server?.close((err) => {
+            this.server?.close(err => {
                 if (err) reject(err)
                 else resolve()
             })
         })
 
-        // Close all existing connections
-        await this.connectionManager.closeAll()
+        // Close all existing connections via connection pool
+        await this.connectionPool.shutdown()
 
         // Stop rate limiter
         this.rateLimiter.stop()
@@ -136,28 +147,53 @@ export class OmniProtocolServer extends EventEmitter {
 
     /**
      * Handle new incoming connection
+     *
+     * Inbound connections are handled by the ConnectionPool which creates bidirectional
+     * PeerConnection instances. After authentication, the connection is registered under
+     * the peer's real identity and can be used for both receiving and sending messages.
      */
     private handleNewConnection(socket: Socket): void {
         const remoteAddress = `${socket.remoteAddress}:${socket.remotePort}`
         const ipAddress = socket.remoteAddress || "unknown"
+        log.debug(
+            `==== DEBUG: New connection request from ${remoteAddress} ====`,
+        )
+        // Log connection count from this IP for debugging
+        const connectionCount =
+            this.connectionPool.getConnectionCountByIp(ipAddress)
+        log.debug(
+            `[OmniProtocolServer] Connections from ${ipAddress}: ${connectionCount}`,
+        )
+        log.debug(`${ipAddress} Connection count: ${connectionCount}`)
 
-        log.debug(`[OmniProtocolServer] New connection from ${remoteAddress}`)
-
-        // Check rate limits for IP
-        const rateLimitResult = this.rateLimiter.checkConnection(ipAddress)
-        if (!rateLimitResult.allowed) {
-            log.warning(
-                `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
+        if (connectionCount > 0) {
+            // Check rate limits for IP
+            const rateLimitResult = this.rateLimiter.checkConnection(
+                ipAddress,
+                "OmniProtocolServer",
             )
-            socket.destroy()
-            this.emit("connection_rejected", remoteAddress, "rate_limit")
-            this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
-            return
+
+            if (!rateLimitResult.allowed) {
+                log.error(
+                    `[OmniProtocolServer] Rate limit exceeded for ${remoteAddress}: ${rateLimitResult.reason}`,
+                )
+                log.error(
+                    `Rate limit result: ${JSON.stringify(rateLimitResult, null, 2)}`,
+                )
+
+                socket.destroy()
+                this.emit("connection_rejected", remoteAddress, "rate_limit")
+                this.emit("rate_limit_exceeded", ipAddress, rateLimitResult)
+                return
+            }
         }
 
         // Check if we're at capacity
-        if (this.connectionManager.getConnectionCount() >= this.config.maxConnections) {
-            log.warning(
+        if (
+            this.connectionPool.getTotalConnectionCount() >=
+            this.config.maxConnections
+        ) {
+            log.error(
                 `[OmniProtocolServer] Connection limit reached, rejecting ${remoteAddress}`,
             )
             socket.destroy()
@@ -171,12 +207,24 @@ export class OmniProtocolServer extends EventEmitter {
         }
         socket.setNoDelay(true) // Disable Nagle's algorithm for low latency
 
-        // Register connection with rate limiter
-        this.rateLimiter.addConnection(ipAddress)
-
-        // Hand off to connection manager
+        // Hand off to connection pool - creates bidirectional PeerConnection
         try {
-            this.connectionManager.handleConnection(socket)
+            const peerConnection =
+                this.connectionPool.handleInboundSocket(socket)
+
+            // Listen for authentication to emit event with peer identity
+            peerConnection.once("authenticated", (peerIdentity: string) => {
+                log.info(
+                    `[OmniProtocolServer] Peer authenticated: ${peerIdentity} from ${remoteAddress}`,
+                )
+                this.emit("peer_authenticated", peerIdentity, remoteAddress)
+            })
+
+            // Listen for close to clean up rate limiter
+            peerConnection.once("close", () => {
+                this.rateLimiter.removeConnection(ipAddress)
+            })
+
             this.emit("connection_accepted", remoteAddress)
         } catch (error) {
             log.error(
@@ -196,7 +244,7 @@ export class OmniProtocolServer extends EventEmitter {
         return {
             isRunning: this.isRunning,
             port: this.config.port,
-            connections: this.connectionManager.getStats(),
+            connections: this.connectionPool.getStats(),
             rateLimit: this.rateLimiter.getStats(),
         }
     }
@@ -213,7 +261,9 @@ export class OmniProtocolServer extends EventEmitter {
      */
     private detectNodePort(): number {
         // Try to read from environment or config
-        const httpPort = parseInt(process.env.NODE_PORT || process.env.PORT || "3000")
+        const httpPort = parseInt(
+            process.env.NODE_PORT || process.env.PORT || "3000",
+        )
         return httpPort
     }
 }

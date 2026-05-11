@@ -1,6 +1,6 @@
 import L2PSMempool, { L2PS_STATUS } from "@/libs/blockchain/l2ps_mempool"
 import { L2PSMempoolTx } from "@/model/entities/L2PSMempool"
-import Mempool from "@/libs/blockchain/mempool_v2"
+import Mempool from "@/libs/blockchain/mempool"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
@@ -10,34 +10,12 @@ import crypto from "crypto"
 import { L2PSBatchProver } from "@/libs/l2ps/zk/L2PSBatchProver"
 import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
+import { Config } from "src/config"
+import type { L2PSBatchPayload } from "./types"
+import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN } from "./constants"
 
-/**
- * L2PS Batch Payload Interface
- * 
- * Represents the encrypted batch data submitted to the main mempool
- */
-export interface L2PSBatchPayload {
-    /** L2PS network identifier */
-    l2ps_uid: string
-    /** Base64 encrypted blob containing all transaction data */
-    encrypted_batch: string
-    /** Number of transactions in this batch */
-    transaction_count: number
-    /** Deterministic hash of the batch for integrity verification */
-    batch_hash: string
-    /** Array of original transaction hashes included in this batch */
-    transaction_hashes: string[]
-    /** HMAC-SHA256 authentication tag for tamper detection */
-    authentication_tag: string
-    /** ZK-SNARK PLONK proof for batch validity (optional during transition) */
-    zk_proof?: {
-        proof: any
-        publicSignals: string[]
-        batchSize: number
-        finalStateRoot: string
-        totalVolume: string
-    }
-}
+// Re-export for backward compatibility
+export type { L2PSBatchPayload } from "./types"
 
 /**
  * L2PS Batch Aggregator Service
@@ -76,25 +54,25 @@ export class L2PSBatchAggregator {
     private zkProver: L2PSBatchProver | null = null
 
     /** Whether ZK proofs are enabled (requires setup_all_batches.sh to be run first) */
-    private zkEnabled = process.env.L2PS_ZK_ENABLED !== "false"
+    private zkEnabled = Config.getInstance().l2ps.zkEnabled
 
     /** Batch aggregation interval in milliseconds */
-    private readonly AGGREGATION_INTERVAL = Number.parseInt(process.env.L2PS_AGGREGATION_INTERVAL_MS || "10000", 10)
+    private readonly AGGREGATION_INTERVAL = Config.getInstance().l2ps.aggregationIntervalMs
 
     /** Minimum number of transactions to trigger a batch (can be lower if timeout reached) */
-    private readonly MIN_BATCH_SIZE = Number.parseInt(process.env.L2PS_MIN_BATCH_SIZE || "1", 10)
+    private readonly MIN_BATCH_SIZE = Config.getInstance().l2ps.minBatchSize
 
-    /** Maximum number of transactions per batch (limited by ZK circuit size: max 10) */
+    /** Maximum number of transactions per batch (limited by ZK circuit size) */
     private readonly MAX_BATCH_SIZE = Math.min(
-        Number.parseInt(process.env.L2PS_MAX_BATCH_SIZE || "10", 10),
-        10 // ZK circuit constraint - cannot exceed 10
+        Config.getInstance().l2ps.maxBatchSize,
+        ZK_CIRCUIT_MAX_BATCH_SIZE,
     )
 
     /** Cleanup age - remove batched transactions older than this (ms) */
-    private readonly CLEANUP_AGE_MS = Number.parseInt(process.env.L2PS_CLEANUP_AGE_MS || "300000", 10) // 5 minutes default
+    private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
     /** Domain separator for batch transaction signatures */
-    private readonly SIGNATURE_DOMAIN = "L2PS_BATCH_TX_V1"
+    private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
 
     /** Statistics tracking */
     private stats = this.createInitialStats()
@@ -356,7 +334,7 @@ export class L2PSBatchAggregator {
                         aggregatedEdits,
                         totalAffectedAccountsCount,
                         batchTransactions.length,
-                        transactionHashes
+                        transactionHashes,
                     )
 
                     if (proofResult.success) {
@@ -378,7 +356,7 @@ export class L2PSBatchAggregator {
                             txHash,
                             "batched",
                             undefined,
-                            `Included in unconfirmed L1 batch`
+                            "Included in unconfirmed L1 batch",
                         )
                     } catch (err) {
                         log.warning(`[L2PS Batch Aggregator] Failed to update tx status for ${txHash.slice(0, 16)}...`)
@@ -422,7 +400,7 @@ export class L2PSBatchAggregator {
             }
 
             // Sum affected accounts counts (privacy-preserving)
-            if (tx.affected_accounts_count && typeof tx.affected_accounts_count === 'number') {
+            if (tx.affected_accounts_count && typeof tx.affected_accounts_count === "number") {
                 totalAffectedAccountsCount += tx.affected_accounts_count
             }
         }
@@ -431,7 +409,7 @@ export class L2PSBatchAggregator {
 
         return {
             aggregatedEdits,
-            totalAffectedAccountsCount
+            totalAffectedAccountsCount,
         }
     }
 
@@ -511,8 +489,8 @@ export class L2PSBatchAggregator {
      */
     private async generateZkProofForBatch(
         transactions: L2PSMempoolTx[],
-        batchHash: string
-    ): Promise<L2PSBatchPayload['zk_proof'] | undefined> {
+        batchHash: string,
+    ): Promise<L2PSBatchPayload["zk_proof"] | undefined> {
         if (!this.zkEnabled || !this.zkProver) {
             return undefined
         }
@@ -551,7 +529,7 @@ export class L2PSBatchAggregator {
             // Use batch hash as initial state root
             let initialStateRoot: bigint
             try {
-                initialStateRoot = BigInt('0x' + batchHash.slice(0, 32)) % (2n ** 253n)
+                initialStateRoot = BigInt("0x" + batchHash.slice(0, 32)) % (2n ** 253n)
             } catch {
                 initialStateRoot = 0n
             }
@@ -638,7 +616,7 @@ export class L2PSBatchAggregator {
             // Store in shared state for persistence
             sharedState.l2psBatchNonce = nonce
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error'
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
             log.warning(`[L2PS Batch Aggregator] Failed to persist nonce: ${errorMessage}`)
         }
     }
@@ -672,7 +650,7 @@ export class L2PSBatchAggregator {
                     finalStateRootBigInt = BigInt(finalStateRoot)
                     totalVolumeBigInt = BigInt(totalVolume)
                 } catch {
-                    log.error(`[L2PS Batch Aggregator] Invalid BigInt values in ZK proof`)
+                    log.error("[L2PS Batch Aggregator] Invalid BigInt values in ZK proof")
                     return false
                 }
 

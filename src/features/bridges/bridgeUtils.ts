@@ -1,4 +1,5 @@
 import { BLOCKCHAIN_NAME, CrossChainManagerCalculationOptions } from "rubic-sdk"
+import { Config } from "src/config"
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export const BRIDGE_PROTOCOLS = {
@@ -11,10 +12,9 @@ export const BRIDGE_PROTOCOLS = {
 } as const
 
 export const RUBIC_API_REFERRER_ADDRESS =
-    process.env.RUBIC_API_REFERRER_ADDRESS || "rubic.exchange"
+    Config.getInstance().bridges.rubicApiReferrerAddress
 export const RUBIC_API_INTEGRATOR_ADDRESS =
-    process.env.RUBIC_API_INTEGRATOR_ADDRESS ||
-    "0x069eA739d1125eDed11663Ba55E0b83277D42885"
+    Config.getInstance().bridges.rubicApiIntegratorAddress
 export const RUBIC_API_V2_BASE_URL = "https://api-v2.rubic.exchange/api"
 export const RUBIC_API_V2_ROUTES = {
     QUOTE_BEST: `${RUBIC_API_V2_BASE_URL}/routes/quoteBest`,

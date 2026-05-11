@@ -435,6 +435,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to get user points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error getting user points",
@@ -469,9 +471,8 @@ export class PointSystem {
 
         try {
             // Get current points and identities from GCR
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {
@@ -526,13 +527,15 @@ export class PointSystem {
                     message: walletIsAlreadyLinked
                         ? walletIsAlreadyLinkedMessage
                         : hasExistingWalletOnChain
-                            ? hasExistingWalletOnChainMessage
-                            : "Points awarded for linking wallet",
+                              ? hasExistingWalletOnChainMessage
+                              : "Points awarded for linking wallet",
                 },
                 require_reply: false,
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -557,9 +560,8 @@ export class PointSystem {
         referralCode?: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Twitter points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.twitter > 0) {
@@ -597,6 +599,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -645,9 +649,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has GitHub points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.github > 0) {
@@ -684,6 +687,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -732,6 +737,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Web3 wallet points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -752,9 +759,8 @@ export class PointSystem {
      */
     async deductTwitterPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Twitter points to deduct
             const currentTwitter =
@@ -804,6 +810,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Twitter points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -827,9 +835,8 @@ export class PointSystem {
         githubUserId: string,
     ): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has GitHub points to deduct
             const currentGithub =
@@ -867,6 +874,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Github points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -917,9 +926,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Telegram points specifically
             if (
@@ -980,6 +988,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1069,6 +1079,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Telegram TLSN points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1089,9 +1101,8 @@ export class PointSystem {
      */
     async deductTelegramPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Telegram points to deduct
             const currentTelegram =
@@ -1129,6 +1140,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Telegram points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1172,9 +1185,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user already has Discord points specifically
             if (userPointsWithIdentities.breakdown.socialAccounts.discord > 0) {
@@ -1211,6 +1223,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding points",
@@ -1230,9 +1244,8 @@ export class PointSystem {
      */
     async deductDiscordPoints(userId: string): Promise<RPCResponse> {
         try {
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if user has Discord points to deduct
             if (
@@ -1270,6 +1283,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Discord points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting points",
@@ -1307,9 +1322,8 @@ export class PointSystem {
                 : pointValues.LINK_UD_DOMAIN
 
             // Get current points and check for duplicate domain linking
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             // Check if this specific domain is already linked
             const account = await ensureGCRForUser(userId)
@@ -1393,6 +1407,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding UD domain points",
@@ -1475,6 +1491,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct UD domain points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting UD domain points",
@@ -1515,9 +1533,8 @@ export class PointSystem {
                 }
             }
 
-            const userPointsWithIdentities = await this.getUserPointsInternal(
-                userId,
-            )
+            const userPointsWithIdentities =
+                await this.getUserPointsInternal(userId)
 
             if (!userPointsWithIdentities.linkedSocials.twitter) {
                 return {
@@ -1606,6 +1623,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Nomis score points",
@@ -1684,6 +1703,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Nomis score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Nomis score points",
@@ -1763,6 +1784,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Human Passport points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Human Passport points",
@@ -1821,6 +1844,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Human Passport points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Human Passport points",
@@ -1947,6 +1972,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to award Ethos score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error awarding Ethos score points",
@@ -2028,6 +2055,8 @@ export class PointSystem {
                 extra: {},
             }
         } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
+            log.error(`[PointSystem] Failed to deduct Ethos score points: ${errorMsg}`)
             return {
                 result: 500,
                 response: "Error deducting Ethos score points",

@@ -1,7 +1,7 @@
 // INFO To safely transition from L2 (IMP) to L1 (DEMOS) it is necessary to have a wrapper that interprets the results
 import { Hash } from "crypto"
 // The outcome of this method can be feed to GCR.addToGCRIMPData
-import { ImMessage } from "@/features/InstantMessagingProtocol/old/types/IMSession"
+import { ImMessage } from "@/features/InstantMessagingProtocol/types"
 import Cryptography from "src/libs/crypto/cryptography"
 import { forgeToHex, hexToForge } from "src/libs/crypto/forgeUtils"
 import Hashing from "src/libs/crypto/hashing"

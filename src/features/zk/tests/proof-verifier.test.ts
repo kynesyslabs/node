@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "bun:test"
 import { ProofVerifier } from "../proof/ProofVerifier.js"
 import type { IdentityAttestationProof, ZKProof } from "../proof/ProofVerifier.js"
-import { Datasource } from "@/model/datasource.js"
+import Datasource from "@/model/datasource.js"
 import type { DataSource } from "typeorm"
 import { In } from "typeorm"
 import { UsedNullifier } from "@/model/entities/GCRv2/UsedNullifier.js"
@@ -121,7 +121,6 @@ describe("ProofVerifier", () => {
 
             // Mock the cryptographic verification to pass (we're testing nullifier check)
             const originalVerify = ProofVerifier.verifyProofOnly
-            // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
             try {
@@ -130,7 +129,6 @@ describe("ProofVerifier", () => {
                 expect(result.reason).toContain("Nullifier already used")
             } finally {
                 // Restore original method
-                // @ts-expect-error - Restoring mocked static method
                 ProofVerifier.verifyProofOnly = originalVerify
             }
         })
@@ -156,7 +154,6 @@ describe("ProofVerifier", () => {
 
             // Mock the cryptographic verification to pass (we're testing Merkle root check)
             const originalVerify = ProofVerifier.verifyProofOnly
-            // @ts-expect-error - Mocking static method for test
             ProofVerifier.verifyProofOnly = async () => true
 
             try {
@@ -165,7 +162,6 @@ describe("ProofVerifier", () => {
                 expect(result.reason).toContain("Merkle root does not match current tree state")
             } finally {
                 // Restore original method
-                // @ts-expect-error - Restoring mocked static method
                 ProofVerifier.verifyProofOnly = originalVerify
             }
         })

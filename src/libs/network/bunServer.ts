@@ -2,7 +2,8 @@ import { Server } from "bun"
 import { Headers } from "node-fetch"
 import log from "@/utilities/logger"
 
-export type Handler = (req: Request) => Promise<Response> | Response
+export type BunRequest = Request & { params: Record<string, string> }
+export type Handler = (req: BunRequest) => Promise<Response> | Response
 export type Middleware = (
     req: Request,
     next: () => Promise<Response>,
@@ -43,6 +44,57 @@ export class BunServer {
         this.routes.get(method)?.set(path, handler)
     }
 
+    private matchRoute(
+        method: string,
+        path: string,
+    ): { handler: Handler; params: Record<string, string> } | null {
+        const methodRoutes = this.routes.get(method)
+        if (!methodRoutes) {
+            return null
+        }
+
+        const exact = methodRoutes.get(path)
+        if (exact) {
+            return { handler: exact, params: {} }
+        }
+
+        const requestedParts = path.split("/").filter(Boolean)
+        for (const [routePath, handler] of methodRoutes.entries()) {
+            const routeParts = routePath.split("/").filter(Boolean)
+            if (routeParts.length !== requestedParts.length) {
+                continue
+            }
+
+            const params: Record<string, string> = {}
+            let matches = true
+
+            for (let i = 0; i < routeParts.length; i++) {
+                const routePart = routeParts[i]
+                const requestedPart = requestedParts[i]
+
+                if (routePart.startsWith(":")) {
+                    params[routePart.slice(1)] = decodeURIComponent(requestedPart)
+                    continue
+                }
+
+                if (routePart === "*") {
+                    continue
+                }
+
+                if (routePart !== requestedPart) {
+                    matches = false
+                    break
+                }
+            }
+
+            if (matches) {
+                return { handler, params }
+            }
+        }
+
+        return null
+    }
+
     private async handleRequest(
         req: Request,
         server?: Server,
@@ -53,11 +105,14 @@ export class BunServer {
 
         // Create the final handler (route handler)
         const finalHandler = async (): Promise<Response> => {
-            const routeHandler = this.routes.get(method)?.get(path)
-            if (routeHandler) {
-                return await routeHandler(req)
+            const match = this.matchRoute(method, path)
+            if (match) {
+                const bunReq = req as BunRequest
+                bunReq.params = match.params
+                return await match.handler(bunReq)
             }
-            return new Response("Not Found", { status: 404 })
+
+            return jsonResponse({ error: "Not Found" }, 404)
         }
 
         // Build middleware chain from right to left (last to first)
@@ -110,6 +165,8 @@ export const cors = (): Middleware => {
         headers = { ...headers, ...response.headers.toJSON() }
 
         return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
             headers: headers,
         })
     }
@@ -118,7 +175,9 @@ export const cors = (): Middleware => {
 export const json = (): Middleware => {
     return async (req, next) => {
         const response = await next()
-        response.headers.set("Content-Type", "application/json")
+        if (!response.headers.has("Content-Type")) {
+            response.headers.set("Content-Type", "application/json")
+        }
         return response
     }
 }
@@ -128,11 +187,19 @@ export const text = (body: string, status = 200): Response => {
     return new Response(body, { status })
 }
 
-export const jsonResponse = (body: any, status = 200): Response => {
+export const jsonResponse = (
+    body: any,
+    status = 200,
+    extraHeaders?: Record<string, string>,
+): Response => {
+    // Spread caller-provided headers first, then force Content-Type so it
+    // can't be accidentally overridden away from application/json.
+    const headers: Record<string, string> = {
+        ...extraHeaders,
+        "Content-Type": "application/json",
+    }
     return new Response(JSON.stringify(body), {
         status,
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers,
     })
 }

@@ -34,26 +34,26 @@ function stringify(value: unknown): string {
 }
 
 /**
- * Extract tag from message like "[MAIN] Starting..." -> "MAIN"
- * Regex is designed to avoid ReDoS by:
- * - Using {1,50} limit on tag length instead of unbounded +
- * - Ensuring no overlapping quantifiers that cause backtracking
+ * Parse leading [TAG] from a message and resolve it to a category.
+ * Only strips the bracketed prefix when TAG is a recognized category tag —
+ * unknown brackets (e.g. "[broadcastBlockHash]" or "[abc123]") are preserved
+ * so the user sees the original message intact.
+ *
+ * Regex uses {1,50} length limit to avoid ReDoS.
  */
-function extractTag(message: string): { tag: string | null; cleanMessage: string } {
-    // Limit tag to 50 chars max to prevent ReDoS, tags are typically short (e.g., "PEER BOOTSTRAP")
+function parseMessage(message: string): {
+    category: LogCategory
+    cleanMessage: string
+} {
     const match = message.match(/^\[([A-Za-z0-9_ ]{1,50})\]\s*(.*)$/i)
     if (match) {
-        return { tag: match[1].trim().toUpperCase(), cleanMessage: match[2] }
+        const tag = match[1].trim().toUpperCase()
+        const category = TAG_TO_CATEGORY[tag]
+        if (category) {
+            return { category, cleanMessage: match[2] }
+        }
     }
-    return { tag: null, cleanMessage: message }
-}
-
-/**
- * Infer category from tag or default to CORE
- */
-function inferCategory(tag: string | null): LogCategory {
-    if (!tag) return "CORE"
-    return TAG_TO_CATEGORY[tag] ?? "CORE"
+    return { category: "CORE", cleanMessage: message }
 }
 
 /**
@@ -89,7 +89,8 @@ export default class LegacyLoggerAdapter {
         }
 
         try {
-            const identityFile = getSharedState.identityFile?.replace(".", "") ?? ""
+            const identityFile =
+                getSharedState.identityFile?.replace(".", "") ?? ""
             const logsDir = `logs_${port}_${identityFile}`
 
             this.LOGS_DIR = logsDir
@@ -125,8 +126,7 @@ export default class LegacyLoggerAdapter {
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
-        const { tag, cleanMessage } = extractTag(stringified)
-        const category = inferCategory(tag)
+        const { category, cleanMessage } = parseMessage(stringified)
 
         this.logger.info(category, cleanMessage)
     }
@@ -142,8 +142,7 @@ export default class LegacyLoggerAdapter {
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
-        const { tag, cleanMessage } = extractTag(stringified)
-        const category = inferCategory(tag)
+        const { category, cleanMessage } = parseMessage(stringified)
         this.logger.error(category, cleanMessage)
     }
 
@@ -160,8 +159,7 @@ export default class LegacyLoggerAdapter {
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
-        const { tag, cleanMessage } = extractTag(stringified)
-        const category = inferCategory(tag)
+        const { category, cleanMessage } = parseMessage(stringified)
         this.logger.debug(category, cleanMessage)
     }
 
@@ -178,8 +176,7 @@ export default class LegacyLoggerAdapter {
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
-        const { tag, cleanMessage } = extractTag(stringified)
-        const category = inferCategory(tag)
+        const { category, cleanMessage } = parseMessage(stringified)
         this.logger.warning(category, cleanMessage)
     }
 
@@ -201,8 +198,7 @@ export default class LegacyLoggerAdapter {
         if (extra !== undefined && typeof extra !== "boolean") {
             stringified += " " + stringify(extra)
         }
-        const { tag, cleanMessage } = extractTag(stringified)
-        const category = inferCategory(tag)
+        const { category, cleanMessage } = parseMessage(stringified)
         this.logger.critical(category, cleanMessage)
     }
 
@@ -241,7 +237,11 @@ export default class LegacyLoggerAdapter {
         }
 
         // Log to terminal if enabled (but not in TUI mode)
-        if (logToTerminal && this.logToTerminal[logfile] && !this.logger.isTuiMode()) {
+        if (
+            logToTerminal &&
+            this.logToTerminal[logfile] &&
+            !this.logger.isTuiMode()
+        ) {
             console.log(logEntry.trim())
         }
     }

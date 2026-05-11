@@ -14,10 +14,12 @@ export async function manageExecution(
 ): Promise<RPCResponse> {
     const returnValue = _.cloneDeep(emptyResponse)
 
-    log.debug("[serverListeners] content.type: " + content.type)
-    log.debug("[serverListeners] content.extra: " + content.extra)
+    log.debug(`[serverListeners] content.type: ${content.type}`)
+    log.debug(`[serverListeners] content.extra: ${content.extra}`)
 
-    log.info(`[serverListeners] Received execution request for type: ${content.type}`)
+    log.info(
+        `[serverListeners] Received execution request for type: ${content.type}`,
+    )
 
     if (content.type === "l2ps" || content.type === "l2psEncryptedTx") {
         const response = await ServerHandlers.handleL2PS(content.data)
@@ -26,7 +28,6 @@ export async function manageExecution(
         }
         return response
     }
-
 
     // TODO Better to modularize this
     // REVIEW We use the 'extra' field to see if it is a confirmTx request (prior to execution)
@@ -37,10 +38,9 @@ export async function manageExecution(
         // ANCHOR Gas consuming transactions
         // Validating a tx means that we calculate gas and check if the transaction is valid
         // Then we send the validation data to the client that can use it to execute the tx
-        case "confirmTx":
+        case "confirmTx": {
             log.info("SERVER", "Received confirmTx")
-            // eslint-disable-next-line no-var
-            var validityData = await ServerHandlers.handleValidateTransaction(
+            const validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
                 sender,
             )
@@ -48,13 +48,14 @@ export async function manageExecution(
             returnValue.response = validityData
             returnValue.require_reply = false
             break
+        }
         // Executing a tx means that we execute the transaction and send back the result
         // to the client. We first need to check if the tx is actually valid.
-        case "broadcastTx":
+        case "broadcastTx": {
             log.info("SERVER", "Received broadcastTx")
             // REVIEW This method needs to actually verify if the transaction is valid
 
-            var validityDataPayload: ValidityData
+            let validityDataPayload: ValidityData
             // If content.data.response.rpc_public_key exists, we assign validityDataPayload to response
             try {
                 if (content.data.response.rpc_public_key) {
@@ -63,6 +64,11 @@ export async function manageExecution(
                     validityDataPayload = content.data
                 }
             } catch (e) {
+                const errorMsg = e instanceof Error ? e.message : String(e)
+                log.warn(
+                    "[manageExecution] Failed to extract validity data payload:",
+                    errorMsg,
+                )
                 validityDataPayload = content.data
             }
 
@@ -90,6 +96,7 @@ export async function manageExecution(
                 returnValue.require_reply = false
                 return returnValue
             }
+        }
         // ANCHOR Messages
         // They are treated as messages and are handled by their types themselves
         // For readability, we call an external function to manage the messages
@@ -99,9 +106,6 @@ export async function manageExecution(
             returnValue.require_reply = false
             break
     }
-    //console.log("content.message: " + content.message)
-    //console.log("content.message.action: " + content.message.action)
-
     // ANCHOR Reply logic
 
     // TODO & REVIEW Call security module for send limiting messages
@@ -113,6 +117,5 @@ export async function manageExecution(
 
     // Sending back the response
     log.debug("[SERVER] Sending back a response")
-    //console.log(return_value)
     return returnValue
 }

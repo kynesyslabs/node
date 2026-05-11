@@ -1,0 +1,570 @@
+---
+title: "StorageProgram Examples"
+description: "Complete SDK examples for StorageProgram operations"
+---
+
+# StorageProgram Examples
+
+Complete examples showing the full transaction flow for StorageProgram operations.
+
+## Transaction Flow Overview
+
+All write operations follow the standard Demos Network confirm/broadcast flow:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         StorageProgram Flow                             │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   1. BUILD PAYLOAD                                                      │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  StorageProgram.createStorageProgram(...)                   │      │
+│   │  StorageProgram.writeStorage(...)                           │      │
+│   │  StorageProgram.updateAccessControl(...)                    │      │
+│   │  StorageProgram.deleteStorageProgram(...)                   │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   2. CREATE TRANSACTION                                                 │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  Transaction {                                               │      │
+│   │    content: {                                                │      │
+│   │      type: "storageProgram",                                 │      │
+│   │      data: [ "storageProgram", payload ]                     │      │
+│   │    }                                                         │      │
+│   │  }                                                           │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   3. CONFIRM TRANSACTION (RPC)                                          │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  POST /                                                      │      │
+│   │  { method: "execute",                                        │      │
+│   │    params: [{ data: { content: tx.content },                 │      │
+│   │              extra: "confirmTx" }] }                         │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   4. RPC RETURNS VALIDITY DATA                                          │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  { success: true,                                            │      │
+│   │    validityData: {                                           │      │
+│   │      hash: "0x...",                                          │      │
+│   │      fee: 1,                                                 │      │
+│   │      nonce: 42,                                              │      │
+│   │      ...                                                     │      │
+│   │    }                                                         │      │
+│   │  }                                                           │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   5. SIGN TRANSACTION                                                   │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  signature = sign(validityData.hash, privateKey)             │      │
+│   │  tx.signature = signature                                    │      │
+│   │  tx.hash = validityData.hash                                 │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   6. BROADCAST TRANSACTION (RPC)                                        │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  POST /                                                      │      │
+│   │  { method: "execute",                                        │      │
+│   │    params: [{ data: signedTransaction,                       │      │
+│   │              extra: "broadcastTx" }] }                       │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                              ↓                                          │
+│   7. TRANSACTION CONFIRMED                                              │
+│   ┌─────────────────────────────────────────────────────────────┐      │
+│   │  { success: true,                                            │      │
+│   │    message: "Storage program created: stor-..." }            │      │
+│   └─────────────────────────────────────────────────────────────┘      │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+## Setup
+
+```typescript
+import { StorageProgram, types, ucrypto } from "@kynesyslabs/demosdk"
+
+const RPC_URL = "https://rpc.demos.network"
+
+// Your wallet
+const privateKey = "your-private-key-hex"
+const publicKey = ucrypto.getPublicKey(privateKey)
+const address = `ed25519:${publicKey}`
+```
+
+## Helper: Execute Transaction
+
+This helper handles the full confirm/broadcast flow:
+
+```typescript
+async function executeStorageTransaction(
+  payload: types.StorageProgramPayload
+): Promise<any> {
+  // 1. Build transaction content
+  const txContent = {
+    type: "storageProgram" as const,
+    data: ["storageProgram", payload] as [string, types.StorageProgramPayload]
+  }
+
+  // 2. Confirm transaction - get validity data
+  const confirmResponse = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      method: "execute",
+      params: [{
+        data: { content: txContent },
+        extra: "confirmTx"
+      }]
+    })
+  })
+
+  const confirmResult = await confirmResponse.json()
+  if (!confirmResult.success) {
+    throw new Error(`Confirm failed: ${confirmResult.error}`)
+  }
+
+  const { validityData } = confirmResult
+
+  // 3. Sign the transaction hash
+  const signature = await ucrypto.sign(privateKey, validityData.hash)
+  const signatureHex = Buffer.from(signature).toString("hex")
+
+  // 4. Build signed transaction
+  const signedTx = {
+    content: txContent,
+    hash: validityData.hash,
+    signature: signatureHex,
+    ed25519_signature: signatureHex,
+    blockNumber: null,
+    status: "pending"
+  }
+
+  // 5. Broadcast transaction
+  const broadcastResponse = await fetch(RPC_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      method: "execute",
+      params: [{
+        data: signedTx,
+        extra: "broadcastTx"
+      }]
+    })
+  })
+
+  return broadcastResponse.json()
+}
+```
+
+## Example 1: Create JSON Storage Program
+
+Store structured JSON data with public read access.
+
+```typescript
+// Derive the storage address first (deterministic)
+const programName = "user-preferences"
+const storageAddress = StorageProgram.deriveStorageAddress(
+  address,
+  programName
+)
+console.log("Storage address will be:", storageAddress)
+// => stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b
+
+// Create the storage program payload
+const payload = StorageProgram.createStorageProgram(
+  address,              // deployer (becomes owner)
+  programName,          // unique name
+  {                     // initial data (JSON)
+    theme: "dark",
+    notifications: true,
+    language: "en",
+    settings: {
+      fontSize: 14,
+      autoSave: true
+    }
+  },
+  "json",               // encoding
+  { mode: "public" },   // ACL - anyone can read
+  {                     // options
+    metadata: {
+      version: "1.0",
+      createdBy: "my-dapp"
+    }
+  }
+)
+
+// Execute the transaction
+const result = await executeStorageTransaction(payload)
+console.log(result)
+// => { success: true, message: "Storage program created: stor-7a8b9c..." }
+```
+
+## Example 2: Create Binary Storage Program
+
+Store binary data (images, files) with restricted access.
+
+```typescript
+import * as fs from "fs"
+
+// Read file and convert to base64
+const imageBuffer = fs.readFileSync("./avatar.png")
+const base64Image = imageBuffer.toString("base64")
+
+// Check size before creating
+const sizeBytes = StorageProgram.getDataSize(base64Image, "binary")
+console.log(`Image size: ${sizeBytes} bytes`)
+
+if (!StorageProgram.validateSize(base64Image, "binary")) {
+  throw new Error("Image exceeds 1MB limit")
+}
+
+// Calculate fee
+const fee = StorageProgram.calculateStorageFee(base64Image, "binary")
+console.log(`Storage fee: ${fee} DEM`)
+
+// Create payload with restricted ACL
+const payload = StorageProgram.createStorageProgram(
+  address,
+  "team-avatar",
+  base64Image,
+  "binary",
+  {
+    mode: "restricted",
+    allowed: [
+      "ed25519:teammate1-pubkey...",
+      "ed25519:teammate2-pubkey..."
+    ]
+  },
+  {
+    metadata: {
+      filename: "avatar.png",
+      mimeType: "image/png",
+      uploadedAt: new Date().toISOString()
+    }
+  }
+)
+
+const result = await executeStorageTransaction(payload)
+```
+
+## Example 3: Create Storage with Groups
+
+Use group-based ACL for team collaboration.
+
+```typescript
+const payload = StorageProgram.createStorageProgram(
+  address,
+  "project-docs",
+  {
+    title: "Project Documentation",
+    sections: ["overview", "api", "deployment"]
+  },
+  "json",
+  StorageProgram.groupACL({
+    admins: {
+      members: ["ed25519:admin1...", "ed25519:admin2..."],
+      permissions: ["read", "write", "delete"]
+    },
+    editors: {
+      members: ["ed25519:editor1...", "ed25519:editor2..."],
+      permissions: ["read", "write"]
+    },
+    viewers: {
+      members: ["ed25519:viewer1...", "ed25519:viewer2..."],
+      permissions: ["read"]
+    }
+  })
+)
+
+const result = await executeStorageTransaction(payload)
+```
+
+## Example 4: Write/Update Storage
+
+Update data in an existing storage program.
+
+```typescript
+const payload = StorageProgram.writeStorage(
+  "stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+  {
+    theme: "light",           // changed
+    notifications: false,     // changed
+    language: "fr",           // changed
+    settings: {
+      fontSize: 16,           // changed
+      autoSave: true
+    },
+    newField: "new value"     // added
+  },
+  "json"
+)
+
+const result = await executeStorageTransaction(payload)
+// => { success: true, message: "Storage program updated: stor-7a8b9c..." }
+```
+
+## Example 5: Update Access Control
+
+Change who can access the storage program.
+
+```typescript
+// Switch from owner-only to public
+const payload = StorageProgram.updateAccessControl(
+  "stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+  { mode: "public" }
+)
+
+const result = await executeStorageTransaction(payload)
+```
+
+```typescript
+// Add a blacklist to public storage
+const payload = StorageProgram.updateAccessControl(
+  "stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+  {
+    mode: "public",
+    blacklisted: [
+      "ed25519:spammer1...",
+      "ed25519:spammer2..."
+    ]
+  }
+)
+```
+
+```typescript
+// Convert to group-based access
+const payload = StorageProgram.updateAccessControl(
+  "stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+  {
+    mode: "restricted",
+    groups: {
+      team: {
+        members: ["ed25519:alice...", "ed25519:bob..."],
+        permissions: ["read", "write"]
+      }
+    }
+  }
+)
+```
+
+## Example 6: Delete Storage Program
+
+Soft-delete a storage program (owner or ACL-permissioned only).
+
+```typescript
+const payload = StorageProgram.deleteStorageProgram(
+  "stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b"
+)
+
+const result = await executeStorageTransaction(payload)
+// => { success: true, message: "Storage program deleted: stor-7a8b9c..." }
+```
+
+## Example 7: Read Storage (RPC GET)
+
+Reading does NOT require a transaction. Use the RPC GET endpoints:
+
+```typescript
+// Read public storage - no auth needed
+const response = await fetch(
+  `${RPC_URL}/storage-program/stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b`
+)
+const data = await response.json()
+
+console.log(data)
+// => {
+//   success: true,
+//   storageAddress: "stor-7a8b9c...",
+//   owner: "ed25519:owner-pubkey...",
+//   programName: "user-preferences",
+//   encoding: "json",
+//   data: { theme: "dark", ... },
+//   metadata: { version: "1.0", ... },
+//   storageLocation: "onchain",
+//   sizeBytes: 256,
+//   createdAt: "2024-01-15T10:30:00.000Z",
+//   updatedAt: "2024-01-16T14:20:00.000Z"
+// }
+```
+
+```typescript
+// Read protected storage - with auth headers
+const message = publicKey
+const signature = await ucrypto.sign(privateKey, message)
+const signatureHex = Buffer.from(signature).toString("hex")
+
+const response = await fetch(
+  `${RPC_URL}/storage-program/stor-7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b`,
+  {
+    headers: {
+      "identity": `ed25519:${publicKey}`,
+      "signature": signatureHex
+    }
+  }
+)
+const data = await response.json()
+```
+
+## Example 8: List Storage by Owner
+
+```typescript
+// List all public programs by owner
+const response = await fetch(
+  `${RPC_URL}/storage-program/owner/${address}`
+)
+const data = await response.json()
+
+console.log(data)
+// => {
+//   success: true,
+//   programs: [
+//     { storageAddress: "stor-abc...", programName: "config-v1", ... },
+//     { storageAddress: "stor-def...", programName: "user-data", ... }
+//   ],
+//   count: 2
+// }
+```
+
+## ACL Helper Methods
+
+The SDK provides convenient ACL builders:
+
+```typescript
+// Private/owner-only (default)
+const privateAcl = StorageProgram.privateACL()
+// => { mode: "owner" }
+
+// Public read, owner write
+const publicAcl = StorageProgram.publicACL()
+// => { mode: "public" }
+
+// Restricted to specific addresses
+const restrictedAcl = StorageProgram.restrictedACL([
+  "ed25519:friend1...",
+  "ed25519:friend2..."
+])
+// => { mode: "restricted", allowed: ["ed25519:friend1...", ...] }
+
+// Group-based access
+const groupAcl = StorageProgram.groupACL({
+  admins: { members: [...], permissions: ["read", "write", "delete"] },
+  users: { members: [...], permissions: ["read"] }
+})
+
+// Public with blacklist
+const blacklistAcl = StorageProgram.blacklistACL(
+  "public",
+  ["ed25519:blocked1...", "ed25519:blocked2..."]
+)
+// => { mode: "public", blacklisted: [...] }
+```
+
+## Validation Utilities
+
+```typescript
+// Check data size
+const size = StorageProgram.getDataSize(data, "json")
+const isValid = StorageProgram.validateSize(data, "json")
+
+// Check JSON nesting depth (max 64 levels)
+const validNesting = StorageProgram.validateNestingDepth(data)
+
+// Calculate fee before transaction
+const fee = StorageProgram.calculateStorageFee(data, "json")
+console.log(`This will cost ${fee} DEM`)
+
+// Check permission
+const acl = { mode: "restricted", allowed: ["ed25519:user1..."] }
+const canRead = StorageProgram.checkPermission(acl, owner, user, "read")
+const canWrite = StorageProgram.checkPermission(acl, owner, user, "write")
+```
+
+## Error Handling
+
+```typescript
+try {
+  const result = await executeStorageTransaction(payload)
+
+  if (!result.success) {
+    switch (result.errorCode) {
+      case "ALREADY_EXISTS":
+        console.error("Storage program already exists at this address")
+        break
+      case "NOT_FOUND":
+        console.error("Storage program not found")
+        break
+      case "PERMISSION_DENIED":
+        console.error("You don't have permission for this operation")
+        break
+      case "SIZE_EXCEEDED":
+        console.error("Data exceeds 1MB limit")
+        break
+      case "INSUFFICIENT_BALANCE":
+        console.error("Not enough DEM for storage fee")
+        break
+      default:
+        console.error(`Error: ${result.error}`)
+    }
+  }
+} catch (error) {
+  console.error("Transaction failed:", error)
+}
+```
+
+## Complete Working Example
+
+Here's a full example you can run:
+
+```typescript
+import { StorageProgram, ucrypto } from "@kynesyslabs/demosdk"
+
+const RPC_URL = "https://rpc.demos.network"
+
+async function main() {
+  // Setup wallet
+  const privateKey = process.env.DEMOS_PRIVATE_KEY!
+  const publicKey = ucrypto.getPublicKey(privateKey)
+  const address = `ed25519:${publicKey}`
+
+  console.log("Wallet address:", address)
+
+  // 1. Create a storage program
+  const programName = "my-first-storage"
+  const storageAddress = StorageProgram.deriveStorageAddress(address, programName)
+
+  console.log("Creating storage at:", storageAddress)
+
+  const createPayload = StorageProgram.createStorageProgram(
+    address,
+    programName,
+    { message: "Hello, Demos!", timestamp: Date.now() },
+    "json",
+    { mode: "public" }
+  )
+
+  const createResult = await executeStorageTransaction(createPayload)
+  console.log("Create result:", createResult)
+
+  // 2. Read the storage
+  const readResponse = await fetch(`${RPC_URL}/storage-program/${storageAddress}`)
+  const readData = await readResponse.json()
+  console.log("Read result:", readData)
+
+  // 3. Update the storage
+  const writePayload = StorageProgram.writeStorage(
+    storageAddress,
+    { message: "Updated message!", timestamp: Date.now(), version: 2 },
+    "json"
+  )
+
+  const writeResult = await executeStorageTransaction(writePayload)
+  console.log("Write result:", writeResult)
+
+  // 4. Read again to verify
+  const verifyResponse = await fetch(`${RPC_URL}/storage-program/${storageAddress}`)
+  const verifyData = await verifyResponse.json()
+  console.log("Updated data:", verifyData.data)
+}
+
+main().catch(console.error)
+```

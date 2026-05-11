@@ -5,30 +5,27 @@
  * Tracks both IP-based and identity-based rate limits.
  */
 
+import { getSharedState } from "@/utilities/sharedState"
 import {
     RateLimitConfig,
     RateLimitEntry,
     RateLimitResult,
     RateLimitType,
 } from "./types"
+import {
+    RATE_LIMIT_BLOCK_DURATION_MS,
+    DEFAULT_MANUAL_BLOCK_DURATION_MS,
+} from "../constants"
 
 export class RateLimiter {
+    private static instance: RateLimiter | null = null
     private config: RateLimitConfig
     private ipLimits: Map<string, RateLimitEntry> = new Map()
     private identityLimits: Map<string, RateLimitEntry> = new Map()
     private cleanupTimer?: NodeJS.Timeout
 
-    constructor(config: Partial<RateLimitConfig> = {}) {
-        this.config = {
-            enabled: config.enabled ?? true,
-            maxConnectionsPerIP: config.maxConnectionsPerIP ?? 10,
-            maxRequestsPerSecondPerIP: config.maxRequestsPerSecondPerIP ?? 100,
-            maxRequestsPerSecondPerIdentity:
-                config.maxRequestsPerSecondPerIdentity ?? 200,
-            windowMs: config.windowMs ?? 1000,
-            entryTTL: config.entryTTL ?? 60000,
-            cleanupInterval: config.cleanupInterval ?? 10000,
-        }
+    constructor() {
+        this.config = structuredClone(getSharedState.omniConfig.rateLimit)
 
         // Start cleanup timer
         if (this.config.enabled) {
@@ -39,7 +36,7 @@ export class RateLimiter {
     /**
      * Check if a connection from an IP is allowed
      */
-    checkConnection(ipAddress: string): RateLimitResult {
+    checkConnection(ipAddress: string, callerName: string): RateLimitResult {
         if (!this.config.enabled) {
             return { allowed: true, currentCount: 0, limit: Infinity }
         }
@@ -54,7 +51,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: "IP temporarily blocked",
+                reason: `[${callerName}] IP temporarily blocked. ${entry.rejectionReason}`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
                 resetIn: entry.blockExpiry - now,
@@ -69,16 +66,17 @@ export class RateLimiter {
 
         // Check connection limit
         if (entry.connections >= this.config.maxConnectionsPerIP) {
-            // Block IP for 1 minute
+            // Block IP for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
+            entry.rejectionReason = `(max ${this.config.maxConnectionsPerIP} connections per IP)`
 
             return {
                 allowed: false,
-                reason: `Too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
+                reason: `[${callerName}] too many connections from IP (max ${this.config.maxConnectionsPerIP})`,
                 currentCount: entry.connections,
                 limit: this.config.maxConnectionsPerIP,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -162,7 +160,7 @@ export class RateLimiter {
         if (entry.blocked && entry.blockExpiry && now < entry.blockExpiry) {
             return {
                 allowed: false,
-                reason: `${type} temporarily blocked`,
+                reason: `${type} temporarily blocked. ${entry.rejectionReason}`,
                 currentCount: entry.timestamps.length,
                 limit: maxRequests,
                 resetIn: entry.blockExpiry - now,
@@ -177,20 +175,21 @@ export class RateLimiter {
         }
 
         // Remove timestamps outside the current window (sliding window)
-        entry.timestamps = entry.timestamps.filter((ts) => ts > windowStart)
+        entry.timestamps = entry.timestamps.filter(ts => ts > windowStart)
 
         // Check if limit exceeded
         if (entry.timestamps.length >= maxRequests) {
-            // Block for 1 minute
+            // Block for duration
             entry.blocked = true
-            entry.blockExpiry = now + 60000
+            entry.blockExpiry = now + RATE_LIMIT_BLOCK_DURATION_MS
+            entry.rejectionReason = `(max ${maxRequests} requests per second)`
 
             return {
                 allowed: false,
                 reason: `Rate limit exceeded for ${type} (max ${maxRequests} requests per second)`,
                 currentCount: entry.timestamps.length,
                 limit: maxRequests,
-                resetIn: 60000,
+                resetIn: RATE_LIMIT_BLOCK_DURATION_MS,
             }
         }
 
@@ -212,11 +211,9 @@ export class RateLimiter {
     /**
      * Get or create a rate limit entry
      */
-    private getOrCreateEntry(
-        key: string,
-        type: RateLimitType,
-    ): RateLimitEntry {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+    private getOrCreateEntry(key: string, type: RateLimitType): RateLimitEntry {
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
 
         let entry = map.get(key)
         if (!entry) {
@@ -301,19 +298,11 @@ export class RateLimiter {
     }
 
     /**
-     * Manually block an IP or identity
-     */
-    blockKey(key: string, type: RateLimitType, durationMs = 3600000): void {
-        const entry = this.getOrCreateEntry(key, type)
-        entry.blocked = true
-        entry.blockExpiry = Date.now() + durationMs
-    }
-
-    /**
      * Manually unblock an IP or identity
      */
     unblockKey(key: string, type: RateLimitType): void {
-        const map = type === RateLimitType.IP ? this.ipLimits : this.identityLimits
+        const map =
+            type === RateLimitType.IP ? this.ipLimits : this.identityLimits
         const entry = map.get(key)
         if (entry) {
             entry.blocked = false
@@ -327,5 +316,13 @@ export class RateLimiter {
     clear(): void {
         this.ipLimits.clear()
         this.identityLimits.clear()
+    }
+
+    static getInstance(): RateLimiter {
+        if (!this.instance) {
+            this.instance = new RateLimiter()
+        }
+
+        return this.instance
     }
 }

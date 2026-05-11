@@ -17,9 +17,9 @@ export default async function manageProposeBlockHash(
 ): Promise<RPCResponse> {
     const response = _.cloneDeep(emptyResponse)
     log.info("[Consensus Message Received] Propose Block Hash")
-    log.info("Block Hash: " + blockHash)
-    log.debug("Validation Data: " + JSON.stringify(validationData))
-    log.info("Peer ID: " + peerId)
+    log.info(`Block Hash: ${blockHash}`)
+    log.debug(`Validation Data: ${JSON.stringify(validationData)}`)
+    log.info(`Peer ID: ${peerId}`)
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
@@ -83,7 +83,10 @@ export default async function manageProposeBlockHash(
                     publicKey: hexToUint8Array(identity),
                 })
             } catch (e) {
-                log.error("Signature verification failed. Signature not added.")
+                const errorMsg = e instanceof Error ? e.message : String(e)
+                log.error(
+                    `[manageProposeBlockHash] Signature verification failed for ${identity}: ${errorMsg}`,
+                )
                 continue
             }
 
@@ -97,8 +100,8 @@ export default async function manageProposeBlockHash(
                 continue
             }
 
-            log.error("Found invalid incoming signature by: " + identity)
-            log.error("Proposed signature: " + signature)
+            log.error(`Found invalid incoming signature by: ${identity}`)
+            log.error(`Proposed signature: ${signature}`)
             log.error(
                 "Candidate block hash: " + getSharedState.candidateBlock.hash,
             )
@@ -114,6 +117,18 @@ export default async function manageProposeBlockHash(
     )
     response.result = 401
     response.response = getSharedState.publicKeyHex
-    response.extra = "Hash does not correspond to our candidate block"
+    response.extra = {
+        message: "Hash does not correspond to our candidate block",
+        ourBlock: {
+            hash: getSharedState.candidateBlock.hash,
+            number: getSharedState.candidateBlock.number,
+            timestamp: getSharedState.candidateBlock.content.timestamp,
+            txCount:
+                getSharedState.candidateBlock.content.ordered_transactions
+                    .length,
+            txHashes:
+                getSharedState.candidateBlock.content.ordered_transactions,
+        },
+    }
     return response
 }

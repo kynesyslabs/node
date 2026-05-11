@@ -16,7 +16,7 @@ export interface OmniMessage {
 
 export interface ParsedOmniMessage<TPayload = unknown> {
     header: OmniMessageHeader
-    auth: AuthBlock | null       // Present if Flags bit 0 = 1
+    auth: AuthBlock | null // Present if Flags bit 0 = 1
     payload: TPayload
 }
 
@@ -51,5 +51,5 @@ export interface HandlerContext<TPayload = unknown> {
 }
 
 export type OmniHandler<TPayload = unknown> = (
-    handlerContext: HandlerContext<TPayload>
+    handlerContext: HandlerContext<TPayload>,
 ) => Promise<Buffer>

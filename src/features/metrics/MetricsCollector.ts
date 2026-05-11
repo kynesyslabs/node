@@ -12,23 +12,18 @@ import { exec } from "node:child_process"
 import { promisify } from "node:util"
 import { MetricsService } from "./MetricsService"
 import log from "@/utilities/logger"
+import { Config } from "src/config"
+import type { MetricsCollectorConfig } from "./types"
+import {
+    DEFAULT_COLLECTOR_CONFIG,
+    HTTP_HEALTH_CHECK_TIMEOUT_MS,
+    MAX_PEERS_TO_REPORT,
+} from "./constants"
+
+// Re-export for backward compatibility
+export type { MetricsCollectorConfig } from "./types"
 
 const execAsync = promisify(exec)
-
-// REVIEW: Configuration for metrics collection
-export interface MetricsCollectorConfig {
-    enabled: boolean
-    collectionIntervalMs: number
-    dockerHealthEnabled: boolean
-    portHealthEnabled: boolean
-}
-
-const DEFAULT_COLLECTOR_CONFIG: MetricsCollectorConfig = {
-    enabled: true,
-    collectionIntervalMs: 2500, // 2.5 seconds - faster updates for real-time monitoring
-    dockerHealthEnabled: true,
-    portHealthEnabled: true,
-}
 
 /**
  * MetricsCollector - Actively collects metrics from node subsystems
@@ -92,12 +87,9 @@ export class MetricsCollector {
         await this.collectAll()
 
         // Start periodic collection
-        this.collectionInterval = setInterval(
-            async () => {
-                await this.collectAll()
-            },
-            this.config.collectionIntervalMs,
-        )
+        this.collectionInterval = setInterval(async () => {
+            await this.collectAll()
+        }, this.config.collectionIntervalMs)
 
         this.running = true
         log.info("[METRICS COLLECTOR] Started")
@@ -140,16 +132,8 @@ export class MetricsCollector {
 
         // === System Metrics ===
         ms.createGauge("system_cpu_usage_percent", "CPU usage percentage", [])
-        ms.createGauge(
-            "system_memory_used_bytes",
-            "Memory used in bytes",
-            [],
-        )
-        ms.createGauge(
-            "system_memory_total_bytes",
-            "Total memory in bytes",
-            [],
-        )
+        ms.createGauge("system_memory_used_bytes", "Memory used in bytes", [])
+        ms.createGauge("system_memory_total_bytes", "Total memory in bytes", [])
         ms.createGauge(
             "system_memory_usage_percent",
             "Memory usage percentage",
@@ -271,7 +255,8 @@ export class MetricsCollector {
             const lastBlock = await chain.getLastBlock()
             if (lastBlock) {
                 // Transaction count in last block
-                const txCount = lastBlock.content?.ordered_transactions?.length ?? 0
+                const txCount =
+                    lastBlock.content?.ordered_transactions?.length ?? 0
                 this.metricsService.setGauge("last_block_tx_count", txCount)
 
                 // Block timestamp and time since last block
@@ -285,7 +270,10 @@ export class MetricsCollector {
                 // Block timestamp is in SECONDS (Unix epoch), not milliseconds
                 if (blockTimestamp > 0) {
                     const nowSeconds = Math.floor(Date.now() / 1000)
-                    const secondsSinceBlock = Math.max(0, nowSeconds - blockTimestamp)
+                    const secondsSinceBlock = Math.max(
+                        0,
+                        nowSeconds - blockTimestamp,
+                    )
                     this.metricsService.setGauge(
                         "seconds_since_last_block",
                         secondsSinceBlock,
@@ -389,12 +377,20 @@ export class MetricsCollector {
     ): void {
         for (const [name] of Object.entries(interfaces)) {
             if (name !== "lo") {
-                this.metricsService.setGauge("system_network_rx_bytes_total", 0, {
-                    interface: name,
-                })
-                this.metricsService.setGauge("system_network_tx_bytes_total", 0, {
-                    interface: name,
-                })
+                this.metricsService.setGauge(
+                    "system_network_rx_bytes_total",
+                    0,
+                    {
+                        interface: name,
+                    },
+                )
+                this.metricsService.setGauge(
+                    "system_network_tx_bytes_total",
+                    0,
+                    {
+                        interface: name,
+                    },
+                )
             }
         }
     }
@@ -491,7 +487,10 @@ export class MetricsCollector {
             const allPeers = peerManager.getAll()
 
             // Counts
-            this.metricsService.setGauge("peer_online_count", onlinePeers.length)
+            this.metricsService.setGauge(
+                "peer_online_count",
+                onlinePeers.length,
+            )
             this.metricsService.setGauge(
                 "peer_offline_count",
                 offlinePeersCount,
@@ -499,11 +498,11 @@ export class MetricsCollector {
             this.metricsService.setGauge("peers_connected", onlinePeers.length)
             this.metricsService.setGauge("peers_total", allPeers.length)
 
-            // Individual peer info (limit to first 20 to avoid explosion)
-            const peersToReport = allPeers.slice(0, 20)
+            // Individual peer info (limit to avoid cardinality explosion)
+            const peersToReport = allPeers.slice(0, MAX_PEERS_TO_REPORT)
             for (const peer of peersToReport) {
                 const status = onlinePeers.some(
-                    (p) => p.identity === peer.identity,
+                    p => p.identity === peer.identity,
                 )
                     ? "online"
                     : "offline"
@@ -528,8 +527,7 @@ export class MetricsCollector {
      */
     private async collectNodeHttpHealth(): Promise<void> {
         // RPC server uses SERVER_PORT or RPC_PORT, NOT OMNI_PORT (which is WebSocket)
-        const rpcPort =
-            process.env.RPC_PORT || process.env.SERVER_PORT || "53550"
+        const rpcPort = Config.getInstance().server.rpcPort
         const baseUrl = `http://localhost:${rpcPort}`
 
         // Check root endpoint
@@ -550,7 +548,7 @@ export class MetricsCollector {
         const startTime = Date.now()
         try {
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
+            const timeout = setTimeout(() => controller.abort(), HTTP_HEALTH_CHECK_TIMEOUT_MS)
 
             const response = await fetch(`${baseUrl}${path}`, {
                 method: "GET",
@@ -589,7 +587,7 @@ export class MetricsCollector {
         const startTime = Date.now()
         try {
             const controller = new AbortController()
-            const timeout = setTimeout(() => controller.abort(), 5000)
+            const timeout = setTimeout(() => controller.abort(), HTTP_HEALTH_CHECK_TIMEOUT_MS)
 
             const response = await fetch(`${baseUrl}/info`, {
                 method: "GET",
@@ -645,8 +643,8 @@ export class MetricsCollector {
      */
     private async collectDockerHealth(): Promise<void> {
         // Get ports from env to construct exact container names (matching run script)
-        const pgPort = process.env.PG_PORT || "5332"
-        const tlsnPort = process.env.TLSNOTARY_PORT || "7047"
+        const pgPort = Config.getInstance().database.port
+        const tlsnPort = Config.getInstance().tlsnotary.port
 
         // Container names match exactly what the run script creates
         const containers = [
@@ -661,9 +659,13 @@ export class MetricsCollector {
                     `docker ps --filter "name=${name}" --format "{{.Status}}" 2>/dev/null || echo ""`,
                 )
                 const isUp = stdout.trim().toLowerCase().includes("up") ? 1 : 0
-                this.metricsService.setGauge("service_docker_container_up", isUp, {
-                    container: displayName,
-                })
+                this.metricsService.setGauge(
+                    "service_docker_container_up",
+                    isUp,
+                    {
+                        container: displayName,
+                    },
+                )
             } catch {
                 // Docker not available or container not found
                 this.metricsService.setGauge("service_docker_container_up", 0, {
@@ -682,11 +684,12 @@ export class MetricsCollector {
      */
     private async collectPortHealth(): Promise<void> {
         // Read ports from environment variables (matching run script naming)
-        const postgresPort = process.env.PG_PORT || "5332"
-        const tlsnPort = process.env.TLSNOTARY_PORT || "7047"
-        const omniPort = process.env.OMNI_PORT || "53551"
-        const ipfsSwarmPort = process.env.IPFS_SWARM_PORT || "4001"
-        const ipfsApiPort = process.env.IPFS_API_PORT || "5001"
+        const config = Config.getInstance()
+        const postgresPort = config.database.port
+        const tlsnPort = config.tlsnotary.port
+        const omniPort = config.server.omniPort
+        const ipfsSwarmPort = config.ipfs.swarmPort
+        const ipfsApiPort = config.ipfs.apiPort
 
         const ports = [
             { port: postgresPort, service: "postgres" },
@@ -704,12 +707,12 @@ export class MetricsCollector {
                 )
                 const isOpen = stdout.trim().length > 0 ? 1 : 0
                 this.metricsService.setGauge("service_port_open", isOpen, {
-                    port,
+                    port: String(port),
                     service,
                 })
             } catch {
                 this.metricsService.setGauge("service_port_open", 0, {
-                    port,
+                    port: String(port),
                     service,
                 })
             }

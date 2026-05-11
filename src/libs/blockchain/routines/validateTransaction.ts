@@ -34,7 +34,9 @@ export async function confirmTransaction(
     // Getting the current block number
     const referenceBlock = await Chain.getLastBlockNumber()
     // REVIEW This should work just fine
-    log.debug(`[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`)
+    log.debug(
+        `[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`,
+    )
     log.debug(`[TX] confirmTransaction - Examining tx: ${JSON.stringify(tx)}`)
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
@@ -97,12 +99,65 @@ export async function confirmTransaction(
         return validityData
     }
 
-    log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
+    log.debug(
+        "[TX] confirmTransaction - Transaction validity verified, compiling ValidityData",
+    )
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
+
+    // Must run before signValidityData(): any gcr_edit attached here
+    // becomes part of the signed hash, so peers compute the same hash.
+    let dispatchResult: { ok: true } | { ok: false; message: string }
+    try {
+        dispatchResult = await runTypeDispatcher(tx)
+    } catch (e) {
+        dispatchResult = {
+            ok: false,
+            message:
+                "Dispatcher crashed: " +
+                (e instanceof Error ? e.message : String(e)),
+        }
+    }
+    if (dispatchResult.ok === false) {
+        validityData.data.valid = false
+        validityData.data.message =
+            "[Tx Validation] [TYPE DISPATCH] " + dispatchResult.message + "\n"
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     validityData = await signValidityData(validityData)
     return validityData
+}
+
+async function runTypeDispatcher(
+    tx: Transaction,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+    const type = (tx?.content?.type ?? "") as string
+    if (
+        type === "validatorStake" ||
+        type === "validatorUnstake" ||
+        type === "validatorExit"
+    ) {
+        const { handleStakingTx } = await import(
+            "@/libs/network/routines/transactions/handleStakingTx"
+        )
+        const r = await handleStakingTx(tx as unknown as Parameters<
+            typeof handleStakingTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    if (type === "networkUpgrade" || type === "networkUpgradeVote") {
+        const { handleGovernanceTx } = await import(
+            "@/libs/network/routines/transactions/handleGovernanceTx"
+        )
+        const r = await handleGovernanceTx(tx as unknown as Parameters<
+            typeof handleGovernanceTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    return { ok: true }
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
@@ -143,7 +198,8 @@ async function defineGas(
         }
         log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
-        log.error("TX", "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction")
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.error("TX", `[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction: ${errorMsg}`)
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
@@ -159,11 +215,15 @@ async function defineGas(
         }
         return [false, validityData]
     }
-    let fromBalance = 0
+    // REVIEW getGCRNativeBalance returns bigint; keep this binding bigint
+    // to make the comparison against compositeFeeAmount (number) explicit
+    // via BigInt() coercion below.
+    let fromBalance = 0n
     try {
         fromBalance = await GCR.getGCRNativeBalance(from)
     } catch (e) {
-        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " + from)
+        const errorMsg = e instanceof Error ? e.message : String(e)
+        log.error("TX", `[Native Tx Validation] [BALANCE ERROR] No balance found for address ${from}: ${errorMsg}`)
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
@@ -182,10 +242,39 @@ async function defineGas(
     }
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
+    // DEFENSIVE: `calculateCurrentGas` returns Promise<number>; if a future
+    // Config / surge multiplier produces a non-finite or fractional value,
+    // `BigInt(compositeFeeAmount)` would raise a generic RangeError inside
+    // the validation critical path. Validate explicitly so the error
+    // message names the offender and the validator-side caller can decide
+    // what to do, rather than relying on the bare-bones BigInt error.
+    // Currently `networkFee + rpcFee + burnFee = 1+1+1 = 3` so this guard
+    // is dormant in production, but the bare BigInt cast was load-bearing
+    // safety that needed naming.
+    // myc#84, GH#3213220459
+    if (
+        !Number.isFinite(compositeFeeAmount) ||
+        !Number.isInteger(compositeFeeAmount) ||
+        compositeFeeAmount < 0
+    ) {
+        throw new Error(
+            "[Native Tx Validation] calculateCurrentGas returned a value " +
+                "that cannot be represented as a non-negative bigint: " +
+                `${compositeFeeAmount} (typeof=${typeof compositeFeeAmount}). ` +
+                "This indicates a Config / surge-multiplier producing a " +
+                "fractional, NaN, Infinity, or negative fee — fees must be " +
+                "non-negative integers in the active denomination.",
+        )
+    }
     // FIXME Overriding for testing
-    if (fromBalance < compositeFeeAmount && getSharedState.PROD) {
-        log.error("TX", "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
-            compositeFeeAmount + "; available: " + fromBalance)
+    if (fromBalance < BigInt(compositeFeeAmount) && getSharedState.PROD) {
+        log.error(
+            "TX",
+            "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
+                compositeFeeAmount +
+                "; available: " +
+                fromBalance,
+        )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +
             compositeFeeAmount +
@@ -259,13 +348,5 @@ export async function broadcastVerifiedNativeTransaction(
     //console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
     //GCR.getInstance().operations.push(validityData.data.gas_operation)
 
-    // Finally, we add all the derived operations to the GCR
-    // NOTE Deprecated in favor of GCREdit
-    /*for (let i = 0; i < execution[2].length; i++) {
-        console.log("[TX RECEIVED] Operation derived")
-        //console.log(execution[2][i])
-        GCR.getInstance().operations.push(execution[2][i])
-        console.log("[TX RECEIVED] Operation added to the GCR\n")
-    }*/
     return execution
 }

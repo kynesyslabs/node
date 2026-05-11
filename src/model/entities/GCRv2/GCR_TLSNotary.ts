@@ -1,10 +1,4 @@
-import {
-    Column,
-    CreateDateColumn,
-    Entity,
-    Index,
-    PrimaryColumn,
-} from "typeorm"
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from "typeorm"
 
 // REVIEW: TLSNotary proof storage entity for on-chain attestation data
 /**

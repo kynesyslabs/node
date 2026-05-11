@@ -1,281 +1,189 @@
-# Specific branches ignores
-*APTOS*.md
-*_TO_PORT.md
-*_SCHEMA.md
-*_PHASES.md
-target/
-bridges_docs/
-aptos_examples_ts/
+# ===========================================
+# Demos Node - .gitignore
+# ===========================================
 
-#Demos files
-bridges_docs/
-/.demos_id*
-demos_peers
-demos_peerlist*
-chain.db
+# ---- Runtime & Data ----
+node_modules/
+.bun/
+dist/
+output/
+*.db
+*.sqlite3
+data/
+docker_data/
+postgres_*/
+neo4j_data/
+ipfs*/
+logs/
+logs_*/
+*.log
+nohup.out
+last_crash_memory_usage.txt
+blocked_ips.json
+.RUN
+
+# ---- Environment & Secrets ----
+.env
+.env.local
+.env.*.local
+mnemonic.txt
+certs/
+*.pem
 keyfile.json
 keyfile_password.txt
-bin
-data/evmChains/
-data/evmChains
-data/evmChains/*.json
-data/chain.db
-docker/node_base
-last_crash_memory_usage.txt
-node[0-9]*
-.env
 twitter_cookies.json
-.RUN
-.vscode
-
-#OSX files
-.DS_Store
-
-
-#Package manager files
-node_modules
-yarn-error.log
-yarn.lock
-node/yarn.lock
-package-lock.json
-data/chain.db
-data/chain.db
-data/twitter/*
-
-# User-specific files
-TODO.md
-src/features/experimental/fhe/fhe_test.ts
-yarn.lock
-publickey
-publickey
-documentation/schemas/.$*
-appmap.yml
-docker/attach.sh
-docker/pre_public_dev.sh
-docker/pre_public_local.sh
-docker/rebuild_rerun.sh
-docker/remove.sh
-docker/reset_rerun.sh
-docker/run_cmd.sh
-docker/stop.sh
-docker/node_1/data/chain.db
-docker/node_2/data/chain.db
-.trunk/tools
-.vscode/settings.json
-documentation/schemas/.*
-pnpm-lock.yaml
+.tlsnotary-key
+.demos_id*
+wallet.demos
+publickey_*
 public.key
 private.key
+demos_peerlist.json
+src/ssl/
 
-# DB Files
-postgres/data
-postgres/data_*
-postgres_*
-
-# Logs
-logs_*/
-logs/
-
-# Test files
-start_two_nodes.sh
-node_*.sh
-publickey_*
-
-# Doc files
-documentation/*.html
-documentation/*.zip
-demos_peers_remote
-documentation/schemas/org_circles.drawio.png
-documentation/export
-
-
-# Bun files
-.bun
+# ---- Build & Cache ----
 bun.lock
-/.env.orig
-/src/libs/blockchain/*_BACKUP_*.ts
-/src/libs/blockchain/block_REMOTE_224733.ts
-GPATH
-GRTAGS
-GTAGS
-.vscode/settings.json
-src/GPATH
-src/GRTAGS
-src/GTAGS
-.vscode/settings.json
+bun.lockb
+package-lock.json
+*.tsbuildinfo
+.gitbook-cache.json
+architecture/
+
+# ---- OS & Editor ----
+.DS_Store
+.vscode/
+.trunk/
 .aider*
 
-# Output files
-output/*
-.env
-bun.lockb
-
-# L2PS files
-CLAUDE.md
-data/l2ps/example/config.json
-data/l2ps/example/iv.key
-data/l2ps/example/config.json
-data/l2ps/example/iv.key
-data/l2ps/*
-
-# Claude specific files
-CLAUDE.md
-GEMINI.md
-
-architecture.gitbook-cache.json
-architecture
-architecture
-.DS_Store
-.serena-backup
-PR_COMMENTS
-bridges_docs
-claudedocs
-dist
-docs
-local_tests
-omniprotocol_fixtures_scripts
-blocked_ips.json
-SMART_CONTRACTS_*.md 
-.gitbook*
-# Aptos stuff
-aptoswares/build
-build/aptoswares
-src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
-APTOS_INTEGRATION_PLAN.md
-aptos_examples_ts
-
-.serena-backup
-.serena/cache/typescript
-.serena-backup
-PR_COMMENTS
-dist
-src/features/bridges/EVMSmartContract/artifacts
-src/features/bridges/EVMSmartContract/cache
-src/features/bridges/EVMSmartContract/lib
-src/features/bridges/EVMSmartContract/out
-src/features/bridges/EVMSmartContract/test
-src/features/bridges/EVMSmartContract/GASLESS_BRIDGE_FLOW_DIAGRAM.md
-src/features/bridges/EVMSmartContract/USAGE.md
-src/features/bridges/SolanaTankProgram/solana_tank/target
-src/features/bridges/SolanaTankProgram/SOLANA_TANK_PHASES.md
-src/features/bridges/SolanaTankProgram/SOLANA_TANK_SCHEMA.md
-src/features/bridges/SolanaTankProgram/SOLANA_TO_PORT.md
-src/features/bridges/LiquidityTank_UserGuide.md
-src/features/contracts/CONTRACT_PHASES.md
-src/features/multichain/chainwares/aptoswares/TECHNICAL_PROPOSAL_APTOS_INTEGRATION.md
-temp
-.gitbook-cache.json
-APTOS_INTEGRATION_PLAN.md
-CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
-D402_HTTP_PHASES.md
-STORAGE_PROGRAMS_PHASES.md
-STORAGE_PROGRAMS_SPEC.md
-CLAUDE.sync-conflict-20250901-171031-7JPPSQB.md
-.serena/cache/typescript/document_symbols_cache_v23-06-25.pkl
-docs/src/
-
-src/features/bridges/
-docs/src/.deps/npm/@openzeppelin/contracts
-docs/src/lib
-docs/src
-src/features/bridges/EVMSmartContract/docs
-src/features/bridges/LiquidityTank_UserGuide.md
-local_tests
-claudedocs
-docs/storage_features
-temp
-STORAGE_PROGRAMS_SPEC.md
-omniprotocol_fixtures_scripts
+# ---- Local artifacts ----
+ClaudeDocs/
 captraf.sh
-http-capture-1762006580.pcap
-http-capture-1762008909.pcap
-http-traffic.json
-PR_PRE_EXISTING_ISSUES.md
-PR_REVIEW.md
-REVIEWER_QUESTIONS_ANSWERED.md
-PR_REVIEW_RAW.md
-PR_REVIEW_FINAL.md
-PR_REVIEW_FINAL.md
-REVIEWER_QUESTIONS_ANSWERED.md
+history/tmp/
+
+# ---- AI Tooling (local-only) ----
+CLAUDE.md
 AGENTS.md
+TEAM.md
+mcp.json
+.serena/
+.serena-backup/
+.planning/
+.taskmaster/
+.beads/
+.beads_bak/
+.mycelium/mycelium.db
+.mycelium/.linear/
+
+# ---- Planning docs inside src/ (keep only README.md) ----
+src/**/*.md
+!src/**/README.md
+
+# ---- Test Artifacts ----
+testing/devnet/identities/
+testing/devnet/.env
+testing/devnet/postgres-data/
+testing/runs/
+local_tests/
+
+# ---- Local devnet identities (private keys / mnemonics) ----
+.devnet/
+.manual-test-mnemonic
+
+# ---- Local upgradable-network manual test artifacts ----
+scripts/check_fee_test.ts
+e2e-runs/
+
+# ---- Documentation Artifacts ----
+documentation/internal-docs/
+documentation/*.html
+documentation/*.zip
+documentation/export/
+documentation/schemas/.$*
+documentation/schemas/.*
+documentation/*.pdf
+documentation/*.odt
+
+# ---- Generated Planning Docs ----
+*_PHASES.md
+*_SCHEMA.md
+*_TO_PORT.md
+APTOS_INTEGRATION_PLAN.md
+SMART_CONTRACTS_*.md
+STORAGE_PROGRAMS_SPEC.md
+PR_REVIEW*.md
+PR_COMMENTS/
+PR_DUMP.md
+PR_PRE_EXISTING_ISSUES.md
+REVIEWER_QUESTIONS_ANSWERED.md
 BUGS_AND_SECURITY_REPORT.md
-CEREMONY_COORDINATION.md
-PR_REVIEW_COMPREHENSIVE.md
-PR_REVIEW_RAW.md
-
-# ZK Ceremony files (SECURITY: must not be committed)
-zk_ceremony/
-ZK_CEREMONY_GIT_WORKFLOW.md
-ZK_CEREMONY_GUIDE.md
-CEREMONY_COORDINATION.md
-attestation_20251204_125424.txt
-prop_agent
-
 TYPE_CHECK_REPORT.md
-qodo-fetch.py
-docs/IPFS_TOKENOMICS_SPEC.md
-ZK_CEREMONY_GIT_WORKFLOW.md
-ZK_CEREMONY_GUIDE.md
-attestation_20251204_125424.txt
-prop_agent
+D402_HTTP_PHASES.md
 
-# ===========================================
-# ZK GENERATED ARTIFACTS (Both ZK Identity & L2PS)
-# ===========================================
-# These files are generated during zk:setup and should NOT be committed
-# Only verification_key*.json files should be committed (they are small and required)
-
-# ZK Identity System (src/features/zk/)
+# ---- ZK Generated Artifacts ----
+# Only verification_key*.json should be committed
 src/features/zk/keys/*.zkey
 src/features/zk/keys/*.ptau
 src/features/zk/circuits/*.r1cs
 src/features/zk/circuits/*.sym
 src/features/zk/circuits/*.wasm
 src/features/zk/circuits/*_js/
-# Allow verification keys (must be committed)
 !src/features/zk/keys/verification_key.json
 !src/features/zk/keys/verification_key_merkle.json
 
-# L2PS ZK System (src/libs/l2ps/zk/)
+# L2PS ZK
 src/libs/l2ps/zk/keys/**/*.zkey
 src/libs/l2ps/zk/keys/**/*.r1cs
 src/libs/l2ps/zk/keys/**/*.sym
 src/libs/l2ps/zk/keys/**/*.wasm
 src/libs/l2ps/zk/keys/**/*_js/
 src/libs/l2ps/zk/ptau/
-# Allow verification keys (must be committed)
 !src/libs/l2ps/zk/keys/**/verification_key.json
 
-# Security & Secrets
-mnemonic.txt
-certs/
-*.pem
+# ---- ZK Ceremony (security-sensitive) ----
+zk_ceremony/
+ZK_CEREMONY_*.md
+CEREMONY_COORDINATION.md
+attestation_*.txt
 
-# Ops junk
-src/libs/network/routines/transactions/*.html
-# Devnet runtime files (generated, not tracked)
-devnet/identities/
-devnet/.env
-devnet/postgres-data/
-ipfs_53550/data_53550/ipfs
-.tlsnotary-key
-src/features/tlsnotary/SDK_INTEGRATION.md
-src/features/tlsnotary/SDK_INTEGRATION.md
-ipfs/data_53550/ipfs
-nohup.out
-*.db
-/.beads/.jsonl.lock
-/.beads/daemon-2026-02-15T16-27-46.352.log.gz
-/.beads/daemon-2026-02-16T14-05-14.370.log.gz
-/.beads/daemon-2026-02-16T17-30-50.885.log.gz
-/.beads/daemon-2026-02-17T18-47-31.076.log.gz
-/.beads/daemon-2026-02-17T21-22-27.436.log.gz
-/.beads/daemon-2026-02-18T22-19-21.387.log.gz
-/.beads/daemon-2026-02-18T22-35-13.404.log.gz
-/.beads/last-touched
-/.taskmaster
-/internal-docs
-/.beads_bak
-/better_testing/runs
-/documentation/internal-docs
-/PR_DUMP.md
+# ---- Bridge Build Artifacts ----
+src/features/bridges/EVMSmartContract/artifacts/
+src/features/bridges/EVMSmartContract/cache/
+src/features/bridges/EVMSmartContract/lib/
+src/features/bridges/EVMSmartContract/out/
+src/features/bridges/SolanaTankProgram/solana_tank/target/
+
+# ---- Project Index & Planning (root) ----
+PROJECT_INDEX.*
+MISSING_SP_ENDPOINTS.md
+env.example
+REPO_ANALYSIS/
+dtr_implementation/
+
+# ---- Solidity (belongs in separate contracts repo) ----
+*.sol
+
+# ---- Misc ----
+bridges_docs/
+aptos_examples_ts/
+target/
+bin/
+omniprotocol_fixtures_scripts/
+prop_agent/
+temp/
+*.pcap
+qodo-fetch.py
+GPATH
+GRTAGS
+GTAGS
+src/GPATH
+src/GRTAGS
+src/GTAGS
+/docs/diagrams
+/.serena
+node*.sh
+yarn.lock
+/TEAM.md
+/documentation/tokens/TEAM.md
+/documentation/tokens/AUDIT.md
+ISSUES.md
+PR_RAW.md

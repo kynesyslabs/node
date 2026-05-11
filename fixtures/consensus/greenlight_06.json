@@ -1,23 +1,19 @@
 {
-  "request": {
-    "method": "consensus_routine",
-    "params": [
-      {
-        "method": "greenlight",
+    "request": {
+        "method": "consensus_routine",
         "params": [
-          18,
-          1762006280,
-          1
+            {
+                "method": "greenlight",
+                "params": [18, 1762006280, 1]
+            }
         ]
-      }
-    ]
-  },
-  "response": {
-    "result": 200,
-    "response": "Greenlight for phase: 1 received with block timestamp: 1762006280",
-    "require_reply": false,
-    "extra": null
-  },
-  "frame_request": "89",
-  "frame_response": "93"
+    },
+    "response": {
+        "result": 200,
+        "response": "Greenlight for phase: 1 received with block timestamp: 1762006280",
+        "require_reply": false,
+        "extra": null
+    },
+    "frame_request": "89",
+    "frame_response": "93"
 }

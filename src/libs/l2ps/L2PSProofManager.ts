@@ -34,7 +34,7 @@ import { getErrorMessage } from "@/utilities/errorMessage"
  */
 function deterministicStringify(obj: any): string {
     return JSON.stringify(obj, (key, value) => {
-        if (value && typeof value === 'object' && !Array.isArray(value)) {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
             return Object.keys(value).sort((a, b) => a.localeCompare(b)).reduce((sorted: any, k) => {
                 sorted[k] = value[k]
                 return sorted
@@ -114,15 +114,15 @@ export default class L2PSProofManager {
         l1BatchHash: string,
         gcrEdits: GCREdit[],
         affectedAccountsCount: number,
-        transactionCount: number = 1,
-        transactionHashes: string[] = []
+        transactionCount = 1,
+        transactionHashes: string[] = [],
     ): Promise<ProofCreationResult> {
         try {
             const repo = await this.getRepo()
 
             // Generate deterministic transactions hash
             const transactionsHash = Hashing.sha256(
-                deterministicStringify({ l2psUid, l1BatchHash, gcrEdits })
+                deterministicStringify({ l2psUid, l1BatchHash, gcrEdits }),
             )
 
             // Create hash-based proof for state transition verification
@@ -131,13 +131,13 @@ export default class L2PSProofManager {
                 l1BatchHash,
                 gcrEdits,
                 affectedAccountsCount,
-                transactionsHash
+                transactionsHash,
             }))
 
             const proof: L2PSProof["proof"] = {
                 type: "hash",
                 data: proofData,
-                public_inputs: [l2psUid, l1BatchHash, transactionsHash]
+                public_inputs: [l2psUid, l1BatchHash, transactionsHash],
             }
 
             const proofEntity = repo.create({
@@ -149,7 +149,7 @@ export default class L2PSProofManager {
                 status: "pending" as L2PSProofStatus,
                 transaction_count: transactionCount,
                 transactions_hash: transactionsHash,
-                transaction_hashes: transactionHashes
+                transaction_hashes: transactionHashes,
             })
 
             const saved = await repo.save(proofEntity)
@@ -160,14 +160,14 @@ export default class L2PSProofManager {
                 success: true,
                 message: `Proof created with ${gcrEdits.length} GCR edits`,
                 proof_id: saved.id,
-                transactions_hash: transactionsHash
+                transactions_hash: transactionsHash,
             }
         } catch (error: unknown) {
             const message = getErrorMessage(error)
             log.error(`[L2PS ProofManager] Failed to create proof: ${message}`)
             return {
                 success: false,
-                message: `Proof creation failed: ${message}`
+                message: `Proof creation failed: ${message}`,
             }
         }
     }
@@ -189,7 +189,7 @@ export default class L2PSProofManager {
 
         return repo.find({
             where,
-            order: { created_at: "ASC" }
+            order: { created_at: "ASC" },
         })
     }
 
@@ -206,9 +206,9 @@ export default class L2PSProofManager {
         // For now, returns all pending proofs in creation order (blockNumber reserved for future use)
         return repo.find({
             where: {
-                status: "pending" as L2PSProofStatus
+                status: "pending" as L2PSProofStatus,
             },
-            order: { created_at: "ASC" }
+            order: { created_at: "ASC" },
         })
     }
 
@@ -228,7 +228,7 @@ export default class L2PSProofManager {
 
             // Validate each GCR edit has required fields
             for (const edit of proof.gcr_edits) {
-                if (!edit.type || (edit.type === 'balance' && !('account' in edit))) {
+                if (!edit.type || (edit.type === "balance" && !("account" in edit))) {
                     log.warning(`[L2PS ProofManager] Proof ${proof.id} has invalid GCR edit`)
                     return false
                 }
@@ -240,7 +240,7 @@ export default class L2PSProofManager {
                 l1BatchHash: proof.l1_batch_hash,
                 gcrEdits: proof.gcr_edits,
                 affectedAccountsCount: proof.affected_accounts_count,
-                transactionsHash: proof.transactions_hash
+                transactionsHash: proof.transactions_hash,
             }))
 
             if (proof.proof.data !== expectedHash) {
@@ -269,7 +269,7 @@ export default class L2PSProofManager {
         await repo.update(proofId, {
             status: "applied" as L2PSProofStatus,
             applied_block_number: blockNumber,
-            processed_at: new Date()
+            processed_at: new Date(),
         })
 
         log.info(`[L2PS ProofManager] Marked proof ${proofId} as applied in block ${blockNumber}`)
@@ -287,7 +287,7 @@ export default class L2PSProofManager {
         await repo.update(proofId, {
             status: "rejected" as L2PSProofStatus,
             error_message: errorMessage,
-            processed_at: new Date()
+            processed_at: new Date(),
         })
 
         log.warning(`[L2PS ProofManager] Marked proof ${proofId} as rejected: ${errorMessage}`)
@@ -315,7 +315,7 @@ export default class L2PSProofManager {
     static async getProofs(
         l2psUid?: string,
         status?: L2PSProofStatus,
-        limit: number = 100
+        limit = 100,
     ): Promise<L2PSProof[]> {
         const repo = await this.getRepo()
 
@@ -330,7 +330,7 @@ export default class L2PSProofManager {
         return repo.find({
             where,
             order: { created_at: "DESC" },
-            take: limit
+            take: limit,
         })
     }
 
@@ -354,7 +354,7 @@ export default class L2PSProofManager {
             queryBuilder.clone().andWhere("proof.status = :status", { status: "pending" }).getCount(),
             queryBuilder.clone().andWhere("proof.status = :status", { status: "applied" }).getCount(),
             queryBuilder.clone().andWhere("proof.status = :status", { status: "rejected" }).getCount(),
-            queryBuilder.clone().getCount()
+            queryBuilder.clone().getCount(),
         ])
 
         return { pending, applied, rejected, total }

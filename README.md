@@ -15,6 +15,7 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 ## System Requirements
 
 ### Minimum Requirements
+
 - 4GB RAM
 - 4 CPU cores (2GHz or higher)
 - Modern SSD storage
@@ -22,6 +23,7 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 - Ubuntu 22.04 LTS or compatible Linux distribution
 
 ### Recommended Specifications
+
 - 8GB RAM or higher
 - 6 CPU cores (2GHz or higher)
 - High-performance SSD storage
@@ -29,23 +31,64 @@ Demos is defined by the Yellowpaper publicly available in [its own repository](h
 
 ## Installation
 
-For detailed installation instructions, please refer to [INSTALL.md](INSTALL.md). The installation guide covers:
+Docker Compose is now the recommended way to run a Demos node. For full installation instructions — both the Docker path and the bare-metal `./run` path — see [INSTALL.md](INSTALL.md). The guide covers:
 
-- System prerequisites and dependencies
-- Docker and container setup
+- Docker Compose quickstart (recommended)
+- Bare-metal install with Bun + Postgres (alternative)
 - Node configuration and key generation
 - Network peer configuration
 - Troubleshooting common issues
 
-## Quick Start
+## Quick Start (Docker)
 
-1. Install prerequisites (Docker, Bun runtime)
-2. Clone this repository
-3. Install dependencies with `bun install`
-4. Configure your node settings
-5. Run `./run` to start the node
+```bash
+git clone https://github.com/kynesyslabs/node.git && cd node
+cp .env.example .env  # defaults are fine; edit only if you want to override
+docker compose up
+```
 
-For complete step-by-step instructions, see [INSTALL.md](INSTALL.md).
+Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (default `admin` / `demos`).
+
+See [INSTALL.md](INSTALL.md) for profiles, env vars, volumes, upgrades, and troubleshooting.
+
+## Publishing the Image
+
+The compose file uses `${IMAGE_NAME}:${IMAGE_TAG}` (default `demos-node:local`) for the node service, so the same compose can either build locally or pull from a registry by switching `.env`.
+
+**Build and tag for a registry:**
+
+```bash
+# Pick your registry coordinates
+export IMAGE_NAME=ghcr.io/kynesyslabs/node     # or docker.io/<user>/demos-node, etc.
+export IMAGE_TAG=v0.9.8                         # or git sha, or 'latest'
+
+docker build -t "$IMAGE_NAME:$IMAGE_TAG" .
+docker push "$IMAGE_NAME:$IMAGE_TAG"
+```
+
+**Multi-arch (recommended for public registries):**
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t "$IMAGE_NAME:$IMAGE_TAG" \
+  --push .
+```
+
+**Pull on a target host** — write `IMAGE_NAME` and `IMAGE_TAG` into that host's `.env`, then:
+
+```bash
+docker compose pull node
+docker compose up -d
+```
+
+For private registries, run `docker login <registry>` first.
+
+## Advanced / Bare-Metal Run
+
+If you'd rather run the node directly on the host (no Docker for the node itself), the legacy `./run` shell script is still supported. It installs Bun, runs Postgres in a sidecar container, and starts the node natively — useful for development, debugging, and TUI-based operation.
+
+See [INSTALL.md → Track 2: Bare metal with `./run`](INSTALL.md) for the full walkthrough.
 
 ## Terminal User Interface (TUI)
 
@@ -57,16 +100,16 @@ By default, the node runs with an interactive TUI that provides:
 
 ### TUI Controls
 
-| Key | Action |
-|-----|--------|
-| `0-9`, `-`, `=` | Switch to tab |
-| `↑/↓` or `j/k` | Scroll logs |
-| `PgUp/PgDn` | Page scroll |
-| `Home/End` | Jump to top/bottom |
-| `A` | Toggle auto-scroll |
-| `C` | Clear current tab logs |
-| `H` or `?` | Show help |
-| `Q` | Quit node |
+| Key             | Action                 |
+| --------------- | ---------------------- |
+| `0-9`, `-`, `=` | Switch to tab          |
+| `↑/↓` or `j/k`  | Scroll logs            |
+| `PgUp/PgDn`     | Page scroll            |
+| `Home/End`      | Jump to top/bottom     |
+| `A`             | Toggle auto-scroll     |
+| `C`             | Clear current tab logs |
+| `H` or `?`      | Show help              |
+| `Q`             | Quit node              |
 
 ### Legacy Mode (for developers)
 
@@ -79,61 +122,22 @@ For debugging and development, you can disable the TUI and use traditional scrol
 
 This provides linear console output that can be easily piped, searched with grep, or redirected to files.
 
-## Monitoring with Prometheus & Grafana
+## Monitoring
 
-The node includes a full monitoring stack with Prometheus metrics and pre-built Grafana dashboards.
+Prometheus + Grafana are part of the unified compose (default profile). Once `docker compose up` is healthy, Grafana is at http://localhost:3000 (`admin` / `demos`) with pre-provisioned dashboards. Configuration knobs (`GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_RETENTION`, etc.) live in `.env` — see [INSTALL.md → Track 1](INSTALL.md) for the full list.
 
-### Enabling Metrics
+Available node-side metrics (scraped at `node:9090/metrics`):
 
-Metrics are enabled by default. To configure, add to your `.env` file:
-
-```env
-METRICS_ENABLED=true
-METRICS_PORT=9090
-```
-
-The node will expose metrics at `http://localhost:9090/metrics`.
-
-### Starting the Monitoring Stack
-
-```bash
-cd monitoring
-docker compose up -d
-```
-
-**Access Grafana**: http://localhost:3000
-**Default credentials**: admin / demos
-
-### Available Metrics
-
-| Metric | Description |
-|--------|-------------|
-| `demos_block_height` | Current block height |
-| `demos_seconds_since_last_block` | Time since last block |
-| `demos_peer_online_count` | Connected peers |
-| `demos_system_cpu_usage_percent` | CPU utilization |
-| `demos_system_memory_usage_percent` | Memory utilization |
+| Metric                              | Description             |
+| ----------------------------------- | ----------------------- |
+| `demos_block_height`                | Current block height    |
+| `demos_seconds_since_last_block`    | Time since last block   |
+| `demos_peer_online_count`           | Connected peers         |
+| `demos_system_cpu_usage_percent`    | CPU utilization         |
+| `demos_system_memory_usage_percent` | Memory utilization      |
 | `demos_service_docker_container_up` | Container health status |
 
-### Configuration
-
-The node and monitoring stack are configurable via environment variables:
-
-**Node metrics (in `.env`):**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `METRICS_ENABLED` | `true` | Enable/disable metrics endpoint |
-| `METRICS_PORT` | `9090` | Node metrics endpoint port |
-
-**Monitoring stack (in `monitoring/.env`):**
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PROMETHEUS_PORT` | `9091` | Prometheus server port |
-| `GRAFANA_PORT` | `3000` | Grafana dashboard port |
-| `GRAFANA_ADMIN_PASSWORD` | `demos` | Grafana admin password |
-| `PROMETHEUS_RETENTION` | `15d` | Data retention period |
-
-For detailed monitoring documentation, see [monitoring/README.md](monitoring/README.md).
+For dashboard internals and customization, see [monitoring/README.md](monitoring/README.md).
 
 ## Technology Stack
 
@@ -153,33 +157,36 @@ After installation, configure your node by editing:
 
 ## Network Ports
 
-The following ports must be open for the node to function properly.
+For the docker-compose path see [INSTALL.md → Network Exposure](INSTALL.md#network-exposure) — that section has the canonical inbound/outbound rules and a `ufw` example for VPS deployments.
 
-> **Note:** These are the default ports. If you have modified any port settings in your `.env` file or run script flags, make sure to open those custom ports instead.
+For the bare-metal `./run` path:
 
-### Required Ports
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 53550 | TCP | Node RPC API |
-| 53551 | TCP/UDP | OmniProtocol P2P communication |
-| 7047 | TCP | TLSNotary server |
-| 55000-60000 | TCP/UDP | WebSocket proxy for TLSNotary |
+### Required Ports (bare metal)
 
-### Optional Ports
-| Port | Protocol | Description |
-|------|----------|-------------|
-| 9090 | TCP | Metrics endpoint (monitoring) |
-| 9091 | TCP | Prometheus server (monitoring stack) |
-| 3000 | TCP | Grafana dashboard (monitoring stack) |
-| 5332 | TCP | PostgreSQL (local only, do not expose externally) |
+| Port        | Protocol | Description                    |
+| ----------- | -------- | ------------------------------ |
+| 53550       | TCP      | Node RPC API                   |
+| 53551       | TCP      | OmniProtocol P2P communication |
+| 7047        | TCP      | TLSNotary server (FFI/docker)  |
+| 55000-60000 | TCP      | WebSocket proxy for TLSNotary FFI mode |
+
+### Optional Ports (bare metal)
+
+| Port | Protocol | Description                                       |
+| ---- | -------- | ------------------------------------------------- |
+| 9090 | TCP      | Metrics endpoint (monitoring)                     |
+| 9091 | TCP      | Prometheus server (monitoring stack)              |
+| 3000 | TCP      | Grafana dashboard (monitoring stack)              |
+| 5332 | TCP      | PostgreSQL (local only, do not expose externally) |
 
 **Firewall example (ufw):**
+
 ```bash
 # Required
 sudo ufw allow 53550/tcp        # Node RPC
-sudo ufw allow 53551            # OmniProtocol (TCP+UDP)
+sudo ufw allow 53551/tcp        # OmniProtocol
 sudo ufw allow 7047/tcp         # TLSNotary
-sudo ufw allow 55000:60000      # TLSNotary WS proxy (TCP+UDP)
+sudo ufw allow 55000:60000/tcp  # TLSNotary WS proxy (FFI mode)
 ```
 
 ## Security
@@ -225,17 +232,80 @@ docker-compose down          # Stop the network
 ### Node Ports
 
 | Node   | RPC Port | Omni Port |
-|--------|----------|-----------|
+| ------ | -------- | --------- |
 | node-1 | 53551    | 53561     |
 | node-2 | 53552    | 53562     |
 | node-3 | 53553    | 53563     |
 | node-4 | 53554    | 53564     |
 
-For detailed devnet documentation, see [devnet/README.md](devnet/README.md).
+For detailed devnet documentation, see [testing/devnet/README.md](testing/devnet/README.md).
 
-## Development
+## Developer's Guide
 
 This is the official implementation maintained by KyneSys Labs. The codebase follows TypeScript best practices with comprehensive error handling and type safety.
+
+### Tooling Overview
+
+| Tool | Purpose | Command |
+|------|---------|---------|
+| **Bun** | Runtime & package manager | `bun install`, `bun run <script>` |
+| **Trunk** | Linting & formatting (owns ESLint + Prettier) | `bun check`, `bun fmt` |
+| **TypeScript** | Type checking | `bun type-check` |
+| **Jest** | Testing | `bun test:chains` |
+
+### Quick Commands
+
+```bash
+# Install dependencies
+bun install
+
+# Linting & formatting (Trunk-managed)
+bun check                    # Run all linters
+bun fmt                      # Auto-format code
+bun lint                     # ESLint only
+bun lint:fix                 # ESLint with auto-fix
+
+# Type checking
+bun type-check               # Fast check via Bun
+bun type-check-ts            # Full tsc --noEmit
+
+# Development
+bun start:bun                # Start node with Bun runtime
+bun dev                      # Start with hot reload
+
+# Dependency management
+bun upgrade_sdk              # Update @kynesyslabs/demosdk
+bun upgrade_deps             # Interactive dependency update
+```
+
+### Code Style
+
+- **Trunk owns linting**: ESLint and Prettier are managed by Trunk, not npm packages
+- **Run `bun check` before committing**: Catches style issues early
+- **Double quotes, no semicolons**: Per `.prettierrc` and `.eslintrc.cjs`
+- **camelCase** for variables/functions, **PascalCase** for types/classes
+
+### Project Structure Tips
+
+```
+src/
+├── features/          # Feature modules (MCP, metrics, multichain, etc.)
+├── libs/              # Core libraries (blockchain, consensus, crypto, network)
+├── model/             # TypeORM entities and database
+├── utilities/         # CLI tools, TUI, helpers
+└── index.ts           # Entry point
+```
+
+### Common Patterns
+
+- **Logging**: Use `CategorizedLogger` instead of `console.log` in `src/` (ESLint warns)
+- **Imports**: Prefer `@/` path aliases over deep relative imports
+- **SDK**: Import from `@kynesyslabs/demosdk`, check `demosdk-refs` MCP for docs
+- **Database**: TypeORM with `synchronize: true` is intentional for dev
+
+### Issue Tracking
+
+This project uses [Mycelium](https://github.com/tcsenpai/mycelium) (`myc`) for task and epic management.
 
 ## Support
 
@@ -243,19 +313,20 @@ For technical support and community discussions, visit [demos.sh](https://demos.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) License - see the [LICENSE](LICENSE.md) file for details.
 
 ## Contributing
 
 We welcome contributions to the Demos Network node implementation! Before contributing, please read our comprehensive [Contributing Guide](CONTRIBUTING.md) which covers:
 
 - Code style and naming conventions
-- Development workflow and best practices  
+- Development workflow and best practices
 - AI-assisted development guidelines
 - Pull request process and review requirements
 - Testing and quality standards
 
 For quick reference, also see:
+
 - [Coding Guidelines](GUIDELINES/CODING.md) - Detailed code style guide
 - [AI Development Guidelines](GUIDELINES/VIBES.md) - Essential for AI-assisted development
 

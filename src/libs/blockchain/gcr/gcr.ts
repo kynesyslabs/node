@@ -70,7 +70,8 @@ import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
-import Mempool from "../mempool_v2"
+import Mempool from "../mempool"
+import { serializeTransactionContent } from "@/forks"
 
 // ? This class should be deprecated: ensure that and remove it
 export class OperationsRegistry {
@@ -214,7 +215,11 @@ export default class GCR {
 
     // ANCHOR Balances retrieval
 
-    static async getGCRNativeBalance(address: string) {
+    // REVIEW Returns bigint to keep the native-balance arithmetic chain
+    // bigint-consistent (subOperations.transferNative, addNative, removeNative
+    // all expect BigInt-safe values). Legacy JSONB storage still holds the
+    // value as a JS number, so we coerce on read.
+    static async getGCRNativeBalance(address: string): Promise<bigint> {
         const db = await Datasource.getInstance()
         const gcrRepository = db
             .getDataSource()
@@ -225,10 +230,11 @@ export default class GCR {
                 select: ["details"],
                 where: { publicKey: address },
             })
-            return response ? response.details.content.balance : 0
+            const stored = response ? response.details.content.balance : 0
+            return BigInt(stored ?? 0)
         } catch (e) {
-            log.debug("[GET BALANCE] No balance for: " + address)
-            return 0
+            log.debug(`[GET BALANCE] No balance for: ${address}`)
+            return 0n
         }
     }
 
@@ -247,7 +253,7 @@ export default class GCR {
                 ? gcrExtendedData.tokens[tokenAddress]
                 : 0
         } catch (e) {
-            log.error("[GCR] Error fetching GCR token balance: " + e)
+            log.error(`[GCR] Error fetching GCR token balance: ${e}`)
         }
     }
 
@@ -266,7 +272,7 @@ export default class GCR {
                 ? gcrExtendedData.nfts[nftAddress]
                 : 0
         } catch (e) {
-            log.error("[GCR] Error fetching GCR NFT balance: " + e)
+            log.error(`[GCR] Error fetching GCR NFT balance: ${e}`)
         }
     }
 
@@ -294,7 +300,7 @@ export default class GCR {
             return gcrExtendedData && gcrExtendedData.other
         } catch (e) {
             // Handle the error appropriately
-            log.error("Error fetching GCR chain properties: " + e)
+            log.error(`Error fetching GCR chain properties: ${e}`)
         }
     }
 
@@ -317,15 +323,22 @@ export default class GCR {
                 order: { first_seen: "DESC" },
             })
 
-            // Hashing
-            let total = 0
-            stakes.forEach(stake => {
-                total += stake.stake // Replace 'stake.stake' with the correct field name if different
-            })
+            let total = 0n
+            for (const v of stakes) {
+                const raw = v.staked_amount ?? "0"
+                try {
+                    total += BigInt(raw)
+                } catch {
+                    log.warning(
+                        "GCR",
+                        `getGCRHashedStakes: dropping malformed staked_amount=${raw} on validator ${v.address}`,
+                    )
+                }
+            }
 
-            return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
+            return Hashing.sha256(total.toString())
         } catch (e) {
-            log.error("Error fetching GCR hashed stakes: " + e)
+            log.error(`Error fetching GCR hashed stakes: ${e}`)
         }
     }
 
@@ -342,7 +355,7 @@ export default class GCR {
             log.debug("No block number provided, getting the last one")
             blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
         }
-        log.debug("blockNumber: " + blockNumber)
+        log.debug(`blockNumber: ${blockNumber}`)
 
         try {
             const blockNodes = await validatorsRepository.find({
@@ -355,7 +368,7 @@ export default class GCR {
 
             return blockNodes || []
         } catch (e) {
-            log.error("Error fetching GCR validators at block: " + e)
+            log.error(`Error fetching GCR validators at block: ${e}`)
             return [] // or handle the error as needed
         }
     }
@@ -385,7 +398,7 @@ export default class GCR {
 
             return info || null
         } catch (e) {
-            log.error("Error fetching validator status: " + e)
+            log.error(`Error fetching validator status: ${e}`)
             return null // or handle the error as needed
         }
     }
@@ -502,15 +515,19 @@ export default class GCR {
             message: "",
         }
         // TODO Add stuff after loading the IMPData
-        if (address == "demos") {
+        if (address === "demos") {
             // TODO Assigning to the blockchain
         }
         return result
     }
 
+    // REVIEW Accepts bigint to keep the native-balance arithmetic chain
+    // bigint-consistent. The legacy JSONB column stores the value as a JS
+    // number, so we coerce here. Values exceeding Number.MAX_SAFE_INTEGER are
+    // rejected to make the precision-loss failure mode loud instead of silent.
     static async setGCRNativeBalance(
         address: string,
-        native: number,
+        native: bigint | number,
         txHash: string,
     ): Promise<boolean> {
         const db = await Datasource.getInstance()
@@ -519,6 +536,18 @@ export default class GCR {
             .getRepository(GlobalChangeRegistry)
 
         try {
+            const nativeBigInt = BigInt(native)
+            if (
+                nativeBigInt > BigInt(Number.MAX_SAFE_INTEGER) ||
+                nativeBigInt < BigInt(Number.MIN_SAFE_INTEGER)
+            ) {
+                log.error(
+                    `[GCR ERROR: NATIVE] Native balance ${nativeBigInt} for ${address} exceeds Number.MAX_SAFE_INTEGER; refusing to truncate into legacy JSONB storage`,
+                )
+                return false
+            }
+            const nativeNumber = Number(nativeBigInt)
+
             let nativeStatus = await gcrRepository.findOne({
                 select: ["details"],
                 where: { publicKey: address },
@@ -554,7 +583,7 @@ export default class GCR {
                     details: {
                         hash: "",
                         content: {
-                            balance: native,
+                            balance: nativeNumber,
                             txs: txList,
                             nonce: nativeStatus.details.content.nonce,
                         },
@@ -1122,7 +1151,13 @@ export default class GCR {
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
         tx.content.data = ["awardPoints", accounts]
-        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — fork-aware serialization for the awardPoints tx hash.
+        // The chain head is the correct reference; this tx is created at
+        // runtime, not bound to a specific block.
+        const referenceHeight = await Chain.getLastBlockNumber()
+        tx.hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, referenceHeight),
+        )
 
         const signature = await ucrypto.sign(
             getSharedState.signingAlgorithm,
@@ -1240,8 +1275,8 @@ export default class GCR {
                 const accountIdentifier = isWeb2Account(account)
                     ? account.username
                     : isXmAccount(account)
-                    ? `${account.chain}:${account.address}`
-                    : account.address
+                      ? `${account.chain}:${account.address}`
+                      : account.address
                 return {
                     success: false,
                     message:
@@ -1303,13 +1338,15 @@ export default class GCR {
 
         const tx = await this.createAwardPointsTransaction(accounts)
 
-        const editResults = await HandleGCR.applyToTx(
-            structuredClone(tx),
+        const entities = await HandleGCR.prepareEntities([tx])
+        const simulateResult = await HandleGCR.applyTransaction(
+            entities,
+            tx,
             false,
             true,
         )
 
-        if (!editResults.success) {
+        if (!simulateResult.success) {
             log.error("Failed to apply GCREdit")
             return {
                 success: false,

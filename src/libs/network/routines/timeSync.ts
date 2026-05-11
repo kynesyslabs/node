@@ -29,8 +29,8 @@ export default async function getPeerTime(
     }
 
     log.warning("[PEER TIMESYNC] Getting peer time delta")
-    log.debug("[PEER TIMESYNC] Peer: " + JSON.stringify(peer))
-    log.debug("[PEER TIMESYNC] ID: " + id)
+    log.debug(`[PEER TIMESYNC] Peer: ${JSON.stringify(peer)}`)
+    log.debug(`[PEER TIMESYNC] ID: ${id}`)
 
     const nodeCall: NodeCall = {
         message: "getPeerTime",
@@ -74,9 +74,7 @@ export const calculatePeerTimeOffset =
         const roundtrips = results.map(result => result.roundtrip)
         const limit = stat.median(roundtrips) + stat.std(roundtrips)
 
-        log.debug(
-            `[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`,
-        )
+        log.debug(`[PEER TIMESYNC] latency median: ${stat.median(roundtrips)}`)
         log.debug(
             `[PEER TIMESYNC] latency standard deviation: ${stat.std(
                 roundtrips,

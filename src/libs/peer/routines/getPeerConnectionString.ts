@@ -36,7 +36,12 @@ export default async function getPeerConnectionString(
         log.debug("[PEER CONNECTION] Received response")
         peer.connection.string = response.response
     } else {
-        log.warning("[PEER CONNECTION] Response " + response.result + " received: " + response.response)
+        log.warning(
+            "[PEER CONNECTION] Response " +
+                response.result +
+                " received: " +
+                response.response,
+        )
     }
     return peer
 }

@@ -16,11 +16,10 @@ export default async function getBlockByNumber(
         }
     } else {
         const blockNumber = parseInt(data.blockNumber)
-        log.debug("[SERVER] Received getBlockByNumber: " + blockNumber)
+        log.debug(`[SERVER] Received getBlockByNumber: ${blockNumber}`)
 
         let block: Blocks
         if (blockNumber === 0) {
-            // @ts-expect-error Block is not typed
             block = {
                 number: 0,
                 hash: await Chain.getGenesisBlockHash(),

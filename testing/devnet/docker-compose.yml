@@ -1,0 +1,270 @@
+
+services:
+  # Shared PostgreSQL instance with 4 databases
+  postgres:
+    image: postgres:16-alpine
+    container_name: demos-devnet-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-demosuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
+      POSTGRES_DB: postgres
+    volumes:
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+      - ${PERSISTENT:+postgres-data:/var/lib/postgresql/data}
+    # Expose Postgres on the host so the rehearsal harness can run
+    # `psql -h localhost ...` without `docker exec`. Override
+    # POSTGRES_HOST_PORT in .env if 5432 conflicts with a developer's
+    # local Postgres (e.g. POSTGRES_HOST_PORT=5532).
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test:
+        [
+          CMD-SHELL,
+          "pg_isready -U ${POSTGRES_USER:-demosuser} -d postgres",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - demos-network
+
+  tlsnotary:
+    image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
+    container_name: demos-devnet-tlsnotary
+    environment:
+      NS_NOTARIZATION__MAX_SENT_DATA: 32768
+    platform: linux/amd64
+    # Override TLSNOTARY_HOST_PORT in .env if 7047 conflicts with a
+    # developer's local tlsnotary instance (e.g. TLSNOTARY_HOST_PORT=7048),
+    # mirroring the POSTGRES_HOST_PORT pattern above. The container always
+    # binds 7047 internally so the in-network nodes can reach it via
+    # TLSNOTARY_PORT=7047.
+    ports:
+      - "${TLSNOTARY_HOST_PORT:-7047}:7047"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+  # Node 1
+  node-1:
+    image: demos-devnet-node
+    build:
+      context: ../..
+      dockerfile: testing/devnet/Dockerfile
+    container_name: demos-devnet-node-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tlsnotary:
+        condition: service_started
+    environment:
+      - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${POSTGRES_USER:-demosuser}
+      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+      - PG_DATABASE=node1_db
+      - PORT=${NODE1_PORT:-53551}
+      - OMNI_PORT=${NODE1_OMNI_PORT:-53552}
+      - EXPOSED_URL=http://node-1:${NODE1_PORT:-53551}
+      - CONSENSUS_TIME=${CONSENSUS_TIME:-10}
+      - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
+    volumes:
+      - ./identities/node1.identity:/app/.demos_identity:ro
+      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
+    ports:
+      - "${NODE1_PORT:-53551}:${NODE1_PORT:-53551}"
+      - "${NODE1_OMNI_PORT:-53552}:${NODE1_OMNI_PORT:-53552}"
+      - "${NODE1_SIGNALING_PORT:-3005}:3005"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+  # Node 2
+  node-2:
+    image: demos-devnet-node
+    container_name: demos-devnet-node-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tlsnotary:
+        condition: service_started
+      node-1:
+        condition: service_started
+    environment:
+      - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${POSTGRES_USER:-demosuser}
+      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+      - PG_DATABASE=node2_db
+      - PORT=${NODE2_PORT:-53553}
+      - OMNI_PORT=${NODE2_OMNI_PORT:-53554}
+      - CONSENSUS_TIME=${CONSENSUS_TIME:-10}
+      - EXPOSED_URL=http://node-2:${NODE2_PORT:-53553}
+      - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
+    volumes:
+      - ./identities/node2.identity:/app/.demos_identity:ro
+      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
+    ports:
+      - "${NODE2_PORT:-53553}:${NODE2_PORT:-53553}"
+      - "${NODE2_OMNI_PORT:-53554}:${NODE2_OMNI_PORT:-53554}"
+      - "${NODE2_SIGNALING_PORT:-3006}:3005"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+  # Node 3
+  node-3:
+    image: demos-devnet-node
+    container_name: demos-devnet-node-3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tlsnotary:
+        condition: service_started
+      node-1:
+        condition: service_started
+    environment:
+      - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${POSTGRES_USER:-demosuser}
+      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+      - PG_DATABASE=node3_db
+      - PORT=${NODE3_PORT:-53555}
+      - CONSENSUS_TIME=${CONSENSUS_TIME:-10}
+      - OMNI_PORT=${NODE3_OMNI_PORT:-53556}
+      - EXPOSED_URL=http://node-3:${NODE3_PORT:-53555}
+      - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
+    volumes:
+      - ./identities/node3.identity:/app/.demos_identity:ro
+      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
+    ports:
+      - "${NODE3_PORT:-53555}:${NODE3_PORT:-53555}"
+      - "${NODE3_OMNI_PORT:-53556}:${NODE3_OMNI_PORT:-53556}"
+      - "${NODE3_SIGNALING_PORT:-3007}:3005"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+  # Node 4
+  node-4:
+    image: demos-devnet-node
+    container_name: demos-devnet-node-4
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tlsnotary:
+        condition: service_started
+      node-1:
+        condition: service_started
+    environment:
+      - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${POSTGRES_USER:-demosuser}
+      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+      - PG_DATABASE=node4_db
+      - CONSENSUS_TIME=${CONSENSUS_TIME:-10}
+      - PORT=${NODE4_PORT:-53557}
+      - OMNI_PORT=${NODE4_OMNI_PORT:-53558}
+      - EXPOSED_URL=http://node-4:${NODE4_PORT:-53557}
+      - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
+    volumes:
+      - ./identities/node4.identity:/app/.demos_identity:ro
+      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
+    ports:
+      - "${NODE4_PORT:-53557}:${NODE4_PORT:-53557}"
+      - "${NODE4_OMNI_PORT:-53558}:${NODE4_OMNI_PORT:-53558}"
+      - "${NODE4_SIGNALING_PORT:-3008}:3005"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+  # Node 5 — REHEARSAL ONLY.
+  #
+  # This service is gated behind the `rehearsal` docker-compose profile so
+  # that `docker compose up` (default) still brings up the canonical
+  # 4-node devnet. To start node-5 alongside the others, run:
+  #
+  #   docker compose --profile rehearsal up -d
+  #
+  # Used by testing/forks/rehearsal/scenarios/03-fresh-node-post-fork.ts
+  # to validate that a node joining after the fork can replay history and
+  # converge with peers (the highest-stakes rehearsal scenario).
+  node-5:
+    profiles: [rehearsal]
+    image: demos-devnet-node
+    container_name: demos-devnet-node-5
+    depends_on:
+      postgres:
+        condition: service_healthy
+      tlsnotary:
+        condition: service_started
+      node-1:
+        condition: service_started
+    environment:
+      - NODE_ENV=development
+      - L2PS_HASH_RELAY_NON_PROD=true
+      - PG_HOST=postgres
+      - PG_PORT=5432
+      - PG_USER=${POSTGRES_USER:-demosuser}
+      - PG_PASSWORD=${POSTGRES_PASSWORD:-demospass}
+      - PG_DATABASE=node5_db
+      - CONSENSUS_TIME=${CONSENSUS_TIME:-10}
+      - PORT=${NODE5_PORT:-53559}
+      - OMNI_PORT=${NODE5_OMNI_PORT:-53560}
+      - EXPOSED_URL=http://node-5:${NODE5_PORT:-53559}
+      - SUDO_PUBKEY=${SUDO_PUBKEY:-}
+      - TLSNOTARY_ENABLED=true
+      - TLSNOTARY_MODE=docker
+      - TLSNOTARY_HOST=tlsnotary
+      - TLSNOTARY_PORT=7047
+      # Rehearsal-only: per-node toggle for pre-fork-binary simulation.
+      # Default unset; set to "true" via override to disable fork machinery.
+      - DEMOS_DISABLE_FORK_MACHINERY=${NODE5_DISABLE_FORK_MACHINERY:-}
+    volumes:
+      - ./identities/node5.identity:/app/.demos_identity:ro
+      - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+      - ./l2ps:/app/data/l2ps:ro
+    ports:
+      - "${NODE5_PORT:-53559}:${NODE5_PORT:-53559}"
+      - "${NODE5_OMNI_PORT:-53560}:${NODE5_OMNI_PORT:-53560}"
+      - "${NODE5_SIGNALING_PORT:-3009}:3005"
+    networks:
+      - demos-network
+    restart: unless-stopped
+
+networks:
+  demos-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+    driver: local

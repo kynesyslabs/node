@@ -11,7 +11,7 @@ export default async function handleNativeRequest(
     content: INativePayload,
 ): Promise<RPCResponse> {
     const operation = content.nativeOperation
-    log.info("[native] [handleNativeRequest] Received a native operation: " + operation)
+    log.info(`[native] [handleNativeRequest] Received a native operation: ${operation}`)
     // TODO: Implement the logic for native operations
     return {
         result: 200,

@@ -64,7 +64,11 @@ export async function handleWeb2ProxyRequest({
                 )
                 if (!validation.ok) {
                     // Explicit narrowing needed due to strictNullChecks: false
-                    const failed = validation as { ok: false; status: 400; message: string }
+                    const failed = validation as {
+                        ok: false
+                        status: 400
+                        message: string
+                    }
                     return createRPCResponse(
                         failed.status,
                         null,
@@ -98,10 +102,10 @@ export async function handleWeb2ProxyRequest({
                 )
             }
         }
-    } catch (error: any) {
+    } catch (error) {
         log.error("Error in handleWeb2ProxyRequest: " + error)
-
-        return createRPCResponse(500, error, error.message)
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        return createRPCResponse(500, error, errorMsg)
     }
 }
 

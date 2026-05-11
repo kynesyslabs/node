@@ -1,15 +1,110 @@
-# Exclude git directory
+# Version control
 .git
+.gitignore
+.gitattributes
+.github/
 
-# Exclude node_modules (installed fresh during build)
+# AI tooling state — local-only, often contains tokens/transcripts
+.claude/
+.beads/
+.beads_bak/
+.taskmaster/
+.serena/
+.serena-backup/
+.mcp_data/
+.gitbook-cache.json
+.trunk/
+
+# Linter / formatter configs not needed at runtime
+.eslintrc.cjs
+.eslintignore
+.prettierrc
+.prettierrc.json
+.requirements
+
+# Secrets that must never enter the image
+.tlsnotary-key
+*.tlsnotary-key
+
+# Dependencies (rebuilt inside the image)
 node_modules
 
-# Exclude devnet runtime files
-devnet/identities
-devnet/.env
-devnet/demos_peerlist.json
-devnet/postgres-data
+# Runtime state — must NOT enter the image
+.demos_identity
+demos_peerlist.json
+demos_peerlist.json.example
+# data/ contains bundled bootstrap (genesis.json, evmChains, l2ps) that the
+# node needs at first boot. Keep it, but exclude any runtime-only artifacts
+# that may be written into it.
+data/chain.db
+data/chain.db-*
+data/twitter/
+data/operations.json
+logs/
+logs_*
+output/
+postgres_*
+ipfs
+ipfs_53550
+neo4j_data
+docker_data
+last_crash_memory_usage.txt
+.RUN
+blocked_ips.json
+publickey_*
 
-# Exclude unnecessary files
-*.log
+# Build artifacts (regenerated)
+dist/
+*.tsbuildinfo
+
+# Test/dev-only directories (not needed at runtime)
+local_tests/
+tests/
+testing/
+# But the devnet Dockerfile (testing/devnet/Dockerfile) ENTRYPOINTs to
+# testing/devnet/run-devnet, which must ship inside the image.
+!testing/devnet/run-devnet
+!testing/devnet/start-staggered.sh
+!testing/devnet/scripts/
+omniprotocol_fixtures_scripts/
+specs/
+fixtures/
+res/
+# NOTE: sdk/ is intentionally NOT excluded — src/ imports from `sdk/localsdk/...`
+# (resolved via tsconfig baseUrl). Excluding it breaks the runtime build.
+
+# Documentation (lives in repo, not in container)
+ClaudeDocs/
+GUIDELINES/
+documentation/
+history/
+docs/
+*.md
+LICENSE.md
+
+# Project-management metadata
+.planning/
+.serena/
+.mycelium/
+
+# IDE/OS
 .DS_Store
+.idea/
+.vscode/
+*.log
+*.swp
+*.swo
+
+# Secrets / dotfiles (defensive)
+.env
+.env.*
+*.pem
+*.key
+
+# Container scaffolding (the image doesn't need these)
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile.*
+postgres/
+tlsnotary/
+monitoring/

@@ -3,12 +3,14 @@ import { Server } from "bun"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
-import { setAuthContext } from "../authContext"
+import { getAuthContext, setAuthContext } from "../authContext"
 import {
     verifySignature,
     isKeyWhitelisted,
     VerificationResult,
 } from "../verifySignature"
+import { PeerManager } from "@/libs/peer"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 interface RateLimitData {
     count: number
@@ -42,16 +44,19 @@ export class RateLimiter {
     public config: RateLimitConfig
     public cleanupInterval: Timer
     private static instance: RateLimiter
-    private local_ips = ["127.0.0.1", "localhost"]
+    private local_ips = ["127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"]
 
     constructor(config: RateLimitConfig) {
         this.config = config
 
         // Clean up expired entries every 15 minutes
-        this.cleanupInterval = setInterval(() => {
-            this.cleanup()
-            this.dumpIPs()
-        }, 15 * 60 * 1000)
+        this.cleanupInterval = setInterval(
+            () => {
+                this.cleanup()
+                this.dumpIPs()
+            },
+            15 * 60 * 1000,
+        )
 
         this.loadIPs()
     }
@@ -120,9 +125,10 @@ export class RateLimiter {
                     Object.keys(data).length
                 } blocked IPs from ${filePath}`,
             )
-        } catch (error: any) {
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error)
             log.warning(
-                `[Rate Limiter] Failed to load blocked IPs from ${filePath}: ${error.message}`,
+                `[Rate Limiter] Failed to load blocked IPs from ${filePath}: ${errorMsg}`,
             )
         }
     }
@@ -151,6 +157,35 @@ export class RateLimiter {
         }
 
         return "unknown"
+    }
+
+    public isTrustedInternalRequest(req: Request, clientIP?: string): boolean {
+        if (
+            clientIP &&
+            this.config.whitelistedIPs.includes(clientIP)
+        ) {
+            return true
+        }
+
+        const authCtx = getAuthContext(req)
+        if (!authCtx.verified || !authCtx.publicKey) {
+            return false
+        }
+
+        const localNodePublicKey = getSharedState.keypair?.publicKey
+            ? uint8ArrayToHex(
+                  getSharedState.keypair.publicKey as Uint8Array,
+              )
+            : null
+
+        if (
+            localNodePublicKey &&
+            authCtx.publicKey === localNodePublicKey
+        ) {
+            return true
+        }
+
+        return !!PeerManager.getInstance().getPeer(authCtx.publicKey)
     }
 
     private isTrustedProxy(ip: string): boolean {
@@ -247,6 +282,15 @@ export class RateLimiter {
                 return await next()
             }
 
+            // Skip rate limiting for infra/probe endpoints. LB and k8s
+            // liveness/readiness probes hit /health frequently from a single
+            // source IP and should never be 429-throttled. /version is small
+            // and equally cheap to serve unconditionally.
+            const path = new URL(req.url).pathname
+            if (path === "/health" || path === "/version") {
+                return await next()
+            }
+
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
@@ -301,9 +345,9 @@ export class RateLimiter {
             log.debug(`[Rate Limiter] Client IP: ${clientIP}`)
 
             // Skip rate limiting for whitelisted IPs
-            if (this.config.whitelistedIPs.includes(clientIP)) {
+            if (this.isTrustedInternalRequest(req, clientIP)) {
                 log.debug(
-                    `[Rate Limiter] Whitelisted IP: ${clientIP}, skipping rate limiting`,
+                    `[Rate Limiter] Trusted internal request: ${clientIP}, skipping rate limiting`,
                 )
                 return await next()
             }
@@ -322,11 +366,9 @@ export class RateLimiter {
 
             const isBlocked =
                 ipData.blocked && ipData.blockExpiry && now < ipData.blockExpiry
-            const isBlockedByBlockCount =
-                ipData.lastSeenWithinBlockCount >= this.config.txPerBlock
 
             // Check if IP is currently blocked
-            if (isBlocked || isBlockedByBlockCount) {
+            if (isBlocked) {
                 const remainingTime = Math.ceil(
                     (ipData.blockExpiry - now) / 1000,
                 )
@@ -402,6 +444,35 @@ export class RateLimiter {
 
             return await next()
         }
+    }
+
+    /**
+     * Return the current rate-limit window state for a given IP. Used by
+     * server_rpc to surface `X-RateLimit-{Limit,Remaining,Reset}` headers
+     * on POST `/` responses so SDK clients can self-throttle.
+     *
+     * Returns null when the IP has no active window yet (no requests seen).
+     */
+    public getCurrentLimits(ip: string): {
+        limit: number
+        remaining: number
+        resetEpochSeconds: number
+    } | null {
+        const ipData = this.ipRequests.get(ip)
+        if (!ipData) {
+            return null
+        }
+
+        // Match middleware: POST `/` resolves to the "POST" method bucket,
+        // falling back to defaultLimit when not configured explicitly.
+        const limitConfig = this.getLimitForMethod("POST")
+        const limit = limitConfig.maxRequests
+        const remaining = Math.max(0, limit - ipData.count)
+        const resetEpochSeconds = Math.floor(
+            (ipData.firstRequest + limitConfig.windowMs) / 1000,
+        )
+
+        return { limit, remaining, resetEpochSeconds }
     }
 
     public getStats(): {

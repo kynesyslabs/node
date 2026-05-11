@@ -1,4 +1,3 @@
-
 export interface ValidationData {
     signatures: { [key: string]: string }
 }

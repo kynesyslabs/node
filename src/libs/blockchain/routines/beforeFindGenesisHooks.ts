@@ -348,9 +348,7 @@ export class BeforeFindGenesisHooks {
                             "Deducting points for non-existing account: " +
                                 referral.referredUserId,
                         )
-                        log.only(
-                            "referral: " + JSON.stringify(referral),
-                        )
+                        log.only("referral: " + JSON.stringify(referral))
 
                         account.points.totalPoints -= referral.pointsAwarded
                         account.points.breakdown.referrals -=

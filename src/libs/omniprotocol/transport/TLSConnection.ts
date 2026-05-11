@@ -2,11 +2,16 @@ import log from "src/utilities/logger"
 import * as tls from "tls"
 import * as fs from "fs"
 import { PeerConnection } from "./PeerConnection"
-import type { ConnectionOptions } from "./types"
+import { ConnectionState, ConnectionStateUtils, type ConnectionOptions, parseConnectionString } from "./types"
 import type { TLSConfig } from "../tls/types"
 import { loadCertificate } from "../tls/certificates"
 
 /**
+ * @deprecated TLSConnection needs migration to the new numeric ConnectionState system.
+ * The class currently uses internal methods that were changed from protected to private.
+ * For now, TLS connections should use the base PeerConnection with external TLS handling,
+ * or this class needs to be rewritten to not override parent methods.
+ *
  * TLS-enabled peer connection
  * Extends PeerConnection to use TLS instead of plain TCP
  */
@@ -32,15 +37,16 @@ export class TLSConnection extends PeerConnection {
      * Overrides parent connect() method
      */
     async connect(options: ConnectionOptions = {}): Promise<void> {
-        if (this.getState() !== "UNINITIALIZED" && this.getState() !== "CLOSED") {
+        const currentState = this.getState()
+        if (currentState !== ConnectionState.UNINITIALIZED && currentState !== ConnectionState.CLOSED) {
             throw new Error(
-                `Cannot connect from state ${this.getState()}, must be UNINITIALIZED or CLOSED`,
+                `Cannot connect from state ${ConnectionStateUtils.getName(currentState)}, must be UNINITIALIZED or CLOSED`,
             )
         }
 
         // Parse connection string
-        const parsed = this.parseConnectionString()
-        this.setState("CONNECTING")
+        const parsed = this.parseConnectionStringForTLS()
+        this._setState(ConnectionState.CONNECTING)
 
         // Validate TLS configuration
         if (!fs.existsSync(this.tlsConfig.certPath)) {
@@ -67,7 +73,7 @@ export class TLSConnection extends PeerConnection {
                 if (this.socket) {
                     this.socket.destroy()
                 }
-                this.setState("ERROR")
+                this._setState(ConnectionState.ERROR)
                 reject(new Error(`TLS connection timeout after ${timeout}ms`))
             }, timeout)
 
@@ -90,14 +96,14 @@ export class TLSConnection extends PeerConnection {
                 // Verify server certificate
                 if (!this.verifyServerCertificate(socket)) {
                     socket.destroy()
-                    this.setState("ERROR")
+                    this._setState(ConnectionState.ERROR)
                     reject(new Error("Server certificate verification failed"))
                     return
                 }
 
                 // Store socket
-                this.setSocket(socket)
-                this.setState("READY")
+                this.socket = socket
+                this._setState(ConnectionState.READY)
 
                 // Log TLS info
                 const protocol = socket.getProtocol()
@@ -111,11 +117,32 @@ export class TLSConnection extends PeerConnection {
 
             socket.on("error", (error: Error) => {
                 clearTimeout(timeoutTimer)
-                this.setState("ERROR")
+                this._setState(ConnectionState.ERROR)
                 log.error("[TLSConnection] Connection error: " + error)
                 reject(error)
             })
         })
+    }
+
+    /**
+     * Internal setState that accesses parent's protected method
+     * @private
+     */
+    // eslint-disable-next-line @typescript-eslint/naming-convention
+    private _setState(state: number): void {
+        // Access the parent's state through casting
+        // This is a workaround until TLSConnection is properly refactored
+        (this as any)._state = state
+        this.emit("stateChange", { to: state })
+    }
+
+    /**
+     * Parse connection string for TLS
+     * @private
+     */
+    private parseConnectionStringForTLS() {
+        // Use the exported parseConnectionString function
+        return parseConnectionString((this as any).connectionString || `tls://${this.peerIdentity}:3001`)
     }
 
     /**
@@ -141,7 +168,9 @@ export class TLSConnection extends PeerConnection {
             const fingerprint = cert.fingerprint256
 
             // If we have a trusted fingerprint for this peer, verify it
-            const trustedFingerprint = this.trustedFingerprints.get(this.peerIdentity)
+            const trustedFingerprint = this.trustedFingerprints.get(
+                this.peerIdentity,
+            )
             if (trustedFingerprint) {
                 if (trustedFingerprint !== fingerprint) {
                     log.error(
@@ -162,7 +191,9 @@ export class TLSConnection extends PeerConnection {
                     `[TLSConnection] No trusted fingerprint for ${this.peerIdentity}`,
                 )
                 log.warning(`  Server certificate fingerprint: ${fingerprint}`)
-                log.warning("  Add to trustedFingerprints to pin this certificate")
+                log.warning(
+                    "  Add to trustedFingerprints to pin this certificate",
+                )
 
                 // In strict mode, reject unknown certificates
                 if (this.tlsConfig.rejectUnauthorized) {
@@ -214,5 +245,4 @@ export class TLSConnection extends PeerConnection {
         }
         return this.parsedConnection
     }
-
 }

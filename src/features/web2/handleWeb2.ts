@@ -40,8 +40,9 @@ export async function handleWeb2(
         log.debug("[handleWeb2] DAHR instance created.")
 
         return dahr
-    } catch (error: any) {
+    } catch (error) {
         log.error("Error in handleWeb2:", error)
-        return error.message
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        return errorMsg
     }
 }

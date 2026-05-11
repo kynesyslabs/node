@@ -1,4 +1,4 @@
-import { AbortError, TimeoutError } from "../exceptions"
+import { AbortError, TimeoutError } from "@/errors"
 import log from "./logger"
 
 // Bun does not support NodeJS.Timeout, so we need to create a type for it
@@ -97,7 +97,7 @@ export class Waiter {
     static resolve<T = null>(id: string, data: T = null): T {
         const entry = Waiter.waitList.get(id)
         if (!entry) {
-            log.error(`[WAITER] No wait entry found for ${id}`)
+            log.warn(`[WAITER] No wait entry found for ${id}`)
             return null
         }
 
@@ -112,7 +112,9 @@ export class Waiter {
 
     static preHold(id: string, data: any = null) {
         if (Waiter.waitList.has(id)) {
-            log.error(`[WAITER] Cannot pre-hold key: ${id} because it's already waiting`)
+            log.error(
+                `[WAITER] Cannot pre-hold key: ${id} because it's already waiting`,
+            )
             throw new Error(`[WAITER] Already waiting for id: ${id}`)
         }
 
