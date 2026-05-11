@@ -30,3 +30,10 @@ export {
     LEGACY_NUMBER_CAP,
 } from "./migrations/osDenomination"
 export type { OsDenominationMigrationResult } from "./migrations/osDenomination"
+export {
+    runGasFeeSeparationMigration,
+    isGasFeeSeparationMigrationApplied,
+    FORK_NAME as GAS_FEE_SEPARATION_FORK_NAME,
+    BURN_ADDRESS as GAS_FEE_SEPARATION_BURN_ADDRESS_CONST,
+} from "./migrations/gasFeeSeparation"
+export type { GasFeeSeparationMigrationResult } from "./migrations/gasFeeSeparation"

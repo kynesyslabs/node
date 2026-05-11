@@ -20,6 +20,10 @@ import {
     isOsDenominationMigrationApplied,
     runOsDenominationMigration,
 } from "@/forks/migrations/osDenomination"
+import {
+    isGasFeeSeparationMigrationApplied,
+    runGasFeeSeparationMigration,
+} from "@/forks/migrations/gasFeeSeparation"
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
@@ -242,6 +246,34 @@ export async function insertBlock(
                     await runOsDenominationMigration(
                         transactionalEntityManager,
                         block.number,
+                    )
+                }
+
+                // DEM-665: gasFeeSeparation activation hook. MUST run
+                // AFTER osDenomination at the same block height so that
+                // when burn/treasury accounts are created with balance
+                // 0n they are already in OS units (matching every other
+                // post-fork account). Order is enforced here by listing
+                // osDenomination's hook first.
+                //
+                // Same atomicity / idempotency story as osDenomination:
+                // runs inside the caller transaction (rolls back with
+                // the block on failure), fork_state row guards re-runs.
+                if (
+                    !isForkMachineryDisabled() &&
+                    isForkActive("gasFeeSeparation", block.number) &&
+                    !(await isGasFeeSeparationMigrationApplied(
+                        transactionalEntityManager,
+                    ))
+                ) {
+                    log.info(
+                        `[forks][gasFeeSeparation] activation hook firing at block ${block.number}`,
+                    )
+                    await runGasFeeSeparationMigration(
+                        transactionalEntityManager,
+                        block.number,
+                        getSharedState.forkConfig.gasFeeSeparation
+                            .treasuryAddress,
                     )
                 }
 
