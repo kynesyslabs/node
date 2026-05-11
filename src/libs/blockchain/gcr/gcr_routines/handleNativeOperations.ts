@@ -9,11 +9,45 @@ import {
     markStored,
     TokenStatus,
 } from "@/features/tlsnotary/tokenManager"
+import { isForkActive } from "@/forks"
+import { generateSpecialOpsFeeEdits } from "./feeDistribution"
+import { getSharedState } from "@/utilities/sharedState"
 
-// REVIEW: TLSNotary native operation pricing (1 DEM = 1 unit, no decimals)
+// DEM-665: TLSNotary native-operation pricing.
+//
+// Pre-fork (legacy): each fee is "1" — single DEM unit. The legacy
+// path treats this as a single-remove burn (no recipient).
+//
+// Post-fork: each fee is 1 DEM = 10^9 OS = 1_000_000_000. The
+// fee-distribution rule routes it as 25/50/25 burn/rpc/treasury via
+// generateSpecialOpsFeeEdits.
+//
+// The constants below are the pre-fork legacy values. Post-fork we
+// scale them by ONE_DEM at call time so re-syncing pre-fork blocks
+// stays bit-identical.
+const ONE_DEM = 1_000_000_000
 const TLSN_REQUEST_FEE = 1
 const TLSN_STORE_BASE_FEE = 1
 const TLSN_STORE_PER_KB_FEE = 1
+
+/**
+ * DEM-665 — returns the per-tx TLSN fee constants scaled to the active
+ * denomination at `blockHeight`. Pre-fork: legacy DEM-1 units;
+ * post-fork: OS = legacy × 10^9. Centralised so the magnitude switch
+ * is documented once.
+ */
+function getTlsnFees(blockHeight: number): {
+    request: number
+    storeBase: number
+    storePerKb: number
+} {
+    const mult = isForkActive("gasFeeSeparation", blockHeight) ? ONE_DEM : 1
+    return {
+        request: TLSN_REQUEST_FEE * mult,
+        storeBase: TLSN_STORE_BASE_FEE * mult,
+        storePerKb: TLSN_STORE_PER_KB_FEE * mult,
+    }
+}
 
 // NOTE This class is responsible for handling native operations such as sending native tokens, etc.
 export class HandleNativeOperations {
@@ -76,16 +110,36 @@ export class HandleNativeOperations {
                     throw new Error("Invalid URL in tlsn_request")
                 }
 
-                // Burn the fee (remove from sender, no add - effectively burns the token)
-                const burnFeeEdit: GCREdit = {
-                    type: "balance",
-                    operation: "remove",
-                    isRollback: isRollback,
-                    account: tx.content.from as string,
-                    txhash: tx.hash,
-                    amount: TLSN_REQUEST_FEE,
+                // DEM-665: fork-gated fee handling.
+                //  - Pre-fork: legacy single-remove burn (no recipient,
+                //    fees vanish from the supply).
+                //  - Post-fork: split 25/50/25 burn/rpc/treasury via
+                //    generateSpecialOpsFeeEdits, scaled to OS via ONE_DEM.
+                const blockHeight =
+                    tx.blockNumber ?? getSharedState.lastBlockNumber ?? 0
+                const fees = getTlsnFees(blockHeight)
+                if (isForkActive("gasFeeSeparation", blockHeight)) {
+                    const rpcAddress =
+                        tx.content.transaction_fee?.rpc_address ?? null
+                    const specialOpsEdits = generateSpecialOpsFeeEdits(
+                        tx.content.from as string,
+                        rpcAddress,
+                        fees.request,
+                        tx.hash,
+                        isRollback,
+                    )
+                    edits.push(...(specialOpsEdits as GCREdit[]))
+                } else {
+                    const burnFeeEdit: GCREdit = {
+                        type: "balance",
+                        operation: "remove",
+                        isRollback: isRollback,
+                        account: tx.content.from as string,
+                        txhash: tx.hash,
+                        amount: fees.request,
+                    }
+                    edits.push(burnFeeEdit)
                 }
-                edits.push(burnFeeEdit)
 
                 // Token creation is handled as a native side-effect during mempool simulation
                 // in `HandleGCR.processNativeSideEffects()` to avoid duplicate tokens.
@@ -129,22 +183,39 @@ export class HandleNativeOperations {
                         : (proof as Uint8Array).byteLength
 
                 const proofSizeKB = Math.ceil(proofBytes / 1024)
+                const storeBlockHeight =
+                    tx.blockNumber ?? getSharedState.lastBlockNumber ?? 0
+                const storeFees = getTlsnFees(storeBlockHeight)
                 const storageFee =
-                    TLSN_STORE_BASE_FEE + proofSizeKB * TLSN_STORE_PER_KB_FEE
+                    storeFees.storeBase + proofSizeKB * storeFees.storePerKb
                 log.info(
-                    `[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} DEM`,
+                    `[TLSNotary] Proof size: ${proofSizeKB}KB, fee: ${storageFee} (denom-scaled)`,
                 )
 
-                // Burn the storage fee
-                const burnStorageFeeEdit: GCREdit = {
-                    type: "balance",
-                    operation: "remove",
-                    isRollback: isRollback,
-                    account: tx.content.from as string,
-                    txhash: tx.hash,
-                    amount: storageFee,
+                // DEM-665: fork-gated storage fee handling — same
+                // contract as tlsn_request above.
+                if (isForkActive("gasFeeSeparation", storeBlockHeight)) {
+                    const rpcAddress =
+                        tx.content.transaction_fee?.rpc_address ?? null
+                    const specialOpsEdits = generateSpecialOpsFeeEdits(
+                        tx.content.from as string,
+                        rpcAddress,
+                        storageFee,
+                        tx.hash,
+                        isRollback,
+                    )
+                    edits.push(...(specialOpsEdits as GCREdit[]))
+                } else {
+                    const burnStorageFeeEdit: GCREdit = {
+                        type: "balance",
+                        operation: "remove",
+                        isRollback: isRollback,
+                        account: tx.content.from as string,
+                        txhash: tx.hash,
+                        amount: storageFee,
+                    }
+                    edits.push(burnStorageFeeEdit)
                 }
-                edits.push(burnStorageFeeEdit)
 
                 // Store the proof (on-chain via GCR)
                 // For IPFS: in future, proof will be IPFS hash, actual data stored externally
