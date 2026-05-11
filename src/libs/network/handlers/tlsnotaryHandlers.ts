@@ -1,4 +1,3 @@
-import { getSharedState } from "src/utilities/sharedState"
 import { Config } from "src/config"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
@@ -126,23 +125,12 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
             const proxyPort = Config.getInstance().tlsnotary.proxyPort
 
-            let nodeHost = "localhost"
-            const wsScheme = (() => {
-                try {
-                    const exposedUrl = getSharedState.exposedUrl
-                    if (exposedUrl) {
-                        const url = new URL(exposedUrl)
-                        nodeHost = url.hostname
-                        return url.protocol === "https:" ? "wss" : "ws"
-                    }
-                } catch {
-                    // Fall back to localhost and ws if URL parsing fails
-                }
-                return "ws"
-            })()
+            const { getPublicUrl } = await import(
+                "@/features/tlsnotary/proxyManager"
+            )
 
-            const notaryUrl = `${wsScheme}://${nodeHost}:${port}`
-            const proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
+            const notaryUrl = getPublicUrl(port)
+            const proxyUrl = getPublicUrl(proxyPort)
 
             response.response = {
                 notaryUrl,

@@ -169,6 +169,23 @@ export function extractDomainAndPort(targetUrl: string): {
 }
 
 /**
+ * Build a public WebSocket URL from a base HTTP(S)/WS(S) URL and a local port.
+ * Path mode: when the base URL has a path, route through a reverse proxy at
+ * `url.host` (port preserved) that maps `<path>/<port>` to the local port
+ * (single nginx rule). No-path mode: connect directly to `url.hostname` on
+ * the target port.
+ */
+export function buildWsUrl(base: string, port: number | string): string {
+    const url = new URL(base)
+    const secure = url.protocol === "https:" || url.protocol === "wss:"
+    const wsScheme = secure ? "wss" : "ws"
+    const path = url.pathname.replace(/\/+$/, "")
+    return path
+        ? `${wsScheme}://${url.host}${path}/${port}/`
+        : `${wsScheme}://${url.hostname}:${port}`
+}
+
+/**
  * Build the public WebSocket URL for the proxy
  * @param localPort - Local port the proxy is listening on
  * @param requestOrigin - Optional request origin for auto-detection
@@ -178,16 +195,10 @@ export function getPublicUrl(
     localPort: number,
     requestOrigin?: string,
 ): string {
-    const build = (base: string) => {
-        const url = new URL(base)
-        const wsScheme = url.protocol === "https:" ? "wss" : "ws"
-        return `${wsScheme}://${url.hostname}:${localPort}`
-    }
-
     // 1. Try auto-detect from request origin (if available in headers)
     if (requestOrigin) {
         try {
-            return build(requestOrigin)
+            return buildWsUrl(requestOrigin, localPort)
         } catch {
             // Invalid origin, continue to fallback
         }
@@ -196,16 +207,15 @@ export function getPublicUrl(
     // 2. Fall back to EXPOSED_URL
     if (process.env.EXPOSED_URL) {
         try {
-            return build(process.env.EXPOSED_URL)
+            return buildWsUrl(process.env.EXPOSED_URL, localPort)
         } catch {
             // Invalid EXPOSED_URL, continue to fallback
         }
     }
 
     // 3. Fall back to sharedState.exposedUrl
-    const sharedState = getSharedState
     try {
-        return build(sharedState.exposedUrl)
+        return buildWsUrl(getSharedState.exposedUrl, localPort)
     } catch {
         // Last resort: localhost
         return `ws://localhost:${localPort}`
