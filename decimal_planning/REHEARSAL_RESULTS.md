@@ -635,3 +635,47 @@ DEM-665 P10b complete: gasFeeSeparation co-activation rehearsed end-to-end on a 
 - New fixture checked in: `testing/forks/rehearsal/genesis/genesis-fork-low-gasFee.json`.
 - Two new scenarios: `scenarios/09-fee-distribution.ts`, `scenarios/10-burn-spend-rejection.ts`.
 - `run-all.sh` runs the full 10-scenario sequence.
+
+---
+
+## Run 7 — DEM-665 P10b scenario 10 (devnet drive)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: scenario 10 promoted from placeholder to a full devnet drive after the harness gained tx-signing support.
+
+### Harness additions
+
+- `testing/forks/rehearsal/lib/signing.ts` (NEW) — `generateHarnessKeypair()` derives a fresh ed25519 keypair via `Cryptography.newFromSeed(crypto.randomBytes(32))` (same primitive `ucrypto.generateIdentity` uses), and `signHarnessTx(kp, content, blockHeight)` runs the fork-aware `serializeTransactionContent` + `sha256` + `Cryptography.sign` chain to produce the `{hash, signature}` pair the validating node expects on the wire. Devnet-only — keys never persisted, never used in prod.
+- `testing/forks/rehearsal/lib/devnetControl.ts` — `stageGenesisWithFundedAccount(fixture, pubkey, balance)` clones a fixture, appends `[pubkey, balance]` to `balances`, stages at `data/genesis.json`. Backup is the same one-time `stageGenesis()` produces.
+
+### Scenario 10 result
+
+`POSTGRES_HOST_PORT=5532 POSTGRES_USER=demosuser POSTGRES_PASSWORD=demospass \
+ bun run testing/forks/rehearsal/scenarios/10-burn-spend-rejection.ts`
+
+**Result**: PASS in 126.4s.
+
+**What it drives**:
+1. Generate fresh ed25519 keypair in-memory.
+2. Inject `[harness pubkey, "1000000"]` into `genesis-fork-low-gasFee.json` `balances`; stage at `data/genesis.json`.
+3. `up --build`, wait height ≥ 6.
+4. Verify activation: `osDenomination.activated = true`, `gasFeeSeparation.applied_at_block = 5` converged across nodes.
+5. Verify burn balance = 0 on every node pre-submission.
+6. Build a `nativeOperation: "send"` tx whose `gcr_edits` carries a legitimate sender-remove + recipient-add PLUS a malicious `remove`-from-burn entry (`account = 0x000…000`, `operation = "remove"`, `isRollback = false`).
+7. Sign with harness keypair via the fork-aware serializer.
+8. POST `{ method: "execute", params: [{ extra: "confirmTx", data: tx, ... }] }` to node-1.
+9. Sleep 15s for any propagation / apply.
+10. Assert burn balance still `"0"` on every node + fork_state row unchanged.
+
+**Acceptance invariant**: burn balance does NOT decrease. This is the consensus-meaningful property — whether the validating node rejected the tx at confirm-time, or whether the apply-time guard at `GCRBalanceRoutines.apply()` caught it, both outcomes produce the same observable state on every node. The unit suite (`tests/blockchain/GCRBalanceRoutines.test.ts`) covers the apply-time branch explicitly with 8 cases including the `"Cannot deduct from burn address"` message.
+
+### Verdict
+
+DEM-665 P10b complete. **Both scenarios 09 and 10 ran end-to-end on a real 4-node Postgres devnet and asserted the consensus-critical invariants without manual intervention.** The harness signing helper (lib/signing.ts) is now in-tree for any future scenario that needs to drive signed-tx flows.
+
+### Final state
+
+- Containers torn down automatically by `runScenario` lifecycle.
+- Production genesis restored.
+- New files: `lib/signing.ts`, `scenarios/10-burn-spend-rejection.ts` (rewritten from placeholder to drive).
