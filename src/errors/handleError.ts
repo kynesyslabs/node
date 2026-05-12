@@ -213,6 +213,57 @@ function inferSeverity(error: unknown): ErrorSeverity {
 }
 
 /**
+ * Walk the error.cause chain and AggregateError.errors[] siblings so the
+ * underlying failure (e.g. node:net ECONNREFUSED nested under an
+ * AggregateError nested under a wrapper) is visible in the log. Without
+ * this, top-line `[UNKNOWN_ERROR]` lines carry no diagnostic payload.
+ * Bounded by depth + sibling caps so a malicious/cyclical chain can't
+ * blow up the logger.
+ */
+function formatCauseChain(cause: unknown, depth = 0): string {
+    if (cause === undefined || cause === null) return ""
+    if (depth > 4) return ` | cause: <chain truncated>`
+
+    const indent = "  ".repeat(depth + 1)
+
+    if (cause instanceof Error) {
+        const frames = (cause.stack ?? "")
+            .split("\n")
+            .slice(0, 6)
+            .map(l => indent + l)
+            .join("\n")
+        let out = ` | cause: ${cause.name}: ${cause.message}\n${frames}`
+
+        // AggregateError.errors[]: the actual TCP/DNS failures live
+        // here, not on the wrapper.
+        const siblings = (cause as { errors?: unknown }).errors
+        if (Array.isArray(siblings) && siblings.length > 0) {
+            const shown = siblings.slice(0, 5)
+            for (let i = 0; i < shown.length; i++) {
+                out += `\n${indent}[error ${i + 1}/${siblings.length}]`
+                out += formatCauseChain(shown[i], depth + 1)
+            }
+            if (siblings.length > shown.length) {
+                out += `\n${indent}... ${siblings.length - shown.length} more`
+            }
+        }
+
+        // Nested `cause` chain (Node 16+).
+        const nested = (cause as { cause?: unknown }).cause
+        if (nested !== undefined && nested !== null) {
+            out += formatCauseChain(nested, depth + 1)
+        }
+        return out
+    }
+
+    try {
+        return ` | cause: ${JSON.stringify(cause)}`
+    } catch {
+        return ` | cause: ${String(cause)}`
+    }
+}
+
+/**
  * Log an AppError using the CategorizedLogger.
  */
 function logError(error: AppError): void {
@@ -220,7 +271,15 @@ function logError(error: AppError): void {
     const contextStr = error.context
         ? ` ${JSON.stringify(error.context)}`
         : ""
-    const fullMessage = `${prefix} ${error.message}${contextStr}`
+    // Diagnostic surface for the underlying cause — without this the
+    // top-line log shows just "[UNKNOWN_ERROR]  {source:main,fatal:true}"
+    // with no message, no stack, no original error. The cause comes
+    // through `normalizeError` as `error.cause` (a generic Error or any
+    // thrown value). Print message + first 5 stack frames when present.
+    const causeStr = formatCauseChain(
+        (error as { cause?: unknown }).cause,
+    )
+    const fullMessage = `${prefix} ${error.message}${contextStr}${causeStr}`
 
     switch (error.severity) {
         case ErrorSeverity.FATAL:
