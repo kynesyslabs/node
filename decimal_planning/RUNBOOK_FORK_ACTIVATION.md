@@ -533,4 +533,4 @@ A proposal touching only `networkFeeBurnPct` without also adjusting `networkFeeT
 
 ---
 
-**DEM-665 status**: design and implementation merged. Source-branch: `claude/gas-fee-separation-aDJK5`. SDK companion: 4.0.0-rc.1 (pending publish; user owns).
+**DEM-665 status**: design and implementation merged. Source-branch: `claude/gas-fee-separation-aDJK5`. SDK companion: **`@kynesyslabs/demosdk@4.0.0`** (required at and after fork activation; pinned in `node/package.json`).

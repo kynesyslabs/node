@@ -56,6 +56,21 @@ export type ApplyGasFeeSeparationResult =
     | { ok: false; message: string }
 
 /**
+ * Stringify a thrown non-Error value for inclusion in a diagnostic
+ * message. `String(obj)` yields `[object Object]` for plain objects;
+ * `JSON.stringify` preserves the shape. Falls back to the bare
+ * default if JSON serialisation itself throws (cyclic graphs, BigInt
+ * outside JSON.rawJSON, etc.) so the diagnostic path never re-throws.
+ */
+function stringifyNonError(e: unknown): string {
+    try {
+        return JSON.stringify(e)
+    } catch {
+        return String(e)
+    }
+}
+
+/**
  * Minimal view of the Transaction surface that this routine touches.
  * Accepts both the SDK ITransaction shape and the node-side Transaction
  * subclass — only the fields listed here are read or written.
@@ -78,7 +93,11 @@ export async function applyGasFeeSeparation(
                 ? tx.content.from
                 : forgeToHex(tx.content.from)
     } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
+        // CodeRabbit PR #817: `String(e)` on a plain object collapses
+        // to `[object Object]` which kills debuggability when a
+        // non-Error gets thrown from forgeToHex. Fall back to
+        // JSON.stringify so the structured value survives in logs.
+        const msg = e instanceof Error ? e.message : stringifyNonError(e)
         return {
             ok: false,
             message: `failed to resolve sender address: ${msg}`,
@@ -120,7 +139,7 @@ export async function applyGasFeeSeparation(
             return {
                 ok: false,
                 message: `failed to read sender balance: ${
-                    e instanceof Error ? e.message : String(e)
+                    e instanceof Error ? e.message : stringifyNonError(e)
                 }`,
             }
         }

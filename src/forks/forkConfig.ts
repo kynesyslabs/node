@@ -38,8 +38,14 @@ export interface BaseForkConfig {
 
 /**
  * `osDenomination` fork: DEM → OS migration. No payload beyond the base.
+ *
+ * Declared as a `type` alias rather than an empty `interface … extends`
+ * to avoid the eslint `@typescript-eslint/no-empty-object-type` rule
+ * (CodeRabbit PR #817 feedback). Structurally identical to
+ * `BaseForkConfig`; consumers narrow via `ForkName`, not via runtime
+ * shape.
  */
-export interface OsDenominationConfig extends BaseForkConfig {}
+export type OsDenominationConfig = BaseForkConfig
 
 /**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
