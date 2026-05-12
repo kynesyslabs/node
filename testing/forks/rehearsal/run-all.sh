@@ -52,7 +52,11 @@ for s in "${SCENARIOS[@]}"; do
     echo "# RUN: ${NAME}"
     echo "########################################################################"
     SCEN_START=$(date +%s)
-    if bun run "testing/forks/rehearsal/${s}" "${EXTRA_ARGS[@]}"; then
+    # macOS bash 3.2 treats `"${EMPTY_ARRAY[@]}"` as an unbound-variable
+    # access under `set -u`. The `${EXTRA_ARGS[@]+...}` parameter
+    # expansion is the portable workaround: only emits the words when
+    # the array is non-empty.
+    if bun run "testing/forks/rehearsal/${s}" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}; then
         SCEN_END=$(date +%s)
         RESULTS+=("PASS  ${NAME}  $((SCEN_END - SCEN_START))s")
     else

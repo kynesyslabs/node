@@ -60,9 +60,30 @@ export async function rpcNodeCall<T = any>(
     const port = NODE_RPC_PORTS[nodeId]
     if (!port) throw new Error(`Unknown node id: ${nodeId}`)
     const url = `http://localhost:${port}`
+    // Wire-shape note (myc#86 strictening surfaced this):
+    // `manageNodeCall` reads `content.data` and forwards it to the
+    // handler. Every handler under `src/libs/network/handlers/` expects
+    // its params under `data.*` (e.g. `data.address` for
+    // `getAddressInfo`). The previous harness flattened `extraParams`
+    // alongside `message`, which left every handler with
+    // `data === undefined` and returned the misleading
+    // "Error in nodeCall: TypeError: undefined is not an object"
+    // response. The bug was masked pre-myc#86 because the strictening
+    // assertion didn't fire on null returns; with the assertion in
+    // place scenario 06 fails on every run.
+    //
+    // Parameter-free RPCs (getLastBlockNumber, getNetworkInfo, ...) are
+    // unaffected because they never read `data`. We always include a
+    // `data` field — an empty object when no extras were supplied — so
+    // both branches resolve safely.
     const body = JSON.stringify({
         method: "nodeCall",
-        params: [{ message, ...extraParams }],
+        params: [
+            {
+                message,
+                data: Object.keys(extraParams).length > 0 ? extraParams : {},
+            },
+        ],
     })
 
     const attempt = async (): Promise<T> => {

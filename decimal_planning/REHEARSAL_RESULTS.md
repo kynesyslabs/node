@@ -679,3 +679,96 @@ DEM-665 P10b complete. **Both scenarios 09 and 10 ran end-to-end on a real 4-nod
 - Containers torn down automatically by `runScenario` lifecycle.
 - Production genesis restored.
 - New files: `lib/signing.ts`, `scenarios/10-burn-spend-rejection.ts` (rewritten from placeholder to drive).
+
+---
+
+## Run 8 — Full 10-scenario `run-all.sh` (DEM-665 final gate)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: complete `testing/forks/rehearsal/run-all.sh` sweep on the post-DEM-665 codebase. Acceptance gate before merging DEM-665 into stabilisation.
+
+### Result
+
+**10/10 PASS** in 1929s wall-clock (~32 min).
+
+```
+PASS  04-genesis-hash-invariance      93s
+PASS  01-all-cross-fork              168s
+PASS  07-sum-invariant-audit         161s
+PASS  08-idempotent-restart          120s
+PASS  05-cap-policy-fires-loud       241s
+PASS  06-mid-flight-tx               248s
+PASS  02-validator-desync-recovery   169s
+PASS  03-fresh-node-post-fork        434s
+PASS  09-fee-distribution            166s
+PASS  10-burn-spend-rejection        129s
+```
+
+### Bugs surfaced + fixed during this run
+
+Two harness bugs were discovered and fixed during the gating cycle. Both pre-date DEM-665 and were masked by either silent tolerance or stale Docker state:
+
+#### Bug 1 — `run-all.sh` empty-array expansion under macOS bash 3.2
+
+`set -u` + `"${EXTRA_ARGS[@]}"` against an empty array triggers
+`unbound variable` on the host's bash 3.2. Symptom: first scenario
+crashes with `EXTRA_ARGS[@]: unbound variable` before `bun run`
+fires. Fix: portable parameter expansion
+`${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}` — only emits words when the
+array is non-empty.
+
+#### Bug 2 — `lib/nodeQueries.ts` `rpcNodeCall` wire-shape mismatch
+
+Pre-myc#86 the assertion that throws on null balance didn't exist,
+so scenario 06 silently accepted nulls and passed. myc#86 added
+strict null-checks and the bug surfaced.
+
+Root cause: `rpcNodeCall` flattened `extraParams` alongside `message`
+(`params: [{ message, ...extraParams }]`), but `manageNodeCall`
+unpacks `content.data` and forwards it to handlers — handlers expect
+`data.address` (or similar param keys). The flattened shape left
+`data === undefined`, every parametric `nodeCall` returned
+`Error in nodeCall: TypeError: undefined is not an object`.
+
+Pre-myc#86 strictening this was an invisible bug — every cross-node
+assertion compared `Set.size === 1` of all-null returns and passed
+trivially. Scenario 06 in Run 5 was a false positive.
+
+Fix: wrap extra params under `data`:
+
+```ts
+params: [{
+    message,
+    data: Object.keys(extraParams).length > 0 ? extraParams : {},
+}]
+```
+
+Parameter-free RPCs (`getLastBlockNumber`, `getNetworkInfo`, …) are
+unaffected because their handlers never read `data`.
+
+#### Side-finding — Docker buildkit snapshot corruption
+
+On a long rehearsal cycle the `docker compose --build` snapshot
+graph can corrupt with a `parent snapshot … does not exist`
+extraction failure. `docker system prune -a -f --volumes`
+rebuilds it cleanly. Operator note for future cycles: run a full
+prune between consecutive `run-all.sh` invocations to avoid the
+flake.
+
+### Verdict
+
+DEM-665 implementation gates clean against the full rehearsal cycle.
+Both new DEM-665 scenarios (09 + 10) and the eight pre-existing
+decimals scenarios pass in a single run with no manual
+intervention beyond the bash 3.2 + Docker prune housekeeping noted
+above. Branch is ready for review.
+
+### Final state
+
+- All containers torn down (`runScenario` lifecycle).
+- Production genesis restored.
+- Two harness fixes committed under DEM-665 P10b followups:
+  - `testing/forks/rehearsal/run-all.sh` — bash 3.2 portability.
+  - `testing/forks/rehearsal/lib/nodeQueries.ts` — `rpcNodeCall`
+    wire shape.
