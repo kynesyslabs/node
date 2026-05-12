@@ -12,9 +12,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
-import calculateCurrentGas, {
-    calculateFeeBreakdown,
-} from "src/libs/blockchain/routines/calculateCurrentGas"
+import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
 import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
 import Transaction from "src/libs/blockchain/transaction"
 import Cryptography from "src/libs/crypto/cryptography"
@@ -26,7 +24,7 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { isForkActive } from "@/forks"
-import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
+import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -128,7 +126,7 @@ export async function confirmTransaction(
     // `signValidityData(validityData)` so the appended edits are part
     // of the signed hash (peers compute the same hash).
     if (isForkActive("gasFeeSeparation", referenceBlock)) {
-        const feeBoundsResult = await applyGasFeeSeparation(tx, validityData)
+        const feeBoundsResult = await applyGasFeeSeparation(tx)
         if (feeBoundsResult.ok === false) {
             validityData.data.valid = false
             validityData.data.message =
@@ -191,116 +189,6 @@ async function runTypeDispatcher(
         >[0])
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
-    return { ok: true }
-}
-
-/**
- * DEM-665 — compute the per-component fee breakdown, stamp
- * `transaction_fee.rpc_address` with this node's pubkey, check sender
- * balance, and prepend fee-distribution edits onto `tx.content.gcr_edits`.
- *
- * Called only when `isForkActive("gasFeeSeparation", currentBlock)` is
- * true. Mutates `tx` in place — the caller treats the mutation as
- * part of confirmation. Returns ok=true on success; ok=false with a
- * human-readable message when the sender cannot afford the total fee.
- *
- * Returns ok=true (no edits emitted) if the runtime
- * `feeDistribution` view is null. That state should never occur in
- * production once the fork is active — both bootstraps
- * (loadForkConfigFromGenesis + loadNetworkParameters) run before any
- * post-fork block is processed. The defensive path prefers
- * letting the tx through to a downstream apply-time failure rather
- * than rejecting valid txs because the loader had a transient hiccup.
- */
-async function applyGasFeeSeparation(
-    tx: Transaction,
-    validityData: ValidityData,
-): Promise<{ ok: true } | { ok: false; message: string }> {
-    void validityData
-    // Normalise sender pubkey to hex string; tx.content.from may be
-    // either string or Uint8Array depending on entry point. Mirrors
-    // the coercion in defineGas() below.
-    let senderAddress: string
-    try {
-        senderAddress =
-            typeof tx.content.from === "string"
-                ? tx.content.from
-                : forgeToHex(tx.content.from)
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e)
-        return {
-            ok: false,
-            message: `failed to resolve sender address: ${msg}`,
-        }
-    }
-
-    // Compute per-component breakdown.
-    const breakdown = await calculateFeeBreakdown(tx)
-    if (
-        !Number.isFinite(breakdown.total) ||
-        !Number.isInteger(breakdown.total) ||
-        breakdown.total < 0
-    ) {
-        return {
-            ok: false,
-            message: `calculateFeeBreakdown returned non-integer total: ${breakdown.total}`,
-        }
-    }
-
-    // Stamp the transaction with the per-component values + this
-    // node's pubkey as the rpc_address. Peers receiving the signed
-    // ValidityData rely on these fields being present.
-    const rpcAddressHex = uint8ArrayToHex(
-        (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
-            .publicKey as Uint8Array,
-    )
-    tx.content.transaction_fee.network_fee = breakdown.network_fee
-    tx.content.transaction_fee.rpc_fee = breakdown.rpc_fee
-    tx.content.transaction_fee.additional_fee = breakdown.additional_fee
-    tx.content.transaction_fee.rpc_address = rpcAddressHex
-
-    // Sender balance check — only enforced in PROD (matches the legacy
-    // defineGas behavior so non-prod testing can submit unfunded txs).
-    if (getSharedState.PROD) {
-        let senderBalance: bigint
-        try {
-            senderBalance = await GCR.getGCRNativeBalance(senderAddress)
-        } catch (e) {
-            return {
-                ok: false,
-                message: `failed to read sender balance: ${
-                    e instanceof Error ? e.message : String(e)
-                }`,
-            }
-        }
-        if (senderBalance < BigInt(breakdown.total)) {
-            return {
-                ok: false,
-                message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
-            }
-        }
-    }
-
-    // Generate fee-distribution edits and prepend onto the tx's
-    // existing gcr_edits. Prepend (rather than append) so the fee
-    // deductions apply before any tx-level operation — same intent as
-    // the legacy gas-Operation slot.
-    const feeEdits = generateFeeDistributionEdits({
-        senderAddress,
-        rpcAddress: rpcAddressHex,
-        networkFee: breakdown.network_fee,
-        rpcFee: breakdown.rpc_fee,
-        additionalFee: breakdown.additional_fee,
-        txHash: tx.hash ?? "",
-        isRollback: false,
-    })
-    tx.content.gcr_edits = [
-        ...(feeEdits as typeof tx.content.gcr_edits),
-        ...(tx.content.gcr_edits ?? []),
-    ]
-    log.debug(
-        `[TX] applyGasFeeSeparation - prepended ${feeEdits.length} fee edits onto tx ${tx.hash}`,
-    )
     return { ok: true }
 }
 
