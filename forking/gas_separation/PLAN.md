@@ -35,7 +35,7 @@ The plan below is the original DEM-665 specification text. **The implementation 
 | TLSN fork-gated branches | `src/libs/blockchain/gcr/gcr_routines/handleNativeOperations.ts` (`tlsn_request`, `tlsn_store`) |
 | Burn-address spend prevention | `src/libs/blockchain/gcr/gcr_routines/GCRBalanceRoutines.ts` |
 | Governance keys + cross-key sum-100 invariant | `src/features/networkUpgrade/constants.ts`, `src/features/networkUpgrade/safetyBounds.ts` |
-| Activation runbook | `decimal_planning/RUNBOOK_FORK_ACTIVATION.md` §9 |
+| Activation runbook | `forking/RUNBOOK_FORK_ACTIVATION.md` §9 |
 
 ### Test coverage
 

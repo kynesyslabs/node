@@ -239,7 +239,7 @@ The fork-activation logic, peer convergence, idempotency, fresh-joiner replay, a
 2. **Add a unit test against Postgres**, not SQLite, that runs the migration on a 1e18-seeded row and asserts behaviour. The 52/52 SQLite tests give false confidence.
 3. **Re-run the rehearsal** after the fix lands; scenarios 2–8 still need verification.
 4. **Document the harness/`.env` mismatch** in `testing/forks/rehearsal/README.md` so the next operator doesn't lose 5 minutes to it.
-5. **Operator note**: the `genesis-fork-overflow.json` referenced in `decimal_planning/REHEARSAL_PLAN.md` for scenario 5 is not present in `testing/forks/rehearsal/genesis/` — the harness uses `genesis-fork-mid.json` instead. Worth reconciling.
+5. **Operator note**: the `genesis-fork-overflow.json` referenced in `forking/REHEARSAL_RESULTS.md` for scenario 5 is not present in `testing/forks/rehearsal/genesis/` — the harness uses `genesis-fork-mid.json` instead. Worth reconciling.
 
 ### Final state
 

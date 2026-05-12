@@ -2,7 +2,7 @@
  * Truth-table tests for the fork gate.
  *
  * These tests verify the contract spelled out in
- * `decimal_planning/SPEC.md` §3 P2: a fork is active iff its
+ * `forking/decimal_planning/SPEC.md` §3 P2: a fork is active iff its
  * `activationHeight` is non-null AND `blockHeight >= activationHeight`. A
  * `null` activation height (the default for every fork in P2) means the
  * fork never activates.

@@ -1,7 +1,7 @@
 # DEM → OS Fork Activation Rehearsal Harness
 
 Implementation of the 8 rehearsal scenarios specified in
-`decimal_planning/REHEARSAL_PLAN.md`. Drives the existing 4-node devnet
+`forking/REHEARSAL_RESULTS.md`. Drives the existing 4-node devnet
 (`testing/devnet/`) under fork activation against PostgreSQL, exercising
 the migration on a real database instead of the in-memory SQLite that
 the unit tests use.
@@ -136,7 +136,7 @@ testing/forks/rehearsal/
 ## Adapters used
 
 Three minimal adapters from the rehearsal-readiness audit
-(`decimal_planning/DEVNET_READINESS.md`):
+(`forking/REHEARSAL_RESULTS.md`):
 
 1. **Genesis adapter — strategy (a) "stage at the build path"**.
    The image bakes `data/genesis.json` at build time. The harness
