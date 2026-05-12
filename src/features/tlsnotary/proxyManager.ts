@@ -170,19 +170,21 @@ export function extractDomainAndPort(targetUrl: string): {
 
 /**
  * Build a public WebSocket URL from a base HTTP(S)/WS(S) URL and a local port.
- * Path mode: when the base URL has a path, route through a reverse proxy at
- * `url.host` (port preserved) that maps `<path>/<port>` to the local port
- * (single nginx rule). No-path mode: connect directly to `url.hostname` on
- * the target port.
+ * Local bases keep direct ws://localhost:<port> URLs for development. Public
+ * bases always route through a TLS reverse proxy path, defaulting to
+ * /tlsn/<port>/ when no explicit path is provided.
  */
 export function buildWsUrl(base: string, port: number | string): string {
     const url = new URL(base)
-    const secure = url.protocol === "https:" || url.protocol === "wss:"
-    const wsScheme = secure ? "wss" : "ws"
-    const path = url.pathname.replace(/\/+$/, "")
-    return path
-        ? `${wsScheme}://${url.host}${path}/${port}/`
-        : `${wsScheme}://${url.hostname}:${port}`
+    const isLocal =
+        url.hostname === "localhost" || url.hostname === "127.0.0.1"
+
+    if (isLocal) {
+        return `ws://${url.hostname}:${port}`
+    }
+
+    const path = url.pathname.replace(/\/+$/, "") || "/tlsn"
+    return `wss://${url.hostname}${path}/${port}/`
 }
 
 /**
