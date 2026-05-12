@@ -11,7 +11,7 @@
  * the mocks it needs and asserts the helper's mutations + result.
  */
 
-import { beforeEach, describe, expect, it, jest } from "@jest/globals"
+import { afterEach, beforeEach, describe, expect, it, jest } from "@jest/globals"
 
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
@@ -272,6 +272,79 @@ describe("applyGasFeeSeparation — breakdown sanity", () => {
         sharedStateStub.rpcFee = 0
         const r = await applyGasFeeSeparation(makeTx())
         expect(r.ok).toBe(false)
+    })
+})
+
+describe("applyGasFeeSeparation — fee-distribution-not-primed guard (PR #817 Greptile P1)", () => {
+    // generateFeeDistributionEdits returns [] when feeDistribution is
+    // null OR every percentage is 0. The helper must refuse the tx
+    // whenever breakdown.total > 0 and no fee edits were generated;
+    // accepting the tx silently in that window collects nothing and
+    // re-introduces the silent fee-leak the guard exists to prevent.
+
+    const restoreFeeDistribution = (): void => {
+        sharedStateStub.feeDistribution = {
+            burnAddress: BURN,
+            treasuryAddress: TREASURY,
+            networkFee: { burnPct: 50, treasuryPct: 50 },
+            additionalFee: { burnPct: 25, treasuryPct: 75 },
+            specialOps: { burnPct: 25, rpcPct: 50, treasuryPct: 25 },
+        }
+    }
+
+    beforeEach(() => {
+        sharedStateStub.PROD = false
+        sharedStateStub.networkFee = 10
+        sharedStateStub.rpcFee = 7
+        sharedStateStub.additionalFee = 0
+        // Each test in this describe block mutates feeDistribution;
+        // restore the default before every case so siblings don't
+        // leak null/all-zero state into later cases.
+        restoreFeeDistribution()
+    })
+
+    afterEach(() => {
+        // Also restore for the next describe block to start clean.
+        restoreFeeDistribution()
+    })
+
+    it("rejects post-fork tx when feeDistribution is null", async () => {
+        sharedStateStub.feeDistribution = null
+        const r = await applyGasFeeSeparation(makeTx())
+        expect(r.ok).toBe(false)
+        if (!r.ok) {
+            expect(r.message).toMatch(/fee distribution not primed/)
+        }
+    })
+
+    it("rejects post-fork tx when all percentages are 0 (init window)", async () => {
+        // Simulate the loadForkConfigFromGenesis-primed-but-
+        // loadNetworkParameters-not-yet state: addresses present,
+        // every group at 0%.
+        sharedStateStub.feeDistribution = {
+            burnAddress: BURN,
+            treasuryAddress: TREASURY,
+            networkFee: { burnPct: 0, treasuryPct: 0 },
+            additionalFee: { burnPct: 0, treasuryPct: 0 },
+            specialOps: { burnPct: 0, rpcPct: 0, treasuryPct: 0 },
+        }
+        const r = await applyGasFeeSeparation(makeTx())
+        expect(r.ok).toBe(false)
+        if (!r.ok) {
+            expect(r.message).toMatch(/fee distribution not primed/)
+        }
+    })
+
+    it("accepts zero-total tx even when feeDistribution returns no edits", async () => {
+        // breakdown.total === 0 means nothing needed to be charged,
+        // so the no-edits return is fine. This guards the harness +
+        // future zero-fee carve-outs (e.g. genesis-fees-disabled).
+        sharedStateStub.feeDistribution = null
+        sharedStateStub.networkFee = 0
+        sharedStateStub.rpcFee = 0
+        sharedStateStub.additionalFee = 0
+        const r = await applyGasFeeSeparation(makeTx())
+        expect(r.ok).toBe(true)
     })
 })
 

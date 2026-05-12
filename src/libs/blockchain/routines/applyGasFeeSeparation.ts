@@ -164,6 +164,26 @@ export async function applyGasFeeSeparation(
         txHash: tx.hash ?? "",
         isRollback: false,
     })
+
+    // PR #817 Greptile P1 (silent fee bypass):
+    // generateFeeDistributionEdits returns [] when
+    // `requireFeeDistribution` returns null — either feeDistribution
+    // hasn't been primed at all, or every percentage is still 0
+    // (transient window between loadForkConfigFromGenesis and
+    // loadNetworkParameters). Silently accepting the tx in that
+    // window would charge nothing while marking the tx valid, which
+    // is exactly the failure mode the prior guard was meant to
+    // prevent. Refuse the tx whenever the breakdown demanded a
+    // non-zero total but no edits were generated.
+    if (breakdown.total > 0 && feeEdits.length === 0) {
+        return {
+            ok: false,
+            message:
+                "fee distribution not primed — refusing to accept post-fork tx without fee collection " +
+                `(breakdown.total=${breakdown.total}, but generateFeeDistributionEdits returned 0 edits)`,
+        }
+    }
+
     tx.content.gcr_edits = [
         ...(feeEdits as GCREdit[]),
         ...((tx.content.gcr_edits ?? []) as GCREdit[]),
