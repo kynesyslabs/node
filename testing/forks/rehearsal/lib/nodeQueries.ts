@@ -264,6 +264,42 @@ export async function getForkStateRow(
     return rows[0] ?? null
 }
 
+/**
+ * DEM-665 — reads the `fork_state` row for `gasFeeSeparation`. The
+ * column set is the same as osDenomination's row (shared table) but
+ * gasFeeSeparation only populates the lifecycle columns
+ * (fork_name, applied, applied_at_block, applied_at); the
+ * sum/cap/row-count columns stay NULL because this migration doesn't
+ * touch balances.
+ */
+export async function getGasFeeForkStateRow(
+    nodeId: number,
+): Promise<ForkStateRow | null> {
+    const rows = await query<ForkStateRow>(
+        nodeId,
+        "SELECT * FROM fork_state WHERE fork_name = $1",
+        ["gasFeeSeparation"],
+    )
+    return rows[0] ?? null
+}
+
+/**
+ * DEM-665 — reads a single gcr_main row by pubkey. Returns the row or
+ * null. Used by scenario 09 to assert burn + treasury accounts exist
+ * with balance 0 after the gasFeeSeparation activation hook fires.
+ */
+export async function getGcrAccount(
+    nodeId: number,
+    pubkey: string,
+): Promise<{ pubkey: string; balance: string } | null> {
+    const rows = await query<{ pubkey: string; balance: string }>(
+        nodeId,
+        "SELECT pubkey, balance::text AS balance FROM gcr_main WHERE pubkey = $1",
+        [pubkey],
+    )
+    return rows[0] ?? null
+}
+
 /** Sums `gcr_main.balance` (bigint) for the given node. */
 export async function sumGcrMain(nodeId: number): Promise<bigint> {
     const rows = await query<{ s: string | null }>(

@@ -1,15 +1,17 @@
 #!/bin/bash
-# Runs the 8 fork-activation rehearsal scenarios in dependency order.
+# Runs the fork-activation rehearsal scenarios in dependency order.
 #
-# Per REHEARSAL_PLAN.md §4, the order is:
-#   1. Scenario 4 — genesis-hash-invariance         (must be first)
-#   2. Scenario 1 — all-validators-cross-fork       (base case)
+# Per REHEARSAL_PLAN.md §4 + DEM-665 P10b, the order is:
+#   1. Scenario 4 — genesis-hash-invariance          (must be first)
+#   2. Scenario 1 — all-validators-cross-fork        (base case)
 #   3. Scenario 7 — sum-invariant-audit
 #   4. Scenario 8 — idempotent-restart
 #   5. Scenario 5 — cap-policy-fires-loud
 #   6. Scenario 6 — mid-flight-tx
 #   7. Scenario 2 — validator-desync-recovery
-#   8. Scenario 3 — fresh-node-post-fork            (highest stakes, last)
+#   8. Scenario 3 — fresh-node-post-fork             (decimals last)
+#   9. Scenario 9 — gasFeeSeparation co-activation   (DEM-665)
+#  10. Scenario 10 — burn-spend-rejection            (DEM-665, placeholder)
 #
 # Exits non-zero on the first failure; subsequent scenarios are skipped.
 # Pass `--keep-state` to leave the devnet running on a failure for
@@ -29,6 +31,8 @@ SCENARIOS=(
     "scenarios/06-mid-flight-tx.ts"
     "scenarios/02-validator-desync-recovery.ts"
     "scenarios/03-fresh-node-post-fork.ts"
+    "scenarios/09-fee-distribution.ts"
+    "scenarios/10-burn-spend-rejection.ts"
 )
 
 EXTRA_ARGS=()

@@ -56,6 +56,17 @@ export const GENESIS_FORK_OVERFLOW = resolve(
     "genesis",
     "genesis-fork-overflow.json",
 )
+/**
+ * DEM-665 — co-activates osDenomination and gasFeeSeparation at
+ * activationHeight=5. Carries a sentinel `treasuryAddress`
+ * (0xfeedface...feedface) so scenario 09 can SELECT it directly out of
+ * gcr_main to assert account creation.
+ */
+export const GENESIS_FORK_LOW_GAS_FEE = resolve(
+    REHEARSAL_DIR,
+    "genesis",
+    "genesis-fork-low-gasFee.json",
+)
 
 /**
  * Runs `docker compose` (cwd=DEVNET_DIR) with the supplied args.

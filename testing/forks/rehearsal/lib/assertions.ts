@@ -9,6 +9,8 @@
 import {
     getBlockHashFromDb,
     getForkStateRow,
+    getGasFeeForkStateRow,
+    getGcrAccount,
     getLastBlockNumber,
     getNetworkInfo,
     sumAllBalances,
@@ -152,4 +154,83 @@ export async function assertSumInvariantConvergence(
         }
     }
     return first
+}
+
+/**
+ * DEM-665 — asserts every node has a `fork_state` row for
+ * `gasFeeSeparation` with `applied = true` AND matching
+ * `applied_at_block` across all nodes. Returns one of the rows for
+ * downstream inspection.
+ *
+ * Sum / cap columns are NULL on this row by design (the migration
+ * creates two zero-balance accounts; it doesn't touch supply), so they
+ * are NOT compared.
+ */
+export async function assertGasFeeForkStateConvergence(
+    nodeIds: number[],
+): Promise<ForkStateRow> {
+    const rows = await Promise.all(
+        nodeIds.map(
+            async id => [id, await getGasFeeForkStateRow(id)] as const,
+        ),
+    )
+    const narrowed: Array<readonly [number, ForkStateRow]> = rows.map(
+        ([id, row]) => {
+            if (!row) {
+                throw new Error(
+                    `Node ${id} has no gasFeeSeparation fork_state row`,
+                )
+            }
+            if (!row.applied) {
+                throw new Error(
+                    `Node ${id} gasFeeSeparation fork_state.applied is false`,
+                )
+            }
+            return [id, row] as const
+        },
+    )
+    const first = narrowed[0][1]
+    const fields: Array<keyof ForkStateRow> = [
+        "fork_name",
+        "applied_at_block",
+    ]
+    for (const [id, row] of narrowed) {
+        for (const f of fields) {
+            if (String(row[f]) !== String(first[f])) {
+                throw new Error(
+                    `gasFeeSeparation fork_state.${String(f)} divergence: ` +
+                        `node-${nodeIds[0]}=${String(first[f])} ` +
+                        `vs node-${id}=${String(row[f])}`,
+                )
+            }
+        }
+    }
+    return first
+}
+
+/**
+ * DEM-665 — asserts every node has a `gcr_main` row at `pubkey` with
+ * the expected balance (string-compared after `numeric::text` cast).
+ * Used by scenario 09 to verify burn + treasury accounts were created
+ * by the gasFeeSeparation migration with balance 0.
+ */
+export async function assertGcrAccountConvergence(
+    nodeIds: number[],
+    pubkey: string,
+    expectedBalance: string,
+    label: string,
+): Promise<void> {
+    for (const id of nodeIds) {
+        const row = await getGcrAccount(id, pubkey)
+        if (!row) {
+            throw new Error(
+                `${label}: node-${id} has no gcr_main row at ${pubkey}`,
+            )
+        }
+        if (row.balance !== expectedBalance) {
+            throw new Error(
+                `${label}: node-${id} balance=${row.balance}, expected=${expectedBalance}`,
+            )
+        }
+    }
 }
