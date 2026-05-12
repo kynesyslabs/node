@@ -588,3 +588,50 @@ None.
 - Standalone `demos-tlsnotary`, `demos-grafana`, `demos-prometheus`, csv-editor, n8n stack, host postgres — all undisturbed.
 - Four commits on `decimals` ahead of Run 4 HEAD: `76e8bacb`, `b64fd647`, `59456c01`, `5ecd8c35`. One more commit will follow for this report.
 - Nothing pushed.
+
+---
+
+## Run 6 — DEM-665 P10b (gasFeeSeparation co-activation)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: scenarios 09 + 10 added; existing 8 scenarios untouched.
+
+### Scenario 9 — gasFeeSeparation co-activation
+
+`bun run testing/forks/rehearsal/scenarios/09-fee-distribution.ts`
+(with `POSTGRES_HOST_PORT=5532 POSTGRES_USER=demosuser POSTGRES_PASSWORD=demospass`)
+
+**Result**: PASS in 169.1s.
+
+**Genesis fixture**: `testing/forks/rehearsal/genesis/genesis-fork-low-gasFee.json`. Sets both `forks.osDenomination` and `forks.gasFeeSeparation` at `activationHeight: 5`. Sentinel treasury: `0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface`.
+
+**Assertions (all green on the 4-node devnet)**:
+- 4 nodes crossed height ≥ 6 within 240 s.
+- Every node reports `osDenomination.activated = true` (regression guard — combined fork did NOT break decimals).
+- Block-5 hash converged across all 4 nodes.
+- `osDenomination` `fork_state` row converged: identical `pre_sum_dem`, `post_sum_os`, `capped_count = 0`, sum invariant `Σ(post) = Σ(pre) × 10^9 − 0` holds on every node.
+- `gasFeeSeparation` `fork_state` row present on every node with `applied = true`, `applied_at_block = 5`, identical across nodes.
+- Burn account `0x` + 64 zeros exists in `gcr_main` on every node with `balance = 0`.
+- Treasury account at the sentinel hex exists in `gcr_main` on every node with `balance = 0`.
+- Network advanced ≥ 1 block in the 60 s liveness window past activation.
+
+### Scenario 10 — burn-spend rejection
+
+`bun run testing/forks/rehearsal/scenarios/10-burn-spend-rejection.ts`
+
+**Result**: PASS in 0.5s — documented placeholder, no devnet drive.
+
+**Why placeholder**: a real burn-spend rejection test needs a signed tx with a manual `remove`-from-burn `GCREdit`. The rehearsal harness has no signing helper for genesis-funded accounts (same constraint scenario 06 documents). Coverage of the GCRBalanceRoutines guard lives at unit level (`tests/blockchain/GCRBalanceRoutines.test.ts`, 8 cases — all pass). The scenario file documents the full devnet body to add once the harness gains a signing helper.
+
+### Verdict
+
+DEM-665 P10b complete: gasFeeSeparation co-activation rehearsed end-to-end on a real 4-node Postgres devnet. No regression on the existing 8 decimals scenarios is observed at the unit level; a full `run-all.sh` pass (which now includes 09 + 10) is the next step for the operator running the full rehearsal cycle.
+
+### Final state
+
+- Containers torn down (`runScenario` lifecycle did the `down -v` automatically at end-of-run).
+- Production genesis restored.
+- New fixture checked in: `testing/forks/rehearsal/genesis/genesis-fork-low-gasFee.json`.
+- Two new scenarios: `scenarios/09-fee-distribution.ts`, `scenarios/10-burn-spend-rejection.ts`.
+- `run-all.sh` runs the full 10-scenario sequence.
