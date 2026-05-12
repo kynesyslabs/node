@@ -83,6 +83,32 @@ function requireFeeDistribution(): NonNullable<
         )
         return null
     }
+    // PR #817 Greptile P2 — fail-closed when distribution percentages
+    // are still in their pre-`loadNetworkParameters` zero state.
+    //
+    // `loadForkConfigFromGenesis` primes `feeDistribution` with zero
+    // percentages so the structure is non-null before
+    // `loadNetworkParameters` runs. If a post-fork tx is processed in
+    // that window (race, partial-init test harness, etc.) every fee
+    // would route 100% to treasury invisibly because all burn/rpc
+    // shares are 0. Refusing to emit edits is louder than silently
+    // misrouting fees — the caller surfaces the rejection through
+    // `applyGasFeeSeparation`'s failure path which signs an invalid
+    // ValidityData with a clear message.
+    const allZero =
+        fd.networkFee.burnPct === 0 &&
+        fd.networkFee.treasuryPct === 0 &&
+        fd.additionalFee.burnPct === 0 &&
+        fd.additionalFee.treasuryPct === 0 &&
+        fd.specialOps.burnPct === 0 &&
+        fd.specialOps.rpcPct === 0 &&
+        fd.specialOps.treasuryPct === 0
+    if (allZero) {
+        log.error(
+            "[FeeDistribution] every distribution percentage is 0 — runtime view was primed by loadForkConfigFromGenesis but loadNetworkParameters has not yet folded governance values. Refusing to emit edits.",
+        )
+        return null
+    }
     return fd
 }
 
@@ -224,20 +250,39 @@ export function generateFeeDistributionEdits(
     )
 
     // --- rpc_fee block (100% to the validating rpc operator) ---
+    //
+    // PR #817 Greptile P1: when rpcAddress is unexpectedly null we
+    // MUST NOT silently drop the whole block. Doing so leaves the
+    // sender's rpc_fee tokens uncollected — a silent fee leak. The
+    // sender's `remove` ALWAYS fires; the recipient `add` folds into
+    // treasury when no rpc operator is identified, matching the
+    // fallback behaviour `generateSpecialOpsFeeEdits` uses for the
+    // same null-rpc case.
     if (rpcFee > 0) {
+        edits.push(
+            makeBalanceEdit(
+                "remove",
+                senderAddress,
+                rpcFee,
+                txHash,
+                isRollback,
+            ),
+        )
         if (!rpcAddress) {
             log.warning(
-                `[FeeDistribution] tx ${txHash} has rpcFee=${rpcFee} but no rpcAddress — skipping rpc_fee block.`,
+                `[FeeDistribution] tx ${txHash} has rpcFee=${rpcFee} but no rpcAddress — folding rpc_fee into treasury.`,
             )
-        } else {
             edits.push(
                 makeBalanceEdit(
-                    "remove",
-                    senderAddress,
+                    "add",
+                    fd.treasuryAddress,
                     rpcFee,
                     txHash,
                     isRollback,
                 ),
+            )
+        } else {
+            edits.push(
                 makeBalanceEdit(
                     "add",
                     rpcAddress,

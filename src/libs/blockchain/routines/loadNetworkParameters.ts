@@ -67,6 +67,12 @@ export async function loadNetworkParameters(
         params.networkFee
     ;(getSharedState as unknown as { shardSize: number }).shardSize =
         params.shardSize
+    // DEM-665: additional_fee is governance-mutable and read by the
+    // post-fork fee-distribution path. Mirror onto the flat field so
+    // calculateFeeBreakdown picks up governance changes without a
+    // restart.
+    ;(getSharedState as unknown as { additionalFee: number }).additionalFee =
+        params.additionalFee
 
     // DEM-665: fold governance-mutable distribution percentages onto
     // SharedState.feeDistribution. Addresses (burnAddress,

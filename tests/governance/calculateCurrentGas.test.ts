@@ -22,7 +22,8 @@ const sharedStateStub: {
     networkFee: number
     rpcFee: number
     burnFee: number
-} = { networkFee: 1, rpcFee: 1, burnFee: 1 }
+    additionalFee: number
+} = { networkFee: 1, rpcFee: 1, burnFee: 1, additionalFee: 0 }
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
@@ -120,11 +121,20 @@ describe("calculateFeeBreakdown — per-component split (DEM-665)", () => {
         expect(b.total).toBe(0)
     })
 
-    it("additional_fee is always 0 until a dApp fee path lands", async () => {
-        const b1 = await calculateFeeBreakdown({ x: 1 })
-        sharedStateStub.networkFee = 100
-        const b2 = await calculateFeeBreakdown({ y: 2 })
-        expect(b1.additional_fee).toBe(0)
-        expect(b2.additional_fee).toBe(0)
+    it("additional_fee is 0 by default (governance has not raised it)", async () => {
+        sharedStateStub.additionalFee = 0
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.additional_fee).toBe(0)
+    })
+
+    it("reflects governance-mutable additionalFee from shared state (PR #817 Greptile P1)", async () => {
+        // Governance proposal raises additionalFee from 0 → 11. The
+        // collection path must follow without a node restart.
+        sharedStateStub.networkFee = 0
+        sharedStateStub.rpcFee = 0
+        sharedStateStub.additionalFee = 11
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.additional_fee).toBe(11)
+        expect(b.total).toBe(11)
     })
 })

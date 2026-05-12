@@ -44,6 +44,7 @@ const sharedStateStub: {
     networkFee: number
     rpcFee: number
     burnFee: number
+    additionalFee: number
     feeDistribution: FeeDistStub | null
 } = {
     PROD: false,
@@ -51,6 +52,7 @@ const sharedStateStub: {
     networkFee: 10,
     rpcFee: 7,
     burnFee: 0,
+    additionalFee: 0,
     feeDistribution: {
         burnAddress: BURN,
         treasuryAddress: TREASURY,

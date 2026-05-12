@@ -78,7 +78,12 @@ export async function calculateFeeBreakdown(
     // pricing comes back, multiply each component by `payloadSize` here.
     const network_fee = getSharedState.networkFee * surge
     const rpc_fee = getSharedState.rpcFee * surge
-    const additional_fee = 0
+    // DEM-665 (PR #817 Greptile P1): read additional_fee from shared
+    // state so governance changes via NetworkParameters actually take
+    // effect on the collection path. Defaults to 0 (matches the
+    // hardcoded fallback); raising it via a governance proposal that
+    // passes safetyBounds will start charging it on the next tx.
+    const additional_fee = getSharedState.additionalFee * surge
 
     return {
         network_fee,

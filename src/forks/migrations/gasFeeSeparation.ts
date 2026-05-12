@@ -56,17 +56,18 @@ import log from "@/utilities/logger"
 export const FORK_NAME = "gasFeeSeparation"
 
 /**
- * Burn-address constant.
+ * Burn-address constant (DEM-665).
  *
- * Re-exported with the same value (deliberate duplicate of the loader's
- * `GAS_FEE_SEPARATION_BURN_ADDRESS`) so both files can compile without a
- * circular import. Authoritative home is here in the migration module —
- * `loadForkConfig.ts` mirrors this value via a `const` and a unit test
- * MUST guard the equality so a future edit can't drift them.
+ * Re-exported from the leaf module `src/forks/burnAddress.ts` so this
+ * file and `loadForkConfig.ts` share a single source of truth. PR #817
+ * Greptile P1 — the prior duplicate literal in `loadForkConfig.ts` and
+ * the migration module relied on a unit test for equality; the
+ * consolidated import makes the invariant compile-time.
  *
  * Format: lowercase hex, `0x` + 64 zero hex digits = 66 chars total.
  */
-export const BURN_ADDRESS = "0x" + "0".repeat(64)
+export { BURN_ADDRESS } from "../burnAddress"
+import { BURN_ADDRESS } from "../burnAddress"
 
 export interface GasFeeSeparationMigrationResult {
     burnAddress: string
@@ -306,6 +307,16 @@ export async function runGasFeeSeparationMigration(
     //    migration doesn't touch balances. Only `applied`, `applied_at_block`
     //    and `applied_at` carry meaning. We still UPSERT for symmetry
     //    with the osDenomination flow.
+    //
+    //    PR #817 Greptile P2 — sqlite portability note: the
+    //    `ON CONFLICT (col) DO UPDATE SET … EXCLUDED.*` syntax
+    //    requires sqlite ≥ 3.24.0 (released 2018-06). Bun's bundled
+    //    sqlite ships 3.44.2 today (verified on the rehearsal host),
+    //    so this is safe for both production (Postgres) and the
+    //    sqlite test harness. If a future image downgrades sqlite,
+    //    the migration would silently no-op on conflict — the
+    //    osDenomination migration has the same dependency, so the
+    //    floor is already implicit in the rehearsal stack.
     const isPg =
         entityManager.connection.options.type === "postgres" ||
         entityManager.connection.options.type === "cockroachdb"

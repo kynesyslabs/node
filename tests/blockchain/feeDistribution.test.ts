@@ -145,7 +145,11 @@ describe("generateFeeDistributionEdits — default 50/50, 100%, 25/75", () => {
         ).toBe(7)
     })
 
-    it("skips rpc_fee block (and logs warning) when rpcAddress is null", () => {
+    it("folds rpc_fee into treasury (with warning) when rpcAddress is null", () => {
+        // PR #817 Greptile P1: previously this case dropped the whole
+        // rpc_fee block, leaving the sender's tokens uncollected.
+        // The sender's remove MUST always fire; the recipient share
+        // folds into treasury when the rpc operator is unknown.
         const edits = generateFeeDistributionEdits({
             senderAddress: SENDER,
             rpcAddress: null,
@@ -155,7 +159,28 @@ describe("generateFeeDistributionEdits — default 50/50, 100%, 25/75", () => {
             txHash: TX,
             isRollback: false,
         })
-        expect(edits).toHaveLength(0)
+        expect(edits).toHaveLength(2)
+        expect(
+            edits.find(
+                e => e.operation === "remove" && e.account === SENDER,
+            )?.amount,
+        ).toBe(50)
+        expect(
+            edits.find(
+                e => e.operation === "add" && e.account === TREASURY,
+            )?.amount,
+        ).toBe(50)
+        // No edit should target the burn address — rpc_fee never burns.
+        expect(edits.find(e => e.account === BURN)).toBeUndefined()
+        // Sum invariant: removed total == added total.
+        const removed = edits
+            .filter(e => e.operation === "remove")
+            .reduce((s, e) => s + (e.amount as number), 0)
+        const added = edits
+            .filter(e => e.operation === "add")
+            .reduce((s, e) => s + (e.amount as number), 0)
+        expect(removed).toBe(50)
+        expect(added).toBe(50)
     })
 
     it("emits additional_fee 25/75 split (3 edits)", () => {

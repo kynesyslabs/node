@@ -30,20 +30,14 @@ export class ForkConfigValidationError extends Error {
 /**
  * Burn-address constant for the gasFeeSeparation fork (DEM-665).
  *
- * Code-baked, never genesis-driven, never rotates. Used both at fork
- * activation (the migration creates a GCR account at this pubkey with
- * balance 0) and at runtime in `gcr_routines/feeDistribution.ts` and
- * `GCRBalanceRoutines.ts`.
- *
- * Mirrored as a re-export from `migrations/gasFeeSeparation.ts` once
- * P12 lands — that file is the authoritative home. Keeping it here too
- * (as the loader needs to write it into `feeDistribution.burnAddress`
- * before the migration file exists in dependency order) avoids a
- * circular import.
- *
- * Format: lowercase hex, `0x` + 64 zero hex digits = 66 chars total.
+ * Re-exported under the historical name `GAS_FEE_SEPARATION_BURN_ADDRESS`
+ * so existing call sites keep compiling unchanged. The actual literal
+ * lives in `./burnAddress.ts` — single source of truth shared with
+ * `migrations/gasFeeSeparation.ts` (PR #817 Greptile P1: removes the
+ * prior test-time-only equality between two duplicate literals).
  */
-export const GAS_FEE_SEPARATION_BURN_ADDRESS = "0x" + "0".repeat(64)
+export { BURN_ADDRESS as GAS_FEE_SEPARATION_BURN_ADDRESS } from "./burnAddress"
+import { BURN_ADDRESS as GAS_FEE_SEPARATION_BURN_ADDRESS } from "./burnAddress"
 
 /**
  * Hex address validation regex: lowercase `0x` + exactly 64 hex chars.

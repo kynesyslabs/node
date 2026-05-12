@@ -256,6 +256,14 @@ export default class SharedState {
     // the SDK adds it to NetworkParameters) this will also be refreshed by
     // loadNetworkParameters() like rpcFee/networkFee.
     burnFee: number = Config.getInstance().core.burnFee
+    // DEM-665 governance-mutable additionalFee scalar — mirrors
+    // NetworkParameters.additionalFee. Refreshed by loadNetworkParameters
+    // on every active-upgrade load. Default 0 (the same default the
+    // hardcoded fallback exposes); the post-fork fee-distribution path
+    // (`feeDistribution.ts`) reads this number and the same governance
+    // proposal that raises it from 0 takes effect on the next tx without
+    // a node restart.
+    additionalFee: number = 0
 
     /**
      * Active network parameters. Loaded once at startup by
