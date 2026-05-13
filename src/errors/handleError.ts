@@ -289,6 +289,21 @@ function formatCauseChain(cause: unknown, depth = 0): string {
     try {
         return ` | cause: ${JSON.stringify(cause)}`
     } catch {
+        // JSON.stringify usually fails on cycles/exotic values. Prefer
+        // a custom toString over `String(cause)` so plain objects don't
+        // collapse to "[object Object]" in the log (CodeRabbit nit on
+        // PR #817).
+        if (
+            typeof cause === "object" &&
+            cause !== null &&
+            "toString" in cause
+        ) {
+            try {
+                return ` | cause: ${(cause as { toString(): string }).toString()}`
+            } catch {
+                // fall through to String() below
+            }
+        }
         return ` | cause: ${String(cause)}`
     }
 }
