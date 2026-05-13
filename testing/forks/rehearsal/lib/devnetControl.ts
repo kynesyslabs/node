@@ -56,6 +56,17 @@ export const GENESIS_FORK_OVERFLOW = resolve(
     "genesis",
     "genesis-fork-overflow.json",
 )
+/**
+ * DEM-665 — co-activates osDenomination and gasFeeSeparation at
+ * activationHeight=5. Carries a sentinel `treasuryAddress`
+ * (0xfeedface...feedface) so scenario 09 can SELECT it directly out of
+ * gcr_main to assert account creation.
+ */
+export const GENESIS_FORK_LOW_GAS_FEE = resolve(
+    REHEARSAL_DIR,
+    "genesis",
+    "genesis-fork-low-gasFee.json",
+)
 
 /**
  * Runs `docker compose` (cwd=DEVNET_DIR) with the supplied args.
@@ -198,6 +209,49 @@ export function restoreProductionGenesis(): void {
     if (existsSync(PROD_GENESIS_BACKUP_PATH)) {
         copyFileSync(PROD_GENESIS_BACKUP_PATH, PROD_GENESIS_PATH)
     }
+}
+
+/**
+ * Reads a rehearsal genesis fixture, injects a synthetic
+ * `[pubkey, balance]` entry into `balances`, and writes the result to
+ * `data/genesis.json` (after the same one-time prod-backup the regular
+ * `stageGenesis()` does). Used by scenario 10 to fund a
+ * harness-controlled keypair so it can sign txs against the live
+ * devnet.
+ *
+ * Pubkey is added in the exact wire shape the production genesis
+ * uses (`0x` + 64 hex chars). Balance is supplied as a decimal string
+ * to match the existing fixtures.
+ *
+ * Returns the staged genesis object so callers can inspect the
+ * injected entries.
+ */
+export function stageGenesisWithFundedAccount(
+    rehearsalGenesisPath: string,
+    pubkeyHex: string,
+    balanceStr: string,
+): { balances: Array<[string, string]> } {
+    if (!existsSync(rehearsalGenesisPath)) {
+        throw new Error(`Genesis not found: ${rehearsalGenesisPath}`)
+    }
+    if (!existsSync(PROD_GENESIS_BACKUP_PATH)) {
+        if (existsSync(PROD_GENESIS_PATH)) {
+            copyFileSync(PROD_GENESIS_PATH, PROD_GENESIS_BACKUP_PATH)
+        }
+    }
+    const raw = require("fs").readFileSync(rehearsalGenesisPath, "utf8")
+    const genesis = JSON.parse(raw) as {
+        balances: Array<[string, string]>
+        [key: string]: unknown
+    }
+    if (!Array.isArray(genesis.balances)) {
+        throw new Error(
+            `stageGenesisWithFundedAccount: fixture has no balances array: ${rehearsalGenesisPath}`,
+        )
+    }
+    genesis.balances.push([pubkeyHex, balanceStr])
+    writeFileSync(PROD_GENESIS_PATH, JSON.stringify(genesis, null, 4) + "\n")
+    return { balances: genesis.balances }
 }
 
 /**

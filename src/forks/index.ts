@@ -1,4 +1,4 @@
-// REVIEW: P2/P3b — public surface for the forks module.
+// REVIEW: P2/P3b + DEM-665 — public surface for the forks module.
 
 export { isForkActive } from "./forkGates"
 export {
@@ -7,13 +7,22 @@ export {
 } from "./serializerGate"
 export {
     DEFAULT_FORK_CONFIG,
+    PLACEHOLDER_TREASURY_ADDRESS,
     cloneDefaultForkConfig,
 } from "./forkConfig"
 export {
     loadForkConfigFromGenesis,
     ForkConfigValidationError,
+    GAS_FEE_SEPARATION_BURN_ADDRESS,
 } from "./loadForkConfig"
-export type { ForkName, ForkConfig } from "./forkConfig"
+export type {
+    ForkName,
+    ForkConfig,
+    ForkConfigByName,
+    BaseForkConfig,
+    OsDenominationConfig,
+    GasFeeSeparationConfig,
+} from "./forkConfig"
 export {
     runOsDenominationMigration,
     isOsDenominationMigrationApplied,
@@ -21,3 +30,10 @@ export {
     LEGACY_NUMBER_CAP,
 } from "./migrations/osDenomination"
 export type { OsDenominationMigrationResult } from "./migrations/osDenomination"
+export {
+    runGasFeeSeparationMigration,
+    isGasFeeSeparationMigrationApplied,
+    FORK_NAME as GAS_FEE_SEPARATION_FORK_NAME,
+    BURN_ADDRESS as GAS_FEE_SEPARATION_BURN_ADDRESS_CONST,
+} from "./migrations/gasFeeSeparation"
+export type { GasFeeSeparationMigrationResult } from "./migrations/gasFeeSeparation"

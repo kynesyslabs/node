@@ -1,17 +1,24 @@
-// Dual-layer safety bounds for governance proposals.
+// Tri-layer safety bounds for governance proposals.
 // Layer 1 — percentage cap: no single proposal may change a numeric value by
 //           more than MAX_CHANGE_PERCENT in either direction.
+//           DEM-665: distribution keys use the tighter
+//           DISTRIBUTION_MAX_CHANGE_PERCENT (±10% by default).
 // Layer 2 — absolute floor/ceiling: each tunable parameter has a hard-coded
 //           acceptable range the governance system cannot override.
+// Layer 3 — DEM-665 cross-key sum-100 invariant: the merged (current ⊕
+//           proposed) view of each distribution group must add to exactly
+//           100.
 //
-// Returns {ok:true} iff every proposed key passes BOTH layers. Non-numeric
-// parameters (featureFlags) are exempt from percentage/floor checks but their
-// values must still be booleans.
+// Returns {ok:true} iff every proposed key passes ALL three layers.
+// Non-numeric parameters (featureFlags) are exempt from percentage/floor
+// checks but their values must still be booleans.
 //
 // Called from validateNetworkUpgradeTx (Phase 1 tx validation) and directly
 // unit-tested below.
 
 import {
+    DISTRIBUTION_KEYS,
+    DISTRIBUTION_MAX_CHANGE_PERCENT,
     getBigintBounds,
     MAX_CHANGE_PERCENT,
     NUMERIC_BOUNDS,
@@ -96,6 +103,78 @@ export function checkSafetyBounds(
             reason: "unsupported parameter type for safety check",
         }
     }
+
+    // DEM-665 — Layer 3: cross-key sum-100 invariant on distribution
+    // groups. Runs on the MERGED view so a proposal touching one
+    // percentage key only is validated against the not-yet-changed
+    // siblings (e.g. raising networkFeeBurnPct from 50 to 55 implies
+    // networkFeeTreasuryPct must drop to 45 — that key has to be in
+    // the same proposal, or the merged view fails to sum to 100).
+    const sumCheck = checkDistributionSumInvariant(current, proposed)
+    if (!sumCheck.ok) return sumCheck
+
+    return { ok: true }
+}
+
+/**
+ * DEM-665 — verifies that any distribution group touched by `proposed`
+ * still sums to exactly 100 once merged onto `current`. Untouched
+ * groups are skipped (they were valid in `current` by construction).
+ *
+ * Groups:
+ *  - network_fee:    burnPct + treasuryPct                === 100
+ *  - additional_fee: burnPct + treasuryPct                === 100
+ *  - special_ops:    burnPct + treasuryPct + rpcPct       === 100
+ *
+ * Returns the first failing group; callers stop on first failure.
+ */
+function checkDistributionSumInvariant(
+    current: NetworkParameters,
+    proposed: Partial<NetworkParameters>,
+): BoundsCheck {
+    const groups: Array<{
+        name: string
+        keys: NetworkParameterKey[]
+    }> = [
+        {
+            name: "network_fee",
+            keys: ["networkFeeBurnPct", "networkFeeTreasuryPct"],
+        },
+        {
+            name: "additional_fee",
+            keys: ["additionalFeeBurnPct", "additionalFeeTreasuryPct"],
+        },
+        {
+            name: "special_ops",
+            keys: [
+                "specialOpsBurnPct",
+                "specialOpsTreasuryPct",
+                "specialOpsRpcPct",
+            ],
+        },
+    ]
+    for (const { name, keys } of groups) {
+        const touched = keys.some(k => k in proposed)
+        if (!touched) continue
+        let sum = 0
+        for (const k of keys) {
+            const v =
+                k in proposed
+                    ? (proposed[k] as number)
+                    : (current[k] as number)
+            sum += v
+        }
+        if (sum !== 100) {
+            // Return the first proposed key in the group as the
+            // diagnostic-bearing key.
+            const reporter = keys.find(k => k in proposed) ?? keys[0]
+            return {
+                ok: false,
+                key: reporter,
+                reason: `distribution sum invariant violated for ${name}: merged sum=${sum}, must equal 100`,
+            }
+        }
+    }
     return { ok: true }
 }
 
@@ -145,11 +224,15 @@ function checkNumericBounds(
             }
         }
     }
-    if (!withinPercentCap(BigInt(current), BigInt(proposed))) {
+    // DEM-665: distribution-percentage keys use the tighter ±10% cap.
+    const cap = DISTRIBUTION_KEYS.has(key)
+        ? DISTRIBUTION_MAX_CHANGE_PERCENT
+        : MAX_CHANGE_PERCENT
+    if (!withinPercentCap(BigInt(current), BigInt(proposed), cap)) {
         return {
             ok: false,
             key,
-            reason: `proposed ${proposed} exceeds ${MAX_CHANGE_PERCENT}% change vs current ${current}`,
+            reason: `proposed ${proposed} exceeds ${cap}% change vs current ${current}`,
         }
     }
     return { ok: true }
@@ -190,7 +273,7 @@ function checkBigintBounds(
             }
         }
     }
-    if (!withinPercentCap(currentBig, proposedBig)) {
+    if (!withinPercentCap(currentBig, proposedBig, MAX_CHANGE_PERCENT)) {
         return {
             ok: false,
             key,
@@ -201,8 +284,12 @@ function checkBigintBounds(
 }
 
 /**
- * True iff |proposed - current| <= (MAX_CHANGE_PERCENT / 100) * |current|.
+ * True iff |proposed - current| <= (cap / 100) * |current|.
  * Bigint-only to avoid floating-point drift.
+ *
+ * DEM-665: `cap` is now a parameter (rather than a hardcoded constant)
+ * so distribution keys can use the tighter ±DISTRIBUTION_MAX_CHANGE_PERCENT
+ * while everything else keeps the historical ±MAX_CHANGE_PERCENT.
  *
  * Edge cases:
  * - current = 0: percent cap is undefined (delta / 0). Allow any non-negative
@@ -212,11 +299,15 @@ function checkBigintBounds(
  *   absolute-value caps (e.g. MAX_NETWORK_FEE) still apply at the
  *   per-key check sites.
  */
-function withinPercentCap(current: bigint, proposed: bigint): boolean {
+function withinPercentCap(
+    current: bigint,
+    proposed: bigint,
+    cap: number,
+): boolean {
     const absCurrent = current < 0n ? -current : current
     if (absCurrent === 0n) return proposed >= 0n
     const delta =
         proposed >= current ? proposed - current : current - proposed
-    // delta * 100 <= absCurrent * MAX_CHANGE_PERCENT
-    return delta * 100n <= absCurrent * BigInt(MAX_CHANGE_PERCENT)
+    // delta * 100 <= absCurrent * cap
+    return delta * 100n <= absCurrent * BigInt(cap)
 }

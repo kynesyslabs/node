@@ -23,6 +23,8 @@ import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { isForkActive } from "@/forks"
+import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -105,6 +107,36 @@ export async function confirmTransaction(
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
+
+    // DEM-665 — gasFeeSeparation fee distribution.
+    //
+    // Post-fork the validating node computes the per-component fee
+    // breakdown, stamps its own pubkey as `transaction_fee.rpc_address`
+    // (so peers know where to route the rpc_fee share), checks the
+    // sender can cover the total, and prepends the fee-distribution
+    // GCREdits onto `tx.content.gcr_edits` so they apply before any
+    // tx-level edits.
+    //
+    // Pre-fork: legacy path is preserved (the dead-code `defineGas`
+    // function below is the historical placeholder). No edits emitted
+    // here; the network keeps charging via the existing
+    // calculateCurrentGas → defineGas → noop flow.
+    //
+    // The fee-distribution write MUST happen before
+    // `signValidityData(validityData)` so the appended edits are part
+    // of the signed hash (peers compute the same hash).
+    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+        const feeBoundsResult = await applyGasFeeSeparation(tx)
+        if (feeBoundsResult.ok === false) {
+            validityData.data.valid = false
+            validityData.data.message =
+                "[Tx Validation] [FEE ERROR] " +
+                feeBoundsResult.message +
+                "\n"
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
 
     // Must run before signValidityData(): any gcr_edit attached here
     // becomes part of the signed hash, so peers compute the same hash.
@@ -311,6 +343,8 @@ async function defineGas(
             network_fee: 0,
             rpc_fee: 0,
             additional_fee: 0,
+            // DEM-665: internal gas Operation; no rpc routing here.
+            rpc_address: null,
         }, // This is the gas operation so it doesn't have additional fees
     }
     log.debug("[TX] defineGas - Gas Operation derived")

@@ -1,6 +1,6 @@
 /**
  * Pre-flight check script for the `osDenomination` fork activation —
- * runs every prerequisite from `decimal_planning/RUNBOOK_FORK_ACTIVATION.md`
+ * runs every prerequisite from `forking/RUNBOOK_FORK_ACTIVATION.md`
  * §2. Read-only; all checks run before exit (non-zero on any FAIL).
  *
  * Usage: `bun run preflight:fork [-- --rpc-url http://127.0.0.1:53551]`

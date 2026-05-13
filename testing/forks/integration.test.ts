@@ -41,8 +41,7 @@ import {
 import { serializeTransactionContent } from "@/forks/serializerGate"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import Hashing from "@/libs/crypto/hashing"
@@ -244,7 +243,7 @@ function makeRpcResponse(): RPCResponse {
 
 describe("forks integration (P3d)", () => {
     let dataSource: DataSource
-    let forkSnapshot: Record<ForkName, ForkConfig>
+    let forkSnapshot: ForkConfigByName
     let blockNumberSnapshot: number
 
     beforeEach(async () => {
@@ -364,6 +363,7 @@ describe("forks integration (P3d)", () => {
                 network_fee: 1,
                 rpc_fee: 1,
                 additional_fee: 1,
+                rpc_address: null,
             },
         }
 

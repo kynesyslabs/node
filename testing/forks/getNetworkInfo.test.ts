@@ -27,8 +27,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { handlerRegistry } from "@/libs/network/handlers"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import type { RPCResponse } from "@kynesyslabs/demosdk/types"
@@ -58,7 +57,7 @@ interface NetworkInfoResponse {
 }
 
 describe("getNetworkInfo RPC handler", () => {
-    let forkSnapshot: Record<ForkName, ForkConfig>
+    let forkSnapshot: ForkConfigByName
     let blockNumberSnapshot: number
 
     beforeEach(() => {

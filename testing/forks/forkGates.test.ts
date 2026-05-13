@@ -2,7 +2,7 @@
  * Truth-table tests for the fork gate.
  *
  * These tests verify the contract spelled out in
- * `decimal_planning/SPEC.md` §3 P2: a fork is active iff its
+ * `forking/decimal_planning/SPEC.md` §3 P2: a fork is active iff its
  * `activationHeight` is non-null AND `blockHeight >= activationHeight`. A
  * `null` activation height (the default for every fork in P2) means the
  * fork never activates.
@@ -12,13 +12,12 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { isForkActive } from "@/forks/forkGates"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 
 describe("isForkActive — truth table", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
 
     beforeEach(() => {
         // REVIEW: Snapshot the singleton config so each test starts from

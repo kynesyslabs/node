@@ -39,7 +39,7 @@
  * does NOT canonicalize (`JSON.stringify(content)` is the raw wire
  * shape), so neither does this helper.
  *
- * @see decimal_planning/SPEC.md §3 (P3 dual-rule paths)
+ * @see forking/decimal_planning/SPEC.md §3 (P3 dual-rule paths)
  * @see src/forks/serializerGate.ts (`toOsBigint`)
  */
 import { denomination } from "@kynesyslabs/demosdk"

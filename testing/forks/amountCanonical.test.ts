@@ -24,8 +24,7 @@ import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { serializeTransactionContent } from "@/forks/serializerGate"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import { denomination } from "@kynesyslabs/demosdk"
@@ -159,7 +158,7 @@ describe("canonicalizeAmountToOs — post-fork (forkActive=true)", () => {
 })
 
 describe("canonicalizeAmountToOs — serializer + executor parity", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
 
     beforeEach(() => {
         snapshot = cloneDefaultForkConfig()
@@ -187,6 +186,7 @@ describe("canonicalizeAmountToOs — serializer + executor parity", () => {
                 network_fee: 0,
                 rpc_fee: 0,
                 additional_fee: 0,
+                rpc_address: null,
             },
         }
     }

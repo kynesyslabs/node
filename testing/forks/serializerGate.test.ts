@@ -22,8 +22,7 @@ import {
 } from "@/forks/serializerGate"
 import {
     cloneDefaultForkConfig,
-    type ForkConfig,
-    type ForkName,
+    type ForkConfigByName,
 } from "@/forks/forkConfig"
 import { getSharedState } from "@/utilities/sharedState"
 import type {
@@ -48,6 +47,7 @@ function makeSampleTransactionContent(): TransactionContent {
             network_fee: 10,
             rpc_fee: 5,
             additional_fee: 0,
+            rpc_address: null,
         },
     }
 }
@@ -72,7 +72,7 @@ function makeSampleBlockContent(): BlockContent {
 }
 
 describe("serializerGate — bit-identical to JSON.stringify with default config", () => {
-    let snapshot: Record<ForkName, ForkConfig>
+    let snapshot: ForkConfigByName
 
     beforeEach(() => {
         snapshot = cloneDefaultForkConfig()

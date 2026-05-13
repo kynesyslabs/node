@@ -71,4 +71,18 @@ export class Transactions {
 
     @Column("bigint", { name: "additionalFee", nullable: true, default: 0 })
     additionalFee: bigint | null
+
+    // DEM-665: ed25519 public key (lowercase hex, `0x` + 64 hex chars) of
+    // the RPC node that validated this transaction. Used by the
+    // post-fork fee-distribution logic to route the rpc-fee portion to
+    // the correct account.
+    //
+    // `nullable: true`: pre-fork rows predate the field (post-wipe
+    // chains should have none, but the column shape is defensive). On a
+    // post-fork tx, the validating node sets this in confirmTransaction
+    // (DEM-665 P6). The column type is `varchar` for symmetry with the
+    // other hex-address columns on this entity (`from`, `to`,
+    // `from_ed25519_address`).
+    @Column("varchar", { name: "rpcAddress", nullable: true })
+    rpcAddress: string | null
 }

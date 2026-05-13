@@ -63,6 +63,7 @@ mock.module("@/libs/blockchain/chain", () => ({
                     network_fee: 0,
                     rpc_fee: 0,
                     additional_fee: 0,
+                    rpc_address: null,
                 },
             },
             status: "confirmed",

@@ -38,7 +38,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // (currently stubbed) dynamic-pricing seam.
         // TODO(decimals): once OS denomination ships, the three components
         // must add up to exactly 1 DEM (≈ 333_333_333 OS each, exact split
-        // TBD). See `decimal_planning/SPEC.md` / Mycelium E#3.
+        // TBD). See `forking/decimal_planning/SPEC.md` / Mycelium E#3.
         rpcFee: 1,
         networkFee: 1,
         burnFee: 1,

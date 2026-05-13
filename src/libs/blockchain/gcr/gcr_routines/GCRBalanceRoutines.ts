@@ -5,6 +5,7 @@ import HandleGCR, { GCRResult } from "src/libs/blockchain/gcr/handleGCR"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
+import { isForkActive } from "@/forks"
 
 export default class GCRBalanceRoutines {
     static async apply(
@@ -58,6 +59,43 @@ export default class GCRBalanceRoutines {
         if (editOperation.isRollback) {
             editOperation.operation =
                 editOperation.operation === "add" ? "remove" : "add"
+        }
+
+        // DEM-665 — burn-address spend prevention.
+        //
+        // Post-fork the burn account at `feeDistribution.burnAddress`
+        // is consensus-significant: balances added to it represent
+        // permanently removed supply. A normal `remove` against this
+        // pubkey would re-circulate burned coins — refuse it.
+        //
+        // Two intentional carve-outs:
+        //   1. The check fires AFTER the rollback inversion above, so a
+        //      rollback of a prior burn `add` (which becomes a `remove`
+        //      via inversion + isRollback=true) IS allowed. Otherwise
+        //      fee distribution would be irreversible.
+        //   2. The check is gated on isForkActive — pre-fork the burn
+        //      address isn't yet a designated consensus account, so
+        //      legacy code paths that happen to mention it stay intact.
+        //
+        // Address comparison is case-normalised (lowercase) to match
+        // the PR #778 G-1/G-4 lesson (myc#6).
+        if (
+            editOperation.operation === "remove" &&
+            !editOperation.isRollback
+        ) {
+            const blockHeight = getSharedState.lastBlockNumber ?? 0
+            const fd = getSharedState.feeDistribution
+            if (
+                fd &&
+                isForkActive("gasFeeSeparation", blockHeight) &&
+                editOperationAccount.toLowerCase() ===
+                    fd.burnAddress.toLowerCase()
+            ) {
+                return {
+                    success: false,
+                    message: "Cannot deduct from burn address",
+                }
+            }
         }
 
         // Getting the account GCR

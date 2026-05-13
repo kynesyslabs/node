@@ -60,9 +60,30 @@ export async function rpcNodeCall<T = any>(
     const port = NODE_RPC_PORTS[nodeId]
     if (!port) throw new Error(`Unknown node id: ${nodeId}`)
     const url = `http://localhost:${port}`
+    // Wire-shape note (myc#86 strictening surfaced this):
+    // `manageNodeCall` reads `content.data` and forwards it to the
+    // handler. Every handler under `src/libs/network/handlers/` expects
+    // its params under `data.*` (e.g. `data.address` for
+    // `getAddressInfo`). The previous harness flattened `extraParams`
+    // alongside `message`, which left every handler with
+    // `data === undefined` and returned the misleading
+    // "Error in nodeCall: TypeError: undefined is not an object"
+    // response. The bug was masked pre-myc#86 because the strictening
+    // assertion didn't fire on null returns; with the assertion in
+    // place scenario 06 fails on every run.
+    //
+    // Parameter-free RPCs (getLastBlockNumber, getNetworkInfo, ...) are
+    // unaffected because they never read `data`. We always include a
+    // `data` field — an empty object when no extras were supplied — so
+    // both branches resolve safely.
     const body = JSON.stringify({
         method: "nodeCall",
-        params: [{ message, ...extraParams }],
+        params: [
+            {
+                message,
+                data: Object.keys(extraParams).length > 0 ? extraParams : {},
+            },
+        ],
     })
 
     const attempt = async (): Promise<T> => {
@@ -260,6 +281,42 @@ export async function getForkStateRow(
         nodeId,
         "SELECT * FROM fork_state WHERE fork_name = $1",
         ["osDenomination"],
+    )
+    return rows[0] ?? null
+}
+
+/**
+ * DEM-665 — reads the `fork_state` row for `gasFeeSeparation`. The
+ * column set is the same as osDenomination's row (shared table) but
+ * gasFeeSeparation only populates the lifecycle columns
+ * (fork_name, applied, applied_at_block, applied_at); the
+ * sum/cap/row-count columns stay NULL because this migration doesn't
+ * touch balances.
+ */
+export async function getGasFeeForkStateRow(
+    nodeId: number,
+): Promise<ForkStateRow | null> {
+    const rows = await query<ForkStateRow>(
+        nodeId,
+        "SELECT * FROM fork_state WHERE fork_name = $1",
+        ["gasFeeSeparation"],
+    )
+    return rows[0] ?? null
+}
+
+/**
+ * DEM-665 — reads a single gcr_main row by pubkey. Returns the row or
+ * null. Used by scenario 09 to assert burn + treasury accounts exist
+ * with balance 0 after the gasFeeSeparation activation hook fires.
+ */
+export async function getGcrAccount(
+    nodeId: number,
+    pubkey: string,
+): Promise<{ pubkey: string; balance: string } | null> {
+    const rows = await query<{ pubkey: string; balance: string }>(
+        nodeId,
+        "SELECT pubkey, balance::text AS balance FROM gcr_main WHERE pubkey = $1",
+        [pubkey],
     )
     return rows[0] ?? null
 }

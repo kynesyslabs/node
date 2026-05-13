@@ -22,7 +22,8 @@ const sharedStateStub: {
     networkFee: number
     rpcFee: number
     burnFee: number
-} = { networkFee: 1, rpcFee: 1, burnFee: 1 }
+    additionalFee: number
+} = { networkFee: 1, rpcFee: 1, burnFee: 1, additionalFee: 0 }
 
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
@@ -38,7 +39,9 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     default: { getGCRLastBlockBaseGas: jest.fn() },
 }))
 
-import calculateCurrentGas from "@/libs/blockchain/routines/calculateCurrentGas"
+import calculateCurrentGas, {
+    calculateFeeBreakdown,
+} from "@/libs/blockchain/routines/calculateCurrentGas"
 
 describe("calculateCurrentGas — flat fee = networkFee + rpcFee + burnFee", () => {
     beforeEach(() => {
@@ -69,5 +72,69 @@ describe("calculateCurrentGas — flat fee = networkFee + rpcFee + burnFee", () 
         sharedStateStub.rpcFee = 0
         sharedStateStub.burnFee = 0
         expect(await calculateCurrentGas({ x: 1 })).toBe(0)
+    })
+})
+
+// DEM-665: new per-component breakdown used by the post-fork
+// fee-distribution edit generator (P5). Does NOT read burnFee — the
+// burned share is derived from per-component distribution percentages
+// in NetworkParameters (P13), not from a separate scalar.
+describe("calculateFeeBreakdown — per-component split (DEM-665)", () => {
+    beforeEach(() => {
+        sharedStateStub.networkFee = 1
+        sharedStateStub.rpcFee = 1
+        sharedStateStub.burnFee = 1
+    })
+
+    it("returns {network_fee, rpc_fee, additional_fee, total} with defaults", async () => {
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.network_fee).toBe(1)
+        expect(b.rpc_fee).toBe(1)
+        expect(b.additional_fee).toBe(0)
+        expect(b.total).toBe(2) // burnFee NOT counted post-fork
+    })
+
+    it("scales each component independently", async () => {
+        sharedStateStub.networkFee = 5
+        sharedStateStub.rpcFee = 7
+        // burnFee bump is INTENTIONALLY ignored by the breakdown path.
+        sharedStateStub.burnFee = 999
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.network_fee).toBe(5)
+        expect(b.rpc_fee).toBe(7)
+        expect(b.additional_fee).toBe(0)
+        expect(b.total).toBe(12)
+    })
+
+    it("total equals sum of components", async () => {
+        sharedStateStub.networkFee = 3
+        sharedStateStub.rpcFee = 4
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.total).toBe(b.network_fee + b.rpc_fee + b.additional_fee)
+    })
+
+    it("zero components yield zero total", async () => {
+        sharedStateStub.networkFee = 0
+        sharedStateStub.rpcFee = 0
+        sharedStateStub.burnFee = 0
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.total).toBe(0)
+    })
+
+    it("additional_fee is 0 by default (governance has not raised it)", async () => {
+        sharedStateStub.additionalFee = 0
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.additional_fee).toBe(0)
+    })
+
+    it("reflects governance-mutable additionalFee from shared state (PR #817 Greptile P1)", async () => {
+        // Governance proposal raises additionalFee from 0 → 11. The
+        // collection path must follow without a node restart.
+        sharedStateStub.networkFee = 0
+        sharedStateStub.rpcFee = 0
+        sharedStateStub.additionalFee = 11
+        const b = await calculateFeeBreakdown({ x: 1 })
+        expect(b.additional_fee).toBe(11)
+        expect(b.total).toBe(11)
     })
 })

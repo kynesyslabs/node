@@ -47,7 +47,7 @@ Counts: PASS 0 / FAIL 0 / SKIPPED 7 / ERROR 1 / TIMEOUT 0.
 
 **Failure mode (environment)**:
 
-```
+```text
 Error response from daemon: failed to set up container networking: driver failed
 programming external connectivity on endpoint demos-devnet-tlsnotary
 (e90364e34d28255b4ffb474685e8ac02ece45a7ad991e6980541068d9c02f054):
@@ -56,7 +56,7 @@ Bind for 0.0.0.0:7047 failed: port is already allocated
 
 `docker ps` confirms the holder:
 
-```
+```text
 demos-tlsnotary  0.0.0.0:7047->7047/tcp, [::]:7047->7047/tcp
 ```
 
@@ -120,7 +120,7 @@ No fork-mechanism evidence was produced. The status of the 8 rehearsal scenarios
 
 The pre-existing `testing/devnet/.env` (gitignored, dated 2026-03-23) used the **earlier** devnet port scheme:
 
-```
+```text
 NODE1_PORT=53551  NODE2_PORT=53552  NODE3_PORT=53553  NODE4_PORT=53554
 NODE1_OMNI_PORT=53561  NODE2_OMNI_PORT=53562  NODE3_OMNI_PORT=53563  NODE4_OMNI_PORT=53564
 ```
@@ -163,7 +163,7 @@ Counts: PASS 0 / FAIL 1 / SKIPPED 7 / ERROR 0 / TIMEOUT 0.
 
 **Log excerpt (node-1, the smoking gun)**:
 
-```
+```text
 [ERROR] [CORE] [ChainDB] [ ERROR ]: Failed to insert block 5 with hash
   63883d6954909e180a1f1516ef48a9b7ed1ed71c5deeb5064922bb119bd63e65:
   QueryFailedError: bigint out of range
@@ -179,7 +179,7 @@ error: script "start:bun" exited with code 1
 
 **Postgres state at the moment of failure** (captured via `docker exec demos-devnet-postgres psql ... node1_db`):
 
-```
+```text
 \d gcr_main
   pubkey   text NOT NULL  PK
   balance  bigint NOT NULL    <-- signed 64-bit, max 9.22e18
@@ -239,7 +239,7 @@ The fork-activation logic, peer convergence, idempotency, fresh-joiner replay, a
 2. **Add a unit test against Postgres**, not SQLite, that runs the migration on a 1e18-seeded row and asserts behaviour. The 52/52 SQLite tests give false confidence.
 3. **Re-run the rehearsal** after the fix lands; scenarios 2–8 still need verification.
 4. **Document the harness/`.env` mismatch** in `testing/forks/rehearsal/README.md` so the next operator doesn't lose 5 minutes to it.
-5. **Operator note**: the `genesis-fork-overflow.json` referenced in `decimal_planning/REHEARSAL_PLAN.md` for scenario 5 is not present in `testing/forks/rehearsal/genesis/` — the harness uses `genesis-fork-mid.json` instead. Worth reconciling.
+5. **Operator note**: the `genesis-fork-overflow.json` referenced in `forking/REHEARSAL_RESULTS.md` for scenario 5 is not present in `testing/forks/rehearsal/genesis/` — the harness uses `genesis-fork-mid.json` instead. Worth reconciling.
 
 ### Final state
 
@@ -291,7 +291,7 @@ Direct postgres + RPC observations on the live devnet at the moment the harness'
 - All 4 nodes at the same head height (block 8–9 and continuing).
 - `fork_state` row identical across all 4 node DBs:
 
-```
+```text
 fork_name      = osDenomination
 applied        = t
 applied_at_block = 5
@@ -397,7 +397,7 @@ Two Date objects with the same wall-clock time are still different references �
 
 Direct evidence from the FAIL output:
 
-```
+```text
 fork_state.applied_at changed across restart:
   before=Fri May 08 2026 11:37:53 GMT+0200 (Central European Summer Time)
   after =Fri May 08 2026 11:37:53 GMT+0200 (Central European Summer Time)
@@ -588,3 +588,187 @@ None.
 - Standalone `demos-tlsnotary`, `demos-grafana`, `demos-prometheus`, csv-editor, n8n stack, host postgres — all undisturbed.
 - Four commits on `decimals` ahead of Run 4 HEAD: `76e8bacb`, `b64fd647`, `59456c01`, `5ecd8c35`. One more commit will follow for this report.
 - Nothing pushed.
+
+---
+
+## Run 6 — DEM-665 P10b (gasFeeSeparation co-activation)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: scenarios 09 + 10 added; existing 8 scenarios untouched.
+
+### Scenario 9 — gasFeeSeparation co-activation
+
+`bun run testing/forks/rehearsal/scenarios/09-fee-distribution.ts`
+(with `POSTGRES_HOST_PORT=5532 POSTGRES_USER=demosuser POSTGRES_PASSWORD=demospass`)
+
+**Result**: PASS in 169.1s.
+
+**Genesis fixture**: `testing/forks/rehearsal/genesis/genesis-fork-low-gasFee.json`. Sets both `forks.osDenomination` and `forks.gasFeeSeparation` at `activationHeight: 5`. Sentinel treasury: `0xfeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedfacefeedface`.
+
+**Assertions (all green on the 4-node devnet)**:
+- 4 nodes crossed height ≥ 6 within 240 s.
+- Every node reports `osDenomination.activated = true` (regression guard — combined fork did NOT break decimals).
+- Block-5 hash converged across all 4 nodes.
+- `osDenomination` `fork_state` row converged: identical `pre_sum_dem`, `post_sum_os`, `capped_count = 0`, sum invariant `Σ(post) = Σ(pre) × 10^9 − 0` holds on every node.
+- `gasFeeSeparation` `fork_state` row present on every node with `applied = true`, `applied_at_block = 5`, identical across nodes.
+- Burn account `0x` + 64 zeros exists in `gcr_main` on every node with `balance = 0`.
+- Treasury account at the sentinel hex exists in `gcr_main` on every node with `balance = 0`.
+- Network advanced ≥ 1 block in the 60 s liveness window past activation.
+
+### Scenario 10 — burn-spend rejection
+
+`bun run testing/forks/rehearsal/scenarios/10-burn-spend-rejection.ts`
+
+**Result**: PASS in 0.5s — documented placeholder, no devnet drive.
+
+**Why placeholder**: a real burn-spend rejection test needs a signed tx with a manual `remove`-from-burn `GCREdit`. The rehearsal harness has no signing helper for genesis-funded accounts (same constraint scenario 06 documents). Coverage of the GCRBalanceRoutines guard lives at unit level (`tests/blockchain/GCRBalanceRoutines.test.ts`, 8 cases — all pass). The scenario file documents the full devnet body to add once the harness gains a signing helper.
+
+### Verdict
+
+DEM-665 P10b complete: gasFeeSeparation co-activation rehearsed end-to-end on a real 4-node Postgres devnet. No regression on the existing 8 decimals scenarios is observed at the unit level; a full `run-all.sh` pass (which now includes 09 + 10) is the next step for the operator running the full rehearsal cycle.
+
+### Final state
+
+- Containers torn down (`runScenario` lifecycle did the `down -v` automatically at end-of-run).
+- Production genesis restored.
+- New fixture checked in: `testing/forks/rehearsal/genesis/genesis-fork-low-gasFee.json`.
+- Two new scenarios: `scenarios/09-fee-distribution.ts`, `scenarios/10-burn-spend-rejection.ts`.
+- `run-all.sh` runs the full 10-scenario sequence.
+
+---
+
+## Run 7 — DEM-665 P10b scenario 10 (devnet drive)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: scenario 10 promoted from placeholder to a full devnet drive after the harness gained tx-signing support.
+
+### Harness additions
+
+- `testing/forks/rehearsal/lib/signing.ts` (NEW) — `generateHarnessKeypair()` derives a fresh ed25519 keypair via `Cryptography.newFromSeed(crypto.randomBytes(32))` (same primitive `ucrypto.generateIdentity` uses), and `signHarnessTx(kp, content, blockHeight)` runs the fork-aware `serializeTransactionContent` + `sha256` + `Cryptography.sign` chain to produce the `{hash, signature}` pair the validating node expects on the wire. Devnet-only — keys never persisted, never used in prod.
+- `testing/forks/rehearsal/lib/devnetControl.ts` — `stageGenesisWithFundedAccount(fixture, pubkey, balance)` clones a fixture, appends `[pubkey, balance]` to `balances`, stages at `data/genesis.json`. Backup is the same one-time `stageGenesis()` produces.
+
+### Scenario 10 result
+
+`POSTGRES_HOST_PORT=5532 POSTGRES_USER=demosuser POSTGRES_PASSWORD=demospass \
+ bun run testing/forks/rehearsal/scenarios/10-burn-spend-rejection.ts`
+
+**Result**: PASS in 126.4s.
+
+**What it drives**:
+1. Generate fresh ed25519 keypair in-memory.
+2. Inject `[harness pubkey, "1000000"]` into `genesis-fork-low-gasFee.json` `balances`; stage at `data/genesis.json`.
+3. `up --build`, wait height ≥ 6.
+4. Verify activation: `osDenomination.activated = true`, `gasFeeSeparation.applied_at_block = 5` converged across nodes.
+5. Verify burn balance = 0 on every node pre-submission.
+6. Build a `nativeOperation: "send"` tx whose `gcr_edits` carries a legitimate sender-remove + recipient-add PLUS a malicious `remove`-from-burn entry (`account = 0x000…000`, `operation = "remove"`, `isRollback = false`).
+7. Sign with harness keypair via the fork-aware serializer.
+8. POST `{ method: "execute", params: [{ extra: "confirmTx", data: tx, ... }] }` to node-1.
+9. Sleep 15s for any propagation / apply.
+10. Assert burn balance still `"0"` on every node + fork_state row unchanged.
+
+**Acceptance invariant**: burn balance does NOT decrease. This is the consensus-meaningful property — whether the validating node rejected the tx at confirm-time, or whether the apply-time guard at `GCRBalanceRoutines.apply()` caught it, both outcomes produce the same observable state on every node. The unit suite (`tests/blockchain/GCRBalanceRoutines.test.ts`) covers the apply-time branch explicitly with 8 cases including the `"Cannot deduct from burn address"` message.
+
+### Verdict
+
+DEM-665 P10b complete. **Both scenarios 09 and 10 ran end-to-end on a real 4-node Postgres devnet and asserted the consensus-critical invariants without manual intervention.** The harness signing helper (lib/signing.ts) is now in-tree for any future scenario that needs to drive signed-tx flows.
+
+### Final state
+
+- Containers torn down automatically by `runScenario` lifecycle.
+- Production genesis restored.
+- New files: `lib/signing.ts`, `scenarios/10-burn-spend-rejection.ts` (rewritten from placeholder to drive).
+
+---
+
+## Run 8 — Full 10-scenario `run-all.sh` (DEM-665 final gate)
+
+**Date**: 2026-05-12.
+**Branch**: `claude/gas-fee-separation-aDJK5`.
+**Scope**: complete `testing/forks/rehearsal/run-all.sh` sweep on the post-DEM-665 codebase. Acceptance gate before merging DEM-665 into stabilisation.
+
+### Result
+
+**10/10 PASS** in 1929s wall-clock (~32 min).
+
+```text
+PASS  04-genesis-hash-invariance      93s
+PASS  01-all-cross-fork              168s
+PASS  07-sum-invariant-audit         161s
+PASS  08-idempotent-restart          120s
+PASS  05-cap-policy-fires-loud       241s
+PASS  06-mid-flight-tx               248s
+PASS  02-validator-desync-recovery   169s
+PASS  03-fresh-node-post-fork        434s
+PASS  09-fee-distribution            166s
+PASS  10-burn-spend-rejection        129s
+```
+
+### Bugs surfaced + fixed during this run
+
+Two harness bugs were discovered and fixed during the gating cycle. Both pre-date DEM-665 and were masked by either silent tolerance or stale Docker state:
+
+#### Bug 1 — `run-all.sh` empty-array expansion under macOS bash 3.2
+
+`set -u` + `"${EXTRA_ARGS[@]}"` against an empty array triggers
+`unbound variable` on the host's bash 3.2. Symptom: first scenario
+crashes with `EXTRA_ARGS[@]: unbound variable` before `bun run`
+fires. Fix: portable parameter expansion
+`${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}` — only emits words when the
+array is non-empty.
+
+#### Bug 2 — `lib/nodeQueries.ts` `rpcNodeCall` wire-shape mismatch
+
+Pre-myc#86 the assertion that throws on null balance didn't exist,
+so scenario 06 silently accepted nulls and passed. myc#86 added
+strict null-checks and the bug surfaced.
+
+Root cause: `rpcNodeCall` flattened `extraParams` alongside `message`
+(`params: [{ message, ...extraParams }]`), but `manageNodeCall`
+unpacks `content.data` and forwards it to handlers — handlers expect
+`data.address` (or similar param keys). The flattened shape left
+`data === undefined`, every parametric `nodeCall` returned
+`Error in nodeCall: TypeError: undefined is not an object`.
+
+Pre-myc#86 strictening this was an invisible bug — every cross-node
+assertion compared `Set.size === 1` of all-null returns and passed
+trivially. Scenario 06 in Run 5 was a false positive.
+
+Fix: wrap extra params under `data`:
+
+```ts
+params: [{
+    message,
+    data: Object.keys(extraParams).length > 0 ? extraParams : {},
+}]
+```
+
+Parameter-free RPCs (`getLastBlockNumber`, `getNetworkInfo`, …) are
+unaffected because their handlers never read `data`.
+
+#### Side-finding — Docker buildkit snapshot corruption
+
+On a long rehearsal cycle the `docker compose --build` snapshot
+graph can corrupt with a `parent snapshot … does not exist`
+extraction failure. `docker system prune -a -f --volumes`
+rebuilds it cleanly. Operator note for future cycles: run a full
+prune between consecutive `run-all.sh` invocations to avoid the
+flake.
+
+### Verdict
+
+DEM-665 implementation gates clean against the full rehearsal cycle.
+Both new DEM-665 scenarios (09 + 10) and the eight pre-existing
+decimals scenarios pass in a single run with no manual
+intervention beyond the bash 3.2 + Docker prune housekeeping noted
+above. Branch is ready for review.
+
+### Final state
+
+- All containers torn down (`runScenario` lifecycle).
+- Production genesis restored.
+- Two harness fixes committed under DEM-665 P10b followups:
+  - `testing/forks/rehearsal/run-all.sh` — bash 3.2 portability.
+  - `testing/forks/rehearsal/lib/nodeQueries.ts` — `rpcNodeCall`
+    wire shape.
