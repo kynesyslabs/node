@@ -47,7 +47,7 @@ Counts: PASS 0 / FAIL 0 / SKIPPED 7 / ERROR 1 / TIMEOUT 0.
 
 **Failure mode (environment)**:
 
-```
+```text
 Error response from daemon: failed to set up container networking: driver failed
 programming external connectivity on endpoint demos-devnet-tlsnotary
 (e90364e34d28255b4ffb474685e8ac02ece45a7ad991e6980541068d9c02f054):
@@ -56,7 +56,7 @@ Bind for 0.0.0.0:7047 failed: port is already allocated
 
 `docker ps` confirms the holder:
 
-```
+```text
 demos-tlsnotary  0.0.0.0:7047->7047/tcp, [::]:7047->7047/tcp
 ```
 
@@ -120,7 +120,7 @@ No fork-mechanism evidence was produced. The status of the 8 rehearsal scenarios
 
 The pre-existing `testing/devnet/.env` (gitignored, dated 2026-03-23) used the **earlier** devnet port scheme:
 
-```
+```text
 NODE1_PORT=53551  NODE2_PORT=53552  NODE3_PORT=53553  NODE4_PORT=53554
 NODE1_OMNI_PORT=53561  NODE2_OMNI_PORT=53562  NODE3_OMNI_PORT=53563  NODE4_OMNI_PORT=53564
 ```
@@ -163,7 +163,7 @@ Counts: PASS 0 / FAIL 1 / SKIPPED 7 / ERROR 0 / TIMEOUT 0.
 
 **Log excerpt (node-1, the smoking gun)**:
 
-```
+```text
 [ERROR] [CORE] [ChainDB] [ ERROR ]: Failed to insert block 5 with hash
   63883d6954909e180a1f1516ef48a9b7ed1ed71c5deeb5064922bb119bd63e65:
   QueryFailedError: bigint out of range
@@ -179,7 +179,7 @@ error: script "start:bun" exited with code 1
 
 **Postgres state at the moment of failure** (captured via `docker exec demos-devnet-postgres psql ... node1_db`):
 
-```
+```text
 \d gcr_main
   pubkey   text NOT NULL  PK
   balance  bigint NOT NULL    <-- signed 64-bit, max 9.22e18
@@ -291,7 +291,7 @@ Direct postgres + RPC observations on the live devnet at the moment the harness'
 - All 4 nodes at the same head height (block 8â€“9 and continuing).
 - `fork_state` row identical across all 4 node DBs:
 
-```
+```text
 fork_name      = osDenomination
 applied        = t
 applied_at_block = 5
@@ -397,7 +397,7 @@ Two Date objects with the same wall-clock time are still different references â†
 
 Direct evidence from the FAIL output:
 
-```
+```text
 fork_state.applied_at changed across restart:
   before=Fri May 08 2026 11:37:53 GMT+0200 (Central European Summer Time)
   after =Fri May 08 2026 11:37:53 GMT+0200 (Central European Summer Time)
@@ -692,7 +692,7 @@ DEM-665 P10b complete. **Both scenarios 09 and 10 ran end-to-end on a real 4-nod
 
 **10/10 PASS** in 1929s wall-clock (~32 min).
 
-```
+```text
 PASS  04-genesis-hash-invariance      93s
 PASS  01-all-cross-fork              168s
 PASS  07-sum-invariant-audit         161s

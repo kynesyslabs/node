@@ -8,7 +8,7 @@
 
 ## 0. TL;DR
 
-```
+```text
 ┌───────────────────────────────────────────────────────────────────┐
 │  Fork bundle: osDenomination + gasFeeSeparation                   │
 │  Trigger:     same activationHeight N in data/genesis.json        │
@@ -222,7 +222,7 @@ sha256sum data/genesis.json   # MUST match the announcement.
 
 Tail the log after start. Look for **two** loader lines from `src/forks/loadForkConfig.ts`:
 
-```
+```text
 [FORKS] Loaded fork "osDenomination" with activationHeight=<N>
 [FORKS] Loaded fork "gasFeeSeparation" with activationHeight=<N>
 ```
@@ -231,7 +231,7 @@ If either is absent, stop the node, re-check `data/genesis.json`, restart. Do no
 
 If you see:
 
-```
+```text
 [FORKS] DEMOS_DISABLE_FORK_MACHINERY set — ignoring genesis `forks` field
 ```
 
@@ -314,7 +314,7 @@ Empirically verified against the 4-node Postgres devnet (Run 5 + Run 6 + Run 8, 
 
 ### 5.1 osDenomination `fork_state` (7-account seed, 1e18 each)
 
-```
+```text
 fork_name           = osDenomination
 applied             = t
 applied_at_block    = <N>
@@ -326,7 +326,7 @@ total_value_lost_os = 0
 
 ### 5.2 gasFeeSeparation `fork_state` (combined fork rehearsal)
 
-```
+```text
 fork_name        = gasFeeSeparation
 applied          = t
 applied_at_block = <N>
@@ -335,7 +335,7 @@ applied_at_block = <N>
 
 ### 5.3 Burn + treasury accounts
 
-```
+```text
 pubkey                                                              balance
 0x0000000000000000000000000000000000000000000000000000000000000000  0
 <treasuryAddress>                                                   0
@@ -343,7 +343,7 @@ pubkey                                                              balance
 
 ### 5.4 Cap policy (only fires if any pre-fork legacy GCR account ≥ ~9 M DEM)
 
-```
+```text
 fork_name           = osDenomination
 capped_count        = >0
 total_value_lost_os = >0
@@ -351,7 +351,7 @@ total_value_lost_os = >0
 
 with log lines:
 
-```
+```text
 [WARNING] [forks][osDenomination] CAP applied: account=<addr> preBalanceDem=<...> postBalanceOs=<...> valueLostOs=<...>
 ```
 

@@ -128,6 +128,18 @@ export class HandleNativeOperations {
                         tx.hash,
                         isRollback,
                     )
+                    // PR #817 Greptile P1 (silent fee bypass): mirror the
+                    // applyGasFeeSeparation guard. generateSpecialOpsFeeEdits
+                    // returns [] when requireFeeDistribution() is null —
+                    // either feeDistribution was never primed, or every
+                    // percentage is 0. With fees.request > 0 the tx must
+                    // not silently proceed with zero edits; refuse it.
+                    if (fees.request > 0 && specialOpsEdits.length === 0) {
+                        throw new Error(
+                            "fee distribution not primed — refusing tlsn_request " +
+                                `(requestFee=${fees.request}, but generateSpecialOpsFeeEdits returned 0 edits)`,
+                        )
+                    }
                     edits.push(...(specialOpsEdits as GCREdit[]))
                 } else {
                     const burnFeeEdit: GCREdit = {
@@ -204,6 +216,14 @@ export class HandleNativeOperations {
                         tx.hash,
                         isRollback,
                     )
+                    // PR #817 Greptile P1 (silent fee bypass) — see
+                    // matching guard above on the tlsn_request branch.
+                    if (storageFee > 0 && specialOpsEdits.length === 0) {
+                        throw new Error(
+                            "fee distribution not primed — refusing tlsn_store " +
+                                `(storageFee=${storageFee}, but generateSpecialOpsFeeEdits returned 0 edits)`,
+                        )
+                    }
                     edits.push(...(specialOpsEdits as GCREdit[]))
                 } else {
                     const burnStorageFeeEdit: GCREdit = {

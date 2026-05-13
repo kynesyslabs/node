@@ -213,6 +213,46 @@ function inferSeverity(error: unknown): ErrorSeverity {
 }
 
 /**
+ * Format an Error's stack frames for the cause chain.
+ *
+ * V8/Node `Error.stack` begins with `"<name>: <message>"` followed by
+ * `at ...` frames. The caller already prints name + message explicitly,
+ * so drop the header line here to avoid duplicating it (CR-3 on PR
+ * #817). Returns 5 frames max, each prefixed with `indent`.
+ */
+function formatErrorFrames(err: Error, indent: string): string {
+    const lines = (err.stack ?? "").split("\n")
+    const start = lines[0]?.startsWith(`${err.name}:`) ? 1 : 0
+    return lines
+        .slice(start, start + 5)
+        .map(l => indent + l)
+        .join("\n")
+}
+
+/**
+ * Render the `errors[]` siblings on an AggregateError. Extracted from
+ * formatCauseChain to keep its cognitive complexity below 15 (Sonar
+ * threshold). Bounded at 5 siblings; the rest are summarised so a
+ * pathological chain can't flood the logger.
+ */
+function formatAggregateSiblings(
+    siblings: readonly unknown[],
+    indent: string,
+    depth: number,
+): string {
+    const shown = siblings.slice(0, 5)
+    let out = ""
+    for (let i = 0; i < shown.length; i++) {
+        out += `\n${indent}[error ${i + 1}/${siblings.length}]`
+        out += formatCauseChain(shown[i], depth + 1)
+    }
+    if (siblings.length > shown.length) {
+        out += `\n${indent}... ${siblings.length - shown.length} more`
+    }
+    return out
+}
+
+/**
  * Walk the error.cause chain and AggregateError.errors[] siblings so the
  * underlying failure (e.g. node:net ECONNREFUSED nested under an
  * AggregateError nested under a wrapper) is visible in the log. Without
@@ -227,25 +267,15 @@ function formatCauseChain(cause: unknown, depth = 0): string {
     const indent = "  ".repeat(depth + 1)
 
     if (cause instanceof Error) {
-        const frames = (cause.stack ?? "")
-            .split("\n")
-            .slice(0, 6)
-            .map(l => indent + l)
-            .join("\n")
-        let out = ` | cause: ${cause.name}: ${cause.message}\n${frames}`
+        const frames = formatErrorFrames(cause, indent)
+        let out = ` | cause: ${cause.name}: ${cause.message}`
+        if (frames) out += `\n${frames}`
 
         // AggregateError.errors[]: the actual TCP/DNS failures live
         // here, not on the wrapper.
         const siblings = (cause as { errors?: unknown }).errors
         if (Array.isArray(siblings) && siblings.length > 0) {
-            const shown = siblings.slice(0, 5)
-            for (let i = 0; i < shown.length; i++) {
-                out += `\n${indent}[error ${i + 1}/${siblings.length}]`
-                out += formatCauseChain(shown[i], depth + 1)
-            }
-            if (siblings.length > shown.length) {
-                out += `\n${indent}... ${siblings.length - shown.length} more`
-            }
+            out += formatAggregateSiblings(siblings, indent, depth)
         }
 
         // Nested `cause` chain (Node 16+).

@@ -204,6 +204,18 @@ describe("handleNativeOperations — tlsn_request fork-gating (DEM-665)", () => 
             balanceEdits.find(e => e.account === TREASURY)?.amount,
         ).toBe(750_000_000)
     })
+
+    // PR #817 Greptile P1 (G-1): silent fee bypass. If feeDistribution
+    // is not primed (or all-zero) when tlsn_request lands post-fork,
+    // generateSpecialOpsFeeEdits returns []. Without the guard the tx
+    // would proceed with zero fee collection. Verify the throw.
+    it("post-fork: throws when feeDistribution is unprimed (no silent bypass)", async () => {
+        activateFork(100)
+        sharedStateStub.feeDistribution = null
+        await expect(
+            HandleNativeOperations.handle(makeTlsnRequestTx()),
+        ).rejects.toThrow(/fee distribution not primed/)
+    })
 })
 
 describe("handleNativeOperations — tlsn_store fork-gating (DEM-665)", () => {
@@ -219,6 +231,16 @@ describe("handleNativeOperations — tlsn_store fork-gating (DEM-665)", () => {
         expect(balanceEdits).toHaveLength(1)
         expect(balanceEdits[0].operation).toBe("remove")
         expect(balanceEdits[0].amount).toBe(3)
+    })
+
+    // PR #817 Greptile P1 (G-2): same silent-bypass guard as
+    // tlsn_request, applied to tlsn_store.
+    it("post-fork: throws when feeDistribution is unprimed (no silent bypass)", async () => {
+        activateFork(100)
+        sharedStateStub.feeDistribution = null
+        await expect(
+            HandleNativeOperations.handle(makeTlsnStoreTx()),
+        ).rejects.toThrow(/fee distribution not primed/)
     })
 
     it("post-fork: size-scaled fee split via special-ops distribution", async () => {
