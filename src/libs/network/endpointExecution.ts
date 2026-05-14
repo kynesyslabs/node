@@ -88,6 +88,7 @@ export async function handleExecuteTransaction(
         return result
     }
 
+    const handleVerifyStart = Date.now()
     const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
     const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: validatedData.signature.type as SigningAlgorithm,
@@ -95,6 +96,11 @@ export async function handleExecuteTransaction(
         publicKey: hexToUint8Array(validatedData.rpc_public_key.data) as any,
         signature: hexToUint8Array(validatedData.signature.data) as any,
     })
+
+    const handleVerifyEnd = Date.now()
+    log.only(
+        `[SERVER] Transaction verified in ${handleVerifyEnd - handleVerifyStart}ms`,
+    )
 
     if (!signatureValid) {
         log.error(
@@ -110,7 +116,12 @@ export async function handleExecuteTransaction(
     }
 
     const blockNumber = validatedData.data.reference_block
+    const handleBlockNumberStart = Date.now()
     const lastBlockNumber = await Chain.getLastBlockNumber()
+    const handleBlockNumberEnd = Date.now()
+    log.only(
+        `[SERVER] Read last block number in ${handleBlockNumberEnd - handleBlockNumberStart}ms`,
+    )
 
     if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
         log.error(
@@ -137,7 +148,12 @@ export async function handleExecuteTransaction(
     }
 
     log.info("SERVER", fname + "Valid validityData!")
+    const cloneTxStart = Date.now()
     const tx = _.cloneDeep(validatedData.data.transaction)
+    const cloneTxEnd = Date.now()
+    log.only(
+        `[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`,
+    )
     let payload: DemoScript | any
 
     switch (tx.content.type) {
@@ -218,10 +234,15 @@ export async function handleExecuteTransaction(
         }
 
         case "web2Request": {
+            const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
             const params = parseWeb2ProxyRequest(payload)
             const web2Result = await handleWeb2ProxyRequest(params)
             result.response = web2Result
+            const handleWeb2RequestEnd = Date.now()
+            log.only(
+                `[SERVER] Web2 request processed in ${handleWeb2RequestEnd - handleWeb2RequestStart}ms`,
+            )
             break
         }
 

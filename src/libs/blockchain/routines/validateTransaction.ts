@@ -32,7 +32,12 @@ export async function confirmTransaction(
 ): Promise<ValidityData> {
     log.info("TX", "[Native Tx Validation] Validating transaction...")
     // Getting the current block number
+    const getLastBlockNumberStart = Date.now()
     const referenceBlock = await Chain.getLastBlockNumber()
+    const getLastBlockNumberEnd = Date.now()
+    log.only(
+        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
+    )
     // REVIEW This should work just fine
     log.debug(
         `[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`,

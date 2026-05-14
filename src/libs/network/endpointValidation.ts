@@ -24,13 +24,28 @@ export async function handleValidateTransaction(
     log.info("SERVER", fname + "Handling transaction...")
     let validationData: ValidityData
     try {
+        const handleConfirmTransactionStart = Date.now()
         validationData = await confirmTransaction(tx, sender)
+        const handleConfirmTransactionEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] Transaction confirmed in ${handleConfirmTransactionEnd - handleConfirmTransactionStart}ms`,
+        )
 
+        const handleGcrEditsStart = Date.now()
         const gcrEdits = await GCRGeneration.generate(tx)
+        const handleGcrEditsEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] GCR edits generated in ${handleGcrEditsEnd - handleGcrEditsStart}ms`,
+        )
         gcrEdits.forEach((gcredit: GCREdit) => {
             gcredit.txhash = ""
         })
+        const handleGcrEditsHashStart = Date.now()
         const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+        const handleGcrEditsHashEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] GCR edits hash generated in ${handleGcrEditsHashEnd - handleGcrEditsHashStart}ms`,
+        )
         log.debug(
             "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
         )
@@ -70,6 +85,7 @@ export async function handleValidateTransaction(
             )
 
         if (totalFee > 0n) {
+            const checkFeeStart = Date.now()
             const db = await Datasource.getInstance()
             const gcrMainRepo = db
                 .getDataSource()
@@ -80,6 +96,10 @@ export async function handleValidateTransaction(
             const senderBalance = account
                 ? BigInt(account.balance)
                 : 0n
+            const checkFeeEnd = Date.now()
+            log.only(
+                `[handleValidateTransaction] Check fee in ${checkFeeEnd - checkFeeStart}ms`,
+            )
             if (senderBalance < totalFee) {
                 throw new Error(
                     `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
