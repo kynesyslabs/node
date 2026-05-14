@@ -2,11 +2,19 @@
 type: plan
 title: "Epic 2 — Healthcheck + Observability Overhaul"
 date: 2026-05-13
-status: ready-for-myc
+status: implemented
+last_updated: 2026-05-14
+implemented_tasks: [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15, T16, T17, T18]
 depends_on: docs/discoveries/startup-assessment-2026-05-13/05-fragility-synthesis.md
 ---
 
 # Epic 2 — Healthcheck + Observability Overhaul
+
+> **Status (2026-05-14):** Implemented end-to-end. All 18 tasks landed
+> in commit dated 2026-05-14 — see this folder's CHANGELOG.md for the
+> change list. Manual smoke tests (real subsystem failure → row turns
+> red in TUI, alert fires in Prometheus) are operator follow-ups; the
+> code path is wired and unit-test-covered.
 
 ## Goal
 

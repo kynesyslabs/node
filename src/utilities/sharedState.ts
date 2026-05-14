@@ -39,6 +39,11 @@ import {
     LOCALHOST_IPS,
     TWITTER_COOKIE_FILE,
 } from "./constants"
+import {
+    BootTracker,
+    buildInitialSubsystemRegistry,
+    type SubsystemInfo,
+} from "./subsystemRegistry"
 
 dotenv.config()
 
@@ -104,12 +109,35 @@ export default class SharedState {
     isShuttingDown = false
     isInitialized = false
     // Set true when the fire-and-forget mainLoop wrapper completes (either
-    // crash or graceful). Epic 13's /health extension will read these to
-    // surface mainLoop liveness; until then they exist for observability
-    // tooling and to diagnose `docker stop` exit codes.
+    // crash or graceful). Epic 13 /health extension reads these.
     mainLoopExited = false
     mainLoopExitedAt: number | null = null
     mainLoopExitReason: string | null = null
+    // Heartbeat updated at the top of every mainLoop iteration (Epic 13 T5).
+    // Epic 13's /health computes `now - mainLoopHeartbeatAt` to flip status
+    // to "failing" when staleness exceeds threshold. null until first tick.
+    mainLoopHeartbeatAt: number | null = null
+    mainLoopIterations = 0
+    // True when the `enough_peers=false` gate at src/index.ts:589-594
+    // skipped the consensus half of boot. Surfaced in /health.dormant +
+    // demos_dormant_mode gauge so operators can distinguish "node is
+    // intentionally idle" from "node is failing".
+    dormantMode = false
+    // Subsystem registry (Epic 13 T1). Initial state = every known
+    // subsystem in "pending"; updated via markSubsystem helper.
+    subsystems: Record<string, SubsystemInfo> = buildInitialSubsystemRegistry()
+    // Append-only boot sequence log (Epic 13 T2). Populated by ANCHOR
+    // brackets in src/index.ts during startup.
+    bootTracker: BootTracker = new BootTracker()
+    // Counters for the global uncaughtException / unhandledRejection
+    // handlers (Epic 13 T8). Surfaced in /health.errors + Prom counters.
+    uncaughtExceptionTotal = 0
+    unhandledRejectionTotal = 0
+    lastUncaughtException: {
+        at: number
+        source: string
+        message: string
+    } | null = null
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false

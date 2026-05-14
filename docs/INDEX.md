@@ -30,3 +30,5 @@ Structured, discoverable documentation for the Demos Network node.
 | `runbooks/wstcp-reachability-check.md` | runbook | 2026-05-14 | active |
 | `runbooks/proxy-setup.md` | runbook | 2026-05-14 | active |
 | `runbooks/proxy-add-service.md` | runbook | 2026-05-14 | active |
+| `runbooks/health-endpoint.md` | runbook | 2026-05-14 | active |
+| `runbooks/dormant-mode.md` | runbook | 2026-05-14 | active |

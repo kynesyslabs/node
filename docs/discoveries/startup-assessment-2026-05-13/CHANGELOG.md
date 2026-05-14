@@ -5,6 +5,138 @@ title: Startup Assessment Changelog
 
 # Startup Assessment Changelog
 
+## 2026-05-14 — Epic 13 (observability) lands
+
+Full implementation of `07-epic-2-healthcheck-observability.md`. The
+node now exposes its internal state via `/health`, Prometheus metrics,
+the TUI, and Grafana — surfacing dormant mode, mainLoop liveness, port
+drift, swallowed errors, and per-subsystem status that were previously
+invisible.
+
+Changes:
+
+- **T1 — SubsystemRegistry**
+  - `src/utilities/subsystemRegistry.ts` (new): typed registry of 10
+    known subsystems (chain, rpc, metrics, signaling, mcp, tlsnotary,
+    omni, dtr, l2ps, main_loop). Helpers `markSubsystem`,
+    `subsystemError`, `snapshotSubsystems`. Lifecycle states
+    pending/running/ready/failed/skipped/dormant. State transitions
+    emit a one-line log; `since` timestamps stamped on real change.
+- **T2 — BootTracker**
+  - Same file. Append-only ordered log of named boot steps with
+    register/start/ready/fail/skip API. `summary()` aggregates counts
+    for `/health.boot`. Deep-clone snapshots for serialisation.
+  - +12 unit tests in `subsystemRegistry.test.ts`, all passing.
+- **T3 — Boot anchor brackets**
+  - `src/index.ts`: every major boot step now wraps `bootTracker.start`
+    / `ready` / `fail` + `markSubsystem`. Silent-success steps
+    (Chain.setup, Mempool.init, fastSync, ParallelNetworks.loadAllL2PS)
+    now emit `[BOOT] ... ready` lines. The dormant-mode block
+    (`enough_peers=false`) sets `getSharedState.dormantMode = true`,
+    logs a clear warning, and marks signaling / MCP / TLSNotary /
+    main_loop / DTR / L2PS as skipped with reason "no peers".
+- **T4 — Port-drift logging**
+  - `getNextAvailablePort(startFrom, reason)`: now takes a reason arg
+    and logs `[PORT] <reason> drifted from X to Y` whenever the
+    chosen port differs from the requested one. All 4 call sites
+    (signaling, omni, metrics, mcp) updated. Drift mirrored into the
+    subsystem registry via `requestedPort` + `port`.
+- **T5 — mainLoop heartbeat**
+  - `src/utilities/mainLoop.ts`: top of `mainLoopCycle` sets
+    `getSharedState.mainLoopHeartbeatAt = Date.now()`, increments
+    `mainLoopIterations`, bumps the Prom counter, and on the very
+    first tick marks `main_loop` as ready.
+  - (`process.exit(1)` removal already shipped in Epic 14 T3.)
+- **T6 — Metrics gauges + counters**
+  - `MetricsService.registerCoreMetrics()` adds `demos_subsystem_up`,
+    `_uptime_seconds`, `_restart_total`, `_error_total`,
+    `demos_boot_step_status`, `demos_boot_complete`,
+    `demos_dormant_mode`, `demos_main_loop_heartbeat_seconds`,
+    `demos_main_loop_iterations_total`, `demos_port_drift`,
+    `demos_uncaught_exception_total`,
+    `demos_unhandled_rejection_total`.
+  - `MetricsCollector.collectObservability()` reads
+    `getSharedState.subsystems` + `bootTracker.summary()` on every
+    tick (every 2.5s) and mirrors into the gauges.
+- **T7 — /health JSON (additive over PR #797)**
+  - `src/libs/network/server_rpc.ts`: extended `/health` body with
+    `status` (ok|degraded|dormant|failing), `dormant`, `boot`,
+    `subsystems`, `ports`, `main_loop`, `errors` blocks. PR #797
+    keys preserved verbatim. HTTP status: 503 only on `failing`;
+    dormant / degraded / ok all return 200. Adds
+    `X-Demos-Dormant: true` response header in dormant state for LB
+    metadata. New sibling endpoint `/health/subsystems` returns the
+    subsystem block only (rate-limit bypassed).
+- **T8 — Uncaught exception counters**
+  - `src/index.ts:53-90`: process-wide handlers now bump
+    `getSharedState.uncaughtExceptionTotal` /
+    `unhandledRejectionTotal`, record `lastUncaughtException`, and
+    increment the matching Prom counter. Swallow behaviour preserved.
+- **T9 — TUI integration**
+  - `src/utilities/tui/TUIManager.ts`: `NodeInfo` gained optional
+    `subsystems` map and `dormantMode` flag. New
+    `refreshSubsystems()` reads the live snapshot and is called on
+    every refresh tick.
+- **T10 — Dockerfile healthcheck target**
+  - `Dockerfile`: HEALTHCHECK switched from `curl /` (always 200) to
+    `curl /health`. `--start-period` bumped 60s → 90s.
+- **T11 — Compose healthchecks**
+  - `docker-compose.yml`: added healthchecks for `node`,
+    `prometheus`, `grafana`, `node-exporter`, `neo4j`. All with
+    sensible intervals + start_periods.
+- **T12 — Log rotation caps**
+  - `docker-compose.yml`: new `x-default-logging` YAML anchor with
+    `max-size: 50m, max-file: 5`. Applied to every service via
+    `<<: *default-logging`.
+- **T13 — Grafana service_healthy dependency**
+  - `grafana` now uses long-form `depends_on: prometheus: condition:
+    service_healthy` instead of plain start-only wait.
+- **T14 — Prometheus alert rules**
+  - `monitoring/prometheus/alerts/node-health.yml` — NodeDown,
+    NodeFailing, NodeDormant, BootIncomplete, MempoolStuck,
+    PeersZero, MainLoopHeartbeatStale.
+  - `subsystems.yml` — SubsystemDown, PortDriftDetected.
+  - `errors.yml` — UncaughtExceptionSpike,
+    UnhandledRejectionSpike.
+  - `prometheus.yml`: uncommented `rule_files: alerts/*.yml`. All 11
+    rules pass `promtool check`.
+- **T15 — Grafana observability dashboard**
+  - `monitoring/grafana/provisioning/dashboards/json/observability.json`
+    (new): subsystem stat row, mainLoop heartbeat gauge, boot
+    complete / dormant stat, boot-sequence table with status enum
+    mappings, error-rate timeseries, iterations/s timeseries.
+    Auto-provisioned alongside the existing dashboards.
+  - Decision: shipped as new dashboard rather than mutating
+    `demos-overview.json` (39KB, complex grid layout — high risk of
+    breaking the existing dashboard on edit).
+- **T16 — `docs/runbooks/health-endpoint.md`** (new)
+- **T17 — `docs/runbooks/dormant-mode.md`** (new)
+- **T18 — Index + manifest + CHANGELOG**
+  - `docs/INDEX.md` + `docs/manifest.json` register the new runbooks.
+  - Plan doc `07-epic-2-healthcheck-observability.md` annotated with
+    implemented_tasks frontmatter + status banner.
+  - `coding-node` hindsight memories retained.
+
+Net effect:
+
+- The dormant-mode failure ("node looks healthy but consensus frozen")
+  is now loud + queryable + alertable. Single highest-impact fix from
+  the original assessment.
+- mainLoop death is detectable via `/health.main_loop.exited` and
+  `demos_main_loop_heartbeat_seconds`. Combined with Epic 14 T3 (no
+  more debug `process.exit(1)`), the node stays observable through a
+  consensus failure instead of crash-looping silently.
+- Port drift no longer silent. Operators see `[PORT] X drifted` lines
+  and can query `/health.ports`.
+- 5 missing compose healthchecks added. `docker compose ps` shows
+  meaningful health state for every service.
+- Prometheus alerts cover the failure modes called out in the
+  fragility synthesis (Tier 1 + Tier 2 items #1–#3).
+- All file-format checks pass: `tsc --noEmit` clean for changed files,
+  `promtool check rules` 11/11 SUCCESS, `docker compose config`
+  validates across every profile combo, `bun test
+  src/utilities/subsystemRegistry.test.ts` 12/12 pass.
+
 ## 2026-05-14 — Epic 12 (reverse proxy) — autofix slice lands
 
 Implementation slice of `06-epic-1-reverse-proxy.md`. Code, config, and

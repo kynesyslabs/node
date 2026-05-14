@@ -562,7 +562,11 @@ export class RateLimiter {
             // source IP and should never be 429-throttled. /version is small
             // and equally cheap to serve unconditionally.
             const path = new URL(req.url).pathname
-            if (path === "/health" || path === "/version") {
+            if (
+                path === "/health" ||
+                path === "/health/subsystems" ||
+                path === "/version"
+            ) {
                 return await next()
             }
 

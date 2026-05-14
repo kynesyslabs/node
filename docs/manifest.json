@@ -50,6 +50,20 @@
       "title": "Add a New Service Behind the Caddy Proxy",
       "date": "2026-05-14",
       "status": "active"
+    },
+    {
+      "path": "runbooks/health-endpoint.md",
+      "type": "runbook",
+      "title": "Interpret the /health Endpoint",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/dormant-mode.md",
+      "type": "runbook",
+      "title": "Diagnose & Recover from Dormant Mode",
+      "date": "2026-05-14",
+      "status": "active"
     }
   ]
 }

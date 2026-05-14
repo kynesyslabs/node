@@ -53,18 +53,82 @@ export async function serverRpcBun() {
     })
 
     server.get("/health", async () => {
-        // Accepting traffic only when fully synced and not in the middle of
-        // a sync loop.
+        // PR #797 contract — preserve every field so SDK probes do not
+        // break. New blocks are additive (Epic 13 T7):
+        //   - `status`: ok | degraded | dormant | failing
+        //   - `dormant`: true when peer list was empty at boot
+        //   - `boot`: counts of step states + name of running step (if any)
+        //   - `subsystems`: per-subsystem registry snapshot
+        //   - `ports`: requested vs actual for drift visibility
+        //   - `errors`: counters from the uncaughtException hooks
+        const {
+            snapshotSubsystems,
+            KNOWN_SUBSYSTEMS,
+        } = await import("@/utilities/subsystemRegistry")
+
         const accepting =
             getSharedState.syncStatus && !getSharedState.inSyncLoop
 
-        // Mempool.count() hits the DB; isolate failures so a transient DB
-        // outage doesn't 500 the health probe.
         let mempoolSize: number | null = null
         try {
             mempoolSize = await Mempool.count()
         } catch (err) {
             log.error("[/health] Mempool.count() failed:", err)
+        }
+
+        const subsystems = snapshotSubsystems(getSharedState.subsystems)
+        const bootSummary = getSharedState.bootTracker.summary()
+
+        // mainLoop heartbeat staleness — if it's been over 3× the
+        // configured sleep time since the last tick (or never), treat as
+        // dead. dormantMode is handled separately below.
+        const sleepMs = getSharedState.mainLoopSleepTime || 1000
+        const heartbeatThresholdMs = Math.max(sleepMs * 3, 30_000)
+        const hbAt = getSharedState.mainLoopHeartbeatAt
+        const heartbeatAgeMs = hbAt ? Date.now() - hbAt : null
+        const mainLoopDead =
+            getSharedState.mainLoopExited ||
+            (hbAt !== null && heartbeatAgeMs! > heartbeatThresholdMs)
+        if (mainLoopDead && subsystems.main_loop) {
+            subsystems.main_loop.status = "failed"
+        }
+
+        // Status precedence: failing > dormant > degraded > ok
+        let status: "ok" | "degraded" | "dormant" | "failing"
+        const dbDown = mempoolSize === null
+        if (
+            dbDown ||
+            subsystems.chain?.status === "failed" ||
+            (mainLoopDead && !getSharedState.dormantMode)
+        ) {
+            status = "failing"
+        } else if (getSharedState.dormantMode) {
+            status = "dormant"
+        } else {
+            const anyOptionalFailed = Object.values(subsystems).some(
+                s => s.status === "failed",
+            )
+            status = anyOptionalFailed ? "degraded" : "ok"
+        }
+
+        const portInfo: Record<
+            string,
+            { requested: number | null; actual: number | null; drifted: boolean }
+        > = {}
+        for (const name of KNOWN_SUBSYSTEMS) {
+            const s = subsystems[name]
+            if (!s) continue
+            const requested = s.requestedPort ?? null
+            const actual = s.port ?? null
+            if (requested === null && actual === null) continue
+            portInfo[name] = {
+                requested,
+                actual,
+                drifted:
+                    requested !== null &&
+                    actual !== null &&
+                    requested !== actual,
+            }
         }
 
         const body = {
@@ -73,12 +137,56 @@ export async function serverRpcBun() {
             accepting,
             mempool_size: mempoolSize,
             uptime_s: getSharedState.getUptimeSeconds(),
+            status,
+            dormant: getSharedState.dormantMode,
+            boot: {
+                complete: bootSummary.complete,
+                steps_total: bootSummary.total,
+                steps_ready: bootSummary.ready,
+                steps_failed: bootSummary.failed,
+                steps_skipped: bootSummary.skipped,
+                current: bootSummary.current,
+            },
+            subsystems,
+            ports: portInfo,
+            main_loop: {
+                heartbeat_age_s:
+                    heartbeatAgeMs === null
+                        ? null
+                        : Math.round(heartbeatAgeMs / 1000),
+                iterations_total: getSharedState.mainLoopIterations,
+                exited: getSharedState.mainLoopExited,
+                exit_reason: getSharedState.mainLoopExitReason,
+            },
+            errors: {
+                uncaught_total: getSharedState.uncaughtExceptionTotal,
+                unhandled_rejection_total:
+                    getSharedState.unhandledRejectionTotal,
+                last_uncaught: getSharedState.lastUncaughtException,
+            },
         }
 
         // Surface health via HTTP status so LB/k8s probes can detect an
-        // unhealthy node without parsing the JSON body.
-        const healthy = accepting && mempoolSize !== null
-        return jsonResponse(body, healthy ? 200 : 503)
+        // unhealthy node without parsing the JSON body. Dormant + degraded
+        // are 200 (intentional state), failing is 503.
+        const httpStatus = status === "failing" ? 503 : 200
+        const extraHeaders: Record<string, string> = {}
+        if (status === "dormant") {
+            extraHeaders["X-Demos-Dormant"] = "true"
+        }
+        return jsonResponse(body, httpStatus, extraHeaders)
+    })
+
+    // Slim sibling endpoint for ops dashboards that only need the
+    // subsystem state. Same data as /health.subsystems, smaller body.
+    server.get("/health/subsystems", async () => {
+        const { snapshotSubsystems } = await import(
+            "@/utilities/subsystemRegistry"
+        )
+        return jsonResponse({
+            dormant: getSharedState.dormantMode,
+            subsystems: snapshotSubsystems(getSharedState.subsystems),
+        })
     })
 
     server.get("/version", () => jsonResponse(getSharedState.version))
