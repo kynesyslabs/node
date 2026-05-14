@@ -28,3 +28,5 @@ Structured, discoverable documentation for the Demos Network node.
 | `discoveries/startup-assessment-2026-05-13/` | discovery + epic plans | 2026-05-14 | active |
 | `runbooks/mcp-security.md` | runbook | 2026-05-14 | active |
 | `runbooks/wstcp-reachability-check.md` | runbook | 2026-05-14 | active |
+| `runbooks/proxy-setup.md` | runbook | 2026-05-14 | active |
+| `runbooks/proxy-add-service.md` | runbook | 2026-05-14 | active |

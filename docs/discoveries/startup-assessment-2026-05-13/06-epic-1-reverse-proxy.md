@@ -2,11 +2,21 @@
 type: plan
 title: "Epic 1 — Reverse Proxy in Front of Exposed Services"
 date: 2026-05-13
-status: ready-for-myc
+status: partially-implemented
+last_updated: 2026-05-14
+implemented_tasks: [T1, T2, T3, T5, T6, T7, T10, T11, T12, T15, T16, T17]
+deferred_tasks: [T4, T8, T9, T13, T14]
 depends_on: docs/discoveries/startup-assessment-2026-05-13/05-fragility-synthesis.md
 ---
 
 # Epic 1 — Reverse Proxy in Front of Exposed Services
+
+> **Status (2026-05-14):** The autofix-safe slice (12 of 17 tasks) has
+> landed. Caddy is wired in compose under `profiles: [proxy]`, the
+> Caddyfile is validated, and the runbooks + docs are in place. T4,
+> T8, T9, T13, T14 remain open — each needs operator action on a real
+> environment. See the matching status notes inline below + the
+> CHANGELOG entry dated 2026-05-14.
 
 ## Goal
 

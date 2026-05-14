@@ -191,6 +191,17 @@ services:
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles
       - --web.enable-lifecycle
+      # NOTE — sub-path serving behind Caddy (Epic 12 T11):
+      # The Caddyfile uses `handle_path /prometheus/*` which strips the
+      # prefix before forwarding here, so Prom can stay at root with
+      # no `--web.external-url` / `--web.route-prefix` flags. The
+      # consequence is that UI asset links inside the Prometheus web
+      # UI render absolute paths and assume root — when accessed via
+      # `https://${PROXY_DOMAIN}/prometheus/` some links may need a
+      # manual `/prometheus` prefix typed in. For full sub-path
+      # support (alerts, federation, etc.) flip to a dedicated
+      # `prometheus.${PROXY_DOMAIN}` subdomain in the Caddyfile. See
+      # docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -214,6 +225,11 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-demos}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # Sub-path serving for `proxy` compose profile. Auto-enabled
+      # whenever GRAFANA_ROOT_URL contains a non-root path. Default
+      # (root URL) leaves serve-from-sub-path off — direct host-port
+      # access at http://localhost:3000 keeps working as before.
+      GF_SERVER_SERVE_FROM_SUB_PATH: ${GRAFANA_SERVE_FROM_SUB_PATH:-false}
       GF_INSTALL_PLUGINS: grafana-clock-panel
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -290,6 +306,50 @@ services:
     networks:
       - demos-network
 
+  # ---------------------------------------------------------------------------
+  # Caddy — reverse proxy + automatic TLS (opt-in via `proxy` profile).
+  # Fronts RPC / Signaling / MCP / Metrics / Grafana / Prometheus / TLSNotary
+  # behind a single ${PROXY_DOMAIN}:443. OmniProtocol (53551) stays direct.
+  #
+  # Engage with:
+  #   COMPOSE_PROFILES=monitoring,tlsnotary,proxy docker compose up -d
+  # OR:
+  #   docker compose --profile proxy up -d
+  #
+  # Required env (set in .env):
+  #   PROXY_DOMAIN              public DNS, must point at this host
+  #   ACME_EMAIL                Let's Encrypt contact
+  #   METRICS_BASIC_AUTH_HASH   bcrypt — see Caddyfile comments
+  #
+  # See monitoring/caddy/Caddyfile + docs/runbooks/proxy-setup.md.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: demos-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
+    volumes:
+      - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - demos-network
+
 networks:
   demos-network:
     name: demos-network
@@ -316,3 +376,7 @@ volumes:
     name: demos_neo4j_data
   neo4j_logs:
     name: demos_neo4j_logs
+  caddy_data:
+    name: demos_caddy_data
+  caddy_config:
+    name: demos_caddy_config

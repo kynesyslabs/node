@@ -36,6 +36,20 @@
       "title": "Verify wstcp Pool Reachability",
       "date": "2026-05-14",
       "status": "active"
+    },
+    {
+      "path": "runbooks/proxy-setup.md",
+      "type": "runbook",
+      "title": "Reverse-Proxy Setup (Caddy)",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/proxy-add-service.md",
+      "type": "runbook",
+      "title": "Add a New Service Behind the Caddy Proxy",
+      "date": "2026-05-14",
+      "status": "active"
     }
   ]
 }

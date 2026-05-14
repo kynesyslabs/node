@@ -5,6 +5,88 @@ title: Startup Assessment Changelog
 
 # Startup Assessment Changelog
 
+## 2026-05-14 — Epic 12 (reverse proxy) — autofix slice lands
+
+Implementation slice of `06-epic-1-reverse-proxy.md`. Code, config, and
+docs only — the live integration steps (cert provisioning, dropping
+host ports, flipping wstcp bind, etc.) need operator action on a real
+environment and are tracked as separate open tasks.
+
+Changes:
+
+- **T5 — Caddyfile**
+  - `monitoring/caddy/Caddyfile` (new): single-vhost reverse proxy with
+    routes for RPC `/`, signaling `/signaling/*`, MCP `/mcp/*`, metrics
+    `/metrics`, Grafana `/grafana/*`, Prometheus `/prometheus/*`,
+    TLSNotary `/tlsnotary/*`. Auto HTTPS via Let's Encrypt
+    (`tls {$ACME_EMAIL}`). Strips inbound `X-Forwarded-*` headers
+    before forwarding so Epic 14's `TRUSTED_PROXIES` model holds.
+    Basic-auth on `/metrics` + `/mcp` with sentinel hashes that reject
+    by default (operator generates real ones via
+    `caddy hash-password`).
+- **T6 — Compose service**
+  - `docker-compose.yml`: `caddy` service under `profiles: [proxy]`,
+    image `caddy:2-alpine`, host ports 80 + 443 (+ 443/udp for HTTP/3),
+    volumes for `Caddyfile` (RO) + named `caddy_data` / `caddy_config`,
+    healthcheck on `wget /:80`. New named volumes added at the bottom
+    of the file. Default-profile compose unchanged (`caddy` does not
+    start unless the operator opts in).
+- **T7 — `.env.example` proxy block**
+  - New section between MONITORING and TLSNOTARY documenting
+    `PROXY_DOMAIN`, `ACME_EMAIL`, `METRICS_BASIC_AUTH_HASH`,
+    `MCP_BASIC_AUTH_HASH`, `GRAFANA_ROOT_URL`,
+    `GRAFANA_SERVE_FROM_SUB_PATH`, `CORS_ALLOWED_ORIGINS`. Reminds
+    operators to set `TRUSTED_PROXIES` (Epic 14) alongside.
+  - `COMPOSE_PROFILES` comment updated to list the new `proxy` profile
+    + recommended `monitoring,tlsnotary,proxy` production pairing.
+- **T10 — Grafana sub-path**
+  - `docker-compose.yml`: added `GF_SERVER_SERVE_FROM_SUB_PATH` env,
+    defaulting to `false`. Operator flips it + sets
+    `GRAFANA_ROOT_URL=https://${PROXY_DOMAIN}/grafana/` to engage.
+- **T11 — Prometheus sub-path**
+  - Caddyfile uses `handle_path /prometheus/*` (prefix-strip) so the
+    Prometheus container stays at root with no `--web.route-prefix`.
+    Documented UI-asset caveats + the subdomain escape hatch in
+    `proxy-setup.md`.
+- **T12 — CORS allowlist**
+  - `src/libs/network/bunServer.ts`: `cors()` middleware now reads
+    `CORS_ALLOWED_ORIGINS`. Default behaviour preserved (`*` wildcard)
+    but emits a one-time `log.warning` at startup if the node also
+    detects `PROXY_DOMAIN` is set to a non-localhost value (i.e., the
+    wildcard is exposed publicly). Allowlist matching is
+    case-insensitive + strips trailing slashes. Preflight OPTIONS now
+    returns 204 instead of 200.
+- **T15 — `docs/runbooks/proxy-setup.md`** (new)
+  - Step-by-step bring-up: env, DNS, firewall, ACME, smoke tests,
+    rollback. Common failures section (ACME challenges, rate limits,
+    Grafana asset breakage, Prometheus sub-path caveats, MCP 401).
+- **T16 — `docs/runbooks/proxy-add-service.md`** (new)
+  - Pattern for routing a new internal service via sub-path or
+    subdomain. Validation + zero-downtime reload commands.
+- **T17 — Cross-references + index**
+  - `docs/INDEX.md` + `docs/manifest.json` register the two new
+    runbooks.
+  - `coding-node` hindsight memories retained.
+
+Closed via Epic 14 (no Epic 12 commit needed):
+
+- **T1** — Trusted-proxy + XFF policy (closed in Epic 14 T1).
+- **T2** — MCP auth decision (closed via Epic 14 T2, Option C).
+- **T3** — MCP binding vs port mapping (closed via Epic 14 T2).
+
+Deferred to live verification (NOT in this commit):
+
+- **T4** — wstcp 0.0.0.0 reachability per-env verify (read-only
+  verdict documented; operator runs the one-liner).
+- **T8** — Path-mode `EXPOSED_URL` end-to-end with SDK integration
+  test against running devnet + proxy.
+- **T9** — `wstcp --bind-addr 127.0.0.1`. Containerized default OK;
+  bare-metal breaks. Gate on Caddy being co-located.
+- **T13** — Drop redundant host port mappings. Risky before smoke
+  test of every proxied route in a real deployment.
+- **T14** — TLSNotary 7047 disposition behind proxy. Needs live WS
+  termination test against the upstream notary binary.
+
 ## 2026-05-14 — Epic 14 (blockers) lands
 
 Implementation of `08-epic-3-blockers.md`. Cleared the three blockers
