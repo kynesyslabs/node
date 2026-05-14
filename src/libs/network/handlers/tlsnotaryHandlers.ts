@@ -1,4 +1,3 @@
-import { getSharedState } from "src/utilities/sharedState"
 import { Config } from "src/config"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
@@ -6,10 +5,12 @@ import type { NodeCallHandler } from "./types"
 export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
     requestTLSNproxy: async (data, response) => {
         try {
-            const { requestProxy, ProxyError } =
-                await import("@/features/tlsnotary/proxyManager")
-            const { validateToken, consumeRetry } =
-                await import("@/features/tlsnotary/tokenManager")
+            const { requestProxy, ProxyError } = await import(
+                "@/features/tlsnotary/proxyManager"
+            )
+            const { validateToken, consumeRetry } = await import(
+                "@/features/tlsnotary/tokenManager"
+            )
 
             if (!data.tokenId || !data.owner) {
                 response.result = 400
@@ -76,7 +77,10 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
                 }
                 response.response = result
             } else {
-                const updatedToken = consumeRetry(data.tokenId, result.proxyId)
+                const updatedToken = consumeRetry(
+                    data.tokenId,
+                    result.proxyId,
+                )
                 if (updatedToken) {
                     log.info(
                         `[TLSNotary] Proxy spawned for token ${data.tokenId}, retries left: ${updatedToken.retriesLeft}`,
@@ -102,7 +106,9 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getInfo": async (data, response) => {
         try {
-            const { getTLSNotaryService } = await import("@/features/tlsnotary")
+            const { getTLSNotaryService } = await import(
+                "@/features/tlsnotary"
+            )
             const service = getTLSNotaryService()
 
             if (!service || !service.isRunning()) {
@@ -119,33 +125,12 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
             const proxyPort = Config.getInstance().tlsnotary.proxyPort
 
-            let nodeHost = "localhost"
-            let notaryUrl = Config.getInstance().tlsnotary.exposedUrl
-            let proxyUrl = Config.getInstance().tlsnotary.proxyUrl
+            const { getPublicUrl } = await import(
+                "@/features/tlsnotary/proxyManager"
+            )
 
-            if (!notaryUrl || !proxyUrl) {
-                const wsScheme = (() => {
-                    try {
-                        const exposedUrl = getSharedState.exposedUrl
-                        if (exposedUrl) {
-                            const url = new URL(exposedUrl)
-                            nodeHost = url.hostname
-                            return url.protocol === "https:" ? "wss" : "ws"
-                        }
-                    } catch {
-                        // Fall back to localhost and ws if URL parsing fails
-                    }
-                    return "ws"
-                })()
-
-                if (!notaryUrl) {
-                    notaryUrl = `${wsScheme}://${nodeHost}:${port}`
-                }
-
-                if (!proxyUrl) {
-                    proxyUrl = `${wsScheme}://${nodeHost}:${proxyPort}`
-                }
-            }
+            const notaryUrl = getPublicUrl(port)
+            const proxyUrl = getPublicUrl(proxyPort)
 
             response.response = {
                 notaryUrl,
@@ -166,8 +151,9 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getToken": async (data, response) => {
         try {
-            const { getTokenByTxHash, getToken } =
-                await import("@/features/tlsnotary/tokenManager")
+            const { getTokenByTxHash, getToken } = await import(
+                "@/features/tlsnotary/tokenManager"
+            )
 
             const { tokenId, txHash } = data as {
                 tokenId?: string
@@ -219,8 +205,9 @@ export const tlsnotaryHandlers: Record<string, NodeCallHandler> = {
 
     "tlsnotary.getTokenStats": async (_data, response) => {
         try {
-            const { getTokenStats } =
-                await import("@/features/tlsnotary/tokenManager")
+            const { getTokenStats } = await import(
+                "@/features/tlsnotary/tokenManager"
+            )
             const stats = getTokenStats()
             response.response = { stats }
         } catch (error) {
