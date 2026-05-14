@@ -34,7 +34,9 @@ export async function serverRpcBun() {
             try {
                 const cloned = req.clone()
                 const body = await cloned.text()
-                bodyLog = body.length > 64 ? body.slice(0, 64) + "...(truncated)" : body
+                bodyLog = body.length > 1024
+                    ? body.slice(0, 768) + "...(truncated)..." + body.slice(-256)
+                    : body
             } catch {
                 bodyLog = "(unreadable body)"
             }
