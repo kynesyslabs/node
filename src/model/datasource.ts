@@ -17,14 +17,11 @@ import { Consensus } from "./entities/Consensus.js"
 import { MempoolTx } from "./entities/Mempool.js"
 import { PgpKeyServer } from "./entities/PgpKeyServer.js"
 import { Transactions } from "./entities/Transactions.js"
-import { Validators } from "./entities/Validators.js"
-import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
-import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
 import { UsedNullifier } from "./entities/GCRv2/UsedNullifier.js"
@@ -52,9 +49,6 @@ export const dataSource = new DataSource({
         GCRHashes,
         GCRSubnetsTxs,
         Transactions,
-        Validators,
-        GlobalChangeRegistry,
-        GCRTracker,
         GCRMain,
         GCRTLSNotary,
         GCRStorageProgram,

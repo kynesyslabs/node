@@ -45,63 +45,27 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO insert it in the gcr automatically so that the parameters of the
 // TODO chain are both immutable and editable at the same time
 
-import * as fs from "fs"
+import _ from "lodash"
+import { In, LessThan, Not } from "typeorm"
+
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { Validators } from "src/model/entities/Validators"
-import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
-import {
-    Operation,
-    OperationRegistrySlot,
-    OperationResult,
-    RPCResponse,
-} from "@kynesyslabs/demosdk/types"
-
+import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "../chain"
-import executeOperations, { Actor } from "../routines/executeOperations"
-import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
-import { Referrals } from "@/features/incentive/referrals"
 import log from "@/utilities/logger"
 import { skeletons } from "@kynesyslabs/demosdk/websdk"
 import { getSharedState } from "@/utilities/sharedState"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
 import TxValidatorPool from "../validation/txValidatorPool"
+import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
+import { emptyResponse } from "@/libs/network"
 
-// ? This class should be deprecated: ensure that and remove it
-export class OperationsRegistry {
-    path = "data/operations.json"
-    operations: OperationRegistrySlot[] = []
-
-    constructor() {
-        // Creating an empty registry if it doesn't exist
-        if (!fs.existsSync(this.path)) fs.writeFileSync(this.path, "[]")
-        this.operations = JSON.parse(fs.readFileSync(this.path).toString())
-    }
-
-    // INFO Adding an operation to the registry
-    async add(operation: Operation) {
-        this.operations.push({
-            operation: operation,
-            status: "pending",
-            result: {
-                success: false,
-                message: "ot yet processed",
-            },
-            timestamp: Date.now(),
-        })
-        await fs.promises.writeFile(this.path, JSON.stringify(this.operations))
-    }
-
-    // INFO Getting the full list of operations currently in the registry
-    get(): OperationRegistrySlot[] {
-        return this.operations
-    }
+export type GetNativeSubnetsTxsOptions = {
+    txData?: boolean
 }
 
 interface Web2AccountParams {
@@ -145,434 +109,65 @@ function isNativeAccount(
     return "address" in account && !("chain" in account)
 }
 
-// INFO Besides the static methods, the GCR store all the operations to be done in the current block so that they can be executed in order
 export default class GCR {
-    private static instance: GCR
-    operations: Operation[] // TODO It will become the above implementation
-
-    private constructor() {
-        this.operations = []
-    }
-
-    // Singleton logic
-    static getInstance(): GCR {
-        if (!this.instance) {
-            this.instance = new GCR()
-        }
-        return this.instance
-    }
-
-    // NOTE Due to the complexity of this method, it is imported by the appropriate module
-    // INFO Any type of transaction is already converted as a native DEMOS transaction
-    //      so that the appropriate Operatin can be executed
-    async executeOperations(): Promise<Map<string, Actor>> {
-        const result = await executeOperations(this.operations)
-        return result
-    }
-
-    static async getGCRStatusNativeTable() {
+    /**
+     *
+     * @param pubkey Get the balance of a GCR account
+     * @returns The balance of the account
+     */
+    static async getAccountBalance(pubkey: string): Promise<bigint> {
         const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        return await gcrRepository.find()
-    }
-
-    static async getGCRStatusPropertiesTable(publicKey: string) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        const gcrSearch = await gcrRepository.findOneBy({ publicKey })
-        const gcrExtendedData = gcrSearch?.extended
-        return gcrExtendedData
-    }
-
-    static async getGCRNativeFor(address: string) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        return await gcrRepository.findOne({
-            where: { publicKey: address },
-        })
-    }
-
-    static async getGCRPropertiesFor(
-        address: string,
-        field: keyof GCRExtended,
-    ) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        const gcrSearch = await gcrRepository.findOneBy({
-            publicKey: address,
-        })
-        const gcrExtendedData = gcrSearch?.extended
-        return gcrExtendedData[field]
-    }
-
-    // ANCHOR Balances retrieval
-
-    static async getGCRNativeBalance(address: string) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
 
         try {
-            const response = await gcrRepository.findOne({
-                select: ["details"],
-                where: { publicKey: address },
+            const account = await gcrRepository.findOne({
+                where: { pubkey },
+                select: ["balance"],
             })
-            return response ? response.details.content.balance : 0
+
+            return account ? BigInt(account.balance) : 0n
         } catch (e) {
-            log.debug(`[GET BALANCE] No balance for: ${address}`)
-            return 0
-        }
-    }
-
-    static async getGCRTokenBalance(address: string, tokenAddress: string) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-
-        try {
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            const gcrExtendedData = gcrSearch?.extended
-            return gcrExtendedData && gcrExtendedData.tokens
-                ? gcrExtendedData.tokens[tokenAddress]
-                : 0
-        } catch (e) {
-            log.error(`[GCR] Error fetching GCR token balance: ${e}`)
-        }
-    }
-
-    static async getGCRNFTBalance(address: string, nftAddress: string) {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-
-        try {
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            const gcrExtendedData = gcrSearch?.extended
-            return gcrExtendedData && gcrExtendedData.nfts
-                ? gcrExtendedData.nfts[nftAddress]
-                : 0
-        } catch (e) {
-            log.error(`[GCR] Error fetching GCR NFT balance: ${e}`)
+            log.debug(`[GET BALANCE] No balance for: ${pubkey}`)
+            return 0n
         }
     }
 
     static async getGCRLastBlockBaseGas(): Promise<number> {
         // TODO Implement and make it dynamic
-        /* let chainProperties = await GCR.getGCRChainProperties()
-        return chainProperties.gas_multiplier */
         return 1
     }
 
-    // INFO In the GCR properties table, the special row "DEMOS Network" defines, in the other
-    // field, the properties of the chain itself shared by all its members.
-    // TODO Maybe implement it at genesis or retrieve the genesis from chain?
-    static async getGCRChainProperties(): Promise<any> {
+    static async getNativeSubnetsTxs(
+        subnetId: string,
+        options: GetNativeSubnetsTxsOptions = {
+            txData: true,
+        },
+    ): Promise<RPCResponse> {
+        const response: RPCResponse = _.cloneDeep(emptyResponse)
         const db = await Datasource.getInstance()
-        const gcrRepository = db
+        const gcrSubnetsTxsRepository = db
             .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-
-        try {
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: "DEMOS Network",
-            })
-            const gcrExtendedData = gcrSearch?.extended
-            return gcrExtendedData && gcrExtendedData.other
-        } catch (e) {
-            // Handle the error appropriately
-            log.error(`Error fetching GCR chain properties: ${e}`)
+            .getRepository(GCRSubnetsTxs)
+        // Getting the status subnets txs data
+        const gcrSubnetsTxsSearch = await gcrSubnetsTxsRepository.findBy({
+            subnet_id: subnetId,
+        })
+        if (!gcrSubnetsTxsSearch) {
+            response.response = "Subnet not found"
+            response.result = 404
+            return response
         }
-    }
-
-    // SECTION Validators management
-
-    // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
-    static async getGCRHashedStakes(n: number = null) {
-        if (!n) {
-            n = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM if necessary
-        }
-
-        const db = await Datasource.getInstance()
-        const validatorsRepository = db
-            .getDataSource()
-            .getRepository(Validators)
-
-        try {
-            const stakes = await validatorsRepository.find({
-                where: { first_seen: LessThanOrEqual(n) },
-                order: { first_seen: "DESC" },
-            })
-
-            // Hashing
-            let total = 0
-            stakes.forEach(stake => {
-                total += stake.stake // Replace 'stake.stake' with the correct field name if different
-            })
-
-            return Hashing.sha256(total.toString()) // Ensure Hashing.sha256 is defined and works as expected
-        } catch (e) {
-            log.error(`Error fetching GCR hashed stakes: ${e}`)
-        }
-    }
-
-    // INFO The following getter is used to retrieve the list of all validators at a given block
-    static async getGCRValidatorsAtBlock(
-        blockNumber: number = null,
-    ): Promise<unknown[]> {
-        const db = await Datasource.getInstance()
-        const validatorsRepository = db
-            .getDataSource()
-            .getRepository(Validators)
-
-        if (!blockNumber) {
-            log.debug("No block number provided, getting the last one")
-            blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
-        }
-        log.debug(`blockNumber: ${blockNumber}`)
-
-        try {
-            const blockNodes = await validatorsRepository.find({
-                where: {
-                    valid_at: LessThanOrEqual(blockNumber),
-                    status: "2",
-                },
-                order: { valid_at: "DESC" },
-            })
-
-            return blockNodes || []
-        } catch (e) {
-            log.error(`Error fetching GCR validators at block: ${e}`)
-            return [] // or handle the error as needed
-        }
-    }
-
-    // INFO Get a validator (or a public key anyway) status in the staking
-    // NOTE While accepting a blockNumber, it defaults to the last one
-    static async getGCRValidatorStatus(
-        publicKeyHex: string,
-        blockNumber: number = null,
-    ) {
-        const db = await Datasource.getInstance()
-        const validatorsRepository = db
-            .getDataSource()
-            .getRepository(Validators)
-
-        if (!blockNumber) {
-            blockNumber = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM
-        }
-
-        try {
-            const info = await validatorsRepository.findOne({
-                where: {
-                    first_seen: LessThanOrEqual(blockNumber),
-                    address: publicKeyHex,
-                },
-            })
-
-            return info || null
-        } catch (e) {
-            log.error(`Error fetching validator status: ${e}`)
-            return null // or handle the error as needed
-        }
-    }
-
-    // !SECTION Validators management
-
-    // SECTION Setters
-    // NOTE For consistency, setters should return a Promise<boolean>
-
-    // INFO Assigning a XM Transaction to an address
-    static async addToGCRXM(
-        address: string,
-        xmHash: string,
-    ): Promise<OperationResult> {
-        const result: OperationResult = {
-            success: false,
-            message: "",
-        }
-        try {
-            let statusProperties: GCRExtended
-            // Getting the table
-            const db = await Datasource.getInstance()
-            const gcrRepository = db
-                .getDataSource()
-                .getRepository(GlobalChangeRegistry)
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            statusProperties = gcrSearch?.extended
-            // Or creating it if it doesn't exist
-            if (!statusProperties) {
-                statusProperties = {
-                    tokens: [],
-                    nfts: [],
-                    xm: [],
-                    web2: [],
-                    other: [],
-                }
+        // Preparing the response
+        const gcrSubnetsTxsData: GCRSubnetsTxs[] = []
+        // Selecting only the requested data
+        if (!options.txData) {
+            for (const tx of gcrSubnetsTxsSearch) {
+                tx.tx_data = null
+                gcrSubnetsTxsData.push(tx)
             }
-            // Loading the object
-            const jStatusProperties = statusProperties.xm
-            jStatusProperties.push(xmHash)
-            // And updating it
-            statusProperties.xm = jStatusProperties
-            await gcrRepository.update(
-                { publicKey: address },
-                { extended: statusProperties },
-            )
-            // REVIEW Save the hash of the GCR for this public key
-            await gcrStateSave.updateGCRTracker(address)
-            result.success = true
-        } catch (e) {
-            result.message = JSON.stringify(e)
         }
-        return result
-    }
-
-    // INFO Assigning a Web2 Transaction to an address
-    static async addToGCRWeb2(
-        address: string,
-        web2Hash: string,
-    ): Promise<OperationResult> {
-        const result: OperationResult = {
-            success: false,
-            message: "",
-        }
-        try {
-            let statusProperties: any
-            // Getting the table
-            const db = await Datasource.getInstance()
-            const gcrRepository = db
-                .getDataSource()
-                .getRepository(GlobalChangeRegistry)
-            const gcrSearch = await gcrRepository.findOneBy({
-                publicKey: address,
-            })
-            statusProperties = gcrSearch?.extended
-            // Or creating it if it doesn't exist
-            if (!statusProperties) {
-                statusProperties = {
-                    tokens: [],
-                    nfts: [],
-                    xm: [],
-                    web2: [],
-                    other: [],
-                }
-            }
-            // Loading the object
-            const jStatusProperties = JSON.parse(statusProperties.web2)
-            jStatusProperties.push(web2Hash)
-            // And updating it
-            statusProperties.web2 = jStatusProperties
-            await gcrRepository.update(
-                { publicKey: address },
-                { extended: statusProperties },
-            )
-            // REVIEW Save the hash of the GCR for this public key
-            await gcrStateSave.updateGCRTracker(address)
-            result.success = true
-        } catch (e) {
-            result.success = false
-            result.message = JSON.stringify(e)
-        }
-        return result
-    }
-
-    // INFO Assigning a IMPData hash to an address or to the L1 itself
-    static async addToGCRIMPData(
-        address: string,
-        impDataHash: string,
-    ): Promise<OperationResult> {
-        const result: OperationResult = {
-            success: false,
-            message: "",
-        }
-        // TODO Add stuff after loading the IMPData
-        if (address === "demos") {
-            // TODO Assigning to the blockchain
-        }
-        return result
-    }
-
-    static async setGCRNativeBalance(
-        address: string,
-        native: number,
-        txHash: string,
-    ): Promise<boolean> {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-
-        try {
-            let nativeStatus = await gcrRepository.findOne({
-                select: ["details"],
-                where: { publicKey: address },
-            })
-
-            if (!nativeStatus) {
-                log.debug("Creating new native status")
-                nativeStatus = gcrRepository.create({
-                    publicKey: address,
-                    details: {
-                        hash: "",
-                        content: {
-                            balance: 0,
-                            identities: {
-                                xm: {},
-                                web2: {},
-                            },
-                            txs: [],
-                            nonce: 0,
-                        },
-                    },
-                })
-                await gcrRepository.save(nativeStatus)
-            }
-
-            //console.log(nativeStatus.details.txs)
-            const txList = nativeStatus.details.content.txs || []
-            txList.push(txHash)
-
-            await gcrRepository.update(
-                { publicKey: address },
-                {
-                    details: {
-                        hash: "",
-                        content: {
-                            balance: native,
-                            txs: txList,
-                            nonce: nativeStatus.details.content.nonce,
-                        },
-                    },
-                },
-            )
-
-            //console.log(tx_list)
-            // TODO: Decide if we should use status_hashes too
-            // Note: The original function returns responses from Chain.write, consider what you need to return here.
-            return true // Adjust the return value as needed based on your requirements.
-        } catch (e) {
-            log.error(
-                "[GCR ERROR: NATIVE] Error setting GCR native balance: " + e,
-            )
-            return false
-        }
+        response.response = gcrSubnetsTxsData
+        return response
     }
 
     static async getAccountByTwitterUsername(username: string) {

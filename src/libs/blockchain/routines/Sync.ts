@@ -911,6 +911,21 @@ export async function fastSync(
     getSharedState.inSyncLoop = true
     getSharedState.fastSyncAborted = false
 
+    // if our difference is greater than 2 blocks, set our sync status to false and broadcast
+
+    if (getSharedState.syncStatus) {
+        const networkHighest = latestBlock()
+        const ourHighest = getSharedState.lastBlockNumber
+        const difference = networkHighest - ourHighest
+        if (difference >= 2) {
+            getSharedState.syncStatus = false
+            await BroadcastManager.broadcastOurSyncData()
+            log.debug(
+                "[fastSync] Network highest block is more than 2 blocks ahead of our highest block, setting sync status to false and broadcasting",
+            )
+        }
+    }
+
     try {
         let synced: boolean
         if (getSharedState.fastSyncCount > 0) {

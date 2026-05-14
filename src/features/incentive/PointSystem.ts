@@ -283,7 +283,6 @@ export class PointSystem {
         twitterUserId?: string,
     ): Promise<void> {
         const db = await Datasource.getInstance()
-        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
         const account = await ensureGCRForUser(userId)
         const isEligibleForReferral = Referrals.isEligibleForReferral(account)
 
@@ -378,6 +377,8 @@ export class PointSystem {
         }
 
         account.points.lastUpdated = new Date()
+
+        const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 
         // Process referral for existing account if eligible
         if (referralCode && isEligibleForReferral) {

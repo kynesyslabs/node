@@ -19,27 +19,13 @@
  * - Also implement the new GCROperation structure replacing the old Operation one
  */
 
-import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
-// NOTE This will replace gcr.ts methods for calling the native tables
-import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
-import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
+
 import {
-    RPCResponse,
     Transaction,
     TransactionContent,
 } from "@kynesyslabs/demosdk/types"
 import Datasource, { dataSource } from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import hashGCRTables from "./gcr_routines/hashGCR"
-import * as GCRJsonbHandler from "./gcr_routines/gcrJSONBHandler"
-import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
-import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
-import { assignXM } from "./gcr_routines/assignXM"
-import { assignWeb2 } from "./gcr_routines/assignWeb2"
-import IdentityManager from "./gcr_routines/identityManager"
-import manageNative from "./gcr_routines/manageNative"
 import { GCREdit, GCREditStorageProgram } from "@kynesyslabs/demosdk/types"
 import {
     GCREditBalance,
@@ -52,12 +38,10 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
-import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
-import Chain from "../chain"
-import { In, Repository } from "typeorm"
+import { In } from "typeorm"
 import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
@@ -85,9 +69,6 @@ export type GetNativePropertiesOptions = {
     other?: boolean
 }
 
-export type GetNativeSubnetsTxsOptions = {
-    txData?: boolean
-}
 
 export interface GCRResult {
     success: boolean
@@ -169,147 +150,7 @@ export default class HandleGCR {
         "escrow",
     ])
 
-    static async getNativeStatus(
-        publicKey: string,
-        options: GetNativeStatusOptions = {
-            balance: true,
-            nonce: true,
-            txList: false,
-            identities: true,
-            extended: false,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        // Getting the datasource
-        const db = await Datasource.getInstance()
-        const globalChangeRegistryRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // Getting the status native data
-        const globalChangeRegistrySearch =
-            await globalChangeRegistryRepository.findOneBy({
-                publicKey: publicKey,
-            })
-        if (!globalChangeRegistrySearch) {
-            response.response = "Address not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const globalChangeRegistryData: GlobalChangeRegistry = {
-            id: globalChangeRegistrySearch.id,
-            publicKey: globalChangeRegistrySearch.publicKey,
-            details: globalChangeRegistrySearch.details,
-            extended: globalChangeRegistrySearch.extended,
-        }
-        // Selecting only the requested data
-        if (options.balance) {
-            globalChangeRegistryData.details.content.balance =
-                globalChangeRegistrySearch.details.content.balance
-        }
-        if (options.nonce) {
-            globalChangeRegistryData.details.content.nonce =
-                globalChangeRegistrySearch.details.content.nonce
-        }
-        if (options.txList) {
-            globalChangeRegistryData.details.content.txs =
-                globalChangeRegistrySearch.details.content.txs
-        }
-        if (options.identities) {
-            globalChangeRegistryData.details.content.identities =
-                globalChangeRegistrySearch.details.content.identities
-        }
-        if (options.extended) {
-            globalChangeRegistryData.extended =
-                globalChangeRegistrySearch.extended
-        }
-        response.response = globalChangeRegistryData
-        return response
-    }
-
-    static async getNativeProperties(
-        publicKey: string,
-        options: GetNativePropertiesOptions = {
-            tokens: true,
-            nfts: true,
-            xm: true,
-            web2: true,
-            other: false,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        // Getting the datasource
-        const db = await Datasource.getInstance()
-        const gcrExtendedRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // Getting the status properties data
-        const repositorySearch = await gcrExtendedRepository.findOneBy({
-            publicKey: publicKey,
-        })
-        const gcrExtendedSearch = repositorySearch.extended
-        if (!gcrExtendedSearch) {
-            response.response = "Address not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const gcrExtendedData: GCRExtended = {
-            tokens: gcrExtendedSearch.tokens,
-            nfts: gcrExtendedSearch.nfts,
-            xm: gcrExtendedSearch.xm,
-            web2: gcrExtendedSearch.web2,
-            other: gcrExtendedSearch.other,
-        }
-        // Selecting only the requested data
-        if (options.tokens) {
-            gcrExtendedData.tokens = gcrExtendedSearch.tokens
-        }
-        if (options.nfts) {
-            gcrExtendedData.nfts = gcrExtendedSearch.nfts
-        }
-        if (options.xm) {
-            gcrExtendedData.xm = gcrExtendedSearch.xm
-        }
-        if (options.web2) {
-            gcrExtendedData.web2 = gcrExtendedSearch.web2
-        }
-        response.response = gcrExtendedData
-        return response
-    }
-
-    static async getNativeSubnetsTxs(
-        subnetId: string,
-        options: GetNativeSubnetsTxsOptions = {
-            txData: true,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        const db = await Datasource.getInstance()
-        const gcrSubnetsTxsRepository = db
-            .getDataSource()
-            .getRepository(GCRSubnetsTxs)
-        // Getting the status subnets txs data
-        const gcrSubnetsTxsSearch = await gcrSubnetsTxsRepository.findBy({
-            subnet_id: subnetId,
-        })
-        if (!gcrSubnetsTxsSearch) {
-            response.response = "Subnet not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const gcrSubnetsTxsData: GCRSubnetsTxs[] = []
-        // Selecting only the requested data
-        if (!options.txData) {
-            for (const tx of gcrSubnetsTxsSearch) {
-                tx.tx_data = null
-                gcrSubnetsTxsData.push(tx)
-            }
-        }
-        response.response = gcrSubnetsTxsData
-        return response
-    }
+    
 
     /**
      * Bulk update assignedTxs using raw SQL for efficiency
@@ -1345,55 +1186,6 @@ export default class HandleGCR {
                 " GCREdits for tx: " +
                 tx.hash,
         )
-    }
-
-    // ! SECTION GCREdit methods
-
-    // Assign methods // ? Probably to remove
-
-    // TODO We have to port these methods from gcr.ts, now they are just proxies
-    assign = {
-        xm: assignXM,
-        web2: assignWeb2,
-        identity: {
-            assignFromWrite: IdentityManager.inferIdentityFromWrite,
-        },
-    }
-
-    // This is a proxy to the manageNative methods for simplicity
-    native = manageNative
-
-    // Utilities
-    utilities = {
-        ensureGCRForUser,
-    }
-
-    // State save methods
-    save = gcrStateSave
-
-    // Hash methods
-    hash = {
-        tables: hashGCRTables,
-    }
-
-    // JSONB methods
-    jsonb = {
-        get: GCRJsonbHandler.getJSONBValue,
-        update: GCRJsonbHandler.updateJSONBValue,
-    }
-
-    private static async getRepositories() {
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
-
-        return {
-            main: dataSource.getRepository(GCRMain),
-            hashes: dataSource.getRepository(GCRHashes),
-            subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
-            tracker: dataSource.getRepository(GCRTracker),
-            tlsnotary: dataSource.getRepository(GCRTLSNotary),
-            storageProgram: dataSource.getRepository(GCRStorageProgram),
-        }
     }
 
     // Create methods

@@ -129,13 +129,3 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     await insertBlock(genesisBlock, [genesisOp], 0)
     return genesisBlock
 }
-
-export async function generateGenesisBlocks(genesisJsons: any[]): Promise<string> {
-    const compiledBlock = ""
-    // TODO
-    return compiledBlock
-}
-
-export async function getGenesisUniqueBlock() {
-    // TODO
-}

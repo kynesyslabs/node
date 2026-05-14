@@ -1,7 +1,11 @@
 import Chain from "src/libs/blockchain/chain"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
-import { ValidityData, GCREdit, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import {
+    ValidityData,
+    GCREdit,
+    SigningAlgorithm,
+} from "@kynesyslabs/demosdk/types"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -14,6 +18,7 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import GCR from "../blockchain/gcr/gcr"
 
 export async function handleValidateTransaction(
     tx: Transaction,
@@ -46,9 +51,7 @@ export async function handleValidateTransaction(
         log.only(
             `[handleValidateTransaction] GCR edits hash generated in ${handleGcrEditsHashEnd - handleGcrEditsHashStart}ms`,
         )
-        log.debug(
-            "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
-        )
+        log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
         const txGcrEditsHash = Hashing.sha256(
             JSON.stringify(tx.content.gcr_edits),
         )
@@ -59,9 +62,9 @@ export async function handleValidateTransaction(
         if (!comparison) {
             log.error(
                 "[handleValidateTransaction] GCREdit mismatch: " +
-                txGcrEditsHash +
-                " <> " +
-                gcrEditsHash,
+                    txGcrEditsHash +
+                    " <> " +
+                    gcrEditsHash,
             )
         }
         if (comparison) {
@@ -80,22 +83,14 @@ export async function handleValidateTransaction(
                             (edit.account as any)?.toString() === sender)),
             )
             .reduce(
-                (sum: bigint, edit: GCREdit) => sum + BigInt((edit as any).amount),
+                (sum: bigint, edit: GCREdit) =>
+                    sum + BigInt((edit as any).amount),
                 0n,
             )
 
         if (totalFee > 0n) {
             const checkFeeStart = Date.now()
-            const db = await Datasource.getInstance()
-            const gcrMainRepo = db
-                .getDataSource()
-                .getRepository(GCRMain)
-            const account = await gcrMainRepo.findOneBy({
-                pubkey: sender,
-            })
-            const senderBalance = account
-                ? BigInt(account.balance)
-                : 0n
+            const senderBalance = await GCR.getAccountBalance(sender)
             const checkFeeEnd = Date.now()
             log.only(
                 `[handleValidateTransaction] Check fee in ${checkFeeEnd - checkFeeStart}ms`,
