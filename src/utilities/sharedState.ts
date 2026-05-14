@@ -103,6 +103,13 @@ export default class SharedState {
     // Modes
     isShuttingDown = false
     isInitialized = false
+    // Set true when the fire-and-forget mainLoop wrapper completes (either
+    // crash or graceful). Epic 13's /health extension will read these to
+    // surface mainLoop liveness; until then they exist for observability
+    // tooling and to diagnose `docker stop` exit codes.
+    mainLoopExited = false
+    mainLoopExitedAt: number | null = null
+    mainLoopExitReason: string | null = null
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false
@@ -409,6 +416,10 @@ export default class SharedState {
             POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
+        // Proxy-header trust — see RateLimiter constructor for resolution
+        // rules. Defaults to "" (auto-derive from list presence).
+        trustedProxies: Config.getInstance().core.trustedProxies,
+        xffMode: Config.getInstance().core.xffMode,
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server

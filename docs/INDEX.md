@@ -23,4 +23,8 @@ Structured, discoverable documentation for the Demos Network node.
 
 ## Documents
 
-_No managed documents yet. Use `/docs:add <type> [title]` to create one._
+| Path | Type | Date | Status |
+|------|------|------|--------|
+| `discoveries/startup-assessment-2026-05-13/` | discovery + epic plans | 2026-05-14 | active |
+| `runbooks/mcp-security.md` | runbook | 2026-05-14 | active |
+| `runbooks/wstcp-reachability-check.md` | runbook | 2026-05-14 | active |

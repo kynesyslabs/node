@@ -43,6 +43,21 @@ export interface CoreConfig {
     logLevel: string
     whitelistedIPs: string[]
     whitelistedKeys: string[]
+    /**
+     * Reverse-proxy / CDN networks whose `X-Forwarded-For`, `X-Real-IP`,
+     * and `CF-Connecting-IP` headers may be trusted. Accepts plain
+     * addresses and CIDR notation. Empty by default — proxy headers are
+     * IGNORED until this list is populated. See `xffMode`.
+     */
+    trustedProxies: string[]
+    /**
+     * Override the auto-resolved XFF handling mode.
+     *   off    — ignore all proxy headers (safe default when list empty)
+     *   strict — honor proxy headers only when socket peer matches list
+     *   legacy — trust XFF/XRI unconditionally (INSECURE, opt-in only)
+     * Empty string means "auto" (off when list empty, strict otherwise).
+     */
+    xffMode: string
     mcpEnabled: boolean
     restore: boolean
     rpcFee: number

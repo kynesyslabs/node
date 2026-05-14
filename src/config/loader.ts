@@ -107,6 +107,8 @@ export function loadConfig(): Readonly<AppConfig> {
             logLevel: envStr(EnvKey.LOG_LEVEL, d.core.logLevel),
             whitelistedIPs: envList(EnvKey.WHITELISTED_IPS, d.core.whitelistedIPs),
             whitelistedKeys: envList(EnvKey.WHITELISTED_KEYS, d.core.whitelistedKeys),
+            trustedProxies: envList(EnvKey.TRUSTED_PROXIES, d.core.trustedProxies),
+            xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
         },

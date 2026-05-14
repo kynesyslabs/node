@@ -159,7 +159,16 @@ services:
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
       - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
-      - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
+      # MCP (Model Context Protocol) intentionally NOT host-published.
+      # The server binds `localhost` inside the container (src/index.ts)
+      # and the SDK has no built-in authentication — publishing this port
+      # exposes node identity + peer topology to anyone who can reach it.
+      # See docs/runbooks/mcp-security.md +
+      # docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
+      # When Epic 12 introduces a reverse proxy with bearer auth, MCP can
+      # be re-exposed there. Until then it remains reachable only via
+      # `docker compose exec node curl http://localhost:3001/sse`.
+      # - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
       # METRICS_PORT — keep container port pinned to 9090 so the
       # prometheus.yml scrape target (node:9090) stays valid. The
       # host-side port is independently configurable via METRICS_HOST_PORT.

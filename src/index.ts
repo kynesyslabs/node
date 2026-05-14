@@ -824,17 +824,38 @@ async function main() {
         await fastSync([], "index.ts")
         getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
+        // Fire-and-forget mainLoop. Do NOT kill the process on exit —
+        // the previous `process.exit(1)` in `.finally` was a debug aid
+        // (commit 455d615b) that became permanent. It killed the node on
+        // any mainLoop error despite the uncaughtException swallow policy
+        // at the top of this file, and it also raced gracefulShutdown's
+        // `process.exit(0)` so `docker stop` exited code 1. The wrapper
+        // now records the exit in sharedState so /health and observability
+        // tooling (Epic 13) can surface it. See
+        // docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mainLoop()
             .catch((error: Error) => {
                 console.error(error)
                 log.error("[CORE] Error in main loop: " + error)
                 handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
+                getSharedState.mainLoopExitReason =
+                    error instanceof Error ? error.message : String(error)
             })
             .finally(() => {
-                log.error("[CORE] Main loop terminated, exiting for debug ... ")
-                process.exit(1)
-                log.info("[CORE] Main loop finished")
-            }) // Is an async function so running without waiting send that to the background
+                getSharedState.mainLoopExited = true
+                getSharedState.mainLoopExitedAt = Date.now()
+                if (getSharedState.isShuttingDown) {
+                    log.info(
+                        "[CORE] Main loop stopped (graceful shutdown)",
+                    )
+                } else {
+                    log.error(
+                        "[CORE] Main loop terminated unexpectedly. " +
+                            "Node continues serving RPC but is no longer producing blocks. " +
+                            "Investigate.",
+                    )
+                }
+            })
 
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
