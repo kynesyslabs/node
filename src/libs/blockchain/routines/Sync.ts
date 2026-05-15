@@ -39,6 +39,7 @@ import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
 import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
+import { getLastBlockSigners } from "../chainBlocks"
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -912,11 +913,11 @@ export async function fastSync(
     getSharedState.fastSyncAborted = false
 
     // if our difference is greater than 2 blocks, set our sync status to false and broadcast
-
     if (getSharedState.syncStatus) {
         const networkHighest = latestBlock()
         const ourHighest = getSharedState.lastBlockNumber
         const difference = networkHighest - ourHighest
+
         if (difference >= 2) {
             getSharedState.syncStatus = false
             await BroadcastManager.broadcastOurSyncData()
@@ -977,4 +978,80 @@ export async function fastSync(
         getSharedState.inSyncLoop = false
         log.debug("[fastSync] Sync loop ended")
     }
+}
+
+/**
+ * Block the consensus until peers reach the same block as us.
+ *
+ * @param lastBlockSignersOnly - If true, only wait for peers that signed the last block.
+ *                               If false, wait for online peers that are level or 1 block behind.
+ * @returns False if any peer is ahead of us (caller should abort the round); true otherwise.
+ */
+export async function waitForPeerStatus(
+    lastBlockSignersOnly = true,
+): Promise<boolean> {
+    const POLL_MS = 100
+    const TIMEOUT_MS = 10_000
+
+    const ourBlock = getSharedState.lastBlockNumber
+    const ourHash = getSharedState.lastBlockHash
+    const selfId = getSharedState.publicKeyHex
+
+    let signerIds: Set<string> | null = new Set()
+
+    if (lastBlockSignersOnly) {
+        const signers = await getLastBlockSigners()
+        const others = signers.filter(id => id !== selfId)
+        if (others.length === 0) {
+            log.debug("[waitForPeerStatus] No prior signers, skipping")
+            return true
+        }
+        signerIds = new Set(others)
+    }
+
+    const start = Date.now()
+    while (Date.now() - start < TIMEOUT_MS) {
+        const onlinePeers = peerManager.getPeers()
+
+        // Abort if any peer is ahead — we're stale and shouldn't drive consensus
+        const ahead = onlinePeers.filter(
+            p => p.status.online && p.sync.status && p.sync.block > ourBlock,
+        )
+        if (ahead.length > 0) {
+            log.warn(
+                `[waitForPeerStatus] ${ahead.length} peer(s) ahead at block ${ourBlock}, aborting`,
+            )
+            return false
+        }
+
+        const waitFor = signerIds
+            ? onlinePeers.filter(p => signerIds.has(p.identity))
+            : onlinePeers.filter(p => p.sync.block >= ourBlock - 1)
+
+        if (waitFor.length === 0) {
+            log.debug("[waitForPeerStatus] No target peers to wait for")
+            return true
+        }
+
+        const isAligned = (p: Peer) =>
+            p.sync.block === ourBlock && p.sync.block_hash === ourHash
+
+        if (waitFor.every(isAligned)) {
+            log.debug(
+                `[waitForPeerStatus] ${waitFor.length} peer(s) aligned at block ${ourBlock}`,
+            )
+            return true
+        }
+
+        const lagging = waitFor.filter(p => !isAligned(p)).length
+        log.debug(
+            `[waitForPeerStatus] Waiting on ${lagging}/${waitFor.length} at block ${ourBlock}`,
+        )
+        await sleep(POLL_MS)
+    }
+
+    log.warn(
+        `[waitForPeerStatus] Timeout after ${TIMEOUT_MS}ms, proceeding best-effort`,
+    )
+    return true
 }

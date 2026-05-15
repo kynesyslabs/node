@@ -1,3 +1,4 @@
+import { BlockContent } from "@kynesyslabs/demosdk/types"
 import { pki } from "node-forge"
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
 
@@ -15,7 +16,7 @@ export class Blocks {
     hash: string
 
     @Column("json", { name: "content" })
-    content: NonNullable<any>
+    content: NonNullable<BlockContent>
 
     @Column("varchar", { name: "status" })
     status: string
@@ -27,5 +28,5 @@ export class Blocks {
     next_proposer: string
 
     @Column("json", { name: "validation_data" })
-    validation_data: any
+    validation_data: NonNullable<{ signatures: { [signer: string]: string } }>
 }

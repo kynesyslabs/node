@@ -895,6 +895,7 @@ async function main() {
 
 // INFO Starting the main routine
 main().catch((error: Error) => {
+    console.error(error)
     handleError(error, "CORE", { source: ErrorSource.MAIN, fatal: true })
     gracefulShutdown("main_error").catch(() => {
         process.exit(1)

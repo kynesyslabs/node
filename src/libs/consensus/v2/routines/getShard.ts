@@ -17,7 +17,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         peer =>
             peer.status.online &&
             peer.sync.status &&
-            Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
+            peer.sync.block === getSharedState.lastBlockNumber &&
+            peer.sync.block_hash === getSharedState.lastBlockHash,
     )
 
     // Select up to 10 peers from the list using the seed as a source of randomness

@@ -16,7 +16,7 @@ import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-import { fastSync } from "@/libs/blockchain/routines/Sync"
+import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
 
 /* INFO
 # Semaphore system
@@ -68,9 +68,17 @@ export async function consensusRoutine(): Promise<void> {
             [],
             "consensusRoutine",
         )
+
         if (latestChainBlock !== ourLatestBlock) {
             log.error(
                 "[consensusRoutine] Latest chain block is not equal to our latest block, exiting",
+            )
+            return
+        }
+        const peersReady = await waitForPeerStatus()
+        if (!peersReady) {
+            log.warn(
+                "[consensusRoutine] Peers ahead of us, aborting this round",
             )
             return
         }

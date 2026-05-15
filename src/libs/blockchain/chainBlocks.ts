@@ -9,11 +9,7 @@ import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import {
-    CHUNK_TRANSACTIONS,
-    chunkedInsert,
-    getBlocksRepo,
-} from "./chainDb"
+import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import type { FindManyOptions } from "typeorm"
 
@@ -39,23 +35,45 @@ export async function getLastBlock(): Promise<Blocks> {
 
 export async function getLastBlockNumber(): Promise<number> {
     if (!getSharedState.lastBlockNumber) {
-        const lastBlock = await getLastBlock()
-        return lastBlock ? lastBlock.number : 0
+        // const lastBlock = await getLastBlock()
+        // return lastBlock ? lastBlock.number : 0
+        const block = await getBlocksRepo().findOne({
+            order: { number: "DESC" },
+            select: ["number"],
+        })
+
+        return block ? block.number : 0
     }
+
     return getSharedState.lastBlockNumber
 }
 
 export async function getLastBlockHash() {
     if (!getSharedState.lastBlockHash) {
-        const lastBlock = await getLastBlock()
-        return lastBlock ? lastBlock.hash : null
+        const block = await getBlocksRepo().findOne({
+            order: { number: "DESC" },
+            select: ["hash"],
+        })
+
+        return block ? block.hash : null
     }
+
     return getSharedState.lastBlockHash
 }
 
 export async function getLastBlockTransactionSet(): Promise<Set<string>> {
     const lastBlock = await getLastBlock()
     return new Set(lastBlock.content.ordered_transactions)
+}
+
+export async function getLastBlockSigners(): Promise<string[]> {
+    const lastBlock = await getBlocksRepo().findOne({
+        where: { number: getSharedState.lastBlockNumber },
+        select: ["validation_data"],
+    })
+
+    const sigs = lastBlock?.validation_data?.signatures
+    return sigs ? Object.keys(sigs) : []
 }
 
 export async function getBlocks(
