@@ -383,6 +383,13 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
         await getCommonValidatorSeed()
 
     const manager = SecretaryManager.getInstance(blockRef)
+
+    if (!manager) {
+        throw new ForgingEndedError(
+            "Secretary Manager instance for this block has been deleted",
+        )
+    }
+
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
 

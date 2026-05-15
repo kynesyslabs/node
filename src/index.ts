@@ -244,8 +244,6 @@ async function warmup() {
     log.cleanLogs(false)
 
     log.info("[MAIN] Starting the node")
-
-    getSharedState.keypair = await getSharedState.identity.loadIdentity()
     indexState.enough_peers = true // ? Review this
 
     // ANCHOR Overrides
@@ -349,7 +347,7 @@ async function preMainLoop() {
                     "     Other peers cannot reach this node at this address.\n" +
                     "     For real network participation, set EXPOSED_URL in .env\n" +
                     "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
-                    "     See INSTALL.md → \"Joining the network\".\n" +
+                    '     See INSTALL.md → "Joining the network".\n' +
                     "============================================================",
             )
         }
@@ -438,6 +436,17 @@ async function main() {
         indexState.TUI_ENABLED = false
     }
 
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
+    try {
+        await TxValidatorPool.getInstance().start()
+    } catch (error) {
+        handleError(error, "CORE", { source: ErrorSource.WORKER_POOL_STARTUP })
+        log.error(
+            "[CORE] TxValidatorPool failed to start; aborting node startup.",
+        )
+        process.exit(1)
+    }
+
     // Initialize TUI if enabled
     if (indexState.TUI_ENABLED) {
         try {
@@ -477,15 +486,6 @@ async function main() {
     // TxValidatorPool spawns workers that need the node's master seed to
     // sign as the node, so it must start AFTER warmup() (which calls
     // identity.loadIdentity() and populates getSharedState.identity.masterSeed).
-    try {
-        await TxValidatorPool.getInstance().start()
-    } catch (error) {
-        handleError(error, "CORE", { source: ErrorSource.WORKER_POOL_STARTUP })
-        log.error(
-            "[CORE] TxValidatorPool failed to start; aborting node startup.",
-        )
-        process.exit(1)
-    }
 
     // Update TUI with port info after warmup
     if (indexState.TUI_ENABLED && indexState.tuiManager) {

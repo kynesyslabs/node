@@ -1044,9 +1044,10 @@ export async function waitForPeerStatus(
         }
 
         const lagging = waitFor.filter(p => !isAligned(p)).length
-        log.debug(
+        log.only(
             `[waitForPeerStatus] Waiting on ${lagging}/${waitFor.length} at block ${ourBlock}`,
         )
+        log.only("😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒😒")
         await sleep(POLL_MS)
     }
 

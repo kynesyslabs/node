@@ -35,12 +35,12 @@ export async function getLastBlock(): Promise<Blocks> {
 
 export async function getLastBlockNumber(): Promise<number> {
     if (!getSharedState.lastBlockNumber) {
-        // const lastBlock = await getLastBlock()
-        // return lastBlock ? lastBlock.number : 0
-        const block = await getBlocksRepo().findOne({
-            order: { number: "DESC" },
-            select: ["number"],
-        })
+        const block = await getBlocksRepo()
+            .createQueryBuilder("block")
+            .select("block.number")
+            .orderBy("block.number", "DESC")
+            .limit(1)
+            .getOne()
 
         return block ? block.number : 0
     }
@@ -50,10 +50,12 @@ export async function getLastBlockNumber(): Promise<number> {
 
 export async function getLastBlockHash() {
     if (!getSharedState.lastBlockHash) {
-        const block = await getBlocksRepo().findOne({
-            order: { number: "DESC" },
-            select: ["hash"],
-        })
+        const block = await getBlocksRepo()
+            .createQueryBuilder("block")
+            .select("block.hash")
+            .orderBy("block.number", "DESC")
+            .limit(1)
+            .getOne()
 
         return block ? block.hash : null
     }
@@ -62,8 +64,20 @@ export async function getLastBlockHash() {
 }
 
 export async function getLastBlockTransactionSet(): Promise<Set<string>> {
-    const lastBlock = await getLastBlock()
-    return new Set(lastBlock.content.ordered_transactions)
+    const query = getBlocksRepo()
+        .createQueryBuilder("block")
+        .select("block.content")
+
+    if (getSharedState.lastBlockNumber) {
+        query.where("block.number = :number", {
+            number: getSharedState.lastBlockNumber,
+        })
+    } else {
+        query.orderBy("block.number", "DESC").limit(1)
+    }
+
+    const block = await query.getOne()
+    return new Set(block?.content?.ordered_transactions ?? [])
 }
 
 export async function getLastBlockSigners(): Promise<string[]> {
