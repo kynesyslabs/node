@@ -64,6 +64,9 @@ export async function consensusRoutine(): Promise<void> {
     let tempMempool: Transaction[] = []
 
     try {
+        log.only("[consensusRoutine] Initializing the consensus state")
+        await initializeConsensusState()
+
         const { latestChainBlock, ourLatestBlock } = await fastSync(
             [],
             "consensusRoutine",
@@ -83,8 +86,6 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        log.only("[consensusRoutine] Initializing the consensus state")
-        await initializeConsensusState()
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")

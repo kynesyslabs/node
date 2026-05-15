@@ -232,9 +232,13 @@ export async function insertBlock(
         return existingBlock
     }
 
-    const transactionEntities = await Mempool.getTransactionsByHashes(
+    let transactionEntities = await Mempool.getTransactionsByHashes(
         orderedTransactionsHashes,
     )
+    transactionEntities = transactionEntities.map(tx => ({
+        ...tx,
+        blockNumber: block.number,
+    }))
 
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
@@ -247,6 +251,7 @@ export async function insertBlock(
                     blocksRepo.target,
                     newBlock,
                 )
+
                 if (block.number > getSharedState.lastBlockNumber) {
                     getSharedState.lastBlockNumber = block.number
                     getSharedState.lastBlockHash = block.hash
@@ -267,7 +272,7 @@ export async function insertBlock(
                     const { skipped } = await chunkedInsert(
                         transactionalEntityManager,
                         Transactions,
-                        rawTransactions as any[],
+                        rawTransactions,
                         CHUNK_TRANSACTIONS,
                     )
                     if (skipped > 0) {
