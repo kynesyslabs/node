@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
@@ -85,6 +85,16 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+
+        log.only(
+            "Ready peers: " +
+                JSON.stringify(
+                    PeerManager.getInstance()
+                        .getPeers()
+                        .filter(p => p.sync.status && p.status.ready)
+                        .map(p => p.connection.string),
+                ),
+        )
 
         log.only("[consensusRoutine] Consensus state initialized")
 
