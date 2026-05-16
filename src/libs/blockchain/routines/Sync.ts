@@ -491,7 +491,7 @@ async function batchDownloadBlocks(
         params: [
             {
                 message: "getBlocks",
-                data: { start: startBlock + limit, limit },
+                data: { start: startBlock + limit - 1, limit },
                 muid: null,
             },
         ],
