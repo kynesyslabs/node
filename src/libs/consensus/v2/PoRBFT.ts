@@ -87,6 +87,14 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         log.only(
+            "ALL PEERS: " +
+                JSON.stringify(PeerManager.getInstance().getAll(), null, 2),
+        )
+        log.only(
+            "getPeers: " +
+                JSON.stringify(PeerManager.getInstance().getPeers(), null, 2),
+        )
+        log.only(
             "Ready peers: " +
                 JSON.stringify(
                     PeerManager.getInstance()
