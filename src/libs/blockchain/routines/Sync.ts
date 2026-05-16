@@ -1009,7 +1009,7 @@ export async function waitForPeerStatus(
         signerIds = new Set(others)
         log.only(
             "[waitForPeerStatus] Last block signers: " +
-                JSON.stringify(signerIds, null, 2),
+                JSON.stringify(Array.from(signerIds), null, 2),
         )
     }
 
