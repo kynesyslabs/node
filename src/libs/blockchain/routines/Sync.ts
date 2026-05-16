@@ -997,7 +997,7 @@ export async function waitForPeerStatus(
     const ourHash = getSharedState.lastBlockHash
     const selfId = getSharedState.publicKeyHex
 
-    let signerIds: Set<string> | null = new Set()
+    let signerIds: Set<string> | null = null
 
     if (lastBlockSignersOnly) {
         const signers = await getLastBlockSigners()
@@ -1007,6 +1007,10 @@ export async function waitForPeerStatus(
             return true
         }
         signerIds = new Set(others)
+        log.only(
+            "[waitForPeerStatus] Last block signers: " +
+                JSON.stringify(signerIds, null, 2),
+        )
     }
 
     const start = Date.now()
