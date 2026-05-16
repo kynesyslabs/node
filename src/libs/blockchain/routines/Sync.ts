@@ -881,13 +881,13 @@ async function fastSyncRoutine(peers: Peer[] = []) {
         await Mempool.cleanMempool()
 
         // await waitForNextBlock()
-        while (!(await waitForNextBlock())) {
-            if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
-                return false
-            log.debug(
-                "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
-            )
-        }
+        // while (!(await waitForNextBlock())) {
+        //     if (getSharedState.isShuttingDown || getSharedState.fastSyncAborted)
+        //         return false
+        //     log.debug(
+        //         "[fastSync] Failed to wait for next block, retrying ... ⛔️⛔️⛔️⛔️⛔️⛔️⛔️⛔️",
+        //     )
+        // }
 
         log.debug("[fastSync] Wait for next block complete! 🥳🥳🥳🥳🥳🥳🥳🥳🥳")
     }

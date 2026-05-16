@@ -15,8 +15,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const allPeers = await PeerManager.getInstance().getOnlinePeers()
     const peers = allPeers.filter(
         peer =>
-            peer.status.online &&
-            peer.sync.status &&
+            // peer.status.online &&
+            // peer.sync.status &&
             peer.sync.block === getSharedState.lastBlockNumber &&
             peer.sync.block_hash === getSharedState.lastBlockHash,
     )
