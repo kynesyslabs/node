@@ -391,8 +391,12 @@ services:
       ACME_EMAIL: ${ACME_EMAIL:-}
       METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
       MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
+      # Epic 12 T14 — selects which tlsnotary-modes/*.caddy snippet
+      # is imported. Allowed: subpath (default), subdomain, direct.
+      TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}
     volumes:
       - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:

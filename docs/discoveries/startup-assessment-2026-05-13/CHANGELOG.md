@@ -5,6 +5,60 @@ title: Startup Assessment Changelog
 
 # Startup Assessment Changelog
 
+## 2026-05-15 — Epic 12 follow-up: env toggles + smoke script
+
+Adds the three env-gated knobs called out in the "deferred — needs
+live verification" list, plus a smoke-test runner so the live verify
+itself is mechanical.
+
+- **T9 — env-gated wstcp bind**
+  - `src/features/tlsnotary/proxyManager.ts:281`: `wstcp --bind-addr`
+    now reads `WSTCP_BIND_HOST` env (default `0.0.0.0` for bare-metal
+    back-compat). Set `WSTCP_BIND_HOST=127.0.0.1` in containerized
+    deployments behind a co-located reverse proxy to remove the
+    2000-port attack surface.
+  - `src/features/tlsnotary/portAllocator.ts:83`: availability probe
+    uses the same bind host so an env switch doesn't drift between
+    "available" check and actual spawn.
+  - `.env.example`: documented block + safety note pointing at
+    `docs/runbooks/wstcp-reachability-check.md`.
+- **T14 — TLSNotary proxy-mode toggle**
+  - `monitoring/caddy/Caddyfile`: TLSNotary route + optional top-level
+    vhost are now imported from
+    `monitoring/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE}.caddy`
+    + `{mode}-vhost.caddy`. Three modes ship:
+      - `subpath` (default) — `/tlsnotary/*` on the main vhost.
+      - `subdomain` — dedicated `notary.${PROXY_DOMAIN}` vhost with
+        its own ACME cert. No prefix stripping — safer for upstream
+        notaries that hard-code root-relative URLs.
+      - `direct` — no proxy route; clients hit host port 7047.
+  - `docker-compose.yml`: caddy service mounts the snippets dir and
+    forwards `TLSNOTARY_PROXY_MODE` env.
+  - All three modes validated with `caddy validate` (in-CI by way of
+    `caddy:2-alpine`).
+- **T13 — smoke-proxy.sh**
+  - `scripts/smoke-proxy.sh`: 10 checks covering RPC root + extended
+    /health + /health/subsystems + /metrics basic-auth + /mcp
+    basic-auth + Grafana + Prometheus sub-path + Signaling WS
+    reachability + TLSNotary (per-mode branch) + XFF-strip
+    verification. Pass/fail counts + non-zero exit on any failure.
+    Operator runs this before flipping T13 (drop redundant host
+    port mappings).
+
+Still deferred (need actual live env to verify, not a code change):
+
+- **T4** — operator runs the wstcp reachability one-liner per env.
+- **T8** — path-mode EXPOSED_URL exercised by a real SDK client
+  through Caddy. Smoke script covers a 405/200 reachability check
+  for `/rpc/<port>/` but does not run a notary session.
+- **T13 host-port removal** — runs after `smoke-proxy.sh` passes on
+  a staging deployment.
+
+Tests: `tsc --noEmit` clean for changed files. `caddy validate`
+SUCCESS for all 3 modes. `docker compose --profile proxy --profile
+monitoring --profile tlsnotary config` validates. `bash -n` clean for
+smoke-proxy.sh.
+
 ## 2026-05-14 — Epic 13 (observability) lands
 
 Full implementation of `07-epic-2-healthcheck-observability.md`. The

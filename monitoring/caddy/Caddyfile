@@ -66,9 +66,12 @@
 		reverse_proxy node:3005
 	}
 
-	handle_path /tlsnotary/* {
-		reverse_proxy tlsnotary:7047
-	}
+	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE env. Defaults
+	# to 'subpath' (path-stripped mount). 'direct' = no route, clients
+	# hit host port 7047. 'subdomain' = no in-vhost route, see the
+	# notary.${PROXY_DOMAIN} block at the bottom of this file. Epic 12
+	# T14 + docs/runbooks/proxy-setup.md.
+	import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}.caddy
 
 	# --- MCP — gated behind basic-auth ---------------------------------------
 	# MCP currently has no built-in authentication (see
@@ -122,3 +125,8 @@
 		format json
 	}
 }
+
+# Optional top-level TLSNotary subdomain vhost. Active when
+# TLSNOTARY_PROXY_MODE=subdomain. For the other modes (subpath/direct)
+# the imported file is empty so this block contributes nothing.
+import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}-vhost.caddy

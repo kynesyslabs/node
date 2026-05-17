@@ -80,7 +80,11 @@ export async function isPortAvailable(port: number): Promise<boolean> {
             server.close(() => finish(true))
         })
 
-        server.listen(port, "0.0.0.0")
+        // Probe the same bind host that spawnProxy will use (Epic 12 T9).
+        // Otherwise we'd return "available" on 0.0.0.0 then fail to bind
+        // on 127.0.0.1 (or vice versa) inside the actual spawn.
+        const bindHost = process.env.WSTCP_BIND_HOST || "0.0.0.0"
+        server.listen(port, bindHost)
     })
 }
 

@@ -1,0 +1,17 @@
+# subdomain mode — dedicated vhost for the TLSNotary sidecar.
+# Requires a DNS record notary.${PROXY_DOMAIN} -> this host.
+# Caddy auto-provisions a Let's Encrypt cert for it.
+
+notary.{$PROXY_DOMAIN} {
+	tls {$ACME_EMAIL}
+
+	# WebSocket reverse proxy with no path rewriting — preserves the
+	# notary's raw HTTP/WS handshake (subpath mode can break clients
+	# that hard-code root-relative URLs in the WS upgrade response).
+	reverse_proxy tlsnotary:7047
+
+	log {
+		output stdout
+		format json
+	}
+}

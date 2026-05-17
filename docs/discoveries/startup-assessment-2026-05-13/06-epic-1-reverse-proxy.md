@@ -4,8 +4,9 @@ title: "Epic 1 — Reverse Proxy in Front of Exposed Services"
 date: 2026-05-13
 status: partially-implemented
 last_updated: 2026-05-14
-implemented_tasks: [T1, T2, T3, T5, T6, T7, T10, T11, T12, T15, T16, T17]
-deferred_tasks: [T4, T8, T9, T13, T14]
+implemented_tasks: [T1, T2, T3, T5, T6, T7, T9, T10, T11, T12, T14, T15, T16, T17]
+deferred_tasks: [T4, T8, T13]
+notes_on_deferred: T13 smoke-script ships (scripts/smoke-proxy.sh) but the actual host-port removal awaits a green smoke run.
 depends_on: docs/discoveries/startup-assessment-2026-05-13/05-fragility-synthesis.md
 ---
 

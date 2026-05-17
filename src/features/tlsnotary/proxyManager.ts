@@ -278,10 +278,18 @@ async function spawnProxy(
 ): Promise<ProxyInfo> {
     const state = getTLSNotaryState()
 
-    // Spawn wstcp: wstcp --bind-addr 0.0.0.0:{port} {domain}:{targetPort}
+    // Spawn wstcp: wstcp --bind-addr <host>:{port} {domain}:{targetPort}
+    //
+    // Default bind host is 0.0.0.0 for back-compat with bare-metal
+    // deployments (README §TLSNotary FFI mode + `ufw allow 55000:60000/tcp`).
+    // Containerized deployments behind a co-located reverse proxy (Caddy
+    // on the same docker network) should set WSTCP_BIND_HOST=127.0.0.1
+    // to remove the 2000-port attack surface. See Epic 12 T9 +
+    // docs/runbooks/wstcp-reachability-check.md.
+    const bindHost = process.env.WSTCP_BIND_HOST || "0.0.0.0"
     const args = [
         "--bind-addr",
-        `0.0.0.0:${localPort}`,
+        `${bindHost}:${localPort}`,
         `${domain}:${targetPort}`,
     ]
     log.info(`[TLSNotary] Spawning wstcp: wstcp ${args.join(" ")}`)
