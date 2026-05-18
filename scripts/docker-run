@@ -37,6 +37,8 @@ WANT_MONITORING=true
 WANT_TLSN=true
 PASSTHROUGH=()
 
+EXTRA_PROFILES=()
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --proxy)
@@ -50,6 +52,12 @@ while [[ $# -gt 0 ]]; do
         --no-tlsn|--no-tlsnotary)
             WANT_TLSN=false
             shift
+            ;;
+        --profile)
+            # Capture --profile NAME so it lands BEFORE the subcommand
+            # (docker compose treats --profile as a global flag).
+            EXTRA_PROFILES+=(--profile "$2")
+            shift 2
             ;;
         --detach|-d)
             PASSTHROUGH+=("-d")
@@ -65,6 +73,22 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Auto-enable tlsnotary profile when the node has TLSNOTARY_ENABLED=true
+# in .env (or defaults to true via .env.example). The node will try to
+# call tlsnotary:7047 on boot and crash-mark the subsystem if the
+# container isn't there. Saves operators from the confusing "TLSN
+# failed to initialize" error on a plain `./run --docker`.
+if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+fi
+TLSNOTARY_ENABLED_RESOLVED="${TLSNOTARY_ENABLED:-true}"
+if [[ "$USE_PROXY" != "true" \
+      && "$TLSNOTARY_ENABLED_RESOLVED" == "true" \
+      && "$WANT_TLSN" == "true" ]]; then
+    EXTRA_PROFILES+=(--profile tlsnotary)
+fi
 
 COMPOSE_ARGS=(-f docker-compose.yml)
 PROFILES=()
@@ -101,7 +125,7 @@ fi
 # of an empty array as unset. Without these guards the default (no
 # --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound
 # variable".
-CMD=(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} "$SUBCOMMAND" ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"})
+CMD=(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} "$SUBCOMMAND" ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"})
 
 echo "+ ${CMD[*]}"
 exec "${CMD[@]}"
