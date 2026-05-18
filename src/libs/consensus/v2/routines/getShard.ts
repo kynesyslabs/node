@@ -35,7 +35,6 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         if (peer && !initialPeers.has(signer)) {
             peers.push(peer)
             log.only("Adding peer: " + signer + " to the shard (is working)")
-            process.exit(0)
         }
     }
     log.only(
