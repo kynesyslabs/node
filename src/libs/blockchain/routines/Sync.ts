@@ -991,7 +991,7 @@ export async function waitForPeerStatus(
     lastBlockSignersOnly = true,
 ): Promise<boolean> {
     const POLL_MS = 100
-    const TIMEOUT_MS = 10_000
+    const TIMEOUT_MS = 30_000
 
     const ourBlock = getSharedState.lastBlockNumber
     const ourHash = getSharedState.lastBlockHash
@@ -1022,7 +1022,7 @@ export async function waitForPeerStatus(
             p => p.status.online && p.sync.status && p.sync.block > ourBlock,
         )
         if (ahead.length > 0) {
-            log.warn(
+            log.error(
                 `[waitForPeerStatus] ${ahead.length} peer(s) ahead at block ${ourBlock}, aborting`,
             )
             return false
@@ -1030,10 +1030,10 @@ export async function waitForPeerStatus(
 
         const waitFor = signerIds
             ? onlinePeers.filter(p => signerIds.has(p.identity))
-            : onlinePeers.filter(p => p.sync.block >= ourBlock - 1)
+            : onlinePeers.filter(p => p.sync.block >= ourBlock - 2)
 
         if (waitFor.length === 0) {
-            log.debug("[waitForPeerStatus] No target peers to wait for")
+            log.only("[waitForPeerStatus] No target peers to wait for")
             return true
         }
 
@@ -1041,8 +1041,8 @@ export async function waitForPeerStatus(
             p.sync.block === ourBlock && p.sync.block_hash === ourHash
 
         if (waitFor.every(isAligned)) {
-            log.debug(
-                `[waitForPeerStatus] ${waitFor.length} peer(s) aligned at block ${ourBlock}`,
+            log.only(
+                `[waitForPeerStatus] ${waitFor.length} peer(s) aligned at block ${ourBlock}, after ${Date.now() - start}ms`,
             )
             return true
         }
@@ -1055,8 +1055,8 @@ export async function waitForPeerStatus(
         await sleep(POLL_MS)
     }
 
-    log.warn(
-        `[waitForPeerStatus] Timeout after ${TIMEOUT_MS}ms, proceeding best-effort`,
+    log.only(
+        `[waitForPeerStatus] Timeout after ${TIMEOUT_MS}ms, proceeding best-effort 🙊`,
     )
     return true
 }
