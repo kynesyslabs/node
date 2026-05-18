@@ -374,9 +374,8 @@ export class PointSystem {
 
         if (appliedDelta !== 0) {
             account.points.totalPoints = oldTotal + appliedDelta
+            account.points.lastUpdated = new Date()
         }
-
-        account.points.lastUpdated = new Date()
 
         const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
 

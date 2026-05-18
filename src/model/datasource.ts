@@ -9,6 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
 
@@ -20,6 +22,7 @@ import { Transactions } from "./entities/Transactions.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRAssignedTx } from "./entities/GCRv2/GCRAssignedTx.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 // ZK Identity entities
@@ -33,6 +36,12 @@ import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
 
+// Resolve the migrations directory relative to this file so the glob works
+// in both source (tsx) and built (dist) modes. Adding a new migration is
+// then a matter of dropping a file into src/migrations/ — no edits here.
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const migrationsGlob = `${__dirname}/../migrations/*.{ts,js}`
+
 export const dataSource = new DataSource({
     type: "postgres",
     host: Config.getInstance().database.host,
@@ -40,7 +49,8 @@ export const dataSource = new DataSource({
     username: Config.getInstance().database.user,
     password: Config.getInstance().database.password,
     database: Config.getInstance().database.database,
-    migrations: ["../migrations/*.{ts,js}"],
+    migrations: [migrationsGlob],
+    migrationsRun: true,
     entities: [
         Blocks,
         MempoolTx,
@@ -50,6 +60,7 @@ export const dataSource = new DataSource({
         GCRSubnetsTxs,
         Transactions,
         GCRMain,
+        GCRAssignedTx,
         GCRTLSNotary,
         GCRStorageProgram,
         // ZK Identity entities
@@ -63,7 +74,7 @@ export const dataSource = new DataSource({
         L2PSTransaction,
         L2PSProof,
     ],
-    synchronize: true,
+    synchronize: false,
     logging: false,
 })
 

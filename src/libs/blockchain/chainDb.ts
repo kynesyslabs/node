@@ -47,6 +47,7 @@ export async function writeSql(sqlQuery: string) {
 const PG_BIND_BUDGET = 65000
 export const CHUNK_TRANSACTIONS = Math.floor(PG_BIND_BUDGET / 16) // Transactions: 16 inserted cols
 export const CHUNK_MEMPOOL_TX = Math.floor(PG_BIND_BUDGET / 10) // MempoolTx: 10 inserted cols
+export const CHUNK_ASSIGNED_TXS = Math.floor(PG_BIND_BUDGET / 10) // GCRAssignedTx: 3 inserted cols
 
 export interface ChunkedInsertResult {
     inserted: number

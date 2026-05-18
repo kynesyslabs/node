@@ -25,7 +25,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
     */
 export async function getJSONBValue(
     pubkey: string,
-    field: "identities" | "assignedTxs",
+    field: "identities",
     key: string,
     subkey?: string,
 ) {
@@ -71,7 +71,7 @@ await GCRJsonbHandler.updateJSONBValue(
     */
 export async function updateJSONBValue(
     pubkey: string,
-    field: "assignedTxs" | "identities",
+    field: "identities",
     key: string,
     value: any,
     subkey?: string,

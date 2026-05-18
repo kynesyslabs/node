@@ -38,6 +38,8 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
+import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
+import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 
@@ -98,6 +100,12 @@ export interface GCRApplyResult {
     appliedEditsCount: number
 }
 
+/** Per-assignment record for the gcr_assigned_txs relation. */
+export interface AssignedTxRecord {
+    txHash: string
+    blockNumber: number
+}
+
 type IndexedSideEffect = {
     txIndex: number
     fn: () => Promise<void>
@@ -153,40 +161,41 @@ export default class HandleGCR {
     
 
     /**
-     * Bulk update assignedTxs using raw SQL for efficiency
+     * Record (pubkey, txHash, blockNumber) assignments into gcr_assigned_txs.
+     *
+     * Replaces the previous design where these tuples were appended to a
+     * jsonb array on gcr_main. The append-rewrite pattern caused unbounded
+     * TOAST churn (see MoveAssignedTxsToOwnTable migration for context).
+     *
+     * Idempotent via the (pubkey, tx_hash) primary key + orIgnore() — safe
+     * during rollback or replay where the same (pubkey, tx) pair recurs.
      */
     static async bulkUpdateAssignedTxs(
-        updates: Map<string, string[]>,
+        updates: Map<string, AssignedTxRecord[]>,
     ): Promise<void> {
         if (updates.size === 0) return
 
-        const db = await Datasource.getInstance()
-        const queryRunner = db.getDataSource().createQueryRunner()
-
-        try {
-            // Build VALUES clause with proper escaping
-            // assignedTxs is jsonb, so we use jsonb arrays and || operator for concatenation
-            const valueEntries: string[] = []
-            for (const [pubkey, txHashes] of updates.entries()) {
-                const escapedPubkey = pubkey.replace(/'/g, "''")
-                // Create a JSON array string for jsonb
-                const jsonArray = JSON.stringify(txHashes).replace(/'/g, "''")
-                valueEntries.push(
-                    `('${escapedPubkey}'::text, '${jsonArray}'::jsonb)`,
-                )
+        const rows: { pubkey: string; txHash: string; blockNumber: number }[] = []
+        for (const [pubkey, records] of updates.entries()) {
+            for (const r of records) {
+                rows.push({
+                    pubkey,
+                    txHash: r.txHash,
+                    blockNumber: r.blockNumber,
+                })
             }
+        }
+        if (rows.length === 0) return
 
-            const sql = `
-            UPDATE gcr_main AS g
-            SET "assignedTxs" = COALESCE(g."assignedTxs", '[]'::jsonb) || v.new_txs,
-                "updatedAt" = NOW()
-            FROM (VALUES ${valueEntries.join(",\n")}) AS v(pubkey, new_txs)
-            WHERE g.pubkey = v.pubkey
-        `
-
-            await queryRunner.query(sql)
-        } finally {
-            await queryRunner.release()
+        const repo = dataSource.getRepository(GCRAssignedTx)
+        for (let i = 0; i < rows.length; i += CHUNK_ASSIGNED_TXS) {
+            const chunk = rows.slice(i, i + CHUNK_ASSIGNED_TXS)
+            await repo
+                .createQueryBuilder()
+                .insert()
+                .values(chunk)
+                .orIgnore()
+                .execute()
         }
     }
 
@@ -572,7 +581,7 @@ export default class HandleGCR {
         const successful: string[] = []
         const failed: string[] = []
         const sideEffects: IndexedSideEffect[] = []
-        const assignedTxs = new Map<string, string[]>()
+        const assignedTxs = new Map<string, AssignedTxRecord[]>()
 
         for (let j = 0; j < group.length; j++) {
             if (j > 0 && j % 8 === 0) {
@@ -605,7 +614,10 @@ export default class HandleGCR {
                     bucket = []
                     assignedTxs.set(sender, bucket)
                 }
-                bucket.push(tx.hash)
+                bucket.push({
+                    txHash: tx.hash,
+                    blockNumber: tx.blockNumber ?? 0,
+                })
             }
 
             successful.push(tx.hash)
@@ -629,7 +641,7 @@ export default class HandleGCR {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
 
-        const assignedTxsUpdates = new Map<string, string[]>()
+        const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         // filter out txs that don't mutate entities
         const toFilter = new Set<TransactionContent["type"]>([
@@ -648,7 +660,10 @@ export default class HandleGCR {
 
                 if (sender) {
                     const bucket = assignedTxsUpdates.get(sender) || []
-                    bucket.push(tx.hash)
+                    bucket.push({
+                        txHash: tx.hash,
+                        blockNumber: tx.blockNumber ?? 0,
+                    })
                     assignedTxsUpdates.set(sender, bucket)
                 }
             } else {
@@ -700,12 +715,12 @@ export default class HandleGCR {
             for (const h of r.successful) successfulSet.add(h)
             for (const h of r.failed) failedSet.add(h)
             allIndexedSideEffects.push(...r.sideEffects)
-            for (const [sender, hashes] of r.assignedTxs) {
+            for (const [sender, records] of r.assignedTxs) {
                 const existing = assignedTxsUpdates.get(sender)
                 if (existing) {
-                    existing.push(...hashes)
+                    existing.push(...records)
                 } else {
-                    assignedTxsUpdates.set(sender, hashes)
+                    assignedTxsUpdates.set(sender, records)
                 }
             }
         }
@@ -1222,7 +1237,6 @@ export default class HandleGCR {
             ud: [],
         }
 
-        account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
         account.points = fillData["points"] || {
             totalPoints: 0,
