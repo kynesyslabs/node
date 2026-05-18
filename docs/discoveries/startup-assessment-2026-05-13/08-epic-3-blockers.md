@@ -84,7 +84,7 @@ Implementation notes:
 - `docker-compose.yml:162` — **remove** the `"${RPC_MCP_PORT:-3001}:..."` line in `node.ports`. Add a comment block referencing this epic + DEPS-AUDIT.md:95.
 - `src/config/defaults.ts:56` — flip `mcpEnabled: true` → `false`. Default-off prevents accidentally-on in fresh deployments.
 - `.env.example` — add a documented block:
-  ```
+  ```bash
   # MCP server (Model Context Protocol — experimental, NO AUTH)
   # Off by default. Do not expose publicly until SDK gains auth.
   # See docs/runbooks/mcp-security.md

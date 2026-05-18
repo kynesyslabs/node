@@ -107,7 +107,7 @@ Returns `{ dormant, subsystems }` only. Same rate-limit allowlist as
 
 ### Load balancer
 
-```
+```http
 GET /health
 Expect 2xx; consider Connection: close.
 ```

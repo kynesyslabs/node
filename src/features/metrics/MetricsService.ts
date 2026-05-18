@@ -213,6 +213,14 @@ export class MetricsService {
             "Whether the named subsystem is in 'ready' or 'running' state (1) or not (0)",
             ["subsystem"],
         )
+        // Separate from subsystem_up so alerts can distinguish
+        // "intentionally skipped" (e.g. MCP disabled, dormant mode)
+        // from "failed". 1 when status == "skipped".
+        this.createGauge(
+            "subsystem_skipped",
+            "Whether the named subsystem was intentionally skipped (1) or not (0)",
+            ["subsystem"],
+        )
         this.createGauge(
             "subsystem_uptime_seconds",
             "Seconds since the named subsystem last transitioned to its current state",

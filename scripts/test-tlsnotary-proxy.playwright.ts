@@ -308,7 +308,7 @@ const HARNESS_ENTRY_SRC = `
 //
 // For the full WASM attest flow, see DAHR-driven integration tests
 // once a staging deployment exists.
-import { TLSNotary } from "${process.env.SDK_BUILD_DIR || resolve(import.meta.dir, "..", "..", "sdks", "build")}/tlsnotary/TLSNotary.js"
+import { TLSNotary } from "${SDK_BUILD_DIR}/tlsnotary/TLSNotary.js"
 
 function log(...args) {
   const line = args.map(a => typeof a === "string" ? a : JSON.stringify(a)).join(" ")
@@ -385,3 +385,5 @@ main()
         console.error("[FAIL] uncaught:", err)
         process.exit(1)
     })
+
+export {}

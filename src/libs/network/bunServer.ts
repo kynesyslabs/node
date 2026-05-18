@@ -203,7 +203,14 @@ export const cors = (): Middleware => {
     const baseHeaders: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "*",
-        Vary: "Origin",
+    }
+    // `Vary: Origin` is only meaningful when the response actually
+    // varies by origin — i.e. when we have an allowlist. Wildcard
+    // mode emits the same Access-Control-Allow-Origin regardless of
+    // the caller, so adding Vary just makes shared caches bucket
+    // responses unnecessarily (Greptile P2).
+    if (allowed !== "*") {
+        baseHeaders.Vary = "Origin"
     }
 
     function pickAllowOrigin(req: Request): string | null {
@@ -232,13 +239,17 @@ export const cors = (): Middleware => {
         }
 
         const response = await next()
+        // Start from the downstream headers, then re-impose CORS so
+        // the middleware controls the Allow-Origin even if an upstream
+        // handler tries to set it (CodeRabbit major). Disallowed
+        // origins get the header stripped here too — never let a
+        // handler leak `*` past the allowlist.
         const merged: Record<string, string> = {
-            ...corsHeaders,
             ...response.headers.toJSON(),
+            ...corsHeaders,
         }
-        // Don't let the upstream response strip our CORS header.
-        if (allowOrigin) {
-            merged["Access-Control-Allow-Origin"] = allowOrigin
+        if (!allowOrigin) {
+            delete merged["Access-Control-Allow-Origin"]
         }
 
         return new Response(response.body, {

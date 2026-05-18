@@ -405,7 +405,15 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      # Probe Caddy's local admin endpoint (loopback inside the
+      # container — see `admin localhost:2019` in the Caddyfile global
+      # block). The previous `http://localhost:80/` probe followed
+      # Caddy's permanent redirect to https://localhost, which has no
+      # matching cert (Caddy only holds one for $PROXY_DOMAIN) — so
+      # the TLS handshake failed and the container stayed permanently
+      # unhealthy in real deployments. The /config endpoint is always
+      # 200 + JSON regardless of vhost state. Greptile P2.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -264,6 +264,11 @@ export class MetricsCollector {
                         ? 1
                         : 0
                 ms.setGauge("subsystem_up", up, { subsystem: name })
+                ms.setGauge(
+                    "subsystem_skipped",
+                    info.status === "skipped" ? 1 : 0,
+                    { subsystem: name },
+                )
                 const uptime =
                     info.since !== null
                         ? Math.max(0, Math.round((now - info.since) / 1000))

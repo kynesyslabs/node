@@ -65,17 +65,24 @@ process.on("uncaughtException", (error: Error) => {
             source: "uncaught_exception",
             message: error instanceof Error ? error.message : String(error),
         }
-        import("@/features/metrics").then(({ getMetricsService }) => {
-            try {
-                getMetricsService().incrementCounter(
-                    "uncaught_exception_total",
-                    { source: "uncaught_exception" },
-                    1,
-                )
-            } catch {
-                /* metrics not ready */
-            }
-        })
+        // void + catch so a failed import inside the exception
+        // handler doesn't emit a new unhandledRejection and re-enter
+        // this hook. Bookkeeping is best-effort.
+        void import("@/features/metrics")
+            .then(({ getMetricsService }) => {
+                try {
+                    getMetricsService().incrementCounter(
+                        "uncaught_exception_total",
+                        { source: "uncaught_exception" },
+                        1,
+                    )
+                } catch {
+                    /* metrics not ready */
+                }
+            })
+            .catch(() => {
+                /* metrics import failed; original error already logged */
+            })
     } catch {
         // SharedState may be mid-initialisation on a very early crash —
         // never let bookkeeping mask the original error.
@@ -92,17 +99,21 @@ process.on("unhandledRejection", (reason: unknown) => {
             source: "unhandled_rejection",
             message: reason instanceof Error ? reason.message : String(reason),
         }
-        import("@/features/metrics").then(({ getMetricsService }) => {
-            try {
-                getMetricsService().incrementCounter(
-                    "unhandled_rejection_total",
-                    { source: "unhandled_rejection" },
-                    1,
-                )
-            } catch {
-                /* metrics not ready */
-            }
-        })
+        void import("@/features/metrics")
+            .then(({ getMetricsService }) => {
+                try {
+                    getMetricsService().incrementCounter(
+                        "unhandled_rejection_total",
+                        { source: "unhandled_rejection" },
+                        1,
+                    )
+                } catch {
+                    /* metrics not ready */
+                }
+            })
+            .catch(() => {
+                /* metrics import failed */
+            })
     } catch {
         // Same caveat as above.
     }

@@ -122,7 +122,7 @@ Retry: `docker compose restart caddy`.
 Used the production endpoint too many times. Switch to staging while
 debugging:
 
-```
+```caddy
 # In monitoring/caddy/Caddyfile, top-level block:
 {
     acme_ca https://acme-staging-v02.api.letsencrypt.org/directory

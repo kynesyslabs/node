@@ -105,9 +105,12 @@
 	}
 
 	# --- Prometheus sub-path -------------------------------------------------
-	# Requires --web.external-url + --web.route-prefix on the prometheus
-	# command-line (see docker-compose.yml).
-	handle /prometheus/* {
+	# Prometheus runs at root (no --web.route-prefix in compose). Strip
+	# the /prometheus/ prefix before forwarding so the upstream sees its
+	# native paths (/api/v1/..., /-/healthy, etc.). UI assets are
+	# documented as best-effort under sub-path mode — see
+	# docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
+	handle_path /prometheus/* {
 		reverse_proxy prometheus:9090
 	}
 

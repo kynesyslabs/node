@@ -17,7 +17,7 @@
  *   NODE_URL=https://localhost \
  *   TARGET_URL=https://api.github.com/zen \
  *   ALLOW_INSECURE=1 \
- *   bun run local_tests/test_tlsnotary_proxy.ts
+ *   bun run scripts/test-tlsnotary-proxy.ts
  *
  * Env:
  *   NODE_URL        Base URL of the node's RPC root (default
@@ -36,8 +36,6 @@
  * Exit code: 0 on PASS, 1 on FAIL.
  */
 
-import { Agent } from "undici"
-
 interface ProxyResponse {
     websocketProxyUrl: string
     targetDomain: string
@@ -50,10 +48,14 @@ const TARGET_URL = process.env.TARGET_URL || "https://api.github.com/zen"
 const ALLOW_INSECURE = process.env.ALLOW_INSECURE === "1"
 const EXPECTED_HOST = process.env.EXPECTED_HOST || ""
 
-let dispatcher: Agent | undefined
-if (ALLOW_INSECURE) {
-    dispatcher = new Agent({ connect: { rejectUnauthorized: false } })
-}
+// Bun's global fetch does NOT support Undici's `dispatcher` option —
+// see https://github.com/oven-sh/bun/issues/4474. Use the native
+// `tls.rejectUnauthorized` option instead. The casts to `never` are
+// because @types/bun adds the field but the lib.dom.d.ts RequestInit
+// doesn't.
+const fetchInit: RequestInit = ALLOW_INSECURE
+    ? ({ tls: { rejectUnauthorized: false } } as never)
+    : {}
 
 function log(level: "pass" | "fail" | "info", msg: string): void {
     const tag =
@@ -69,7 +71,7 @@ async function main(): Promise<number> {
     // Step 1 — health probe. Confirms the node + proxy are reachable.
     let healthBody: Record<string, unknown> | null = null
     try {
-        const res = await fetch(`${NODE_URL}/health`, { dispatcher } as never)
+        const res = await fetch(`${NODE_URL}/health`, fetchInit)
         if (!res.ok) {
             log("fail", `/health -> HTTP ${res.status}`)
             return 1
@@ -88,6 +90,7 @@ async function main(): Promise<number> {
     let proxyResp: ProxyResponse | null = null
     try {
         const res = await fetch(NODE_URL, {
+            ...fetchInit,
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -99,8 +102,7 @@ async function main(): Promise<number> {
                     },
                 ],
             }),
-            dispatcher,
-        } as never)
+        })
 
         if (!res.ok) {
             log("fail", `requestTLSNproxy -> HTTP ${res.status}`)
@@ -196,7 +198,7 @@ async function main(): Promise<number> {
     console.log("")
     log(
         "info",
-        "Partial T8 PASS. Full notary session (Prover/Notarize) needs a browser context — see local_tests/test_tlsnotary_proxy.playwright.ts (TODO).",
+        "Partial T8 PASS. Full notary session (Prover/Notarize) needs a browser context — see scripts/test-tlsnotary-proxy.playwright.ts.",
     )
     return 0
 }
@@ -207,3 +209,5 @@ main()
         console.error("[FAIL] uncaught:", err)
         process.exit(1)
     })
+
+export {}

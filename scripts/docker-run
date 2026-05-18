@@ -55,7 +55,13 @@ while [[ $# -gt 0 ]]; do
             ;;
         --profile)
             # Capture --profile NAME so it lands BEFORE the subcommand
-            # (docker compose treats --profile as a global flag).
+            # (docker compose treats --profile as a global flag). Guard
+            # against `--profile` at end-of-args — without this, `set -u`
+            # aborts with "$2: unbound variable".
+            if [[ $# -lt 2 || -z "${2:-}" || "$2" == --* ]]; then
+                echo "scripts/docker-run: --profile requires a value" >&2
+                exit 2
+            fi
             EXTRA_PROFILES+=(--profile "$2")
             shift 2
             ;;

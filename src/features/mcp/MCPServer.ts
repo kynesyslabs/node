@@ -310,7 +310,7 @@ export class MCPServerManager {
         // inject messages into the active SSE session (the previous code
         // only checked `this.transport instanceof SSEServerTransport`,
         // which is true for any caller).
-        this.expressApp.post("/message", (req, res) => {
+        this.expressApp.post("/message", async (req, res) => {
             try {
                 if (!(this.transport instanceof SSEServerTransport)) {
                     res.status(503).json({
@@ -333,12 +333,17 @@ export class MCPServerManager {
                     })
                     return
                 }
-                // Forward message to current SSE transport. The transport
-                // internally handles parsing + dispatch.
-                res.json({ status: "received" })
+                // Hand the request to the SSE transport so it can parse
+                // the JSON-RPC body and dispatch it through the server's
+                // message handler. The transport owns the response —
+                // the previous `res.json({status:"received"})` was a
+                // no-op ack that dropped every message.
+                await this.transport.handlePostMessage(req, res)
             } catch (error) {
                 log.error(`[MCP] Error handling message: ${String(error)}`)
-                res.status(500).json({ error: "Message handling failed" })
+                if (!res.headersSent) {
+                    res.status(500).json({ error: "Message handling failed" })
+                }
             }
         })
 

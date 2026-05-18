@@ -18,8 +18,11 @@ tools leak sensitive data:
   network topology map).
 
 Do not enable + publish MCP without an authenticated reverse proxy in
-front. Until Epic 12 lands a Caddy bearer-auth route, treat MCP as
-**strictly internal**.
+front. The Caddyfile ships a `/mcp/*` route gated by basic-auth (see
+`monitoring/caddy/Caddyfile`), defaulting to a sentinel hash that
+rejects every password until the operator sets `MCP_BASIC_AUTH_HASH`.
+Treat MCP as **strictly internal** unless that hash is set + MCP is
+explicitly enabled.
 
 ## Current default state
 

@@ -27,7 +27,7 @@ global:
 # specific and stays in docs/runbooks/health-endpoint.md — only rules
 # ship in this repo.
 rule_files:
-  - "alerts/*.yml"
+  - alerts/*.yml
 
 scrape_configs:
     # Prometheus self-monitoring

@@ -300,7 +300,9 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/"]
+      # Probe Caddy admin loopback (always 200, no redirect chain).
+      # See compose root file for why localhost:80 fails.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3
