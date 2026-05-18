@@ -49,6 +49,22 @@ docker compose up
 
 Once the stack is healthy: RPC at http://localhost:53550 (try `curl http://localhost:53550/info`) and Grafana at http://localhost:3000 (default `admin` / `demos`).
 
+### Reverse-proxy mode (Caddy)
+
+Bring up the same stack behind Caddy on a single TLS endpoint:
+
+```bash
+./scripts/docker-run --proxy           # adds proxy + monitoring + tlsnotary
+./scripts/docker-run --proxy --no-monitor   # drop Grafana/Prom
+./scripts/docker-run --proxy -d        # detach
+./scripts/docker-run down              # teardown (proxy or not)
+```
+
+`--proxy` merges `docker-compose.proxy.yml` so only ports 80 + 443
+(Caddy) and 53551 (OmniProtocol, custom TLS) remain published.
+Requires `PROXY_DOMAIN` + `ACME_EMAIL` in `.env`. See
+[docs/runbooks/proxy-setup.md](docs/runbooks/proxy-setup.md).
+
 See [INSTALL.md](INSTALL.md) for profiles, env vars, volumes, upgrades, and troubleshooting.
 
 ## Publishing the Image
