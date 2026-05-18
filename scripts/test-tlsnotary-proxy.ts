@@ -57,10 +57,20 @@ const fetchInit: RequestInit = ALLOW_INSECURE
     ? ({ tls: { rejectUnauthorized: false } } as never)
     : {}
 
+// Sanitize log message to strip ANSI escapes + control chars + cap
+// length. The driver echoes upstream server text into the terminal;
+// without this, a malicious node response could inject terminal
+// escape sequences (CWE-117). Sonar tssecurity:S5145.
+function sanitize(s: string): string {
+    return s
+        .replace(/[\x00-\x1f\x7f]/g, "?")
+        .slice(0, 500)
+}
+
 function log(level: "pass" | "fail" | "info", msg: string): void {
     const tag =
         level === "pass" ? "[PASS]" : level === "fail" ? "[FAIL]" : "[INFO]"
-    console.log(`${tag} ${msg}`)
+    console.log(`${tag} ${sanitize(msg)}`)
 }
 
 async function main(): Promise<number> {
