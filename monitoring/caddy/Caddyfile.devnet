@@ -1,0 +1,76 @@
+# =============================================================================
+# Demos Network — Devnet Caddy reverse-proxy
+# =============================================================================
+# Devnet variant of monitoring/caddy/Caddyfile. Differences:
+#   - Listens on `localhost` (Caddy internal CA, self-signed)
+#   - Upstream services are devnet container names (node-1 etc.)
+#   - No Grafana / Prometheus blocks — devnet doesn't run them
+#
+# Same route shapes as the production Caddyfile so smoke-proxy.sh
+# exercises the same surface.
+# =============================================================================
+
+{
+	admin localhost:2019
+	# Use Caddy's internal CA for localhost — no ACME, no DNS, no port 80
+	# challenge. Browsers + curl --insecure / wget --no-check-certificate
+	# both work for the smoke test.
+	local_certs
+
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+{$PROXY_DOMAIN:localhost} {
+	tls internal
+
+	request_header -X-Forwarded-For
+	request_header -X-Forwarded-Host
+	request_header -X-Forwarded-Proto
+	request_header -X-Real-IP
+
+	encode zstd gzip
+
+	handle_path /signaling/* {
+		reverse_proxy node-1:3005
+	}
+
+	# MCP — gated behind basic-auth (defaults reject all).
+	handle_path /mcp/* {
+		basic_auth {
+			mcp {$MCP_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+		}
+		reverse_proxy node-1:3001
+	}
+
+	# Metrics — basic-auth. Devnet may not expose node metrics by
+	# default; the route is here so smoke-proxy.sh sees a 401 either
+	# way.
+	handle /metrics {
+		basic_auth {
+			metrics {$METRICS_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+		}
+		reverse_proxy node-1:9090
+	}
+
+	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE.
+	import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}.caddy
+
+	# RPC — root + everything else
+	handle {
+		reverse_proxy node-1:53550
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Optional subdomain vhost (subdomain mode only; empty otherwise).
+import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}-vhost.caddy

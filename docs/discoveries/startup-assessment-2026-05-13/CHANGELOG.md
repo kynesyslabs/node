@@ -5,6 +5,69 @@ title: Startup Assessment Changelog
 
 # Startup Assessment Changelog
 
+## 2026-05-18 — Epic 12 verify-slice (devnet + T13 override + partial T8)
+
+Three pieces that move T13 + T8 from "needs live env" toward
+"verifiable locally on developer laptop".
+
+- **T13 — `docker-compose.proxy.yml` override**
+  - New file. When merged via `-f docker-compose.yml -f
+    docker-compose.proxy.yml --profile proxy ...`, drops every host
+    port mapping that Caddy now serves. OmniProtocol 53551 stays via
+    a single explicit `!override` entry (custom-fingerprint TLS can't
+    proxy). Uses Compose Spec's `!override` tag to REPLACE the parent
+    ports list instead of merging — without it Compose unions across
+    files and every host port stayed published.
+  - Validated: `docker compose ... config` yields published ports
+    = {80, 443, 443/udp, 53551} only. Default mode unchanged.
+  - Bare-metal deployments do not use this file.
+
+- **devnet Caddy profile**
+  - `testing/devnet/docker-compose.yml`: added `caddy` service
+    under `profiles: [proxy]`. Mounts the production Caddyfile via
+    a devnet-specific variant (`Caddyfile.devnet`) that:
+      - listens on `${PROXY_DOMAIN:-localhost}`
+      - uses Caddy's internal CA (`tls internal` / `local_certs`)
+        instead of ACME — zero DNS / port-80 dependency
+      - routes to `node-1` (canonical devnet node) for RPC / MCP /
+        signaling / metrics
+      - imports the same `tlsnotary-modes/*.caddy` snippets as
+        production
+  - Validated for `subpath` + `direct` modes. `subdomain` mode is
+    intentionally unsupported on devnet (would need DNS records).
+  - Adds `caddy_data` + `caddy_config` named volumes.
+  - Bring up:
+    `cd testing/devnet && docker compose --profile proxy up -d caddy`
+    then `PROXY_DOMAIN=localhost CADDY_INSECURE=1
+    ../../scripts/smoke-proxy.sh`.
+
+- **T8 partial — Node-side proxy driver**
+  - `scripts/test-tlsnotary-proxy.ts` (new): drives the
+    `requestTLSNproxy` RPC handler through whatever URL the operator
+    points at (direct or proxied), parses the returned
+    `websocketProxyUrl`, asserts:
+      - protocol is ws/wss
+      - hostname matches `EXPECTED_HOST` when set
+      - flags path-mode vs host:port mode
+  - Decision: the full notary session (Prover -> Notarize ->
+    Presentation) runs inside a Web Worker + WASM in
+    `@kynesyslabs/demosdk`. A Node-side driver can't execute that
+    flow without browser polyfills. Documented as a known limit;
+    Playwright driver is the proper path for the full T8 (TODO).
+
+Still deferred:
+- T4 — operator runs the wstcp reachability one-liner per env.
+- T8 full — Playwright driver for the WASM-backed notary session.
+- T13 host-port removal — runs against a real deployment using
+  `-f docker-compose.proxy.yml`; the file ships but operators must
+  flip the merge command intentionally.
+
+Tests: `caddy validate` SUCCESS for Caddyfile.devnet subpath/direct.
+`docker compose -f docker-compose.yml -f docker-compose.proxy.yml
+--profile proxy --profile monitoring --profile tlsnotary config`
+yields only 80/443/53551 host-published. `bun build` clean for the
+T8 driver.
+
 ## 2026-05-15 — Epic 12 follow-up: env toggles + smoke script
 
 Adds the three env-gated knobs called out in the "deferred — needs
