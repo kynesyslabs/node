@@ -63,7 +63,7 @@
 
 	# RPC — root + everything else
 	handle {
-		reverse_proxy node-1:53550
+		reverse_proxy node-1:53551
 	}
 
 	log {

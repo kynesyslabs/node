@@ -389,8 +389,13 @@ services:
     environment:
       PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
       ACME_EMAIL: ${ACME_EMAIL:-}
-      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
-      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
+      # Sentinel bcrypt that rejects every password. Operators override
+      # in `.env` to enable basic-auth. Default lives here (not in
+      # Caddyfile) because Caddy's `{$VAR:default}` fallback only fires
+      # for UNSET vars — compose always sets the var, so the default
+      # would never take effect. See Caddyfile.devnet line 46 for shape.
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
       # Epic 12 T14 — selects which tlsnotary-modes/*.caddy snippet
       # is imported. Allowed: subpath (default), subdomain, direct.
       TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}

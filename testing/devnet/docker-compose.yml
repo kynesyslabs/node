@@ -286,8 +286,13 @@ services:
     environment:
       PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
       ACME_EMAIL: ${ACME_EMAIL:-internal}
-      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-}
-      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-}
+      # Sentinel bcrypt rejects every password; operators set real
+      # hash in `.env`. Default lives in compose (not Caddyfile) because
+      # Caddy's `{$VAR:default}` only fires for UNSET vars — compose
+      # always sets them, so the Caddyfile-side default would never
+      # take effect.
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
       TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}
     volumes:
       - ../../monitoring/caddy/Caddyfile.devnet:/etc/caddy/Caddyfile:ro

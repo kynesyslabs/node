@@ -64,7 +64,16 @@ fi
 # 2. /health extended JSON
 body=$("${CURL[@]}" "$BASE/health" || true)
 if echo "$body" | grep -q '"status"'; then
-    status=$(echo "$body" | sed -n 's/.*"status":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+    # Extract top-level .status. Prefer jq when available — the body
+    # contains nested status fields (one per subsystem) and a greedy
+    # sed regex picks the wrong one.
+    if command -v jq >/dev/null 2>&1; then
+        status=$(echo "$body" | jq -r '.status // empty')
+    else
+        # Fallback: grab the FIRST status occurrence (top-level wins
+        # because it appears before the subsystems block).
+        status=$(echo "$body" | grep -o '"status":[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/')
+    fi
     case "$status" in
         ok|degraded|dormant) ok "RPC /health -> status=$status";;
         failing)             fail "RPC /health -> status=failing";;
@@ -123,10 +132,14 @@ else
     skip "/mcp authenticated   (set MCP_BASIC_AUTH_PASS)"
 fi
 
-# 6. Grafana sub-path
+# 6. Grafana sub-path. devnet doesn't run Grafana; route 404 is the
+# expected upstream-absent signal (Caddy reached node-1 but no handler).
+# Skip on devnet; fail on production where the route is wired.
 code=$(http_status "$BASE/grafana/api/health")
 if [[ "$code" == "200" ]]; then
     ok "/grafana/api/health -> 200"
+elif [[ "$code" == "404" || "$code" == "502" ]] && [[ "${SMOKE_NO_MONITORING:-0}" == "1" ]]; then
+    skip "/grafana/api/health (monitoring stack not deployed: got $code)"
 else
     fail "/grafana/api/health -> $code"
 fi
@@ -135,6 +148,8 @@ fi
 code=$(http_status "$BASE/prometheus/-/healthy")
 if [[ "$code" == "200" ]]; then
     ok "/prometheus/-/healthy -> 200"
+elif [[ "$code" == "404" || "$code" == "502" ]] && [[ "${SMOKE_NO_MONITORING:-0}" == "1" ]]; then
+    skip "/prometheus/-/healthy (monitoring stack not deployed: got $code)"
 else
     fail "/prometheus/-/healthy -> $code"
 fi
