@@ -1,3 +1,4 @@
+import Mempool from "@/libs/blockchain/mempool"
 import { getSharedState } from "@/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { handleError } from "src/errors"
@@ -41,7 +42,31 @@ export default async function getTxsByHashes(
             hashes = data.hashes.slice(0, getSharedState.batchSyncTxLimit)
         }
 
+        const toGet = new Set(hashes)
         const transactions = await Chain.getTransactionsFromHashes(hashes)
+
+        for (const tx of transactions) {
+            toGet.delete(tx.hash)
+        }
+
+        if (toGet.size > 0) {
+            // NOTE: If peer tries to fetch transactions for a block not
+            // finalized by this peer yet,
+            // (because block is broadcasted right after voting,
+            // and it's possible that this peer might be slow)
+            // the block txs will not be in the transactions table yet,
+            // fetch them from the mempool, and update the blockNumber to match block
+            const missing = await Mempool.getTransactionsByHashes(
+                Array.from(toGet),
+            )
+            transactions.push(
+                ...missing.map(tx => ({
+                    ...tx,
+                    blockNumber: getSharedState.lastBlockNumber,
+                })),
+            )
+        }
+
         if (transactions && transactions.length > 0) {
             return {
                 result: 200,

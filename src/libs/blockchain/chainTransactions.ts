@@ -10,6 +10,8 @@ import {
 } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload } from "./chainTypes"
+import Mempool from "./mempool"
+import { getSharedState } from "@/utilities/sharedState"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -112,8 +114,41 @@ export async function getBlockTransactions(
     blockHash: string,
 ): Promise<Transaction[]> {
     const { getBlockByHash } = await import("./chainBlocks")
-    const block = await getBlockByHash(blockHash)
-    return await getTransactionsFromHashes(block.content.ordered_transactions)
+    let block = await getBlockByHash(blockHash)
+
+    if (!block) {
+        if (blockHash === getSharedState.candidateBlock.hash) {
+            block = getSharedState.candidateBlock
+        } else {
+            return []
+        }
+    }
+
+    const toGet = new Set(block.content.ordered_transactions)
+
+    const fetched = await getTransactionsFromHashes(
+        block.content.ordered_transactions,
+    )
+    let missing: Transaction[] = []
+
+    for (const tx of fetched) {
+        toGet.delete(tx.hash)
+    }
+
+    if (toGet.size > 0 && getSharedState.lastBlockNumber - block.number <= 1) {
+        // NOTE: If peer tries to fetch transactions for a block not
+        // finalized by this peer yet,
+        // (because block is broadcasted right after voting,
+        // and it's possible that this peer might be slow)
+        // the block txs will not be in the transactions table yet,
+        // fetch them from the mempool, and update the blockNumber to match block
+        missing = await Mempool.getTransactionsByHashes(Array.from(toGet))
+    }
+
+    return [
+        ...fetched,
+        ...missing.map(tx => ({ ...tx, blockNumber: block.number })),
+    ]
 }
 
 export async function getTransactionFromHash(
