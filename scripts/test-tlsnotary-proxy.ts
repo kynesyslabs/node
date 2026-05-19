@@ -61,10 +61,16 @@ const fetchInit: RequestInit = ALLOW_INSECURE
 // length. The driver echoes upstream server text into the terminal;
 // without this, a malicious node response could inject terminal
 // escape sequences (CWE-117). Sonar tssecurity:S5145.
+// Loop form (not a regex character class) avoids the eslint
+// `no-control-regex` rule that ships in `eslint:recommended`.
 function sanitize(s: string): string {
-    return s
-        .replace(/[\x00-\x1f\x7f]/g, "?")
-        .slice(0, 500)
+    let out = ""
+    for (const ch of s) {
+        const code = ch.charCodeAt(0)
+        out += code <= 0x1f || code === 0x7f ? "?" : ch
+        if (out.length >= 500) break
+    }
+    return out
 }
 
 function log(level: "pass" | "fail" | "info", msg: string): void {

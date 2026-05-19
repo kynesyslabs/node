@@ -11,16 +11,22 @@ groups:
           severity: critical
         annotations:
           summary: Demos node is down
-          description: "Prometheus failed to scrape `demos-node` for >1m, OR the target was removed from service discovery. Node may have crashed or metrics server is unreachable."
+          description: Prometheus failed to scrape `demos-node` for >1m, OR the target was removed from service discovery. Node may have crashed or metrics server is unreachable.
 
       - alert: NodeFailing
+        # Exclude dormant mode — there, main_loop is intentionally
+        # skipped (demos_subsystem_skipped == 1) and operators get the
+        # NodeDormant warning instead (Greptile P1). Without this gate,
+        # every dormant boot fires NodeFailing as critical at 2m, which
+        # arrives ~8m before the matching NodeDormant warning.
         expr: demos_subsystem_up{subsystem="main_loop"} == 0
+              and demos_subsystem_skipped{subsystem="main_loop"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
           summary: Main loop is dead
-          description: "demos_subsystem_up{subsystem=\"main_loop\"} has been 0 for >2m. The node is serving RPC but is no longer producing blocks. Check `/health.main_loop.exit_reason` and recent logs."
+          description: 'demos_subsystem_up{subsystem="main_loop"} has been 0 for >2m and the subsystem was not intentionally skipped. The node is serving RPC but is no longer producing blocks. Check `/health.main_loop.exit_reason` and recent logs.'
 
       - alert: NodeDormant
         expr: demos_dormant_mode == 1
@@ -29,7 +35,7 @@ groups:
           severity: warning
         annotations:
           summary: Demos node is in dormant mode
-          description: "The peer list was empty at boot and signaling/MCP/TLSN/mainLoop were skipped. RPC is up but consensus is frozen. See docs/runbooks/dormant-mode.md."
+          description: The peer list was empty at boot and signaling/MCP/TLSN/mainLoop were skipped. RPC is up but consensus is frozen. See docs/runbooks/dormant-mode.md.
 
       - alert: BootIncomplete
         expr: demos_boot_complete == 0
@@ -38,7 +44,7 @@ groups:
           severity: warning
         annotations:
           summary: Node boot did not complete
-          description: "demos_boot_complete has been 0 for >5m. One or more boot steps are stuck in running or pending. Check `/health.boot.current`."
+          description: demos_boot_complete has been 0 for >5m. One or more boot steps are stuck in running or pending. Check `/health.boot.current`.
 
       - alert: MempoolStuck
         expr: rate(demos_transactions_total[5m]) == 0 and demos_mempool_size > 0
@@ -47,7 +53,7 @@ groups:
           severity: warning
         annotations:
           summary: Mempool has pending transactions but throughput is zero
-          description: "demos_mempool_size > 0 yet rate(demos_transactions_total) has been 0 for 5m. Block production may be stalled."
+          description: demos_mempool_size > 0 yet rate(demos_transactions_total) has been 0 for 5m. Block production may be stalled.
 
       - alert: PeersZero
         expr: demos_peer_online_count == 0
@@ -56,7 +62,7 @@ groups:
           severity: warning
         annotations:
           summary: No connected peers
-          description: "demos_peer_online_count has been 0 for >5m. Check network egress + bootstrap peer list."
+          description: demos_peer_online_count has been 0 for >5m. Check network egress + bootstrap peer list.
 
       - alert: MainLoopHeartbeatStale
         expr: demos_main_loop_heartbeat_seconds > 120

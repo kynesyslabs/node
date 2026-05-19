@@ -296,7 +296,7 @@ async function isPortAvailable(port: number): Promise<boolean> {
  */
 async function getNextAvailablePort(
     startFrom: number,
-    reason: string = "unspecified",
+    reason = "unspecified",
 ) {
     const originalStartFrom = startFrom
     let availablePort: number = null
