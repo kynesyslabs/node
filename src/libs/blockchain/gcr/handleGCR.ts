@@ -21,10 +21,7 @@
 
 import _ from "lodash"
 
-import {
-    Transaction,
-    TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+import { Transaction, TransactionContent } from "@kynesyslabs/demosdk/types"
 import Datasource, { dataSource } from "src/model/datasource"
 import { GCREdit, GCREditStorageProgram } from "@kynesyslabs/demosdk/types"
 import {
@@ -70,7 +67,6 @@ export type GetNativePropertiesOptions = {
     web2?: boolean
     other?: boolean
 }
-
 
 export interface GCRResult {
     success: boolean
@@ -158,8 +154,6 @@ export default class HandleGCR {
         "escrow",
     ])
 
-    
-
     /**
      * Record (pubkey, txHash, blockNumber) assignments into gcr_assigned_txs.
      *
@@ -175,7 +169,8 @@ export default class HandleGCR {
     ): Promise<void> {
         if (updates.size === 0) return
 
-        const rows: { pubkey: string; txHash: string; blockNumber: number }[] = []
+        const rows: { pubkey: string; txHash: string; blockNumber: number }[] =
+            []
         for (const [pubkey, records] of updates.entries()) {
             for (const r of records) {
                 rows.push({
@@ -744,6 +739,8 @@ export default class HandleGCR {
                 log.debug(
                     `[applyTransactions] Updating ${assignedTxsUpdates.size} assignedTxs`,
                 )
+
+                // TODO: Move this to after transactions have been saved to the database
                 await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
             }
         })

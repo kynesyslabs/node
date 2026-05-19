@@ -232,13 +232,17 @@ export async function insertBlock(
         return existingBlock
     }
 
-    let transactionEntities = await Mempool.getTransactionsByHashes(
+    const transactionEntities = await Mempool.getTransactionsByHashes(
         orderedTransactionsHashes,
     )
-    transactionEntities = transactionEntities.map(tx => ({
-        ...tx,
-        blockNumber: block.number,
-    }))
+
+    // DEBUG: Confirm all transactions' blockNumber == block.number
+    if (transactionEntities.some(tx => tx.blockNumber !== block.number)) {
+        log.error(
+            `[insertBlock] Transaction blockNumber mismatch: ${transactionEntities.map(tx => tx.blockNumber).join(", ")}`,
+        )
+        process.exit(1)
+    }
 
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()

@@ -480,13 +480,18 @@ async function mergeAndOrderMempools(
     // Log transaction type breakdown
     const typeCounts: Record<string, number> = {}
     for (const tx of finalMempool) {
+        // INFO: Update tx block number to this consensus' block number
+        tx.blockNumber = blockRef
+
         const txType = tx.content.type ?? "unknown"
         typeCounts[txType] = (typeCounts[txType] || 0) + 1
     }
+
     log.only(
         `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs ` +
             `(removed ${existingHashes.size}: pre-merge ${preExisting.size}, delta ${newlyExisting.size})`,
     )
+
     for (const [type, count] of Object.entries(typeCounts)) {
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
