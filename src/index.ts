@@ -1104,6 +1104,19 @@ async function main() {
                             "Node continues serving RPC but is no longer producing blocks. " +
                             "Investigate.",
                     )
+                    // Mirror the exit into the subsystem registry so
+                    // MetricsCollector.collectObservability() drops
+                    // demos_subsystem_up{subsystem="main_loop"} to 0
+                    // and the `NodeFailing` Prom alert fires. Without
+                    // this, /health flipped the local snapshot to
+                    // "failed" but the registry stayed "running", so
+                    // the metric + alert diverged silently from the
+                    // health probe. Greptile P1.
+                    markSubsystem(
+                        getSharedState.subsystems,
+                        "main_loop",
+                        "failed",
+                    )
                 }
             })
 
