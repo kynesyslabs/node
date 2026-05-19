@@ -30,6 +30,23 @@ export interface NodeInfo {
         port: number
         running: boolean
     }
+    /**
+     * Subsystem registry snapshot (Epic 13 T9). Optional — populated by
+     * the periodic refresh loop reading getSharedState.subsystems. Keys
+     * mirror KNOWN_SUBSYSTEMS in subsystemRegistry.ts. Consumers that
+     * want a per-subsystem row in the UI iterate this map; callers that
+     * don't render it can ignore the field.
+     */
+    subsystems?: Record<
+        string,
+        {
+            status: string
+            port?: number | null
+            lastError?: { at: number; message: string } | null
+        }
+    >
+    /** Dormant-mode flag mirrored from getSharedState.dormantMode. */
+    dormantMode?: boolean
 }
 
 export interface TUIConfig {
@@ -301,8 +318,10 @@ export class TUIManager extends EventEmitter {
         this.updateFilteredLogs()
         this.render()
 
-        // Start refresh loop
+        // Start refresh loop. Subsystem snapshot reads SharedState on
+        // every tick (Epic 13 T9) so panels can render live state.
         this.refreshInterval = setInterval(() => {
+            void this.refreshSubsystems()
             this.render()
         }, this.config.refreshRate)
 
@@ -986,6 +1005,36 @@ export class TUIManager extends EventEmitter {
      */
     updateNodeInfo(info: Partial<NodeInfo>): void {
         this.nodeInfo = { ...this.nodeInfo, ...info }
+    }
+
+    /**
+     * Pull the latest subsystem registry + dormant flag from SharedState
+     * and mirror it into `nodeInfo`. Called on the periodic refresh tick
+     * so TUI panels can render live state without each panel hitting
+     * SharedState directly. Safe to call when SharedState is mid-init —
+     * any error is swallowed (TUI is best-effort).
+     */
+    async refreshSubsystems(): Promise<void> {
+        try {
+            const { getSharedState } = await import("@/utilities/sharedState")
+            const subsystems: NodeInfo["subsystems"] = {}
+            for (const [name, info] of Object.entries(
+                getSharedState.subsystems,
+            )) {
+                subsystems[name] = {
+                    status: info.status,
+                    port: info.port ?? null,
+                    lastError: info.lastError ?? null,
+                }
+            }
+            this.nodeInfo = {
+                ...this.nodeInfo,
+                subsystems,
+                dormantMode: getSharedState.dormantMode,
+            }
+        } catch {
+            // SharedState not loaded yet, or test env. Ignore.
+        }
     }
 
     /**

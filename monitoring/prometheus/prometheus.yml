@@ -22,9 +22,12 @@ global:
 #         - targets:
 #           - alertmanager:9093
 
-# Rule files (optional, for future alerting rules)
-# rule_files:
-#   - "alerts/*.yml"
+# Alert rules (Epic 13 T14). Files under alerts/ are loaded at startup
+# and reloaded on SIGHUP. Receiver/alertmanager wiring is deployment-
+# specific and stays in docs/runbooks/health-endpoint.md — only rules
+# ship in this repo.
+rule_files:
+  - alerts/*.yml
 
 scrape_configs:
     # Prometheus self-monitoring

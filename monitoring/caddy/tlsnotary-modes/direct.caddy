@@ -1,0 +1,9 @@
+# TLSNotary route — direct mode.
+# No proxy route for TLSNotary; clients connect direct to the host port
+# 7047. Use when upstream notary's WS handshake / framing rejects being
+# behind a reverse proxy. The 'tlsnotary' compose service must still
+# publish 7047 to the host in this mode (it does, by default).
+#
+# Selected when TLSNOTARY_PROXY_MODE=direct.
+
+# Intentionally empty — handled by the host port mapping in compose.

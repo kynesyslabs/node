@@ -53,7 +53,14 @@ export const DEFAULT_CONFIG: AppConfig = {
         logLevel: "info",
         whitelistedIPs: [],
         whitelistedKeys: [],
-        mcpEnabled: true,
+        trustedProxies: [],
+        xffMode: "",
+        // MCP server (Model Context Protocol) is OFF by default. It currently
+        // has no built-in authentication and exposes node identity + peer
+        // topology via its `get_node_identity` / `get_peer_list` tools.
+        // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
+        // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
+        mcpEnabled: false,
         restore: false,
     },
 

@@ -1,0 +1,9 @@
+# TLSNotary route — subdomain mode (in-vhost portion).
+# When using subdomain mode, the TLSNotary vhost is declared at top level
+# in the main Caddyfile (notary.${PROXY_DOMAIN}). This snippet stays
+# empty so the main vhost doesn't double-route /tlsnotary/*.
+#
+# Selected when TLSNOTARY_PROXY_MODE=subdomain.
+
+# Intentionally empty — see the notary.${PROXY_DOMAIN} block at the
+# bottom of Caddyfile, only activated when TLSNOTARY_PROXY_MODE=subdomain.

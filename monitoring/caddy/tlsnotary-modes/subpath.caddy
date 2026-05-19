@@ -1,0 +1,10 @@
+# TLSNotary route — subpath mode (default).
+# Mount at https://${PROXY_DOMAIN}/tlsnotary/. Caddy strips the prefix
+# before forwarding so the notary container stays at root. Works when
+# upstream notary has no sub-path assumptions in its WS framing.
+#
+# Selected when TLSNOTARY_PROXY_MODE=subpath (or unset).
+
+handle_path /tlsnotary/* {
+	reverse_proxy tlsnotary:7047
+}

@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# docker-run — convenience launcher for the dockerized node stack.
+#
+# Defaults to direct host-port mode (matches a plain `docker compose up`).
+# Add `--proxy` to flip into Caddy reverse-proxy mode at invocation time
+# without changing the default compose behaviour — that lets bare-metal
+# users + existing CI scripts keep working unchanged.
+#
+# Usage:
+#   ./scripts/docker-run [--proxy] [--detach|-d] [docker-compose-args...]
+#
+# Flags handled here:
+#   --proxy      Merge docker-compose.proxy.yml + enable the `proxy`,
+#                `monitoring`, and `tlsnotary` compose profiles. Drops
+#                redundant host port mappings; only 80, 443, 443/udp,
+#                and 53551 (OmniProtocol) remain published.
+#   --no-monitor Drop the `monitoring` profile from the proxy bundle.
+#   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
+#   --detach,-d  Detach after start (`docker compose up -d`).
+#   --help,-h    Print this help.
+#
+# Everything else is forwarded to `docker compose` after the `up`
+# subcommand. Examples:
+#   ./scripts/docker-run                       # plain dev: postgres + node
+#   ./scripts/docker-run --proxy -d            # full prod stack, detached
+#   ./scripts/docker-run --proxy --no-monitor  # proxy without Grafana/Prom
+#   ./scripts/docker-run down                  # teardown
+#   ./scripts/docker-run --proxy down          # teardown w/ proxy stack
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+USE_PROXY=false
+WANT_MONITORING=true
+WANT_TLSN=true
+PASSTHROUGH=()
+
+EXTRA_PROFILES=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --proxy)
+            USE_PROXY=true
+            shift
+            ;;
+        --no-monitor|--no-monitoring)
+            WANT_MONITORING=false
+            shift
+            ;;
+        --no-tlsn|--no-tlsnotary)
+            WANT_TLSN=false
+            shift
+            ;;
+        --profile)
+            # Capture --profile NAME so it lands BEFORE the subcommand
+            # (docker compose treats --profile as a global flag). Guard
+            # against `--profile` at end-of-args — without this, `set -u`
+            # aborts with "$2: unbound variable".
+            if [[ $# -lt 2 || -z "${2:-}" || "$2" == --* ]]; then
+                echo "scripts/docker-run: --profile requires a value" >&2
+                exit 2
+            fi
+            EXTRA_PROFILES+=(--profile "$2")
+            shift 2
+            ;;
+        --detach|-d)
+            PASSTHROUGH+=("-d")
+            shift
+            ;;
+        --help|-h)
+            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            PASSTHROUGH+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Auto-enable tlsnotary profile when the node has TLSNOTARY_ENABLED=true
+# in .env (or defaults to true via .env.example). The node will try to
+# call tlsnotary:7047 on boot and crash-mark the subsystem if the
+# container isn't there. Saves operators from the confusing "TLSN
+# failed to initialize" error on a plain `./run --docker`.
+if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+fi
+TLSNOTARY_ENABLED_RESOLVED="${TLSNOTARY_ENABLED:-true}"
+if [[ "$USE_PROXY" != "true" \
+      && "$TLSNOTARY_ENABLED_RESOLVED" == "true" \
+      && "$WANT_TLSN" == "true" ]]; then
+    EXTRA_PROFILES+=(--profile tlsnotary)
+fi
+
+COMPOSE_ARGS=(-f docker-compose.yml)
+PROFILES=()
+
+if [[ "$USE_PROXY" == "true" ]]; then
+    if [[ ! -f docker-compose.proxy.yml ]]; then
+        echo "docker-compose.proxy.yml missing — cannot enable proxy mode." >&2
+        exit 1
+    fi
+    COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
+    PROFILES+=(--profile proxy)
+    [[ "$WANT_MONITORING" == "true" ]] && PROFILES+=(--profile monitoring)
+    [[ "$WANT_TLSN" == "true" ]] && PROFILES+=(--profile tlsnotary)
+fi
+
+# Determine the compose subcommand. First non-flag passthrough arg
+# wins; default is `up` so the common case (`./scripts/docker-run`)
+# brings the stack up.
+SUBCOMMAND="up"
+SUBCOMMAND_ARGS=()
+if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
+    case "${PASSTHROUGH[0]}" in
+        up|down|ps|logs|restart|stop|start|build|pull|exec|run|config|kill|rm|top|images|version|exec|port|wait|cp|create|events)
+            SUBCOMMAND="${PASSTHROUGH[0]}"
+            SUBCOMMAND_ARGS=("${PASSTHROUGH[@]:1}")
+            ;;
+        *)
+            SUBCOMMAND_ARGS=("${PASSTHROUGH[@]}")
+            ;;
+    esac
+fi
+
+# Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
+# of an empty array as unset. Without these guards the default (no
+# --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound
+# variable".
+CMD=(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} "$SUBCOMMAND" ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"})
+
+echo "+ ${CMD[*]}"
+exec "${CMD[@]}"

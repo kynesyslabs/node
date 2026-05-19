@@ -1,4 +1,20 @@
 #!/bin/bash
-# Wrapper: forwards to scripts/run (the actual script lives there now)
+# Wrapper for the node launcher.
+#
+#   ./run              -> bare-metal launcher (scripts/run)
+#   ./run --docker     -> docker compose launcher (scripts/docker-run)
+#   ./run --docker --proxy [...]
+#                      -> same, with Caddy + monitoring + tlsnotary profiles
+#
+# The --docker flag MUST be the first argument so we don't have to
+# scan an arbitrary number of bare-metal flags. Everything after
+# --docker is forwarded to scripts/docker-run unchanged.
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+if [[ "${1:-}" == "--docker" ]]; then
+    shift
+    exec "$SCRIPT_DIR/scripts/docker-run" "$@"
+fi
+
 exec "$SCRIPT_DIR/scripts/run" "$@"

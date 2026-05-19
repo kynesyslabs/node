@@ -206,6 +206,89 @@ export class MetricsService {
         this.createGauge("gcr_accounts_total", "Total accounts in GCR", [])
         this.createGauge("gcr_total_supply", "Total native token supply", [])
 
+        // === Observability (Epic 13 T6) ===
+        // Subsystem registry surface — one row per subsystem.
+        this.createGauge(
+            "subsystem_up",
+            "Whether the named subsystem is in 'ready' or 'running' state (1) or not (0)",
+            ["subsystem"],
+        )
+        // Separate from subsystem_up so alerts can distinguish
+        // "intentionally skipped" (e.g. MCP disabled, dormant mode)
+        // from "failed". 1 when status == "skipped".
+        this.createGauge(
+            "subsystem_skipped",
+            "Whether the named subsystem was intentionally skipped (1) or not (0)",
+            ["subsystem"],
+        )
+        this.createGauge(
+            "subsystem_uptime_seconds",
+            "Seconds since the named subsystem last transitioned to its current state",
+            ["subsystem"],
+        )
+        this.createCounter(
+            "subsystem_restart_total",
+            "Times the named subsystem has transitioned to 'running' after being 'failed' or 'ready'",
+            ["subsystem"],
+        )
+        this.createCounter(
+            "subsystem_error_total",
+            "Errors recorded against the named subsystem via subsystemError()",
+            ["subsystem"],
+        )
+
+        // Boot tracker surface — per-step status as numeric enum:
+        // 0=pending 1=running 2=ready 3=failed 4=skipped
+        this.createGauge(
+            "boot_step_status",
+            "Boot step status enum (0=pending,1=running,2=ready,3=failed,4=skipped)",
+            ["step"],
+        )
+        this.createGauge(
+            "boot_complete",
+            "1 when every registered boot step is in ready/skipped, 0 otherwise",
+            [],
+        )
+
+        // Dormant mode — the 'enough_peers=false' gate at index.ts:589-594.
+        this.createGauge(
+            "dormant_mode",
+            "1 when the node skipped signaling/MCP/TLSN/mainLoop due to empty peer list",
+            [],
+        )
+
+        // mainLoop liveness.
+        this.createGauge(
+            "main_loop_heartbeat_seconds",
+            "Seconds since the last mainLoop iteration heartbeat",
+            [],
+        )
+        this.createCounter(
+            "main_loop_iterations_total",
+            "Total mainLoop iterations completed since boot",
+            [],
+        )
+
+        // Port drift — actual minus requested. 0 in the common case;
+        // positive when getNextAvailablePort walked forward.
+        this.createGauge(
+            "port_drift",
+            "Difference between actual and originally-requested port for a subsystem",
+            ["subsystem"],
+        )
+
+        // Process-wide error surface.
+        this.createCounter(
+            "uncaught_exception_total",
+            "Process uncaughtException handler invocations",
+            ["source"],
+        )
+        this.createCounter(
+            "unhandled_rejection_total",
+            "Process unhandledRejection handler invocations",
+            ["source"],
+        )
+
         log.debug("[METRICS] Core metrics registered")
     }
 

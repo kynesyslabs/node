@@ -170,6 +170,97 @@ Opens a tmux session with 4 panes, one per node:
 - `Ctrl+B` then `D` to detach
 - `tmux attach -t demos-devnet` to reattach
 
+## Reverse Proxy (Caddy) — `proxy` profile
+
+Local smoke test of Epic 12 without a public domain or ACME. Caddy
+fronts node-1 on `localhost:443` using its internal CA (self-signed),
+and exercises the same routes the production Caddyfile ships.
+
+### Bring up
+
+```bash
+cd testing/devnet
+
+# Boot a minimal proxy stack: postgres + tlsnotary + node-1 + caddy.
+docker compose --profile proxy up -d postgres tlsnotary node-1 caddy
+
+# Wait ~30s for node-1 to bootstrap.
+docker compose --profile proxy logs -f node-1
+```
+
+Caddy lives at `https://localhost/`. The cert is self-signed, so
+clients need to skip verification (`curl --insecure`, browser warning,
+`NODE_TLS_REJECT_UNAUTHORIZED=0`, etc.).
+
+### Smoke test
+
+```bash
+# Devnet skips Grafana / Prometheus — pass SMOKE_NO_MONITORING=1 so
+# those checks are SKIP instead of FAIL.
+PROXY_DOMAIN=localhost \
+CADDY_INSECURE=1 \
+SMOKE_NO_MONITORING=1 \
+    ../../scripts/smoke-proxy.sh
+```
+
+Expected: `PASS=8 FAIL=0 SKIP=4`.
+
+### TLSNotary proxy driver
+
+Partial (Node-side, no WASM):
+
+```bash
+NODE_TLS_REJECT_UNAUTHORIZED=0 \
+NODE_URL=https://localhost \
+ALLOW_INSECURE=1 \
+EXPECTED_HOST=localhost \
+    bun run ../../scripts/test-tlsnotary-proxy.ts
+```
+
+Verifies that `requestTLSNproxy` reaches the node handler through
+Caddy. Returns PASS-with-caveat — a real DAHR token is needed for the
+full WS proxy URL response.
+
+Full (Playwright + WASM notary session):
+
+```bash
+# One-time: download the chromium binary playwright needs.
+bunx playwright install chromium
+
+# Run the full attest flow through a real browser.
+PROXY_URL=https://localhost \
+ALLOW_INSECURE=1 \
+    bun run ../../scripts/test-tlsnotary-proxy.playwright.ts
+```
+
+This driver spins a tiny HTTP server that serves the SDK build + WASM
+files, launches headless Chromium, and drives the full
+`initTlsn → new TLSNotary → attestQuick` flow through Caddy. Set
+`HEADED=1` to watch the browser in real time.
+
+### TLSNotary proxy mode
+
+The Caddyfile imports route snippets keyed by `TLSNOTARY_PROXY_MODE`:
+
+| Mode       | Path                                          | Devnet support |
+|------------|-----------------------------------------------|----------------|
+| `subpath`  | `https://${PROXY_DOMAIN}/tlsnotary/`          | yes (default)  |
+| `direct`   | no proxy route; clients hit host port 7048    | yes            |
+| `subdomain`| `https://notary.${PROXY_DOMAIN}/`             | **no** — needs DNS |
+
+Flip via `.env`:
+
+```bash
+echo "TLSNOTARY_PROXY_MODE=direct" >> .env
+docker compose --profile proxy restart caddy
+```
+
+### Teardown
+
+```bash
+docker compose --profile proxy down
+```
+
 ## Troubleshooting
 
 ### Nodes can't connect to each other

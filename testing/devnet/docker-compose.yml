@@ -261,10 +261,63 @@ services:
       - demos-network
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Caddy — devnet reverse proxy (opt-in via `proxy` profile). Fronts node-1
+  # on localhost with Caddy's internal CA (self-signed). Use this to smoke-
+  # test the proxy stack without a public DNS / ACME setup. Bring up with:
+  #   docker compose --profile proxy up -d caddy
+  # Then:
+  #   PROXY_DOMAIN=localhost CADDY_INSECURE=1 \
+  #       ../../scripts/smoke-proxy.sh
+  #
+  # Reuses the production Caddyfile at ../../monitoring/caddy/ so devnet
+  # validates the same config that ships. The only delta is the upstream
+  # service name overrides below (devnet uses node-1, not node).
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: demos-devnet-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    ports:
+      - "${CADDY_HOST_HTTP:-80}:80"
+      - "${CADDY_HOST_HTTPS:-443}:443"
+      - "${CADDY_HOST_HTTPS:-443}:443/udp"
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-internal}
+      # Sentinel bcrypt rejects every password; operators set real
+      # hash in `.env`. Default lives in compose (not Caddyfile) because
+      # Caddy's `{$VAR:default}` only fires for UNSET vars — compose
+      # always sets them, so the Caddyfile-side default would never
+      # take effect.
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}
+    volumes:
+      - ../../monitoring/caddy/Caddyfile.devnet:/etc/caddy/Caddyfile:ro
+      - ../../monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Probe Caddy admin loopback (always 200, no redirect chain).
+      # See compose root file for why localhost:80 fails.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - demos-network
+
 networks:
   demos-network:
     driver: bridge
 
 volumes:
   postgres-data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

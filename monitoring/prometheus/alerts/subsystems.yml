@@ -1,0 +1,25 @@
+# Per-subsystem alerts. Generic SubsystemDown rule fires for any
+# non-skipped subsystem that drops to up=0. Epic 13 T14.
+groups:
+  - name: demos-subsystems
+    rules:
+      - alert: SubsystemDown
+        # Both metrics share the {subsystem} label so the vector match
+        # is direct — pre-fix this joined against demos_boot_step_status
+        # which uses {step} labels and never matched.
+        expr: demos_subsystem_up == 0 and demos_subsystem_skipped == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Subsystem {{ $labels.subsystem }} is down
+          description: 'demos_subsystem_up{subsystem="{{ $labels.subsystem }}"} has been 0 for >2m without being intentionally skipped. Check /health/subsystems for last_error.'
+
+      - alert: PortDriftDetected
+        expr: abs(demos_port_drift) > 0
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: Subsystem {{ $labels.subsystem }} drifted from requested port
+          description: 'Subsystem bound to a different port than configured (drift = {{ $value }}). Reachability + firewall rules may need an update.'

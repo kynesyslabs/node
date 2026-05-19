@@ -1,0 +1,21 @@
+# Process-wide error surface. Epic 13 T14.
+groups:
+  - name: demos-errors
+    rules:
+      - alert: UncaughtExceptionSpike
+        expr: increase(demos_uncaught_exception_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Spike of uncaught exceptions
+          description: "{{ $value }} uncaught exceptions in 5m. The handler is swallowing them — subsystems may be in a corrupted state."
+
+      - alert: UnhandledRejectionSpike
+        expr: increase(demos_unhandled_rejection_total[5m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Spike of unhandled promise rejections
+          description: "{{ $value }} unhandled rejections in 5m. Same caveat as UncaughtExceptionSpike."

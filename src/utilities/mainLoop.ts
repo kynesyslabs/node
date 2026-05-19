@@ -39,6 +39,28 @@ export default async function mainLoop() {
 
 async function mainLoopCycle() {
     await sleep(getSharedState.mainLoopSleepTime)
+    // Heartbeat (Epic 13 T5). /health derives staleness from this — once
+    // the gap exceeds 3× the loop interval, status flips to "failing".
+    // First heartbeat also flips the `main_loop` subsystem to "ready".
+    const isFirst = getSharedState.mainLoopHeartbeatAt === null
+    getSharedState.mainLoopHeartbeatAt = Date.now()
+    getSharedState.mainLoopIterations++
+    // Mirror into Prometheus. Lazy import so the metrics module can stay
+    // optional / disabled without breaking mainLoop.
+    try {
+        const { getMetricsService } = await import("@/features/metrics")
+        getMetricsService().incrementCounter(
+            "main_loop_iterations_total",
+            {},
+            1,
+        )
+    } catch {
+        // Metrics disabled or not yet initialised — fine.
+    }
+    if (isFirst) {
+        const { markSubsystem } = await import("./subsystemRegistry")
+        markSubsystem(getSharedState.subsystems, "main_loop", "ready")
+    }
     log.info(
         "\n============================================================\n",
         true,

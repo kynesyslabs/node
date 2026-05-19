@@ -2,5 +2,68 @@
   "version": 1,
   "project": "demos-network-node",
   "initialized": "2026-02-12",
-  "documents": []
+  "documents": [
+    {
+      "path": "discoveries/startup-assessment-2026-05-13",
+      "type": "discovery",
+      "title": "Node Startup & Stack Flow Assessment",
+      "date": "2026-05-13",
+      "status": "active",
+      "branch": "better_startup",
+      "files": [
+        "README.md",
+        "01-compose-services.md",
+        "02-startup-trace.md",
+        "03-ports-and-certs.md",
+        "04-scripts-and-dockerfile.md",
+        "05-fragility-synthesis.md",
+        "06-epic-1-reverse-proxy.md",
+        "07-epic-2-healthcheck-observability.md",
+        "08-epic-3-blockers.md",
+        "CHANGELOG.md"
+      ]
+    },
+    {
+      "path": "runbooks/mcp-security.md",
+      "type": "runbook",
+      "title": "MCP Server Security & Enablement",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/wstcp-reachability-check.md",
+      "type": "runbook",
+      "title": "Verify wstcp Pool Reachability",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/proxy-setup.md",
+      "type": "runbook",
+      "title": "Reverse-Proxy Setup (Caddy)",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/proxy-add-service.md",
+      "type": "runbook",
+      "title": "Add a New Service Behind the Caddy Proxy",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/health-endpoint.md",
+      "type": "runbook",
+      "title": "Interpret the /health Endpoint",
+      "date": "2026-05-14",
+      "status": "active"
+    },
+    {
+      "path": "runbooks/dormant-mode.md",
+      "type": "runbook",
+      "title": "Diagnose & Recover from Dormant Mode",
+      "date": "2026-05-14",
+      "status": "active"
+    }
+  ]
 }

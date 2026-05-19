@@ -24,6 +24,15 @@
 # Wipe everything (DANGER): docker compose down -v
 # =============================================================================
 
+# Bounded json-file logging — without these caps a long-running deployment
+# will eventually fill the docker storage volume. Anchor referenced from
+# every service via `<<: *default-logging` (Epic 13 T12).
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL — primary datastore for the node (TypeORM with synchronize=true)
@@ -44,6 +53,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    logging: *default-logging
     networks:
       - demos-network
     # ports:
@@ -75,6 +85,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -159,11 +170,31 @@ services:
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
       - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
-      - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
+      # MCP (Model Context Protocol) intentionally NOT host-published.
+      # The server binds `localhost` inside the container (src/index.ts)
+      # and the SDK has no built-in authentication — publishing this port
+      # exposes node identity + peer topology to anyone who can reach it.
+      # See docs/runbooks/mcp-security.md +
+      # docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
+      # When Epic 12 introduces a reverse proxy with bearer auth, MCP can
+      # be re-exposed there. Until then it remains reachable only via
+      # `docker compose exec node curl http://localhost:3001/sse`.
+      # - "${RPC_MCP_PORT:-3001}:${RPC_MCP_PORT:-3001}"
       # METRICS_PORT — keep container port pinned to 9090 so the
       # prometheus.yml scrape target (node:9090) stays valid. The
       # host-side port is independently configurable via METRICS_HOST_PORT.
       - "${METRICS_HOST_PORT:-9090}:9090"
+    healthcheck:
+      # Mirrors the Dockerfile HEALTHCHECK so compose-level wait + watch
+      # commands work without depending on the image build (Epic 13 T11).
+      # /health returns 503 when chain DB is down or mainLoop is dead;
+      # 200 for ok/dormant/degraded (operator reads body for nuance).
+      test: ["CMD", "curl", "-fsS", "http://localhost:${RPC_PORT:-53550}/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -182,11 +213,29 @@ services:
       - --web.console.libraries=/etc/prometheus/console_libraries
       - --web.console.templates=/etc/prometheus/consoles
       - --web.enable-lifecycle
+      # NOTE — sub-path serving behind Caddy (Epic 12 T11):
+      # The Caddyfile uses `handle_path /prometheus/*` which strips the
+      # prefix before forwarding here, so Prom can stay at root with
+      # no `--web.external-url` / `--web.route-prefix` flags. The
+      # consequence is that UI asset links inside the Prometheus web
+      # UI render absolute paths and assume root — when accessed via
+      # `https://${PROXY_DOMAIN}/prometheus/` some links may need a
+      # manual `/prometheus` prefix typed in. For full sub-path
+      # support (alerts, federation, etc.) flip to a dedicated
+      # `prometheus.${PROXY_DOMAIN}` subdomain in the Caddyfile. See
+      # docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "${PROMETHEUS_PORT:-9091}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -198,13 +247,23 @@ services:
     container_name: demos-grafana
     restart: unless-stopped
     profiles: [monitoring]
+    # Wait until Prometheus reports healthy (Epic 13 T13). Previously a
+    # plain short-form list which only waited for container-start, not
+    # readiness — Grafana could initialize against an unreachable
+    # datasource and need a manual restart.
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-demos}
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # Sub-path serving for `proxy` compose profile. Auto-enabled
+      # whenever GRAFANA_ROOT_URL contains a non-root path. Default
+      # (root URL) leaves serve-from-sub-path off — direct host-port
+      # access at http://localhost:3000 keeps working as before.
+      GF_SERVER_SERVE_FROM_SUB_PATH: ${GRAFANA_SERVE_FROM_SUB_PATH:-false}
       GF_INSTALL_PLUGINS: grafana-clock-panel
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
@@ -234,6 +293,13 @@ services:
       - ./monitoring/grafana/branding/favicon.png:/usr/share/grafana/public/img/favicon.png:ro
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -257,6 +323,12 @@ services:
       - /:/rootfs:ro
     ports:
       - "${NODE_EXPORTER_PORT:-9100}:9100"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -278,6 +350,75 @@ services:
     ports:
       - "${NEO4J_HTTP_PORT:-7474}:7474"
       - "${NEO4J_BOLT_PORT:-7687}:7687"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *default-logging
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Caddy — reverse proxy + automatic TLS (opt-in via `proxy` profile).
+  # Fronts RPC / Signaling / MCP / Metrics / Grafana / Prometheus / TLSNotary
+  # behind a single ${PROXY_DOMAIN}:443. OmniProtocol (53551) stays direct.
+  #
+  # Engage with:
+  #   COMPOSE_PROFILES=monitoring,tlsnotary,proxy docker compose up -d
+  # OR:
+  #   docker compose --profile proxy up -d
+  #
+  # Required env (set in .env):
+  #   PROXY_DOMAIN              public DNS, must point at this host
+  #   ACME_EMAIL                Let's Encrypt contact
+  #   METRICS_BASIC_AUTH_HASH   bcrypt — see Caddyfile comments
+  #
+  # See monitoring/caddy/Caddyfile + docs/runbooks/proxy-setup.md.
+  # ---------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: demos-caddy
+    profiles: [proxy]
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    environment:
+      PROXY_DOMAIN: ${PROXY_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Sentinel bcrypt that rejects every password. Operators override
+      # in `.env` to enable basic-auth. Default lives here (not in
+      # Caddyfile) because Caddy's `{$VAR:default}` fallback only fires
+      # for UNSET vars — compose always sets the var, so the default
+      # would never take effect. See Caddyfile.devnet line 46 for shape.
+      METRICS_BASIC_AUTH_HASH: ${METRICS_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      MCP_BASIC_AUTH_HASH: ${MCP_BASIC_AUTH_HASH:-$$2a$$14$$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+      # Epic 12 T14 — selects which tlsnotary-modes/*.caddy snippet
+      # is imported. Allowed: subpath (default), subdomain, direct.
+      TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}
+    volumes:
+      - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Probe Caddy's local admin endpoint (loopback inside the
+      # container — see `admin localhost:2019` in the Caddyfile global
+      # block). The previous `http://localhost:80/` probe followed
+      # Caddy's permanent redirect to https://localhost, which has no
+      # matching cert (Caddy only holds one for $PROXY_DOMAIN) — so
+      # the TLS handshake failed and the container stayed permanently
+      # unhealthy in real deployments. The /config endpoint is always
+      # 200 + JSON regardless of vhost state. Greptile P2.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging: *default-logging
     networks:
       - demos-network
 
@@ -307,3 +448,7 @@ volumes:
     name: demos_neo4j_data
   neo4j_logs:
     name: demos_neo4j_logs
+  caddy_data:
+    name: demos_caddy_data
+  caddy_config:
+    name: demos_caddy_config
