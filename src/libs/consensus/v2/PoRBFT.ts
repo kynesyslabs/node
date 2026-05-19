@@ -196,6 +196,8 @@ export async function consensusRoutine(): Promise<void> {
                 successfulTxs: localSuccessfulTxs,
                 failedTxs: localFailedTxs,
             } = await applyGCREditsFromMergedMempool(tempMempool)
+            BroadcastManager.broadcastNewBlock(block)
+
             successfulTxs = successfulTxs.concat(localSuccessfulTxs)
             failedTxs = failedTxs.concat(localFailedTxs)
             log.debug(
@@ -254,7 +256,6 @@ export async function consensusRoutine(): Promise<void> {
             // REVIEW: Should we await this?
             // REVIEW: All nodes broadcast the block for redundancy
             // if (manager.checkIfWeAreSecretary()) {
-            BroadcastManager.broadcastNewBlock(block)
             // }
 
             // INFO: Release DTR transaction relay waiter
