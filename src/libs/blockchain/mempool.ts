@@ -93,7 +93,7 @@ export default class Mempool {
             }
         }
 
-        if (!blockRef) {
+        if (blockRef === undefined) {
             blockRef = getSharedState.lastBlockNumber + 1
 
             if (getSharedState.inConsensusLoop) {

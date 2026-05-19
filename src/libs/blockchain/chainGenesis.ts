@@ -82,7 +82,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
 
     log.debug("[GENESIS] Block generated, ready to insert it")
     log.debug("[GENESIS] inserting transaction into the mempool")
-    await Mempool.addTransaction({ ...genesisTx, reference_block: 0 })
+    await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }, 0)
     log.debug("[GENESIS] inserted transaction")
 
     // SECTION: Restoring account data
