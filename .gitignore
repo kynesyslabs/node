@@ -9,7 +9,14 @@ dist/
 output/
 *.db
 *.sqlite3
-data/
+# Ignore everything in `data/` (runtime DBs, chain blobs, l2ps state, ...)
+# EXCEPT the committed state-restore snapshot under `data/snapshot/`.
+# The negation works because we use `data/*` (not `data/`) — `data/` with
+# trailing slash refuses to recurse, so any `!data/...` rule would be
+# ignored. The raw `.snapshot-restore/` source dump (213 MB uncompressed)
+# is NOT committed — see entry near the bottom.
+data/*
+!data/snapshot/
 docker_data/
 postgres_*/
 neo4j_data/
@@ -188,3 +195,8 @@ yarn.lock
 ISSUES.md
 PR_RAW.md
 .git.broken-2026-05-13
+# Raw pg_dump source for the state-restore snapshot (213 MB uncompressed).
+# Transform output lives in `data/snapshot/` and IS committed; this dir is
+# the local-only source-of-truth fed into `bun snapshot:transform`.
+.snapshot-restore/
+.test-identity/

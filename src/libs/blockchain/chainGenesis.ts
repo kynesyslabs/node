@@ -12,9 +12,15 @@ import {
     serializeTransactionContent,
     serializeBlockContent,
 } from "@/forks"
+import Datasource from "src/model/datasource"
+import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
+import { restoreSnapshot } from "src/libs/blockchain/genesis/restoreSnapshot"
+import {
+    seedValidators,
+    type GenesisValidatorSeed,
+} from "src/libs/blockchain/genesis/seedValidators"
+import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGenesis"
 
-// REVIEW: P2 — genesis is always block 0; route both genesis hashes through
-// the fork-aware serializer for symmetry. The gate is bit-identical in P2.
 const GENESIS_BLOCK_HEIGHT = 0
 
 export async function generateGenesisBlock(genesisData: any): Promise<Block> {
@@ -102,43 +108,103 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     log.debug("[GENESIS] inserted transaction")
 
     // SECTION: Restoring account data
-    const users = {}
+    //
+    // Two paths, gated by snapshot availability:
+    //
+    //   1. Snapshot present (P1 — fresh hard-fork chain bootstrap):
+    //      stream rows from `data/snapshot/*.jsonl` into gcr_main +
+    //      gcr_storageprogram + identity_commitments under a single
+    //      caller-owned transaction. The legacy `genesisData.balances` /
+    //      `genesisData.users` arrays are SKIPPED — the snapshot owns
+    //      every account row, including the founder pubkeys that used to
+    //      ride in `balances`. See forking/restore/PLAN.md P1 + P3.
+    //
+    //   2. No snapshot (dev / empty-chain boot): fall through to the
+    //      pre-snapshot behavior — derive `users{}` from
+    //      `genesisData.balances` and overlay `genesisData.users`, then
+    //      seed via HandleGCR.createAccount in batches. Back-compat for
+    //      operators who don't ship a snapshot.
+    //
+    // Ordering note: this restore block sits between the mempool add and
+    // `insertBlock(...)`. If `insertBlock` fails AFTER a successful
+    // restore, the DB carries the rows but no block 0; the next boot's
+    // preflight check will detect that mismatch (gcr_main != 0 AND
+    // blocks == 0) and bail out with the operator-facing guidance.
+    const snapshot = await loadSnapshot()
 
-    for (const balance of genesisData.balances) {
-        const user = {
-            pubkey: balance[0],
-            balance: balance[1],
-        }
-        users[user.pubkey] = user
-    }
-
-    for (const user of genesisData?.users || []) {
-        const balance = users[user.pubkey]?.balance || 0n
-        users[user.pubkey] = {
-            ...user,
-            balance: balance,
-        }
-    }
-
-    const userAccounts: Record<string, any>[] = Object.values(users)
-    log.debug(`total users: ${userAccounts.length}`)
-
-    const batchSize = 100
-    for (let i = 0; i < userAccounts.length; i += batchSize) {
-        const batch = userAccounts.slice(i, i + batchSize)
+    if (snapshot.available) {
+        const db = await Datasource.getInstance()
+        const dataSource = db.getDataSource()
+        // Wrap the entire restore in one transaction so partial failure
+        // leaves the DB empty (otherwise a crash mid-restore would yield
+        // corrupted half-restored state that the next boot's preflight
+        // would refuse to retry).
+        await dataSource.transaction(async em => {
+            await restoreSnapshot(em, snapshot)
+            // Genesis-baked validators: seed from data/genesis.json inside
+            // the same transaction so a partial restore never ships without
+            // the founding validator set (and vice-versa).
+            if (
+                Array.isArray(genesisData.validators) &&
+                (genesisData.validators as unknown[]).length > 0
+            ) {
+                await seedValidators(
+                    em,
+                    genesisData.validators as GenesisValidatorSeed[],
+                )
+            }
+            // Pre-apply forks deterministically at genesis. Migration output is
+            // a pure function of input state — no consensus block-1 hook needed.
+            // Pristine boot is fully post-fork; solo nodes don't sit at genesis.
+            await applyForksAtGenesis(em, genesisData.forks)
+        })
+    } else {
         log.info(
-            `[GENESIS] Processing batch ${
-                Math.floor(i / batchSize) + 1
-            }/${Math.ceil(userAccounts.length / batchSize)} (${
-                batch.length
-            } accounts)`,
+            "[GENESIS] no snapshot at data/snapshot/; falling back to genesisData.balances + genesisData.users",
         )
+        // NOTE: genesis-baked validators are intentionally NOT seeded in the
+        // legacy path. The founding validator set is tied to the snapshot-fork-
+        // bootstrap flow. Dev/empty-chain operators register validators via the
+        // existing staking flow (bun upgradable:cli / scripts/upgradable-network/cli.ts).
 
-        await Promise.all(
-            batch.map(async user => {
-                await HandleGCR.createAccount(user.pubkey, user)
-            }),
-        )
+        const users: Record<string, Record<string, any>> = {}
+
+        for (const balance of genesisData.balances) {
+            const user = {
+                pubkey: balance[0],
+                balance: balance[1],
+            }
+            users[user.pubkey] = user
+        }
+
+        for (const user of genesisData?.users || []) {
+            const balance = users[user.pubkey]?.balance || 0n
+            users[user.pubkey] = {
+                ...user,
+                balance: balance,
+            }
+        }
+
+        const userAccounts: Record<string, any>[] = Object.values(users)
+        log.debug(`total users: ${userAccounts.length}`)
+
+        const batchSize = 100
+        for (let i = 0; i < userAccounts.length; i += batchSize) {
+            const batch = userAccounts.slice(i, i + batchSize)
+            log.info(
+                `[GENESIS] Processing batch ${
+                    Math.floor(i / batchSize) + 1
+                }/${Math.ceil(userAccounts.length / batchSize)} (${
+                    batch.length
+                } accounts)`,
+            )
+
+            await Promise.all(
+                batch.map(async user => {
+                    await HandleGCR.createAccount(user.pubkey, user)
+                }),
+            )
+        }
     }
     // !SECTION Restoring account data
 
