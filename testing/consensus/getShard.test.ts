@@ -157,12 +157,14 @@ mock.module("src/utilities/logger", () => ({
 // ---------------------------------------------------------------------------
 
 let getShard: (seed: string) => Promise<{ identity: string }[]>
+let resetValidatorCache: () => void
 
 beforeAll(async () => {
     const mod = await import(
         "src/libs/consensus/v2/routines/getShard"
     )
     getShard = mod.default as (seed: string) => Promise<{ identity: string }[]>
+    resetValidatorCache = mod.__resetValidatorCache as () => void
 })
 
 // ---------------------------------------------------------------------------
@@ -187,6 +189,9 @@ afterEach(() => {
     // Prevent DEMOS_REQUIRE_VALIDATORS from bleeding between tests.
     delete process.env.DEMOS_REQUIRE_VALIDATORS
     resetMockState()
+    // Per-block validator cache otherwise persists across tests; flush it
+    // so each case re-issues the mocked DB query.
+    resetValidatorCache()
 })
 
 describe("getShard — validator-set filter", () => {
@@ -417,5 +422,46 @@ describe("getShard — validator-set filter", () => {
         expect(identities).toContain("0xLEGIT")
         expect(identities).not.toContain("null")
         expect(identities).not.toContain("0xOUTSIDER")
+    })
+
+    // -----------------------------------------------------------------------
+    // Case (i): Per-block validator cache.
+    //           Two consecutive getShard calls at the same lastBlockNumber
+    //           must hit the mocked DB only once; bumping the block
+    //           re-issues the query.
+    // -----------------------------------------------------------------------
+    it("(i) validator set is cached per-block — DB hit once per block height", async () => {
+        const peer = makePeer("0xCACHE")
+        mockState.onlinePeers = [peer]
+        mockState.validators = [makeValidator("0xCACHE")]
+
+        let callCount = 0
+        const originalGetter = mockState.validators
+        // Spy on the underlying lookup by counting accesses through the
+        // mocked GCR module. The mock returns mockState.validators by
+        // reference, so we wrap with a Proxy that increments callCount.
+        Object.defineProperty(mockState, "validators", {
+            configurable: true,
+            get() {
+                callCount += 1
+                return originalGetter
+            },
+        })
+
+        await getShard("seed-i-1")
+        await getShard("seed-i-2")
+        expect(callCount).toBe(1)
+
+        // Bump the block — cache must invalidate.
+        mockState.lastBlockNumber += 1
+        await getShard("seed-i-3")
+        expect(callCount).toBe(2)
+
+        // Restore plain property so afterEach reset works.
+        Object.defineProperty(mockState, "validators", {
+            configurable: true,
+            writable: true,
+            value: originalGetter,
+        })
     })
 })

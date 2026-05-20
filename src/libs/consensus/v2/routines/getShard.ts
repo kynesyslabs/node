@@ -7,6 +7,19 @@ import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
 
+// Per-block cache of the active-validator query. getShard runs on every
+// consensus tick (multiple times per block), but the validator set only
+// changes via stake/unstake/exit txs which land at block boundaries.
+// Caching keyed by `lastBlockNumber` collapses N round-trips per block
+// into one. Exported for tests via `__resetValidatorCache`.
+let cachedBlock: number | null = null
+let cachedValidators: Validators[] | null = null
+
+export function __resetValidatorCache(): void {
+    cachedBlock = null
+    cachedValidators = null
+}
+
 /**
  * Retrieve the current list of online peers, filtered to active validators.
  *
@@ -20,9 +33,17 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         peer => peer.status.online && peer.sync.status && Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
     )
 
-    // Fetch active validators from DB at the current block
+    // Fetch active validators from DB at the current block, with a
+    // per-block memoisation to avoid one DB round-trip per consensus tick.
     const lastBlock = getSharedState.lastBlockNumber
-    const activeValidators = await GCR.getGCRValidatorsAtBlock(lastBlock) as Validators[]
+    let activeValidators: Validators[]
+    if (cachedBlock === lastBlock && cachedValidators !== null) {
+        activeValidators = cachedValidators
+    } else {
+        activeValidators = await GCR.getGCRValidatorsAtBlock(lastBlock) as Validators[]
+        cachedBlock = lastBlock
+        cachedValidators = activeValidators
+    }
 
     let validatedPeers: Peer[]
 
