@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "host": "node3.demos.sh",
+    "chain_block_height": 2285755,
+    "chain_block_hash": "3c6a0b81e4cc8fdd44719f79f5f71938e75f465802f312c4fb475886a36b8338",
+    "node_version": "0.9.8",
+    "pg_version": "17.0",
+    "dumped_at": "2026-05-19T15:22:00Z"
+  },
+  "files": {
+    "gcr_main.jsonl": {
+      "sha256": "b50513ce9632c5460a608d29cc0f4593cbb961bcf585a017323100a9bef10b55",
+      "rows": 13880,
+      "balance_sum": "15024999999998868586"
+    },
+    "gcr_storageprogram.jsonl": {
+      "sha256": "30f6f31243b77c66c25cadf5523c251a7aada7e858b669288f5c6b53cd11ee9f",
+      "rows": 1382,
+      "size_bytes_sum": 1269189
+    },
+    "identity_commitments.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rows": 0
+    }
+  },
+  "transforms_applied": {
+    "nonces_reset_to_zero": true,
+    "assigned_txs_emptied": true,
+    "test_identity_commitments_dropped": 1
+  }
+}

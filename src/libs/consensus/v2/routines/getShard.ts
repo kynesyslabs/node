@@ -4,12 +4,27 @@ import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
+import GCR from "src/libs/blockchain/gcr/gcr"
+import type { Validators } from "src/model/entities/Validators"
+
+// Per-block cache of the active-validator query. getShard runs on every
+// consensus tick (multiple times per block), but the validator set only
+// changes via stake/unstake/exit txs which land at block boundaries.
+// Caching keyed by `lastBlockNumber` collapses N round-trips per block
+// into one. Exported for tests via `__resetValidatorCache`.
+let cachedBlock: number | null = null
+let cachedValidators: Validators[] | null = null
+
+export function __resetValidatorCache(): void {
+    cachedBlock = null
+    cachedValidators = null
+}
 
 /**
- * Retrieve the current list of online peers.
+ * Retrieve the current list of online peers, filtered to active validators.
  *
  * @param seed - Seed intended for deterministic shard selection; currently not used and has no effect
- * @returns An array of peers that are currently considered online
+ * @returns An array of peers that are currently considered online and are active validators
  */
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
@@ -18,17 +33,55 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         peer => peer.status.online && peer.sync.status && Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
     )
 
+    // Fetch active validators from DB at the current block, with a
+    // per-block memoisation to avoid one DB round-trip per consensus tick.
+    const lastBlock = getSharedState.lastBlockNumber
+    let activeValidators: Validators[]
+    if (cachedBlock === lastBlock && cachedValidators !== null) {
+        activeValidators = cachedValidators
+    } else {
+        activeValidators = await GCR.getGCRValidatorsAtBlock(lastBlock) as Validators[]
+        cachedBlock = lastBlock
+        cachedValidators = activeValidators
+    }
+
+    let validatedPeers: Peer[]
+
+    if (activeValidators.length === 0) {
+        if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+            throw new Error(
+                "[getShard] no active validators in DB AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
+            )
+        }
+        log.warning(
+            "[getShard] SECURITY: no active validators in DB; falling back to online-peer-only shard selection. Set DEMOS_REQUIRE_VALIDATORS=true to enforce.",
+        )
+        validatedPeers = peers
+    } else {
+        // Validators.address is typed `string | null` (PrimaryColumn but
+        // TypeORM widens to null); filter defensively so a NULL row can't
+        // accidentally land in the set as a string and corrupt the filter.
+        const validatorAddressSet = new Set<string>(
+            activeValidators
+                .map(v => v.address)
+                .filter((a): a is string => a !== null),
+        )
+        validatedPeers = peers.filter(peer =>
+            validatorAddressSet.has(peer.identity),
+        )
+    }
+
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = getSharedState.shardSize
-    if (peers.length < maxShardSize) {
-        maxShardSize = peers.length
+    if (validatedPeers.length < maxShardSize) {
+        maxShardSize = validatedPeers.length
     }
     log.debug(`[getShard] maxShardSize: ${maxShardSize}`)
     const shard: Peer[] = []
     log.custom("last_shard", "Shard seed is: " + seed)
     // getSharedState.lastShardSeed = seed
     const deterministicRandomness = Alea(seed)
-    const availablePeers = [...peers]
+    const availablePeers = [...validatedPeers]
 
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes
@@ -42,6 +95,10 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
+
+    log.info(
+        `[getShard] active validators in DB: ${activeValidators.length}; online+validator peers: ${validatedPeers.length}; shard size: ${shard.length}`,
+    )
 
     // Setting the last shard
     // getSharedState.lastShard = shard.map(peer => peer.identity)

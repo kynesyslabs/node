@@ -1,0 +1,90 @@
+# Multi-node interop test — companion overlay.
+#
+# Adds one extra node alongside the primary stack. Joins the same
+# `demos-network` so it can reach demos-postgres + demos-tlsnotary +
+# demos-node by service-name DNS.
+#
+# Uses the same image as the primary node (demos-node:local) so genesis
+# bake + snapshot are identical. A separate PG schema (demos_companion)
+# is created on first boot via POSTGRES_DB envvar mismatch — the shared
+# postgres container only auto-creates one DB at startup, so the
+# companion ships with a small init helper that calls `CREATE DATABASE
+# demos_companion` against the running postgres before the node starts.
+#
+# Bring up alongside the primary stack with:
+#   docker compose -f docker-compose.yml -f testing/multinode/docker-compose.companion.yml up -d companion
+# Or via the helper:
+#   bash testing/multinode/up-companion.sh
+
+services:
+  companion-db-init:
+    image: postgres:16-alpine
+    container_name: demos-companion-db-init
+    networks:
+      - demos-network
+    environment:
+      PGPASSWORD: ${PG_PASSWORD:-demospassword}
+    entrypoint:
+      - sh
+      - -c
+      - |
+        until pg_isready -h postgres -U "${PG_USER:-demosuser}" >/dev/null 2>&1; do sleep 1; done
+        psql -h postgres -U "${PG_USER:-demosuser}" -d postgres -c \
+          "SELECT 1 FROM pg_database WHERE datname='demos_companion'" \
+          | grep -q 1 || \
+          psql -h postgres -U "${PG_USER:-demosuser}" -d postgres -c \
+          "CREATE DATABASE demos_companion"
+    restart: "no"
+
+  companion:
+    image: demos-node:local
+    container_name: demos-companion
+    depends_on:
+      companion-db-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    networks:
+      - demos-network
+    environment:
+      NODE_ENV: development
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_USER: ${PG_USER:-demosuser}
+      PG_PASSWORD: ${PG_PASSWORD:-demospassword}
+      PG_DATABASE: demos_companion
+      RPC_PORT: 53560
+      OMNI_PORT: 53561
+      RPC_SIGNALING_PORT: 3015
+      METRICS_PORT: 9090
+      METRICS_ENABLED: "false"
+      IDENTITY_FILE: .demos_identity
+      PEER_LIST_FILE: demos_peerlist.json
+      EXPOSED_URL: http://companion:53560
+      TLSNOTARY_ENABLED: "true"
+      TLSNOTARY_MODE: docker
+      TLSNOTARY_HOST: tlsnotary
+      TLSNOTARY_PORT: "7047"
+      CONSENSUS_TIME: "${CONSENSUS_TIME:-10}"
+    volumes:
+      - companion_data:/app/data
+      - companion_logs:/app/logs
+      - companion_state:/app/state
+    ports:
+      - "53560:53560"
+      - "53561:53561"
+      - "3015:3015"
+    restart: unless-stopped
+
+networks:
+  demos-network:
+    external: true
+    name: demos-network
+
+volumes:
+  companion_data:
+    name: demos_companion_data
+  companion_logs:
+    name: demos_companion_logs
+  companion_state:
+    name: demos_companion_state

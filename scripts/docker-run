@@ -16,6 +16,10 @@
 #                and 53551 (OmniProtocol) remain published.
 #   --no-monitor Drop the `monitoring` profile from the proxy bundle.
 #   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
+#   --clean      Wipe DB + bundled-data volumes (pgdata, node_data) before
+#                `up`. Equivalent to bare-metal `./run -b true`. Brings down
+#                the stack first, then `docker volume rm` the project-scoped
+#                volumes. Snapshot-restore re-runs from genesis on next boot.
 #   --detach,-d  Detach after start (`docker compose up -d`).
 #   --help,-h    Print this help.
 #
@@ -26,6 +30,8 @@
 #   ./scripts/docker-run --proxy --no-monitor  # proxy without Grafana/Prom
 #   ./scripts/docker-run down                  # teardown
 #   ./scripts/docker-run --proxy down          # teardown w/ proxy stack
+#   ./scripts/docker-run --clean               # wipe volumes + fresh up
+#   ./scripts/docker-run --clean --proxy -d    # wipe + full prod stack
 
 set -euo pipefail
 
@@ -35,6 +41,7 @@ cd "$REPO_ROOT"
 USE_PROXY=false
 WANT_MONITORING=true
 WANT_TLSN=true
+WIPE_VOLUMES=false
 PASSTHROUGH=()
 
 EXTRA_PROFILES=()
@@ -51,6 +58,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-tlsn|--no-tlsnotary)
             WANT_TLSN=false
+            shift
+            ;;
+        --clean)
+            WIPE_VOLUMES=true
             shift
             ;;
         --profile)
@@ -70,7 +81,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -125,6 +136,26 @@ if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
             SUBCOMMAND_ARGS=("${PASSTHROUGH[@]}")
             ;;
     esac
+fi
+
+# --clean: bring everything down + drop the named volumes before `up`.
+# Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
+# the wipe would be confusing. Compose project name defaults to the
+# repo basename (`node`); allow COMPOSE_PROJECT_NAME override.
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
+    echo "+ --clean: tearing down stack + wiping volumes for project '$PROJECT_NAME'"
+    # Down with --volumes so anonymous volumes go too; named volumes
+    # still need explicit removal below because compose only drops them
+    # when `--volumes` is paired with full project teardown AND no other
+    # containers reference them.
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
+    for vol in "${PROJECT_NAME}_pgdata" "${PROJECT_NAME}_node_data"; do
+        if docker volume inspect "$vol" >/dev/null 2>&1; then
+            echo "+ --clean: removing volume $vol"
+            docker volume rm "$vol" || true
+        fi
+    done
 fi
 
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion

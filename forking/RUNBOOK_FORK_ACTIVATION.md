@@ -4,6 +4,10 @@
 **Scope**: Single coordinated activation of the two bundled hard forks `osDenomination` (DEM → OS denomination, ×10⁹) AND `gasFeeSeparation` (DEM-665 — three-component fee + burn/treasury/rpc-operator distribution) at the same `activationHeight`.
 **Status**: Operational. Read end-to-end before fork day.
 
+> **Prerequisite — chain-wipe fork only**: When this runbook is executed against a freshly-wiped chain (rather than activating in-place), operators must first restore historical state via the snapshot-restore flow. See [`forking/restore/RUNBOOK.md`](restore/RUNBOOK.md) and [`forking/restore/PLAN.md`](restore/PLAN.md). The restore is automatic on the first `./run` against an empty PG when `data/snapshot/` is present.
+>
+> **Production environments**: set `DEMOS_REQUIRE_VALIDATORS=true` in the node's env. As of epic #17, `getShard()` enforces the genesis-baked validator set at the consensus layer. With the env var set, a node booting against an empty/non-active validators table refuses to operate (loud error) instead of silently falling back to permissive online-peer-only shard selection.
+
 ---
 
 ## 0. TL;DR
