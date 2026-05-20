@@ -242,9 +242,13 @@ afterEach(async () => {
         await rm(snapshotDir, { recursive: true, force: true })
     }
 
-    // Truncate tables to leave DB clean for next test
+    // Truncate all tables touched by restoreSnapshot + seedValidators to
+    // leave the DB clean for the next test. Includes blocks and validators
+    // so partial-genesis detection in preflightEmpty starts from a clean slate.
     if (pgAvailable && ds?.isInitialized) {
-        await ds.query(`TRUNCATE TABLE gcr_main, gcr_storageprogram, identity_commitments CASCADE`)
+        await ds.query(
+            `TRUNCATE TABLE gcr_main, gcr_storageprogram, identity_commitments, blocks, validators CASCADE`,
+        )
     }
 })
 

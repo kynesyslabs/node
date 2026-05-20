@@ -61,6 +61,17 @@ function validateSeed(seed: GenesisValidatorSeed, index: number): void {
         )
     }
 
+    // connection_url must be null or a non-empty string. Reject empty strings
+    // and other non-string types (e.g. number, undefined) which would silently
+    // store garbage in the validators table.
+    if (seed.connection_url !== null) {
+        if (typeof seed.connection_url !== "string" || seed.connection_url.length === 0) {
+            throw new Error(
+                `[GENESIS][VALIDATORS] seed[${index}].connection_url must be null or a non-empty string, got ${JSON.stringify(seed.connection_url)}`,
+            )
+        }
+    }
+
     if (!Number.isInteger(seed.first_seen) || seed.first_seen < 0) {
         throw new Error(
             `[GENESIS][VALIDATORS] seed[${index}].first_seen must be a non-negative integer, got ${seed.first_seen}`,

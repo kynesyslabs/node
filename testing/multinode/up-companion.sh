@@ -17,8 +17,15 @@ if [[ ! -f .test-identity/companion.mnemonic ]]; then
     exit 1
 fi
 
+if [[ ! -f .test-identity/companion.pubkey ]]; then
+    echo "missing .test-identity/companion.pubkey — run:" >&2
+    echo "  bun scripts/gen-test-identity.ts --name companion" >&2
+    exit 1
+fi
+
 if [[ ! -f .test-identity/pubkey ]]; then
-    echo "missing .test-identity/pubkey (host pubkey) — primary node identity not set" >&2
+    echo "missing .test-identity/pubkey (host pubkey) — run:" >&2
+    echo "  bun scripts/gen-test-identity.ts" >&2
     exit 1
 fi
 

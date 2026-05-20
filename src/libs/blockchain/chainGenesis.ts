@@ -126,10 +126,19 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     //      operators who don't ship a snapshot.
     //
     // Ordering note: this restore block sits between the mempool add and
-    // `insertBlock(...)`. If `insertBlock` fails AFTER a successful
-    // restore, the DB carries the rows but no block 0; the next boot's
-    // preflight check will detect that mismatch (gcr_main != 0 AND
-    // blocks == 0) and bail out with the operator-facing guidance.
+    // `insertBlock(...)`. `insertBlock` opens its own internal transaction
+    // (with Merkle-tree updates, governance hooks, and savepoint-per-tx
+    // logic) so it cannot easily be folded into the snapshot transaction
+    // without invasive refactoring.
+    //
+    // Risk: if `insertBlock` fails AFTER the snapshot transaction commits,
+    // the DB carries gcr_main/gcr_storageprogram rows but no block 0.
+    // Mitigation (approach b): `restoreSnapshot.preflightEmpty` detects this
+    // "partial genesis" state on the next boot (gcr_main populated, blocks
+    // empty) and emits a specific operator-facing error distinguishing it
+    // from "fully initialised chain". The operator recovers by wiping via
+    // `./run -b true`. Full atomicity (approach a) would require plumbing an
+    // optional EntityManager through insertBlock — deferred to a future refactor.
     const snapshot = await loadSnapshot()
 
     if (snapshot.available) {

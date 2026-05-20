@@ -73,6 +73,25 @@ function parseManifest(raw: string): SnapshotManifest {
         if (typeof entry.rows !== "number") {
             throw new Error(`manifest.files["${key}"].rows missing`)
         }
+        // Fail loudly on missing required sum fields rather than letting
+        // downstream BigInt()/Number() coercions produce opaque errors.
+        if (key === "gcr_main.jsonl") {
+            if (typeof entry.balance_sum !== "string" || entry.balance_sum.length === 0) {
+                throw new Error(
+                    `manifest.files["gcr_main.jsonl"].balance_sum missing or not a string`,
+                )
+            }
+        }
+        if (key === "gcr_storageprogram.jsonl") {
+            if (
+                typeof entry.size_bytes_sum !== "number" ||
+                !Number.isSafeInteger(entry.size_bytes_sum)
+            ) {
+                throw new Error(
+                    `manifest.files["gcr_storageprogram.jsonl"].size_bytes_sum missing or not a safe integer`,
+                )
+            }
+        }
     }
     return parsed as unknown as SnapshotManifest
 }
@@ -90,6 +109,9 @@ type FileStats = {
  * Single-pass file read: computes sha256, row count, and an optional
  * per-row sum (balance for gcr_main, sizeBytes for gcr_storageprogram)
  * in one streaming pass to avoid TOCTOU races from re-opening the file.
+ *
+ * Row counting happens unconditionally inside the same streaming pass
+ * that feeds the sha256 hash — no second readFile is ever issued.
  *
  * Parse/validation errors during line accumulation are captured in
  * `parseError` rather than thrown immediately. The caller MUST verify
@@ -113,7 +135,8 @@ async function readFileSinglePass(
 
     // Accumulate raw bytes for sha256 while also splitting on newlines for
     // row counting and optional field accumulation. We keep a leftover
-    // buffer for lines that span chunk boundaries.
+    // buffer for lines that span chunk boundaries. Row counting runs
+    // unconditionally — sumField only governs whether field parsing occurs.
     let leftover = ""
 
     const stream = createReadStream(path)
@@ -121,20 +144,22 @@ async function readFileSinglePass(
         const buf = chunk instanceof Buffer ? chunk : Buffer.from(chunk as string)
         hash.update(buf)
 
-        if (sumField && !parseError) {
-            // Process complete lines within this chunk.
-            const text = leftover + buf.toString("utf8")
-            const parts = text.split("\n")
-            // Last element may be incomplete — carry it over to the next chunk.
-            leftover = parts.pop() ?? ""
-            for (const line of parts) {
-                if (line.length === 0) continue
-                rows++
+        // Split chunk into lines. Always count non-empty lines; only parse
+        // JSON content when sumField is set and no parse error has occurred.
+        const text = leftover + buf.toString("utf8")
+        const parts = text.split("\n")
+        // Last element may be incomplete — carry it over to the next chunk.
+        leftover = parts.pop() ?? ""
+
+        for (const line of parts) {
+            if (line.length === 0) continue
+            rows++
+            if (sumField && !parseError) {
                 try {
                     const obj: unknown = JSON.parse(line)
                     if (!isRecord(obj)) {
                         parseError = new Error(`${path}: row ${rows} is not an object`)
-                        break
+                        continue
                     }
                     if (sumField === "balance") {
                         const v = obj.balance
@@ -142,7 +167,7 @@ async function readFileSinglePass(
                             parseError = new Error(
                                 `${path}: row ${rows} missing string balance, got ${typeof v}`,
                             )
-                            break
+                            continue
                         }
                         balanceSum += BigInt(v)
                     } else {
@@ -151,22 +176,21 @@ async function readFileSinglePass(
                             parseError = new Error(
                                 `${path}: row ${rows} missing numeric sizeBytes`,
                             )
-                            break
+                            continue
                         }
                         sizeBytesSum += v
                     }
                 } catch (err) {
                     parseError = err instanceof Error ? err : new Error(String(err))
-                    break
                 }
             }
         }
     }
 
-    if (sumField && !parseError) {
-        // Flush any trailing content not terminated by a newline.
-        if (leftover.length > 0) {
-            rows++
+    // Flush any trailing content not terminated by a newline.
+    if (leftover.length > 0) {
+        rows++
+        if (sumField && !parseError) {
             try {
                 const obj: unknown = JSON.parse(leftover)
                 if (!isRecord(obj)) {
@@ -193,18 +217,6 @@ async function readFileSinglePass(
             } catch (err) {
                 parseError = err instanceof Error ? err : new Error(String(err))
             }
-        }
-    }
-
-    if (!sumField) {
-        // No sum needed — count non-empty lines by scanning the buffered text.
-        // For identity_commitments (0 bytes) this is effectively instantaneous.
-        // We reuse the leftover buffer which holds any trailing partial line.
-        // Since we already streamed the file for sha256, we do a second
-        // cheap readFile for row counting (identity file is 0 bytes; this is free).
-        const content = await readFile(path, "utf8")
-        for (const line of content.split("\n")) {
-            if (line.length > 0) rows++
         }
     }
 

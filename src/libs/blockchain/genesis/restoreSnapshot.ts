@@ -76,10 +76,42 @@ async function preflightEmpty(em: EntityManager): Promise<void> {
         const detail = offenders
             .map(o => `${o.table}=${o.count}`)
             .join(", ")
+
+        // Distinguish between two failure modes so operators know which
+        // recovery path to take:
+        //
+        // (A) Partial genesis — gcr_main is populated but blocks is empty.
+        //     This can occur if a previous boot's restoreSnapshot transaction
+        //     committed but the subsequent insertBlock (which runs outside
+        //     the snapshot transaction) crashed before completing. The DB
+        //     contains snapshot rows but no block 0.
+        //     Recovery: wipe and restart — `./run -b true` or remove the
+        //     data_* PG volume. Do NOT attempt to re-run without wiping.
+        //
+        // (B) Fully initialised chain — both gcr_main and blocks are
+        //     populated. This is the normal "node already started" case.
+        //     Recovery: no action needed; genesis is complete.
+        //
+        // Both cases use the same throw path (the caller's outer transaction
+        // rolls back), but the message helps operators diagnose without
+        // inspecting the DB manually.
+        const gcrMainCount = checks.find(c => c.table === "gcr_main")?.count ?? 0
+        const blocksCount = checks.find(c => c.table === "blocks")?.count ?? 0
+        const isPartialGenesis = gcrMainCount > 0 && blocksCount === 0
+
+        if (isPartialGenesis) {
+            throw new Error(
+                `[GENESIS][SNAPSHOT] partial genesis detected: gcr_main has ${gcrMainCount} row(s) but blocks is empty. ` +
+                    `A previous boot's snapshot restore committed but block-0 insertion did not complete. ` +
+                    `Wipe with './run -b true' or remove data_* folders, then retry.`,
+            )
+        }
+
         throw new Error(
             `[GENESIS][SNAPSHOT] snapshot restore requires empty database; ` +
                 `found rows in: ${detail}. ` +
-                `Wipe with './run -b true' or remove data_* folders, then retry.`,
+                `If the chain is already initialised, no action is needed. ` +
+                `To wipe and re-restore, use './run -b true' or remove data_* folders, then retry.`,
         )
     }
 }

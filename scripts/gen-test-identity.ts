@@ -18,7 +18,19 @@ const OUT_DIR = path.join(process.cwd(), ".test-identity")
 // distinct identities side-by-side without overwriting the host's keypair.
 const args = process.argv.slice(2)
 const nameIdx = args.indexOf("--name")
-const NAME = nameIdx >= 0 && args[nameIdx + 1] ? args[nameIdx + 1] : null
+const NAME_RAW = nameIdx >= 0 ? (args[nameIdx + 1] ?? null) : null
+if (nameIdx >= 0 && !NAME_RAW) {
+    console.error("error: --name requires a value")
+    process.exit(1)
+}
+const NAME_RE = /^[a-zA-Z0-9._-]+$/
+if (NAME_RAW !== null && !NAME_RE.test(NAME_RAW)) {
+    console.error(
+        `error: --name value "${NAME_RAW}" contains invalid characters; only [a-zA-Z0-9._-] are allowed`,
+    )
+    process.exit(1)
+}
+const NAME = NAME_RAW
 const MNEMONIC_FILE = path.join(OUT_DIR, NAME ? `${NAME}.mnemonic` : "mnemonic")
 const PUBKEY_FILE = path.join(OUT_DIR, NAME ? `${NAME}.pubkey` : "pubkey")
 const FORCE = args.includes("--force")

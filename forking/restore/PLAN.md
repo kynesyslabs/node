@@ -1,6 +1,6 @@
 # State Restore from Snapshot — Implementation Plan
 
-> **Target:** Hard fork chain bootstrap. No backward compatibility required.
+> **Target:** Hard fork chain bootstrap. Backward compatibility with the legacy `genesisData.balances`/`genesisData.users` path is preserved — nodes without a snapshot directory continue to boot via the existing flow.
 > **Scope:** Single-shot fresh-chain bootstrap from a peer-sourced PG snapshot. Populates pre-fork `gcr_main`, `gcr_storageprogram`, `identity_commitments` such that the new chain starts with full historical state, then lets the existing `osDenomination` + `gasFeeSeparation` fork machinery apply at scheduled heights.
 
 ---

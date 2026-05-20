@@ -317,17 +317,17 @@ afterEach(async () => {
 // =============================================================================
 
 describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
-    // The genesis forks config matching the P7 production shape:
-    // activationHeight=null in genesis.json, treasury address preserved.
-    // applyForksAtGenesis checks activationHeight !== null to decide whether
-    // to run, so null = "don't apply via block-N hook" but the pre-apply
-    // function itself is called regardless — it reads the heights from forks.
-    // Wait: the spec says activationHeight=null in genesis.json means skip.
-    // applyForksAtGenesis checks `activationHeight !== null && !== undefined`.
-    // For this E2E we use a non-null activationHeight (e.g. 1) to verify the
-    // migrations actually run, since that is the pre-P7 genesis.json shape.
-    // A separate test covers the null path (nothing applied) which is what
-    // the updated genesis.json ships.
+    // Two fork configs used across the suite:
+    //
+    //   GENESIS_FORKS_RUN  — activationHeight=1 on both forks. Used to verify
+    //     that applyForksAtGenesis actually runs both migrations (balances × 1e9,
+    //     burn/treasury accounts created, fork_state rows written).
+    //
+    //   GENESIS_FORKS_NULL — activationHeight=null on both forks. Matches the
+    //     P7 production genesis.json shape. applyForksAtGenesis runs both
+    //     migrations unconditionally when called at genesis regardless of
+    //     activationHeight; the height only governs the chainBlocks block-N hook
+    //     (which stays dormant when null). This is verified in the second test.
     const GENESIS_FORKS_RUN: GenesisForkConfig = {
         osDenomination: { activationHeight: 1 },
         gasFeeSeparation: {
@@ -412,7 +412,7 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
         }
     })
 
-    it("P7 production config (null activationHeight): migrations DO apply at genesis (pre-apply runs unconditionally when forks block present)", async () => {
+    it("P7 production config (null activationHeight): applyForksAtGenesis still runs both migrations unconditionally at genesis", async () => {
         await writeTestSnapshot(snapshotDir)
         process.env.DEMOS_SNAPSHOT_DIR = snapshotDir
 
@@ -426,7 +426,7 @@ describe("restoreE2E_with_forks — genesis pre-apply (P7)", () => {
             return applyForksAtGenesis(em, GENESIS_FORKS_NULL)
         })
 
-        // Presence of forks block triggers pre-apply regardless of activationHeight value.
+        // applyForksAtGenesis runs both migrations unconditionally.
         // The null activationHeight only governs the block-N chainBlocks hook (which stays dormant).
         expect(report.osDenominationApplied).toBe(true)
         expect(report.gasFeeSeparationApplied).toBe(true)

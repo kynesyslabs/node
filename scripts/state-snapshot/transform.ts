@@ -149,6 +149,7 @@ export function parseValuesPayload(payload: string): SqlValue[] {
             // Single-quoted string. Walk until the closing quote, handling
             // `''` as a literal embedded single quote.
             let out = ""
+            let closed = false
             i++ // skip opening quote
             while (i < n) {
                 const ch = payload[i]
@@ -159,10 +160,14 @@ export function parseValuesPayload(payload: string): SqlValue[] {
                         continue
                     }
                     i++ // closing quote
+                    closed = true
                     break
                 }
                 out += ch
                 i++
+            }
+            if (!closed) {
+                throw new Error(`unterminated string literal starting near: ${JSON.stringify(payload.slice(Math.max(0, i - 20), i))}`)
             }
             tokens.push({ kind: "string", value: out })
             continue
@@ -361,7 +366,14 @@ export function coerceField(
             return value.value
         case "bigint-string":
             if (value.kind === "bigint") return value.value.toString()
-            if (value.kind === "number") return Math.trunc(value.value).toString()
+            if (value.kind === "number") {
+                if (!Number.isSafeInteger(value.value)) {
+                    throw new Error(
+                        `bigint-string column ${columnName} received a non-integer or out-of-safe-range number: ${value.value}`,
+                    )
+                }
+                return value.value.toString()
+            }
             throw new Error(
                 `expected bigint for ${columnName}, got ${value.kind}`,
             )
