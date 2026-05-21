@@ -80,22 +80,27 @@ RUN set -eu; \
 ARG PRUNE_MODULES=true
 RUN if [ "$PRUNE_MODULES" = "true" ]; then \
         echo "node_modules size before prune: $(du -sh node_modules | cut -f1)"; \
-        # Documentation and license files (typical: 60-100 MB)
+        # Documentation and license files (typical: 60-100 MB).
+        # IMPORTANT: only match doc-typical extensions / extensionless files,
+        # never the bare `-iname 'X*'` glob. Real packages ship runtime
+        # modules whose filename happens to start with these tokens
+        # (e.g. @mysten/sui/.../client/types/changes.js); deleting them
+        # corrupts module resolution at runtime.
         find node_modules -type f \( \
-            -iname 'README*' -o \
-            -iname 'CHANGELOG*' -o \
-            -iname 'CHANGES*' -o \
-            -iname 'HISTORY*' -o \
-            -iname 'CONTRIBUTING*' -o \
-            -iname 'AUTHORS*' -o \
-            -iname 'CONTRIBUTORS*' -o \
-            -iname 'LICEN[CS]E*' -o \
-            -iname 'NOTICE*' -o \
-            -iname 'NOTICES*' -o \
-            -iname 'PATENTS*' -o \
+            -iname 'README' -o -iname 'README.md' -o -iname 'README.txt' -o -iname 'README.rst' -o -iname 'README.markdown' -o \
+            -iname 'CHANGELOG' -o -iname 'CHANGELOG.md' -o -iname 'CHANGELOG.txt' -o -iname 'CHANGELOG.rst' -o \
+            -iname 'CHANGES' -o -iname 'CHANGES.md' -o -iname 'CHANGES.txt' -o -iname 'CHANGES.rst' -o \
+            -iname 'HISTORY' -o -iname 'HISTORY.md' -o -iname 'HISTORY.txt' -o \
+            -iname 'CONTRIBUTING' -o -iname 'CONTRIBUTING.md' -o -iname 'CONTRIBUTING.txt' -o \
+            -iname 'AUTHORS' -o -iname 'AUTHORS.md' -o -iname 'AUTHORS.txt' -o \
+            -iname 'CONTRIBUTORS' -o -iname 'CONTRIBUTORS.md' -o -iname 'CONTRIBUTORS.txt' -o \
+            -iname 'LICENSE' -o -iname 'LICENSE.md' -o -iname 'LICENSE.txt' -o -iname 'LICENSE-MIT' -o -iname 'LICENSE-APACHE' -o -iname 'LICENSE-MIT.txt' -o -iname 'LICENSE-APACHE.txt' -o \
+            -iname 'LICENCE' -o -iname 'LICENCE.md' -o -iname 'LICENCE.txt' -o \
+            -iname 'NOTICE' -o -iname 'NOTICE.md' -o -iname 'NOTICE.txt' -o \
+            -iname 'PATENTS' -o -iname 'PATENTS.md' -o -iname 'PATENTS.txt' -o \
             -iname 'governance.md' -o \
             -iname 'security.md' -o \
-            -iname 'code_of_conduct*' \
+            -iname 'CODE_OF_CONDUCT' -o -iname 'CODE_OF_CONDUCT.md' -o -iname 'CODE_OF_CONDUCT.txt' \
         \) -delete 2>/dev/null || true; \
         # Source maps (typical: 80-150 MB)
         find node_modules -type f \( -name '*.map' -o -name '*.ts.map' \) -delete 2>/dev/null || true; \
