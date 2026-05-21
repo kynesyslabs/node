@@ -20,6 +20,10 @@
 #                `up`. Equivalent to bare-metal `./run -b true`. Brings down
 #                the stack first, then `docker volume rm` the project-scoped
 #                volumes. Snapshot-restore re-runs from genesis on next boot.
+#   --rebuild    Rebuild the node image with --no-cache before `up`. Use
+#                after pulling new commits to force a fresh build that
+#                picks up Dockerfile / source / data/ changes. Implied by
+#                nothing — pass explicitly.
 #   --detach,-d  Detach after start (`docker compose up -d`).
 #   --help,-h    Print this help.
 #
@@ -32,6 +36,8 @@
 #   ./scripts/docker-run --proxy down          # teardown w/ proxy stack
 #   ./scripts/docker-run --clean               # wipe volumes + fresh up
 #   ./scripts/docker-run --clean --proxy -d    # wipe + full prod stack
+#   ./scripts/docker-run --rebuild --clean -d  # rebuild image + wipe + up
+#   ./scripts/docker-run --rebuild -d          # rebuild image (no wipe), up
 
 set -euo pipefail
 
@@ -42,6 +48,7 @@ USE_PROXY=false
 WANT_MONITORING=true
 WANT_TLSN=true
 WIPE_VOLUMES=false
+REBUILD_IMAGE=false
 PASSTHROUGH=()
 
 EXTRA_PROFILES=()
@@ -64,6 +71,10 @@ while [[ $# -gt 0 ]]; do
             WIPE_VOLUMES=true
             shift
             ;;
+        --rebuild)
+            REBUILD_IMAGE=true
+            shift
+            ;;
         --profile)
             # Capture --profile NAME so it lands BEFORE the subcommand
             # (docker compose treats --profile as a global flag). Guard
@@ -81,7 +92,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -156,6 +167,15 @@ if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
             docker volume rm "$vol" || true
         fi
     done
+fi
+
+# --rebuild: force --no-cache rebuild of the node image before `up`.
+# Order matters: after --clean (volumes wiped) so the freshly-built image
+# is paired with an empty data dir. Only fires when SUBCOMMAND is `up`;
+# explicit `down`/`logs`/etc skip the rebuild.
+if [[ "$REBUILD_IMAGE" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    echo "+ --rebuild: docker compose build --no-cache node"
+    docker compose "${COMPOSE_ARGS[@]}" build --no-cache node
 fi
 
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
