@@ -27,6 +27,14 @@
 #   --detach,-d  Detach after start (`docker compose up -d`).
 #   --help,-h    Print this help.
 #
+# Identity sync (always-on, no flag):
+#   On every `up`, if `$REPO_ROOT/.demos_identity` exists, it is copied
+#   into the `<project>_node_state` volume (overwriting any prior copy)
+#   and chmod'd 0600 / chown'd 1000:1000 to match the container user.
+#   Mirrors the bare-metal `./run` behavior which reads the file
+#   directly. To boot with a fresh auto-generated identity, delete
+#   `$REPO_ROOT/.demos_identity` first.
+#
 # Everything else is forwarded to `docker compose` after the `up`
 # subcommand. Examples:
 #   ./scripts/docker-run                       # plain dev: postgres + node
@@ -92,7 +100,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -176,6 +184,41 @@ fi
 if [[ "$REBUILD_IMAGE" == "true" && "$SUBCOMMAND" == "up" ]]; then
     echo "+ --rebuild: docker compose build --no-cache node"
     docker compose "${COMPOSE_ARGS[@]}" build --no-cache node
+fi
+
+# Always-sync host `.demos_identity` -> `node_state` volume before `up`.
+#
+# Bare-metal `./run` reads `$REPO_ROOT/.demos_identity` directly. The
+# docker flow stores identity inside the `demos_node_state` named volume,
+# which is opaque to the host filesystem. Without this sync, operators
+# who configured an identity at the repo root were silently bypassed:
+# the container saw an empty volume on first boot, generated a fresh
+# mnemonic, and pinned the wrong pubkey. The pubkey then mismatched any
+# genesis-baked validator entry, leaving the node out of consensus.
+#
+# Sync rules:
+#   - Only fires for SUBCOMMAND=up.
+#   - Only fires when `$REPO_ROOT/.demos_identity` exists.
+#   - Overwrites the volume copy unconditionally — the repo file is the
+#     source of truth, including across --clean. Operators who want a
+#     fresh identity should `rm .demos_identity` first.
+#   - Sets the same perms the container's entrypoint expects
+#     (0600, owned by uid 1000 to match the demos user inside the image).
+HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
+if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
+    PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
+    STATE_VOL="${PROJECT_NAME}_node_state"
+    # Create the volume if it doesn't already exist so compose can mount it.
+    docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
+    echo "+ syncing .demos_identity -> $STATE_VOL"
+    docker run --rm \
+        -v "$STATE_VOL":/state \
+        -v "$HOST_IDENTITY_FILE":/src/.demos_identity:ro \
+        alpine sh -c '
+            cp /src/.demos_identity /state/.demos_identity &&
+            chmod 600 /state/.demos_identity &&
+            chown 1000:1000 /state /state/.demos_identity
+        '
 fi
 
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
