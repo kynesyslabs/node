@@ -159,17 +159,20 @@ fi
 
 # --clean: bring everything down + drop the named volumes before `up`.
 # Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
-# the wipe would be confusing. Compose project name defaults to the
-# repo basename (`node`); allow COMPOSE_PROJECT_NAME override.
+# the wipe would be confusing.
+#
+# Volume names are hardcoded as `demos_*` in docker-compose.yml `volumes:`
+# section via `name:` overrides — NOT derived from the compose project
+# name. Do NOT prefix with $(basename $REPO_ROOT) here; that targets a
+# parallel volume that compose never mounts.
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
-    PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
-    echo "+ --clean: tearing down stack + wiping volumes for project '$PROJECT_NAME'"
+    echo "+ --clean: tearing down stack + wiping volumes (demos_pgdata, demos_node_data)"
     # Down with --volumes so anonymous volumes go too; named volumes
     # still need explicit removal below because compose only drops them
     # when `--volumes` is paired with full project teardown AND no other
     # containers reference them.
     docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
-    for vol in "${PROJECT_NAME}_pgdata" "${PROJECT_NAME}_node_data"; do
+    for vol in demos_pgdata demos_node_data; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "+ --clean: removing volume $vol"
             docker volume rm "$vol" || true
@@ -206,8 +209,11 @@ fi
 #     (0600, owned by uid 1000 to match the demos user inside the image).
 HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
 if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
-    PROJECT_NAME="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
-    STATE_VOL="${PROJECT_NAME}_node_state"
+    # Volume name is hardcoded in docker-compose.yml via `name:` override
+    # (`demos_node_state`), NOT derived from the compose project name. Match
+    # the literal name here so the seeded mnemonic lands in the volume
+    # that compose actually mounts at /app/state.
+    STATE_VOL="demos_node_state"
     # Create the volume if it doesn't already exist so compose can mount it.
     docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
     echo "+ syncing .demos_identity -> $STATE_VOL"
