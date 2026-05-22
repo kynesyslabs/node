@@ -1,5 +1,5 @@
 import Chain from "../../blockchain/chain"
-import Hashing from "../../crypto/hashing"
+import { hashGenesisData } from "../../blockchain/genesis/normalizeGenesisForHash"
 import getPreviousHashFromBlockNumber from "../routines/nodecalls/getPreviousHashFromBlockNumber"
 import getPreviousHashFromBlockHash from "../routines/nodecalls/getPreviousHashFromBlockHash"
 import getBlockHeaderByNumber from "../routines/nodecalls/getBlockHeaderByNumber"
@@ -29,7 +29,7 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
                 genesisData = JSON.parse(genesisData)
             }
 
-            response.response = Hashing.sha256(JSON.stringify(genesisData))
+            response.response = hashGenesisData(genesisData)
         } catch (error) {
             log.error(
                 "[manageNodeCall] Failed to get genesis data hash: " +

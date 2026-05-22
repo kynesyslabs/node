@@ -15,11 +15,11 @@ import axios from "axios"
 import Peer from "../Peer"
 import log from "src/utilities/logger"
 import PeerManager from "../PeerManager"
-import Hashing from "@/libs/crypto/hashing"
 import getPeerIdentity from "./getPeerIdentity"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
+import { hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
 
 let ourGenesisDataHash = ""
 const genesisFile = "data/genesis.json"
@@ -79,10 +79,11 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             if (res.status === 200) {
                 // INFO: Save the new genesis data to the file
                 fs.writeFileSync(genesisFile, JSON.stringify(res.data, null, 2))
-                const ourNewGenesisDataHash = Hashing.sha256(
-                    JSON.stringify(
-                        JSON.parse(fs.readFileSync(genesisFile, "utf8")),
-                    ),
+                // Re-hash through the canonical normalizer so connection_url
+                // differences between this node and the source peer do not
+                // produce a spurious mismatch (see normalizeGenesisForHash.ts).
+                const ourNewGenesisDataHash = hashGenesisData(
+                    JSON.parse(fs.readFileSync(genesisFile, "utf8")),
                 )
 
                 // INFO: Update discovered genesis hashes and current genesis hash
@@ -215,7 +216,7 @@ export default async function peerBootstrap(
     // INFO: Get our genesis data hash
     const genesisFile = "data/genesis.json"
     const genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
-    ourGenesisDataHash = Hashing.sha256(JSON.stringify(genesisData))
+    ourGenesisDataHash = hashGenesisData(genesisData)
 
     // Validity check
     for (const peer of localList) {
