@@ -1,5 +1,5 @@
 import type { IOperation } from "@kynesyslabs/demosdk/types"
-import { EVM, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
+import { EVM, MULTIVERSX, SOLANA, TON } from "@kynesyslabs/demosdk/xm-localsdk"
 import { evmProviders } from "sdk/localsdk/multichain/configs/evmProviders"
 import log from "@/utilities/logger"
 import handleAptosContractWrite from "./aptos_contract_write"
@@ -42,6 +42,16 @@ async function handleTonContractWrite(operation: IOperation) {
     )
 }
 
+async function handleMultiversxContractWrite(operation: IOperation) {
+    // Signed payload is an IPlainTransactionObject; the localSDK's MULTIVERSX.sendTransaction
+    // POSTs it to the MultiversX REST API at /transaction/send.
+    return await genericJsonRpcPay(
+        MULTIVERSX,
+        chainProviders.egld[operation.subchain],
+        operation,
+    )
+}
+
 export default async function handleContractWrite(
     operation: IOperation,
     chainID: number,
@@ -57,6 +67,8 @@ export default async function handleContractWrite(
             return await handleSolanaContractWrite(operation)
         case "ton":
             return await handleTonContractWrite(operation)
+        case "egld":
+            return await handleMultiversxContractWrite(operation)
         default:
             return {
                 result: "error",
