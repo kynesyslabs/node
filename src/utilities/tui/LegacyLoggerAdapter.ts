@@ -253,6 +253,8 @@ export default class LegacyLoggerAdapter {
     private static originalLog: typeof console.log | null = null
 
     static only(message: unknown, padWithNewLines = false): void {
+        return this.debug(message, padWithNewLines)
+
         const stringifiedMessage = stringify(message)
         if (!this.LOG_ONLY_ENABLED) {
             this.logger.debug("CORE", "[LOG ONLY ENABLED]")
