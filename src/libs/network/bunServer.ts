@@ -148,26 +148,114 @@ export class BunServer {
     }
 }
 
-// Helper functions for common middleware
+// ---------------------------------------------------------------------------
+// CORS middleware
+// ---------------------------------------------------------------------------
+//
+// Default behaviour is `Access-Control-Allow-Origin: *` for back-compat.
+// Set `CORS_ALLOWED_ORIGINS` (comma-separated list of origins) to lock it
+// down — Epic 12 T12. When a wildcard is in effect AND the node is being
+// fronted by Caddy, a startup warning is emitted (once) so operators
+// notice. The allowlist comparison is case-insensitive and tolerates
+// trailing slashes.
+//
+// Examples:
+//   CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+//   CORS_ALLOWED_ORIGINS=*                  (explicit wildcard, no warning)
+//   (unset)                                 (implicit wildcard, warning if proxy)
+
+let corsWarningEmitted = false
+
+function loadCorsAllowedOrigins(): string[] | "*" {
+    const raw = process.env.CORS_ALLOWED_ORIGINS
+    if (!raw || raw.trim() === "" || raw.trim() === "*") {
+        return "*"
+    }
+    return raw
+        .split(",")
+        .map(s => s.trim().replace(/\/$/, "").toLowerCase())
+        .filter(s => s.length > 0)
+}
+
+function maybeWarnCorsWildcard(allowed: string[] | "*"): void {
+    if (corsWarningEmitted) return
+    if (allowed !== "*") return
+    const behindProxy =
+        !!process.env.PROXY_DOMAIN &&
+        process.env.PROXY_DOMAIN !== "localhost"
+    if (!behindProxy) return
+    corsWarningEmitted = true
+    // Lazy require to avoid circular import at module-load time.
+    import("src/utilities/logger").then(({ default: log }) => {
+        log.warning(
+            "[CORS] CORS_ALLOWED_ORIGINS is unset; defaulting to '*' while " +
+                "behind a reverse proxy. Restrict to known origins (e.g. " +
+                "https://app.example.com) before adding cookies or other " +
+                "credential-bearing auth flows.",
+        )
+    })
+}
+
 export const cors = (): Middleware => {
-    let headers = {
-        "Access-Control-Allow-Origin": "*",
+    const allowed = loadCorsAllowedOrigins()
+    maybeWarnCorsWildcard(allowed)
+
+    const baseHeaders: Record<string, string> = {
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "*",
     }
+    // `Vary: Origin` is only meaningful when the response actually
+    // varies by origin — i.e. when we have an allowlist. Wildcard
+    // mode emits the same Access-Control-Allow-Origin regardless of
+    // the caller, so adding Vary just makes shared caches bucket
+    // responses unnecessarily (Greptile P2).
+    if (allowed !== "*") {
+        baseHeaders.Vary = "Origin"
+    }
+
+    function pickAllowOrigin(req: Request): string | null {
+        if (allowed === "*") return "*"
+        const reqOrigin = req.headers.get("origin")
+        if (!reqOrigin) return null
+        const norm = reqOrigin.replace(/\/$/, "").toLowerCase()
+        return allowed.includes(norm) ? reqOrigin : null
+    }
 
     return async (req, next) => {
+        const allowOrigin = pickAllowOrigin(req)
+        const corsHeaders: Record<string, string> = { ...baseHeaders }
+        if (allowOrigin) {
+            corsHeaders["Access-Control-Allow-Origin"] = allowOrigin
+        }
+
         if (req.method === "OPTIONS") {
-            return new Response("OK", { headers: headers })
+            // Preflight: 204 with headers; if origin not allowed, omit
+            // the Allow-Origin header (browser will reject) but still
+            // return 204 so the request isn't logged as an error.
+            return new Response(null, {
+                status: 204,
+                headers: corsHeaders,
+            })
         }
 
         const response = await next()
-        headers = { ...headers, ...response.headers.toJSON() }
+        // Start from the downstream headers, then re-impose CORS so
+        // the middleware controls the Allow-Origin even if an upstream
+        // handler tries to set it (CodeRabbit major). Disallowed
+        // origins get the header stripped here too — never let a
+        // handler leak `*` past the allowlist.
+        const merged: Record<string, string> = {
+            ...response.headers.toJSON(),
+            ...corsHeaders,
+        }
+        if (!allowOrigin) {
+            delete merged["Access-Control-Allow-Origin"]
+        }
 
         return new Response(response.body, {
             status: response.status,
             statusText: response.statusText,
-            headers: headers,
+            headers: merged,
         })
     }
 }
@@ -187,11 +275,19 @@ export const text = (body: string, status = 200): Response => {
     return new Response(body, { status })
 }
 
-export const jsonResponse = (body: any, status = 200): Response => {
+export const jsonResponse = (
+    body: any,
+    status = 200,
+    extraHeaders?: Record<string, string>,
+): Response => {
+    // Spread caller-provided headers first, then force Content-Type so it
+    // can't be accidentally overridden away from application/json.
+    const headers: Record<string, string> = {
+        ...extraHeaders,
+        "Content-Type": "application/json",
+    }
     return new Response(JSON.stringify(body), {
         status,
-        headers: {
-            "Content-Type": "application/json",
-        },
+        headers,
     })
 }

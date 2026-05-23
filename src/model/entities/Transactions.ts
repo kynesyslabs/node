@@ -49,12 +49,40 @@ export class Transactions {
     @Column("bigint", { name: "timestamp" })
     timestamp: number
 
-    @Column("bigint", { name: "networkFee" })
-    networkFee: bigint
+    // REVIEW Widened from `integer` (32-bit) to `bigint` so OS-denominated
+    // fees (post-migration) cannot be silently truncated. Pre-migration the
+    // values still fit in 32 bits, so the migration is a pure widening with
+    // no data conversion required. TypeORM returns bigint columns as JS
+    // strings unless a transformer is supplied; callers around
+    // toRawTransaction/fromRawTransaction (the only consumers) coerce via
+    // BigInt() at the boundary.
+    //
+    // `nullable: true, default: 0` — older databases predate the entity
+    // declaration and may have NULL fee rows. With `synchronize: true` an
+    // implicit NOT NULL constraint would fail on startup against such
+    // rows. Allowing NULL + defaulting to 0 lets the node start; readers
+    // already coerce via `Number(rawTx.networkFee ?? 0)` and
+    // `BigInt(... ?? 0)` so a NULL is observed as 0 throughout the stack.
+    @Column("bigint", { name: "networkFee", nullable: true, default: 0 })
+    networkFee: bigint | null
 
-    @Column("bigint", { name: "rpcFee" })
-    rpcFee: bigint
+    @Column("bigint", { name: "rpcFee", nullable: true, default: 0 })
+    rpcFee: bigint | null
 
-    @Column("bigint", { name: "additionalFee" })
-    additionalFee: bigint
+    @Column("bigint", { name: "additionalFee", nullable: true, default: 0 })
+    additionalFee: bigint | null
+
+    // DEM-665: ed25519 public key (lowercase hex, `0x` + 64 hex chars) of
+    // the RPC node that validated this transaction. Used by the
+    // post-fork fee-distribution logic to route the rpc-fee portion to
+    // the correct account.
+    //
+    // `nullable: true`: pre-fork rows predate the field (post-wipe
+    // chains should have none, but the column shape is defensive). On a
+    // post-fork tx, the validating node sets this in confirmTransaction
+    // (DEM-665 P6). The column type is `varchar` for symmetry with the
+    // other hex-address columns on this entity (`from`, `to`,
+    // `from_ed25519_address`).
+    @Column("varchar", { name: "rpcAddress", nullable: true })
+    rpcAddress: string | null
 }

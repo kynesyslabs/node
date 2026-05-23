@@ -99,13 +99,29 @@ interface StorageProgramGranularResponse {
         | "INVALID_FIELD_TYPE"
 }
 
+/**
+ * Extract the requester's address from the `identity` header.
+ *
+ * Identity can be either a bare address or a `prefix:address` form
+ * (e.g. `ed25519:<addr>`). Returns `undefined` when:
+ *   - the header is missing or empty
+ *   - the post-colon segment is empty (e.g. `"ed25519:"`)
+ *
+ * Returning `undefined` for an empty post-colon segment is semantically
+ * equivalent to anonymous in `checkReadPermission` — every branch either
+ * already guards on falsy requesterAddress or compares it against a real
+ * value that an empty string can't match. The change ensures consistent
+ * behaviour with the SQL ACL filter and other call sites that distinguish
+ * `""` from `undefined`.
+ */
 function getRequesterAddress(req: Request): string | undefined {
     const identity = req.headers.get("identity")
-    if (!identity) {
+    if (!identity || identity.length === 0) {
         return undefined
     }
     const splits = identity.split(":")
-    return splits.length > 1 ? splits[1] : identity
+    const candidate = splits.length > 1 ? splits[1] : identity
+    return candidate && candidate.length > 0 ? candidate : undefined
 }
 
 function getValueType(
@@ -629,37 +645,38 @@ async function listByOwnerHandler(req: Request): Promise<Response> {
             return jsonResponse(response, 400)
         }
 
-        // Get requester identity from header
-        const identity = req.headers.get("identity")
-        let requesterAddress: string | undefined
+        // Pagination via ?limit=&offset= — defaults match the GCR routine
+        // (200 limit today, will drop to 100 in a future release).
+        const rawLimit = parseInt(
+            url.searchParams.get("limit") || "200",
+            10,
+        )
+        const limit = Math.min(Math.max(1, rawLimit), 200)
+        const offset = Math.max(
+            0,
+            parseInt(url.searchParams.get("offset") || "0", 10),
+        )
 
-        if (identity) {
-            const splits = identity.split(":")
-            requesterAddress = splits.length > 1 ? splits[1] : identity
-        }
+        // Empty string and missing identity both map to undefined so the
+        // SQL ACL filter sees a true anonymous caller (not a falsy
+        // owner-bypass).
+        const requesterAddress = getRequesterAddress(req)
 
         // Get repository
         const db = await Datasource.getInstance()
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
-        // Fetch all programs by owner
-        const programs =
+        // ACL filtering and pagination both happen in SQL. The
+        // owner-fast-path is internal: when requesterAddress === owner, the
+        // routine skips the jsonb predicate and uses the owner index
+        // directly.
+        const accessiblePrograms =
             await GCRStorageProgramRoutines.getStorageProgramsByOwner(
                 owner,
                 repository,
+                requesterAddress,
+                { limit, offset },
             )
-
-        // Owner always sees all their own programs.
-        // For other requesters, filter by read permission.
-        const isOwnerRequest = !requesterAddress || requesterAddress === owner
-        const accessiblePrograms = isOwnerRequest
-            ? programs
-            : programs.filter(program =>
-                  GCRStorageProgramRoutines.checkReadPermission(
-                      program,
-                      requesterAddress,
-                  ),
-              )
 
         // Map to response format
         const response: StorageProgramsListResponse = {
@@ -723,34 +740,20 @@ async function searchByNameHandler(req: Request): Promise<Response> {
             return jsonResponse(response, 400)
         }
 
-        // Get requester identity from header
-        const identity = req.headers.get("identity")
-        let requesterAddress: string | undefined
-
-        if (identity) {
-            const splits = identity.split(":")
-            requesterAddress = splits.length > 1 ? splits[1] : identity
-        }
+        const requesterAddress = getRequesterAddress(req)
 
         // Get repository
         const db = await Datasource.getInstance()
         const repository = db.getDataSource().getRepository(GCRStorageProgram)
 
-        // Search programs by name
-        const programs =
+        // ACL filtering happens in SQL so LIMIT/OFFSET produce full pages
+        // (no post-fetch JS filter that would silently shorten them).
+        const accessiblePrograms =
             await GCRStorageProgramRoutines.searchStorageProgramsByName(
                 query.trim(),
                 repository,
-                { limit, offset, exactMatch },
+                { limit, offset, exactMatch, requesterAddress },
             )
-
-        // Filter to only programs the requester can read
-        const accessiblePrograms = programs.filter(program =>
-            GCRStorageProgramRoutines.checkReadPermission(
-                program,
-                requesterAddress,
-            ),
-        )
 
         // Map to response format
         const response: StorageProgramsListResponse = {

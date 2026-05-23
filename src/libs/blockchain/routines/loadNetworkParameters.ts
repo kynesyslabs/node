@@ -1,0 +1,111 @@
+import Datasource from "@/model/datasource"
+import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
+import { getSharedState } from "@/utilities/sharedState"
+import { getGenesisNetworkParameters } from "@/features/networkUpgrade/constants"
+import type { NetworkParameters } from "@/features/networkUpgrade/types"
+import log from "@/utilities/logger"
+
+// Precedence: governance (DB active rows) > env (Config) > hardcoded fallback.
+// Folds active upgrades onto env-resolved genesis in activation order;
+// later proposals overwrite earlier ones key-by-key.
+export async function loadNetworkParameters(
+    repo?: Awaited<
+        ReturnType<typeof Datasource.getInstance>
+    >["getDataSource"] extends () => infer DS
+        ? DS extends { getRepository: (e: typeof NetworkUpgrade) => infer R }
+            ? R
+            : never
+        : never,
+): Promise<NetworkParameters> {
+    let active: NetworkUpgrade[] = []
+    try {
+        let resolvedRepo = repo as
+            | import("typeorm").Repository<NetworkUpgrade>
+            | undefined
+        if (!resolvedRepo) {
+            const db = await Datasource.getInstance()
+            resolvedRepo = db.getDataSource().getRepository(NetworkUpgrade)
+        }
+        active = await resolvedRepo.find({
+            where: { status: "active" },
+            order: { effectiveAtBlock: "ASC", proposalId: "ASC" },
+        })
+    } catch (e) {
+        // Both datasource acquisition and the find() are inside this try
+        // so a missing/uninitialised datasource also falls through to
+        // genesis defaults instead of bubbling.
+        log.error(
+            "NETWORK_PARAMETERS",
+            `Failed to read active upgrades; falling back to genesis defaults: ${(e as Error).message}`,
+        )
+    }
+
+    const genesis = getGenesisNetworkParameters()
+    const params: NetworkParameters = {
+        ...genesis,
+        featureFlags: { ...genesis.featureFlags },
+    }
+
+    for (const upgrade of active) {
+        if (!upgrade.proposedParameters) continue
+        for (const [key, value] of Object.entries(upgrade.proposedParameters)) {
+            if (key === "featureFlags" && value && typeof value === "object") {
+                Object.assign(
+                    params.featureFlags,
+                    value as Record<string, boolean>,
+                )
+            } else {
+                (params as unknown as Record<string, unknown>)[key] = value
+            }
+        }
+    }
+
+    getSharedState.networkParameters = params
+    // Mirror onto flat fields read by calculateCurrentGas / getShard.
+    ;(getSharedState as unknown as { rpcFee: number }).rpcFee = params.rpcFee
+    ;(getSharedState as unknown as { networkFee: number }).networkFee =
+        params.networkFee
+    ;(getSharedState as unknown as { shardSize: number }).shardSize =
+        params.shardSize
+    // DEM-665: additional_fee is governance-mutable and read by the
+    // post-fork fee-distribution path. Mirror onto the flat field so
+    // calculateFeeBreakdown picks up governance changes without a
+    // restart.
+    ;(getSharedState as unknown as { additionalFee: number }).additionalFee =
+        params.additionalFee
+
+    // DEM-665: fold governance-mutable distribution percentages onto
+    // SharedState.feeDistribution. Addresses (burnAddress,
+    // treasuryAddress) were primed earlier by loadForkConfigFromGenesis
+    // (P2) — preserve them and only overwrite the percentage groups.
+    //
+    // A node that has not yet called loadForkConfigFromGenesis (rare —
+    // tests, partial-init paths) has feeDistribution === null; build
+    // the object from scratch in that case, using zero-string addresses
+    // as a placeholder. Real fees never route through this code path
+    // because `feeDistribution.ts` (P5) is fork-gated.
+    const existingFee = getSharedState.feeDistribution
+    getSharedState.feeDistribution = {
+        burnAddress: existingFee?.burnAddress ?? "",
+        treasuryAddress: existingFee?.treasuryAddress ?? "",
+        networkFee: {
+            burnPct: params.networkFeeBurnPct,
+            treasuryPct: params.networkFeeTreasuryPct,
+        },
+        additionalFee: {
+            burnPct: params.additionalFeeBurnPct,
+            treasuryPct: params.additionalFeeTreasuryPct,
+        },
+        specialOps: {
+            burnPct: params.specialOpsBurnPct,
+            rpcPct: params.specialOpsRpcPct,
+            treasuryPct: params.specialOpsTreasuryPct,
+        },
+    }
+
+    log.info(
+        "NETWORK_PARAMETERS",
+        `Loaded NetworkParameters from ${active.length} active upgrade(s): ${JSON.stringify(params)}`,
+    )
+    return params
+}

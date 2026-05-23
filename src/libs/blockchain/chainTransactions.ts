@@ -1,6 +1,6 @@
 import { In, LessThan, EntityManager, FindManyOptions } from "typeorm"
 import log from "src/utilities/logger"
-import Transaction from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
 import {
@@ -9,7 +9,7 @@ import {
     getTransactionsRepo,
 } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
-import type { L2PSHashUpdatePayload } from "./chainTypes"
+import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
 import Mempool from "./mempool"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -83,6 +83,29 @@ export async function getTxByHash(hash: string): Promise<Transaction | null> {
         log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(error)}`)
         throw error
     }
+}
+
+/**
+ * Lifecycle status of a transaction by hash.
+ *
+ * Cheap: 1 mempool lookup, then 1 transactions lookup if not in mempool.
+ *
+ * "failed" is reserved — currently the node does not record execution
+ * failures, so failed txs surface as "unknown".
+ */
+export async function getTransactionStatus(hash: string): Promise<TxStatus> {
+    const inMempool = await Mempool.findByHash(hash)
+    if (inMempool) return { state: "pending" }
+
+    const tx = await getTxByHash(hash)
+    if (tx) {
+        return {
+            state: "included",
+            blockNumber: tx.blockNumber ?? undefined,
+        }
+    }
+
+    return { state: "unknown" }
 }
 
 export async function getTransactionHistory(
@@ -218,7 +241,9 @@ export async function insertTransaction(
     log.debug("[insertTransaction] Raw transaction: ")
     log.debug(JSON.stringify(rawTransaction))
     try {
-        await getTransactionsRepo().save(rawTransaction)
+        // REVIEW P5a: bridge wire-shape `RawTransaction` to entity-shape
+        // `Transactions` (bigint amount/fees). Runtime payload unchanged.
+        await getTransactionsRepo().save(toTransactionsEntity(rawTransaction))
         return true
     } catch (e) {
         log.error(

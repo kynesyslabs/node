@@ -37,6 +37,7 @@ import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { serializeTransactionContent } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
 
 interface TransactionResponse {
@@ -72,6 +73,11 @@ export default class Transaction implements ITransaction {
                     network_fee: null,
                     rpc_fee: null,
                     additional_fee: null,
+                    // DEM-665: populated post-fork by the validating
+                    // node in confirmTransaction (P6). Pre-fork rows
+                    // and freshly-constructed unsent transactions
+                    // carry `null`.
+                    rpc_address: null,
                 },
             },
             signature: null,
@@ -83,9 +89,48 @@ export default class Transaction implements ITransaction {
         })
     }
 
+
+    // INFO Given a transaction, sign it with the private key of the sender
+    public static async sign(
+        tx: Transaction,
+        blockHeight?: number,
+    ): Promise<[boolean, any]> {
+        // Check sanity of the structure of the tx object
+        if (!tx.content) {
+            return [false, "Missing tx.content"]
+        }
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), preserving
+        // signatures bit-for-bit.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        const signature_ = await ucrypto.sign(
+            getSharedState.signingAlgorithm,
+            new TextEncoder().encode(
+                serializeTransactionContent(tx.content, height),
+            ),
+        )
+
+        if (!signature_) {
+            return [false, "Failed to sign transaction"]
+        }
+        return [
+            true,
+            {
+                type: getSharedState.signingAlgorithm,
+                data: uint8ArrayToHex(signature_.signature),
+            },
+        ]
+    }
+
     // INFO Hashing the content of a transaction
-    static hash(tx: Transaction): any {
-        const hash = Hashing.sha256(JSON.stringify(tx.content))
+    static hash(tx: Transaction, blockHeight?: number): any {
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), so every
+        // existing tx hash is preserved exactly.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        const hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, height),
+        )
         if (!hash) {
             return false
         } else {
@@ -186,9 +231,17 @@ export default class Transaction implements ITransaction {
     }
 
     // INFO Checking if the tx is coherent to the current state of the blockchain (and the txs pending before it)
-    public static isCoherent(tx: Transaction) {
+    public static isCoherent(tx: Transaction, blockHeight?: number) {
         log.debug(`[TX] isCoherent - Checking coherence of tx hash: ${tx.hash}`)
-        const derivedHash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — route through fork-aware serializer. In P2 the gate
+        // returns identical bytes to JSON.stringify(tx.content), so legacy
+        // tx hashes still match when re-derived. When a caller has the
+        // owning block context, it should pass `block.number`; otherwise
+        // we fall back to the chain head.
+        const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        const derivedHash = Hashing.sha256(
+            serializeTransactionContent(tx.content, height),
+        )
         log.debug(
             `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash === tx.hash}`,
         )
@@ -432,6 +485,14 @@ export default class Transaction implements ITransaction {
             tx.content.from = tx.content.from["data"]?.toString("hex")
         }
 
+        // REVIEW P5a: returns the SDK `RawTransaction` shape (`amount` and
+        // fees as `string | number`). Callers (`insertTransaction`,
+        // `chainBlocks.insertBlock`) pass this to TypeORM `save()`, which
+        // accepts `string | number` for `bigint` columns at runtime — but
+        // the entity's static type declares `bigint`, so we can't directly
+        // assign. The `saveTransactionEntity` helper below bridges the
+        // type without changing the runtime payload (`JSON.stringify` of
+        // the raw tx still works because no `bigint` is introduced).
         const rawTx = {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
@@ -450,13 +511,19 @@ export default class Transaction implements ITransaction {
             networkFee: tx.content.transaction_fee.network_fee,
             rpcFee: tx.content.transaction_fee.rpc_fee,
             additionalFee: tx.content.transaction_fee.additional_fee,
+            // DEM-665: rpcAddress is null on pre-fork rows and on
+            // freshly-constructed transactions before confirmTransaction
+            // runs (P6). The DB column is nullable.
+            rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
         }
 
         return rawTx
     }
 
-    public static fromRawTransaction(rawTx: RawTransaction): Transaction {
+    public static fromRawTransaction(
+        rawTx: RawTransaction | Transactions,
+    ): Transaction {
         if (!rawTx) {
             return null
         }
@@ -479,13 +546,34 @@ export default class Transaction implements ITransaction {
             from: rawTx.from,
             to: rawTx.to,
             from_ed25519_address: rawTx.from_ed25519_address,
-            amount: rawTx.amount,
+            // REVIEW P5a: callers pass either the SDK `RawTransaction` shape
+            // (`amount: string | number`) or the TypeORM `Transactions`
+            // entity (`amount: bigint`). Coerce to the wire-format shape
+            // (`number`) the rest of the node still expects pre-fork; the
+            // serializerGate transforms to OS string when the fork
+            // activates. Bit-identical to pre-bump behavior: TypeORM
+            // historically returned `bigint` columns as JS strings/numbers
+            // depending on driver, and `Number(bigint | string | number)` is
+            // what the legacy code path produced.
+            amount: fromEntityToWireNumber(rawTx.amount),
             nonce: rawTx.nonce,
             timestamp: rawTx.timestamp,
             transaction_fee: {
-                network_fee: rawTx.networkFee,
-                rpc_fee: rawTx.rpcFee,
-                additional_fee: rawTx.additionalFee,
+                // REVIEW The Transactions entity stores fees as `bigint` columns;
+                // TypeORM hands them back to us as JS strings (or bigint) on
+                // some drivers. The SDK's TxFee type is `string | number`
+                // post-3.1.0, so coerce to `number` (pre-fork wire shape) at
+                // the boundary to keep callers bit-identical to pre-bump.
+                network_fee: fromEntityToWireNumber(rawTx.networkFee),
+                rpc_fee: fromEntityToWireNumber(rawTx.rpcFee),
+                additional_fee: fromEntityToWireNumber(rawTx.additionalFee),
+                // DEM-665: rpc_address is plain varchar — no numeric
+                // coercion. `?? null` normalises undefined (an older
+                // RawTransaction without the field) to the explicit
+                // `null` declared by TxFee.
+                rpc_address:
+                    (rawTx as { rpcAddress?: string | null }).rpcAddress ??
+                    null,
             },
 
             data: JSON.parse(rawTx.content).data,
@@ -509,19 +597,6 @@ export default class Transaction implements ITransaction {
  * here to keep the typecheck honest. `null`/`undefined` map to `0n` to
  * match the zero-fee/zero-amount path that genesis and value-less
  * transactions have always relied on.
- *
- * Fractional `number` inputs (e.g. `0.1` DEM from a pre-fork sender that
- * bypassed the SDK's `SubDemPrecisionError` guard) are floored, not
- * thrown — `BigInt(0.1)` raises `RangeError: Not an integer`, which would
- * abort the whole block-insert transaction and stall the chain. Flooring
- * is deterministic (`Math.floor` is consensus-safe) and matches the GCR
- * balance edits in these transactions, which already carry integer
- * `amount` values. The recorded `transactions.amount` is the only field
- * that gets the floored value; the GCR ledger is unaffected.
- *
- * This is a damage-control measure, not a substitute for rejecting
- * sub-DEM precision at the mempool boundary. See follow-up: mempool guard
- * mirroring the SDK's `SubDemPrecisionError`.
  */
 function toEntityBigint(
     value: string | number | bigint | null | undefined,
@@ -532,28 +607,46 @@ function toEntityBigint(
     if (typeof value === "bigint") {
         return value
     }
-
-    if (typeof value === "number") {
-        if (!Number.isFinite(value)) {
-            log.warn(
-                `[toEntityBigint] non-finite number ${value}; coercing to 0`,
-            )
-            return 0n
-        }
-
-        if (!Number.isInteger(value)) {
-            const floored = Math.floor(value)
-            log.warn(
-                `[toEntityBigint] fractional number ${value} floored to ${floored}; ` +
-                    "sub-unit precision dropped at DB boundary",
-            )
-            return BigInt(floored)
-        }
-
-        return BigInt(value)
-    }
-
     return BigInt(value)
+}
+
+/**
+ * Coerce an entity-shape amount/fee value back to the legacy wire shape
+ * (`number`) that downstream node code consumed pre-bump.
+ *
+ * P5a boundary helper. The TypeORM `bigint` columns surface as `string`
+ * (Postgres) or `bigint` (some drivers) at the JS level; the SDK's
+ * `TransactionContent.amount` and `TxFee.*` were widened to `string |
+ * number` in 3.1.0. We narrow back to `number` here to preserve the
+ * pre-bump observable behavior — the serializerGate is the single
+ * choke-point that converts to OS strings post-fork.
+ *
+ * **Fail-loud bound (myc#77, GH#3213223281, GH#3213220462, GH#3215...
+ * post-iter-5)**: post-fork OS amounts > `Number.MAX_SAFE_INTEGER`
+ * (≈ 9.007e15 OS = ~9.007M DEM) cannot be represented as a JS `number`
+ * without precision loss; a silent `Number(big)` cast would round to
+ * the nearest double-precision value — corrupting amounts that flow
+ * through `fromRawTransaction` into `tx.content.amount` and
+ * `transaction_fee.*`. Throwing here surfaces a wire-shape mismatch
+ * (pre-fork wire never carries OS-magnitude amounts; a post-fork value
+ * showing up at this code path indicates a missing canonicalization
+ * upstream).
+ */
+function fromEntityToWireNumber(
+    value: string | number | bigint | null | undefined,
+): number {
+    if (value === null || value === undefined) {
+        return 0
+    }
+    const big: bigint =
+        typeof value === "bigint" ? value : BigInt(value as string | number)
+    const max = BigInt(Number.MAX_SAFE_INTEGER)
+    if (big > max || big < -max) {
+        throw new Error(
+            `fromEntityToWireNumber: value ${big.toString()} exceeds Number.MAX_SAFE_INTEGER (~9.007e15). This indicates a wire-shape mismatch — pre-fork wire should never carry OS-magnitude amounts. See myc#77 / GH#3213223281.`,
+        )
+    }
+    return Number(big)
 }
 
 /**

@@ -22,6 +22,8 @@ import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../validation/txValidatorPool"
+import { isForkActive } from "@/forks"
+import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -109,8 +111,89 @@ export async function confirmTransaction(
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true
+
+    // DEM-665 — gasFeeSeparation fee distribution.
+    //
+    // Post-fork the validating node computes the per-component fee
+    // breakdown, stamps its own pubkey as `transaction_fee.rpc_address`
+    // (so peers know where to route the rpc_fee share), checks the
+    // sender can cover the total, and prepends the fee-distribution
+    // GCREdits onto `tx.content.gcr_edits` so they apply before any
+    // tx-level edits.
+    //
+    // Pre-fork: legacy path is preserved (the dead-code `defineGas`
+    // function below is the historical placeholder). No edits emitted
+    // here; the network keeps charging via the existing
+    // calculateCurrentGas → defineGas → noop flow.
+    //
+    // The fee-distribution write MUST happen before
+    // `signValidityData(validityData)` so the appended edits are part
+    // of the signed hash (peers compute the same hash).
+    if (isForkActive("gasFeeSeparation", referenceBlock)) {
+        const feeBoundsResult = await applyGasFeeSeparation(tx)
+        if (feeBoundsResult.ok === false) {
+            validityData.data.valid = false
+            validityData.data.message =
+                "[Tx Validation] [FEE ERROR] " +
+                feeBoundsResult.message +
+                "\n"
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
+
+    // Must run before signValidityData(): any gcr_edit attached here
+    // becomes part of the signed hash, so peers compute the same hash.
+    let dispatchResult: { ok: true } | { ok: false; message: string }
+    try {
+        dispatchResult = await runTypeDispatcher(tx)
+    } catch (e) {
+        dispatchResult = {
+            ok: false,
+            message:
+                "Dispatcher crashed: " +
+                (e instanceof Error ? e.message : String(e)),
+        }
+    }
+    if (dispatchResult.ok === false) {
+        validityData.data.valid = false
+        validityData.data.message =
+            "[Tx Validation] [TYPE DISPATCH] " + dispatchResult.message + "\n"
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     validityData = await signValidityData(validityData)
     return validityData
+}
+
+async function runTypeDispatcher(
+    tx: Transaction,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+    const type = (tx?.content?.type ?? "") as string
+    if (
+        type === "validatorStake" ||
+        type === "validatorUnstake" ||
+        type === "validatorExit"
+    ) {
+        const { handleStakingTx } = await import(
+            "@/libs/network/routines/transactions/handleStakingTx"
+        )
+        const r = await handleStakingTx(tx as unknown as Parameters<
+            typeof handleStakingTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    if (type === "networkUpgrade" || type === "networkUpgradeVote") {
+        const { handleGovernanceTx } = await import(
+            "@/libs/network/routines/transactions/handleGovernanceTx"
+        )
+        const r = await handleGovernanceTx(tx as unknown as Parameters<
+            typeof handleGovernanceTx
+        >[0])
+        return r.success ? { ok: true } : { ok: false, message: r.message }
+    }
+    return { ok: true }
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
@@ -171,6 +254,9 @@ async function defineGas(
         }
         return [false, validityData]
     }
+    // REVIEW getGCRNativeBalance returns bigint; keep this binding bigint
+    // to make the comparison against compositeFeeAmount (number) explicit
+    // via BigInt() coercion below.
     let fromBalance = 0n
     try {
         fromBalance = await GCR.getAccountBalance(from)
@@ -198,6 +284,30 @@ async function defineGas(
     }
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
+    // DEFENSIVE: `calculateCurrentGas` returns Promise<number>; if a future
+    // Config / surge multiplier produces a non-finite or fractional value,
+    // `BigInt(compositeFeeAmount)` would raise a generic RangeError inside
+    // the validation critical path. Validate explicitly so the error
+    // message names the offender and the validator-side caller can decide
+    // what to do, rather than relying on the bare-bones BigInt error.
+    // Currently `networkFee + rpcFee + burnFee = 1+1+1 = 3` so this guard
+    // is dormant in production, but the bare BigInt cast was load-bearing
+    // safety that needed naming.
+    // myc#84, GH#3213220459
+    if (
+        !Number.isFinite(compositeFeeAmount) ||
+        !Number.isInteger(compositeFeeAmount) ||
+        compositeFeeAmount < 0
+    ) {
+        throw new Error(
+            "[Native Tx Validation] calculateCurrentGas returned a value " +
+                "that cannot be represented as a non-negative bigint: " +
+                `${compositeFeeAmount} (typeof=${typeof compositeFeeAmount}). ` +
+                "This indicates a Config / surge-multiplier producing a " +
+                "fractional, NaN, Infinity, or negative fee — fees must be " +
+                "non-negative integers in the active denomination.",
+        )
+    }
     // FIXME Overriding for testing
     if (fromBalance < BigInt(compositeFeeAmount) && getSharedState.PROD) {
         log.error(
@@ -243,6 +353,8 @@ async function defineGas(
             network_fee: 0,
             rpc_fee: 0,
             additional_fee: 0,
+            // DEM-665: internal gas Operation; no rpc routing here.
+            rpc_address: null,
         }, // This is the gas operation so it doesn't have additional fees
     }
     log.debug("[TX] defineGas - Gas Operation derived")

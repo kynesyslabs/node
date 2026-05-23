@@ -35,12 +35,12 @@ import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
-
-// Resolve the migrations directory relative to this file so the glob works
-// in both source (tsx) and built (dist) modes. Adding a new migration is
-// then a matter of dropping a file into src/migrations/ — no edits here.
-const __dirname = dirname(fileURLToPath(import.meta.url))
-const migrationsGlob = `${__dirname}/../migrations/*.{ts,js}`
+// Stackable-genesis governance entities
+import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
+import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
+// Hard-fork bookkeeping (P3b — DEM→OS denomination migration)
+import { ForkState } from "./entities/ForkState.js"
+import { Validators } from "./entities/Validators.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -49,7 +49,7 @@ export const dataSource = new DataSource({
     username: Config.getInstance().database.user,
     password: Config.getInstance().database.password,
     database: Config.getInstance().database.database,
-    migrations: [migrationsGlob],
+    migrations: ["src/migrations/*.{ts,js}"],
     migrationsRun: true,
     entities: [
         Blocks,
@@ -63,6 +63,7 @@ export const dataSource = new DataSource({
         GCRAssignedTx,
         GCRTLSNotary,
         GCRStorageProgram,
+        Validators,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
@@ -73,6 +74,11 @@ export const dataSource = new DataSource({
         L2PSMempoolTx,
         L2PSTransaction,
         L2PSProof,
+        // Stackable-genesis governance entities
+        NetworkUpgrade,
+        NetworkUpgradeVote,
+        // Hard-fork bookkeeping (P3b)
+        ForkState,
     ],
     synchronize: false,
     logging: false,

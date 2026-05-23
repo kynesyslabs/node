@@ -11,6 +11,21 @@ import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
+import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
+import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
+import { loadNetworkParameters } from "./routines/loadNetworkParameters"
+import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
+import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
+import {
+    isOsDenominationMigrationApplied,
+    runOsDenominationMigration,
+} from "@/forks/migrations/osDenomination"
+import {
+    isGasFeeSeparationMigrationApplied,
+    runGasFeeSeparationMigration,
+} from "@/forks/migrations/gasFeeSeparation"
+import { isForkActive } from "@/forks/forkGates"
+import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
 
 export function isGenesis(block: Block): boolean {
@@ -251,6 +266,61 @@ export async function insertBlock(
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
                 const saveBlockStart = Date.now()
+                // REVIEW: P3b — fork-activation hook. Runs *before* the
+                // block is persisted so balances are migrated atomically
+                // with the triggering block. Either both commit or both
+                // roll back. Idempotency is enforced by `fork_state`.
+                //
+                // No-op when the fork is inactive (default in production:
+                // activationHeight === null in DEFAULT_FORK_CONFIG) OR when
+                // the rehearsal-only `DEMOS_DISABLE_FORK_MACHINERY` flag is
+                // set (used to simulate a pre-fork binary without
+                // maintaining a separate branch). Production must NEVER
+                // set that flag.
+                if (
+                    !isForkMachineryDisabled() &&
+                    isForkActive("osDenomination", block.number) &&
+                    !(await isOsDenominationMigrationApplied(
+                        transactionalEntityManager,
+                    ))
+                ) {
+                    log.info(
+                        `[forks][osDenomination] activation hook firing at block ${block.number}`,
+                    )
+                    await runOsDenominationMigration(
+                        transactionalEntityManager,
+                        block.number,
+                    )
+                }
+
+                // DEM-665: gasFeeSeparation activation hook. MUST run
+                // AFTER osDenomination at the same block height so that
+                // when burn/treasury accounts are created with balance
+                // 0n they are already in OS units (matching every other
+                // post-fork account). Order is enforced here by listing
+                // osDenomination's hook first.
+                //
+                // Same atomicity / idempotency story as osDenomination:
+                // runs inside the caller transaction (rolls back with
+                // the block on failure), fork_state row guards re-runs.
+                if (
+                    !isForkMachineryDisabled() &&
+                    isForkActive("gasFeeSeparation", block.number) &&
+                    !(await isGasFeeSeparationMigrationApplied(
+                        transactionalEntityManager,
+                    ))
+                ) {
+                    log.info(
+                        `[forks][gasFeeSeparation] activation hook firing at block ${block.number}`,
+                    )
+                    await runGasFeeSeparationMigration(
+                        transactionalEntityManager,
+                        block.number,
+                        getSharedState.forkConfig.gasFeeSeparation
+                            .treasuryAddress,
+                    )
+                }
+
                 const savedBlock = await transactionalEntityManager.save(
                     blocksRepo.target,
                     newBlock,
@@ -350,6 +420,21 @@ export async function insertBlock(
                     `[insertBlock] Update Merkle tree took ${updateMerkleTreeEnd - updateMerkleTreeStart}ms`,
                 )
 
+                // Governance hooks scoped to the block transaction so they
+                // commit/rollback atomically with it. sharedState refresh
+                // is deferred to post-commit (below) — RAM never ahead of DB.
+                const govProposalRepo =
+                    transactionalEntityManager.getRepository(NetworkUpgrade)
+                const govVoteRepo = transactionalEntityManager.getRepository(
+                    NetworkUpgradeVote,
+                )
+                await tallyUpgradeVotes(
+                    block.number,
+                    govProposalRepo,
+                    govVoteRepo,
+                )
+                await applyNetworkUpgrade(block.number, govProposalRepo)
+
                 return savedBlock
             },
         )
@@ -360,6 +445,18 @@ export async function insertBlock(
         log.debug(
             "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
         )
+
+        // Post-commit refresh: rolled-back tx → no-op; committed tx →
+        // picks up newly-active proposals. Failure is non-fatal — next
+        // block will re-derive.
+        try {
+            await loadNetworkParameters()
+        } catch (e) {
+            log.warning(
+                "GOVERNANCE",
+                `[insertBlock] sharedState refresh after block ${block.number} failed: ${(e as Error).message}`,
+            )
+        }
 
         return result
     } catch (error) {

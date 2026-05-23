@@ -63,7 +63,7 @@ export async function runL2psExchangeParticipationSmoke() {
       throw new Error("l2ps_exchange_participation_smoke failed: exchange did not delegate through discovery as expected")
     }
   } finally {
-    ;(L2PSMempool as any).getLastTransaction = previousGetLastTransaction
+    (L2PSMempool as any).getLastTransaction = previousGetLastTransaction
     getSharedState.l2psJoinedUids = previousJoinedUids
     clearL2PSCache()
   }

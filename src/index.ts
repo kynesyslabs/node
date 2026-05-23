@@ -26,12 +26,17 @@ import {
 } from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
+import {
+    markSubsystem,
+    subsystemError,
+} from "./utilities/subsystemRegistry"
 import { fastSync } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
@@ -52,11 +57,67 @@ import { Config } from "src/config"
 
 process.on("uncaughtException", (error: Error) => {
     handleError(error, "CORE", { source: ErrorSource.UNCAUGHT_EXCEPTION })
+    // Record for /health + Prometheus observability (Epic 13 T8).
+    // Swallow + continue behaviour preserved — observability only.
+    try {
+        getSharedState.uncaughtExceptionTotal++
+        getSharedState.lastUncaughtException = {
+            at: Date.now(),
+            source: "uncaught_exception",
+            message: error instanceof Error ? error.message : String(error),
+        }
+        // void + catch so a failed import inside the exception
+        // handler doesn't emit a new unhandledRejection and re-enter
+        // this hook. Bookkeeping is best-effort.
+        void import("@/features/metrics")
+            .then(({ getMetricsService }) => {
+                try {
+                    getMetricsService().incrementCounter(
+                        "uncaught_exception_total",
+                        { source: "uncaught_exception" },
+                        1,
+                    )
+                } catch {
+                    /* metrics not ready */
+                }
+            })
+            .catch(() => {
+                /* metrics import failed; original error already logged */
+            })
+    } catch {
+        // SharedState may be mid-initialisation on a very early crash —
+        // never let bookkeeping mask the original error.
+    }
     // Don't exit — let the node try to continue serving RPC
 })
 
 process.on("unhandledRejection", (reason: unknown) => {
     handleError(reason, "CORE", { source: ErrorSource.UNHANDLED_REJECTION })
+    try {
+        getSharedState.unhandledRejectionTotal++
+        getSharedState.lastUncaughtException = {
+            at: Date.now(),
+            source: "unhandled_rejection",
+            message: reason instanceof Error ? reason.message : String(reason),
+        }
+        void import("@/features/metrics")
+            .then(({ getMetricsService }) => {
+                try {
+                    getMetricsService().incrementCounter(
+                        "unhandled_rejection_total",
+                        { source: "unhandled_rejection" },
+                        1,
+                    )
+                } catch {
+                    /* metrics not ready */
+                }
+            })
+            .catch(() => {
+                /* metrics import failed */
+            })
+    } catch {
+        // Same caveat as above.
+    }
     // Don't exit — let the node try to continue serving RPC
 })
 
@@ -226,7 +287,19 @@ async function isPortAvailable(port: number): Promise<boolean> {
     })
 }
 
-async function getNextAvailablePort(startFrom: number) {
+/**
+ * Find the first free TCP port at or after `startFrom`.
+ *
+ * Emits a `[PORT]` warning when the chosen port differs from the requested
+ * one — operators previously had no way to tell "I asked for 3005, I got
+ * 3007" without packet capture. The `reason` arg is included in the log
+ * so multiple callers in this file remain distinguishable. Epic 13 T4.
+ */
+async function getNextAvailablePort(
+    startFrom: number,
+    reason = "unspecified",
+) {
+    const originalStartFrom = startFrom
     let availablePort: number = null
     while (startFrom < 65535 || !!availablePort) {
         if (await isPortAvailable(startFrom)) {
@@ -234,6 +307,11 @@ async function getNextAvailablePort(startFrom: number) {
             break
         }
         startFrom++
+    }
+    if (availablePort !== null && availablePort !== originalStartFrom) {
+        log.warning(
+            `[PORT] ${reason} drifted from ${originalStartFrom} to ${availablePort}`,
+        )
     }
     return availablePort
 }
@@ -264,9 +342,15 @@ async function warmup() {
 
     // Use next available port for the signaling server
     // (useful when we have multiple nodes running the same code on the same machine)
+    const signalingRequested = indexState.SIGNALING_SERVER_PORT
     indexState.SIGNALING_SERVER_PORT = await getNextAvailablePort(
         indexState.SIGNALING_SERVER_PORT,
+        "signaling",
     )
+    markSubsystem(getSharedState.subsystems, "signaling", "pending", {
+        requestedPort: signalingRequested,
+        port: indexState.SIGNALING_SERVER_PORT,
+    })
 
     // MCP Server configuration
     indexState.MCP_SERVER_PORT =
@@ -275,7 +359,13 @@ async function warmup() {
 
     // OmniProtocol TCP Server configuration
     indexState.OMNI_ENABLED = cfg.omni.enabled
-    indexState.OMNI_PORT = await getNextAvailablePort(cfg.omni.port)
+    const omniRequested = cfg.omni.port
+    indexState.OMNI_PORT = await getNextAvailablePort(cfg.omni.port, "omni")
+    markSubsystem(getSharedState.subsystems, "omni", "pending", {
+        requestedPort: omniRequested,
+        port: indexState.OMNI_PORT,
+        enabled: indexState.OMNI_ENABLED,
+    })
 
     getSharedState.omniConfig.port = indexState.OMNI_PORT
     getSharedState.serverPort = indexState.SERVER_PORT
@@ -387,11 +477,16 @@ async function preMainLoop() {
 
     // ANCHOR Looking for the genesis block
     log.info("[BOOTSTRAP] Looking for the genesis block")
-    // INFO Now ensuring we have an initialized chain or initializing the genesis block
-    await peerBootstrap(indexState.PeerList)
     await findGenesisBlock()
     await loadGenesisIdentities()
     log.info("[CHAIN] 🖥️ Found the genesis block")
+
+    // Governance state must be in sharedState BEFORE any inbound traffic
+    // hits a handler that reads networkParameters / fees. Order matters:
+    // findGenesisBlock → loadNetworkParameters → peerBootstrap.
+    await loadNetworkParameters()
+
+    await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
@@ -478,14 +573,46 @@ async function main() {
         }
     }
 
-    await Chain.setup()
-    await Mempool.init()
-    // INFO Warming up the node (including arguments digesting)
-    await warmup()
+    // Bracket the silent-success boot steps so operators can see
+    // "Chain DB ready" / "Mempool ready" markers (Epic 13 T3). Pre-fix,
+    // these returned with no log; if `setupChainDb` hangs on Postgres,
+    // there would be nothing on stdout until the next step ran.
+    const bootTracker = getSharedState.bootTracker
+    bootTracker.start("chain.setup")
+    try {
+        await Chain.setup()
+        bootTracker.ready("chain.setup")
+        markSubsystem(getSharedState.subsystems, "chain", "ready")
+        log.info("[BOOT] Chain DB ready")
+    } catch (e) {
+        bootTracker.fail("chain.setup", e)
+        subsystemError(getSharedState.subsystems, "chain", e)
+        throw e
+    }
 
-    // TxValidatorPool spawns workers that need the node's master seed to
-    // sign as the node, so it must start AFTER warmup() (which calls
-    // identity.loadIdentity() and populates getSharedState.identity.masterSeed).
+    bootTracker.start("mempool.init")
+    try {
+        await Mempool.init()
+        bootTracker.ready("mempool.init")
+        log.info("[BOOT] Mempool ready")
+    } catch (e) {
+        bootTracker.fail("mempool.init", e)
+        throw e
+    }
+
+    // INFO Warming up the node (including arguments digesting)
+    bootTracker.start("warmup")
+    try {
+        await warmup()
+        bootTracker.ready("warmup")
+        // RPC server is up at this point (warmup awaits serverRpcBun).
+        markSubsystem(getSharedState.subsystems, "rpc", "ready", {
+            port: indexState.SERVER_PORT,
+        })
+    } catch (e) {
+        bootTracker.fail("warmup", e)
+        throw e
+    }
 
     // Update TUI with port info after warmup
     if (indexState.TUI_ENABLED && indexState.tuiManager) {
@@ -499,6 +626,7 @@ async function main() {
 
     // Start OmniProtocol TCP server (optional)
     if (indexState.OMNI_ENABLED) {
+        bootTracker.start("omni.server")
         try {
             getSharedState.omniConfig.port = indexState.OMNI_PORT
             const omniServer = await startOmniProtocolServer(
@@ -520,8 +648,15 @@ async function main() {
             log.info(
                 `[CORE] OmniProtocol client adapter initialized with mode: ${omniMode}`,
             )
+            bootTracker.ready("omni.server")
+            markSubsystem(getSharedState.subsystems, "omni", "ready", {
+                port: indexState.OMNI_PORT,
+                enabled: true,
+            })
         } catch (error) {
             handleError(error, "NETWORK", { source: ErrorSource.OMNI_STARTUP })
+            bootTracker.fail("omni.server", error)
+            subsystemError(getSharedState.subsystems, "omni", error)
             // Continue without OmniProtocol (failsafe - falls back to HTTP)
         }
 
@@ -533,9 +668,21 @@ async function main() {
         log.info(
             "[CORE] OmniProtocol server disabled (set OMNI_ENABLED=true to enable)",
         )
+        markSubsystem(getSharedState.subsystems, "omni", "skipped", {
+            reason: "OMNI_ENABLED=false",
+            enabled: false,
+        })
+        bootTracker.skip("omni.server", "disabled")
     }
     // INFO Preparing the main loop
-    await preMainLoop()
+    bootTracker.start("pre_main_loop")
+    try {
+        await preMainLoop()
+        bootTracker.ready("pre_main_loop")
+    } catch (e) {
+        bootTracker.fail("pre_main_loop", e)
+        throw e
+    }
 
     // Update TUI with identity and chain info after preMainLoop
     if (indexState.TUI_ENABLED && indexState.tuiManager) {
@@ -552,12 +699,15 @@ async function main() {
 
     // REVIEW: Start Prometheus Metrics server (enabled by default)
     if (indexState.METRICS_ENABLED) {
+        bootTracker.start("metrics.server")
         try {
             const { getMetricsServer, getMetricsCollector } =
                 await import("./features/metrics")
 
+            const metricsRequested = indexState.METRICS_PORT
             indexState.METRICS_PORT = await getNextAvailablePort(
                 indexState.METRICS_PORT,
+                "metrics",
             )
 
             const metricsServer = getMetricsServer({
@@ -581,14 +731,27 @@ async function main() {
             })
             await metricsCollector.start()
             log.info("[METRICS] Metrics collector started")
+            bootTracker.ready("metrics.server")
+            markSubsystem(getSharedState.subsystems, "metrics", "ready", {
+                port: indexState.METRICS_PORT,
+                requestedPort: metricsRequested,
+                enabled: true,
+            })
         } catch (error) {
             log.error("[METRICS] Failed to start metrics server: " + error)
+            bootTracker.fail("metrics.server", error)
+            subsystemError(getSharedState.subsystems, "metrics", error)
             // Continue without metrics (failsafe)
         }
     } else {
         log.info(
             "[METRICS] Metrics server disabled (set METRICS_ENABLED=true to enable)",
         )
+        markSubsystem(getSharedState.subsystems, "metrics", "skipped", {
+            reason: "METRICS_ENABLED=false",
+            enabled: false,
+        })
+        bootTracker.skip("metrics.server", "disabled")
     }
 
     // ANCHOR Based on the above methods, we can now start the main loop
@@ -596,6 +759,29 @@ async function main() {
     if (indexState.peerManager.getPeers().length < 1) {
         log.warning("[PEER] 🔍 No peers detected, listening...")
         indexState.enough_peers = false
+        // Dormant mode (Epic 13 T3) — surface in /health + metrics so the
+        // operator can distinguish "intentionally idle, waiting for peers"
+        // from "failing". Without this, RPC + metrics keep answering and
+        // the node looks healthy while consensus is frozen.
+        getSharedState.dormantMode = true
+        log.warning(
+            "[BOOT] DORMANT MODE: peer list empty; signaling / MCP / " +
+                "TLSNotary / mainLoop / DTR / L2PS are skipped until peers " +
+                "appear. /health will report status=dormant.",
+        )
+        for (const skipped of [
+            "signaling",
+            "mcp",
+            "tlsnotary",
+            "main_loop",
+            "dtr",
+            "l2ps",
+        ]) {
+            markSubsystem(getSharedState.subsystems, skipped, "skipped", {
+                reason: "no peers",
+            })
+        }
+        bootTracker.skip("dormant_block", "no peers")
     }
     // TODO Enough_peers will be shared between modules so that can be checked async
     if (indexState.enough_peers) {
@@ -609,25 +795,42 @@ async function main() {
             // commandLine() // While doing the rest of the stuff needed, a comand line interface is available
         }
         // Starting the signaling server
+        bootTracker.start("signaling")
         indexState.signalingServer = new SignalingServer(
             indexState.SIGNALING_SERVER_PORT,
         )
         if (indexState.signalingServer) {
             getSharedState.isSignalingServerStarted = true
             log.info("[NETWORK] Signaling server started")
+            bootTracker.ready("signaling")
+            markSubsystem(getSharedState.subsystems, "signaling", "ready", {
+                port: indexState.SIGNALING_SERVER_PORT,
+            })
         } else {
             log.error("[NETWORK] Failed to start the signaling server")
+            bootTracker.fail(
+                "signaling",
+                new Error("constructor returned null"),
+            )
+            subsystemError(
+                getSharedState.subsystems,
+                "signaling",
+                new Error("constructor returned null"),
+            )
             process.exit(1)
         }
 
         // Start MCP server (failsafe)
         if (indexState.MCP_ENABLED) {
+            bootTracker.start("mcp.server")
             try {
                 const { createDemosMCPServer, createDemosNetworkTools } =
                     await import("./features/mcp")
 
+                const mcpRequested = indexState.MCP_SERVER_PORT
                 indexState.MCP_SERVER_PORT = await getNextAvailablePort(
                     indexState.MCP_SERVER_PORT,
+                    "mcp",
                 )
 
                 const mcpServer = createDemosMCPServer({
@@ -646,15 +849,30 @@ async function main() {
                 log.info(
                     `[MCP] MCP server started on port ${indexState.MCP_SERVER_PORT}`,
                 )
+                bootTracker.ready("mcp.server")
+                markSubsystem(getSharedState.subsystems, "mcp", "ready", {
+                    port: indexState.MCP_SERVER_PORT,
+                    requestedPort: mcpRequested,
+                    enabled: true,
+                })
             } catch (error) {
                 log.error("[MCP] Failed to start MCP server: " + error)
                 getSharedState.isMCPServerStarted = false
+                bootTracker.fail("mcp.server", error)
+                subsystemError(getSharedState.subsystems, "mcp", error)
                 // Continue without MCP (failsafe)
             }
+        } else {
+            markSubsystem(getSharedState.subsystems, "mcp", "skipped", {
+                reason: "MCP_ENABLED=false",
+                enabled: false,
+            })
+            bootTracker.skip("mcp.server", "disabled")
         }
 
         // REVIEW: Start TLSNotary service (failsafe - optional HTTPS attestation feature)
         if (indexState.TLSNOTARY_ENABLED) {
+            bootTracker.start("tlsnotary")
             try {
                 const {
                     initializeTLSNotary,
@@ -694,6 +912,16 @@ async function main() {
                     log.info(
                         `[TLSNotary] WebSocket server started on port ${indexState.TLSNOTARY_PORT}`,
                     )
+                    bootTracker.ready("tlsnotary")
+                    markSubsystem(
+                        getSharedState.subsystems,
+                        "tlsnotary",
+                        "ready",
+                        {
+                            port: indexState.TLSNOTARY_PORT,
+                            enabled: true,
+                        },
+                    )
                     // Update TUI with TLSNotary info
                     if (indexState.TUI_ENABLED && indexState.tuiManager) {
                         indexState.tuiManager.updateNodeInfo({
@@ -707,6 +935,12 @@ async function main() {
                 } else {
                     const msg =
                         "[TLSNotary] Service disabled or failed to initialize (check TLSNOTARY_SIGNING_KEY)"
+                    bootTracker.fail("tlsnotary", new Error(msg))
+                    subsystemError(
+                        getSharedState.subsystems,
+                        "tlsnotary",
+                        new Error(msg),
+                    )
                     if (fatal) {
                         log.error("[TLSNotary] FATAL: " + msg)
                         process.exit(1)
@@ -716,6 +950,12 @@ async function main() {
             } catch (error) {
                 log.error(
                     "[TLSNotary] Failed to start TLSNotary service: " + error,
+                )
+                bootTracker.fail("tlsnotary", error)
+                subsystemError(
+                    getSharedState.subsystems,
+                    "tlsnotary",
+                    error,
                 )
                 const { isTLSNotaryFatal } =
                     await import("./features/tlsnotary")
@@ -731,6 +971,11 @@ async function main() {
             log.info(
                 "[TLSNotary] Service disabled (set TLSNOTARY_ENABLED=true to enable)",
             )
+            markSubsystem(getSharedState.subsystems, "tlsnotary", "skipped", {
+                reason: "TLSNOTARY_ENABLED=false",
+                enabled: false,
+            })
+            bootTracker.skip("tlsnotary", "disabled")
         }
 
         log.info("[MAIN] ✅ Starting the background loop")
@@ -827,19 +1072,69 @@ async function main() {
             }
         }
 
-        await Mempool.cleanMempool()
-        await fastSync([], "index.ts")
+        bootTracker.start("fast_sync")
+        try {
+            await Mempool.cleanMempool()
+            await fastSync([], "index.ts")
+            bootTracker.ready("fast_sync")
+        } catch (e) {
+            bootTracker.fail("fast_sync", e)
+            throw e
+        }
         getSharedState.isInitialized = true
         // ANCHOR Starting the main loop
+        // Fire-and-forget mainLoop. Do NOT kill the process on exit —
+        // the previous `process.exit(1)` in `.finally` was a debug aid
+        // (commit 455d615b) that became permanent. It killed the node on
+        // any mainLoop error despite the uncaughtException swallow policy
+        // at the top of this file, and it also raced gracefulShutdown's
+        // `process.exit(0)` so `docker stop` exited code 1. The wrapper
+        // now records the exit in sharedState so /health and observability
+        // tooling (Epic 13) can surface it. See
+        // docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mainLoop()
             .catch((error: Error) => {
                 console.error(error)
                 log.error("[CORE] Error in main loop: " + error)
                 handleError(error, "CORE", { source: ErrorSource.MAIN_LOOP })
+                getSharedState.mainLoopExitReason =
+                    error instanceof Error ? error.message : String(error)
             })
             .finally(() => {
-                log.info("[CORE] Main loop terminated")
-            }) // Is an async function so running without waiting send that to the background
+                getSharedState.mainLoopExited = true
+                getSharedState.mainLoopExitedAt = Date.now()
+                if (getSharedState.isShuttingDown) {
+                    log.info(
+                        "[CORE] Main loop stopped (graceful shutdown)",
+                    )
+                } else {
+                    log.error(
+                        "[CORE] Main loop terminated unexpectedly. " +
+                            "Node continues serving RPC but is no longer producing blocks. " +
+                            "Investigate.",
+                    )
+                    // Mirror the exit into the subsystem registry so
+                    // MetricsCollector.collectObservability() drops
+                    // demos_subsystem_up{subsystem="main_loop"} to 0
+                    // and the `NodeFailing` Prom alert fires. Without
+                    // this, /health flipped the local snapshot to
+                    // "failed" but the registry stayed "running", so
+                    // the metric + alert diverged silently from the
+                    // health probe. Greptile P1.
+                    markSubsystem(
+                        getSharedState.subsystems,
+                        "main_loop",
+                        "failed",
+                    )
+                }
+            })
+
+        // mainLoop is fire-and-forget; mark it "running" eagerly so the
+        // boot summary moves on. Heartbeat (Epic 13 T5) flips it to "ready"
+        // on the first iteration and tracks staleness thereafter.
+        bootTracker.start("main_loop")
+        bootTracker.ready("main_loop")
+        markSubsystem(getSharedState.subsystems, "main_loop", "running")
 
         // Start DTR relay retry service after background loop initialization
         // The service will wait for syncStatus to be true before actually processing
@@ -849,15 +1144,32 @@ async function main() {
             )
             // Service will check syncStatus internally before processing
             DTRManager.getInstance().start()
+            bootTracker.ready("dtr")
+            markSubsystem(getSharedState.subsystems, "dtr", "running", {
+                enabled: true,
+            })
+        } else {
+            markSubsystem(getSharedState.subsystems, "dtr", "skipped", {
+                reason: "PROD=false",
+                enabled: false,
+            })
+            bootTracker.skip("dtr", "non-prod")
         }
 
         // Load L2PS networks configuration
+        bootTracker.start("l2ps.networks")
         try {
             await ParallelNetworks.getInstance().loadAllL2PS()
+            bootTracker.ready("l2ps.networks")
+            log.info(
+                `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+            )
         } catch (error) {
             handleError(error, "CORE", {
                 source: ErrorSource.L2PS_NETWORK_LOADING,
             })
+            bootTracker.fail("l2ps.networks", error)
+            subsystemError(getSharedState.subsystems, "l2ps", error)
         }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
@@ -866,6 +1178,7 @@ async function main() {
             getSharedState.l2psJoinedUids &&
             getSharedState.l2psJoinedUids.length > 0
         ) {
+            bootTracker.start("l2ps.services")
             try {
                 const l2psHashService = L2PSHashService.getInstance()
                 await l2psHashService.start()
@@ -877,15 +1190,29 @@ async function main() {
                 const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
                 await l2psBatchAggregator.start()
                 log.info("[CORE] [L2PS] Batch aggregator service started")
+                bootTracker.ready("l2ps.services")
+                markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
+                    enabled: true,
+                    extra: {
+                        joined_uids: getSharedState.l2psJoinedUids.length,
+                    },
+                })
             } catch (error) {
                 handleError(error, "CORE", {
                     source: ErrorSource.L2PS_SERVICES_STARTUP,
                 })
+                bootTracker.fail("l2ps.services", error)
+                subsystemError(getSharedState.subsystems, "l2ps", error)
             }
         } else {
             log.info(
                 "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
             )
+            markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
+                reason: "no joined networks",
+                enabled: false,
+            })
+            bootTracker.skip("l2ps.services", "no joined networks")
         }
     }
 }

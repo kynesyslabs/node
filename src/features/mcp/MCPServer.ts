@@ -303,21 +303,47 @@ export class MCPServerManager {
             })
         })
 
-        // Handle POST messages (for client to server communication)
-        this.expressApp.post("/message", (_req, res) => {
+        // Handle POST messages (for client to server communication).
+        // CSRF defense-in-depth (Epic 14 T2): the SSE GET hands the client
+        // a sessionId in the `endpoint` event; subsequent POSTs must echo
+        // it back. Without this check, any caller that knows the path can
+        // inject messages into the active SSE session (the previous code
+        // only checked `this.transport instanceof SSEServerTransport`,
+        // which is true for any caller).
+        this.expressApp.post("/message", async (req, res) => {
             try {
-                // Forward message to current SSE transport
-                if (this.transport instanceof SSEServerTransport) {
-                    // The message handling is done internally by the transport
-                    res.json({ status: "received" })
-                } else {
-                    res.status(500).json({
+                if (!(this.transport instanceof SSEServerTransport)) {
+                    res.status(503).json({
                         error: "No SSE transport available",
                     })
+                    return
                 }
+                const provided =
+                    typeof req.query.sessionId === "string"
+                        ? req.query.sessionId
+                        : null
+                const expected = this.transport.sessionId
+                if (!provided || provided !== expected) {
+                    log.warning(
+                        `[MCP] POST /message rejected: sessionId mismatch ` +
+                            `(provided=${provided ?? "<missing>"})`,
+                    )
+                    res.status(401).json({
+                        error: "Invalid or missing sessionId",
+                    })
+                    return
+                }
+                // Hand the request to the SSE transport so it can parse
+                // the JSON-RPC body and dispatch it through the server's
+                // message handler. The transport owns the response —
+                // the previous `res.json({status:"received"})` was a
+                // no-op ack that dropped every message.
+                await this.transport.handlePostMessage(req, res)
             } catch (error) {
                 log.error(`[MCP] Error handling message: ${String(error)}`)
-                res.status(500).json({ error: "Message handling failed" })
+                if (!res.headersSent) {
+                    res.status(500).json({ error: "Message handling failed" })
+                }
             }
         })
 

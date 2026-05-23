@@ -32,7 +32,17 @@ export const DEFAULT_CONFIG: AppConfig = {
         shardSize: 4,
         mainLoopSleepTime: 1000,
         rpcFeePercent: 10,
-        rpcFee: 10,
+        // Flat per-tx fee components. Total cost of a tx today is the sum
+        // of these three: networkFee + rpcFee + burnFee = 1 + 1 + 1 = 3.
+        // No congestion adjustment — see calculateCurrentGas.ts for the
+        // (currently stubbed) dynamic-pricing seam.
+        // TODO(decimals): once OS denomination ships, the three components
+        // must add up to exactly 1 DEM (≈ 333_333_333 OS each, exact split
+        // TBD). See `forking/decimal_planning/SPEC.md` / Mycelium E#3.
+        rpcFee: 1,
+        networkFee: 1,
+        burnFee: 1,
+        minValidatorStake: "1000000000000000000",
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
         exposedUrl: "",  // calculated from serverPort if empty
@@ -43,7 +53,14 @@ export const DEFAULT_CONFIG: AppConfig = {
         logLevel: "info",
         whitelistedIPs: [],
         whitelistedKeys: [],
-        mcpEnabled: true,
+        trustedProxies: [],
+        xffMode: "",
+        // MCP server (Model Context Protocol) is OFF by default. It currently
+        // has no built-in authentication and exposes node identity + peer
+        // topology via its `get_node_identity` / `get_peer_list` tools.
+        // Opt-in via MCP_ENABLED=true after reading docs/runbooks/mcp-security.md.
+        // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
+        mcpEnabled: false,
         restore: false,
     },
 

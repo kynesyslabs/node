@@ -348,7 +348,7 @@ async function contributeCeremony() {
             {
                 stdio: "inherit",
                 shell: "/bin/bash",
-                env: process.env
+                env: process.env,
             },
         )
         success("Contribution added successfully")

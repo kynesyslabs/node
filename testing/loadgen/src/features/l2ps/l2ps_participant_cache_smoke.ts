@@ -69,7 +69,7 @@ export async function runL2psParticipantCacheSmoke() {
       throw new Error("l2ps_participant_cache_smoke failed: cache-backed discovery behavior did not match expectations")
     }
   } finally {
-    ;(L2PSMempool as any).getLastTransaction = previousGetLastTransaction
+    (L2PSMempool as any).getLastTransaction = previousGetLastTransaction
     clearL2PSCache()
   }
 }

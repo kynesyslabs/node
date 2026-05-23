@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+# docker-run — convenience launcher for the dockerized node stack.
+#
+# Defaults to direct host-port mode (matches a plain `docker compose up`).
+# Add `--proxy` to flip into Caddy reverse-proxy mode at invocation time
+# without changing the default compose behaviour — that lets bare-metal
+# users + existing CI scripts keep working unchanged.
+#
+# Usage:
+#   ./scripts/docker-run [--proxy] [--detach|-d] [docker-compose-args...]
+#
+# Flags handled here:
+#   --proxy      Merge docker-compose.proxy.yml + enable the `proxy`,
+#                `monitoring`, and `tlsnotary` compose profiles. Drops
+#                redundant host port mappings; only 80, 443, 443/udp,
+#                and 53551 (OmniProtocol) remain published.
+#   --no-monitor Drop the `monitoring` profile from the proxy bundle.
+#   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
+#   --clean      Wipe DB + bundled-data volumes (pgdata, node_data) before
+#                `up`. Equivalent to bare-metal `./run -b true`. Brings down
+#                the stack first, then `docker volume rm` the project-scoped
+#                volumes. Snapshot-restore re-runs from genesis on next boot.
+#   --rebuild    Rebuild the node image with --no-cache before `up`. Use
+#                after pulling new commits to force a fresh build that
+#                picks up Dockerfile / source / data/ changes. Implied by
+#                nothing — pass explicitly.
+#   --detach,-d  Detach after start (`docker compose up -d`).
+#   --help,-h    Print this help.
+#
+# Identity sync (always-on, no flag):
+#   On every `up`, if `$REPO_ROOT/.demos_identity` exists, it is copied
+#   into the `<project>_node_state` volume (overwriting any prior copy)
+#   and chmod'd 0600 / chown'd 1000:1000 to match the container user.
+#   Mirrors the bare-metal `./run` behavior which reads the file
+#   directly. To boot with a fresh auto-generated identity, delete
+#   `$REPO_ROOT/.demos_identity` first.
+#
+# Everything else is forwarded to `docker compose` after the `up`
+# subcommand. Examples:
+#   ./scripts/docker-run                       # plain dev: postgres + node
+#   ./scripts/docker-run --proxy -d            # full prod stack, detached
+#   ./scripts/docker-run --proxy --no-monitor  # proxy without Grafana/Prom
+#   ./scripts/docker-run down                  # teardown
+#   ./scripts/docker-run --proxy down          # teardown w/ proxy stack
+#   ./scripts/docker-run --clean               # wipe volumes + fresh up
+#   ./scripts/docker-run --clean --proxy -d    # wipe + full prod stack
+#   ./scripts/docker-run --rebuild --clean -d  # rebuild image + wipe + up
+#   ./scripts/docker-run --rebuild -d          # rebuild image (no wipe), up
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO_ROOT"
+
+USE_PROXY=false
+WANT_MONITORING=true
+WANT_TLSN=true
+WIPE_VOLUMES=false
+REBUILD_IMAGE=false
+PASSTHROUGH=()
+
+EXTRA_PROFILES=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --proxy)
+            USE_PROXY=true
+            shift
+            ;;
+        --no-monitor|--no-monitoring)
+            WANT_MONITORING=false
+            shift
+            ;;
+        --no-tlsn|--no-tlsnotary)
+            WANT_TLSN=false
+            shift
+            ;;
+        --clean)
+            WIPE_VOLUMES=true
+            shift
+            ;;
+        --rebuild)
+            REBUILD_IMAGE=true
+            shift
+            ;;
+        --profile)
+            # Capture --profile NAME so it lands BEFORE the subcommand
+            # (docker compose treats --profile as a global flag). Guard
+            # against `--profile` at end-of-args — without this, `set -u`
+            # aborts with "$2: unbound variable".
+            if [[ $# -lt 2 || -z "${2:-}" || "$2" == --* ]]; then
+                echo "scripts/docker-run: --profile requires a value" >&2
+                exit 2
+            fi
+            EXTRA_PROFILES+=(--profile "$2")
+            shift 2
+            ;;
+        --detach|-d)
+            PASSTHROUGH+=("-d")
+            shift
+            ;;
+        --help|-h)
+            sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+            ;;
+        *)
+            PASSTHROUGH+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Auto-enable tlsnotary profile when the node has TLSNOTARY_ENABLED=true
+# in .env (or defaults to true via .env.example). The node will try to
+# call tlsnotary:7047 on boot and crash-mark the subsystem if the
+# container isn't there. Saves operators from the confusing "TLSN
+# failed to initialize" error on a plain `./run --docker`.
+if [[ -f .env ]]; then
+    # shellcheck disable=SC1091
+    set -a; . ./.env; set +a
+fi
+TLSNOTARY_ENABLED_RESOLVED="${TLSNOTARY_ENABLED:-true}"
+if [[ "$USE_PROXY" != "true" \
+      && "$TLSNOTARY_ENABLED_RESOLVED" == "true" \
+      && "$WANT_TLSN" == "true" ]]; then
+    EXTRA_PROFILES+=(--profile tlsnotary)
+fi
+
+COMPOSE_ARGS=(-f docker-compose.yml)
+PROFILES=()
+
+if [[ "$USE_PROXY" == "true" ]]; then
+    if [[ ! -f docker-compose.proxy.yml ]]; then
+        echo "docker-compose.proxy.yml missing — cannot enable proxy mode." >&2
+        exit 1
+    fi
+    COMPOSE_ARGS+=(-f docker-compose.proxy.yml)
+    PROFILES+=(--profile proxy)
+    [[ "$WANT_MONITORING" == "true" ]] && PROFILES+=(--profile monitoring)
+    [[ "$WANT_TLSN" == "true" ]] && PROFILES+=(--profile tlsnotary)
+fi
+
+# Determine the compose subcommand. First non-flag passthrough arg
+# wins; default is `up` so the common case (`./scripts/docker-run`)
+# brings the stack up.
+SUBCOMMAND="up"
+SUBCOMMAND_ARGS=()
+if [[ ${#PASSTHROUGH[@]} -gt 0 ]]; then
+    case "${PASSTHROUGH[0]}" in
+        up|down|ps|logs|restart|stop|start|build|pull|exec|run|config|kill|rm|top|images|version|exec|port|wait|cp|create|events)
+            SUBCOMMAND="${PASSTHROUGH[0]}"
+            SUBCOMMAND_ARGS=("${PASSTHROUGH[@]:1}")
+            ;;
+        *)
+            SUBCOMMAND_ARGS=("${PASSTHROUGH[@]}")
+            ;;
+    esac
+fi
+
+# --clean: bring everything down + drop the named volumes before `up`.
+# Only fires when SUBCOMMAND ends up as `up`; for explicit `down`/`logs`/etc
+# the wipe would be confusing.
+#
+# Volume names are hardcoded as `demos_*` in docker-compose.yml `volumes:`
+# section via `name:` overrides — NOT derived from the compose project
+# name. Do NOT prefix with $(basename $REPO_ROOT) here; that targets a
+# parallel volume that compose never mounts.
+if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    echo "+ --clean: tearing down stack + wiping volumes (demos_pgdata, demos_node_data)"
+    # Down with --volumes so anonymous volumes go too; named volumes
+    # still need explicit removal below because compose only drops them
+    # when `--volumes` is paired with full project teardown AND no other
+    # containers reference them.
+    docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
+    for vol in demos_pgdata demos_node_data; do
+        if docker volume inspect "$vol" >/dev/null 2>&1; then
+            echo "+ --clean: removing volume $vol"
+            docker volume rm "$vol" || true
+        fi
+    done
+fi
+
+# --rebuild: force --no-cache rebuild of the node image before `up`.
+# Order matters: after --clean (volumes wiped) so the freshly-built image
+# is paired with an empty data dir. Only fires when SUBCOMMAND is `up`;
+# explicit `down`/`logs`/etc skip the rebuild.
+if [[ "$REBUILD_IMAGE" == "true" && "$SUBCOMMAND" == "up" ]]; then
+    echo "+ --rebuild: docker compose build --no-cache node"
+    docker compose "${COMPOSE_ARGS[@]}" build --no-cache node
+fi
+
+# Always-sync host `.demos_identity` -> `node_state` volume before `up`.
+#
+# Bare-metal `./run` reads `$REPO_ROOT/.demos_identity` directly. The
+# docker flow stores identity inside the `demos_node_state` named volume,
+# which is opaque to the host filesystem. Without this sync, operators
+# who configured an identity at the repo root were silently bypassed:
+# the container saw an empty volume on first boot, generated a fresh
+# mnemonic, and pinned the wrong pubkey. The pubkey then mismatched any
+# genesis-baked validator entry, leaving the node out of consensus.
+#
+# Sync rules:
+#   - Only fires for SUBCOMMAND=up.
+#   - Only fires when `$REPO_ROOT/.demos_identity` exists.
+#   - Overwrites the volume copy unconditionally — the repo file is the
+#     source of truth, including across --clean. Operators who want a
+#     fresh identity should `rm .demos_identity` first.
+#   - Sets the same perms the container's entrypoint expects
+#     (0600, owned by uid 1000 to match the demos user inside the image).
+HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
+if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
+    # Volume name is hardcoded in docker-compose.yml via `name:` override
+    # (`demos_node_state`), NOT derived from the compose project name. Match
+    # the literal name here so the seeded mnemonic lands in the volume
+    # that compose actually mounts at /app/state.
+    STATE_VOL="demos_node_state"
+    # Create the volume if it doesn't already exist so compose can mount it.
+    docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
+    echo "+ syncing .demos_identity -> $STATE_VOL"
+    docker run --rm \
+        -v "$STATE_VOL":/state \
+        -v "$HOST_IDENTITY_FILE":/src/.demos_identity:ro \
+        alpine sh -c '
+            cp /src/.demos_identity /state/.demos_identity &&
+            chmod 600 /state/.demos_identity &&
+            chown 1000:1000 /state /state/.demos_identity
+        '
+fi
+
+# Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
+# of an empty array as unset. Without these guards the default (no
+# --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound
+# variable".
+CMD=(docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} "$SUBCOMMAND" ${SUBCOMMAND_ARGS[@]+"${SUBCOMMAND_ARGS[@]}"})
+
+echo "+ ${CMD[*]}"
+exec "${CMD[@]}"

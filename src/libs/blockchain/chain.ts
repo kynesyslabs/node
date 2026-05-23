@@ -23,6 +23,9 @@ import { setupChainDb, readSql, writeSql, getBlocksRepo, getTransactionsRepo } f
 import * as blockOps from "./chainBlocks"
 import * as txOps from "./chainTransactions"
 import * as genesisOps from "./chainGenesis"
+import type { TxStatus } from "./chainTypes"
+
+export type { TxStatus } from "./chainTypes"
 
 /**
  * Chain facade — delegates to focused sub-modules:
@@ -99,6 +102,10 @@ export default class Chain {
     // ── Transaction queries ───────────────────────────────────
     static async getTxByHash(hash: string): Promise<Transaction | null> {
         return txOps.getTxByHash(hash)
+    }
+
+    static async getTransactionStatus(hash: string): Promise<TxStatus> {
+        return txOps.getTransactionStatus(hash)
     }
 
     static async getTransactionHistory(

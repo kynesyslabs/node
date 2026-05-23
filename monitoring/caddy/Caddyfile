@@ -1,0 +1,135 @@
+# =============================================================================
+# Demos Network — Caddy reverse-proxy config
+# =============================================================================
+#
+# This file fronts every HTTP/WS service the node exposes, terminating TLS
+# once and forwarding to the right upstream over the docker bridge network.
+#
+# Routes (all single domain, ${PROXY_DOMAIN}):
+#   /                  -> RPC (node:53550)              — HTTP JSON-RPC
+#   /signaling/*       -> Signaling (node:3005)         — WSS (Bun WS)
+#   /mcp/*             -> MCP (node:3001)               — SSE/HTTP, AUTH
+#   /metrics           -> Node metrics (node:9090)      — Prometheus, AUTH
+#   /grafana/*         -> Grafana (grafana:3000)        — UI sub-path
+#   /prometheus/*      -> Prometheus (prometheus:9090)  — UI sub-path
+#   /tlsnotary/*       -> TLSNotary (tlsnotary:7047)    — WSS
+#
+# OmniProtocol (53551) is NOT proxied — its custom-fingerprint TLS cannot
+# survive a termination + re-encryption hop.
+#
+# Required env (read from docker-compose `environment:` block):
+#   PROXY_DOMAIN              - public DNS name, e.g. node.example.com
+#   ACME_EMAIL                - Let's Encrypt contact for renewal failures
+#   METRICS_BASIC_AUTH_HASH   - bcrypt hash from `caddy hash-password`
+#   MCP_BASIC_AUTH_HASH       - optional, only set when MCP_ENABLED=true
+#
+# Quick check after starting: `docker compose --profile proxy logs caddy`.
+# Cert state:                 `docker compose exec caddy caddy list-certificates`.
+# =============================================================================
+{
+	# Admin endpoint is exposed only on the local container interface
+	# (Caddy default is 0.0.0.0:2019). Keep it bound to loopback inside
+	# the container — the docker bridge alone is not a security boundary.
+	admin localhost:2019
+
+	# Sensible defaults.
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# Plain HTTP listener — Let's Encrypt HTTP-01 challenge lives here,
+# everything else is redirected to HTTPS.
+:80 {
+	redir https://{host}{uri} permanent
+}
+
+# Main HTTPS vhost.
+{$PROXY_DOMAIN} {
+	# Automatic Let's Encrypt + auto HTTPS — Caddy default. Set ACME_EMAIL
+	# in the environment to receive expiry-warning emails.
+	tls {$ACME_EMAIL}
+
+	# Strip any inbound X-Forwarded-* the client sent us; only Caddy may
+	# set them downstream. Combined with the node's TRUSTED_PROXIES list
+	# (Epic 14 T1) this defeats source-IP spoofing.
+	request_header -X-Forwarded-For
+	request_header -X-Forwarded-Host
+	request_header -X-Forwarded-Proto
+	request_header -X-Real-IP
+
+	encode zstd gzip
+
+	# --- WebSocket routes (must come before catch-all /) ---------------------
+
+	handle_path /signaling/* {
+		reverse_proxy node:3005
+	}
+
+	# TLSNotary route — selected by TLSNOTARY_PROXY_MODE env. Defaults
+	# to 'subpath' (path-stripped mount). 'direct' = no route, clients
+	# hit host port 7047. 'subdomain' = no in-vhost route, see the
+	# notary.${PROXY_DOMAIN} block at the bottom of this file. Epic 12
+	# T14 + docs/runbooks/proxy-setup.md.
+	import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}.caddy
+
+	# --- MCP — gated behind basic-auth ---------------------------------------
+	# MCP currently has no built-in authentication (see
+	# docs/runbooks/mcp-security.md). The default hash below rejects every
+	# password — set MCP_BASIC_AUTH_HASH in your .env to a real bcrypt hash
+	# to enable. Generate one with:
+	#   docker run --rm caddy:2 caddy hash-password --plaintext '<password>'
+	handle_path /mcp/* {
+		basic_auth {
+			mcp {$MCP_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+		}
+		reverse_proxy node:3001
+	}
+
+	# --- Metrics — basic-auth (Prometheus scrapes via docker net, not here) -
+	# Same pattern as MCP — default rejects everyone until operator sets
+	# METRICS_BASIC_AUTH_HASH. Internal Prometheus scrape goes through the
+	# docker network direct to node:9090 and bypasses this route entirely.
+	handle /metrics {
+		basic_auth {
+			metrics {$METRICS_BASIC_AUTH_HASH:$2a$14$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidi}
+		}
+		reverse_proxy node:9090
+	}
+
+	# --- Grafana sub-path ---------------------------------------------------
+	# Requires GF_SERVER_SERVE_FROM_SUB_PATH=true + correct GF_SERVER_ROOT_URL
+	# on the grafana container (see docker-compose.yml).
+	handle /grafana/* {
+		reverse_proxy grafana:3000
+	}
+
+	# --- Prometheus sub-path -------------------------------------------------
+	# Prometheus runs at root (no --web.route-prefix in compose). Strip
+	# the /prometheus/ prefix before forwarding so the upstream sees its
+	# native paths (/api/v1/..., /-/healthy, etc.). UI assets are
+	# documented as best-effort under sub-path mode — see
+	# docs/runbooks/proxy-setup.md §"Prometheus sub-path caveats".
+	handle_path /prometheus/* {
+		reverse_proxy prometheus:9090
+	}
+
+	# --- RPC — root + everything else ---------------------------------------
+	# Note: /health and /version on the node are intentionally fast and
+	# rate-limit-bypassed already (server_rpc.ts). LB / k8s probes can hit
+	# them directly through this vhost without auth.
+	handle {
+		reverse_proxy node:53550
+	}
+
+	# Access log to stdout — captured by docker logs json driver.
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Optional top-level TLSNotary subdomain vhost. Active when
+# TLSNOTARY_PROXY_MODE=subdomain. For the other modes (subpath/direct)
+# the imported file is empty so this block contributes nothing.
+import /etc/caddy/tlsnotary-modes/{$TLSNOTARY_PROXY_MODE:subpath}-vhost.caddy

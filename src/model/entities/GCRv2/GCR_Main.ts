@@ -7,6 +7,7 @@ import {
     PrimaryColumn,
 } from "typeorm"
 import type { StoredIdentities } from "../types/IdentityTypes"
+import { bigintNumericTransformer } from "../transformers"
 // Define the shape of your JSON data
 
 @Entity("gcr_main")
@@ -16,7 +17,28 @@ export class GCRMain {
     pubkey: string
     @Column({ type: "integer", name: "nonce" })
     nonce: number
-    @Column({ type: "bigint", name: "balance" })
+    /**
+     * Account balance in the active denomination (DEM pre-fork, OS
+     * post-fork). Stored as Postgres `numeric(38, 0)` (integer-only,
+     * arbitrary precision up to 38 decimal digits) so the osDenomination
+     * migration's `balance * 10^9` UPDATE cannot overflow signed 64-bit
+     * AND the column-type itself rejects fractional writes from a
+     * malformed raw SQL caller (myc#85). 38 digits comfortably covers
+     * post-fork OS magnitudes up to ~1e27.
+     *
+     * Driver returns `numeric` as a string; the transformer converts to
+     * `bigint` at the ORM boundary so the application-level type stays
+     * `bigint`. Raw `entityManager.query` calls bypass the transformer
+     * and must coerce via `BigInt(row.balance)` explicitly.
+     */
+    @Column({
+        type: "numeric",
+        name: "balance",
+        precision: 38,
+        scale: 0,
+        default: "0",
+        transformer: bigintNumericTransformer,
+    })
     balance: bigint
     @Column({ type: "jsonb", name: "identities" })
     identities: StoredIdentities

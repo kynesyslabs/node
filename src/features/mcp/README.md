@@ -1,5 +1,19 @@
 # MCP (Model Context Protocol) Integration for Demos Network
 
+> **⚠️ SECURITY: experimental — no built-in authentication.**
+> The MCP server is **disabled by default** since Epic 14 (2026-05-14).
+> Its `get_node_identity` and `get_peer_list` tools leak the node's
+> public key and peer topology to any reachable client.
+> **Do not bind `0.0.0.0` or publish the port via docker-compose** until
+> an authenticated reverse proxy (Caddy bearer-auth, mTLS, or equivalent)
+> is in front. Older examples in this README that show
+> `"0.0.0.0"` as a host or suggest "external access" predate that policy
+> and apply only behind such a proxy.
+>
+> See `docs/runbooks/mcp-security.md` for the threat model and the
+> recommended enablement path. Enable with `MCP_ENABLED=true` only after
+> reading it.
+
 This module provides comprehensive MCP server functionality for the Demos Network, enabling AI assistants and other clients to interact with blockchain operations, network status, and node management through a standardized protocol.
 
 ## Overview

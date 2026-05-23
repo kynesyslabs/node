@@ -1,0 +1,53 @@
+# =============================================================================
+# Compose override — proxy mode (Epic 12 T13)
+# =============================================================================
+# Used together with docker-compose.yml when Caddy fronts all HTTP/WS routes.
+# Drops every host port mapping that Caddy now serves, so a fresh
+# `docker compose ps` only shows 80/443 (Caddy) + 53551 (OmniProtocol) +
+# 7047 (TLSNotary direct mode only). OmniProtocol stays direct because
+# its custom-fingerprint TLS cannot survive proxy termination.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml \
+#       --profile proxy --profile monitoring --profile tlsnotary up -d
+#
+# Or, more convenient, via .env:
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+#   COMPOSE_PROFILES=monitoring,tlsnotary,proxy
+#
+# Set EXPOSE_DIRECT_PORTS=true to undo (keep host ports + Caddy together;
+# useful during the smoke-test phase when you want to compare direct vs
+# proxied responses). Default false in this override file.
+#
+# Bare-metal deployments DO NOT use this file at all.
+# =============================================================================
+
+services:
+  node:
+    # `!override` (Compose Spec, supported by Compose v2.20+) replaces
+    # the parent's ports list with this one instead of unioning them.
+    # Without it, Compose merges lists across files — leaves every host
+    # port still published. OmniProtocol stays direct (custom-fingerprint
+    # TLS cannot survive a proxy hop).
+    ports: !override
+      - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
+
+  prometheus:
+    ports: !override []
+
+  grafana:
+    ports: !override []
+
+  node-exporter:
+    ports: !override []
+
+  neo4j:
+    # Bolt port stays internal-only in proxy mode; HTTP UI is reached via
+    # Caddy if you add a route (not in default Caddyfile). Drop both.
+    ports: !override []
+
+  tlsnotary:
+    # TLSNotary disposition depends on TLSNOTARY_PROXY_MODE. The default
+    # subpath/subdomain modes proxy via Caddy — direct mode requires the
+    # operator to flip back to docker-compose.yml's host mapping.
+    ports: !override []

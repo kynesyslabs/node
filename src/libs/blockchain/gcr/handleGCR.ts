@@ -39,6 +39,7 @@ import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
+import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
 import { In } from "typeorm"
 import { Mutex } from "async-mutex"
@@ -965,7 +966,46 @@ export default class HandleGCR {
                 }
                 break
             }
-
+            // KNOWN GAP: these branches persist via the default datasource
+            // (not the transactionalEntityManager that wraps insertBlock),
+            // so a partially-failed block leaves orphaned rows. Threading
+            // the EM through HandleGCR + every routine is a separate
+            // refactor — tracked in the upgradable-network testing doc.
+            case "validatorStake":
+                if (simulate) {
+                    // Validation already ran during handleStakingTx; we don't
+                    // mutate state during mempool simulation.
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    result = await GCRValidatorStakeRoutines.apply(editOperation)
+                }
+                break
+            // Phase 1 governance: persists proposal/vote rows on every
+            // node at block-confirmation time. Idempotent.
+            case "networkUpgrade":
+                if (simulate) {
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    const { default: GCRNetworkUpgradeRoutines } = await import(
+                        "./gcr_routines/GCRNetworkUpgradeRoutines"
+                    )
+                    result = await GCRNetworkUpgradeRoutines.applyProposal(
+                        editOperation,
+                    )
+                }
+                break
+            case "networkUpgradeVote":
+                if (simulate) {
+                    result = { success: true, message: "Simulated" }
+                } else {
+                    const { default: GCRNetworkUpgradeRoutines } = await import(
+                        "./gcr_routines/GCRNetworkUpgradeRoutines"
+                    )
+                    result = await GCRNetworkUpgradeRoutines.applyVote(
+                        editOperation,
+                    )
+                }
+                break
             default:
                 return { success: false, message: "Invalid GCREdit type" }
         }

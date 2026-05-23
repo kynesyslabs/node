@@ -32,7 +32,7 @@ export async function runMcpServerRegistrySmoke() {
 
   let registerWhileRunningError: string | null = null
   try {
-    ;(manager as any).isRunning = true
+    (manager as any).isRunning = true
     manager.registerTool({
       name: "tool_gamma",
       description: "gamma",
@@ -42,7 +42,7 @@ export async function runMcpServerRegistrySmoke() {
   } catch (error) {
     registerWhileRunningError = (error as Error).message
   } finally {
-    ;(manager as any).isRunning = false
+    (manager as any).isRunning = false
   }
 
   const checks = {

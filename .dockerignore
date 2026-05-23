@@ -61,6 +61,11 @@ dist/
 local_tests/
 tests/
 testing/
+# But the devnet Dockerfile (testing/devnet/Dockerfile) ENTRYPOINTs to
+# testing/devnet/run-devnet, which must ship inside the image.
+!testing/devnet/run-devnet
+!testing/devnet/start-staggered.sh
+!testing/devnet/scripts/
 omniprotocol_fixtures_scripts/
 specs/
 fixtures/

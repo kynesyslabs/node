@@ -328,7 +328,7 @@ export default class L2PSMempool {
 
             return await this.repo.findOne({
                 where: { l2ps_uid: l2psUid },
-                order: { timestamp: "DESC" }
+                order: { timestamp: "DESC" },
             })
         } catch (error) {
             log.error(`[L2PS Mempool] Error getting latest transaction for UID ${l2psUid}:`, error)
@@ -454,7 +454,7 @@ export default class L2PSMempool {
     public static async updateGCREdits(
         hash: string,
         gcrEdits: GCREdit[],
-        affectedAccountsCount: number
+        affectedAccountsCount: number,
     ): Promise<boolean> {
         try {
             await this.ensureInitialized()
@@ -464,7 +464,7 @@ export default class L2PSMempool {
                 {
                     gcr_edits: gcrEdits,
                     affected_accounts_count: affectedAccountsCount,
-                    timestamp: Date.now().toString()
+                    timestamp: Date.now().toString(),
                 },
             )
 

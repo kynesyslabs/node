@@ -213,6 +213,102 @@ function inferSeverity(error: unknown): ErrorSeverity {
 }
 
 /**
+ * Format an Error's stack frames for the cause chain.
+ *
+ * V8/Node `Error.stack` begins with `"<name>: <message>"` followed by
+ * `at ...` frames. The caller already prints name + message explicitly,
+ * so drop the header line here to avoid duplicating it (CR-3 on PR
+ * #817). Returns 5 frames max, each prefixed with `indent`.
+ */
+function formatErrorFrames(err: Error, indent: string): string {
+    const lines = (err.stack ?? "").split("\n")
+    const start = lines[0]?.startsWith(`${err.name}:`) ? 1 : 0
+    return lines
+        .slice(start, start + 5)
+        .map(l => indent + l)
+        .join("\n")
+}
+
+/**
+ * Render the `errors[]` siblings on an AggregateError. Extracted from
+ * formatCauseChain to keep its cognitive complexity below 15 (Sonar
+ * threshold). Bounded at 5 siblings; the rest are summarised so a
+ * pathological chain can't flood the logger.
+ */
+function formatAggregateSiblings(
+    siblings: readonly unknown[],
+    indent: string,
+    depth: number,
+): string {
+    const shown = siblings.slice(0, 5)
+    let out = ""
+    for (let i = 0; i < shown.length; i++) {
+        out += `\n${indent}[error ${i + 1}/${siblings.length}]`
+        out += formatCauseChain(shown[i], depth + 1)
+    }
+    if (siblings.length > shown.length) {
+        out += `\n${indent}... ${siblings.length - shown.length} more`
+    }
+    return out
+}
+
+/**
+ * Walk the error.cause chain and AggregateError.errors[] siblings so the
+ * underlying failure (e.g. node:net ECONNREFUSED nested under an
+ * AggregateError nested under a wrapper) is visible in the log. Without
+ * this, top-line `[UNKNOWN_ERROR]` lines carry no diagnostic payload.
+ * Bounded by depth + sibling caps so a malicious/cyclical chain can't
+ * blow up the logger.
+ */
+function formatCauseChain(cause: unknown, depth = 0): string {
+    if (cause === undefined || cause === null) return ""
+    if (depth > 4) return ` | cause: <chain truncated>`
+
+    const indent = "  ".repeat(depth + 1)
+
+    if (cause instanceof Error) {
+        const frames = formatErrorFrames(cause, indent)
+        let out = ` | cause: ${cause.name}: ${cause.message}`
+        if (frames) out += `\n${frames}`
+
+        // AggregateError.errors[]: the actual TCP/DNS failures live
+        // here, not on the wrapper.
+        const siblings = (cause as { errors?: unknown }).errors
+        if (Array.isArray(siblings) && siblings.length > 0) {
+            out += formatAggregateSiblings(siblings, indent, depth)
+        }
+
+        // Nested `cause` chain (Node 16+).
+        const nested = (cause as { cause?: unknown }).cause
+        if (nested !== undefined && nested !== null) {
+            out += formatCauseChain(nested, depth + 1)
+        }
+        return out
+    }
+
+    try {
+        return ` | cause: ${JSON.stringify(cause)}`
+    } catch {
+        // JSON.stringify usually fails on cycles/exotic values. Prefer
+        // a custom toString over `String(cause)` so plain objects don't
+        // collapse to "[object Object]" in the log (CodeRabbit nit on
+        // PR #817).
+        if (
+            typeof cause === "object" &&
+            cause !== null &&
+            "toString" in cause
+        ) {
+            try {
+                return ` | cause: ${(cause as { toString(): string }).toString()}`
+            } catch {
+                // fall through to String() below
+            }
+        }
+        return ` | cause: ${String(cause)}`
+    }
+}
+
+/**
  * Log an AppError using the CategorizedLogger.
  */
 function logError(error: AppError): void {
@@ -220,7 +316,15 @@ function logError(error: AppError): void {
     const contextStr = error.context
         ? ` ${JSON.stringify(error.context)}`
         : ""
-    const fullMessage = `${prefix} ${error.message}${contextStr}`
+    // Diagnostic surface for the underlying cause — without this the
+    // top-line log shows just "[UNKNOWN_ERROR]  {source:main,fatal:true}"
+    // with no message, no stack, no original error. The cause comes
+    // through `normalizeError` as `error.cause` (a generic Error or any
+    // thrown value). Print message + first 5 stack frames when present.
+    const causeStr = formatCauseChain(
+        (error as { cause?: unknown }).cause,
+    )
+    const fullMessage = `${prefix} ${error.message}${contextStr}${causeStr}`
 
     switch (error.severity) {
         case ErrorSeverity.FATAL:

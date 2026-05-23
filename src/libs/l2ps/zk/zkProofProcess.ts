@@ -8,24 +8,24 @@
  * Usage: bun zkProofProcess.ts <keysDir>
  */
 
-import * as snarkjs from 'snarkjs'
-import { buildPoseidon } from 'circomlibjs'
-import * as path from 'node:path'
-import * as fs from 'node:fs'
-import * as readline from 'node:readline'
+import * as snarkjs from "snarkjs"
+import { buildPoseidon } from "circomlibjs"
+import * as path from "node:path"
+import * as fs from "node:fs"
+import * as readline from "node:readline"
 
 const BATCH_SIZES = [5, 10] as const
 type BatchSize = typeof BATCH_SIZES[number]
 
 let poseidon: any = null
 let initialized = false
-const keysDir = process.argv[2] || path.join(process.cwd(), 'src/libs/l2ps/zk/keys')
+const keysDir = process.argv[2] || path.join(process.cwd(), "src/libs/l2ps/zk/keys")
 
 /**
  * Send response to parent process
  */
 function sendResponse(response: any): void {
-    process.stdout.write(JSON.stringify(response) + '\n')
+    process.stdout.write(JSON.stringify(response) + "\n")
 }
 
 /**
@@ -74,7 +74,7 @@ function padTransactions(txs: any[], targetSize: number): any[] {
             senderAfter: 0n,
             receiverBefore: 0n,
             receiverAfter: 0n,
-            amount: 0n
+            amount: 0n,
         })
     }
     return padded
@@ -106,7 +106,7 @@ async function generateProof(input: any): Promise<any> {
 
     const txCount = input.transactions.length
     if (txCount === 0) {
-        throw new Error('Cannot generate proof for empty batch')
+        throw new Error("Cannot generate proof for empty batch")
     }
 
     // Convert transactions - handle BigInt serialization
@@ -115,7 +115,7 @@ async function generateProof(input: any): Promise<any> {
         senderAfter: BigInt(tx.senderAfter),
         receiverBefore: BigInt(tx.receiverBefore),
         receiverAfter: BigInt(tx.receiverAfter),
-        amount: BigInt(tx.amount)
+        amount: BigInt(tx.amount),
     }))
 
     const initialStateRoot = BigInt(input.initialStateRoot)
@@ -145,7 +145,7 @@ async function generateProof(input: any): Promise<any> {
         sender_after: paddedTxs.map((tx: any) => tx.senderAfter.toString()),
         receiver_before: paddedTxs.map((tx: any) => tx.receiverBefore.toString()),
         receiver_after: paddedTxs.map((tx: any) => tx.receiverAfter.toString()),
-        amounts: paddedTxs.map((tx: any) => tx.amount.toString())
+        amounts: paddedTxs.map((tx: any) => tx.amount.toString()),
     }
 
     // Generate PLONK proof
@@ -155,7 +155,7 @@ async function generateProof(input: any): Promise<any> {
         zkeyPath,
         null,
         {},
-        { singleThread: true }
+        { singleThread: true },
     )
 
     return {
@@ -164,7 +164,7 @@ async function generateProof(input: any): Promise<any> {
         batchSize,
         txCount,
         finalStateRoot: finalStateRoot.toString(),
-        totalVolume: totalVolume.toString()
+        totalVolume: totalVolume.toString(),
     }
 }
 
@@ -172,13 +172,13 @@ async function generateProof(input: any): Promise<any> {
  * Verify a batch proof
  */
 async function verifyProof(batchProof: any): Promise<boolean> {
-    const vkeyPath = path.join(keysDir, `batch_${batchProof.batchSize}`, 'verification_key.json')
+    const vkeyPath = path.join(keysDir, `batch_${batchProof.batchSize}`, "verification_key.json")
 
     if (!fs.existsSync(vkeyPath)) {
         throw new Error(`Missing verification key: ${vkeyPath}`)
     }
 
-    const vkey = JSON.parse(fs.readFileSync(vkeyPath, 'utf-8'))
+    const vkey = JSON.parse(fs.readFileSync(vkeyPath, "utf-8"))
     return await snarkjs.plonk.verify(vkey, batchProof.publicSignals, batchProof.proof)
 }
 
@@ -190,24 +190,24 @@ async function handleRequest(request: any): Promise<void> {
 
     try {
         switch (request.type) {
-            case 'initialize':
+            case "initialize":
                 await initialize()
-                response.type = 'result'
+                response.type = "result"
                 response.data = { success: true }
                 break
 
-            case 'generateProof':
-                response.type = 'result'
+            case "generateProof":
+                response.type = "result"
                 response.data = await generateProof(request.data)
                 break
 
-            case 'verifyProof':
-                response.type = 'result'
+            case "verifyProof":
+                response.type = "result"
                 response.data = await verifyProof(request.data)
                 break
 
-            case 'ping':
-                response.type = 'result'
+            case "ping":
+                response.type = "result"
                 response.data = { pong: true }
                 break
 
@@ -215,7 +215,7 @@ async function handleRequest(request: any): Promise<void> {
                 throw new Error(`Unknown request type: ${request.type}`)
         }
     } catch (error) {
-        response.type = 'error'
+        response.type = "error"
         response.error = error instanceof Error ? error.message : String(error)
     }
 
@@ -226,20 +226,20 @@ async function handleRequest(request: any): Promise<void> {
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    terminal: false
+    terminal: false,
 })
 
-rl.on('line', async (line: string) => {
+rl.on("line", async (line: string) => {
     try {
         const request = JSON.parse(line)
         await handleRequest(request)
     } catch (error) {
         sendResponse({
-            type: 'error',
-            error: `Failed to parse request: ${error instanceof Error ? error.message : error}`
+            type: "error",
+            error: `Failed to parse request: ${error instanceof Error ? error.message : error}`,
         })
     }
 })
 
 // Signal ready
-sendResponse({ type: 'ready' })
+sendResponse({ type: "ready" })

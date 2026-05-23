@@ -27,7 +27,7 @@ let GCRStorageProgramRoutines: typeof import("src/libs/blockchain/gcr/gcr_routin
 let validateStorageProgramPayload: typeof import("src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines")["validateStorageProgramPayload"]
 
 beforeAll(async () => {
-    ;({ GCRStorageProgramRoutines, validateStorageProgramPayload } =
+    ({ GCRStorageProgramRoutines, validateStorageProgramPayload } =
         await import(
             "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
         ))

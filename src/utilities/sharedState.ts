@@ -16,6 +16,10 @@ import log from "@/utilities/logger"
 import type { TLSNotaryState } from "@/features/tlsnotary/proxyManager"
 import type { TokenStoreState } from "@/features/tlsnotary/tokenManager"
 import { OmniServerConfig } from "@/libs/omniprotocol/integration/startup"
+import {
+    cloneDefaultForkConfig,
+    type ForkConfigByName,
+} from "@/forks/forkConfig"
 import { Config } from "src/config"
 import {
     APP_VERSION,
@@ -35,8 +39,37 @@ import {
     LOCALHOST_IPS,
     TWITTER_COOKIE_FILE,
 } from "./constants"
+import {
+    BootTracker,
+    buildInitialSubsystemRegistry,
+    type SubsystemInfo,
+} from "./subsystemRegistry"
 
 dotenv.config()
+
+/**
+ * Combined fee-distribution runtime view (DEM-665).
+ *
+ * `burnAddress` and `treasuryAddress` come from the `gasFeeSeparation` fork
+ * payload / migration code constants (consensus-significant, fork-fixed).
+ * The percentage groups come from governance NetworkParameters (mutable
+ * via on-chain proposals, day 1).
+ *
+ * Stored on `SharedState.feeDistribution` (nullable until the post-genesis
+ * bootstrap completes). The shape mirrors the genesis SPEC distribution
+ * table exactly: each component lists every recipient with a non-zero
+ * share — fields with zero share are omitted, so `network_fee` has no
+ * `rpcPct`, `rpc_fee` is implicit 100% to the rpc operator (no entry
+ * here), `additional_fee` has no `rpcPct`, `special_ops` carries all
+ * three.
+ */
+export interface FeeDistributionRuntime {
+    burnAddress: string
+    treasuryAddress: string
+    networkFee: { burnPct: number; treasuryPct: number }
+    additionalFee: { burnPct: number; treasuryPct: number }
+    specialOps: { burnPct: number; rpcPct: number; treasuryPct: number }
+}
 
 export default class SharedState {
     private static instance: SharedState
@@ -46,6 +79,17 @@ export default class SharedState {
     version = APP_VERSION
     version_name = APP_VERSION_NAME
     signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
+
+    // Node start time in milliseconds since epoch — set when this singleton
+    // is first imported. Used by /health to report uptime.
+    nodeStartTime = Date.now()
+
+    /**
+     * Seconds since the node process started, rounded down. Used by /health.
+     */
+    public getUptimeSeconds(): number {
+        return Math.floor((Date.now() - this.nodeStartTime) / 1000)
+    }
 
     block_time = DEFAULT_BLOCK_TIME // TODO Get it from the genesis (or see Consensus module)
 
@@ -64,6 +108,36 @@ export default class SharedState {
     // Modes
     isShuttingDown = false
     isInitialized = false
+    // Set true when the fire-and-forget mainLoop wrapper completes (either
+    // crash or graceful). Epic 13 /health extension reads these.
+    mainLoopExited = false
+    mainLoopExitedAt: number | null = null
+    mainLoopExitReason: string | null = null
+    // Heartbeat updated at the top of every mainLoop iteration (Epic 13 T5).
+    // Epic 13's /health computes `now - mainLoopHeartbeatAt` to flip status
+    // to "failing" when staleness exceeds threshold. null until first tick.
+    mainLoopHeartbeatAt: number | null = null
+    mainLoopIterations = 0
+    // True when the `enough_peers=false` gate at src/index.ts:589-594
+    // skipped the consensus half of boot. Surfaced in /health.dormant +
+    // demos_dormant_mode gauge so operators can distinguish "node is
+    // intentionally idle" from "node is failing".
+    dormantMode = false
+    // Subsystem registry (Epic 13 T1). Initial state = every known
+    // subsystem in "pending"; updated via markSubsystem helper.
+    subsystems: Record<string, SubsystemInfo> = buildInitialSubsystemRegistry()
+    // Append-only boot sequence log (Epic 13 T2). Populated by ANCHOR
+    // brackets in src/index.ts during startup.
+    bootTracker: BootTracker = new BootTracker()
+    // Counters for the global uncaughtException / unhandledRejection
+    // handlers (Epic 13 T8). Surfaced in /health.errors + Prom counters.
+    uncaughtExceptionTotal = 0
+    unhandledRejectionTotal = 0
+    lastUncaughtException: {
+        at: number
+        source: string
+        message: string
+    } | null = null
     inMainLoop = false
     inConsensusLoop = false
     inSyncLoop = false
@@ -211,6 +285,31 @@ export default class SharedState {
 
     // SECTION Configuration
     rpcFee: number = Config.getInstance().core.rpcFeePercent
+    networkFee: number = Config.getInstance().core.networkFee
+    // Per-tx burn — third component of the flat fee. Mirrored onto sharedState
+    // by the node's startup config load. Once governance owns burnFee (after
+    // the SDK adds it to NetworkParameters) this will also be refreshed by
+    // loadNetworkParameters() like rpcFee/networkFee.
+    burnFee: number = Config.getInstance().core.burnFee
+    // DEM-665 governance-mutable additionalFee scalar — mirrors
+    // NetworkParameters.additionalFee. Refreshed by loadNetworkParameters
+    // on every active-upgrade load. Default 0 (the same default the
+    // hardcoded fallback exposes); the post-fork fee-distribution path
+    // (`feeDistribution.ts`) reads this number and the same governance
+    // proposal that raises it from 0 takes effect on the next tx without
+    // a node restart.
+    additionalFee: number = 0
+
+    /**
+     * Active network parameters. Loaded once at startup by
+     * `loadNetworkParameters()` — either from the latest `active` NetworkUpgrade
+     * in the DB, or from GENESIS_NETWORK_PARAMETERS when no upgrade has
+     * activated. Re-read at each post-block activation hook.
+     *
+     * Typed loosely here to avoid a circular import between sharedState and
+     * features/networkUpgrade/types.ts.
+     */
+    networkParameters: unknown = null
     serverPort = Config.getInstance().server.serverPort
     identityFile: string = Config.getInstance().core.identityFile
     peerListFile: string = Config.getInstance().core.peerListFile
@@ -224,6 +323,35 @@ export default class SharedState {
 
     // TODO The following variables should be in the genesis
     maxMessageSize = Config.getInstance().core.maxMessageSize
+
+    // SECTION Forks (P2 + DEM-665)
+    // REVIEW: Hard-fork activation registry. Hydrated from `data/genesis.json`
+    // at startup (see findGenesisBlock.ts). Default is all forks inactive
+    // (`activationHeight: null`), so a node booting without a `forks` section
+    // in genesis is bit-identical to a pre-fork node.
+    //
+    // Typed as `ForkConfigByName` (per-fork narrowed map) so consumers can
+    // read fork-specific payload fields without runtime narrowing — e.g.
+    // `forkConfig.gasFeeSeparation.treasuryAddress` is statically typed.
+    forkConfig: ForkConfigByName = cloneDefaultForkConfig()
+    // !SECTION Forks
+
+    // SECTION Fee distribution (DEM-665)
+    // Combined runtime view of fee-distribution config, populated in two
+    // stages:
+    //   1) loadForkConfigFromGenesis writes burnAddress (code constant from
+    //      `migrations/gasFeeSeparation.ts`) and treasuryAddress (from the
+    //      `gasFeeSeparation` fork payload).
+    //   2) loadNetworkParameters folds the governance-mutable distribution
+    //      percentages (per fee component) onto this object after the
+    //      genesis bootstrap completes.
+    //
+    // Consumers (`gcr_routines/feeDistribution.ts`) dereference this at call
+    // time so a governance proposal touching percentages takes effect on
+    // the next tx without a node restart. `null` before the bootstrap
+    // (tests, partial-init code paths) — callers MUST guard.
+    feeDistribution: FeeDistributionRuntime | null = null
+    // !SECTION Fee distribution
 
     constructor() {
         this.identity = Identity.getInstance()
@@ -316,6 +444,10 @@ export default class SharedState {
             POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
+        // Proxy-header trust — see RateLimiter constructor for resolution
+        // rules. Defaults to "" (auto-derive from list presence).
+        trustedProxies: Config.getInstance().core.trustedProxies,
+        xffMode: Config.getInstance().core.xffMode,
     }
 
     // NOTE This is a wrapper for many stats that are used by the node and the rpc server

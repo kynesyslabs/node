@@ -152,7 +152,7 @@ export async function plonkVerifyBun(
     _vk_verifier: any,
     _publicSignals: any[],
     _proof: any,
-    logger?: any
+    logger?: any,
 ): Promise<boolean> {
     let curve: any = null
     

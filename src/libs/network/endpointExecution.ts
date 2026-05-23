@@ -316,6 +316,21 @@ export async function handleExecuteTransaction(
             result.success = l2psHashResult.result === 200
             break
         }
+
+        // Staking + governance type-specific validation + edit attachment
+        // moved into confirmTransaction() (pre-sign) so the synthesized
+        // gcr_edit becomes part of the signed validityData and survives
+        // through DTR relay + consensus + block sync. By the time we get
+        // here, the dispatcher has already run; nothing extra to do for
+        // these tx types at execute/broadcast time.
+        case "validatorStake":
+        case "validatorUnstake":
+        case "validatorExit":
+        case "networkUpgrade":
+        case "networkUpgradeVote": {
+            // No-op — dispatcher already ran in confirmTransaction.
+            break
+        }
     }
 
     // Only if the transaction is valid we add it to the mempool

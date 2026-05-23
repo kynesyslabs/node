@@ -219,6 +219,7 @@ export class MetricsCollector {
                 this.collectNetworkIOMetrics(),
                 this.collectPeerMetrics(),
                 this.collectNodeHttpHealth(),
+                this.collectObservability(),
                 this.config.dockerHealthEnabled
                     ? this.collectDockerHealth()
                     : Promise.resolve(),
@@ -229,6 +230,90 @@ export class MetricsCollector {
         } catch (error) {
             log.error(
                 `[METRICS COLLECTOR] Collection error: ${error instanceof Error ? error.message : String(error)}`,
+            )
+        }
+    }
+
+    /**
+     * Read the subsystem registry + boot tracker from SharedState and
+     * mirror them into Prometheus gauges (Epic 13 T6).
+     *
+     * Subsystem status -> integer enum:
+     *   pending=0 running=1 ready=2 failed=3 skipped=4 dormant=5
+     * subsystem_up = 1 when status ∈ {running, ready}, else 0.
+     * port_drift   = actual - requested (0 in the common case).
+     */
+    private async collectObservability(): Promise<void> {
+        try {
+            const { getSharedState } = await import("@/utilities/sharedState")
+            const ms = this.metricsService
+
+            const subsystems = getSharedState.subsystems
+            const now = Date.now()
+            const STATUS_ENUM: Record<string, number> = {
+                pending: 0,
+                running: 1,
+                ready: 2,
+                failed: 3,
+                skipped: 4,
+                dormant: 5,
+            }
+            for (const [name, info] of Object.entries(subsystems)) {
+                const up =
+                    info.status === "ready" || info.status === "running"
+                        ? 1
+                        : 0
+                ms.setGauge("subsystem_up", up, { subsystem: name })
+                ms.setGauge(
+                    "subsystem_skipped",
+                    info.status === "skipped" ? 1 : 0,
+                    { subsystem: name },
+                )
+                const uptime =
+                    info.since !== null
+                        ? Math.max(0, Math.round((now - info.since) / 1000))
+                        : 0
+                ms.setGauge("subsystem_uptime_seconds", uptime, {
+                    subsystem: name,
+                })
+                if (
+                    info.requestedPort !== null &&
+                    info.requestedPort !== undefined &&
+                    info.port !== null &&
+                    info.port !== undefined
+                ) {
+                    ms.setGauge(
+                        "port_drift",
+                        info.port - info.requestedPort,
+                        { subsystem: name },
+                    )
+                }
+            }
+
+            const summary = getSharedState.bootTracker.summary()
+            ms.setGauge("boot_complete", summary.complete ? 1 : 0, {})
+            for (const step of getSharedState.bootTracker.snapshot()) {
+                const value = STATUS_ENUM[step.status] ?? 0
+                ms.setGauge("boot_step_status", value, { step: step.name })
+            }
+
+            ms.setGauge(
+                "dormant_mode",
+                getSharedState.dormantMode ? 1 : 0,
+                {},
+            )
+
+            const hbAt = getSharedState.mainLoopHeartbeatAt
+            ms.setGauge(
+                "main_loop_heartbeat_seconds",
+                hbAt === null ? 0 : Math.max(0, Math.round((now - hbAt) / 1000)),
+                {},
+            )
+            // main_loop_iterations_total + uncaught/unhandled counters are
+            // incremented at source, not derived here.
+        } catch (error) {
+            log.error(
+                `[METRICS COLLECTOR] Observability collection error: ${error instanceof Error ? error.message : String(error)}`,
             )
         }
     }

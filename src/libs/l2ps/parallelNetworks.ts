@@ -248,13 +248,34 @@ export default class ParallelNetworks {
             .map(dirent => dirent.name)
 
         for (const uid of dirs) {
+            // Skip directories that don't carry a config.json. The
+            // bundled `data/l2ps/example/` ships only a stale
+            // `private.key` placeholder; without this guard the loader
+            // throws on every boot. Operators who actually want to
+            // join an L2PS network drop a real config.json under
+            // `data/l2ps/<uid>/` — see testing/devnet/l2ps/<uid> for
+            // the canonical layout. Epic 12 follow-up.
+            const cfgPath = path.join(l2psDir, uid, "config.json")
+            if (!fs.existsSync(cfgPath)) {
+                log.info(
+                    `[L2PS] Skipping ${uid}: no config.json (placeholder dir)`,
+                )
+                continue
+            }
             try {
                 await this.loadL2PS(uid)
                 l2psJoinedUids.push(uid)
                 log.info(`[L2PS] Loaded L2PS: ${uid}`)
             } catch (error) {
                 const message = getErrorMessage(error)
-                log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
+                // `enabled: false` is an operator decision, not a fault.
+                // Log as info so the noise floor stays low when sample
+                // configs ship alongside live ones (e.g. data/l2ps/example).
+                if (/invalid or disabled/i.test(message)) {
+                    log.info(`[L2PS] Skipping ${uid}: ${message}`)
+                } else {
+                    log.error(`[L2PS] Failed to load L2PS ${uid}: ${message}`)
+                }
             }
         }
         getSharedState.l2psJoinedUids = l2psJoinedUids

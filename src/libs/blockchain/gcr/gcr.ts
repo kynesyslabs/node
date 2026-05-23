@@ -46,7 +46,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 // TODO chain are both immutable and editable at the same time
 
 import _ from "lodash"
-import { In, LessThan, Not } from "typeorm"
+import { In, LessThan, LessThanOrEqual, Not } from "typeorm"
 
 import Hashing from "src/libs/crypto/hashing"
 import Datasource from "src/model/datasource"
@@ -60,9 +60,11 @@ import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
+import { serializeTransactionContent } from "@/forks"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
+import { Validators } from "@/model/entities/Validators"
 
 export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
@@ -110,6 +112,8 @@ function isNativeAccount(
 }
 
 export default class GCR {
+    // ANCHOR Balances retrieval
+
     /**
      *
      * @param pubkey Get the balance of a GCR account
@@ -135,6 +139,105 @@ export default class GCR {
     static async getGCRLastBlockBaseGas(): Promise<number> {
         // TODO Implement and make it dynamic
         return 1
+    }
+
+    // SECTION Validators management
+
+    // INFO The following getter is used to retrieve the hashed form of the sum of all the stakes at block N
+    static async getGCRHashedStakes(n: number = null) {
+        if (!n) {
+            n = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM if necessary
+        }
+
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
+        try {
+            const stakes = await validatorsRepository.find({
+                where: { first_seen: LessThanOrEqual(n) },
+                order: { first_seen: "DESC" },
+            })
+
+            let total = 0n
+            for (const v of stakes) {
+                const raw = v.staked_amount ?? "0"
+                try {
+                    total += BigInt(raw)
+                } catch {
+                    log.warning(
+                        "GCR",
+                        `getGCRHashedStakes: dropping malformed staked_amount=${raw} on validator ${v.address}`,
+                    )
+                }
+            }
+
+            return Hashing.sha256(total.toString())
+        } catch (e) {
+            log.error(`Error fetching GCR hashed stakes: ${e}`)
+        }
+    }
+
+    // INFO The following getter is used to retrieve the list of all validators at a given block
+    static async getGCRValidatorsAtBlock(
+        blockNumber: number = null,
+    ): Promise<unknown[]> {
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
+        if (!blockNumber) {
+            log.debug("No block number provided, getting the last one")
+            blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
+        }
+        log.debug(`blockNumber: ${blockNumber}`)
+
+        try {
+            const blockNodes = await validatorsRepository.find({
+                where: {
+                    valid_at: LessThanOrEqual(blockNumber),
+                    status: "2",
+                },
+                order: { valid_at: "DESC" },
+            })
+
+            return blockNodes || []
+        } catch (e) {
+            log.error(`Error fetching GCR validators at block: ${e}`)
+            return [] // or handle the error as needed
+        }
+    }
+
+// INFO Get a validator (or a public key anyway) status in the staking
+    // NOTE While accepting a blockNumber, it defaults to the last one
+    static async getGCRValidatorStatus(
+        publicKeyHex: string,
+        blockNumber: number = null,
+    ) {
+        const db = await Datasource.getInstance()
+        const validatorsRepository = db
+            .getDataSource()
+            .getRepository(Validators)
+
+        if (!blockNumber) {
+            blockNumber = await Chain.getLastBlockNumber() // Ensure this method is also ported to TypeORM
+        }
+
+        try {
+            const info = await validatorsRepository.findOne({
+                where: {
+                    first_seen: LessThanOrEqual(blockNumber),
+                    address: publicKeyHex,
+                },
+            })
+
+            return info || null
+        } catch (e) {
+            log.error(`Error fetching validator status: ${e}`)
+            return null // or handle the error as needed
+        }
     }
 
     static async getNativeSubnetsTxs(
@@ -718,7 +821,13 @@ export default class GCR {
         tx.content.amount = 0
         // @ts-expect-error This is a custom tx type
         tx.content.data = ["awardPoints", accounts]
-        tx.hash = Hashing.sha256(JSON.stringify(tx.content))
+        // REVIEW: P2 — fork-aware serialization for the awardPoints tx hash.
+        // The chain head is the correct reference; this tx is created at
+        // runtime, not bound to a specific block.
+        const referenceHeight = await Chain.getLastBlockNumber()
+        tx.hash = Hashing.sha256(
+            serializeTransactionContent(tx.content, referenceHeight),
+        )
 
         const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
