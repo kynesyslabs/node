@@ -509,6 +509,19 @@ export default class Transaction implements ITransaction {
  * here to keep the typecheck honest. `null`/`undefined` map to `0n` to
  * match the zero-fee/zero-amount path that genesis and value-less
  * transactions have always relied on.
+ *
+ * Fractional `number` inputs (e.g. `0.1` DEM from a pre-fork sender that
+ * bypassed the SDK's `SubDemPrecisionError` guard) are floored, not
+ * thrown — `BigInt(0.1)` raises `RangeError: Not an integer`, which would
+ * abort the whole block-insert transaction and stall the chain. Flooring
+ * is deterministic (`Math.floor` is consensus-safe) and matches the GCR
+ * balance edits in these transactions, which already carry integer
+ * `amount` values. The recorded `transactions.amount` is the only field
+ * that gets the floored value; the GCR ledger is unaffected.
+ *
+ * This is a damage-control measure, not a substitute for rejecting
+ * sub-DEM precision at the mempool boundary. See follow-up: mempool guard
+ * mirroring the SDK's `SubDemPrecisionError`.
  */
 function toEntityBigint(
     value: string | number | bigint | null | undefined,
@@ -519,6 +532,27 @@ function toEntityBigint(
     if (typeof value === "bigint") {
         return value
     }
+
+    if (typeof value === "number") {
+        if (!Number.isFinite(value)) {
+            log.warn(
+                `[toEntityBigint] non-finite number ${value}; coercing to 0`,
+            )
+            return 0n
+        }
+
+        if (!Number.isInteger(value)) {
+            const floored = Math.floor(value)
+            log.warn(
+                `[toEntityBigint] fractional number ${value} floored to ${floored}; ` +
+                    "sub-unit precision dropped at DB boundary",
+            )
+            return BigInt(floored)
+        }
+
+        return BigInt(value)
+    }
+
     return BigInt(value)
 }
 
