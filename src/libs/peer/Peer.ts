@@ -7,6 +7,7 @@ import { NodeCall } from "../network/manageNodeCall"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "./PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 export interface SyncData {
     status: boolean
@@ -206,7 +207,7 @@ export default class Peer {
             await ucrypto.getIdentity(getSharedState.signingAlgorithm)
         ).publicKey
         const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
-        const bufferSignature = await ucrypto.sign(
+        const bufferSignature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hexPublicKey),
         )
@@ -285,7 +286,7 @@ export default class Peer {
                 await ucrypto.getIdentity(getSharedState.signingAlgorithm)
             ).publicKey
             const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
-            const bufferSignature = await ucrypto.sign(
+            const bufferSignature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(hexPublicKey),
             )

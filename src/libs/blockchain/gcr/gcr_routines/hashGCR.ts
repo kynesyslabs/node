@@ -3,10 +3,8 @@ import Datasource from "../../../../model/datasource"
 import Hashing from "src/libs/crypto/hashing"
 import { GCRSubnetsTxs } from "../../../../model/entities/GCRv2/GCRSubnetsTxs"
 import { GCRTLSNotary } from "../../../../model/entities/GCRv2/GCR_TLSNotary"
-import { GlobalChangeRegistry } from "../../../../model/entities/GCR/GlobalChangeRegistry"
 import { GCRHashes } from "../../../../model/entities/GCRv2/GCRHashes"
 import Chain from "src/libs/blockchain/chain"
-import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
 import { type NativeTablesHashes } from "@kynesyslabs/demosdk/types"
 
 /**
@@ -103,12 +101,10 @@ export async function hashTLSNotaryTable(): Promise<string> {
 export default async function hashGCRTables(): Promise<NativeTablesHashes> {
     // Get all individual hashes
     // REVIEW: The below was GCRTracker without "", which was causing an error as is not an entity
-    const gcrHash = await hashPublicKeyTable("gcr_tracker") // Tracking the GCR hashes as they are hashes of the GCR itself
     const subnetsTxsHash = await hashSubnetsTxsTable()
     // REVIEW: TLSNotary proofs included in GCR integrity hash
     const tlsnotaryHash = await hashTLSNotaryTable()
     return {
-        native_gcr: gcrHash,
         native_subnets_txs: subnetsTxsHash,
         native_tlsnotary: tlsnotaryHash,
     }

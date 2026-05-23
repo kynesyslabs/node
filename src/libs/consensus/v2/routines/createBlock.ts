@@ -8,6 +8,7 @@ import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeBlockContent } from "@/forks"
 
 export async function createBlock(
@@ -41,7 +42,7 @@ export async function createBlock(
     block.hash = Hashing.sha256(serializeBlockContent(block.content, blockNumber))
     // Signing the block and adding the signature to the block validation data
 
-    const blockSignature = await ucrypto.sign(
+    const blockSignature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(block.hash),
     )

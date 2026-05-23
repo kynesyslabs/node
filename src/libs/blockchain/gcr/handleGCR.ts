@@ -19,27 +19,10 @@
  * - Also implement the new GCROperation structure replacing the old Operation one
  */
 
-import { emptyResponse } from "./../../network/server_rpc"
 import _ from "lodash"
-// NOTE This will replace gcr.ts methods for calling the native tables
-import { GCRSubnetsTxs } from "src/model/entities/GCRv2/GCRSubnetsTxs" // TODO Put this in the sdk when done
-import { GCRHashes } from "src/model/entities/GCRv2/GCRHashes"
-import {
-    RPCResponse,
-    Transaction,
-    TransactionContent,
-} from "@kynesyslabs/demosdk/types"
+
+import { Transaction, TransactionContent } from "@kynesyslabs/demosdk/types"
 import Datasource, { dataSource } from "src/model/datasource"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import hashGCRTables from "./gcr_routines/hashGCR"
-import * as GCRJsonbHandler from "./gcr_routines/gcrJSONBHandler"
-import ensureGCRForUser from "./gcr_routines/ensureGCRForUser"
-import gcrStateSave from "./gcr_routines/gcrStateSaverHelper"
-import { assignXM } from "./gcr_routines/assignXM"
-import { assignWeb2 } from "./gcr_routines/assignWeb2"
-import IdentityManager from "./gcr_routines/identityManager"
-import manageNative from "./gcr_routines/manageNative"
 import { GCREdit, GCREditStorageProgram } from "@kynesyslabs/demosdk/types"
 import {
     GCREditBalance,
@@ -52,13 +35,13 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
-import { GCRTracker } from "src/model/entities/GCR/GCRTracker"
+import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
+import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
-import Chain from "../chain"
-import { In, Repository } from "typeorm"
+import { In } from "typeorm"
 import { Mutex } from "async-mutex"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
@@ -84,10 +67,6 @@ export type GetNativePropertiesOptions = {
     xm?: boolean
     web2?: boolean
     other?: boolean
-}
-
-export type GetNativeSubnetsTxsOptions = {
-    txData?: boolean
 }
 
 export interface GCRResult {
@@ -116,6 +95,12 @@ export interface GCRApplyResult {
     message: string
     sideEffects: (() => Promise<void>)[]
     appliedEditsCount: number
+}
+
+/** Per-assignment record for the gcr_assigned_txs relation. */
+export interface AssignedTxRecord {
+    txHash: string
+    blockNumber: number
 }
 
 type IndexedSideEffect = {
@@ -170,183 +155,43 @@ export default class HandleGCR {
         "escrow",
     ])
 
-    static async getNativeStatus(
-        publicKey: string,
-        options: GetNativeStatusOptions = {
-            balance: true,
-            nonce: true,
-            txList: false,
-            identities: true,
-            extended: false,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        // Getting the datasource
-        const db = await Datasource.getInstance()
-        const globalChangeRegistryRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // Getting the status native data
-        const globalChangeRegistrySearch =
-            await globalChangeRegistryRepository.findOneBy({
-                publicKey: publicKey,
-            })
-        if (!globalChangeRegistrySearch) {
-            response.response = "Address not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const globalChangeRegistryData: GlobalChangeRegistry = {
-            id: globalChangeRegistrySearch.id,
-            publicKey: globalChangeRegistrySearch.publicKey,
-            details: globalChangeRegistrySearch.details,
-            extended: globalChangeRegistrySearch.extended,
-        }
-        // Selecting only the requested data
-        if (options.balance) {
-            globalChangeRegistryData.details.content.balance =
-                globalChangeRegistrySearch.details.content.balance
-        }
-        if (options.nonce) {
-            globalChangeRegistryData.details.content.nonce =
-                globalChangeRegistrySearch.details.content.nonce
-        }
-        if (options.txList) {
-            globalChangeRegistryData.details.content.txs =
-                globalChangeRegistrySearch.details.content.txs
-        }
-        if (options.identities) {
-            globalChangeRegistryData.details.content.identities =
-                globalChangeRegistrySearch.details.content.identities
-        }
-        if (options.extended) {
-            globalChangeRegistryData.extended =
-                globalChangeRegistrySearch.extended
-        }
-        response.response = globalChangeRegistryData
-        return response
-    }
-
-    static async getNativeProperties(
-        publicKey: string,
-        options: GetNativePropertiesOptions = {
-            tokens: true,
-            nfts: true,
-            xm: true,
-            web2: true,
-            other: false,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        // Getting the datasource
-        const db = await Datasource.getInstance()
-        const gcrExtendedRepository = db
-            .getDataSource()
-            .getRepository(GlobalChangeRegistry)
-        // Getting the status properties data
-        const repositorySearch = await gcrExtendedRepository.findOneBy({
-            publicKey: publicKey,
-        })
-        const gcrExtendedSearch = repositorySearch.extended
-        if (!gcrExtendedSearch) {
-            response.response = "Address not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const gcrExtendedData: GCRExtended = {
-            tokens: gcrExtendedSearch.tokens,
-            nfts: gcrExtendedSearch.nfts,
-            xm: gcrExtendedSearch.xm,
-            web2: gcrExtendedSearch.web2,
-            other: gcrExtendedSearch.other,
-        }
-        // Selecting only the requested data
-        if (options.tokens) {
-            gcrExtendedData.tokens = gcrExtendedSearch.tokens
-        }
-        if (options.nfts) {
-            gcrExtendedData.nfts = gcrExtendedSearch.nfts
-        }
-        if (options.xm) {
-            gcrExtendedData.xm = gcrExtendedSearch.xm
-        }
-        if (options.web2) {
-            gcrExtendedData.web2 = gcrExtendedSearch.web2
-        }
-        response.response = gcrExtendedData
-        return response
-    }
-
-    static async getNativeSubnetsTxs(
-        subnetId: string,
-        options: GetNativeSubnetsTxsOptions = {
-            txData: true,
-        },
-    ): Promise<RPCResponse> {
-        const response: RPCResponse = _.cloneDeep(emptyResponse)
-        const db = await Datasource.getInstance()
-        const gcrSubnetsTxsRepository = db
-            .getDataSource()
-            .getRepository(GCRSubnetsTxs)
-        // Getting the status subnets txs data
-        const gcrSubnetsTxsSearch = await gcrSubnetsTxsRepository.findBy({
-            subnet_id: subnetId,
-        })
-        if (!gcrSubnetsTxsSearch) {
-            response.response = "Subnet not found"
-            response.result = 404
-            return response
-        }
-        // Preparing the response
-        const gcrSubnetsTxsData: GCRSubnetsTxs[] = []
-        // Selecting only the requested data
-        if (!options.txData) {
-            for (const tx of gcrSubnetsTxsSearch) {
-                tx.tx_data = null
-                gcrSubnetsTxsData.push(tx)
-            }
-        }
-        response.response = gcrSubnetsTxsData
-        return response
-    }
-
     /**
-     * Bulk update assignedTxs using raw SQL for efficiency
+     * Record (pubkey, txHash, blockNumber) assignments into gcr_assigned_txs.
+     *
+     * Replaces the previous design where these tuples were appended to a
+     * jsonb array on gcr_main. The append-rewrite pattern caused unbounded
+     * TOAST churn (see MoveAssignedTxsToOwnTable migration for context).
+     *
+     * Idempotent via the (pubkey, tx_hash) primary key + orIgnore() — safe
+     * during rollback or replay where the same (pubkey, tx) pair recurs.
      */
     static async bulkUpdateAssignedTxs(
-        updates: Map<string, string[]>,
+        updates: Map<string, AssignedTxRecord[]>,
     ): Promise<void> {
         if (updates.size === 0) return
 
-        const db = await Datasource.getInstance()
-        const queryRunner = db.getDataSource().createQueryRunner()
-
-        try {
-            // Build VALUES clause with proper escaping
-            // assignedTxs is jsonb, so we use jsonb arrays and || operator for concatenation
-            const valueEntries: string[] = []
-            for (const [pubkey, txHashes] of updates.entries()) {
-                const escapedPubkey = pubkey.replace(/'/g, "''")
-                // Create a JSON array string for jsonb
-                const jsonArray = JSON.stringify(txHashes).replace(/'/g, "''")
-                valueEntries.push(
-                    `('${escapedPubkey}'::text, '${jsonArray}'::jsonb)`,
-                )
+        const rows: { pubkey: string; txHash: string; blockNumber: number }[] =
+            []
+        for (const [pubkey, records] of updates.entries()) {
+            for (const r of records) {
+                rows.push({
+                    pubkey,
+                    txHash: r.txHash,
+                    blockNumber: r.blockNumber,
+                })
             }
+        }
+        if (rows.length === 0) return
 
-            const sql = `
-            UPDATE gcr_main AS g
-            SET "assignedTxs" = COALESCE(g."assignedTxs", '[]'::jsonb) || v.new_txs,
-                "updatedAt" = NOW()
-            FROM (VALUES ${valueEntries.join(",\n")}) AS v(pubkey, new_txs)
-            WHERE g.pubkey = v.pubkey
-        `
-
-            await queryRunner.query(sql)
-        } finally {
-            await queryRunner.release()
+        const repo = dataSource.getRepository(GCRAssignedTx)
+        for (let i = 0; i < rows.length; i += CHUNK_ASSIGNED_TXS) {
+            const chunk = rows.slice(i, i + CHUNK_ASSIGNED_TXS)
+            await repo
+                .createQueryBuilder()
+                .insert()
+                .values(chunk)
+                .orIgnore()
+                .execute()
         }
     }
 
@@ -716,7 +561,7 @@ export default class HandleGCR {
         }
 
         const end = Date.now()
-        log.debug(
+        log.only(
             `[partitionIndependentTxs] Time taken: ${end - now}ms for ${txs.length} txs`,
         )
 
@@ -732,9 +577,14 @@ export default class HandleGCR {
         const successful: string[] = []
         const failed: string[] = []
         const sideEffects: IndexedSideEffect[] = []
-        const assignedTxs = new Map<string, string[]>()
+        const assignedTxs = new Map<string, AssignedTxRecord[]>()
 
-        for (const tx of group) {
+        for (let j = 0; j < group.length; j++) {
+            if (j > 0 && j % 8 === 0) {
+                await new Promise<void>(resolve => setImmediate(resolve))
+            }
+
+            const tx = group[j]
             const applyResult = await HandleGCR.applyTransaction(
                 entities,
                 tx,
@@ -760,7 +610,10 @@ export default class HandleGCR {
                     bucket = []
                     assignedTxs.set(sender, bucket)
                 }
-                bucket.push(tx.hash)
+                bucket.push({
+                    txHash: tx.hash,
+                    blockNumber: tx.blockNumber ?? 0,
+                })
             }
 
             successful.push(tx.hash)
@@ -784,7 +637,7 @@ export default class HandleGCR {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
 
-        const assignedTxsUpdates = new Map<string, string[]>()
+        const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         // filter out txs that don't mutate entities
         const toFilter = new Set<TransactionContent["type"]>([
@@ -803,7 +656,10 @@ export default class HandleGCR {
 
                 if (sender) {
                     const bucket = assignedTxsUpdates.get(sender) || []
-                    bucket.push(tx.hash)
+                    bucket.push({
+                        txHash: tx.hash,
+                        blockNumber: tx.blockNumber ?? 0,
+                    })
                     assignedTxsUpdates.set(sender, bucket)
                 }
             } else {
@@ -855,12 +711,12 @@ export default class HandleGCR {
             for (const h of r.successful) successfulSet.add(h)
             for (const h of r.failed) failedSet.add(h)
             allIndexedSideEffects.push(...r.sideEffects)
-            for (const [sender, hashes] of r.assignedTxs) {
+            for (const [sender, records] of r.assignedTxs) {
                 const existing = assignedTxsUpdates.get(sender)
                 if (existing) {
-                    existing.push(...hashes)
+                    existing.push(...records)
                 } else {
-                    assignedTxsUpdates.set(sender, hashes)
+                    assignedTxsUpdates.set(sender, records)
                 }
             }
         }
@@ -884,16 +740,20 @@ export default class HandleGCR {
                 log.debug(
                     `[applyTransactions] Updating ${assignedTxsUpdates.size} assignedTxs`,
                 )
+
+                // TODO: Move this to after transactions have been saved to the database
                 await this.bulkUpdateAssignedTxs(assignedTxsUpdates)
             }
         })
 
         const end = Date.now()
-        log.debug(
+        log.only(
             `[applyTransactions] Time taken: ${(end - now) / 1000}s for ${finalTxs.length} txs across ${groups.length} groups (${txs.length - finalTxs.length} non-state-mutating skipped)`,
         )
-        log.debug(`[applyTransactions] Non-state-mutating skipped: ${txs.length - finalTxs.length}`)
-        log.debug(`[applyTransactions] Total txs: ${txs.length}`)
+        log.only(
+            `[applyTransactions] Non-state-mutating skipped: ${txs.length - finalTxs.length}`,
+        )
+        log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
         return { successfulTxs, failedTxs }
     }
@@ -908,6 +768,7 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         sideEffects: (() => Promise<void>)[],
     ) {
+        const now = Date.now()
         // Save GCRMain entities
         const entitiesToSave = entities.accounts.values().toArray()
         entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
@@ -983,6 +844,11 @@ export default class HandleGCR {
                 )
             }
         }
+
+        const end = Date.now()
+        log.only(
+            `[saveGCREditChanges] Time taken: ${(end - now) / 1000}s for ${sideEffects.length} side effects`,
+        )
     }
 
     // REVIEW Implement the execution of GCREdit objects
@@ -1374,55 +1240,6 @@ export default class HandleGCR {
         )
     }
 
-    // ! SECTION GCREdit methods
-
-    // Assign methods // ? Probably to remove
-
-    // TODO We have to port these methods from gcr.ts, now they are just proxies
-    assign = {
-        xm: assignXM,
-        web2: assignWeb2,
-        identity: {
-            assignFromWrite: IdentityManager.inferIdentityFromWrite,
-        },
-    }
-
-    // This is a proxy to the manageNative methods for simplicity
-    native = manageNative
-
-    // Utilities
-    utilities = {
-        ensureGCRForUser,
-    }
-
-    // State save methods
-    save = gcrStateSave
-
-    // Hash methods
-    hash = {
-        tables: hashGCRTables,
-    }
-
-    // JSONB methods
-    jsonb = {
-        get: GCRJsonbHandler.getJSONBValue,
-        update: GCRJsonbHandler.updateJSONBValue,
-    }
-
-    private static async getRepositories() {
-        const db = await Datasource.getInstance()
-        const dataSource = db.getDataSource()
-
-        return {
-            main: dataSource.getRepository(GCRMain),
-            hashes: dataSource.getRepository(GCRHashes),
-            subnetsTxs: dataSource.getRepository(GCRSubnetsTxs),
-            tracker: dataSource.getRepository(GCRTracker),
-            tlsnotary: dataSource.getRepository(GCRTLSNotary),
-            storageProgram: dataSource.getRepository(GCRStorageProgram),
-        }
-    }
-
     // Create methods
     /**
      * Creates a new GCRMain account.
@@ -1457,7 +1274,6 @@ export default class HandleGCR {
             ud: [],
         }
 
-        account.assignedTxs = []
         account.nonce = fillData["nonce"] || 0
         account.points = fillData["points"] || {
             totalPoints: 0,

@@ -9,6 +9,7 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import getShard from "./getShard"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -54,11 +55,12 @@ export default async function manageProposeBlockHash(
             "[manageProposeBlockHash] Candidate block not formed: refusing the block hash",
         )
 
-        response.result = 401
+        response.result = 404
         response.response = getSharedState.publicKeyHex
         response.extra = "Candidate block not formed"
         return response
     }
+
     const ourCandidateHash = getSharedState.candidateBlock.hash
     if (ourCandidateHash === blockHash) {
         log.info(
@@ -74,7 +76,7 @@ export default async function manageProposeBlockHash(
             let isValid = false
 
             try {
-                isValid = await ucrypto.verify({
+                isValid = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
                     message: new TextEncoder().encode(
                         getSharedState.candidateBlock.hash,

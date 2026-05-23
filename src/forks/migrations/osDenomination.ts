@@ -18,13 +18,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  * Three balance-bearing sources are migrated:
  *
  *  1. **GCRv2 `gcr_main.balance`** (`bigint`) — single UPDATE × 10^9.
- *  2. **Legacy `global_change_registry.details.content.balance`** (JSONB
- *     storing a JS `number`) — row-by-row with a CAP policy. JS numbers
- *     can't safely hold > `Number.MAX_SAFE_INTEGER` (2^53-1), so any
- *     account whose post-multiplication value would exceed
- *     `Math.floor(MAX_SAFE_INTEGER * 0.9)` is capped at that value and
- *     the lost OS amount is recorded loudly in logs and `fork_state`.
- *  3. **`validators.staked_amount`** (`text`, bigint-as-string) — single
+ *  2. **`validators.staked_amount`** (`text`, bigint-as-string) — single
  *     UPDATE that multiplies the cast numeric × 10^9.
  *
  * The migration runs **inside the caller-provided EntityManager**. This is
@@ -190,7 +184,7 @@ export async function computePreSumDem(
 }> {
     let sum = 0n
     let gcrV2RowCount = 0
-    let legacyRowCount = 0
+    const legacyRowCount = 0
     let validatorsRowCount = 0
 
     // GCRv2 — bigint column. Rows where balance is null are tolerated as 0.
@@ -200,21 +194,6 @@ export async function computePreSumDem(
         gcrV2RowCount += 1
         if (row.balance === null || row.balance === undefined) continue
         sum += toBigInt(row.balance)
-    }
-
-    // Legacy GCR — JSONB `details` column with `content.balance` as a JS
-    // number. We read the whole row and grab `details.content.balance`.
-    const legacyRows: Array<{
-        id: number
-        details: unknown
-    }> = await entityManager.query(
-        "SELECT id, details FROM global_change_registry",
-    )
-    for (const row of legacyRows) {
-        legacyRowCount += 1
-        const balance = readLegacyBalance(row.details)
-        if (balance === null) continue
-        sum += BigInt(Math.trunc(balance))
     }
 
     // Validators stake — text bigint-as-string. Malformed rows are skipped
@@ -252,15 +231,6 @@ export async function computePostSumOs(
     for (const row of gcrV2Rows) {
         if (row.balance === null || row.balance === undefined) continue
         sum += toBigInt(row.balance)
-    }
-
-    const legacyRows: Array<{ details: unknown }> = await entityManager.query(
-        "SELECT details FROM global_change_registry",
-    )
-    for (const row of legacyRows) {
-        const balance = readLegacyBalance(row.details)
-        if (balance === null) continue
-        sum += BigInt(Math.trunc(balance))
     }
 
     const validatorRows: Array<{ staked_amount: string | null }> =
@@ -329,60 +299,8 @@ export async function runOsDenominationMigration(
         `[forks][osDenomination] gcr_main migrated (rows=${gcrV2RowCount})`,
     )
 
-    // 4. Migrate legacy GCR row-by-row (CAP policy).
-    let cappedCount = 0
-    let totalValueLostOs = 0n
-    const legacyRows: Array<{ id: number; details: unknown }> =
-        await entityManager.query(
-            "SELECT id, details FROM global_change_registry",
-        )
-    for (const row of legacyRows) {
-        const parsed = parseLegacyDetails(row.details)
-        if (parsed === null) continue
-        const balance = parsed?.content?.balance
-        if (typeof balance !== "number" || !isFinite(balance)) continue
-
-        const preBalanceDem = BigInt(Math.trunc(balance))
-        const uncappedOs = preBalanceDem * OS_PER_DEM
-
-        let postBalanceOs = uncappedOs
-        if (uncappedOs > LEGACY_NUMBER_CAP) {
-            postBalanceOs = LEGACY_NUMBER_CAP
-            const valueLost = uncappedOs - LEGACY_NUMBER_CAP
-            cappedCount += 1
-            totalValueLostOs += valueLost
-            log.warning(
-                "[forks][osDenomination] CAP applied: " +
-                    `account=${getLegacyAccountTag(parsed)} ` +
-                    `preBalanceDem=${preBalanceDem.toString()} ` +
-                    `postBalanceOs=${postBalanceOs.toString()} ` +
-                    `valueLostOs=${valueLost.toString()}`,
-            )
-        }
-
-        // Build the new details, preserving every other field. The post-cap
-        // value must round-trip through JS `number`, which is fine because
-        // the cap is below MAX_SAFE_INTEGER by definition.
-        const newDetails = {
-            ...parsed,
-            content: {
-                ...parsed.content,
-                balance: Number(postBalanceOs),
-            },
-        }
-        const pDetails = placeholder(entityManager, 1)
-        const pId = placeholder(entityManager, 2)
-        await entityManager.query(
-            `UPDATE global_change_registry SET details = ${pDetails} WHERE id = ${pId}`,
-            [serializeLegacyDetails(newDetails, row.details), row.id],
-        )
-    }
-    log.info(
-        "[forks][osDenomination] global_change_registry migrated " +
-            `(rows=${legacyRowCount}, capped=${cappedCount}, ` +
-            `valueLostOs=${totalValueLostOs.toString()})`,
-    )
-
+    const cappedCount = 0
+    const totalValueLostOs = 0n
     // 5. Migrate Validators stake — single bulk UPDATE that handles '0'
     // and any valid bigint string. We use raw SQL with a portable pattern:
     // the cast-as-text/cast-as-numeric round-trip is supported by both

@@ -16,8 +16,6 @@ import { Peer } from "../peer"
 import Transaction from "./transaction"
 import { Blocks } from "src/model/entities/Blocks"
 import { Transactions } from "src/model/entities/Transactions"
-import { GCRExtended } from "src/model/entities/GCR/GlobalChangeRegistry"
-import { GlobalChangeRegistry } from "src/model/entities/GCR/GlobalChangeRegistry"
 import type { Operation } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 
@@ -25,7 +23,6 @@ import { setupChainDb, readSql, writeSql, getBlocksRepo, getTransactionsRepo } f
 import * as blockOps from "./chainBlocks"
 import * as txOps from "./chainTransactions"
 import * as genesisOps from "./chainGenesis"
-import * as statusOps from "./chainStatus"
 import type { TxStatus } from "./chainTypes"
 
 export type { TxStatus } from "./chainTypes"
@@ -165,38 +162,5 @@ export default class Chain {
     // ── Genesis ───────────────────────────────────────────────
     static async generateGenesisBlock(genesisData: any): Promise<Block> {
         return genesisOps.generateGenesisBlock(genesisData)
-    }
-
-    static async generateGenesisBlocks(genesisJsons: any[]): Promise<string> {
-        return genesisOps.generateGenesisBlocks(genesisJsons)
-    }
-
-    static async getGenesisUniqueBlock() {
-        return genesisOps.getGenesisUniqueBlock()
-    }
-
-    // ── Status ────────────────────────────────────────────────
-    static async statusOf(
-        address: string,
-        type: number,
-    ): Promise<GlobalChangeRegistry | GCRExtended | null> {
-        return statusOps.statusOf(address, type)
-    }
-
-    static async statusHashAt(blockNumber: number) {
-        return statusOps.statusHashAt(blockNumber)
-    }
-
-    // ── Maintenance ───────────────────────────────────────────
-    static async pruneBlocksToGenesisBlock(): Promise<void> {
-        return blockOps.pruneBlocksToGenesisBlock()
-    }
-
-    static async nukeGenesis(): Promise<void> {
-        return blockOps.nukeGenesis()
-    }
-
-    static async updateGenesisTimestamp(newTimestamp: number): Promise<void> {
-        return blockOps.updateGenesisTimestamp(newTimestamp)
     }
 }

@@ -15,8 +15,6 @@ import { bigintNumericTransformer } from "../transformers"
 export class GCRMain {
     @PrimaryColumn({ type: "text", name: "pubkey" })
     pubkey: string
-    @Column({ type: "jsonb", name: "assignedTxs" })
-    assignedTxs: string[]
     @Column({ type: "integer", name: "nonce" })
     nonce: number
     /**

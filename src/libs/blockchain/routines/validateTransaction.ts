@@ -13,9 +13,7 @@ import { pki } from "node-forge"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
-import executeNativeTransaction from "src/libs/blockchain/routines/executeNativeTransaction"
 import Transaction from "src/libs/blockchain/transaction"
-import Cryptography from "src/libs/crypto/cryptography"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -23,6 +21,7 @@ import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "../validation/txValidatorPool"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 
@@ -34,7 +33,12 @@ export async function confirmTransaction(
 ): Promise<ValidityData> {
     log.info("TX", "[Native Tx Validation] Validating transaction...")
     // Getting the current block number
+    const getLastBlockNumberStart = Date.now()
     const referenceBlock = await Chain.getLastBlockNumber()
+    const getLastBlockNumberEnd = Date.now()
+    log.only(
+        `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
+    )
     // REVIEW This should work just fine
     log.debug(
         `[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`,
@@ -196,7 +200,7 @@ async function signValidityData(data: ValidityData): Promise<ValidityData> {
     const hash = Hashing.sha256(JSON.stringify(data.data))
     // return data
 
-    const signature = await ucrypto.sign(
+    const signature = await TxValidatorPool.getInstance().sign(
         getSharedState.signingAlgorithm,
         new TextEncoder().encode(hash),
     )
@@ -231,13 +235,16 @@ async function defineGas(
         log.debug(`[TX] defineGas - Calculating gas for: ${from}`)
     } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e)
-        log.error("TX", `[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction: ${errorMsg}`)
+        log.error(
+            "TX",
+            `[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction: ${errorMsg}`,
+        )
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )
@@ -252,10 +259,13 @@ async function defineGas(
     // via BigInt() coercion below.
     let fromBalance = 0n
     try {
-        fromBalance = await GCR.getGCRNativeBalance(from)
+        fromBalance = await GCR.getAccountBalance(from)
     } catch (e) {
         const errorMsg = e instanceof Error ? e.message : String(e)
-        log.error("TX", `[Native Tx Validation] [BALANCE ERROR] No balance found for address ${from}: ${errorMsg}`)
+        log.error(
+            "TX",
+            `[Native Tx Validation] [BALANCE ERROR] No balance found for address ${from}: ${errorMsg}`,
+        )
         validityData.data.message =
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
@@ -263,7 +273,7 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )
@@ -317,7 +327,7 @@ async function defineGas(
         // Hash the validation data
         const hash = Hashing.sha256(JSON.stringify(validityData.data))
         // Sign the hash
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hash),
         )
@@ -357,30 +367,4 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
     // TODO Get, check and increment the nonce of the transaction
     // while returning either true or false
     return validNonce
-}
-
-// TODO a verified transaction should be signed by the same rpc that verified it and should be only valid for the current consensus round
-export async function broadcastVerifiedNativeTransaction(
-    validityData: ValidityData,
-): Promise<[boolean, string, Operation[]?]> {
-    // REVIEW Execute or Revert the transaction
-    // NOTE executeTransaction returns an array of [success, message, operations]
-    // The operations are the Operation objects that are executed in the GCR after the consensus
-    // has confirmed the transaction in the block.
-
-    const execution = await executeNativeTransaction(
-        validityData.data.transaction,
-    )
-    if (!execution[0]) {
-        return [false, "Execution failed: " + execution[1]]
-    }
-
-    // ANCHOR TX Pre-execution, operation derivation and GCR Operation registry update are defined here
-
-    // NOTE Deprecated in favor of the GCREdit system
-    // and the gas will be deducted anyway
-    //console.log("[TX RECEIVED] Gas Operation added to the GCR\n")
-    //GCR.getInstance().operations.push(validityData.data.gas_operation)
-
-    return execution
 }

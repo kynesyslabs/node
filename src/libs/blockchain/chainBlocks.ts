@@ -1,16 +1,32 @@
-import { ILike, LessThan, MoreThan, QueryFailedError } from "typeorm"
+import { LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
 import Transaction, { toTransactionsEntity } from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
+import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import { handleError } from "src/errors"
-import { getBlocksRepo, getTransactionsRepo } from "./chainDb"
+import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
+import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
+import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
+import { loadNetworkParameters } from "./routines/loadNetworkParameters"
+import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
+import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
+import {
+    isOsDenominationMigrationApplied,
+    runOsDenominationMigration,
+} from "@/forks/migrations/osDenomination"
+import {
+    isGasFeeSeparationMigrationApplied,
+    runGasFeeSeparationMigration,
+} from "@/forks/migrations/gasFeeSeparation"
+import { isForkActive } from "@/forks/forkGates"
+import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
@@ -50,23 +66,59 @@ export async function getLastBlock(): Promise<Blocks> {
 
 export async function getLastBlockNumber(): Promise<number> {
     if (!getSharedState.lastBlockNumber) {
-        const lastBlock = await getLastBlock()
-        return lastBlock ? lastBlock.number : 0
+        const block = await getBlocksRepo()
+            .createQueryBuilder("block")
+            .select("block.number")
+            .orderBy("block.number", "DESC")
+            .limit(1)
+            .getOne()
+
+        return block ? block.number : 0
     }
+
     return getSharedState.lastBlockNumber
 }
 
 export async function getLastBlockHash() {
     if (!getSharedState.lastBlockHash) {
-        const lastBlock = await getLastBlock()
-        return lastBlock ? lastBlock.hash : null
+        const block = await getBlocksRepo()
+            .createQueryBuilder("block")
+            .select("block.hash")
+            .orderBy("block.number", "DESC")
+            .limit(1)
+            .getOne()
+
+        return block ? block.hash : null
     }
+
     return getSharedState.lastBlockHash
 }
 
 export async function getLastBlockTransactionSet(): Promise<Set<string>> {
-    const lastBlock = await getLastBlock()
-    return new Set(lastBlock.content.ordered_transactions)
+    const query = getBlocksRepo()
+        .createQueryBuilder("block")
+        .select("block.content")
+
+    if (getSharedState.lastBlockNumber) {
+        query.where("block.number = :number", {
+            number: getSharedState.lastBlockNumber,
+        })
+    } else {
+        query.orderBy("block.number", "DESC").limit(1)
+    }
+
+    const block = await query.getOne()
+    return new Set(block?.content?.ordered_transactions ?? [])
+}
+
+export async function getLastBlockSigners(): Promise<string[]> {
+    const lastBlock = await getBlocksRepo().findOne({
+        where: { number: getSharedState.lastBlockNumber },
+        select: ["validation_data"],
+    })
+
+    const sigs = lastBlock?.validation_data?.signatures
+    return sigs ? Object.keys(sigs) : []
 }
 
 export async function getBlocks(
@@ -93,7 +145,7 @@ export async function getBlockByNumber(number: number): Promise<Blocks> {
 }
 
 export async function getBlockByHash(hash: string): Promise<Blocks> {
-    return await getBlocksRepo().findOneBy({ hash: ILike(hash) })
+    return await getBlocksRepo().findOneBy({ hash: hash })
 }
 
 export async function getGenesisBlock(): Promise<Blocks> {
@@ -162,7 +214,6 @@ export async function insertBlock(
     cleanMempool = true,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
-    const transactionsRepo = getTransactionsRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
 
     const newBlock = new Blocks()
@@ -216,12 +267,21 @@ export async function insertBlock(
         orderedTransactionsHashes,
     )
 
+    // DEBUG: Confirm all transactions' blockNumber == block.number
+    // if (transactionEntities.some(tx => tx.blockNumber !== block.number)) {
+    //     log.error(
+    //         `[insertBlock] Transaction blockNumber mismatch: ${transactionEntities.map(tx => tx.blockNumber).join(", ")}`,
+    //     )
+    //     process.exit(1)
+    // }
+
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
 
     try {
         const result = await dataSource.transaction(
             async transactionalEntityManager => {
+                const saveBlockStart = Date.now()
                 // REVIEW: P3b — fork-activation hook. Runs *before* the
                 // block is persisted so balances are migrated atomically
                 // with the triggering block. Either both commit or both
@@ -282,61 +342,65 @@ export async function insertBlock(
                     newBlock,
                 )
 
-                const queryRunner = transactionalEntityManager.queryRunner
-                for (let i = 0; i < transactionEntities.length; i++) {
-                    const tx = transactionEntities[i]
-                    const savepoint = `tx_insert_${i}`
+                if (block.number > getSharedState.lastBlockNumber) {
+                    getSharedState.lastBlockNumber = block.number
+                    getSharedState.lastBlockHash = block.hash
+                }
 
-                    await queryRunner.query(`SAVEPOINT ${savepoint}`)
-                    try {
-                        const rawTransaction = Transaction.toRawTransaction(
-                            tx,
-                            "confirmed",
+                const saveBlockEnd = Date.now()
+                log.only(
+                    `[insertBlock] Save block took ${saveBlockEnd - saveBlockStart}ms`,
+                )
+
+                const insertTransactionsStart = Date.now()
+
+                if (transactionEntities.length > 0) {
+                    const rawTransactions = transactionEntities.map(tx =>
+                        Transaction.toRawTransaction(tx, "confirmed"),
+                    )
+
+                    const { skipped } = await chunkedInsert(
+                        transactionalEntityManager,
+                        Transactions,
+                        rawTransactions.map(tx => toTransactionsEntity(tx)),
+                        CHUNK_TRANSACTIONS,
+                    )
+                    if (skipped > 0) {
+                        log.warn(
+                            `[ChainDB] Skipped ${skipped} duplicate transaction(s) in block ${block.number}`,
                         )
-                        // REVIEW P5a: bridge wire-shape `RawTransaction` to
-                        // entity-shape `Transactions` (bigint amount/fees).
-                        // Runtime payload unchanged.
-                        await transactionalEntityManager.save(
-                            transactionsRepo.target,
-                            toTransactionsEntity(rawTransaction),
-                        )
+                    }
+
+                    const l2psTxs = transactionEntities.filter(
+                        tx => tx.content?.type === "l2ps_hash_update",
+                    )
+                    for (const tx of l2psTxs) {
                         await persistConfirmedTransactionProjection(
                             tx,
                             block.number,
                             transactionalEntityManager,
                         )
-                        await queryRunner.query(
-                            `RELEASE SAVEPOINT ${savepoint}`,
-                        )
-                    } catch (error) {
-                        await queryRunner.query(
-                            `ROLLBACK TO SAVEPOINT ${savepoint}`,
-                        )
-                        if (error instanceof QueryFailedError) {
-                            log.error(
-                                `[ChainDB] [ ERROR ]: Failed to insert transaction ${tx.hash}. Skipping it ...`,
-                            )
-                            log.error(`Message: ${error.message}`)
-                            continue
-                        }
-
-                        log.error(
-                            "Unexpected error while inserting tx: " + tx.hash,
-                        )
-                        handleError(error, "CHAIN", {
-                            source: "transaction insertion",
-                        })
-                        throw error
                     }
                 }
 
+                const insertTransactionsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Insert transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
+                )
+
+                const removeTransactionsStart = Date.now()
                 if (cleanMempool) {
                     await Mempool.removeTransactionsByHashes(
                         transactionEntities.map(tx => tx.hash),
                         transactionalEntityManager,
                     )
                 }
+                const removeTransactionsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Remove transactions took ${removeTransactionsEnd - removeTransactionsStart}ms`,
+                )
 
+                const commitmentsStart = Date.now()
                 const committedTxHashes = transactionEntities.map(tx => tx.hash)
                 if (committedTxHashes.length > 0) {
                     await transactionalEntityManager
@@ -351,7 +415,12 @@ export async function insertBlock(
                         })
                         .execute()
                 }
+                const commitmentsEnd = Date.now()
+                log.only(
+                    `[insertBlock] Commitments took ${commitmentsEnd - commitmentsStart}ms`,
+                )
 
+                const updateMerkleTreeStart = Date.now()
                 const commitmentsAdded = await updateMerkleTreeAfterBlock(
                     dataSource,
                     block.number,
@@ -362,6 +431,10 @@ export async function insertBlock(
                         `[ZK] Added ${commitmentsAdded} commitment(s) to Merkle tree for block ${block.number}`,
                     )
                 }
+                const updateMerkleTreeEnd = Date.now()
+                log.only(
+                    `[insertBlock] Update Merkle tree took ${updateMerkleTreeEnd - updateMerkleTreeStart}ms`,
+                )
 
                 // Governance hooks scoped to the block transaction so they
                 // commit/rollback atomically with it. sharedState refresh
@@ -381,11 +454,6 @@ export async function insertBlock(
                 return savedBlock
             },
         )
-
-        if (block.number > getSharedState.lastBlockNumber) {
-            getSharedState.lastBlockNumber = block.number
-            getSharedState.lastBlockHash = block.hash
-        }
 
         log.debug(
             "[insertBlock] lastBlockNumber: " + getSharedState.lastBlockNumber,

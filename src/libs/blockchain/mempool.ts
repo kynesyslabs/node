@@ -9,13 +9,14 @@ import {
 } from "typeorm"
 import Datasource from "@/model/datasource"
 
-import TxUtils from "./transaction"
 import log from "src/utilities/logger"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
+import TxValidatorPool from "./validation/txValidatorPool"
+import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -108,15 +109,12 @@ export default class Mempool {
             }
         }
 
-        let blockNumber: number = blockRef ?? undefined
+        if (blockRef === undefined) {
+            blockRef = getSharedState.lastBlockNumber + 1
 
-        // INFO: If we're in consensus, move tx to next block
-        if (getSharedState.inConsensusLoop && !blockNumber) {
-            blockNumber = SecretaryManager.lastBlockRef + 1
-        }
-
-        if (!blockNumber) {
-            blockNumber = (await Chain.getLastBlockNumber()) + 1
+            if (getSharedState.inConsensusLoop) {
+                blockRef = SecretaryManager.lastBlockRef + 1
+            }
         }
 
         try {
@@ -124,7 +122,7 @@ export default class Mempool {
                 ...transaction,
                 timestamp: BigInt(transaction.content.timestamp),
                 nonce: transaction.content.nonce,
-                blockNumber: blockNumber,
+                blockNumber: blockRef,
             })
 
             return {
@@ -160,9 +158,9 @@ export default class Mempool {
     }
 
     public static async receive(incoming: Transaction[]) {
-        if (!getSharedState.inConsensusLoop) {
+        if (incoming.length === 0) {
             return {
-                success: false,
+                success: true,
                 mempool: [],
             }
         }
@@ -177,51 +175,53 @@ export default class Mempool {
             tx => !existingHashes[tx.hash],
         )
 
+        log.only(
+            "[Mempool.receive] Unseen transcations: " +
+                JSON.stringify(
+                    unseenTransactions.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
+        log.only(
+            `[Mempool.receive] Unseen transactions: ${unseenTransactions.length}`,
+        )
+
         if (unseenTransactions.length === 0) {
+            const incomingHashes = new Set(incoming.map(tx => tx.hash))
             const finalPool = await this.getMempool(blockNumber)
             const final = finalPool.filter(
-                tx => tx.blockNumber === blockNumber,
+                tx =>
+                    tx.blockNumber <= blockNumber &&
+                    !incomingHashes.has(tx.hash),
             )
+
             return {
                 success: true,
                 mempool: final,
             }
         }
 
-        const validateOne = async (
-            tx: Transaction,
-        ): Promise<Transaction | null> => {
-            const isCoherent = TxUtils.isCoherent(tx)
-            if (!isCoherent) {
-                log.error(
-                    "[Mempool.receive] Transaction is not coherent: " + tx.hash,
-                )
-                return null
-            }
+        const now = Date.now()
+        const results =
+            await TxValidatorPool.getInstance().validate(unseenTransactions)
+        const end = Date.now()
+        log.only(
+            `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,
+        )
 
-            const { success: signatureValid } =
-                await TxUtils.validateSignature(tx)
-            if (!signatureValid) {
-                log.error(
-                    "[Mempool.receive] Transaction signature is not valid: " +
-                        tx.hash,
-                )
-                return null
+        const validTransactions: Transaction[] = []
+        for (let i = 0; i < unseenTransactions.length; i++) {
+            const r = results[i]
+            if (!r.valid) {
+                log.error(`[Mempool.receive] Invalid tx ${r.hash}: ${r.reason}`)
+                continue
             }
-
-            return tx
+            validTransactions.push(unseenTransactions[i])
         }
 
-        const BATCH_SIZE = 16
-        const validationResults: (Transaction | null)[] = []
-        for (let i = 0; i < unseenTransactions.length; i += BATCH_SIZE) {
-            const batch = unseenTransactions.slice(i, i + BATCH_SIZE)
-            const results = await Promise.all(batch.map(validateOne))
-            validationResults.push(...results)
-        }
-
-        const validTransactions = validationResults.filter(
-            (tx): tx is Transaction => tx !== null,
+        log.only(
+            `[Mempool.receive] Valid transactions: ${validTransactions.length}`,
         )
 
         for (const tx of validTransactions) {
@@ -230,17 +230,18 @@ export default class Mempool {
 
         if (validTransactions.length > 0) {
             try {
-                const insertResult = await this.repo
-                    .createQueryBuilder()
-                    .insert()
-                    .into(MempoolTx)
-                    .values(validTransactions)
-                    .orIgnore()
-                    .execute()
-
-                const insertedCount = insertResult.identifiers.length
-                log.debug(
-                    `[Mempool.receive] Inserted ${insertedCount}/${validTransactions.length} transactions`,
+                const { inserted } = await chunkedInsert(
+                    this.repo,
+                    MempoolTx,
+                    validTransactions as any[],
+                    CHUNK_MEMPOOL_TX,
+                    {
+                        conflictTarget: ["hash"],
+                        overwrite: ["blockNumber"],
+                    },
+                )
+                log.only(
+                    `[Mempool.receive] Inserted ${inserted}/${validTransactions.length} transactions`,
                 )
             } catch (error) {
                 log.error("[Mempool.receive] Error saving received mempool:")
@@ -248,7 +249,10 @@ export default class Mempool {
             }
         }
 
+        // DEBUG: Confirm all inserted transactions are in the mempool
+
         const finalPool = await this.getMempool(blockNumber)
+        log.only("[Mempool.receive] Final pool size: " + finalPool.length)
 
         // INFO: Redundancy
         // INFO: Return the difference to the caller node

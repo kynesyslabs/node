@@ -128,8 +128,8 @@ export default class SubOperations {
                 message: "Invalid amount",
             }
         }
-        const balanceFrom = await GCR.getGCRNativeBalance(from)
-        const balanceTo = await GCR.getGCRNativeBalance(to)
+        const balanceFrom = await GCR.getAccountBalance(from)
+        const balanceTo = await GCR.getAccountBalance(to)
         // Sanity checks
 
         if (amount === 0n) {
@@ -212,7 +212,7 @@ export default class SubOperations {
     static async addNative(operation: Operation): Promise<OperationResult> {
         const to: string = operation.params.to
         const amount: string = operation.params.amount
-        const balanceTo = await GCR.getGCRNativeBalance(to)
+        const balanceTo = await GCR.getAccountBalance(to)
         // Sanity checks
         if (amount === "0") {
             return {
@@ -252,7 +252,7 @@ export default class SubOperations {
     static async removeNative(operation: Operation): Promise<OperationResult> {
         const to: string = operation.params.to
         const amount: string = operation.params.amount
-        const balanceTo = await GCR.getGCRNativeBalance(to)
+        const balanceTo = await GCR.getAccountBalance(to)
         // Sanity checks
         if (amount === "0") {
             return {

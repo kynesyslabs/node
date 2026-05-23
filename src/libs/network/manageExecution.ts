@@ -40,9 +40,14 @@ export async function manageExecution(
         // Then we send the validation data to the client that can use it to execute the tx
         case "confirmTx": {
             log.info("SERVER", "Received confirmTx")
+            const handleValidateStart = Date.now()
             const validityData = await ServerHandlers.handleValidateTransaction(
                 content.data as Transaction,
                 sender,
+            )
+            const handleValidateEnd = Date.now()
+            log.only(
+                `[confirmTx] Transaction validated in ${handleValidateEnd - handleValidateStart}ms`,
             )
             returnValue.result = 200
             returnValue.response = validityData
@@ -73,9 +78,14 @@ export async function manageExecution(
             }
 
             try {
+                const handleExecuteStart = Date.now()
                 const result = await ServerHandlers.handleExecuteTransaction(
                     validityDataPayload,
                     sender,
+                )
+                const handleExecuteEnd = Date.now()
+                log.only(
+                    `[broadcastTx] Transaction executed in ${handleExecuteEnd - handleExecuteStart}ms`,
                 )
                 log.debug(
                     "[SERVER] Transaction executed. Sending back the result",

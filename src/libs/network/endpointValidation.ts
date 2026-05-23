@@ -1,7 +1,11 @@
 import Chain from "src/libs/blockchain/chain"
 import { confirmTransaction } from "src/libs/blockchain/routines/validateTransaction"
 import type { Transaction } from "@kynesyslabs/demosdk/types"
-import { ValidityData, GCREdit, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import {
+    ValidityData,
+    GCREdit,
+    SigningAlgorithm,
+} from "@kynesyslabs/demosdk/types"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
@@ -13,6 +17,8 @@ import {
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import GCR from "../blockchain/gcr/gcr"
 
 export async function handleValidateTransaction(
     tx: Transaction,
@@ -23,16 +29,29 @@ export async function handleValidateTransaction(
     log.info("SERVER", fname + "Handling transaction...")
     let validationData: ValidityData
     try {
+        const handleConfirmTransactionStart = Date.now()
         validationData = await confirmTransaction(tx, sender)
+        const handleConfirmTransactionEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] Transaction confirmed in ${handleConfirmTransactionEnd - handleConfirmTransactionStart}ms`,
+        )
 
+        const handleGcrEditsStart = Date.now()
         const gcrEdits = await GCRGeneration.generate(tx)
+        const handleGcrEditsEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] GCR edits generated in ${handleGcrEditsEnd - handleGcrEditsStart}ms`,
+        )
         gcrEdits.forEach((gcredit: GCREdit) => {
             gcredit.txhash = ""
         })
+        const handleGcrEditsHashStart = Date.now()
         const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
-        log.debug(
-            "[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash,
+        const handleGcrEditsHashEnd = Date.now()
+        log.only(
+            `[handleValidateTransaction] GCR edits hash generated in ${handleGcrEditsHashEnd - handleGcrEditsHashStart}ms`,
         )
+        log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
         const txGcrEditsHash = Hashing.sha256(
             JSON.stringify(tx.content.gcr_edits),
         )
@@ -43,9 +62,9 @@ export async function handleValidateTransaction(
         if (!comparison) {
             log.error(
                 "[handleValidateTransaction] GCREdit mismatch: " +
-                txGcrEditsHash +
-                " <> " +
-                gcrEditsHash,
+                    txGcrEditsHash +
+                    " <> " +
+                    gcrEditsHash,
             )
         }
         if (comparison) {
@@ -64,21 +83,18 @@ export async function handleValidateTransaction(
                             (edit.account as any)?.toString() === sender)),
             )
             .reduce(
-                (sum: bigint, edit: GCREdit) => sum + BigInt((edit as any).amount),
+                (sum: bigint, edit: GCREdit) =>
+                    sum + BigInt((edit as any).amount),
                 0n,
             )
 
         if (totalFee > 0n) {
-            const db = await Datasource.getInstance()
-            const gcrMainRepo = db
-                .getDataSource()
-                .getRepository(GCRMain)
-            const account = await gcrMainRepo.findOneBy({
-                pubkey: sender,
-            })
-            const senderBalance = account
-                ? BigInt(account.balance)
-                : 0n
+            const checkFeeStart = Date.now()
+            const senderBalance = await GCR.getAccountBalance(sender)
+            const checkFeeEnd = Date.now()
+            log.only(
+                `[handleValidateTransaction] Check fee in ${checkFeeEnd - checkFeeStart}ms`,
+            )
             if (senderBalance < totalFee) {
                 throw new Error(
                     `Insufficient balance: required ${totalFee.toString()}, available ${senderBalance.toString()}`,
@@ -104,7 +120,7 @@ export async function handleValidateTransaction(
         const hashedValidationData = Hashing.sha256(
             JSON.stringify(validationData.data),
         )
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(hashedValidationData),
         )

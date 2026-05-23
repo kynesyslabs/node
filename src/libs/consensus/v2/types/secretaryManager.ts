@@ -76,22 +76,22 @@ export default class SecretaryManager {
         // Assigning the secretary and its key
         this.shard.secretaryKey = this.secretary.identity
 
-        log.debug("\n\n\n")
-        log.debug("INITIALIZED SHARD:")
-        log.debug(
+        log.only("\n\n\n")
+        log.only("INITIALIZED SHARD:")
+        log.only(
             `SHARD: ${JSON.stringify(
                 this.shard.members.map(m => m.connection.string),
             )}`,
         )
-        log.debug(`SECRETARY: ${this.secretary.identity}`)
+        log.only(`SECRETARY: ${this.secretary.identity}`)
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {
-            log.debug(
+            log.only(
                 "⬜️ We are the secretary ⬜️. starting the secretary routine",
             )
             this.secretaryRoutine().finally(async () => {
-                log.debug("Secretary routine finished confetti confetti 🎊🎉")
+                log.only("Secretary routine finished confetti confetti 🎊🎉")
             })
         }
 
@@ -489,7 +489,7 @@ export default class SecretaryManager {
         // INFO: Check if that peer was the one holding the green light
         if (shouldRelease) {
             // INFO: If we are in the last phase, stop the secretary routine
-            if (this.ourValidatorPhase.currentPhase === 7) {
+            if (this.ourValidatorPhase.currentPhase === 6) {
                 this.runSecretaryRoutine = false
             }
 
@@ -875,42 +875,47 @@ export default class SecretaryManager {
 
     public async endConsensusRoutine() {
         log.debug("Ending the consensus routine")
-        const manager = SecretaryManager.instances.get(this.shard.blockRef)
+        let manager: SecretaryManager = null
+
+        if (this.shard) {
+            manager = SecretaryManager.instances.get(this.shard.blockRef)
+        }
 
         if (manager) {
             manager.runSecretaryRoutine = false
-        }
-        const filter = (key: string) =>
-            key.includes("greenLight" + this.shard.blockRef)
+            const filter = (key: string) =>
+                key.includes("greenLight" + this.shard.blockRef)
 
-        const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
-        const waiters = waiterKeys.map(key => Waiter.wait(key))
+            const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
+            const waiters = waiterKeys.map(key => Waiter.wait(key))
 
-        log.debug(
-            "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
-        )
-        log.debug(`Waiter keys: ${JSON.stringify(waiterKeys)}`)
-        try {
-            await Promise.all(waiters)
-        } catch (error) {
-            log.error(
-                `[SECRETARY] Error waiting for hanging greenlights: ${error}`,
+            log.debug(
+                "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
             )
-            process.exit(1)
+            log.debug(`Waiter keys: ${JSON.stringify(waiterKeys)}`)
+            try {
+                await Promise.all(waiters)
+            } catch (error) {
+                log.error(
+                    `[SECRETARY] Error waiting for hanging greenlights: ${error}`,
+                )
+                process.exit(1)
+            }
+
+            Waiter.preHeld
+                .keys()
+                .filter(filter)
+                .forEach(key => Waiter.preHeld.delete(key))
         }
 
         // INFO: Delete pre-held keys for ended consensus round
-        Waiter.preHeld
-            .keys()
-            .filter(filter)
-            .forEach(key => Waiter.preHeld.delete(key))
 
         log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 
         Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
 
-        if (SecretaryManager.getInstance(this.shard.blockRef) === this) {
+        if (manager && manager === this) {
             log.debug("deleting the instance")
             SecretaryManager.instances.delete(this.shard.blockRef)
         }

@@ -25,6 +25,7 @@ import { chainIds } from "sdk/localsdk/multichain/configs/chainIds"
 import { NomisWalletIdentity, SavedHumanPassportIdentity, EthosWalletIdentity } from "@/model/entities/types/IdentityTypes"
 import { HumanPassportProvider } from "@/libs/identity/tools/humanpassport"
 import { verifyMessage as verifyEvmMessage } from "ethers"
+import TxValidatorPool from "../../validation/txValidatorPool"
 
 function normalizeComparableAddress(address: string | undefined | null): string {
     return (address || "").trim().toLowerCase()
@@ -276,7 +277,7 @@ export default class IdentityManager {
         senderEd25519: string,
     ): Promise<{ success: boolean; message: string }> {
         for (const payload of payloads) {
-            const verified = await ucrypto.verify({
+            const verified = await TxValidatorPool.getInstance().verify({
                 algorithm: "ed25519",
                 signature: hexToUint8Array(payload.signature),
                 publicKey: hexToUint8Array(senderEd25519),

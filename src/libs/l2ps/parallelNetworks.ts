@@ -12,6 +12,7 @@ import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 /**
  * Configuration interface for an L2PS node.
@@ -298,7 +299,7 @@ export default class ParallelNetworks {
 
         // Sign encrypted transaction with node's private key
         const sharedState = getSharedState
-        const signature = await ucrypto.sign(
+        const signature = await TxValidatorPool.getInstance().sign(
             sharedState.signingAlgorithm,
             new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
         )
@@ -327,7 +328,7 @@ export default class ParallelNetworks {
 
         // Verify signature before decrypting
         if (encryptedTx.signature) {
-            const isValid = await ucrypto.verify({
+            const isValid = await TxValidatorPool.getInstance().verify({
                 algorithm: encryptedTx.signature.type as SigningAlgorithm,
                 message: new TextEncoder().encode(JSON.stringify(encryptedTx.content)),
                 publicKey: hexToUint8Array(encryptedTx.content.from as string),

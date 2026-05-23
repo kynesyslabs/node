@@ -12,7 +12,7 @@ export const DEFAULT_SIGNING_ALGORITHM = "ed25519" as const
 
 // --- Consensus / Block timing ---
 /** Default block time in seconds (should come from genesis in the future) */
-export const DEFAULT_BLOCK_TIME = 20
+export const DEFAULT_BLOCK_TIME = 10
 
 // --- Peer management ---
 /** How often to recheck peers (ms) */

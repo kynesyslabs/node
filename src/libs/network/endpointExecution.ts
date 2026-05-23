@@ -1,6 +1,6 @@
 import Chain from "src/libs/blockchain/chain"
 import Mempool from "src/libs/blockchain/mempool"
-import type { Transaction, L2PSTransaction } from "@kynesyslabs/demosdk/types"
+import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
 import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import _ from "lodash"
@@ -8,12 +8,10 @@ import {
     ExecutionResult,
     ValidityData,
     XMScript,
-    RPCResponse,
     IWeb2Payload,
     SigningAlgorithm,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
-import isValidatorForNextBlock from "src/libs/consensus/v2/routines/isValidator"
 import handleDemosWorkRequest from "./routines/transactions/demosWork/handleDemosWorkRequest"
 import multichainDispatcher from "src/features/multichain/XMDispatcher"
 import { DemoScript } from "@kynesyslabs/demosdk/types"
@@ -30,6 +28,7 @@ import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -89,13 +88,19 @@ export async function handleExecuteTransaction(
         return result
     }
 
+    const handleVerifyStart = Date.now()
     const hashedData = Hashing.sha256(JSON.stringify(validatedData.data))
-    const signatureValid = await ucrypto.verify({
+    const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: validatedData.signature.type as SigningAlgorithm,
         message: new TextEncoder().encode(hashedData),
         publicKey: hexToUint8Array(validatedData.rpc_public_key.data) as any,
         signature: hexToUint8Array(validatedData.signature.data) as any,
     })
+
+    const handleVerifyEnd = Date.now()
+    log.only(
+        `[SERVER] Transaction verified in ${handleVerifyEnd - handleVerifyStart}ms`,
+    )
 
     if (!signatureValid) {
         log.error(
@@ -111,7 +116,12 @@ export async function handleExecuteTransaction(
     }
 
     const blockNumber = validatedData.data.reference_block
+    const handleBlockNumberStart = Date.now()
     const lastBlockNumber = await Chain.getLastBlockNumber()
+    const handleBlockNumberEnd = Date.now()
+    log.only(
+        `[SERVER] Read last block number in ${handleBlockNumberEnd - handleBlockNumberStart}ms`,
+    )
 
     if (!isReferenceBlockAllowed(blockNumber, lastBlockNumber)) {
         log.error(
@@ -138,7 +148,12 @@ export async function handleExecuteTransaction(
     }
 
     log.info("SERVER", fname + "Valid validityData!")
+    const cloneTxStart = Date.now()
     const tx = _.cloneDeep(validatedData.data.transaction)
+    const cloneTxEnd = Date.now()
+    log.only(
+        `[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`,
+    )
     let payload: DemoScript | any
 
     switch (tx.content.type) {
@@ -219,10 +234,15 @@ export async function handleExecuteTransaction(
         }
 
         case "web2Request": {
+            const handleWeb2RequestStart = Date.now()
             payload = tx.content.data[1] as IWeb2Payload
             const params = parseWeb2ProxyRequest(payload)
             const web2Result = await handleWeb2ProxyRequest(params)
             result.response = web2Result
+            const handleWeb2RequestEnd = Date.now()
+            log.only(
+                `[SERVER] Web2 request processed in ${handleWeb2RequestEnd - handleWeb2RequestStart}ms`,
+            )
             break
         }
 
@@ -335,54 +355,54 @@ export async function handleExecuteTransaction(
         }
 
         log.debug("PROD: " + getSharedState.PROD)
-        const { isValidator, validators } = await isValidatorForNextBlock()
+        // const { isValidator, validators } = await isValidatorForNextBlock()
 
-        if (!isValidator) {
-            log.debug(
-                "[DTR] Non-validator node: attempting relay to all validators",
-            )
-            const availableValidators = validators.sort(
-                () => Math.random() - 0.5,
-            )
+        // if (!isValidator) {
+        //     log.debug(
+        //         "[DTR] Non-validator node: attempting relay to all validators",
+        //     )
+        //     const availableValidators = validators.sort(
+        //         () => Math.random() - 0.5,
+        //     )
 
-            log.debug(
-                `[DTR] Found ${availableValidators.length} available validators, trying all`,
-            )
+        //     log.debug(
+        //         `[DTR] Found ${availableValidators.length} available validators, trying all`,
+        //     )
 
-            const results = await Promise.allSettled(
-                availableValidators.map(validator =>
-                    DTRManager.relayTransactions(validator, [validatedData]),
-                ),
-            )
+        //     const results = await Promise.allSettled(
+        //         availableValidators.map(validator =>
+        //             DTRManager.relayTransactions(validator, [validatedData]),
+        //         ),
+        //     )
 
-            for (const result of results) {
-                if (result.status === "fulfilled") {
-                    const response = result.value
-                    if (response.result === 200) {
-                        continue
-                    }
-                    DTRManager.validityDataCache.set(
-                        validatedData.data.transaction.hash,
-                        validatedData,
-                    )
-                }
-            }
+        //     for (const result of results) {
+        //         if (result.status === "fulfilled") {
+        //             const response = result.value
+        //             if (response.result === 200) {
+        //                 continue
+        //             }
+        //             DTRManager.validityDataCache.set(
+        //                 validatedData.data.transaction.hash,
+        //                 validatedData,
+        //             )
+        //         }
+        //     }
 
-            return {
-                success: true,
-                response: {
-                    message: "Transaction relayed to validators",
-                },
-                extra: {
-                    confirmationBlock: getSharedState.lastBlockNumber + 1,
-                },
-                require_reply: false,
-            }
-        }
+        //     return {
+        //         success: true,
+        //         response: {
+        //             message: "Transaction relayed to validators",
+        //         },
+        //         extra: {
+        //             confirmationBlock: getSharedState.lastBlockNumber + 1,
+        //         },
+        //         require_reply: false,
+        //     }
+        // }
 
-        if (getSharedState.inConsensusLoop) {
-            return await DTRManager.inConsensusHandler(validatedData)
-        }
+        // if (getSharedState.inConsensusLoop) {
+        //     return await DTRManager.inConsensusHandler(validatedData)
+        // }
 
         log.debug("--------------------------------")
         log.debug("In consensus loop: " + getSharedState.inConsensusLoop)

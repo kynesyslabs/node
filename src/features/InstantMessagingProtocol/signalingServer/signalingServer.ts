@@ -74,6 +74,7 @@ import { OfflineMessage } from "@/model/entities/OfflineMessages"
 import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Import from the sdk once we can
 import log from "@/utilities/logger"
 import { handleError } from "@/errors"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeTransactionContent } from "@/forks"
 /**
  * SignalingServer class that manages peer connections and message routing
@@ -324,7 +325,7 @@ export class SignalingServer {
             const signingPublicKey = deserializedProof.publicKey
 
             // Validate the proof
-            const verified = await ucrypto.verify(deserializedProof)
+            const verified = await TxValidatorPool.getInstance().verify(deserializedProof)
 
             if (!verified) {
                 this.sendError(ws, ImErrorType.INVALID_PROOF, "Invalid proof")
@@ -677,7 +678,7 @@ export class SignalingServer {
             transaction.hash = Hashing.sha256(
                 serializeTransactionContent(transaction.content, referenceBlock),
             )
-            const signature = await ucrypto.sign(
+            const signature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
                 new TextEncoder().encode(transaction.hash),
             )

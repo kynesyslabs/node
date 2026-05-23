@@ -6,6 +6,7 @@ import { syncBlock } from "../blockchain/routines/Sync"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
+import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
 /**
  * Manages the broadcasting of messages to the network
@@ -70,6 +71,7 @@ export class BroadcastManager {
      * @param block The new block received
      */
     static async handleNewBlock(sender: string, block: Block) {
+        log.debug("handleNewBlock called with block: " + block.number)
         const peerman = PeerManager.getInstance()
 
         if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {
@@ -81,7 +83,7 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Block received while waiting for next block",
-                syncData: PeerManager.getInstance().ourSyncDataString,
+                syncData: peerman.ourSyncDataString,
             }
         }
 
@@ -89,7 +91,7 @@ export class BroadcastManager {
             return {
                 result: 200,
                 message: "Cannot handle new block. Node is not initialized",
-                syncData: PeerManager.getInstance().ourSyncDataString,
+                syncData: peerman.ourSyncDataString,
             }
         }
 
@@ -103,12 +105,47 @@ export class BroadcastManager {
             }
         }
 
+        // If we signed the block, exit
+        if (block.validation_data.signatures[getSharedState.publicKeyHex]) {
+            log.only("Block is already signed by us, ignoring it")
+            return {
+                result: 200,
+                message: "Block is already signed by us, ignoring it",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
+        // If block is greater than our last block + 1, exit
+        if (block.number > getSharedState.lastBlockNumber + 1) {
+            log.only("Block is greater than our last block + 1, ignoring it")
+
+            return {
+                result: 200,
+                message:
+                    "Block is greater than our last block + 1, ignoring it",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
         // check if we already have the block
         const existing = await Chain.getBlockByHash(block.hash)
         if (existing) {
             return {
                 result: 200,
                 message: "Block already exists",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
+        // check if we're in the consensus for received block
+        const manager = SecretaryManager.getInstance(block.number)
+
+        if (manager) {
+            log.debug("Received block while in consensus")
+
+            return {
+                result: 200,
+                message: "Cannot process block, still in consensus",
                 syncData: peerman.ourSyncDataString,
             }
         }
@@ -180,6 +217,10 @@ export class BroadcastManager {
      * @param syncData The sync data to update
      */
     static async handleUpdatePeerSyncData(sender: string, syncData: string) {
+        log.debug(
+            "handleUpdatePeerSyncData called with syncData: " +
+                JSON.stringify(syncData),
+        )
         const peerman = PeerManager.getInstance()
         const ePeer = peerman.getPeer(sender)
 

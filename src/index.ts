@@ -42,6 +42,7 @@ import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
 import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentities"
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
+import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
 import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
@@ -321,7 +322,6 @@ async function warmup() {
     log.cleanLogs(false)
 
     log.info("[MAIN] Starting the node")
-
     indexState.enough_peers = true // ? Review this
 
     // ANCHOR Overrides
@@ -407,8 +407,6 @@ async function preMainLoop() {
     getSharedState.rpcFee = indexState.RPC_FEE
 
     // INFO: Initialize Unified Crypto with ed25519 private key
-    getSharedState.keypair = await getSharedState.identity.loadIdentity()
-
     log.info("[BOOTSTRAP] Our identity is ready")
     // Log identity
     const publicKeyHex = uint8ArrayToHex(
@@ -439,7 +437,7 @@ async function preMainLoop() {
                     "     Other peers cannot reach this node at this address.\n" +
                     "     For real network participation, set EXPOSED_URL in .env\n" +
                     "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
-                    "     See INSTALL.md → \"Joining the network\".\n" +
+                    '     See INSTALL.md → "Joining the network".\n' +
                     "============================================================",
             )
         }
@@ -531,6 +529,17 @@ async function main() {
     // Check for --no-tui flag early (before warmup processes args fully)
     if (process.argv.includes("no-tui") || process.argv.includes("--no-tui")) {
         indexState.TUI_ENABLED = false
+    }
+
+    getSharedState.keypair = await getSharedState.identity.loadIdentity()
+    try {
+        await TxValidatorPool.getInstance().start()
+    } catch (error) {
+        handleError(error, "CORE", { source: ErrorSource.WORKER_POOL_STARTUP })
+        log.error(
+            "[CORE] TxValidatorPool failed to start; aborting node startup.",
+        )
+        process.exit(1)
     }
 
     // Initialize TUI if enabled
@@ -1213,6 +1222,7 @@ async function main() {
 
 // INFO Starting the main routine
 main().catch((error: Error) => {
+    console.error(error)
     handleError(error, "CORE", { source: ErrorSource.MAIN, fatal: true })
     gracefulShutdown("main_error").catch(() => {
         process.exit(1)
@@ -1262,6 +1272,16 @@ async function gracefulShutdown(signal: string) {
             ])
         } catch (error) {
             handleError(error, "CORE", { source: ErrorSource.L2PS_SHUTDOWN })
+        }
+
+        // Stop TxValidatorPool workers
+        try {
+            log.info("[CORE] Stopping TxValidatorPool...")
+            await TxValidatorPool.getInstance().stop(2_000)
+        } catch (error) {
+            handleError(error, "CORE", {
+                source: ErrorSource.WORKER_POOL_SHUTDOWN,
+            })
         }
 
         // Stop OmniProtocol server if running
@@ -1341,6 +1361,7 @@ async function gracefulShutdown(signal: string) {
 
         // Stop HTTP rate limiter cleanup interval
         try {
+            // eslint-disable-next-line @typescript-eslint/naming-convention
             const { RateLimiter: HttpRateLimiter } =
                 await import("./libs/network/middleware/rateLimiter")
             HttpRateLimiter.getInstance().destroy()

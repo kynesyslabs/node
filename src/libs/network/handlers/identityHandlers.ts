@@ -2,11 +2,11 @@ import { Twitter } from "../../identity/tools/twitter"
 import { Discord } from "../../identity/tools/discord"
 import { UDIdentityManager } from "../../blockchain/gcr/gcr_routines/udIdentityManager"
 import ensureGCRForUser from "../../blockchain/gcr/gcr_routines/ensureGCRForUser"
-import HandleGCR from "../../blockchain/gcr/handleGCR"
 import type { Tweet } from "@kynesyslabs/demosdk/types"
 import type { DiscordMessage } from "../../identity/tools/discord"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
+import GCR from "@/libs/blockchain/gcr/gcr"
 
 export const identityHandlers: Record<string, NodeCallHandler> = {
     getAddressInfo: async (data, response) => {
@@ -37,22 +37,8 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
         return response
     },
 
-    getNativeStatus: async (data, _response) => {
-        return await HandleGCR.getNativeStatus(
-            data.address,
-            ...(data.options ? [data.options] : []),
-        )
-    },
-
-    getNativeProperties: async (data, _response) => {
-        return await HandleGCR.getNativeProperties(
-            data.address,
-            ...(data.options ? [data.options] : []),
-        )
-    },
-
     getNativeSubnetsTxs: async (data, _response) => {
-        return await HandleGCR.getNativeSubnetsTxs(
+        return await GCR.getNativeSubnetsTxs(
             data.subnetId,
             ...(data.options ? [data.options] : []),
         )

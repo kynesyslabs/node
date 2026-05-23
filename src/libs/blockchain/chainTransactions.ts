@@ -1,13 +1,17 @@
-import { ILike, In, LessThan, EntityManager, FindManyOptions } from "typeorm"
+import { In, LessThan, EntityManager, FindManyOptions } from "typeorm"
 import log from "src/utilities/logger"
 import Transaction, { toTransactionsEntity } from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
-import { handleError } from "src/errors"
-import { getTransactionsRepo } from "./chainDb"
-import Mempool from "./mempool"
+import {
+    CHUNK_TRANSACTIONS,
+    chunkedInsert,
+    getTransactionsRepo,
+} from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
+import Mempool from "./mempool"
+import { getSharedState } from "@/utilities/sharedState"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -55,15 +59,26 @@ export async function persistConfirmedTransactionProjection(
 
 export async function getTxByHash(hash: string): Promise<Transaction | null> {
     try {
+        const getTxByHashStart = Date.now()
         const rawTx = await getTransactionsRepo().findOneBy({
-            hash: ILike(hash),
+            hash: hash,
         })
 
         if (!rawTx) {
             return null
         }
 
-        return Transaction.fromRawTransaction(rawTx)
+        const convertToTransactionStart = Date.now()
+        const tx = Transaction.fromRawTransaction(rawTx)
+        const convertToTransactionEnd = Date.now()
+        log.only(
+            `[getTxByHash] Convert to transaction took ${convertToTransactionEnd - convertToTransactionStart}ms`,
+        )
+        const getTxByHashEnd = Date.now()
+        log.only(
+            `[getTxByHash] Get tx by hash took ${getTxByHashEnd - getTxByHashStart}ms`,
+        )
+        return tx
     } catch (error) {
         log.error(`[ChainDB] [ ERROR ]: ${JSON.stringify(error)}`)
         throw error
@@ -122,14 +137,47 @@ export async function getBlockTransactions(
     blockHash: string,
 ): Promise<Transaction[]> {
     const { getBlockByHash } = await import("./chainBlocks")
-    const block = await getBlockByHash(blockHash)
-    return await getTransactionsFromHashes(block.content.ordered_transactions)
+    let block = await getBlockByHash(blockHash)
+
+    if (!block) {
+        if (blockHash === getSharedState.candidateBlock.hash) {
+            block = getSharedState.candidateBlock
+        } else {
+            return []
+        }
+    }
+
+    const toGet = new Set(block.content.ordered_transactions)
+
+    const fetched = await getTransactionsFromHashes(
+        block.content.ordered_transactions,
+    )
+    let missing: Transaction[] = []
+
+    for (const tx of fetched) {
+        toGet.delete(tx.hash)
+    }
+
+    if (toGet.size > 0 && getSharedState.lastBlockNumber - block.number <= 1) {
+        // NOTE: If peer tries to fetch transactions for a block not
+        // finalized by this peer yet,
+        // (because block is broadcasted right after voting,
+        // and it's possible that this peer might be slow)
+        // the block txs will not be in the transactions table yet,
+        // fetch them from the mempool, and update the blockNumber to match block
+        missing = await Mempool.getTransactionsByHashes(Array.from(toGet))
+    }
+
+    return [
+        ...fetched,
+        ...missing.map(tx => ({ ...tx, blockNumber: block.number })),
+    ]
 }
 
 export async function getTransactionFromHash(
     hash: string,
 ): Promise<Transaction | null> {
-    const rawTx = await getTransactionsRepo().findOneBy({ hash: ILike(hash) })
+    const rawTx = await getTransactionsRepo().findOneBy({ hash: hash })
     if (!rawTx) {
         return null
     }
@@ -188,9 +236,7 @@ export async function insertTransaction(
     transaction: Transaction,
     status = "confirmed",
 ): Promise<boolean> {
-    log.debug(
-        "[insertTransaction] Inserting transaction: " + transaction.hash,
-    )
+    log.debug("[insertTransaction] Inserting transaction: " + transaction.hash)
     const rawTransaction = Transaction.toRawTransaction(transaction, status)
     log.debug("[insertTransaction] Raw transaction: ")
     log.debug(JSON.stringify(rawTransaction))
@@ -213,13 +259,36 @@ export async function insertTransaction(
 export async function insertTransactionsFromSync(
     transactions: Transaction[],
 ): Promise<boolean> {
-    for (const tx of transactions) {
-        try {
-            await insertTransaction(tx)
-        } catch (error) {
-            handleError(error, "CHAIN", { source: "ChainDB sync insertion" })
-        }
-    }
+    if (transactions.length === 0) return true
 
-    return true
+    const datasourceModule = (await import("src/model/datasource")).default
+
+    const db = await datasourceModule.getInstance()
+    const dataSource = db.getDataSource()
+
+    try {
+        await dataSource.transaction(async em => {
+            const rawTransactions = transactions.map(tx =>
+                Transaction.toRawTransaction(tx, "confirmed"),
+            )
+            const { skipped } = await chunkedInsert(
+                em,
+                Transactions,
+                rawTransactions as any[],
+                CHUNK_TRANSACTIONS,
+            )
+            if (skipped > 0) {
+                log.warn(
+                    `[insertTransactionsFromSync] Skipped ${skipped} duplicate transaction(s)`,
+                )
+            }
+        })
+
+        return true
+    } catch (error) {
+        log.error(
+            `[insertTransactionsFromSync] Transaction batch failed: ${error}`,
+        )
+        return false
+    }
 }

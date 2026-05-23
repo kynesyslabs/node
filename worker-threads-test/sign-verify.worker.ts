@@ -1,0 +1,109 @@
+declare var self: Worker;
+
+const workerId = Math.random().toString(36).slice(2, 6);
+console.log(`[worker ${workerId}] booted, importing demosdk encryption...`);
+
+const t0 = Bun.nanoseconds();
+// Bypass @kynesyslabs/demosdk/encryption (the index re-exports zK and FHE, which
+// transitively pull in ffjavascript → web-worker. web-worker's startup path
+// crashes inside Bun Workers because Bun doesn't populate node:worker_threads
+// `workerData` the way the polyfill expects, killing the worker before our
+// handlers can run.) Loading unifiedCrypto.js directly skips both modules.
+const unifiedCryptoUrl = new URL(
+    "../node_modules/@kynesyslabs/demosdk/build/encryption/unifiedCrypto.js",
+    import.meta.url,
+);
+const { unifiedCrypto: ucrypto, hexToUint8Array } = await import(
+    unifiedCryptoUrl.href
+);
+const importMs = (Bun.nanoseconds() - t0) / 1e6;
+console.log(
+    `[worker ${workerId}] unifiedCrypto imported in ${importMs.toFixed(1)}ms`,
+);
+
+type VerifyItem = { hashHex: string; sigHex: string };
+type BatchMessage = {
+    type: "batch";
+    batchId: number;
+    pubKeyHex: string;
+    items: VerifyItem[];
+};
+type ShutdownMessage = { type: "shutdown" };
+type BatchResult = {
+    type: "batch-result";
+    batchId: number;
+    verified: number;
+    failed: number;
+};
+type ErrorResult = {
+    type: "worker-error";
+    batchId?: number;
+    message: string;
+    stack?: string;
+};
+
+const postError = (err: unknown, batchId?: number) => {
+    const e = err as Error;
+    console.error(`[worker ${workerId}] error:`, e?.message ?? err);
+    const payload: ErrorResult = {
+        type: "worker-error",
+        batchId,
+        message: e?.message ?? String(err),
+        stack: e?.stack,
+    };
+    try {
+        postMessage(payload);
+    } catch {}
+};
+
+process.on?.("uncaughtException", (err) => postError(err));
+process.on?.("unhandledRejection", (err) => postError(err));
+
+self.onmessage = async (
+    event: MessageEvent<BatchMessage | ShutdownMessage>,
+) => {
+    const msg = event.data;
+
+    if (msg.type === "shutdown") {
+        console.log(`[worker ${workerId}] shutdown received`);
+        process.exit(0);
+    }
+
+    if (msg.type === "batch") {
+        console.log(
+            `[worker ${workerId}] received batch ${msg.batchId} (${msg.items.length} items)`,
+        );
+        try {
+            const publicKey = hexToUint8Array(msg.pubKeyHex);
+            let verified = 0;
+            let failed = 0;
+
+            for (const item of msg.items) {
+                const ok = await ucrypto.verify({
+                    algorithm: "ed25519",
+                    message: new TextEncoder().encode(item.hashHex),
+                    publicKey,
+                    signature: hexToUint8Array(item.sigHex),
+                } as any);
+                if (ok) verified++;
+                else failed++;
+            }
+
+            const result: BatchResult = {
+                type: "batch-result",
+                batchId: msg.batchId,
+                verified,
+                failed,
+            };
+            console.log(
+                `[worker ${workerId}] sending result for batch ${msg.batchId} (${verified}/${msg.items.length})`,
+            );
+            postMessage(result);
+        } catch (err) {
+            postError(err, msg.batchId);
+        }
+    }
+};
+
+postMessage({ type: "ready", workerId });
+console.log(`[worker ${workerId}] handler registered, ready signal sent`);

@@ -30,7 +30,6 @@ export default async function mainLoop() {
         } finally {
             // Reset flags
             getSharedState.inMainLoop = false
-            getSharedState.inSyncLoop = false
             getSharedState.inPeerRecheckLoop = false
             await sleep(getSharedState.mainLoopSleepTime)
         }
@@ -92,7 +91,7 @@ async function mainLoopCycle() {
     // await peerGossip()
 
     log.info("[MAINLOOP]: Running Sync routine")
-    fastSync([], "mainloop") // REVIEW Test here
+    // await fastSync([], "mainloop") // REVIEW Test here
     // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
 

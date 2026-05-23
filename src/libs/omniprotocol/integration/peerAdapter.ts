@@ -17,6 +17,7 @@ import {
 } from "../serialization/control"
 import { OmniOpcode } from "../protocol/opcodes"
 import { getSharedState } from "@/utilities/sharedState"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 
 export type AdapterOptions = BaseAdapterOptions
 
@@ -108,7 +109,9 @@ export class PeerOmniAdapter extends BaseOmniAdapter {
                 extra: decoded.extra,
             }
         } catch (error) {
-            handleError(error, "NETWORK", { source: "OmniProtocol PeerAdapter.adaptCall" })
+            handleError(error, "NETWORK", {
+                source: "OmniProtocol PeerAdapter.adaptCall",
+            })
             // Check for fatal mode - will exit if OMNI_FATAL=true
             this.handleFatalError(
                 error,

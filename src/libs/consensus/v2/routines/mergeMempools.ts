@@ -8,7 +8,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 
-const PEER_CALL_TIMEOUT_MS = 15_000
+const PEER_CALL_TIMEOUT_MS = 10_000
 
 function withTimeout(
     promise: Promise<RPCResponse>,
@@ -17,16 +17,16 @@ function withTimeout(
 ): Promise<RPCResponse> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     const timeoutPromise = new Promise<RPCResponse>(resolve => {
-        timeoutId = setTimeout(
-            () =>
-                resolve({
-                    result: 504,
-                    response: "mergeMempools peer timeout",
-                    require_reply: false,
-                    extra: peer.identity,
-                }),
-            ms,
-        )
+        timeoutId = setTimeout(() => {
+            log.error(`[withTimeout] Peer ${peer.connection.string} timed out`)
+
+            return resolve({
+                result: 504,
+                response: "mergeMempools peer timeout",
+                require_reply: false,
+                extra: peer.identity,
+            })
+        }, ms)
     })
 
     return Promise.race([
@@ -36,6 +36,7 @@ function withTimeout(
 }
 
 export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
+    const now = Date.now()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
     if (shard.length === 0) {
@@ -48,7 +49,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
     }
 
     const promises = shard.map(peer => {
-        log.debug(
+        log.only(
             `[mergeMempools] Merging mempool with ${peer.connection.string}`,
         )
         return withTimeout(
@@ -85,7 +86,7 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         }
 
         const txs = response.response as Transaction[]
-        log.debug(
+        log.only(
             `[mergeMempools] Received ${txs.length} transactions from ${peer.connection.string}`,
         )
         for (const tx of txs) {
@@ -99,8 +100,12 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         return
     }
 
-    log.debug(
+    log.only(
         `[mergeMempools] Forwarding ${merged.size} unique txs to Mempool.receive`,
     )
     await Mempool.receive(Array.from(merged.values()))
+    const end = Date.now()
+    log.only(
+        `[mergeMempools] Time taken: ${(end - now) / 1000}s with ${shard.length} peers`,
+    )
 }

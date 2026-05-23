@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
@@ -16,6 +16,7 @@ import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
+import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
 
 /* INFO
 # Semaphore system
@@ -63,7 +64,43 @@ export async function consensusRoutine(): Promise<void> {
     let tempMempool: Transaction[] = []
 
     try {
+        log.only("[consensusRoutine] Initializing the consensus state")
         await initializeConsensusState()
+
+        const { latestChainBlock, ourLatestBlock } = await fastSync(
+            [],
+            "consensusRoutine",
+        )
+
+        if (latestChainBlock !== ourLatestBlock) {
+            log.error(
+                "[consensusRoutine] Latest chain block is not equal to our latest block, exiting",
+            )
+            return
+        }
+        const peersReady = await waitForPeerStatus()
+        if (!peersReady) {
+            log.warn(
+                "[consensusRoutine] Peers ahead of us, aborting this round",
+            )
+            return
+        }
+
+        log.only(
+            "ALL PEERS: " +
+                JSON.stringify(PeerManager.getInstance().getAll(), null, 2),
+        )
+        log.only(
+            "Ready peers: " +
+                JSON.stringify(
+                    PeerManager.getInstance()
+                        .getPeers()
+                        .filter(p => p.sync.status && p.status.ready)
+                        .map(p => p.connection.string),
+                ),
+        )
+
+        log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
         // Initialize the consensus state and check if the local node is in the shard
@@ -71,9 +108,10 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
-        log.debug(`Forgin block: ${manager.shard.blockRef}`)
-        log.debug("[consensusRoutine] We are in the shard, creating the block")
-        log.debug(
+        preventForgingEnded(blockRef)
+        log.only(`Forgin block: ${manager.shard.blockRef}`)
+        log.only("[consensusRoutine] We are in the shard, creating the block")
+        log.only(
             `[consensusRoutine] shard: ${JSON.stringify(
                 manager.shard.members.map(m => m.connection.string),
                 null,
@@ -84,77 +122,27 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: Broadcast our validation phase to the secretary
         await updateValidatorPhase(1, blockRef)
-
+        preventForgingEnded(blockRef)
         // synchronize and average the time
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
-        log.debug("[consensusRoutine] Merging and ordering the mempools...")
+        log.only("[consensusRoutine] Merging and ordering the mempools...")
         tempMempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
         )
+        preventForgingEnded(blockRef)
 
-        log.debug(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
-        log.debug(
+        log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
+        log.only(
             `[consensusRoutine] Our mempool: ${JSON.stringify(
                 tempMempool.map(tx => tx.hash),
                 null,
                 2,
             )}`,
         )
-
-        // INFO: CONSENSUS ACTION 3: Merge the peerlist (skipped)
-        // Merge the peerlist
-        const peerlist = []
-        // await mergePeerlistAndWait(shard)
-
-        // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
-        /**
-         * Here we apply the GCR operations to the state before forging the block
-         * so that the GCR hash is included in the block.
-         * A list of successful and failed GCR operations is returned.
-         * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
-         * */
-        // ? The following line could be outdated once we use the GCREdit stuff
-        // await applyGCRForNewBlock(mempool)
-
-        // Applying the GCREdits and see if everything is consistent
-        const { successfulTxs: localSuccessfulTxs, failedTxs: localFailedTxs } =
-            await applyGCREditsFromMergedMempool(tempMempool)
-        successfulTxs = successfulTxs.concat(localSuccessfulTxs)
-        failedTxs = failedTxs.concat(localFailedTxs)
-        log.debug(`[consensusRoutine] Successful Txs: ${successfulTxs.length}`)
-        log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
-        if (failedTxs.length > 0) {
-            log.debug(
-                "[consensusRoutine] Failed Txs found, pruning the mempool",
-            )
-            //  Prune the mempool of the failed txs
-            // NOTE The mempool should now be updated with only the successful txs
-            for (const tx of failedTxs) {
-                log.debug(`Failed tx: ${tx}`)
-                await Mempool.removeTransactionsByHashes([tx])
-            }
-        }
-
-        // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
-        // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
-        const l2psResult = await L2PSConsensus.applyPendingProofs(
-            blockRef,
-            false,
-        )
-        if (l2psResult.proofsApplied > 0) {
-            log.info(
-                `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
-            )
-        }
-        if (l2psResult.proofsFailed > 0) {
-            log.warning(
-                `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
-            )
-        }
 
         // REVIEW Re-merge the mempools anyway to get the correct mempool from the whole shard
         // const mempool = await mergeAndOrderMempools(manager.shard.members)
@@ -170,6 +158,7 @@ export async function consensusRoutine(): Promise<void> {
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
+            preventForgingEnded(blockRef)
 
             if (blockTimestamp) {
                 getSharedState.lastConsensusTime = blockTimestamp
@@ -182,7 +171,8 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(tempMempool, peerlist) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(tempMempool, []) // NOTE The GCR hash is calculated here and added to the block
+        preventForgingEnded(blockRef)
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
@@ -191,21 +181,85 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
+            // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
+            /**
+             * Here we apply the GCR operations to the state before forging the block
+             * so that the GCR hash is included in the block.
+             * A list of successful and failed GCR operations is returned.
+             * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
+             * */
+            // ? The following line could be outdated once we use the GCREdit stuff
+            // await applyGCRForNewBlock(mempool)
+
+            // Applying the GCREdits and see if everything is consistent
+            const {
+                successfulTxs: localSuccessfulTxs,
+                failedTxs: localFailedTxs,
+            } = await applyGCREditsFromMergedMempool(tempMempool)
+            BroadcastManager.broadcastNewBlock(block)
+
+            successfulTxs = successfulTxs.concat(localSuccessfulTxs)
+            failedTxs = failedTxs.concat(localFailedTxs)
+            log.debug(
+                `[consensusRoutine] Successful Txs: ${successfulTxs.length}`,
+            )
+            log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
+            if (failedTxs.length > 0) {
+                log.debug(
+                    "[consensusRoutine] Failed Txs found, pruning the mempool",
+                )
+                //  Prune the mempool of the failed txs
+                // NOTE The mempool should now be updated with only the successful txs
+                const pruneStart = Date.now()
+                for (const tx of failedTxs) {
+                    log.debug(`Failed tx: ${tx}`)
+                    await Mempool.removeTransactionsByHashes([tx])
+                }
+                const pruneEnd = Date.now()
+                log.only(
+                    `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms`,
+                )
+            }
+
+            // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
+            // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
+            const l2psStart = Date.now()
+            const l2psResult = await L2PSConsensus.applyPendingProofs(
+                blockRef,
+                false,
+            )
+            const l2psEnd = Date.now()
+            log.only(`[consensusRoutine] L2PS took ${l2psEnd - l2psStart}ms`)
+
+            if (l2psResult.proofsApplied > 0) {
+                log.info(
+                    `[consensusRoutine] Applied ${l2psResult.proofsApplied} L2PS proofs with ${l2psResult.totalEditsApplied} GCR edits`,
+                )
+            }
+            if (l2psResult.proofsFailed > 0) {
+                log.warning(
+                    `[consensusRoutine] ${l2psResult.proofsFailed} L2PS proofs failed verification`,
+                )
+            }
             log.debug(
                 "[consensusRoutine] [result] Block is valid with " +
                     pro +
                     " votes",
             )
+            const finalizeStart = Date.now()
             await finalizeBlock(block, pro)
-
+            const finalizeEnd = Date.now()
+            log.only(
+                `[consensusRoutine] Finalize took ${finalizeEnd - finalizeStart}ms`,
+            )
+            log.only("[consensusRoutine] Block finalized")
             // REVIEW: Should we await this?
             // REVIEW: All nodes broadcast the block for redundancy
             // if (manager.checkIfWeAreSecretary()) {
-            BroadcastManager.broadcastNewBlock(block)
             // }
 
             // INFO: Release DTR transaction relay waiter
-            await DTRManager.releaseDTRWaiter(block)
+            DTRManager.releaseDTRWaiter(block)
         } else {
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -216,8 +270,35 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
 
+        // // Check if the block is valid
+        // if (isBlockValid(pro, manager.shard.members.length)) {
+        //     log.debug(
+        //         "[consensusRoutine] [result] Block is valid with " +
+        //             pro +
+        //             " votes",
+        //     )
+        //     await finalizeBlock(block, pro)
+
+        //     // REVIEW: Should we await this?
+        //     // REVIEW: All nodes broadcast the block for redundancy
+        //     // if (manager.checkIfWeAreSecretary()) {
+        //     BroadcastManager.broadcastNewBlock(block)
+        //     // }
+
+        //     // INFO: Release DTR transaction relay waiter
+        //     await DTRManager.releaseDTRWaiter(block)
+        // } else {
+        //     log.error(
+        //         `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
+        //     )
+        //     // Raising an error to rollback the GCREdits
+        //     throw new BlockInvalidError(
+        //         `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
+        //     )
+        // }
+
         // INFO: CONSENSUS ACTION 7: End the consensus routine
-        await updateValidatorPhase(7, blockRef)
+        // await updateValidatorPhase(7, blockRef)
     } catch (error) {
         if (
             error instanceof NotInShardError ||
@@ -269,13 +350,13 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
         if (DTRManager.poolSize > 0) {
-            await DTRManager.releaseDTRWaiter()
+            DTRManager.releaseDTRWaiter()
         }
 
         cleanupConsensusState()
         manager.endConsensusRoutine()
 
-        log.debug("[consensusRoutine] Consensus routine ended")
+        log.only("[consensusRoutine] Consensus routine ended")
     }
 }
 
@@ -318,6 +399,13 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
         await getCommonValidatorSeed()
 
     const manager = SecretaryManager.getInstance(blockRef)
+
+    if (!manager) {
+        throw new ForgingEndedError(
+            "Secretary Manager instance for this block has been deleted",
+        )
+    }
+
     return await manager.initializeShard(commonValidatorSeed, lastBlockNumber)
 }
 
@@ -355,6 +443,8 @@ async function mergeAndOrderMempools(
 ): Promise<(Transaction & { reference_block: number })[]> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.getMempool(blockRef)
+
+    log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
     const preExisting =
         preHashes.length > 0
@@ -367,17 +457,23 @@ async function mergeAndOrderMempools(
     await updateValidatorPhase(3, blockRef)
 
     const postMempool = await Mempool.getMempool(blockRef)
+    log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
     const preChecked = new Set(preHashes)
     const newHashes = postMempool
         .map(tx => tx.hash)
         .filter(h => !preChecked.has(h))
+    log.only(`[mergeAndOrderMempools] New hashes: ${newHashes.length}`)
     const newlyExisting =
         newHashes.length > 0
             ? await Chain.getExistingTransactionHashes(newHashes)
             : new Set<string>()
 
     const existingHashes = preExisting.union(newlyExisting)
+    log.only(`[mergeAndOrderMempools] Existing hashes: ${existingHashes.size}`)
     const finalMempool = postMempool.filter(tx => !existingHashes.has(tx.hash))
+    log.only(
+        `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs`,
+    )
 
     // INFO: Remove existing txs from mempool
     await Mempool.removeTransactionsByHashes(Array.from(existingHashes))
@@ -385,15 +481,20 @@ async function mergeAndOrderMempools(
     // Log transaction type breakdown
     const typeCounts: Record<string, number> = {}
     for (const tx of finalMempool) {
+        // INFO: Update tx block number to this consensus' block number
+        tx.blockNumber = blockRef
+
         const txType = tx.content.type ?? "unknown"
         typeCounts[txType] = (typeCounts[txType] || 0) + 1
     }
-    log.debug(
+
+    log.only(
         `[mergeAndOrderMempools] Final mempool: ${finalMempool.length} txs ` +
             `(removed ${existingHashes.size}: pre-merge ${preExisting.size}, delta ${newlyExisting.size})`,
     )
+
     for (const [type, count] of Object.entries(typeCounts)) {
-        log.debug(`[mergeAndOrderMempools]   ${type}: ${count}`)
+        log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
     return finalMempool
@@ -522,7 +623,7 @@ async function forgeBlock(
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
     // Using the secretary to update the local statuses
-    await updateValidatorPhase(5, block.number)
+    // await updateValidatorPhase(5, block.number)
     return block
 }
 
@@ -537,14 +638,19 @@ async function voteOnBlock(
     block: Block,
     shard: Peer[],
 ): Promise<[number, number]> {
-    log.debug(
+    const now = Date.now()
+    log.only(
         `[consensusRoutine] Broadcasting block hash to the shard: ${block.hash}`,
     )
     const [pro, con] = await broadcastBlockHash(block, shard)
     // await updateValidatorStatus("votedForBlock", true, false, true)
     // Using the secretary to update the local statuses
     await updateValidatorPhase(6, block.number)
-    log.debug(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    log.only(`[consensusRoutine] Votes:\nPro: ${pro}\nCon: ${con}`)
+    const end = Date.now()
+    log.only(
+        `[consensusRoutine] Time taken: ${(end - now) / 1000}s for voting on the block`,
+    )
 
     return [pro, con]
 }

@@ -3,7 +3,7 @@ import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
-import Chain from "src/libs/blockchain/chain"
+import { getLastBlockSigners } from "@/libs/blockchain/chainBlocks"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
 
@@ -28,9 +28,37 @@ export function __resetValidatorCache(): void {
  */
 export default async function getShard(seed: string): Promise<Peer[]> {
     // ! we need to get the peers from the last 3 blocks too
-    const allPeers = await PeerManager.getInstance().getOnlinePeers()
+    const peerman = PeerManager.getInstance()
+    const allPeers = await peerman.getOnlinePeers()
     const peers = allPeers.filter(
-        peer => peer.status.online && peer.sync.status && Math.abs(peer.sync.block - getSharedState.lastBlockNumber) <= 1,
+        peer =>
+            // peer.status.online &&
+            // peer.sync.status &&
+            peer.sync.block === getSharedState.lastBlockNumber &&
+            peer.sync.block_hash === getSharedState.lastBlockHash,
+    )
+
+    const lastBlockSigners = await getLastBlockSigners()
+
+    const initialPeers = new Set(peers.map(peer => peer.identity))
+    log.only(
+        "Initial peers: " + JSON.stringify(Array.from(initialPeers), null, 2),
+    )
+    for (const signer of lastBlockSigners) {
+        const peer = peerman.getPeer(signer)
+
+        if (peer && !initialPeers.has(signer)) {
+            peers.push(peer)
+            log.only("Adding peer: " + signer + " to the shard (is working)")
+        }
+    }
+    log.only(
+        "Final peers: " +
+            JSON.stringify(
+                peers.map(peer => peer.identity),
+                null,
+                2,
+            ),
     )
 
     // Fetch active validators from DB at the current block, with a

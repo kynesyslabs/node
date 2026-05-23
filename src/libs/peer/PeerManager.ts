@@ -16,6 +16,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 export default class PeerManager {
     private static instance: PeerManager
@@ -243,7 +244,10 @@ export default class PeerManager {
                     peer.connection.string,
             )
             log.error("[PEERMANAGER] Peer not added: " + peer.identity)
-            return [false, "Invalid connection string: " + peer.connection.string]
+            return [
+                false,
+                "Invalid connection string: " + peer.connection.string,
+            ]
         }
 
         // REVIEW check for duplicates
@@ -384,15 +388,9 @@ export default class PeerManager {
         // TODO test and finalize this method
         log.debug("[Hello Peer] Saying hello to peer " + peer.identity)
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
-        const signedConnectionString = await ucrypto.sign(
+        const signedConnectionString = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(connectionString),
-        )
-
-        log.debug("[Hello Peer] Signing connection string: " + connectionString)
-        log.debug(
-            "[Hello Peer] Signed connection string: " +
-                uint8ArrayToHex(signedConnectionString.signature),
         )
 
         // Sending the transmission to the peer

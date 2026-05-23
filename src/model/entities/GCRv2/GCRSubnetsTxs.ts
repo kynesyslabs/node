@@ -6,7 +6,7 @@ import type { L2PSTransaction } from "@kynesyslabs/demosdk/types"
     This allows for a quick lookup to the transaction details and the block they were included in.
 */
 
-@Entity("global_change_registry_subnets_txs")
+@Entity("gcr_subnets_txs")
 export class GCRSubnetsTxs {
     @PrimaryColumn("text", { name: "tx_hash" })
     tx_hash: string

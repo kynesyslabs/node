@@ -5,6 +5,7 @@ import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 export async function broadcastBlockHash(
     block: Block,
@@ -34,6 +35,7 @@ export async function broadcastBlockHash(
             ), // REVIEW  We should wait a little if the call returns false as the node is not in the consensus loop yet and in general for all consensus_routine calls
         )
     }
+
     // See manageConsensusRoutine.ts for more details on the response format and mechanism
     for (const promise of promises) {
         // Work asynchronously
@@ -65,7 +67,7 @@ export async function broadcastBlockHash(
                 const signatureVerificationPromises = Object.entries(
                     incomingSignatures,
                 ).map(async ([identity, signature]) => {
-                    const isValid = await ucrypto.verify({
+                    const isValid = await TxValidatorPool.getInstance().verify({
                         algorithm: getSharedState.signingAlgorithm,
                         message: new TextEncoder().encode(block.hash),
                         signature: hexToUint8Array(signature),
@@ -115,6 +117,24 @@ export async function broadcastBlockHash(
                 )
 
                 if (response.extra.ourBlock) {
+                    const theirTxHashes: string[] =
+                        response.extra.ourBlock.txHashes ??
+                        response.extra.ourBlock.ordered_transactions ??
+                        []
+                    const ourTxHashes: string[] =
+                        getSharedState.candidateBlock.content
+                            .ordered_transactions
+
+                    const theirSet = new Set(theirTxHashes)
+                    const ourSet = new Set(ourTxHashes)
+
+                    const missingFromUs = theirTxHashes.filter(
+                        h => !ourSet.has(h),
+                    )
+                    const missingFromThem = ourTxHashes.filter(
+                        h => !theirSet.has(h),
+                    )
+
                     log.error(
                         "Their block: " +
                             JSON.stringify(response.extra.ourBlock, null, 2),
@@ -129,16 +149,18 @@ export async function broadcastBlockHash(
                                     timestamp:
                                         getSharedState.candidateBlock.content
                                             .timestamp,
-                                    txCount:
-                                        getSharedState.candidateBlock.content
-                                            .ordered_transactions.length,
-                                    txHashes:
-                                        getSharedState.candidateBlock.content
-                                            .ordered_transactions,
+                                    txCount: ourTxHashes.length,
+                                    txHashes: ourTxHashes,
                                 },
                                 null,
                                 2,
                             ),
+                    )
+                    log.error(
+                        `[broadcastBlockHash] Missing from us (${missingFromUs.length}): ${JSON.stringify(missingFromUs)}`,
+                    )
+                    log.error(
+                        `[broadcastBlockHash] Missing from them (${missingFromThem.length}): ${JSON.stringify(missingFromThem)}`,
                     )
                 }
                 con++

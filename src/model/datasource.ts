@@ -9,6 +9,8 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 */
 
+import { dirname } from "node:path"
+import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
 
@@ -17,14 +19,12 @@ import { Consensus } from "./entities/Consensus.js"
 import { MempoolTx } from "./entities/Mempool.js"
 import { PgpKeyServer } from "./entities/PgpKeyServer.js"
 import { Transactions } from "./entities/Transactions.js"
-import { Validators } from "./entities/Validators.js"
-import { GlobalChangeRegistry } from "./entities/GCR/GlobalChangeRegistry.js"
 import { GCRHashes } from "./entities/GCRv2/GCRHashes.js"
 import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
+import { GCRAssignedTx } from "./entities/GCRv2/GCRAssignedTx.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
-import { GCRTracker } from "./entities/GCR/GCRTracker.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
 import { UsedNullifier } from "./entities/GCRv2/UsedNullifier.js"
@@ -40,6 +40,7 @@ import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
 import { NetworkUpgradeVote } from "./entities/NetworkUpgradeVote.js"
 // Hard-fork bookkeeping (P3b — DEM→OS denomination migration)
 import { ForkState } from "./entities/ForkState.js"
+import { Validators } from "./entities/Validators.js"
 
 export const dataSource = new DataSource({
     type: "postgres",
@@ -48,7 +49,8 @@ export const dataSource = new DataSource({
     username: Config.getInstance().database.user,
     password: Config.getInstance().database.password,
     database: Config.getInstance().database.database,
-    migrations: ["../migrations/*.{ts,js}"],
+    migrations: ["src/migrations/*.{ts,js}"],
+    migrationsRun: true,
     entities: [
         Blocks,
         MempoolTx,
@@ -57,12 +59,11 @@ export const dataSource = new DataSource({
         GCRHashes,
         GCRSubnetsTxs,
         Transactions,
-        Validators,
-        GlobalChangeRegistry,
-        GCRTracker,
         GCRMain,
+        GCRAssignedTx,
         GCRTLSNotary,
         GCRStorageProgram,
+        Validators,
         // ZK Identity entities
         IdentityCommitment,
         UsedNullifier,
@@ -79,7 +80,7 @@ export const dataSource = new DataSource({
         // Hard-fork bookkeeping (P3b)
         ForkState,
     ],
-    synchronize: true,
+    synchronize: false,
     logging: false,
 })
 

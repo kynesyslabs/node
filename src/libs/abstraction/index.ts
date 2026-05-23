@@ -15,6 +15,7 @@ import { toInteger } from "lodash"
 import Chain from "../blockchain/chain"
 import fs from "fs"
 import { getSharedState } from "@/utilities/sharedState"
+import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 /**
  * Verifies telegram dual signature attestation (user + bot signatures)
@@ -110,7 +111,7 @@ async function verifyTelegramProof(
         const { bot_address: botAddress } = attestationPayload
 
         // INFO: Verify user signature
-        const userSignatureValid = await ucrypto.verify({
+        const userSignatureValid = await TxValidatorPool.getInstance().verify({
             algorithm: "ed25519",
             message: new TextEncoder().encode(attestationPayload.challenge),
             publicKey: hexToUint8Array(attestationPayload.public_key),
@@ -129,7 +130,7 @@ async function verifyTelegramProof(
 
         // Verify BOT signature against the attestation payload
         // The bot has already verified the user signature locally
-        const botSignatureValid = await ucrypto.verify({
+        const botSignatureValid = await TxValidatorPool.getInstance().verify({
             algorithm: signature.type,
             message: new TextEncoder().encode(messageToVerify),
             publicKey: hexToUint8Array(botAddress), // Bot's public key
@@ -229,7 +230,7 @@ export async function verifyWeb2Proof(
             payload.proof as string,
         )
         try {
-            const verified = await ucrypto.verify({
+            const verified = await TxValidatorPool.getInstance().verify({
                 algorithm: type,
                 message: new TextEncoder().encode(message),
                 publicKey: hexToUint8Array(sender),
