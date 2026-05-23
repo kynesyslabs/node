@@ -37,6 +37,7 @@ import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { Transactions } from "@/model/entities/Transactions"
 
 interface TransactionResponse {
     status: string
@@ -493,5 +494,56 @@ export default class Transaction implements ITransaction {
         tx.ed25519_signature = rawTx.ed25519_signature
 
         return tx
+    }
+}
+
+/**
+ * Coerce a wire-shape amount/fee value (`string | number | bigint | null`)
+ * to a `bigint` suitable for the TypeORM `bigint` columns on the
+ * `Transactions` entity.
+ *
+ * P5a boundary helper. The SDK's `RawTransaction`/`TransactionContent`
+ * widened these fields to `string | number` (dual-format wire shape) but
+ * the entity columns are `bigint`. TypeORM's runtime would accept either
+ * shape, but the static type declares `bigint`, so we coerce explicitly
+ * here to keep the typecheck honest. `null`/`undefined` map to `0n` to
+ * match the zero-fee/zero-amount path that genesis and value-less
+ * transactions have always relied on.
+ */
+function toEntityBigint(
+    value: string | number | bigint | null | undefined,
+): bigint {
+    if (value === null || value === undefined) {
+        return 0n
+    }
+    if (typeof value === "bigint") {
+        return value
+    }
+    return BigInt(value)
+}
+
+/**
+ * Convert a wire-shape `RawTransaction` (as produced by
+ * {@link Transaction.toRawTransaction}) into a `Transactions` entity row
+ * ready for TypeORM `save()`.
+ *
+ * P5a boundary helper. SDK 3.1.0 widened `RawTransaction.amount` and
+ * fee fields to `string | number`, but the TypeORM entity columns are
+ * `bigint`. Runtime behaviour is unchanged (TypeORM accepted the wire
+ * shape implicitly before the SDK bump); this helper only narrows the
+ * static types so `entityManager.save()` typechecks.
+ *
+ * @param rawTx - Wire-shape transaction record.
+ * @returns Entity-shape transaction row (`bigint` amount and fees).
+ */
+export function toTransactionsEntity(rawTx: RawTransaction): Transactions {
+    return {
+        ...rawTx,
+        amount: toEntityBigint(rawTx.amount),
+        networkFee: toEntityBigint(rawTx.networkFee),
+        rpcFee: toEntityBigint(rawTx.rpcFee),
+        additionalFee: toEntityBigint(rawTx.additionalFee),
+        // `nonce` on the entity is typed `number` while the SDK's
+        // `RawTransaction.nonce` is `number`; pass through.
     }
 }

@@ -2,7 +2,7 @@ import { LessThan, MoreThan } from "typeorm"
 import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
-import Transaction from "./transaction"
+import Transaction, { toTransactionsEntity } from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { Transactions } from "src/model/entities/Transactions"
@@ -276,7 +276,7 @@ export async function insertBlock(
                     const { skipped } = await chunkedInsert(
                         transactionalEntityManager,
                         Transactions,
-                        rawTransactions,
+                        rawTransactions.map(tx => toTransactionsEntity(tx)),
                         CHUNK_TRANSACTIONS,
                     )
                     if (skipped > 0) {

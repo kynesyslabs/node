@@ -49,12 +49,12 @@ export class Transactions {
     @Column("bigint", { name: "timestamp" })
     timestamp: number
 
-    @Column("integer", { name: "networkFee" })
-    networkFee: number
+    @Column("bigint", { name: "networkFee" })
+    networkFee: bigint
 
-    @Column("integer", { name: "rpcFee" })
-    rpcFee: number
+    @Column("bigint", { name: "rpcFee" })
+    rpcFee: bigint
 
-    @Column("integer", { name: "additionalFee" })
-    additionalFee: number
+    @Column("bigint", { name: "additionalFee" })
+    additionalFee: bigint
 }
