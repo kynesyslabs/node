@@ -66,6 +66,7 @@ testing/
 !testing/devnet/run-devnet
 !testing/devnet/start-staggered.sh
 !testing/devnet/scripts/
+!testing/loadgen/
 omniprotocol_fixtures_scripts/
 specs/
 fixtures/
