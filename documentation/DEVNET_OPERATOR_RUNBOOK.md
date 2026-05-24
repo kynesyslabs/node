@@ -335,7 +335,160 @@ All step output lands in `testing/runs/` and `./e2e-runs/`;
 
 ---
 
-## 8. Known footguns
+## 8. Testing deployed nodes (remote cluster)
+
+For checks against a running cluster you do **not** boot yourself
+(devnet on a remote host, testnet, beta-mainnet). All commands below
+take a list of RPC URLs via `TARGETS` / `NODES` env or `RPC_URL` for
+single-node tools. Public Demos nodes are reverse-proxied on `:443` —
+use bare hostnames, not `:53550`.
+
+```bash
+NODES="https://node2.demos.sh https://node3.demos.sh https://node4.demos.sh"
+```
+
+### 8.1 Read-only health (no keys, plain curl)
+
+```bash
+# liveness + version + identity per node
+for n in $NODES; do
+  echo "=== $n ==="
+  curl -s $n/info | jq '{block: .peerlist[0].sync.block, version, identity}' \
+    2>/dev/null || echo "DOWN"
+done
+
+# block-height drift (spot a lagging node)
+for n in $NODES; do
+  b=$(curl -s $n/info | jq -r '.peerlist[0].sync.block')
+  echo "$b  $n"
+done | sort -n
+
+# L2PS subnet enabled on each node (yes/no per uid)
+for n in $NODES; do
+  for uid in testnet_l2ps_001 live_local_001; do
+    r=$(curl -s -X POST $n/ -H "Content-Type: application/json" \
+      -d "{\"method\":\"nodeCall\",\"params\":[{\"message\":\"getL2PSParticipationById\",\"data\":{\"l2psUid\":\"$uid\"},\"muid\":\"c\"}]}" \
+      | jq -r .response.participating)
+    echo "$n / $uid → $r"
+  done
+done
+```
+
+### 8.2 testenv suites against the deployed cluster
+
+Drop `:local` and pass `TARGETS`:
+
+```bash
+TARGETS="https://node2.demos.sh,https://node3.demos.sh,https://node4.demos.sh"
+
+TARGETS=$TARGETS bun run testenv:doctor
+TARGETS=$TARGETS bun run testenv:prod-gate
+TARGETS=$TARGETS bun run testenv:soak
+
+# single scenario
+TARGETS=$TARGETS testing/scripts/run-scenario.sh consensus_tx_inclusion \
+  --env CONCURRENCY=50 --env DURATION_SEC=60
+```
+
+### 8.3 Governance read-only
+
+Read-only `upgradable:cli` commands do not sign; `MNEMONIC_FILE` is
+not required.
+
+```bash
+RPC_URL=https://node2.demos.sh bun run upgradable:cli params
+RPC_URL=https://node2.demos.sh bun run upgradable:cli validators
+RPC_URL=https://node2.demos.sh bun run upgradable:cli proposals
+RPC_URL=https://node2.demos.sh bun run upgradable:cli history
+RPC_URL=https://node2.demos.sh bun run upgradable:cli block
+```
+
+### 8.4 Provision funded stress creds (run **once on the VPS**)
+
+The writes in §§ 8.5–8.6 need a funded mnemonic + the subnet's AES
+key/IV. Generate everything in one shot:
+
+```bash
+# on the VPS, in the node repo root:
+bash scripts/provision-l2ps-test-env.sh
+
+# customise:
+L2PS_UID=stress_v2 AMOUNT=5000000000000000000 \
+PUBLIC_RPC=https://node2.demos.sh \
+  bash scripts/provision-l2ps-test-env.sh
+```
+
+What it does, on the VPS, one command:
+1. Provisions a fresh L2PS subnet under `data/l2ps/<uid>/` (or reuses
+   if it exists)
+2. Generates a fresh BIP-39 mnemonic
+3. Funds that mnemonic from the node's own `.demos_identity` (a
+   genesis-funded validator wallet)
+4. Writes a copy-pasteable env block to `./stress-env-<uid>-<ts>.txt`
+
+Output is the **constant** that local devs paste into
+`agent-commerce-demo/.env.local`:
+
+```
+DEMOS_RPC_URL=https://node2.demos.sh
+LIVE_DEMO_BASE_MNEMONIC="<12-word>"
+LIVE_DEMO_TEST_ADDRESS=<hex>
+L2PS_UID=<uid>
+L2PS_AES_KEY=<64 hex>
+L2PS_IV=<32 hex>
+```
+
+After running: restart the node so the subnet loads (look for
+`[MULTICHAIN] Loaded L2PS: <uid>`), then share the env block over a
+**secure channel** (Slack DM, age, 1Password) — mnemonic + AES key are
+secrets.
+
+After this one VPS run, ALL stress (§§ 8.5–8.6) runs locally with zero
+further VPS access.
+
+### 8.5 L2PS multi-node stress against deployed
+
+Requires the env block from §8.4. Paste those vars (or export them),
+then:
+
+```bash
+LIVE_DEMO_BASE_MNEMONIC="$LIVE_DEMO_BASE_MNEMONIC" \
+TARGETS=https://node2.demos.sh,https://node3.demos.sh,https://node4.demos.sh \
+L2PS_UID="$L2PS_UID" \
+COUNT=200 \
+  scripts/l2ps-multinode-stress.sh
+```
+
+### 8.6 Single live tx (sanity)
+
+```bash
+MNEMONIC_FILE=.demos_identity \
+RPC_URL=https://node2.demos.sh \
+  bunx tsx -e '
+import { Demos } from "@kynesyslabs/demosdk/websdk"
+import { readFileSync } from "fs"
+const d = new Demos()
+await d.connect(process.env.RPC_URL)
+await d.connectWallet(readFileSync(process.env.MNEMONIC_FILE, "utf8").trim())
+const tx = await d.pay("0x10bf4da38f753d53d811bcad22e0d6daa99a82f0ba0dbbee59830383ace2420c", 1, d)
+const r = await d.confirm(tx)
+console.log({ hash: tx.hash, fee: tx.content.transaction_fee, result: r.result })
+'
+```
+
+### 8.7 What does NOT work against a deployed cluster
+
+- `scripts/governance-multinode-stress.sh` — boots its **own** devnet
+- `bun run test:upgradable:e2e[:fast]` — same
+- `./run` — full node-host stack, not a client tool
+
+§§ 8.1–8.3 are read-only and safe to run anywhere. §8.4 must run on the
+VPS (one time). §§ 8.5–8.6 write real transactions; require the env
+block produced by §8.4.
+
+---
+
+## 9. Known footguns
 
 - **TUI exits on non-TTY** — always `./run --no-tui` outside an
   interactive terminal (section 2).
