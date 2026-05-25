@@ -20,6 +20,7 @@ import {
     type GenesisValidatorSeed,
 } from "src/libs/blockchain/genesis/seedValidators"
 import { applyForksAtGenesis } from "src/libs/blockchain/genesis/applyForksAtGenesis"
+import { mergeGenesisBalances } from "src/libs/blockchain/genesis/mergeGenesisBalances"
 
 const GENESIS_BLOCK_HEIGHT = 0
 
@@ -162,6 +163,16 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
                     genesisData.validators as GenesisValidatorSeed[],
                 )
             }
+            // Overlay genesisData.balances on top of the snapshot rows.
+            // Historical behavior silently dropped balances when a
+            // snapshot was present — operator-written top-ups (e.g.
+            // founder/incentives wallets added in `data/genesis.json`)
+            // ended up at balance=0 once `ensureGCRForUser` later
+            // created the row. Block-0 hash already commits to
+            // `genesisData.balances` via `extra.genesisData`, so making
+            // the disk reflect it does not change consensus — it just
+            // closes the gap between hash and state.
+            await mergeGenesisBalances(em, genesisData.balances)
             // Pre-apply forks deterministically at genesis. Migration output is
             // a pure function of input state — no consensus block-1 hook needed.
             // Pristine boot is fully post-fork; solo nodes don't sit at genesis.
