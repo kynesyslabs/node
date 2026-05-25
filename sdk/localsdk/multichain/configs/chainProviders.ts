@@ -11,6 +11,7 @@ export const chainProviders = {
     egld: {
         mainnet: "https://api.multiversx.com",
         testnet: "https://testnet-api.multiversx.com",
+        devnet: "https://devnet-api.multiversx.com",
     },
     solana: {
         mainnet: "https://britta-qyzo1g-fast-mainnet.helius-rpc.com",
