@@ -37,7 +37,7 @@ async function handleMultiversxContractWrite(operation: IOperation) {
     // POSTs it to the MultiversX REST API at /transaction/send.
     return await genericJsonRpcPay(
         MULTIVERSX,
-        chainProviders.egld[operation.subchain],
+        operation.rpc || chainProviders.egld[operation.subchain],
         operation,
     )
 }
@@ -47,7 +47,7 @@ async function handleTonContractWrite(operation: IOperation) {
     // TON.sendTransaction parses it and broadcasts via TonCenter.
     return await genericJsonRpcPay(
         TON,
-        chainProviders.ton[operation.subchain],
+        operation.rpc || chainProviders.ton[operation.subchain],
         operation,
     )
 }
