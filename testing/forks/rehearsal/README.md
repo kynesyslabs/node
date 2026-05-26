@@ -98,7 +98,6 @@ state chained across scenarios.
 | 1 | `01-all-cross-fork.ts` | Base case | Postgres migration runs; peer convergence |
 | 7 | `07-sum-invariant-audit.ts` | Medium | All 3 backends migrated, invariant holds |
 | 8 | `08-idempotent-restart.ts` | **HIGHEST** | No double-migration on crash recovery |
-| 5 | `05-cap-policy-fires-loud.ts` | High | Fail-loud cap contract on Postgres |
 | 6 | `06-mid-flight-tx.ts` | Medium | Boundary-block tx handling |
 | 2 | `02-validator-desync-recovery.ts` | High | Wipe + re-sync; loud failure on stale binary |
 | 3 | `03-fresh-node-post-fork.ts` | **HIGHEST** | Migration runs during historical replay |
@@ -127,7 +126,6 @@ testing/forks/rehearsal/
     02-validator-desync-recovery.ts
     03-fresh-node-post-fork.ts
     04-genesis-hash-invariance.ts
-    05-cap-policy-fires-loud.ts
     06-mid-flight-tx.ts
     07-sum-invariant-audit.ts
     08-idempotent-restart.ts

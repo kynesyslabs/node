@@ -6,12 +6,15 @@
 #   2. Scenario 1 — all-validators-cross-fork        (base case)
 #   3. Scenario 7 — sum-invariant-audit
 #   4. Scenario 8 — idempotent-restart
-#   5. Scenario 5 — cap-policy-fires-loud
-#   6. Scenario 6 — mid-flight-tx
-#   7. Scenario 2 — validator-desync-recovery
-#   8. Scenario 3 — fresh-node-post-fork             (decimals last)
-#   9. Scenario 9 — gasFeeSeparation co-activation   (DEM-665)
-#  10. Scenario 10 — burn-spend-rejection            (DEM-665, placeholder)
+#   5. Scenario 6 — mid-flight-tx
+#   6. Scenario 2 — validator-desync-recovery
+#   7. Scenario 3 — fresh-node-post-fork             (decimals last)
+#   8. Scenario 9 — gasFeeSeparation co-activation   (DEM-665)
+#   9. Scenario 10 — burn-spend-rejection            (DEM-665, placeholder)
+#
+# Note: scenario 5 (cap-policy-fires-loud) was retired alongside the
+# legacy `global_change_registry` backend — the CAP policy only ever
+# applied to legacy JSONB number balances, and that path is gone.
 #
 # Exits non-zero on the first failure; subsequent scenarios are skipped.
 # Pass `--keep-state` to leave the devnet running on a failure for
@@ -27,7 +30,6 @@ SCENARIOS=(
     "scenarios/01-all-cross-fork.ts"
     "scenarios/07-sum-invariant-audit.ts"
     "scenarios/08-idempotent-restart.ts"
-    "scenarios/05-cap-policy-fires-loud.ts"
     "scenarios/06-mid-flight-tx.ts"
     "scenarios/02-validator-desync-recovery.ts"
     "scenarios/03-fresh-node-post-fork.ts"

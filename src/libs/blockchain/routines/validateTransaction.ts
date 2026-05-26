@@ -254,7 +254,7 @@ async function defineGas(
         }
         return [false, validityData]
     }
-    // REVIEW getGCRNativeBalance returns bigint; keep this binding bigint
+    // REVIEW getAccountBalance returns bigint; keep this binding bigint
     // to make the comparison against compositeFeeAmount (number) explicit
     // via BigInt() coercion below.
     let fromBalance = 0n
