@@ -178,11 +178,27 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
 
+# Build-time provenance. These ARGs are populated by the build driver
+# (compose passes `git rev-parse HEAD` + `git rev-parse --abbrev-ref HEAD`
+# + `git diff --quiet; echo $?` + an ISO timestamp). They land in the
+# image as ENV so `process.env.GIT_COMMIT` etc. resolve from
+# `src/utilities/nodeVersion.ts` without shipping `.git/` into the runtime
+# layer. Missing values fall through to the module's null defaults — the
+# node never panics on absence.
+ARG GIT_COMMIT=
+ARG GIT_BRANCH=
+ARG GIT_DIRTY=false
+ARG BUILT_AT=
+
 # Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
 # IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
 ENV NODE_ENV=production \
     RPC_PORT=53550 \
-    METRICS_HOST=0.0.0.0
+    METRICS_HOST=0.0.0.0 \
+    GIT_COMMIT=$GIT_COMMIT \
+    GIT_BRANCH=$GIT_BRANCH \
+    GIT_DIRTY=$GIT_DIRTY \
+    BUILT_AT=$BUILT_AT
 
 # Exposed services:
 #   53550 - RPC (HTTP/JSON-RPC)

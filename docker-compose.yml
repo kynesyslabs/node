@@ -102,6 +102,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      # Build-time provenance. Compose interpolates these from the
+      # host's git + shell at `docker compose build` time. The wrapper
+      # script `./scripts/docker-run` (and CI) export them; manual
+      # invocations also work because every variable has a sensible
+      # `:-` default so an unset host falls back gracefully.
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+        GIT_BRANCH: ${GIT_BRANCH:-}
+        GIT_DIRTY: ${GIT_DIRTY:-false}
+        BUILT_AT: ${BUILT_AT:-}
     container_name: demos-node
     restart: unless-stopped
     depends_on:
