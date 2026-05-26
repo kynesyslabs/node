@@ -41,6 +41,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 
 export interface NodeVersionInfo {
     /** Package name from package.json (e.g. "demos-node"). */
@@ -63,25 +64,55 @@ export interface NodeVersionInfo {
 // package.json (name + version)
 // =============================================================================
 
+/**
+ * Resolve `/app/package.json` (in-container) or `<repo>/package.json`
+ * (dev tree) at runtime. We avoid `require("../../package.json")`
+ * because the ESM/CJS interop story under bun + tsconfig-paths is
+ * unreliable enough that the first attempt silently fell back to
+ * defaults in production (the rebuilt dev.node2 was returning
+ * `name: "demos-node"` + `version: "0.0.0"` — the catch-clause
+ * sentinels). Walking from `import.meta.url` up to the first
+ * directory that contains a readable `package.json` mirrors what
+ * the git-root walker below already does for `.git/HEAD`, so the
+ * two halves of the module behave identically.
+ */
 function readPackageJson(): { name: string; version: string } {
-    try {
-        // `require` resolves off the compiled module's directory, so the
-        // top-level `package.json` is two `..` from
-        // `src/utilities/nodeVersion.ts`. Same on the source tree and
-        // inside the docker image (`/app/build/utilities/nodeVersion.js`
-        // → `/app/package.json`).
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const pkg = require("../../package.json") as Partial<{
-            name: string
-            version: string
-        }>
-        return {
-            name: typeof pkg.name === "string" ? pkg.name : "demos-node",
-            version: typeof pkg.version === "string" ? pkg.version : "0.0.0",
+    const moduleDir = (() => {
+        try {
+            return dirname(fileURLToPath(import.meta.url))
+        } catch {
+            return process.cwd()
         }
-    } catch {
-        return { name: "demos-node", version: "0.0.0" }
+    })()
+
+    let cur = resolve(moduleDir)
+    for (let i = 0; i < 16; i++) {
+        try {
+            const raw = readFileSync(resolve(cur, "package.json"), "utf8")
+            const pkg = JSON.parse(raw) as Partial<{
+                name: string
+                version: string
+            }>
+            // Skip nested package manifests (e.g. node_modules/*) by
+            // requiring a non-empty `version` field — those exist on
+            // every workspace's package.json, including ours.
+            if (typeof pkg.version === "string" && pkg.version.length > 0) {
+                return {
+                    name:
+                        typeof pkg.name === "string"
+                            ? pkg.name
+                            : "demos-node",
+                    version: pkg.version,
+                }
+            }
+        } catch {
+            /* fall through, walk up */
+        }
+        const parent = dirname(cur)
+        if (parent === cur) break
+        cur = parent
     }
+    return { name: "demos-node", version: "0.0.0" }
 }
 
 // =============================================================================
