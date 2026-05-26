@@ -123,8 +123,39 @@ export async function handleValidateTransaction(
         log.debug(
             "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
         )
+        // CANARY: distinctive log line that proves the running binary
+        // includes the symmetric-normalisation branch (PR #867+). If you
+        // grep node logs for this string and see nothing, the runtime is
+        // executing pre-PR-#867 bytes despite the source file on disk
+        // appearing up-to-date.
+        log.debug(
+            "[handleValidateTransaction] SYMMETRIC-NORMALISE-V2 active",
+        )
         const comparison = txGcrEditsHash === gcrEditsHash
         if (!comparison) {
+            // DEBUG: on mismatch, dump the raw JSON shape both sides see
+            // so we can identify the specific field that diverges between
+            // SDK ship and node regen. Hex-encoded so multi-line JSON
+            // doesn't break log parsing.
+            try {
+                log.error(
+                    "[handleValidateTransaction] mismatch dump.tx: " +
+                        JSON.stringify(normalisedTxEdits),
+                )
+                log.error(
+                    "[handleValidateTransaction] mismatch dump.regen: " +
+                        JSON.stringify(normalisedRegen),
+                )
+                log.error(
+                    "[handleValidateTransaction] mismatch dump.rawTx: " +
+                        JSON.stringify(tx.content.gcr_edits ?? []),
+                )
+            } catch (dumpErr) {
+                log.error(
+                    "[handleValidateTransaction] mismatch dump failed: " +
+                        (dumpErr instanceof Error ? dumpErr.message : String(dumpErr)),
+                )
+            }
             log.error(
                 "[handleValidateTransaction] GCREdit mismatch: " +
                     txGcrEditsHash +
