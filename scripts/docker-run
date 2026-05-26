@@ -139,7 +139,14 @@ if git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --git-dir >/dev/null 2>&
     GIT_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     export GIT_COMMIT="$(git -C "$GIT_REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
     export GIT_BRANCH="$(git -C "$GIT_REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-    if git -C "$GIT_REPO_DIR" diff-index --quiet HEAD 2>/dev/null; then
+    # Refresh the index first so stat-cache drift (mtime/ctime updated by
+    # an editor that wrote a file back identically, or by file-mode bits
+    # touched on checkout) doesn't lie about dirty. After
+    # `update-index --refresh` only actual content diffs remain, and
+    # `git status --porcelain` covers both staged-or-not + untracked-but-
+    # not-ignored in one go (which `diff-index --quiet HEAD` misses).
+    git -C "$GIT_REPO_DIR" update-index --refresh >/dev/null 2>&1 || true
+    if [[ -z "$(git -C "$GIT_REPO_DIR" status --porcelain 2>/dev/null)" ]]; then
         export GIT_DIRTY="false"
     else
         export GIT_DIRTY="true"
