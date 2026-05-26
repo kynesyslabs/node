@@ -1,5 +1,6 @@
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
+import { bigintNumericTransformer } from "./transformers"
 
 @Entity("transactions")
 @Index("idx_transactions_hash", ["hash"])
@@ -40,7 +41,23 @@ export class Transactions {
     @Column("varchar", { name: "to" })
     to: string
 
-    @Column("bigint", { name: "amount", nullable: true })
+    // Widened from PG `bigint` (int8, max ~9.2e18) to `numeric(38, 0)` so
+    // post-fork OS values fit. A 10% transfer out of the production
+    // genesis-funded 10^18 DEM account is 10^17 DEM × 10^9 OS/DEM = 10^26
+    // OS — three orders of magnitude past `int8`'s ceiling, which manifests
+    // at block-insert time as `value "1e26" is out of range for type bigint`
+    // and crashes the consensus loop. `numeric(38, 0)` matches
+    // `gcr_main.balance` (see PR that introduced bigintNumericTransformer)
+    // and shares its transformer so the application-level type stays
+    // `bigint` end-to-end.
+    @Column({
+        type: "numeric",
+        name: "amount",
+        precision: 38,
+        scale: 0,
+        nullable: true,
+        transformer: bigintNumericTransformer,
+    })
     amount: bigint
 
     @Column("bigint", { name: "nonce", nullable: true, default: 0 })
@@ -49,27 +66,42 @@ export class Transactions {
     @Column("bigint", { name: "timestamp" })
     timestamp: number
 
-    // REVIEW Widened from `integer` (32-bit) to `bigint` so OS-denominated
-    // fees (post-migration) cannot be silently truncated. Pre-migration the
-    // values still fit in 32 bits, so the migration is a pure widening with
-    // no data conversion required. TypeORM returns bigint columns as JS
-    // strings unless a transformer is supplied; callers around
-    // toRawTransaction/fromRawTransaction (the only consumers) coerce via
-    // BigInt() at the boundary.
-    //
-    // `nullable: true, default: 0` — older databases predate the entity
-    // declaration and may have NULL fee rows. With `synchronize: true` an
-    // implicit NOT NULL constraint would fail on startup against such
-    // rows. Allowing NULL + defaulting to 0 lets the node start; readers
-    // already coerce via `Number(rawTx.networkFee ?? 0)` and
-    // `BigInt(... ?? 0)` so a NULL is observed as 0 throughout the stack.
-    @Column("bigint", { name: "networkFee", nullable: true, default: 0 })
+    // Fee columns: same widening rationale as `amount`. `nullable: true,
+    // default: 0` retained — older databases predate the entity
+    // declaration and may have NULL fee rows; readers already coerce
+    // via `BigInt(... ?? 0)` so a NULL is observed as 0 throughout
+    // the stack.
+    @Column({
+        type: "numeric",
+        name: "networkFee",
+        precision: 38,
+        scale: 0,
+        nullable: true,
+        default: "0",
+        transformer: bigintNumericTransformer,
+    })
     networkFee: bigint | null
 
-    @Column("bigint", { name: "rpcFee", nullable: true, default: 0 })
+    @Column({
+        type: "numeric",
+        name: "rpcFee",
+        precision: 38,
+        scale: 0,
+        nullable: true,
+        default: "0",
+        transformer: bigintNumericTransformer,
+    })
     rpcFee: bigint | null
 
-    @Column("bigint", { name: "additionalFee", nullable: true, default: 0 })
+    @Column({
+        type: "numeric",
+        name: "additionalFee",
+        precision: 38,
+        scale: 0,
+        nullable: true,
+        default: "0",
+        transformer: bigintNumericTransformer,
+    })
     additionalFee: bigint | null
 
     // DEM-665: ed25519 public key (lowercase hex, `0x` + 64 hex chars) of
