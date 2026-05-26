@@ -1,6 +1,7 @@
 import { getSharedState } from "@/utilities/sharedState"
 import { isForkActive } from "@/forks/forkGates"
 import log from "@/utilities/logger"
+import { NODE_VERSION, type NodeVersionInfo } from "@/utilities/nodeVersion"
 import type { NodeCallHandler } from "./types"
 
 // REVIEW: P3c — fork-status RPC. Adds `getNetworkInfo` so SDK v3 (P4) can
@@ -32,11 +33,21 @@ export interface ForkStatus {
  *
  * Wrapped in `forks.<name>` so that adding a future fork is a strictly
  * additive change rather than a breaking one.
+ *
+ * `nodeVersion` is the build-time provenance of the responding node
+ * (package version, git SHA, branch, dirty flag, build timestamp).
+ * Surfacing it on the same call operators already poll for fork status
+ * means a single round-trip can answer both "is the fork active?" and
+ * "is this node running the binary I think it is?" — the second
+ * question is what we want when chasing "fix merged to stabilisation
+ * but symptom still reproduces" cases. Optional in the response so
+ * older SDKs that destructure `forks` keep working.
  */
 export interface NetworkInfo {
     forks: {
         osDenomination: ForkStatus
     }
+    nodeVersion: NodeVersionInfo
 }
 
 /**
@@ -76,6 +87,7 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                     currentHeight,
                 },
             },
+            nodeVersion: NODE_VERSION,
         }
 
         response.response = networkInfo
