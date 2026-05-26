@@ -31,6 +31,25 @@ export async function handleValidateTransaction(
     log.info("SERVER", fname + "Handling transaction...")
     let validationData: ValidityData
     try {
+        // SNAPSHOT the SDK-shipped gcr_edits BEFORE confirmTransaction
+        // mutates the array. `confirmTransaction` calls
+        // `applyGasFeeSeparation` when the gasFeeSeparation fork is
+        // active, which PREPENDS node-computed fee edits onto
+        // `tx.content.gcr_edits`. Without this snapshot, the hash
+        // comparison below would be comparing
+        //   tx.content.gcr_edits (mutated: [fee...,subtract,add,gas,nonce])
+        // against
+        //   GCRGeneration.generate(tx) (regen: [subtract,add,gas,nonce])
+        // and diverge by exactly the prepended fee edits — a structural
+        // mismatch the SDK has no way to predict because the fee
+        // distribution is the validator's computation, not the
+        // signer's. Hashing the snapshot keeps the compare meaningful:
+        // "did the SDK ship the same edits GCRGeneration would
+        // regenerate?", which is the actual invariant we want.
+        const txShippedGcrEdits: GCREdit[] = JSON.parse(
+            JSON.stringify(tx.content.gcr_edits ?? []),
+        )
+
         const handleConfirmTransactionStart = Date.now()
         validationData = await confirmTransaction(tx, sender)
         const handleConfirmTransactionEnd = Date.now()
@@ -113,7 +132,10 @@ export async function handleValidateTransaction(
         //      handled by `normaliseGcrEditsForHash`; we mirror that
         //      walker on the tx-side input by feeding it through the
         //      same envelope.
-        const txEditsBlanked = (tx.content.gcr_edits ?? []).map(
+        // Use the PRE-confirmTransaction snapshot, not tx.content.gcr_edits,
+        // which `applyGasFeeSeparation` may have mutated by prepending
+        // node-computed fee edits.
+        const txEditsBlanked = txShippedGcrEdits.map(
             (e: GCREdit) => ({ ...e, txhash: "" }),
         )
         const normalisedTxEdits = normaliseGcrEditsForHash(txEditsBlanked)
