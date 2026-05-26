@@ -83,7 +83,7 @@ export default async function executeNativeTransaction(
             typeof transaction.content.from === "string"
                 ? transaction.content.from
                 : forgeToHex(transaction.content.from)
-        const senderBalance = await GCR.getGCRNativeBalance(sender)
+        const senderBalance = await GCR.getAccountBalance(sender)
         const receiver =
             typeof transaction.content.to === "string"
                 ? transaction.content.to

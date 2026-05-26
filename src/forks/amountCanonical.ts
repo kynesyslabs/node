@@ -32,7 +32,7 @@
  *
  * The pre-fork branch deliberately does NOT multiply by OS_PER_DEM:
  * the executor's balance comparison runs against a DEM-magnitude
- * `getGCRNativeBalance` pre-fork, and applying the migration scaling
+ * `getAccountBalance` pre-fork, and applying the migration scaling
  * here would cause every transfer to fail the funds check (1e9× too
  * large). The helper's job is to give the executor whatever magnitude
  * the SAME serializer's hashing path used — pre-fork the serializer

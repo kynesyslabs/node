@@ -134,7 +134,7 @@ export async function applyGasFeeSeparation(
     if (getSharedState.PROD) {
         let senderBalance: bigint
         try {
-            senderBalance = await GCR.getGCRNativeBalance(senderAddress)
+            senderBalance = await GCR.getAccountBalance(senderAddress)
         } catch (e) {
             return {
                 ok: false,

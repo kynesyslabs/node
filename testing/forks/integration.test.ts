@@ -271,7 +271,10 @@ describe("forks integration (P3d)", () => {
     it("scenario 1: snapshot replay across fork height multiplies all sources by 10^9", async () => {
         getSharedState.forkConfig.osDenomination.activationHeight = 10
 
-        // Seed pre-fork (DEM) state.
+        // Seed pre-fork (DEM) state. Legacy `global_change_registry` is no
+        // longer in the runtime path (the entity, the migration, and the
+        // backend table were retired); only gcr_main + validators are
+        // touched by the activation hook now.
         await dataSource.transaction(async em => {
             await seedGcrV2(em, [
                 { pubkey: "addr_a", balance: 100n },
@@ -284,16 +287,11 @@ describe("forks integration (P3d)", () => {
                 { address: "v_alpha", stakedDem: 5_000n },
                 { address: "v_beta", stakedDem: 12_345n },
             ])
-            await seedLegacy(em, [
-                { publicKey: "leg_x", balanceDem: 100, identityKey: "id_x" },
-                { publicKey: "leg_y", balanceDem: 75, identityKey: "id_y" },
-            ])
         })
 
         // Snapshot the pre-state for assertion comparisons.
         const preGcrV2 = await getGcrV2Balances(dataSource.manager)
         const preStakes = await getValidatorStakes(dataSource.manager)
-        const preLegacy = await getLegacyBalances(dataSource.manager)
 
         // Fire the activation hook the way `chainBlocks.insertBlock` does
         // when it sees its first block at >= activationHeight.
@@ -310,12 +308,6 @@ describe("forks integration (P3d)", () => {
         const postStakes = await getValidatorStakes(dataSource.manager)
         for (const [addr, preStake] of preStakes) {
             expect(postStakes.get(addr)).toBe(preStake * 1_000_000_000n)
-        }
-
-        // Legacy GCR (sub-cap): every JSONB content.balance × 10^9.
-        const postLegacy = await getLegacyBalances(dataSource.manager)
-        for (const [pk, preBalance] of preLegacy) {
-            expect(postLegacy.get(pk)).toBe(preBalance * 1e9)
         }
 
         // fork_state was written.
@@ -413,7 +405,7 @@ describe("forks integration (P3d)", () => {
     it("scenario 3: migration is idempotent across simulated restart", async () => {
         getSharedState.forkConfig.osDenomination.activationHeight = 10
 
-        // Seed pre-fork state (mirrors Scenario 1).
+        // Seed pre-fork state (mirrors Scenario 1; legacy backend removed).
         await dataSource.transaction(async em => {
             await seedGcrV2(em, [
                 { pubkey: "addr_a", balance: 100n },
@@ -421,9 +413,6 @@ describe("forks integration (P3d)", () => {
             ])
             await seedValidators(em, [
                 { address: "v_alpha", stakedDem: 5_000n },
-            ])
-            await seedLegacy(em, [
-                { publicKey: "leg_x", balanceDem: 100, identityKey: "id_x" },
             ])
         })
 
@@ -433,7 +422,6 @@ describe("forks integration (P3d)", () => {
 
         const balancesAfterBlock10 = await getGcrV2Balances(dataSource.manager)
         const stakesAfterBlock10 = await getValidatorStakes(dataSource.manager)
-        const legacyAfterBlock10 = await getLegacyBalances(dataSource.manager)
         const fsRowAfterBlock10 = await getForkStateRow(dataSource.manager)
         expect(fsRowAfterBlock10!.applied_at_block).toBe(10)
 
@@ -467,7 +455,6 @@ describe("forks integration (P3d)", () => {
         // Balances unchanged from after block 10 (i.e. × 10^9, not × 10^18).
         const balancesAfterBlock11 = await getGcrV2Balances(dataSource.manager)
         const stakesAfterBlock11 = await getValidatorStakes(dataSource.manager)
-        const legacyAfterBlock11 = await getLegacyBalances(dataSource.manager)
 
         for (const [pk, postBalance] of balancesAfterBlock10) {
             expect(balancesAfterBlock11.get(pk)).toBe(postBalance)
@@ -479,9 +466,6 @@ describe("forks integration (P3d)", () => {
         }
         for (const [addr, postStake] of stakesAfterBlock10) {
             expect(stakesAfterBlock11.get(addr)).toBe(postStake)
-        }
-        for (const [pk, postBalance] of legacyAfterBlock10) {
-            expect(legacyAfterBlock11.get(pk)).toBe(postBalance)
         }
 
         // The applied-flag helper agrees from a fresh read.
