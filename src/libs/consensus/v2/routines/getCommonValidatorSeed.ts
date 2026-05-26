@@ -50,6 +50,12 @@ import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
 let genesisHash: string | null = null
+let lastBlockHash: string | null = null
+let lastCVSAResult: {
+    commonValidatorSeed: string
+    lastBlockNumber: number
+} | null = null
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 function defaultLogger(message: string) {
@@ -63,6 +69,16 @@ export default async function getCommonValidatorSeed(
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
+    const ignoreCache = lastBlock !== null
+
+    if (
+        !ignoreCache &&
+        lastBlockHash &&
+        getSharedState.lastBlockHash === lastBlockHash
+    ) {
+        return lastCVSAResult
+    }
+
     const blockCount = 3
 
     if (!lastBlock) {
@@ -140,5 +156,11 @@ export default async function getCommonValidatorSeed(
     // }
 
     logger(`Common validator seed: ${commonValidatorSeed}`)
+
+    if (!ignoreCache) {
+        lastCVSAResult = { commonValidatorSeed, lastBlockNumber }
+        lastBlockHash = getSharedState.lastBlockHash
+    }
+
     return { commonValidatorSeed, lastBlockNumber }
 }
