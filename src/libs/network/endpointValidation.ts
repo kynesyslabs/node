@@ -12,11 +12,13 @@ import log from "src/utilities/logger"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { denomination } from "@kynesyslabs/demosdk"
 import {
     hexToUint8Array,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
+import { isForkActive } from "@/forks/forkGates"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import GCR from "../blockchain/gcr/gcr"
 
@@ -45,13 +47,63 @@ export async function handleValidateTransaction(
         gcrEdits.forEach((gcredit: GCREdit) => {
             gcredit.txhash = ""
         })
+
+        // Normalise the regenerated gcrEdits through the SAME serializer
+        // the SDK ran on its side before broadcast. Without this, the
+        // post-fork SDK ships `gcr_edits[i].amount` as a canonical OS
+        // decimal string (e.g. `"1000000000"` for the 1-DEM gas edit)
+        // while `GCRGeneration.generate` returns the raw author shape
+        // (`amount: 1` as a JS `number` in DEM for the gas edit). Hashing
+        // those two shapes diverges, surfacing here as a spurious
+        // `GCREdit mismatch` even though the edit set is otherwise
+        // identical (subtract + add + gas + nonce, same accounts, same
+        // base amount).
+        //
+        // We piggyback on `serializeTransactionContent` (SDK), which is
+        // the canonical wire-shape transform — it already walks
+        // `gcr_edits[]` and rewrites embedded `amount` fields on
+        // `balance` / `escrow` / `validatorStake` entries per
+        // `transformEditPostFork` (or `…PreFork` when the fork is
+        // inactive). Wrapping the regenerated edits into a throwaway
+        // content envelope is the cheapest way to reuse that walker
+        // without exporting the private helper.
+        //
+        // Block-height source: `Chain.getLastBlockNumber()` mirrors what
+        // the SDK uses on the client side (its `_isPostForkCached`
+        // ultimately resolves against the same gate via the
+        // `getNetworkInfo` RPC). Pending-tx hashing always references the
+        // current chain tip — block-0 / mempool entries are caught by
+        // `isForkActive` returning `false` on a null/future activation.
+        const blockHeight = await Chain.getLastBlockNumber()
+        const postFork = isForkActive("osDenomination", blockHeight)
+
+        const normaliseGcrEditsForHash = (edits: GCREdit[]): GCREdit[] => {
+            // Build a minimal `TransactionContent`-shaped envelope so
+            // `serializeTransactionContent` can do its `gcr_edits[]`
+            // walk; the other fields are passed through unchanged.
+            const envelope = {
+                ...tx.content,
+                gcr_edits: edits,
+            }
+            const serialised = denomination.serializeTransactionContent(
+                envelope as any,
+                postFork,
+            )
+            const parsed = JSON.parse(serialised) as { gcr_edits: GCREdit[] }
+            return parsed.gcr_edits ?? []
+        }
+
         const handleGcrEditsHashStart = Date.now()
-        const gcrEditsHash = Hashing.sha256(JSON.stringify(gcrEdits))
+        const normalisedRegen = normaliseGcrEditsForHash(gcrEdits)
+        const gcrEditsHash = Hashing.sha256(JSON.stringify(normalisedRegen))
         const handleGcrEditsHashEnd = Date.now()
         log.only(
             `[handleValidateTransaction] GCR edits hash generated in ${handleGcrEditsHashEnd - handleGcrEditsHashStart}ms`,
         )
         log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
+        // tx.content.gcr_edits is already on the SDK-normalised wire shape
+        // (the SDK serialised before signing); hash it directly to compare
+        // against the freshly-normalised regen above.
         const txGcrEditsHash = Hashing.sha256(
             JSON.stringify(tx.content.gcr_edits),
         )

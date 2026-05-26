@@ -9,7 +9,7 @@
   },
   "forks": {
       "osDenomination": {
-          "activationHeight": null
+          "activationHeight": 0
       },
       "gasFeeSeparation": {
           "activationHeight": null,
