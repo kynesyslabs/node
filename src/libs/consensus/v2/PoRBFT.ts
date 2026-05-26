@@ -196,7 +196,9 @@ export async function consensusRoutine(): Promise<void> {
                 successfulTxs: localSuccessfulTxs,
                 failedTxs: localFailedTxs,
             } = await applyGCREditsFromMergedMempool(tempMempool)
+
             BroadcastManager.broadcastNewBlock(block)
+            DTRManager.releaseDTRWaiter(block)
 
             successfulTxs = successfulTxs.concat(localSuccessfulTxs)
             failedTxs = failedTxs.concat(localFailedTxs)
@@ -259,7 +261,6 @@ export async function consensusRoutine(): Promise<void> {
             // }
 
             // INFO: Release DTR transaction relay waiter
-            DTRManager.releaseDTRWaiter(block)
         } else {
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,

@@ -157,7 +157,7 @@ export default class Mempool {
         return await repo.delete({ hash: In(hashes) })
     }
 
-    public static async receive(incoming: Transaction[]) {
+    public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
             return {
                 success: true,
@@ -246,6 +246,13 @@ export default class Mempool {
             } catch (error) {
                 log.error("[Mempool.receive] Error saving received mempool:")
                 console.error(error)
+            }
+        }
+
+        if (!returnDiff) {
+            return {
+                success: true,
+                mempool: [],
             }
         }
 

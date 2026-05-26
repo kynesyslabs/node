@@ -29,6 +29,7 @@ import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
 function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
@@ -151,9 +152,7 @@ export async function handleExecuteTransaction(
     const cloneTxStart = Date.now()
     const tx = _.cloneDeep(validatedData.data.transaction)
     const cloneTxEnd = Date.now()
-    log.only(
-        `[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`,
-    )
+    log.only(`[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`)
     let payload: DemoScript | any
 
     switch (tx.content.type) {
@@ -354,74 +353,59 @@ export async function handleExecuteTransaction(
             return result
         }
 
-        log.debug("PROD: " + getSharedState.PROD)
-        // const { isValidator, validators } = await isValidatorForNextBlock()
+        if (getSharedState.PROD) {
+            if (getSharedState.inConsensusLoop) {
+                return await DTRManager.inConsensusHandler([validatedData])
+            }
 
-        // if (!isValidator) {
-        //     log.debug(
-        //         "[DTR] Non-validator node: attempting relay to all validators",
-        //     )
-        //     const availableValidators = validators.sort(
-        //         () => Math.random() - 0.5,
-        //     )
+            const { isValidator, validators, lastBlockHash } =
+                await isValidatorForNextBlock()
 
-        //     log.debug(
-        //         `[DTR] Found ${availableValidators.length} available validators, trying all`,
-        //     )
+            if (!isValidator) {
+                log.debug(
+                    "[DTR] Non-validator node: attempting relay to all validators",
+                )
+                const availableValidators = validators.sort(
+                    () => Math.random() - 0.5,
+                )
 
-        //     const results = await Promise.allSettled(
-        //         availableValidators.map(validator =>
-        //             DTRManager.relayTransactions(validator, [validatedData]),
-        //         ),
-        //     )
+                log.debug(
+                    `[DTR] Found ${availableValidators.length} available validators, trying all`,
+                )
 
-        //     for (const result of results) {
-        //         if (result.status === "fulfilled") {
-        //             const response = result.value
-        //             if (response.result === 200) {
-        //                 continue
-        //             }
-        //             DTRManager.validityDataCache.set(
-        //                 validatedData.data.transaction.hash,
-        //                 validatedData,
-        //             )
-        //         }
-        //     }
+                const results = await DTRManager.relayTransactions(
+                    availableValidators,
+                    [validatedData],
+                    lastBlockHash,
+                )
 
-        //     return {
-        //         success: true,
-        //         response: {
-        //             message: "Transaction relayed to validators",
-        //         },
-        //         extra: {
-        //             confirmationBlock: getSharedState.lastBlockNumber + 1,
-        //         },
-        //         require_reply: false,
-        //     }
-        // }
+                for (const result of results.response) {
+                    if (result.status === "fulfilled") {
+                        const response = result.value
+                        if (response.result === 200) {
+                            continue
+                        }
 
-        // if (getSharedState.inConsensusLoop) {
-        //     return await DTRManager.inConsensusHandler(validatedData)
-        // }
+                        DTRManager.validityDataCache.set(
+                            validatedData.data.transaction.hash,
+                            validatedData,
+                        )
+                    }
+                }
 
-        log.debug("--------------------------------")
-        log.debug("In consensus loop: " + getSharedState.inConsensusLoop)
-        log.debug("In main loop: " + getSharedState.inMainLoop)
-        log.debug("In sync loop: " + getSharedState.inSyncLoop)
-        log.debug("In peer recheck loop: " + getSharedState.inPeerRecheckLoop)
-        log.debug("In starting consensus: " + getSharedState.startingConsensus)
-        log.debug("Running main loop: " + getSharedState.runMainLoop)
-        log.debug("--------------------------------")
+                return {
+                    success: true,
+                    response: {
+                        message: "Transaction relayed to validators",
+                    },
+                    extra: {
+                        confirmationBlock: getSharedState.lastBlockNumber + 1,
+                    },
+                    require_reply: false,
+                }
+            }
+        }
 
-        log.debug(
-            "👀 not in consensus loop, adding tx to mempool: " + queriedTx.hash,
-        )
-
-        log.debug(
-            "[handleExecuteTransaction] Adding tx with hash: " +
-                queriedTx.hash +
-                " to the mempool",
-        )
         try {
             const { confirmationBlock, error } = await Mempool.addTransaction({
                 ...queriedTx,

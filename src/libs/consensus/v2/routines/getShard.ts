@@ -15,6 +15,7 @@ import type { Validators } from "src/model/entities/Validators"
 let cachedBlock: number | null = null
 let cachedValidators: Validators[] | null = null
 
+// eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetValidatorCache(): void {
     cachedBlock = null
     cachedValidators = null
@@ -41,9 +42,6 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const lastBlockSigners = await getLastBlockSigners()
 
     const initialPeers = new Set(peers.map(peer => peer.identity))
-    log.only(
-        "Initial peers: " + JSON.stringify(Array.from(initialPeers), null, 2),
-    )
     for (const signer of lastBlockSigners) {
         const peer = peerman.getPeer(signer)
 
@@ -52,14 +50,6 @@ export default async function getShard(seed: string): Promise<Peer[]> {
             log.only("Adding peer: " + signer + " to the shard (is working)")
         }
     }
-    log.only(
-        "Final peers: " +
-            JSON.stringify(
-                peers.map(peer => peer.identity),
-                null,
-                2,
-            ),
-    )
 
     // Fetch active validators from DB at the current block, with a
     // per-block memoisation to avoid one DB round-trip per consensus tick.

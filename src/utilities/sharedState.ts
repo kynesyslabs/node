@@ -169,8 +169,8 @@ export default class SharedState {
         rateLimit: {
             enabled: Config.getInstance().omni.rateLimit.enabled,
             maxConnectionsPerIP: Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
-            maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 100,
-            maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 200,
+            maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 2_000,
+            maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 1_000,
             windowMs: 1000,
             entryTTL: 60000,
             cleanupInterval: 10000,

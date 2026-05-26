@@ -1,5 +1,4 @@
 import Mempool from "../../blockchain/mempool"
-import isValidatorForNextBlock from "../../consensus/v2/routines/isValidator"
 import getShard from "../../consensus/v2/routines/getShard"
 import getCommonValidatorSeed from "../../consensus/v2/routines/getCommonValidatorSeed"
 import { getSharedState } from "../../../utilities/sharedState"
@@ -22,6 +21,7 @@ import { Waiter } from "@/utilities/waiter"
 import Block from "@/libs/blockchain/block"
 import Chain from "@/libs/blockchain/chain"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
+import { handleError } from "@/errors"
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -39,17 +39,9 @@ import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
  */
 export class DTRManager {
     private static instance: DTRManager
-    private isRunning = false
-    private retryInterval: NodeJS.Timeout | null = null
-    private retryAttempts = new Map<string, number>() // txHash -> attempt count
-    private readonly maxRetryAttempts = 10
-    private readonly retryIntervalMs = 10000 // 10 seconds
+
     // map of txhash to ValidityData
     public static validityDataCache = new Map<string, ValidityData>()
-
-    // Optimization: only recalculate validators when block number changes
-    private lastBlockNumber = 0
-    private cachedValidators: any[] = []
 
     static getInstance(): DTRManager {
         if (!DTRManager.instance) {
@@ -80,158 +72,10 @@ export class DTRManager {
         }
     }
 
-    /**
-     * @deprecated
-     *
-     * Starts the background relay retry service
-     * Only starts if not already running
-     */
-    start() {
-        if (this.isRunning) return
-
-        log.info(
-            "[DTR RetryService] Service started - will retry every 10 seconds",
-        )
-        this.isRunning = true
-
-        this.retryInterval = setInterval(() => {
-            this.processMempool().catch(error => {
-                log.error("[DTR RetryService] Error in retry cycle: " + error)
-            })
-        }, this.retryIntervalMs)
-    }
-
-    /**
-     * @deprecated
-     *
-     * Stops the background relay retry service
-     * Cleans up interval and resets state
-     */
-    stop() {
-        if (!this.isRunning) return
-
-        log.info("[DTR RetryService] Stopping relay service")
-        this.isRunning = false
-
-        if (this.retryInterval) {
-            clearInterval(this.retryInterval)
-            this.retryInterval = null
-        }
-
-        // Clean up state
-        this.retryAttempts.clear()
-        this.cachedValidators = []
-        this.lastBlockNumber = 0
-    }
-
-    /**
-     * @deprecated
-     *
-     * Main processing loop - runs every 10 seconds
-     * Checks mempool for transactions that need relaying
-     */
-    private async processMempool() {
-        try {
-            // Only run in production mode
-            if (!getSharedState.PROD) {
-                return
-            }
-
-            // Only run after sync is complete
-            if (!getSharedState.syncStatus) {
-                return
-            }
-
-            // Only run on non-validator nodes
-            if (await isValidatorForNextBlock()) {
-                return
-            }
-
-            // Get our entire mempool
-            const mempool = await Mempool.getMempool()
-
-            if (mempool.length === 0) {
-                return
-            }
-
-            log.info(
-                `[DTR RetryService] Processing ${mempool.length} transactions in mempool`,
-            )
-
-            // Get validators (only recalculate if block number changed)
-            const availableValidators = await this.getValidatorsOptimized()
-
-            if (availableValidators.length === 0) {
-                log.warn("[DTR RetryService] No validators available for relay")
-                return
-            }
-
-            log.debug(
-                `[DTR RetryService] Found ${availableValidators.length} available validators`,
-            )
-
-            // Process each transaction in mempool
-            for (const tx of mempool) {
-                await this.tryRelayTransaction(tx, availableValidators)
-            }
-        } catch (error) {
-            log.error("[DTR RetryService] Error processing mempool: " + error)
-        }
-    }
-
-    /**
-     * Optimized validator retrieval - only recalculates when block number changes
-     * @returns Array of available validators in random order
-     */
-    private async getValidatorsOptimized(): Promise<any[]> {
-        const currentBlockNumber = getSharedState.lastBlockNumber
-
-        // Only recalculate if block number changed
-        if (
-            currentBlockNumber !== this.lastBlockNumber ||
-            this.cachedValidators.length === 0
-        ) {
-            log.debug(
-                `[DTR RetryService] Block number changed (${this.lastBlockNumber} -> ${currentBlockNumber}), recalculating validators`,
-            )
-
-            try {
-                const { commonValidatorSeed } = await getCommonValidatorSeed()
-                const validators = await getShard(commonValidatorSeed)
-
-                // Filter and cache validators
-                this.cachedValidators = validators.filter(
-                    v => v.status.online && v.sync.status,
-                )
-                this.lastBlockNumber = currentBlockNumber
-
-                log.debug(
-                    `[DTR RetryService] Cached ${this.cachedValidators.length} validators for block ${currentBlockNumber}`,
-                )
-            } catch (error) {
-                log.error(
-                    "[DTR RetryService] Error recalculating validators: " +
-                        error,
-                )
-                return []
-            }
-        }
-
-        // Return validators in random order for load balancing
-        return [...this.cachedValidators].sort(() => Math.random() - 0.5)
-    }
-
-    /**
-     * Attempts to relay a transaction to a validator
-     *
-     * @param validator - Validator to relay to
-     * @param validityData - ValidityData of the transaction to relay
-     *
-     * @returns RPCResponse
-     */
-    public static async relayTransactions(
+    static async relayTransaction(
         validator: Peer,
         payload: ValidityData[],
+        blockRef: string,
     ): Promise<RPCResponse> {
         try {
             log.debug(
@@ -248,10 +92,13 @@ export class DTRManager {
                         data: {
                             payload,
                             blockNumber: getSharedState.lastBlockNumber,
+                            // INFO: hash of block used to get cvsa used to select this validator
+                            blockRef: blockRef,
                         },
                     },
                 ],
             }
+
             const res = await validator.longCall(request, true, {
                 sleepTime: 250,
                 retries: 4,
@@ -263,6 +110,7 @@ export class DTRManager {
                 extra: {
                     ...(res.extra ? res.extra : {}),
                     peer: validator.identity,
+                    txhashes: payload.map(vd => vd.data.transaction.hash),
                 },
             }
         } catch (error) {
@@ -281,125 +129,141 @@ export class DTRManager {
     }
 
     /**
-     * Attempts to relay a single transaction to all available validators
+     * Attempts to relay a transaction to a validator
      *
-     * @param transaction - Transaction to relay
-     * @param validators - Array of available validators
+     * @param validator - Validator to relay to
+     * @param validityData - ValidityData of the transaction to relay
+     *
+     * @returns RPCResponse
      */
-    private async tryRelayTransaction(
-        transaction: any,
-        validators: any[],
-    ): Promise<void> {
-        const txHash = transaction.hash
-        const currentAttempts = this.retryAttempts.get(txHash) || 0
+    public static async relayTransactions(
+        validators: Peer[],
+        payload: ValidityData[],
+        lastBlockHash: string,
+    ): Promise<RPCResponse> {
+        const availableValidators = validators.sort(() => Math.random() - 0.5)
 
-        // Give up after max attempts
-        if (currentAttempts >= this.maxRetryAttempts) {
-            log.warning(
-                `[DTR RetryService] Giving up on transaction ${txHash} after ${this.maxRetryAttempts} attempts`,
-            )
-            this.retryAttempts.delete(txHash)
-            // Clean up ValidityData from memory
-            getSharedState.validityDataCache.delete(txHash)
-            return
-        }
-
-        // Check if we have ValidityData in memory
-        const validityData = getSharedState.validityDataCache.get(txHash)
-        if (!validityData) {
-            log.error(
-                `[DTR RetryService] No ValidityData found for ${txHash}, removing from mempool`,
-            )
-            await Mempool.removeTransaction(txHash)
-            this.retryAttempts.delete(txHash)
-            return
-        }
-
-        // Try all validators in random order
-        for (const validator of validators) {
-            try {
-                const result = await validator.call(
-                    {
-                        method: "nodeCall",
-                        params: [
-                            {
-                                type: "RELAY_TX",
-                                data: {
-                                    transaction,
-                                    validityData: validityData,
-                                },
-                            },
-                        ],
-                    },
-                    true,
-                )
-
-                if (result.result === 200) {
-                    log.info(
-                        `[DTR RetryService] Successfully relayed ${txHash} to ${validator.identity.substring(0, 8)}... (attempt ${currentAttempts + 1})`,
-                    )
-
-                    // Remove from local mempool since it's now in validator's mempool
-                    await Mempool.removeTransaction(txHash)
-                    this.retryAttempts.delete(txHash)
-                    getSharedState.validityDataCache.delete(txHash)
-                    return // Success!
-                }
-
-                log.debug(
-                    `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... rejected ${txHash}: ${result.response}`,
-                )
-            } catch (error) {
-                const errorMsg =
-                    error instanceof Error ? error.message : String(error)
-                log.debug(
-                    `[DTR RetryService] Validator ${validator.identity.substring(0, 8)}... error for ${txHash}: ${errorMsg}`,
-                )
-                continue // Try next validator
-            }
-        }
-
-        // All validators failed, increment attempt count
-        this.retryAttempts.set(txHash, currentAttempts + 1)
-        log.warn(
-            `[DTR RetryService] Attempt ${currentAttempts + 1}/${this.maxRetryAttempts} failed for ${txHash}`,
-        )
-    }
-
-    static async receiveRelayedTransactions(data: {
-        payload: ValidityData[]
-        blockNumber: number
-    }): Promise<RPCResponse> {
-        const response = await Promise.all(
-            data.payload.map(payload =>
-                this.receiveRelayedTransaction(payload, data.blockNumber),
+        const results = await Promise.all(
+            availableValidators.map(validator =>
+                this.relayTransaction(validator, payload, lastBlockHash),
             ),
         )
 
         return {
             result: 200,
-            response,
+            response: results,
             extra: null,
             require_reply: false,
+        }
+    }
+
+    static async receiveRelayedTransactions(data: {
+        payload: ValidityData[]
+        blockNumber: number
+        blockRef: string
+    }): Promise<RPCResponse> {
+        try {
+            if (getSharedState.inConsensusLoop) {
+                if (
+                    !(
+                        getSharedState.candidateBlock &&
+                        getSharedState.candidateBlock.hash === data.blockRef
+                    )
+                ) {
+                    return await this.inConsensusHandler(data.payload)
+                }
+            }
+
+            if (data.payload.length === 1) {
+                return await this.receiveRelayedTransaction(
+                    data.payload[0],
+                    data.blockNumber,
+                )
+            }
+
+            // INFO: Filter by signing algorithm
+            const peers = await PeerManager.getInstance().getOnlinePeers()
+            const peerSet = new Set(peers.map(peer => peer.identity))
+
+            let payload = data.payload.filter(
+                payload =>
+                    payload.rpc_public_key.type ===
+                        getSharedState.signingAlgorithm &&
+                    peerSet.has(payload.rpc_public_key.data),
+            )
+
+            const verifyRPCSignature = async (payload: ValidityData) => {
+                return await TxValidatorPool.getInstance().verify({
+                    algorithm: payload.rpc_public_key.type as SigningAlgorithm,
+                    message: new TextEncoder().encode(
+                        Hashing.sha256(JSON.stringify(payload.data)),
+                    ),
+                    publicKey: hexToUint8Array(payload.rpc_public_key.data),
+                    signature: hexToUint8Array(payload.signature.data),
+                })
+            }
+
+            payload = payload.filter(async payload => {
+                return await verifyRPCSignature(payload)
+            })
+
+            const txs = payload.map(vd => ({
+                ...vd.data.transaction,
+                timestamp: BigInt(vd.data.transaction.content.timestamp),
+                nonce: vd.data.transaction.content.nonce,
+                blockNumber: data.blockNumber,
+                reference_block: vd.data.reference_block,
+            }))
+
+            const { success } = await Mempool.receive(txs, false)
+
+            if (!success) {
+                return {
+                    result: 400,
+                    response: {
+                        message: "Failed to receive relayed transactions",
+                    },
+                    require_reply: false,
+                    extra: null,
+                }
+            }
+
+            return {
+                result: 200,
+                response: {
+                    message: "Relayed transactions received",
+                },
+                require_reply: false,
+                extra: null,
+            }
+        } catch (error) {
+            handleError(error)
+
+            return {
+                result: 500,
+                response: {
+                    message: "Failed to receive relayed transactions",
+                },
+                require_reply: false,
+                extra: null,
+            }
         }
     }
 
     /**
      * Adds the transaction to the validity data cache and starts the relay waiter
      *
-     * @param validityData - ValidityData of the transaction to receive
+     * @param payload - ValidityData of the transaction to receive
      *
      * @returns RPCResponse
      */
-    static async inConsensusHandler(validityData: ValidityData) {
-        log.debug(
-            "[inConsensusHandler] in consensus loop, adding tx in cache: " +
+    static async inConsensusHandler(payload: ValidityData[]) {
+        for (const validityData of payload) {
+            DTRManager.validityDataCache.set(
                 validityData.data.transaction.hash,
-        )
-        DTRManager.validityDataCache.set(
-            validityData.data.transaction.hash,
-            validityData,
-        )
+                validityData,
+            )
+        }
 
         // INFO: Start the relay waiter
         if (!DTRManager.isWaitingForBlock) {
@@ -409,11 +273,12 @@ export class DTRManager {
             DTRManager.waitForBlockThenRelay()
         }
 
-        log.debug("[inConsensusHandler] returning success")
         return {
             success: true,
+            result: 200,
             response: {
-                message: "Transaction relayed to validators",
+                message:
+                    "Transaction received during consensus, confirmation in next block",
             },
             extra: {
                 confirmationBlock: getSharedState.lastBlockNumber + 1,
@@ -443,25 +308,7 @@ export class DTRManager {
         }
 
         try {
-            if (getSharedState.inConsensusLoop) {
-                return await this.inConsensusHandler(validityData)
-            }
-
-            // 1. Verify we are actually a validator for next block
-            const isValidator = await isValidatorForNextBlock()
-            if (!isValidator) {
-                log.error("[DTR] Rejecting relay: not a validator")
-
-                return {
-                    ...response,
-                    result: 403,
-                    response: {
-                        message: "Node is not a validator for next block",
-                    },
-                }
-            }
-
-            // 2. Make sure we're using the same signing algorithm
+            // Make sure we're using the same signing algorithm
             const isSameSigningAlgorithm =
                 validityData.rpc_public_key.type ===
                 getSharedState.signingAlgorithm
@@ -686,46 +533,31 @@ export class DTRManager {
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
-            log.debug(
-                "[waitForBlockThenRelay] We're up next, keeping transactions",
-            )
-            return await Promise.all(
-                txsToRelay.map(tx => {
-                    Mempool.addTransaction(
-                        {
-                            ...tx.data.transaction,
-                            reference_block: tx.data.reference_block,
-                        },
-                        getSharedState.lastBlockNumber + 1,
-                    )
+            const res = await this.receiveRelayedTransactions({
+                payload: txsToRelay,
+                blockRef: getSharedState.lastBlockHash,
+                blockNumber: getSharedState.lastBlockNumber + 1,
+            })
 
-                    // INFO: Remove tx from cache
-                    DTRManager.validityDataCache.delete(
-                        tx.data.transaction.hash,
-                    )
-                }),
-            )
+            for (const tx of txsToRelay) {
+                DTRManager.validityDataCache.delete(tx.data.transaction.hash)
+            }
+
+            return res
         }
 
         log.debug("[waitForBlockThenRelay] Relaying transactions to validators")
-        const nodeResults = await Promise.all(
-            validators.map(validator =>
-                this.relayTransactions(validator, txsToRelay),
-            ),
+
+        const nodeResults = await this.relayTransactions(
+            validators,
+            txsToRelay,
+            getSharedState.lastBlockHash,
         )
 
-        for (const result of nodeResults) {
-            log.debug(
-                "[waitForBlockThenRelay] relay result: " +
-                    JSON.stringify(result),
-            )
-
+        for (const result of nodeResults.response as RPCResponse[]) {
             if (result.result === 200) {
-                for (const txres of result.response) {
-                    if (txres.result === 200) {
-                        log.debug("deleting tx: " + txres.extra.txhash)
-                        DTRManager.validityDataCache.delete(txres.extra.txhash)
-                    }
+                for (const txhash of result.extra?.txhashes ?? []) {
+                    DTRManager.validityDataCache.delete(txhash)
                 }
             }
         }

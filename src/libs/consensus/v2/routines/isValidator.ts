@@ -13,6 +13,7 @@ import getCommonValidatorSeed from "./getCommonValidatorSeed"
 export default async function isValidatorForNextBlock(): Promise<{
     isValidator: boolean
     validators: Peer[]
+    lastBlockHash: string
 }> {
     const { commonValidatorSeed } = await getCommonValidatorSeed()
     const validators = await getShard(commonValidatorSeed)
@@ -22,5 +23,6 @@ export default async function isValidatorForNextBlock(): Promise<{
             peer => peer.identity === getSharedState.publicKeyHex,
         ),
         validators,
+        lastBlockHash: getSharedState.lastBlockHash,
     }
 }

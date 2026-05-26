@@ -9,6 +9,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
 /**
+ * 
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {

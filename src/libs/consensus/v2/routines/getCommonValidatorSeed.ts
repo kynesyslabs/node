@@ -49,6 +49,7 @@ import { Blocks } from "src/model/entities/Blocks"
 import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 
+let genesisHash: string | null = null
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 function defaultLogger(message: string) {
@@ -100,16 +101,17 @@ export default async function getCommonValidatorSeed(
         }
     }
 
-    let genesisHash = await Chain.getGenesisBlockHash()
-    // Get genesis block for chain anchoring
-
     if (!genesisHash) {
         // NOTE: Only happens when forging genesis block
         // INFO: check if genesis is lastBlock
         if (lastBlock.number === 0) {
             genesisHash = lastBlock.hash
         } else {
-            throw new Error("Genesis block not found")
+            genesisHash = await Chain.getGenesisBlockHash()
+
+            if (!genesisHash) {
+                throw new Error("Genesis block not found")
+            }
         }
     }
 

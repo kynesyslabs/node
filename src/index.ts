@@ -1136,25 +1136,6 @@ async function main() {
         bootTracker.ready("main_loop")
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
 
-        // Start DTR relay retry service after background loop initialization
-        // The service will wait for syncStatus to be true before actually processing
-        if (getSharedState.PROD) {
-            log.info(
-                "[CORE] [DTR] Initializing relay retry service (will start after sync)",
-            )
-            // Service will check syncStatus internally before processing
-            DTRManager.getInstance().start()
-            bootTracker.ready("dtr")
-            markSubsystem(getSharedState.subsystems, "dtr", "running", {
-                enabled: true,
-            })
-        } else {
-            markSubsystem(getSharedState.subsystems, "dtr", "skipped", {
-                reason: "PROD=false",
-                enabled: false,
-            })
-            bootTracker.skip("dtr", "non-prod")
-        }
 
         // Load L2PS networks configuration
         bootTracker.start("l2ps.networks")
@@ -1255,12 +1236,6 @@ async function gracefulShutdown(signal: string) {
             } catch (_) {
                 /* ignore TUI errors during shutdown */
             }
-        }
-
-        // Stop DTR manager if running (PROD only)
-        if (getSharedState.PROD) {
-            log.info("[CORE] Stopping DTR manager...")
-            DTRManager.getInstance().stop()
         }
 
         // Stop L2PS services if running (await so their intervals are cleared)
