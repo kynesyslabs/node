@@ -101,11 +101,24 @@ export async function handleValidateTransaction(
             `[handleValidateTransaction] GCR edits hash generated in ${handleGcrEditsHashEnd - handleGcrEditsHashStart}ms`,
         )
         log.debug("[handleValidateTransaction] gcrEditsHash: " + gcrEditsHash)
-        // tx.content.gcr_edits is already on the SDK-normalised wire shape
-        // (the SDK serialised before signing); hash it directly to compare
-        // against the freshly-normalised regen above.
+        // SYMMETRY: tx.content.gcr_edits must be hashed in the EXACT same
+        // shape as `normalisedRegen` above, otherwise any field the SDK
+        // populates that the regen path blanks (or vice-versa) shows up as
+        // a spurious "GCREdit mismatch". Two specific gotchas:
+        //   1. `txhash`. The SDK currently ships gcr_edits with `txhash`
+        //      empty, but some flows (and older nodes) propagate the
+        //      parent tx hash into every edit. Force-blank on both sides
+        //      to make the hash invariant under that choice.
+        //   2. Embedded amount shape (number vs OS string). Already
+        //      handled by `normaliseGcrEditsForHash`; we mirror that
+        //      walker on the tx-side input by feeding it through the
+        //      same envelope.
+        const txEditsBlanked = (tx.content.gcr_edits ?? []).map(
+            (e: GCREdit) => ({ ...e, txhash: "" }),
+        )
+        const normalisedTxEdits = normaliseGcrEditsForHash(txEditsBlanked)
         const txGcrEditsHash = Hashing.sha256(
-            JSON.stringify(tx.content.gcr_edits),
+            JSON.stringify(normalisedTxEdits),
         )
         log.debug(
             "[handleValidateTransaction] txGcrEditsHash: " + txGcrEditsHash,
