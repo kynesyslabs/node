@@ -76,8 +76,12 @@ describe("getNetworkInfo RPC handler", () => {
     })
 
     it("default state — activationHeight null, fork inactive", async () => {
-        // Fresh defaults: activationHeight === null. currentHeight can be
-        // anything; assert only that the response surfaces it faithfully.
+        // Pin activationHeight to null explicitly to test the legacy
+        // pre-fork path. The library default flipped to `0` (post-fork)
+        // for fresh-chain ergonomics; this scenario covers operators who
+        // still pin null in their genesis.json for live cross-fork
+        // upgrades.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         getSharedState.lastBlockNumber = 0
 
         const response = await getNetworkInfo(
@@ -92,7 +96,9 @@ describe("getNetworkInfo RPC handler", () => {
     })
 
     it("default state — surfaces non-zero currentHeight while inactive", async () => {
-        // Mid-life node, fork still unconfigured.
+        // Mid-life node, fork still unconfigured. Pin null explicitly —
+        // see comment in the previous test for why.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         getSharedState.lastBlockNumber = 12_345
 
         const response = await getNetworkInfo(

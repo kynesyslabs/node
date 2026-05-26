@@ -31,7 +31,10 @@ describe("isForkActive — truth table", () => {
     })
 
     it("returns false when activationHeight is null (default)", () => {
-        // All P2 defaults: activationHeight === null.
+        // Legacy pre-fork mode — operator pins null in genesis for live
+        // cross-fork upgrades. Library default flipped to 0 for fresh
+        // chains, so pin null explicitly here.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         expect(isForkActive("osDenomination", 0)).toBe(false)
         expect(isForkActive("osDenomination", 1)).toBe(false)
         expect(isForkActive("osDenomination", 1_000_000)).toBe(false)

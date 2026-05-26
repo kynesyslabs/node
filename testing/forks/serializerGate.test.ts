@@ -84,14 +84,18 @@ describe("serializerGate — bit-identical to JSON.stringify with default config
     })
 
     it("transaction content: same bytes as JSON.stringify at any height (default config)", () => {
+        // Legacy pre-fork mode pinned explicitly — library default is
+        // now post-fork (0), this test still covers the cross-fork
+        // upgrade path where operators pin null in genesis.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         const content = makeSampleTransactionContent()
         const direct = JSON.stringify(content)
 
         expect(serializeTransactionContent(content, 0)).toBe(direct)
         expect(serializeTransactionContent(content, 1)).toBe(direct)
         expect(serializeTransactionContent(content, 1_000_000)).toBe(direct)
-        // Default: activationHeight === null → fork never active even at
-        // absurdly high heights.
+        // activationHeight === null → fork never active even at absurdly
+        // high heights.
         expect(serializeTransactionContent(content, 999_999_999)).toBe(direct)
     })
 

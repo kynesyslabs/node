@@ -109,14 +109,30 @@ export const PLACEHOLDER_TREASURY_ADDRESS =
     "0x" + "0".repeat(64)
 
 /**
- * Default fork configuration. Every fork starts inactive (`null`) so that a
- * node booting without a `forks` section in genesis is bit-identical to a
- * pre-fork node. Genesis can override individual entries via
- * `genesisData.forks`.
+ * Default fork configuration.
+ *
+ * `osDenomination` defaults to `activationHeight: 0` — fresh chains
+ * boot post-fork by default. Rationale: every Demos chain shipped via
+ * `./run -b true` / `wipe_and_reboot.sh` / docker --clean is a brand-new
+ * chain with no pre-fork peers to maintain wire compatibility with. The
+ * previous default (`null`) was a backwards-compatibility hedge for the
+ * incentives-campaign testnet that crossed the fork mid-flight; that
+ * window has closed. Operators upgrading an existing pre-fork chain
+ * MUST still pin `activationHeight: <future block>` explicitly in
+ * `data/genesis.json.forks.osDenomination` and roll the upgrade in
+ * lock-step with their peers — overriding the default to `null` is
+ * supported and remains the safe path for a live cross-fork upgrade.
+ *
+ * `gasFeeSeparation` stays inactive by default because its activation
+ * also requires a real treasury address — the placeholder zero address
+ * is rejected by the loader when `activationHeight !== null`. Operators
+ * who want this fork active on a fresh chain set both fields explicitly.
+ *
+ * Genesis can override any entry via `genesisData.forks`.
  */
 export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
     osDenomination: {
-        activationHeight: null,
+        activationHeight: 0,
         description:
             "DEM→OS denomination change. amount field becomes OS string.",
     },

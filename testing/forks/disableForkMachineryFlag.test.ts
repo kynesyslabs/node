@@ -82,13 +82,18 @@ describe("DEMOS_DISABLE_FORK_MACHINERY (rehearsal flag)", () => {
     })
 
     it("loadForkConfigFromGenesis ignores `forks` when flag is set", () => {
+        // Pin to null first so we can prove the loader was a no-op when
+        // the flag is set; without the explicit pin we'd be measuring
+        // against the new post-fork default and the test would pass even
+        // if the flag silently let activation through.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         process.env.DEMOS_DISABLE_FORK_MACHINERY = "true"
         loadForkConfigFromGenesis({
             forks: {
                 osDenomination: { activationHeight: 5 },
             },
         })
-        // Default config retained: activation stays null (inactive).
+        // Pre-pinned null retained — proving the loader is a no-op.
         expect(
             getSharedState.forkConfig.osDenomination.activationHeight,
         ).toBeNull()

@@ -40,6 +40,10 @@ describe("loadForkConfigFromGenesis", () => {
     })
 
     it("is a no-op for genesis with no `forks` field", () => {
+        // Pin to a known sentinel so we can prove no-op: any value
+        // other than the library default would be overwritten if the
+        // loader were active.
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         const before = JSON.stringify(getSharedState.forkConfig)
         loadForkConfigFromGenesis({
             properties: { id: 1, name: "DEMOS", currency: "DEM" },
@@ -239,6 +243,9 @@ describe("loadForkConfigFromGenesis", () => {
     })
 
     it("handles null/undefined/non-object input gracefully", () => {
+        // Pin to null so the assertion below proves the loader was a
+        // pure no-op (rather than matching the new post-fork default).
+        getSharedState.forkConfig.osDenomination.activationHeight = null
         expect(() => loadForkConfigFromGenesis(null)).not.toThrow()
         expect(() => loadForkConfigFromGenesis(undefined)).not.toThrow()
         expect(() => loadForkConfigFromGenesis("not-an-object")).not.toThrow()
