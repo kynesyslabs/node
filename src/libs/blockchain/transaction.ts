@@ -634,17 +634,33 @@ function toEntityBigint(
  */
 function fromEntityToWireNumber(
     value: string | number | bigint | null | undefined,
-): number {
+): number | string {
     if (value === null || value === undefined) {
         return 0
     }
     const big: bigint =
         typeof value === "bigint" ? value : BigInt(value as string | number)
     const max = BigInt(Number.MAX_SAFE_INTEGER)
+    // Post-fork: OS-magnitude amounts exceed `Number.MAX_SAFE_INTEGER`
+    // (~9.007e15 OS = ~9.007M DEM). Coerce to a decimal string instead
+    // of throwing — the SDK's `TxFee.{network_fee,rpc_fee,additional_fee}`
+    // and `TransactionContent.amount` are typed `string | number` since
+    // 3.1.0, so the string shape is wire-legal and lossless.
+    //
+    // The previous behaviour (throw on overflow) was inherited from
+    // pre-fork days when this helper only ever saw DEM-magnitude values.
+    // After the osDenomination fork activates, every persisted amount
+    // is in OS — and any post-fork chain that ever processes a transfer
+    // big enough to need OS precision (a 10 % move out of a founder
+    // wallet pre-funded with 10^18 DEM = 10^27 OS, for instance) would
+    // hit this throw on every `getTransactionStatus` poll, exactly the
+    // path the SDK's `broadcastAndWait` walks while waiting for
+    // inclusion. The polling caller then sees an HTTP 500 envelope,
+    // never observes `state: "included"`, and times out — even though
+    // the tx is on chain. Returning a string instead lets the SDK keep
+    // parsing the response and observing the correct lifecycle state.
     if (big > max || big < -max) {
-        throw new Error(
-            `fromEntityToWireNumber: value ${big.toString()} exceeds Number.MAX_SAFE_INTEGER (~9.007e15). This indicates a wire-shape mismatch — pre-fork wire should never carry OS-magnitude amounts. See myc#77 / GH#3213223281.`,
-        )
+        return big.toString()
     }
     return Number(big)
 }
