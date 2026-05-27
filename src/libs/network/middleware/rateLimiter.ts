@@ -621,13 +621,9 @@ export class RateLimiter {
             }
 
             const clientIP = this.getClientIP(req, server)
-            log.debug(`[Rate Limiter] Client IP: ${clientIP}`)
 
             // Skip rate limiting for whitelisted IPs
             if (this.isTrustedInternalRequest(req, clientIP)) {
-                log.debug(
-                    `[Rate Limiter] Trusted internal request: ${clientIP}, skipping rate limiting`,
-                )
                 return await next()
             }
 

@@ -40,24 +40,11 @@ export async function broadcastBlockHash(
     for (const promise of promises) {
         // Work asynchronously
         promise.then(async (response: RPCResponse) => {
-            log.info("[broadcastBlockHash] response from a validator received.")
             if (response.result === 200) {
-                log.info(
-                    "[broadcastBlockHash] Block hash confirmation received from the validator: " +
-                        response.response,
-                )
-                log.debug(
-                    "[broadcastBlockHash] response: " +
-                        JSON.stringify(response),
-                )
                 // Add the validation data to the block
                 // ? Should we check if the peer is in the shard? Theoretically we checked before
                 const peerValidationData =
                     response.extra.signatures[response.response]
-                log.info(
-                    "[broadcastBlockHash] Peer validation data: ",
-                    peerValidationData,
-                )
                 block.validation_data.signatures[response.response] =
                     peerValidationData
 

@@ -28,13 +28,10 @@ export async function manageHelloPeer(
     // Prepare the response
     const response: RPCResponse = _.cloneDeep(emptyResponse)
 
-    log.info("[Handle Hello Peer] Handling hello peer...")
-    log.info("[Hello Peer Listener] Building peer object...")
     const peerObject = new Peer()
     peerObject.identity = content.publicKey
 
     if (peerObject.identity === getSharedState.publicKeyHex) {
-        log.debug("[Hello Peer Listener] Peer is us: skipping")
         response.result = 200
         response.response = true
         response.extra = {
@@ -44,13 +41,8 @@ export async function manageHelloPeer(
     }
 
     peerObject.connection.string = content.url
-    log.info(
-        "[Hello Peer Listener] Extracted peer with connection string: " +
-            peerObject.connection.string,
-    )
 
     // Check if the authentication info is valid based on the sender info from the headers
-    log.info("[Hello Peer Listener] Verifying authentication info...")
     const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: content.signature.type,
         message: new TextEncoder().encode(content.url),
@@ -84,17 +76,9 @@ export async function manageHelloPeer(
     // INFO: Write the sync data for the peer
     peerObject.sync = content.syncData
 
-    log.debug(
-        "[Hello Peer Listener] Sender sync data: " +
-            JSON.stringify(peerObject.sync),
-    )
-
     const peerManager = PeerManager.getInstance()
 
     // If we are here, the peer is connected
-    log.info(
-        "[Hello Peer Listener] Adding peer with id: " + peerObject.identity,
-    )
     const [isAddedToPeerlist, message] = peerManager.addPeer(peerObject)
     if (!isAddedToPeerlist) {
         response.result = 400

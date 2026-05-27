@@ -86,20 +86,6 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
-        log.only(
-            "ALL PEERS: " +
-                JSON.stringify(PeerManager.getInstance().getAll(), null, 2),
-        )
-        log.only(
-            "Ready peers: " +
-                JSON.stringify(
-                    PeerManager.getInstance()
-                        .getPeers()
-                        .filter(p => p.sync.status && p.status.ready)
-                        .map(p => p.connection.string),
-                ),
-        )
-
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
@@ -202,24 +188,17 @@ export async function consensusRoutine(): Promise<void> {
 
             successfulTxs = successfulTxs.concat(localSuccessfulTxs)
             failedTxs = failedTxs.concat(localFailedTxs)
-            log.debug(
-                `[consensusRoutine] Successful Txs: ${successfulTxs.length}`,
-            )
-            log.debug(`[consensusRoutine] Failed Txs: ${failedTxs.length}`)
+
             if (failedTxs.length > 0) {
-                log.debug(
-                    "[consensusRoutine] Failed Txs found, pruning the mempool",
-                )
                 //  Prune the mempool of the failed txs
                 // NOTE The mempool should now be updated with only the successful txs
                 const pruneStart = Date.now()
                 for (const tx of failedTxs) {
-                    log.debug(`Failed tx: ${tx}`)
                     await Mempool.removeTransactionsByHashes([tx])
                 }
                 const pruneEnd = Date.now()
                 log.only(
-                    `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms`,
+                    `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms with ${failedTxs.length} failed txs`,
                 )
             }
 
@@ -380,7 +359,6 @@ export function isConsensusAlreadyRunning(): boolean {
  * Initialize the consensus state
  */
 async function initializeConsensusState(): Promise<void> {
-    log.info("[consensusRoutine] Starting the consensus routine")
     getSharedState.consensusMode = true
     getSharedState.inConsensusLoop = true
     getSharedState.lastTimestamp = getNetworkTimestamp()
@@ -665,8 +643,6 @@ async function voteOnBlock(
  */
 function isBlockValid(pro: number, totalVotes: number): boolean {
     const threshold = Math.floor((totalVotes * 2) / 3) + 1
-    log.info(`[consensusRoutine] Threshold: ${threshold}`)
-    log.info(`[consensusRoutine] Total votes: ${totalVotes}`)
     return pro >= threshold
 }
 
@@ -677,14 +653,8 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param pro - The number of votes for the block
  */
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
-    log.info(`[CONSENSUS] Block is valid with ${pro} votes`)
-    log.debug(`[CONSENSUS] Block data: ${JSON.stringify(block)}`)
     await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
-    //getSharedState.consensusMode = false
-    ///getSharedState.inConsensusLoop = false
     log.info("[CONSENSUS] Block added to the chain")
-    const lastBlock = await Chain.getLastBlock()
-    log.debug(`[CONSENSUS] Last block: ${JSON.stringify(lastBlock)}`)
 }
 
 function preventForgingEnded(blockRef: number) {

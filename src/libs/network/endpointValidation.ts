@@ -26,9 +26,8 @@ export async function handleValidateTransaction(
     tx: Transaction,
     sender: string,
 ): Promise<ValidityData> {
-    log.info("SERVER", "[handleTransactions] Handling a DEMOS tx...")
     const fname = "[handleTransactions] "
-    log.info("SERVER", fname + "Handling transaction...")
+
     let validationData: ValidityData
     try {
         // SNAPSHOT the SDK-shipped gcr_edits BEFORE confirmTransaction
@@ -185,9 +184,7 @@ export async function handleValidateTransaction(
                     gcrEditsHash,
             )
         }
-        if (comparison) {
-            log.info("[handleValidateTransaction] GCREdit hash match")
-        } else {
+        if (!comparison) {
             throw new Error("GCREdit mismatch")
         }
 
@@ -249,6 +246,5 @@ export async function handleValidateTransaction(
         }
     }
 
-    log.info("SERVER", fname + "Transaction handled.")
     return validationData
 }

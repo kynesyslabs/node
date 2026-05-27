@@ -106,7 +106,6 @@ export async function verifySignature(
         const isValid = await TxValidatorPool.getInstance().verify(signatureObj)
 
         if (isValid) {
-            log.debug(`[verifySignature] Valid signature for: ${identity}`)
             return {
                 valid: true,
                 identity,

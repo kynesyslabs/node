@@ -21,7 +21,6 @@ export async function manageNodeCall(content: NodeCall): Promise<RPCResponse> {
     response.result = 200
     response.require_reply = false
     response.extra = null
-    log.debug("[manageNodeCall] Content: " + JSON.stringify(content))
 
     const handler = handlerRegistry[content.message]
     if (handler) {

@@ -31,7 +31,6 @@ export async function confirmTransaction(
     tx: Transaction, // Must contain a tx property being a Transaction object
     sender: string,
 ): Promise<ValidityData> {
-    log.info("TX", "[Native Tx Validation] Validating transaction...")
     // Getting the current block number
     const getLastBlockNumberStart = Date.now()
     const referenceBlock = await Chain.getLastBlockNumber()
@@ -39,11 +38,7 @@ export async function confirmTransaction(
     log.only(
         `[confirmTransaction] Get last block number in ${getLastBlockNumberEnd - getLastBlockNumberStart}ms`,
     )
-    // REVIEW This should work just fine
-    log.debug(
-        `[TX] confirmTransaction - Signature: ${JSON.stringify(tx.signature)}`,
-    )
-    log.debug(`[TX] confirmTransaction - Examining tx: ${JSON.stringify(tx)}`)
+
     // REVIEW Below: if this does not work, use ValidityData interface and fill manually
     let validityData: ValidityData = {
         data: {
@@ -105,9 +100,6 @@ export async function confirmTransaction(
         return validityData
     }
 
-    log.debug(
-        "[TX] confirmTransaction - Transaction validity verified, compiling ValidityData",
-    )
     validityData.data.message =
         "[Tx Validation] Transaction signature verified\n"
     validityData.data.valid = true

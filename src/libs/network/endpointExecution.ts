@@ -42,12 +42,6 @@ export async function handleExecuteTransaction(
     validatedData: ValidityData,
     sender: string,
 ): Promise<ExecutionResult> {
-    log.debug(
-        "[handleExecuteTransaction] Validated Data: " +
-            JSON.stringify(validatedData),
-    )
-
-    const fname = "[handleExecuteTransaction] "
     const result: ExecutionResult = {
         success: true,
         response: null,
@@ -58,7 +52,6 @@ export async function handleExecuteTransaction(
     const ourKey = (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
         .publicKey
 
-    log.debug("Our key: " + ourKey)
     const hexOurKey = uint8ArrayToHex(ourKey as Uint8Array)
     const queriedTx = _.cloneDeep(validatedData.data.transaction)
     if (!queriedTx.blockNumber) {
@@ -73,15 +66,10 @@ export async function handleExecuteTransaction(
                 queriedTx.blockNumber,
         )
     }
-    log.debug(
-        "[handleExecuteTransaction] Queried tx processing in block: " +
-            queriedTx.blockNumber,
-    )
 
     if (validatedData.rpc_public_key.data !== hexOurKey) {
-        log.error(
-            "SERVER",
-            fname + "Invalid validityData signature key (not us) 💀",
+        log.warning(
+            "[handleExecuteTransaction] Invalid validityData signature key (not us) 💀",
         )
         result.success = false
         result.response = false
@@ -148,7 +136,6 @@ export async function handleExecuteTransaction(
         return result
     }
 
-    log.info("SERVER", fname + "Valid validityData!")
     const cloneTxStart = Date.now()
     const tx = _.cloneDeep(validatedData.data.transaction)
     const cloneTxEnd = Date.now()
@@ -158,10 +145,6 @@ export async function handleExecuteTransaction(
     switch (tx.content.type) {
         case "crosschainOperation": {
             payload = tx.content.data
-            log.debug(
-                "[handleExecuteTransaction] Included XM Chainscript: " +
-                    JSON.stringify(payload[1]),
-            )
             const xmResult = await multichainDispatcher.digest(
                 payload[1] as XMScript,
             )
@@ -175,10 +158,6 @@ export async function handleExecuteTransaction(
 
         case "subnet": {
             payload = tx.content.data
-            log.debug(
-                "[handleExecuteTransaction] Subnet payload: " +
-                    JSON.stringify(payload[1]),
-            )
             const subnetResult = await handleL2PS(tx as L2PSTransaction)
             result.response = subnetResult
             break
@@ -362,15 +341,8 @@ export async function handleExecuteTransaction(
                 await isValidatorForNextBlock()
 
             if (!isValidator) {
-                log.debug(
-                    "[DTR] Non-validator node: attempting relay to all validators",
-                )
                 const availableValidators = validators.sort(
                     () => Math.random() - 0.5,
-                )
-
-                log.debug(
-                    `[DTR] Found ${availableValidators.length} available validators, trying all`,
                 )
 
                 const results = await DTRManager.relayTransactions(

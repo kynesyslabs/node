@@ -218,10 +218,6 @@ export class BroadcastManager {
      * @param syncData The sync data to update
      */
     static async handleUpdatePeerSyncData(sender: string, syncData: string) {
-        log.debug(
-            "handleUpdatePeerSyncData called with syncData: " +
-                JSON.stringify(syncData),
-        )
         const peerman = PeerManager.getInstance()
         const ePeer = peerman.getPeer(sender)
 

@@ -238,8 +238,7 @@ export async function insertTransaction(
 ): Promise<boolean> {
     log.debug("[insertTransaction] Inserting transaction: " + transaction.hash)
     const rawTransaction = Transaction.toRawTransaction(transaction, status)
-    log.debug("[insertTransaction] Raw transaction: ")
-    log.debug(JSON.stringify(rawTransaction))
+
     try {
         // REVIEW P5a: bridge wire-shape `RawTransaction` to entity-shape
         // `Transactions` (bigint amount/fees). Runtime payload unchanged.

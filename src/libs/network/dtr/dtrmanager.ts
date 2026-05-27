@@ -78,12 +78,6 @@ export class DTRManager {
         blockRef: string,
     ): Promise<RPCResponse> {
         try {
-            log.debug(
-                "[DTR] Attempting to relay transaction to validator: " +
-                    validator.identity,
-            )
-            log.debug("[DTR] ValidityData: " + JSON.stringify(payload))
-
             const request: RPCRequest = {
                 method: "nodeCall",
                 params: [
@@ -312,10 +306,7 @@ export class DTRManager {
             const isSameSigningAlgorithm =
                 validityData.rpc_public_key.type ===
                 getSharedState.signingAlgorithm
-            log.debug(
-                "[DTR] Relayed tx isSameSigningAlgorithm: " +
-                    isSameSigningAlgorithm,
-            )
+
             if (!isSameSigningAlgorithm) {
                 log.error(
                     "[DTR] Transaction relayed with different signing algorithm",
@@ -336,14 +327,6 @@ export class DTRManager {
             ).some(
                 // Assuming both nodes are running on same signing algorithm
                 peer => peer.identity === validityData.rpc_public_key.data,
-            )
-            log.debug(
-                "[DTR] Relayed tx isFromKnownValidator: " +
-                    isFromKnownValidator,
-            )
-            log.debug(
-                "[DTR] Relayed tx validator identity: " +
-                    validityData.rpc_public_key.data,
             )
 
             if (!isFromKnownValidator) {
@@ -374,15 +357,6 @@ export class DTRManager {
                 },
             )
 
-            log.debug("[DTR] Relayed tx isSignatureValid: " + isSignatureValid)
-            log.debug(
-                "[DTR] Relayed tx signature: " + validityData.signature.data,
-            )
-            log.debug(
-                "[DTR] Relayed tx public key: " +
-                    validityData.rpc_public_key.data,
-            )
-
             if (!isSignatureValid) {
                 log.error("[DTR] Validity data signature validation failed")
 
@@ -398,27 +372,8 @@ export class DTRManager {
 
             const tx = validityData.data.transaction
 
-            // 4. Validate transaction coherence (hash matches content)
-            const isCoherent = TxUtils.isCoherent(tx)
-
-            log.debug("[DTR] Relayed tx isCoherent: " + isCoherent)
-            if (!isCoherent) {
-                log.error(
-                    "[DTR] Transaction coherence validation failed: " + tx.hash,
-                )
-
-                return {
-                    ...response,
-                    result: 400,
-                    response: "REJECTED: Transaction hash mismatch",
-                }
-            }
-
             // Validate transaction signature
             const { success } = await TxUtils.validateSignature(tx)
-            log.debug(
-                "[DTR] Relayed tx signature validation success: " + success,
-            )
 
             if (!success) {
                 log.error(
@@ -451,11 +406,6 @@ export class DTRManager {
                 blockNumber,
             )
 
-            log.debug(
-                "[DTR] Relayed tx confirmationBlock: " + confirmationBlock,
-            )
-            log.debug("[DTR] Relayed tx error: " + error)
-
             if (error) {
                 log.error(
                     "[DTR] Failed to add relayed transaction to mempool: " +
@@ -471,10 +421,6 @@ export class DTRManager {
                 }
             }
 
-            log.debug(
-                "[DTR] Successfully added relayed transaction to mempool: " +
-                    tx.hash,
-            )
             return {
                 ...response,
                 result: 200,
@@ -545,8 +491,6 @@ export class DTRManager {
 
             return res
         }
-
-        log.debug("[waitForBlockThenRelay] Relaying transactions to validators")
 
         const nodeResults = await this.relayTransactions(
             validators,

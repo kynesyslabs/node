@@ -548,7 +548,6 @@ export default class SecretaryManager {
             waitingMembers = this.getWaitingMembers()
         }
 
-        log.debug(`WAITING MEMBERS: ${JSON.stringify(waitingMembers)}`)
         const promises = []
 
         for (const pubKey of waitingMembers) {
@@ -569,12 +568,6 @@ export default class SecretaryManager {
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
             const member = this.shard.members.find(m => m.identity === pubKey)
-
-            log.debug(
-                `[SECRETARY ROUTINE] Sending greenlight to ${member.identity}`,
-            )
-
-            log.debug(`Peer to receive greenlight: ${JSON.stringify(member)}`)
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
@@ -592,7 +585,6 @@ export default class SecretaryManager {
         for (const [index, result] of results.entries()) {
             const pubKey = waitingMembers[index]
             const member = this.shard.members.find(m => m.identity === pubKey)
-            log.debug(`Peer who received greenlight: ${JSON.stringify(member)}`)
 
             if (result.result === 400) {
                 log.debug(
@@ -605,8 +597,6 @@ export default class SecretaryManager {
             }
 
             if (result.result === 200) {
-                log.debug(`[SECRETARY ROUTINE] Greenlight sent to ${pubKey}`)
-                log.debug(`Response: ${JSON.stringify(result)}`)
                 continue
             }
 
@@ -787,7 +777,6 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
                 )
-                log.debug(`Response: ${JSON.stringify(res)}`)
 
                 // REVIEW: How should we handle this?
                 // NOTE: A 400 is returned if the block reference is
@@ -889,10 +878,6 @@ export default class SecretaryManager {
             const waiterKeys = Array.from(Waiter.waitList.keys()).filter(filter)
             const waiters = waiterKeys.map(key => Waiter.wait(key))
 
-            log.debug(
-                "💁💁💁💁💁💁💁💁 WAITING FOR HANGING GREENLIGHTS 💁💁💁💁💁💁💁💁💁💁",
-            )
-            log.debug(`Waiter keys: ${JSON.stringify(waiterKeys)}`)
             try {
                 await Promise.all(waiters)
             } catch (error) {
@@ -910,13 +895,11 @@ export default class SecretaryManager {
 
         // INFO: Delete pre-held keys for ended consensus round
 
-        log.debug("HANGING GREENLIGHTS RESOLVED")
         log.debug("[SECRETARY ROUTINE] Secretary routine finished 🎉")
 
         Waiter.abort(Waiter.keys.SET_WAIT_STATUS)
 
         if (manager && manager === this) {
-            log.debug("deleting the instance")
             SecretaryManager.instances.delete(this.shard.blockRef)
         }
 

@@ -228,11 +228,6 @@ export async function insertBlock(
     newBlock.content.ordered_transactions = orderedTransactionsHashes
 
     let existingBlock = null
-    log.info(
-        "[ChainDB] [ INFO ]: Checking if block with hash " +
-            block.hash +
-            " already exists",
-    )
 
     existingBlock = await blocksRepo.findOneBy({
         hash: block.hash,
@@ -453,13 +448,6 @@ export async function insertBlock(
 
                 return savedBlock
             },
-        )
-
-        log.debug(
-            "[insertBlock] lastBlockNumber: " + getSharedState.lastBlockNumber,
-        )
-        log.debug(
-            "[insertBlock] lastBlockHash: " + getSharedState.lastBlockHash,
         )
 
         // Post-commit refresh: rolled-back tx → no-op; committed tx →

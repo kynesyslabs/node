@@ -17,10 +17,7 @@ export default async function manageProposeBlockHash(
     peerId: string,
 ): Promise<RPCResponse> {
     const response = _.cloneDeep(emptyResponse)
-    log.info("[Consensus Message Received] Propose Block Hash")
-    log.info(`Block Hash: ${blockHash}`)
-    log.debug(`Validation Data: ${JSON.stringify(validationData)}`)
-    log.info(`Peer ID: ${peerId}`)
+
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
@@ -39,17 +36,11 @@ export default async function manageProposeBlockHash(
         response.extra = "Validator is not in the shard"
         return response
     }
-    log.info(
-        "[manageProposeBlockHash] Validator is in the shard: voting for the block hash",
-    )
+
     // ? Should we check for the block number as well? Or we cancel the candidateBlock at the end of the consensus?
     // Vote for the block hash
     // We must ensure we generated a block indeed
     const candidateBlockFormed = await ensureCandidateBlockFormed()
-    log.debug(
-        "[manageProposeBlockHash] Candidate block formed: " +
-            JSON.stringify(candidateBlockFormed),
-    )
     if (!candidateBlockFormed) {
         log.error(
             "[manageProposeBlockHash] Candidate block not formed: refusing the block hash",
@@ -114,9 +105,6 @@ export default async function manageProposeBlockHash(
         return response
     }
 
-    log.info(
-        "[manageProposeBlockHash] Hash does not correspond to our candidate block",
-    )
     response.result = 401
     response.response = getSharedState.publicKeyHex
     response.extra = {

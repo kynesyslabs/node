@@ -14,13 +14,6 @@ export async function manageExecution(
 ): Promise<RPCResponse> {
     const returnValue = _.cloneDeep(emptyResponse)
 
-    log.debug(`[serverListeners] content.type: ${content.type}`)
-    log.debug(`[serverListeners] content.extra: ${content.extra}`)
-
-    log.info(
-        `[serverListeners] Received execution request for type: ${content.type}`,
-    )
-
     if (content.type === "l2ps" || content.type === "l2psEncryptedTx") {
         const response = await ServerHandlers.handleL2PS(content.data)
         if (response.result !== 200) {

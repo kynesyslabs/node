@@ -1,9 +1,0 @@
-{
-    "name": "worker-threads-test",
-    "private": true,
-    "type": "module",
-    "scripts": {
-        "test:workers": "bun run main.ts",
-        "test:workers:signverify": "bun run sign-verify.ts"
-    }
-}

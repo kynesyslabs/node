@@ -100,7 +100,7 @@ export default async function getCommonValidatorSeed(
 
     logger("LAST BLOCK NUMBER: " + lastBlock.number)
     logger("--------------------------------")
-    logger("LAST BLOCK: " + lastBlock.hash)
+    logger("LAST BLOCK HASH: " + lastBlock.hash)
     logger("--------------------------------")
 
     // Get remaining blocks (if available)

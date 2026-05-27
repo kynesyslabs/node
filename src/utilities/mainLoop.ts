@@ -66,7 +66,6 @@ async function mainLoopCycle() {
     )
     // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
     // await getSharedState.getUTCTime()
-    log.info(`[MAINLOOP] Current UTC time: ${getSharedState.currentUTCTime}`)
 
     // Check if the main loop is paused
     if (getSharedState.mainLoopPaused) {
@@ -77,22 +76,17 @@ async function mainLoopCycle() {
     getSharedState.inMainLoop = true
 
     // Diagnostic logging
-    log.info("[MAIN LOOP] Logging current diagnostics")
     // logCurrentDiagnostics()
-    // await yieldToEventLoop()
 
     // ANCHOR Execute the peer routine before the consensus loop
     /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // await peerRoutine()
-    log.info("[MAINLOOP]: checking offline peers")
     checkOfflinePeers()
     // await peerGossip()
 
-    log.info("[MAINLOOP]: Running Sync routine")
     // await fastSync([], "mainloop") // REVIEW Test here
-    // await yieldToEventLoop()
     // we now have a list of online peers that can be used for consensus
 
     // ANCHOR Syncing the blockchain after the peer routine
@@ -103,28 +97,10 @@ async function mainLoopCycle() {
 
     // ANCHOR Check if we have to forge the block now
     const isConsensusTimeReached = await consensusTime.checkConsensusTime()
-    // await yieldToEventLoop()
-    log.info("[MAINLOOP]: about to check if its time for consensus")
-
-    if (!isConsensusTimeReached) {
-        log.info("[MAINLOOP]: is not consensus time")
-        //await sendNodeOnlineTx()
-    }
 
     // ? Move this to a standalone method?
     // NOTE We need both the consensus time and the sync status to be true, to avoid
     // conflicts with the sync loop that would alead to a failure in the consensus mechanism.
-    log.debug("[MAINLOOP]: isConsensusTimeReached: " + isConsensusTimeReached)
-    log.debug(
-        "[MAINLOOP]: getSharedState.syncStatus: " + getSharedState.syncStatus,
-    )
-    log.debug(
-        "[MAINLOOP]: startingConsensus: " + getSharedState.startingConsensus,
-    )
-    log.debug(
-        "[MAINLOOP]: getSharedState.inConsensusLoop: " +
-            getSharedState.inConsensusLoop,
-    )
 
     if (
         isConsensusTimeReached &&
@@ -138,7 +114,6 @@ async function mainLoopCycle() {
         // let timer = 0
         // while (getSharedState.peerRoutineRunning > 0) {
         //     await sleep(100)
-        //     await yieldToEventLoop()
         //     timer += 1
         //     if (timer > 10) {
         //         log.error(

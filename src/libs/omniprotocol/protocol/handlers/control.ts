@@ -86,9 +86,6 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
         const { default: serverHandlers } =
             await import("src/libs/network/endpointHandlers")
         const log = await import("src/utilities/logger").then(m => m.default)
-        log.info(
-            `[handleNodeCall] mempool merge request from peer: "${context.peerIdentity}"`,
-        )
 
         // ServerHandlers.handleMempool expects content with .data property
         const content = request.params ?? []
@@ -107,10 +104,6 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
     if (request.method === "hello_peer") {
         const { manageHelloPeer } =
             await import("src/libs/network/manageHelloPeer")
-
-        log.debug(
-            `[handleNodeCall] hello_peer from peer: "${context.peerIdentity}"`,
-        )
 
         const params = Array.isArray(request.params) ? request.params : []
         const helloPeerRequest = params[0]
@@ -156,14 +149,6 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
                 extra: null,
             })
         }
-
-        // REVIEW: Debug logging for peer identity lookup
-        log.debug(
-            `[handleNodeCall] consensus_routine from peer: "${context.peerIdentity}"`,
-        )
-        log.debug(
-            `[handleNodeCall] isAuthenticated: ${context.isAuthenticated}`,
-        )
 
         // Call manageConsensusRoutines with sender identity and payload
         const response = await manageConsensusRoutines(

@@ -65,10 +65,15 @@ export class ConnectionPool extends EventEmitter {
     constructor(config: Partial<PoolConfig> = {}, rateLimiter?: RateLimiter) {
         super()
         this.config = {
-            maxTotalConnections: config.maxTotalConnections ?? DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
-            maxConnectionsPerPeer: config.maxConnectionsPerPeer ?? DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
+            maxTotalConnections:
+                config.maxTotalConnections ??
+                DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
+            maxConnectionsPerPeer:
+                config.maxConnectionsPerPeer ??
+                DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
             idleTimeout: config.idleTimeout ?? DEFAULT_POOL_IDLE_TIMEOUT_MS,
-            connectTimeout: config.connectTimeout ?? DEFAULT_POOL_CONNECT_TIMEOUT_MS,
+            connectTimeout:
+                config.connectTimeout ?? DEFAULT_POOL_CONNECT_TIMEOUT_MS,
             authTimeout: config.authTimeout ?? DEFAULT_POOL_AUTH_TIMEOUT_MS,
         }
         this.rateLimiter = rateLimiter
@@ -225,21 +230,10 @@ export class ConnectionPool extends EventEmitter {
         options: ConnectionOptions = {},
     ): Promise<PeerConnection | null> {
         // Try to reuse existing usable connection (prefers newest)
-        const peer = PeerManager.getInstance().getPeer(peerIdentity)
-        log.debug(
-            `==== DEBUG: Acquiring connection to ${
-                peer ? peer.connection.string : "Unknown peer"
-            } ====`,
-        )
         const totalConnections = this.getTotalConnectionCount()
-        log.debug(`Total connections: ${totalConnections}`)
-        log.debug(`Total pending connections: ${this.pendingConnections.size}`)
-
         const existing = this.findUsableConnection(peerIdentity)
-        log.debug(`Existing connection: ${existing ? "Found" : "Not found"}`)
+
         if (existing) {
-            log.debug(`Returning existing connection, Socket ID: ${existing.socketId}`)
-            log.debug(`URL: ${existing.socket?.remoteAddress}:${existing.socket?.remotePort}`)
             return existing
         }
 
@@ -537,7 +531,10 @@ export class ConnectionPool extends EventEmitter {
         for (const peerConnections of this.connections.values()) {
             for (const conn of peerConnections) {
                 log.debug(`Found IP: ${conn.socket?.remoteAddress}`)
-                if (conn.socket?.remoteAddress === ipAddress && !conn.socket.destroyed) {
+                if (
+                    conn.socket?.remoteAddress === ipAddress &&
+                    !conn.socket.destroyed
+                ) {
                     count++
                 }
             }

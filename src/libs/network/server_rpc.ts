@@ -279,11 +279,6 @@ export async function serverRpcBun() {
                 )
             }
 
-            log.info(
-                "[RPC Call] Received request: " + JSON.stringify(payload),
-                false,
-            )
-
             const authCtx = getAuthContext(req)
             const sender = authCtx.publicKey || ""
             const response = await processPayload(payload, sender)
