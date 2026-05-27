@@ -501,13 +501,38 @@ export class L2PSBatchAggregator {
             // Convert transactions to ZK-friendly format using the amount from tx content when present.
             // If absent, fallback to 0n to avoid failing the batching loop.
             const zkTransactions = transactions.map((tx) => {
-                // Safely convert amount to BigInt with validation
+                // Safely convert amount to BigInt with validation. The
+                // amount field is `string | number | bigint` across the
+                // SDK wire shapes — pre-fork carries a DEM `number`,
+                // post-fork carries an OS decimal string that exceeds
+                // `Number.MAX_SAFE_INTEGER` for any meaningful supply.
+                // Routing through `Number()` first would silently
+                // round-trip the post-fork string through a lossy
+                // double-precision cast (10^26 OS becomes ~10^26 minus
+                // junk in the low ~70 bits); BigInt() accepts string,
+                // number, and bigint directly, so let it handle the
+                // coercion losslessly.
                 const rawAmount = (tx.encrypted_tx as any)?.content?.amount
                 let amount: bigint
                 try {
-                    amount = rawAmount !== undefined && rawAmount !== null
-                        ? BigInt(Math.floor(Number(rawAmount)))
-                        : 0n
+                    if (rawAmount === undefined || rawAmount === null) {
+                        amount = 0n
+                    } else if (typeof rawAmount === "bigint") {
+                        amount = rawAmount
+                    } else if (typeof rawAmount === "number") {
+                        if (!Number.isFinite(rawAmount)) {
+                            amount = 0n
+                        } else {
+                            amount = BigInt(Math.trunc(rawAmount))
+                        }
+                    } else {
+                        // string path — accept decimal-integer strings as
+                        // BigInt() does natively; reject fractional strings
+                        // by truncating at the decimal point if present.
+                        const s = String(rawAmount).trim()
+                        const i = s.indexOf(".")
+                        amount = BigInt(i >= 0 ? s.slice(0, i) : s)
+                    }
                 } catch {
                     amount = 0n
                 }

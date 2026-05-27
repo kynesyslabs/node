@@ -15,6 +15,7 @@ import {
     Index,
     CreateDateColumn,
 } from "typeorm"
+import { bigintNumericTransformer } from "./transformers"
 
 /**
  * L2PS Transaction Entity
@@ -96,9 +97,20 @@ export class L2PSTransaction {
     to_address: string
 
     /**
-     * Transaction amount
+     * Transaction amount. Widened from PG `bigint` (int8, max ~9.22 × 10^18)
+     * to `numeric(38, 0)` for the same reason `transactions.amount` was
+     * widened in the iter-5 fork bump: post-fork OS values exceed int8
+     * on any meaningful supply (10 % of a 10^18 DEM founder wallet is
+     * 10^26 OS). Application-level type stays `bigint` via the shared
+     * transformer.
      */
-    @Column("bigint", { default: 0 })
+    @Column({
+        type: "numeric",
+        precision: 38,
+        scale: 0,
+        default: "0",
+        transformer: bigintNumericTransformer,
+    })
     amount: bigint
 
     /**
