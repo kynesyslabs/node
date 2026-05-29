@@ -9,7 +9,7 @@
 //   MNEMONIC_FILE=./stress-test-mnemonic \
 //   bunx tsx scripts/dev-node-battery.ts
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs"
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs"
 import { randomUUID } from "node:crypto"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
@@ -29,6 +29,7 @@ mkdirSync(REPORT_DIR, { recursive: true })
 interface StageResult {
     name: string
     ok: boolean
+    skipped?: boolean
     durationMs: number
     notes: string[]
     txHash?: string
@@ -182,6 +183,7 @@ async function main() {
         stages.push({
             name: "2. L2PS broadcast (encrypted tx)",
             ok: false,
+            skipped: true,
             durationMs: 0,
             notes: ["SKIPPED — L2PS_UID env not set (need subnet key + iv from client)"],
         })
@@ -264,6 +266,7 @@ async function main() {
         stages.push({
             name: "4. Governance propose",
             ok: false,
+            skipped: true,
             durationMs: 0,
             notes: ["SKIPPED — stake did not succeed"],
         })
@@ -304,6 +307,7 @@ async function main() {
         stages.push({
             name: "5. Vote",
             ok: false,
+            skipped: true,
             durationMs: 0,
             notes: ["SKIPPED — no proposalId from stage 4"],
         })
@@ -332,6 +336,7 @@ async function main() {
         stages.push({
             name: "6. Unstake (arm)",
             ok: false,
+            skipped: true,
             durationMs: 0,
             notes: ["SKIPPED — stake did not succeed"],
         })
@@ -369,14 +374,16 @@ async function main() {
     lines.push(`- **L2PS:** ${L2PS_UID ? `uid=\`${L2PS_UID}\`` : "_not provided — separate run needed_"}`)
     lines.push("")
     const okCount = stages.filter(s => s.ok).length
-    const total = stages.length
-    lines.push(`**Summary: ${okCount}/${total} stages passed.**`)
+    const skippedCount = stages.filter(s => s.skipped).length
+    const ranCount = stages.length - skippedCount
+    const skippedNote = skippedCount > 0 ? ` (+ ${skippedCount} skipped)` : ""
+    lines.push(`**Summary: ${okCount}/${ranCount} stages passed${skippedNote}.**`)
     lines.push("")
     lines.push(`| # | Stage | Status | Duration | tx hash | tx status | block |`)
     lines.push(`|---|-------|--------|----------|---------|-----------|-------|`)
     for (let i = 0; i < stages.length; i++) {
         const s = stages[i]
-        const status = s.ok ? "✅" : s.notes.some(n => n.startsWith("SKIPPED")) ? "⏭️" : "❌"
+        const status = s.ok ? "✅" : s.skipped ? "⏭️" : "❌"
         const hash = s.txHash ? `\`${s.txHash.slice(0, 14)}…\`` : "—"
         const txS = s.txStatus ?? "—"
         const blk = s.blockNumber ?? "—"
@@ -428,7 +435,7 @@ async function main() {
 
     writeFileSync(REPORT_PATH, lines.join("\n"))
     console.log(`\n📄 Report: ${REPORT_PATH}`)
-    console.log(`📊 ${okCount}/${total} stages passed`)
+    console.log(`📊 ${okCount}/${ranCount} stages passed${skippedNote}`)
 }
 
 main().catch(e => {

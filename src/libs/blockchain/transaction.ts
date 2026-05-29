@@ -303,24 +303,21 @@ export default class Transaction implements ITransaction {
         if (!coherence) {
             // Sibling of PR #870's GCREdit-mismatch dump: when the full
             // content hash diverges, emit the bytes the node hashed and
-            // the bytes (well, hash) the SDK shipped so the diff can be
-            // eyeballed from logs alone. Without this, "Transaction hash
-            // mismatch" is opaque — every byte of `content` is a suspect.
+            // the hash the SDK shipped so the diff can be eyeballed
+            // from logs alone. Without this, "Transaction hash mismatch"
+            // is opaque — every byte of `content` is a suspect.
+            //
+            // `log.warn`, not `log.error`: a hash mismatch is an
+            // expected, recoverable condition during investigation
+            // (rejected at validation, never lands). Error-level would
+            // light up on-call alerts in any monitoring stack watching
+            // this node for each rejected tx — wrong signal.
             try {
-                log.error(
-                    `[TX] isCoherent mismatch dump.tx_type: ${tx.content?.type}`,
-                )
-                log.error(
-                    `[TX] isCoherent mismatch dump.sdkHash: ${tx.hash}`,
-                )
-                log.error(
-                    `[TX] isCoherent mismatch dump.derivedHash: ${derivedHash}`,
-                )
-                log.error(
-                    `[TX] isCoherent mismatch dump.serialized: ${serialized}`,
+                log.warn(
+                    `[TX] isCoherent mismatch — type=${tx.content?.type} sdkHash=${tx.hash} derivedHash=${derivedHash} serialized=${serialized}`,
                 )
             } catch (dumpErr) {
-                log.error(
+                log.warn(
                     `[TX] isCoherent mismatch dump failed: ${dumpErr instanceof Error ? dumpErr.message : String(dumpErr)}`,
                 )
             }
