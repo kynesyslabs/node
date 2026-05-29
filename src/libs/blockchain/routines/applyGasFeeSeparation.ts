@@ -46,7 +46,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import type { Transaction as ITransaction } from "@kynesyslabs/demosdk/types"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { calculateFeeBreakdown } from "@/libs/blockchain/routines/calculateCurrentGas"
+import {
+    calculateFeeBreakdown,
+    type FeeBreakdown,
+} from "@/libs/blockchain/routines/calculateCurrentGas"
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
@@ -108,26 +111,37 @@ export async function applyGasFeeSeparation(
 
     // Compute per-component breakdown.
     const breakdown = await calculateFeeBreakdown(tx)
-    if (
-        !Number.isFinite(breakdown.total) ||
-        !Number.isInteger(breakdown.total) ||
-        breakdown.total < 0
-    ) {
-        return {
-            ok: false,
-            message: `calculateFeeBreakdown returned non-integer total: ${breakdown.total}`,
-        }
-    }
 
-    // Audit-sweep batch B: assert components sum to total so any rounding
-    // bug or config drift in calculateFeeBreakdown is caught here instead
-    // of as a validator-side consensus disagreement.
-    const componentSum =
-        breakdown.network_fee + breakdown.rpc_fee + breakdown.additional_fee
-    if (componentSum !== breakdown.total) {
-        return {
-            ok: false,
-            message: `calculateFeeBreakdown components do not sum to total: network_fee=${breakdown.network_fee} + rpc_fee=${breakdown.rpc_fee} + additional_fee=${breakdown.additional_fee} = ${componentSum}, expected ${breakdown.total}`,
+    // Audit-sweep batch B: validate every fee component independently.
+    // calculateFeeBreakdown derives `total` as the direct sum of the
+    // three component locals, so asserting `total` alone, or asserting
+    // components-sum === total, is tautological with the current
+    // implementation. The real failure surface is each component
+    // becoming NaN / Infinity / negative / fractional via the
+    // `scalar * surge` multiplication: a misconfigured scalar
+    // (negative governance proposal, accidental float coefficient) or
+    // a broken `dynamicSurgeMultiplier` will produce one or more bad
+    // components, which then propagate into `tx.content.transaction_fee`
+    // and the fee-distribution edits and finally surface as
+    // validator-side consensus disagreement. Validate each component
+    // here so the tx is rejected at the RPC boundary with an
+    // actionable per-component message instead.
+    const components: Array<[keyof FeeBreakdown, number]> = [
+        ["network_fee", breakdown.network_fee],
+        ["rpc_fee", breakdown.rpc_fee],
+        ["additional_fee", breakdown.additional_fee],
+        ["total", breakdown.total],
+    ]
+    for (const [name, value] of components) {
+        if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 0
+        ) {
+            return {
+                ok: false,
+                message: `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`,
+            }
         }
     }
 
