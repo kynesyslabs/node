@@ -276,12 +276,11 @@ async function verifyLastBlockIntegrity(
         }
 
         if (genesisBlock.hash !== ourGenesisHash) {
-            log.error("[fastSync] Genesis hash is not coherent")
-            log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
-            log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
-            throw new Error(
-                `[fastSync] Genesis hash mismatch with peer ${currentPeer.identity}: ours=${ourGenesisHash} peer=${genesisBlock.hash}`,
+            log.error(
+                `[fastSync] Genesis hash mismatch with peer ${currentPeer.identity}: ours=${ourGenesisHash} peer=${genesisBlock.hash}, trying next peer`,
             )
+            currentPeer = findNextAvailablePeer(seenPeers)
+            continue
         }
 
         // Verify if the last block hash is coherent

@@ -22,8 +22,10 @@ KyneSys Labs: https://www.kynesys.xyz/
  *      additional_fee, rpc_address}` with the breakdown values + this
  *      node's signing pubkey. Peers verifying the signed ValidityData
  *      rely on those fields being present.
- *   3. (PROD only) Reads the sender's GCR balance and rejects if it is
- *      below the total fee.
+ *   3. Reads the sender's GCR balance and rejects if it is below the
+ *      total fee. Enforced in every environment as of audit-sweep
+ *      batch B (the previous PROD-only gate let non-prod nodes accept
+ *      unfunded transactions, which made devnet diverge from PROD).
  *   4. Generates the fee-distribution GCREdits via
  *      {@link generateFeeDistributionEdits} and prepends them onto
  *      `tx.content.gcr_edits` so the fee deductions apply before any
