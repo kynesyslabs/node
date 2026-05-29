@@ -612,10 +612,19 @@ export default class SecretaryManager {
             }
 
             log.error(
-                `[SECRETARY ROUTINE] Error sending greenlight to ${pubKey}`,
+                `[SECRETARY ROUTINE] Error sending greenlight to ${pubKey} (result=${result?.result}) — skipping this validator and continuing with the round`,
             )
             log.error(`Response: ${JSON.stringify(result)}`)
-            process.exit(1)
+            // Audit-sweep batch B: was process.exit(1). A single
+            // misbehaving validator returning an unexpected HTTP
+            // status no longer kills the secretary mid-consensus
+            // round. The validator stays in `waitingMembers` for the
+            // next greenlight pass; secretaryRoutine will retry via
+            // its own timeout-driven loop. If every validator fails,
+            // the consensus round eventually times out at the
+            // existing `_greenlight_timeout` boundary instead of
+            // taking the node down with partial round state.
+            continue
         }
 
         return true
