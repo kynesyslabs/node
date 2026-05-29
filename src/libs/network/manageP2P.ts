@@ -72,7 +72,7 @@ export default class DemosP2P {
 
     // Get the messages for the partecipant and mark them as read
     public getMessagesForPartecipant(publicKey: string): Message[] {
-        const messages = this.messages.get(publicKey)
+        const messages = this.messages.get(publicKey) ?? []
         for (const message of messages) {
             message.read = true
         }

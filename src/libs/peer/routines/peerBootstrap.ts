@@ -218,7 +218,12 @@ export default async function peerBootstrap(
     try {
         genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
     } catch (error) {
-        throw new Error(`Corrupt genesis file at data/genesis.json: ${error instanceof Error ? error.message : String(error)}`)
+        const msg = error instanceof Error ? error.message : String(error)
+        const label =
+            (error as NodeJS.ErrnoException).code === "ENOENT"
+                ? "Missing genesis file"
+                : "Corrupt genesis file"
+        throw new Error(`${label} at data/genesis.json: ${msg}`)
     }
     ourGenesisDataHash = hashGenesisData(genesisData)
 
