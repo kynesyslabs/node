@@ -141,25 +141,28 @@ export async function applyGasFeeSeparation(
     tx.content.transaction_fee.additional_fee = breakdown.additional_fee
     tx.content.transaction_fee.rpc_address = rpcAddressHex
 
-    // Sender balance check — only enforced in PROD (matches the legacy
-    // defineGas behavior so non-prod testing can submit unfunded txs).
-    if (getSharedState.PROD) {
-        let senderBalance: bigint
-        try {
-            senderBalance = await GCR.getAccountBalance(senderAddress)
-        } catch (e) {
-            return {
-                ok: false,
-                message: `failed to read sender balance: ${
-                    e instanceof Error ? e.message : stringifyNonError(e)
-                }`,
-            }
+    // Audit-sweep batch B: balance check is now enforced in every
+    // environment. The previous PROD-only gate (paired with the same
+    // gate in validateTransaction.defineGas, also dropped in this
+    // batch) let non-prod nodes accept unfunded transactions, which
+    // made devnet/staging diverge from PROD validation semantics.
+    // Devnet uses a funded-genesis fixture, so unfunded broadcasts
+    // are no longer needed for local testing.
+    let senderBalance: bigint
+    try {
+        senderBalance = await GCR.getAccountBalance(senderAddress)
+    } catch (e) {
+        return {
+            ok: false,
+            message: `failed to read sender balance: ${
+                e instanceof Error ? e.message : stringifyNonError(e)
+            }`,
         }
-        if (senderBalance < BigInt(breakdown.total)) {
-            return {
-                ok: false,
-                message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
-            }
+    }
+    if (senderBalance < BigInt(breakdown.total)) {
+        return {
+            ok: false,
+            message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
         }
     }
 
