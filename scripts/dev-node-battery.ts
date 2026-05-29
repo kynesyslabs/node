@@ -14,7 +14,10 @@ import { randomUUID } from "node:crypto"
 import { Demos } from "@kynesyslabs/demosdk/websdk"
 import { DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
-const RPC = process.env.RPC ?? "http://dev.node2.demos.sh:53552"
+// NOSONAR-NEXT-LINE typescript:S5332 — the deployed dev node listens on plain
+// HTTP (no TLS terminator in front of it). Override via `RPC=https://...` when
+// pointing at a production / TLS-terminated endpoint.
+const RPC = process.env.RPC ?? "http://dev.node2.demos.sh:53552" // NOSONAR
 const MNEMONIC_FILE = process.env.MNEMONIC_FILE ?? "./stress-test-mnemonic"
 const L2PS_UID = process.env.L2PS_UID ?? ""
 const STAKE = process.env.STAKE ?? "1000000000000000000"
