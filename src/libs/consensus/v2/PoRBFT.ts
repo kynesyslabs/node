@@ -193,9 +193,7 @@ export async function consensusRoutine(): Promise<void> {
                 //  Prune the mempool of the failed txs
                 // NOTE The mempool should now be updated with only the successful txs
                 const pruneStart = Date.now()
-                for (const tx of failedTxs) {
-                    await Mempool.removeTransactionsByHashes([tx])
-                }
+                await Mempool.removeTransactionsByHashes(failedTxs)
                 const pruneEnd = Date.now()
                 log.only(
                     `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms with ${failedTxs.length} failed txs`,

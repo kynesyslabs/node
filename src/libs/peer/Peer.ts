@@ -382,7 +382,7 @@ export default class Peer {
 
             return {
                 result: 500,
-                response: error,
+                response: error instanceof Error ? error.message : String(error),
                 require_reply: false,
                 extra: null,
             }
@@ -400,8 +400,12 @@ export default class Peer {
         }
         const url = this.connection.string + "/" + endpoint
         log.info("[Fetch] Making fetch call to: " + url)
-        const response = await axios.get(url)
-        return response.data
+        try {
+            const response = await axios.get(url)
+            return response.data
+        } catch (e) {
+            return { status: 0, error: e instanceof Error ? e.message : String(e) }
+        }
     }
 
     async getInfo(): Promise<any> {

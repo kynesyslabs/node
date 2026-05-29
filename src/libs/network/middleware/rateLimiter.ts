@@ -274,7 +274,7 @@ export class RateLimiter {
             15 * 60 * 1000,
         )
 
-        this.loadIPs()
+        void this.loadIPs()
     }
 
     /**
@@ -375,12 +375,12 @@ export class RateLimiter {
         }
     }
 
-    private loadIPs(): void {
+    private async loadIPs(): Promise<void> {
         const filePath = "blocked_ips.json"
 
         try {
             const data: Record<string, RateLimitData> = JSON.parse(
-                fs.readFileSync(filePath, "utf8"),
+                await fs.promises.readFile(filePath, "utf8"),
             )
 
             // load each IP and its RateLimitData to this.ipRequests

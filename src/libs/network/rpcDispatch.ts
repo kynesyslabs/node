@@ -131,7 +131,7 @@ export async function processPayload(
                     response: "Error in nodeCall: ",
                     require_reply: false,
                     extra: {
-                        error: error.toString(),
+                        error: error instanceof Error ? error.message : String(error),
                     },
                 }
             }

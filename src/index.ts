@@ -269,13 +269,12 @@ async function digestArguments() {
 async function isPortAvailable(port: number): Promise<boolean> {
     return new Promise((resolve, reject) => {
         const server = net.createServer()
-        server.once("error", err => {
+        server.once("error", (err: NodeJS.ErrnoException) => {
             server.close()
-            if (err["code"] == "EADDRINUSE") {
+            if (err.code === "EADDRINUSE") {
                 resolve(false)
             } else {
-                resolve(false) // or throw error!!
-                // reject(err);
+                reject(err)
             }
         })
 

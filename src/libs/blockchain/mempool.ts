@@ -149,8 +149,7 @@ export default class Mempool {
         hashes: string[],
         transactionalEntityManager?: EntityManager,
     ) {
-        // REVIEW: CRITICAL FIX - Support transactional entity manager for atomic operations
-        // When called within a transaction, use the transactional manager to ensure atomicity
+        // Use transactional EM for atomicity if provided by caller
         const repo = transactionalEntityManager
             ? transactionalEntityManager.getRepository(this.repo.target)
             : this.repo

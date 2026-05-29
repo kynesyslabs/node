@@ -21,7 +21,7 @@ export interface Message {
 // Multiton class to manage P2P connections and sessions
 export default class DemosP2P {
 
-    private static instances: Map<string, DemosP2P>
+    private static instances: Map<string, DemosP2P> = new Map()
 
     // SECTION Properties and constructor
 
@@ -33,6 +33,7 @@ export default class DemosP2P {
     constructor(partecipants: [string, string]) {
         this.partecipants = partecipants
         this.sessionId = DemosP2P.getSessionId(partecipants[0], partecipants[1])
+        this.messages = new Map()
     }
 
     // SECTION Static methods
@@ -65,7 +66,8 @@ export default class DemosP2P {
     // Relay a message to the other partecipant
     public relayMessage(message: Message): void {
         // ! TODO Signature verification
-        this.messages.get(message.publicKey).push(message)
+        if (!this.messages.has(message.publicKey)) this.messages.set(message.publicKey, [])
+        this.messages.get(message.publicKey)!.push(message)
     }
 
     // Get the messages for the partecipant and mark them as read

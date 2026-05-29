@@ -95,7 +95,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                     log.error(
                         "[BOOTSTRAP] Conflicting genesis data hashes found",
                     )
-                    process.exit(1)
+                    throw new Error("Conflicting genesis data hashes found across peers")
                 }
 
                 log.debug(
@@ -110,7 +110,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                             " != " +
                             peerGenesisDataHash,
                     )
-                    process.exit(1)
+                    throw new Error(`Genesis data hash mismatch after download: ${ourNewGenesisDataHash} != ${peerGenesisDataHash}`)
                 }
 
                 return
@@ -120,7 +120,7 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 "[BOOTSTRAP] Failed to download genesis data from peer: " +
                     verifiedPeer.connection.string,
             )
-            process.exit(1)
+            throw new Error(`Failed to download genesis data from peer: ${verifiedPeer.connection.string}`)
         }
     } else {
         log.error(
@@ -177,7 +177,7 @@ async function tryConnectPeer(peer: Peer) {
     } catch (error) {
         log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
         log.error("[PEER] Bootstrap error: " + error)
-        process.exit(1)
+        throw new Error(`Genesis data match failed for peer ${verifiedPeer.connection.string}: ${error instanceof Error ? error.message : String(error)}`)
     }
 
     let maxRetries = 3
@@ -201,10 +201,9 @@ async function tryConnectPeer(peer: Peer) {
         "[BOOTSTRAP] Failed to pair with anchor peer: " +
             verifiedPeer.identity +
             " @ " +
-            verifiedPeer.connection.string +
-            ". Exiting ...",
+            verifiedPeer.connection.string,
     )
-    process.exit(1)
+    throw new Error(`Failed to pair with anchor peer: ${verifiedPeer.identity} @ ${verifiedPeer.connection.string}`)
 }
 
 // ANCHOR Main function
@@ -215,7 +214,12 @@ export default async function peerBootstrap(
 
     // INFO: Get our genesis data hash
     const genesisFile = "data/genesis.json"
-    const genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
+    let genesisData: unknown
+    try {
+        genesisData = JSON.parse(fs.readFileSync(genesisFile, "utf8"))
+    } catch (error) {
+        throw new Error(`Corrupt genesis file at data/genesis.json: ${error instanceof Error ? error.message : String(error)}`)
+    }
     ourGenesisDataHash = hashGenesisData(genesisData)
 
     // Validity check
