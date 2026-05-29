@@ -300,8 +300,13 @@ async function defineGas(
                 "non-negative integers in the active denomination.",
         )
     }
-    // FIXME Overriding for testing
-    if (fromBalance < BigInt(compositeFeeAmount) && getSharedState.PROD) {
+    // Audit-sweep batch B: dropped the `&& getSharedState.PROD` guard so the
+    // balance check is enforced in every environment. The previous PROD-only
+    // gate let non-prod nodes accept zero-balance transactions, which made
+    // devnet/staging diverge from PROD validation semantics. Devnet now uses
+    // a funded-genesis fixture, so unfunded broadcasts are no longer needed
+    // for local testing.
+    if (fromBalance < BigInt(compositeFeeAmount)) {
         log.error(
             "TX",
             "[Native Tx Validation] [BALANCE ERROR] Insufficient balance for gas; required: " +

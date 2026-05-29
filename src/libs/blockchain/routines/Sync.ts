@@ -256,7 +256,7 @@ async function verifyLastBlockIntegrity(
     peer: Peer,
     ourLastBlockNumber: number,
     ourLastBlockHash: string,
-) {
+): Promise<boolean> {
     const ourGenesisHash = await Chain.getGenesisBlockHash()
     const seenPeers = new Set<string>()
     let currentPeer: Peer | null = peer
@@ -279,7 +279,9 @@ async function verifyLastBlockIntegrity(
             log.error("[fastSync] Genesis hash is not coherent")
             log.error(`[fastSync] Our hash: ${ourGenesisHash}`)
             log.error(`[fastSync] Peer hash: ${genesisBlock.hash}`)
-            process.exit(1)
+            throw new Error(
+                `[fastSync] Genesis hash mismatch with peer ${currentPeer.identity}: ours=${ourGenesisHash} peer=${genesisBlock.hash}`,
+            )
         }
 
         // Verify if the last block hash is coherent
@@ -302,7 +304,7 @@ async function verifyLastBlockIntegrity(
     log.error(
         "[fastSync] Exhausted all peers, could not verify last block integrity",
     )
-    process.exit(1)
+    return false
 }
 
 /**
@@ -864,7 +866,9 @@ async function fastSyncRoutine(peers: Peer[] = []) {
 
         if (!verified) {
             log.error("[fastSync] Last block is not coherent")
-            process.exit(1)
+            throw new Error(
+                "[fastSync] Last block integrity check failed — node refusing to sync against incoherent chain",
+            )
         }
     }
 

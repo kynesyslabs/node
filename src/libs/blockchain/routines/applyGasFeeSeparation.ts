@@ -117,6 +117,18 @@ export async function applyGasFeeSeparation(
         }
     }
 
+    // Audit-sweep batch B: assert components sum to total so any rounding
+    // bug or config drift in calculateFeeBreakdown is caught here instead
+    // of as a validator-side consensus disagreement.
+    const componentSum =
+        breakdown.network_fee + breakdown.rpc_fee + breakdown.additional_fee
+    if (componentSum !== breakdown.total) {
+        return {
+            ok: false,
+            message: `calculateFeeBreakdown components do not sum to total: network_fee=${breakdown.network_fee} + rpc_fee=${breakdown.rpc_fee} + additional_fee=${breakdown.additional_fee} = ${componentSum}, expected ${breakdown.total}`,
+        }
+    }
+
     // Stamp the transaction with the per-component values + this
     // node's pubkey as the rpc_address. Peers receiving the signed
     // ValidityData rely on these fields being present.
