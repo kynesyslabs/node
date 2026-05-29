@@ -618,12 +618,13 @@ export default class SecretaryManager {
             // Audit-sweep batch B: was process.exit(1). A single
             // misbehaving validator returning an unexpected HTTP
             // status no longer kills the secretary mid-consensus
-            // round. The validator stays in `waitingMembers` for the
-            // next greenlight pass; secretaryRoutine will retry via
-            // its own timeout-driven loop. If every validator fails,
-            // the consensus round eventually times out at the
-            // existing `_greenlight_timeout` boundary instead of
-            // taking the node down with partial round state.
+            // round. The validator's waitStatus has already been
+            // cleared by the time this loop runs, so it does NOT
+            // automatically re-enter the wait queue — the round's
+            // fallback is the existing `_greenlight_timeout`
+            // boundary, which will fire and trigger the standard
+            // timeout-recovery path instead of taking the node down
+            // with partial round state.
             continue
         }
 
