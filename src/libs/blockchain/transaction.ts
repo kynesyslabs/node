@@ -294,13 +294,37 @@ export default class Transaction implements ITransaction {
         // owning block context, it should pass `block.number`; otherwise
         // we fall back to the chain head.
         const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
-        const derivedHash = Hashing.sha256(
-            serializeTransactionContent(tx.content, height),
-        )
+        const serialized = serializeTransactionContent(tx.content, height)
+        const derivedHash = Hashing.sha256(serialized)
         log.debug(
             `[TX] isCoherent - Derived hash: ${derivedHash}, Coherence: ${derivedHash === tx.hash}`,
         )
         const coherence = derivedHash === tx.hash
+        if (!coherence) {
+            // Sibling of PR #870's GCREdit-mismatch dump: when the full
+            // content hash diverges, emit the bytes the node hashed and
+            // the bytes (well, hash) the SDK shipped so the diff can be
+            // eyeballed from logs alone. Without this, "Transaction hash
+            // mismatch" is opaque — every byte of `content` is a suspect.
+            try {
+                log.error(
+                    `[TX] isCoherent mismatch dump.tx_type: ${tx.content?.type}`,
+                )
+                log.error(
+                    `[TX] isCoherent mismatch dump.sdkHash: ${tx.hash}`,
+                )
+                log.error(
+                    `[TX] isCoherent mismatch dump.derivedHash: ${derivedHash}`,
+                )
+                log.error(
+                    `[TX] isCoherent mismatch dump.serialized: ${serialized}`,
+                )
+            } catch (dumpErr) {
+                log.error(
+                    `[TX] isCoherent mismatch dump failed: ${dumpErr instanceof Error ? dumpErr.message : String(dumpErr)}`,
+                )
+            }
+        }
         return coherence
     }
     /**
