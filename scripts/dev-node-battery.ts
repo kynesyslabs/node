@@ -239,10 +239,16 @@ async function main() {
         await runStage("4. Governance propose (blockTimeMs 1000→1100)", async () => {
             const block = await getBlock(demos)
             const effectiveAtBlock = (Number(block) || 0) + 160
-            proposalId = randomUUID()
+            // Mint id locally and only promote to outer `proposalId` after
+            // the tx lands. If `confirm()` throws (today: hash mismatch),
+            // `runStage` catches it but a UUID would still be assigned to
+            // the outer var — Stage 5's `if (proposalId)` guard would then
+            // fire a vote against a proposal that never existed on chain.
+            // Mirrors the `stakeOk` pattern in Stage 3.
+            const id = randomUUID()
             const tx = await DemosTransactions.proposeNetworkUpgrade(
                 {
-                    proposalId,
+                    proposalId: id,
                     proposedParameters: { blockTimeMs: 1100 } as any,
                     rationale: "dev-node-battery: bump blockTimeMs 1000→1100 (10%) smoke",
                     effectiveAtBlock,
@@ -253,16 +259,19 @@ async function main() {
             const r = await demos.broadcast(v)
             const hash = (tx as any).hash
             const poll = await pollTx(demos, hash)
+            if (poll.status === "included") {
+                proposalId = id
+            }
             return {
                 txHash: hash,
                 txStatus: poll.status,
                 blockNumber: poll.blockNumber,
                 notes: [
                     `broadcast: ${(r as any)?.result}`,
-                    `proposalId: ${proposalId}`,
+                    `proposalId: ${id}`,
                     `effectiveAtBlock: ${effectiveAtBlock}`,
                 ],
-                extra: { proposalId, effectiveAtBlock },
+                extra: { proposalId: id, effectiveAtBlock },
             }
         })
     } else {
