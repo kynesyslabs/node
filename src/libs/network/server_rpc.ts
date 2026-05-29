@@ -96,7 +96,7 @@ export async function serverRpcBun() {
         try {
             mempoolSize = await Mempool.count()
         } catch (err) {
-            log.error("[/health] Mempool.count() failed:", err)
+            log.error("[/health] Mempool.count() failed: " + (err instanceof Error ? err.message : String(err)))
         }
 
         const subsystems = snapshotSubsystems(getSharedState.subsystems)
@@ -237,14 +237,22 @@ export async function serverRpcBun() {
     })
 
     server.get("/genesis", async () => {
-        const genesisBlock = await Chain.getGenesisBlock()
-        let genesisData = genesisBlock.content.extra?.genesisData || null
+        try {
+            const genesisBlock = await Chain.getGenesisBlock()
+            let genesisData = genesisBlock.content.extra?.genesisData || null
 
-        if (typeof genesisData === "string") {
-            genesisData = JSON.parse(genesisData)
+            if (typeof genesisData === "string") {
+                try {
+                    genesisData = JSON.parse(genesisData)
+                } catch (_e) {
+                    return jsonResponse({ result: 503, response: "STATE_NOT_READY", extra: { message: "Corrupt genesis data" } }, 503)
+                }
+            }
+
+            return jsonResponse(genesisData)
+        } catch (e) {
+            return jsonResponse({ result: 503, response: "STATE_NOT_READY", extra: { message: e instanceof Error ? e.message : String(e) } }, 503)
         }
-
-        return jsonResponse(genesisData)
     })
 
     server.get("/rate-limit/stats", () => {

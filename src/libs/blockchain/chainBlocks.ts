@@ -3,7 +3,6 @@ import log from "src/utilities/logger"
 import Block from "./block"
 import Mempool from "./mempool"
 import Transaction, { toTransactionsEntity } from "./transaction"
-import Transaction, { toTransactionsEntity } from "./transaction"
 import Datasource from "src/model/datasource"
 import { Blocks } from "src/model/entities/Blocks"
 import { Transactions } from "src/model/entities/Transactions"
@@ -12,21 +11,6 @@ import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
 import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
-import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
-import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
-import { loadNetworkParameters } from "./routines/loadNetworkParameters"
-import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
-import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
-import {
-    isOsDenominationMigrationApplied,
-    runOsDenominationMigration,
-} from "@/forks/migrations/osDenomination"
-import {
-    isGasFeeSeparationMigrationApplied,
-    runGasFeeSeparationMigration,
-} from "@/forks/migrations/gasFeeSeparation"
-import { isForkActive } from "@/forks/forkGates"
-import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"

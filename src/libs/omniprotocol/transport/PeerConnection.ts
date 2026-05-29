@@ -885,9 +885,10 @@ export class PeerConnection extends EventEmitter {
                 `[PeerConnection] ${this._peerIdentity} handler error: ${error}`,
             )
 
+            handleError(error, "NETWORK", { source: "PeerConnection.handler" })
             // Send error response
             const errorPayload = Buffer.from(
-                JSON.stringify({ error: String(error) }),
+                JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
             )
             await this.sendResponse(header.sequence, errorPayload)
         }

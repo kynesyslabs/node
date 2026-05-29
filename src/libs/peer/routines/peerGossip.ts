@@ -26,7 +26,6 @@ const maxGossipPeers = 10
  * This function ensures that only one gossip process runs at a time.
  */
 export async function peerGossip() {
-    process.exit(0)
     if (getSharedState.inPeerGossip) return
     getSharedState.inPeerGossip = true
 

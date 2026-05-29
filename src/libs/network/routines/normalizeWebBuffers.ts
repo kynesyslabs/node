@@ -25,6 +25,6 @@ export function normalizeWebBuffers(webBuffer: any): [Buffer, string] {
             return [Buffer.from(bufferized.data), null]
         }
     } catch (e) {
-        return [null, e["message"]]
+        return [null, e instanceof Error ? e.message : String(e)]
     }
 }

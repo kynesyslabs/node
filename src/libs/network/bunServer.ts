@@ -1,6 +1,7 @@
 import { Server } from "bun"
 import { Headers } from "node-fetch"
 import log from "@/utilities/logger"
+import { handleError } from "src/errors"
 
 export type BunRequest = Request & { params: Record<string, string> }
 export type Handler = (req: BunRequest) => Promise<Response> | Response
@@ -126,7 +127,12 @@ export class BunServer {
         }
 
         // Execute the complete chain
-        return await handler()
+        try {
+            return await handler()
+        } catch (err) {
+            handleError(err, "NETWORK", { source: "bunServer.handleRequest", path: (req as Request).url })
+            return jsonResponse({ error: "Internal error" }, 500)
+        }
     }
 
     start(): Server {
@@ -135,6 +141,10 @@ export class BunServer {
             hostname: this.hostname,
             fetch: async (req, server) => {
                 return await this.handleRequest(req, server)
+            },
+            error(err) {
+                handleError(err, "NETWORK", { source: "bun_serve" })
+                return new Response(JSON.stringify({ error: "Internal error" }), { status: 500, headers: { "content-type": "application/json" } })
             },
         })
         return this.server

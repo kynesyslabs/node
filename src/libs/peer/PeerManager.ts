@@ -57,13 +57,19 @@ export default class PeerManager {
         } catch (error) {
             // INFO: Skip no file error
             if (!(error instanceof Error && error.message.includes("ENOENT"))) {
-                // INFO: Crash for debugging purposes
                 log.error("[PEER] Error loading peer list: " + error)
-                process.exit(1)
+                this.peerList = {}
+                return
             }
         }
 
-        const peerList = JSON.parse(rawPeerList)
+        let peerList: Record<string, unknown>
+        try {
+            peerList = JSON.parse(rawPeerList)
+        } catch (error) {
+            log.warning("[PEER] Corrupt peer list file, treating as empty: " + error)
+            peerList = {}
+        }
 
         // INFO: If this peer is not in peer list, add it
         if (!peerList[getSharedState.publicKeyHex]) {
@@ -207,12 +213,18 @@ export default class PeerManager {
             return [false, "No identity detected!"]
         }
 
+        let parsedHostname: string
+        try {
+            parsedHostname = new URL(peer.connection.string).hostname
+        } catch (_e) {
+            log.warning("[PEERMANAGER] Invalid connection string URL, rejecting peer: " + peer.connection.string)
+            return [false, "Invalid connection string: " + peer.connection.string]
+        }
+
         if (
             getSharedState.PROD &&
             peer.identity !== getSharedState.publicKeyHex &&
-            ["127.0.0.1", "localhost", "0.0.0.0"].includes(
-                new URL(peer.connection.string).hostname,
-            )
+            ["127.0.0.1", "localhost", "0.0.0.0"].includes(parsedHostname)
         ) {
             log.warning(
                 "[PEERMANAGER] Invalid connection string: " +

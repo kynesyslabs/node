@@ -74,18 +74,36 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
 
     getLastBlockNumber: async (_data, response) => {
         log.debug("[SERVER] Received getLastBlockNumber")
-        response.response = await Chain.getLastBlockNumber()
-        log.debug("[CHAIN] Received reply from the database")
+        try {
+            response.response = await Chain.getLastBlockNumber()
+            log.debug("[CHAIN] Received reply from the database")
+        } catch (e) {
+            response.result = 503
+            response.response = "STATE_NOT_READY"
+            response.extra = { message: e instanceof Error ? e.message : String(e) }
+        }
         return response
     },
 
     getLastBlock: async (_data, response) => {
-        response.response = await Chain.getLastBlock()
+        try {
+            response.response = await Chain.getLastBlock()
+        } catch (e) {
+            response.result = 503
+            response.response = "STATE_NOT_READY"
+            response.extra = { message: e instanceof Error ? e.message : String(e) }
+        }
         return response
     },
 
     getLastBlockHash: async (_data, response) => {
-        response.response = await Chain.getLastBlockHash()
+        try {
+            response.response = await Chain.getLastBlockHash()
+        } catch (e) {
+            response.result = 503
+            response.response = "STATE_NOT_READY"
+            response.extra = { message: e instanceof Error ? e.message : String(e) }
+        }
         return response
     },
 
@@ -115,7 +133,7 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
         } catch (e) {
             response.response = null
             response.result = 400
-            response.extra = e
+            response.extra = { message: e instanceof Error ? e.message : String(e) }
         }
         return response
     },
@@ -126,7 +144,13 @@ export const blockHandlers: Record<string, NodeCallHandler> = {
             response.response = "No block hash specified"
             return response
         }
-        response.response = await Chain.getBlockTransactions(data.blockHash)
+        try {
+            response.response = await Chain.getBlockTransactions(data.blockHash)
+        } catch (e) {
+            response.result = 503
+            response.response = "STATE_NOT_READY"
+            response.extra = { message: e instanceof Error ? e.message : String(e) }
+        }
         return response
     },
 }

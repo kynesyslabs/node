@@ -11,6 +11,7 @@ import log from "src/utilities/logger"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
 import { getSharedState } from "./sharedState"
 import { peerGossip } from "src/libs/peer/routines/peerGossip"
+import { handleError } from "src/errors/handleError"
 
 // INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
@@ -83,7 +84,7 @@ async function mainLoopCycle() {
     getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
     running the consensus routine. */
     // await peerRoutine()
-    checkOfflinePeers()
+    checkOfflinePeers().catch(e => handleError(e, "PEER", { source: "checkOfflinePeers" }))
     // await peerGossip()
 
     // await fastSync([], "mainloop") // REVIEW Test here

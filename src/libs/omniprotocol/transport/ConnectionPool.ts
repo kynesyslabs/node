@@ -758,8 +758,7 @@ export class ConnectionPool extends EventEmitter {
         }
 
         if (!this.instance && !rateLimiter) {
-            log.error("Connection Pool not initialized")
-            process.exit(1)
+            throw new Error("ConnectionPool not initialised: must call getInstance(rateLimiter) before getInstance()")
         }
 
         return this.instance

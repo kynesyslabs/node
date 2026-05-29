@@ -21,7 +21,7 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
         } catch (error) {
             response.result = 400
             response.response = "error"
-            response.extra = error
+            response.extra = { message: error instanceof Error ? error.message : String(error) }
         }
         return response
     },

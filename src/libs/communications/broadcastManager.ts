@@ -3,7 +3,7 @@ import Block from "../blockchain/block"
 import Chain from "../blockchain/chain"
 import { Peer, PeerManager } from "../peer"
 import { syncBlock } from "../blockchain/routines/Sync"
-import { RPCRequest } from "@kynesyslabs/demosdk/types"
+import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
@@ -47,10 +47,15 @@ export class BroadcastManager {
             }
         })
 
-        const responses = await Promise.all(promises)
+        type BroadcastResult = { pubkey: string; result: RPCResponse }
+        const settled = await Promise.allSettled(promises)
+        const responses = settled
+            .filter((r): r is PromiseFulfilledResult<BroadcastResult> => r.status === "fulfilled")
+            .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
         for (const res of responses) {
+            if (res.result.result !== 200) continue
             await this.handleUpdatePeerSyncData(
                 res.pubkey,
                 res.result.response.syncData,
@@ -194,7 +199,11 @@ export class BroadcastManager {
             }
         })
 
-        const responses = await Promise.all(promises)
+        type SyncResult = { pubkey: string; result: RPCResponse }
+        const settled = await Promise.allSettled(promises)
+        const responses = settled
+            .filter((r): r is PromiseFulfilledResult<SyncResult> => r.status === "fulfilled")
+            .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
         for (const res of responses) {
