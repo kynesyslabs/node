@@ -95,6 +95,7 @@ local_tests/
 # ---- Local devnet identities (private keys / mnemonics) ----
 .devnet/
 .manual-test-mnemonic
+stress-test-mnemonic
 
 # ---- Local upgradable-network manual test artifacts ----
 scripts/check_fee_test.ts

@@ -194,8 +194,8 @@ async function main() {
     let stakeOk = false
     await runStage("3. Stake (register validator)", async () => {
         const tx = await DemosTransactions.stake(STAKE, RPC, demos)
-        const v = await demos.confirm(tx, demos)
-        const r = await demos.broadcast(v, demos)
+        const v = await demos.confirm(tx)
+        const r = await demos.broadcast(v)
         const hash = (v as any)?.response?.data?.transaction?.hash ?? (tx as any).hash
         const poll = await pollTx(demos, hash)
         if (poll.status === "included") {
@@ -246,8 +246,8 @@ async function main() {
                 },
                 demos,
             )
-            const v = await demos.confirm(tx, demos)
-            const r = await demos.broadcast(v, demos)
+            const v = await demos.confirm(tx)
+            const r = await demos.broadcast(v)
             const hash = (tx as any).hash
             const poll = await pollTx(demos, hash)
             return {
@@ -280,8 +280,8 @@ async function main() {
                 true,
                 demos,
             )
-            const v = await demos.confirm(tx, demos)
-            const r = await demos.broadcast(v, demos)
+            const v = await demos.confirm(tx)
+            const r = await demos.broadcast(v)
             const hash = (v as any)?.response?.data?.transaction?.hash ?? (tx as any).hash
             const poll = await pollTx(demos, hash)
             return {
@@ -317,8 +317,8 @@ async function main() {
     if (stakeOk) {
         await runStage("6. Unstake (arm 1000-block lock)", async () => {
             const tx = await DemosTransactions.unstake(demos)
-            const v = await demos.confirm(tx, demos)
-            const r = await demos.broadcast(v, demos)
+            const v = await demos.confirm(tx)
+            const r = await demos.broadcast(v)
             const hash = (v as any)?.response?.data?.transaction?.hash ?? (tx as any).hash
             const poll = await pollTx(demos, hash)
             return {
