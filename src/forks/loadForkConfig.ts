@@ -5,6 +5,7 @@ import type {
     ForkConfig,
     ForkName,
     GasFeeSeparationConfig,
+    NonceEnforcementConfig,
     OsDenominationConfig,
 } from "./forkConfig"
 
@@ -223,6 +224,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.gasFeeSeparation =
                 config as GasFeeSeparationConfig
             return
+        case "nonceEnforcement":
+            getSharedState.forkConfig.nonceEnforcement =
+                config as NonceEnforcementConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -327,6 +332,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             return base as OsDenominationConfig
         case "gasFeeSeparation":
             return validateGasFeeSeparationEntry(base, entry)
+        case "nonceEnforcement":
+            // No payload beyond the base. Genesis may only set
+            // activationHeight + description.
+            return base as NonceEnforcementConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

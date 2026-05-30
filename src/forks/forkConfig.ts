@@ -48,6 +48,27 @@ export interface BaseForkConfig {
 export type OsDenominationConfig = BaseForkConfig
 
 /**
+ * `nonceEnforcement` fork (audit-sweep batch C): activates strict
+ * sequential per-sender nonce semantics.
+ *
+ * Pre-fork: `assignNonce` accepts any value, `HandleNativeOperations`
+ * does not emit a `nonce` GCREdit, `GCRNonceRoutines` ignores the
+ * `expectedPrior` field. Bit-identical to legacy for re-sync.
+ *
+ * Post-fork: incoming txs must satisfy
+ * `tx.content.nonce === account.nonce + 1 + pending_mempool_count`;
+ * every native tx emits a `+1` nonce GCREdit with `expectedPrior =
+ * account.nonce`; consensus-time apply rejects the edit when
+ * `account.nonce !== expectedPrior`, blocking cross-RPC replays.
+ *
+ * No payload beyond the base. Declared as a type alias (not an empty
+ * interface) for the same reason as `OsDenominationConfig`.
+ *
+ * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
+ */
+export type NonceEnforcementConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -72,14 +93,20 @@ export interface GasFeeSeparationConfig extends BaseForkConfig {
  * the key in `Record<ForkName, ForkConfig>` (not a tag on the value),
  * so consumers narrow by reading via `forkConfig.gasFeeSeparation` etc.
  */
-export type ForkConfig = OsDenominationConfig | GasFeeSeparationConfig
+export type ForkConfig =
+    | OsDenominationConfig
+    | GasFeeSeparationConfig
+    | NonceEnforcementConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
  * means typos surface at compile time rather than being silently treated as
  * "unknown fork → inactive".
  */
-export type ForkName = "osDenomination" | "gasFeeSeparation"
+export type ForkName =
+    | "osDenomination"
+    | "gasFeeSeparation"
+    | "nonceEnforcement"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -88,6 +115,7 @@ export type ForkName = "osDenomination" | "gasFeeSeparation"
 export interface ForkConfigByName {
     osDenomination: OsDenominationConfig
     gasFeeSeparation: GasFeeSeparationConfig
+    nonceEnforcement: NonceEnforcementConfig
 }
 
 /**
@@ -143,6 +171,13 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "components with per-component burn/treasury/rpc-operator distribution.",
         treasuryAddress: PLACEHOLDER_TREASURY_ADDRESS,
     },
+    nonceEnforcement: {
+        activationHeight: null,
+        description:
+            "Sequential per-sender nonce enforcement (audit-sweep batch C). " +
+            "Validates tx.content.nonce at RPC ingress, emits +1 nonce GCREdit " +
+            "per native tx, rejects same-nonce replays at consensus apply-time.",
+    },
 }
 
 /**
@@ -155,5 +190,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
     return {
         osDenomination: { ...DEFAULT_FORK_CONFIG.osDenomination },
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
+        nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
     }
 }

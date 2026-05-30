@@ -24,6 +24,8 @@ import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
+import Datasource from "@/model/datasource"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -359,9 +361,119 @@ async function defineGas(
     return [true, gasOperation]
 }
 
+/**
+ * Audit-sweep batch C — PR 1: nonce-validation infrastructure.
+ *
+ * Verifies an incoming transaction's `tx.content.nonce` against the
+ * sender's current GCR account nonce. Fork-gated by `nonceEnforcement`:
+ *
+ *  - Pre-fork (legacy): always returns true; bit-identical to the
+ *    previous hardcoded stub. Re-syncing pre-fork blocks is unaffected.
+ *
+ *  - Post-fork: returns true iff
+ *      `tx.content.nonce === account.nonce + 1`.
+ *    This PR (PR 1) is a single-tx check; PR 2 extends it to account
+ *    for pending mempool txs from the same sender so back-to-back
+ *    submissions from one address are accepted in order.
+ *
+ * The caller in `confirmTransaction` (lines 77-86) remains commented
+ * out in PR 1 — this commit ships the validation infra without
+ * wiring it into the live tx path. PR 3 uncomments the caller once
+ * the consensus-side rejection (GCREdit `expectedPrior`) is in place,
+ * so the validation and the apply-time check ship together behind
+ * the same fork gate.
+ *
+ * Strictly read-only against the GCR. Uses a direct `findOne` lookup
+ * rather than `ensureGCRForUser` so an unknown sender pubkey cannot
+ * provision a phantom account row as a side effect of nonce
+ * validation (PR #884 review: Greptile P1 / CodeRabbit Critical). The
+ * increment side is shipped by PR 3 as a `+1` nonce GCREdit emitted
+ * from `HandleNativeOperations.handle()` and applied by
+ * `GCRNonceRoutines` at consensus time.
+ *
+ * Fork-gate block height is read from `getSharedState.lastBlockNumber`
+ * only — never from the tx, which is attacker-controlled on the
+ * ingress path (PR #884 review: CodeRabbit Critical).
+ *
+ * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
+ */
 export async function assignNonce(tx: Transaction): Promise<boolean> {
-    const validNonce = true // TODO Override for testing
-    // TODO Get, check and increment the nonce of the transaction
-    // while returning either true or false
-    return validNonce
+    // Greptile + CodeRabbit PR #884 feedback: fork gating must use
+    // node-local chain state only. `tx.blockNumber` is attacker-
+    // controlled on the ingress path (the caller is RPC-facing), so
+    // pinning to it would let a forged tx select a pre-fork height
+    // and bypass enforcement once the caller is uncommented in PR 3.
+    //
+    // The tx is destined for the next block (`lastBlockNumber + 1`).
+    // Using `lastBlockNumber` here is slightly conservative at the
+    // exact activation boundary — if `activationHeight ===
+    // lastBlockNumber + 1`, the gate reads inactive at ingress but
+    // active at inclusion. PR 3's consensus-side `expectedPrior`
+    // check is the safety net for that one-block window.
+    const blockHeight = getSharedState.lastBlockNumber ?? 0
+
+    if (!isForkActive("nonceEnforcement", blockHeight)) {
+        // Pre-fork: legacy accept-all behaviour. Preserves bit-identical
+        // re-sync of every block authored before the fork activation.
+        return true
+    }
+
+    // CodeRabbit feedback: canonicalise to lowercase so submissions
+    // that differ only in casing target the same GCR row. The wire
+    // pubkey format is lowercase hex by convention, but we don't
+    // want validation to depend on caller discipline.
+    const senderAddressRaw: string =
+        typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+    const senderAddress = senderAddressRaw.toLowerCase()
+
+    // Greptile P1 feedback: must be a pure read. The previous draft
+    // used `ensureGCRForUser`, which calls `HandleGCR.createAccount`
+    // for unknown pubkeys. Once the caller is uncommented in PR 3,
+    // validation runs before signature verification, so any
+    // syntactically valid `from` could provision a phantom account
+    // (DB bloat + free side-effect ahead of crypto check). Use a
+    // direct repository lookup and treat unknown sender as invalid
+    // nonce — a real sender that has never transacted has
+    // `account.nonce === 0`, so they were created at genesis or by
+    // a prior received tx; never having a row means they can't have
+    // a valid nonce to submit either.
+    let account: GCRMain | null
+    try {
+        const db = await Datasource.getInstance()
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
+        account = await gcrRepository.findOne({
+            where: { pubkey: senderAddress },
+        })
+    } catch (e) {
+        log.error(
+            `[assignNonce] failed to load sender account for ${senderAddress}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return false
+    }
+
+    if (!account) {
+        log.error(
+            `[assignNonce] no GCR account for sender ${senderAddress} — ` +
+                "rejecting nonce check",
+        )
+        return false
+    }
+
+    const txNonce = tx.content.nonce
+    const expected = account.nonce + 1
+
+    if (!Number.isInteger(txNonce) || txNonce !== expected) {
+        log.error(
+            `[assignNonce] nonce mismatch for ${senderAddress}: ` +
+                `tx.content.nonce=${txNonce}, expected=${expected} ` +
+                `(account.nonce=${account.nonce})`,
+        )
+        return false
+    }
+
+    return true
 }
