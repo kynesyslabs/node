@@ -24,6 +24,8 @@ import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
+import ensureGCRForUser from "@/libs/blockchain/gcr/gcr_routines/ensureGCRForUser"
+import type { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -359,9 +361,72 @@ async function defineGas(
     return [true, gasOperation]
 }
 
+/**
+ * Audit-sweep batch C — PR 1: nonce-validation infrastructure.
+ *
+ * Verifies an incoming transaction's `tx.content.nonce` against the
+ * sender's current GCR account nonce. Fork-gated by `nonceEnforcement`:
+ *
+ *  - Pre-fork (legacy): always returns true; bit-identical to the
+ *    previous hardcoded stub. Re-syncing pre-fork blocks is unaffected.
+ *
+ *  - Post-fork: returns true iff
+ *      `tx.content.nonce === account.nonce + 1`.
+ *    This PR (PR 1) is a single-tx check; PR 2 extends it to account
+ *    for pending mempool txs from the same sender so back-to-back
+ *    submissions from one address are accepted in order.
+ *
+ * The caller in `confirmTransaction` (lines 77-86) remains commented
+ * out in PR 1 — this commit ships the validation infra without
+ * wiring it into the live tx path. PR 3 uncomments the caller once
+ * the consensus-side rejection (GCREdit `expectedPrior`) is in place,
+ * so the validation and the apply-time check ship together behind
+ * the same fork gate.
+ *
+ * Read-only: does not mutate `account.nonce`. The increment is emitted
+ * as a `+1` nonce GCREdit by `HandleNativeOperations.handle()` in
+ * PR 3, and applied at consensus time by `GCRNonceRoutines`.
+ *
+ * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
+ */
 export async function assignNonce(tx: Transaction): Promise<boolean> {
-    const validNonce = true // TODO Override for testing
-    // TODO Get, check and increment the nonce of the transaction
-    // while returning either true or false
-    return validNonce
+    const blockHeight =
+        tx.blockNumber ?? getSharedState.lastBlockNumber ?? 0
+
+    if (!isForkActive("nonceEnforcement", blockHeight)) {
+        // Pre-fork: legacy accept-all behaviour. Preserves bit-identical
+        // re-sync of every block authored before the fork activation.
+        return true
+    }
+
+    const senderAddress: string =
+        typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+
+    let account: GCRMain
+    try {
+        account = await ensureGCRForUser(senderAddress)
+    } catch (e) {
+        log.error(
+            `[assignNonce] failed to load sender account for ${senderAddress}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return false
+    }
+
+    const txNonce = tx.content.nonce
+    const expected = account.nonce + 1
+
+    if (!Number.isInteger(txNonce) || txNonce !== expected) {
+        log.error(
+            `[assignNonce] nonce mismatch for ${senderAddress}: ` +
+                `tx.content.nonce=${txNonce}, expected=${expected} ` +
+                `(account.nonce=${account.nonce})`,
+        )
+        return false
+    }
+
+    return true
 }
