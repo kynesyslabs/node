@@ -91,10 +91,20 @@ export default class Mempool {
      *   expected_nonce = account.nonce + 1 + countPendingByAddress(sender)
      *
      * Counts every tx whose `content.from` matches the supplied
-     * lowercase hex address. The mempool is the single-writer source
-     * of truth for queue depth on this node — cross-node race against
-     * a peer's mempool is resolved by the consensus-time
-     * `expectedPrior` check shipped in PR 3.
+     * lowercase hex address AND whose `reference_block` is still
+     * inside the allowed window
+     * (`lastBlock - referenceBlockRoom ..= lastBlock`) — the same
+     * cut-off that `cleanMempool` uses to mark a tx stale and that
+     * `isReferenceBlockAllowed` enforces on inbound RPC. Without the
+     * window filter, expired-but-not-yet-swept rows would inflate
+     * the count and block every subsequent legitimate submission
+     * until the next mempool sweep ran (PR #885 Greptile P1).
+     *
+     * Cross-node correctness is not the goal here — the mempool is
+     * the single-writer source of truth for queue depth on this node.
+     * Another node may have a different pending set. The
+     * consensus-time `expectedPrior` check shipped in PR 3 is the
+     * cross-node safety net.
      *
      * Case sensitivity: the SDK and the rest of the codebase emit
      * addresses as lowercase hex (`0x` + 64 hex chars). Stored
@@ -104,16 +114,19 @@ export default class Mempool {
      * input as defence in depth.
      *
      * @param address Lowercase hex pubkey of the sender.
-     * @returns Number of mempool rows with matching `content.from`.
+     * @returns Number of in-window mempool rows from this sender.
      */
     public static async countPendingByAddress(
         address: string,
     ): Promise<number> {
+        const lastBlock = await Chain.getLastBlockNumber()
+        const cutoff = lastBlock - getSharedState.referenceBlockRoom
         return await this.repo
             .createQueryBuilder("tx")
             .where("LOWER(tx.content->>'from') = LOWER(:address)", {
                 address,
             })
+            .andWhere("tx.reference_block >= :cutoff", { cutoff })
             .getCount()
     }
 

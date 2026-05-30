@@ -381,6 +381,18 @@ async function defineGas(
  *    `expectedPrior` check that prevents cross-RPC double-submission
  *    where a peer's mempool count diverges from this node's.
  *
+ * Concurrency caveat (TOCTOU). On a single node, two concurrent
+ * submissions from the same sender both read `pendingCount` before
+ * either is admitted to the mempool, so both compute the same
+ * `expected` and both pass validation. PR 2 explicitly does NOT
+ * close this window. The fix lands in PR 3 alongside the caller
+ * wire-up, where the validate+`Mempool.addTransaction` sequence
+ * is wrapped in a per-sender critical section (Postgres advisory
+ * lock keyed by `hashtext(sender)`, released at commit). Today the
+ * caller is commented out so the race is unreachable; the
+ * surrounding lock is part of the PR 3 design lock-in
+ * (see `docs/specs/audit-sweep-batch-c-nonce.md` — Risks section).
+ *
  * The caller in `confirmTransaction` (lines 77-86) remains commented
  * out in PR 1 — this commit ships the validation infra without
  * wiring it into the live tx path. PR 3 uncomments the caller once

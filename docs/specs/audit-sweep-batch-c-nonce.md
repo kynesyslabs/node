@@ -6,7 +6,7 @@ status: in-progress
 related: docs/specs/active-feature-test-addition-proposal.md, .ccb/bug-hunt-2026-05-28/FINAL_REPORT.md
 prs:
   - "#884 (PR 1: fork registration + assignNonce infra — merged)"
-  - "#TBD (PR 2: mempool-aware lookahead)"
+  - "#885 (PR 2: mempool-aware lookahead)"
   - "#TBD (PR 3: consensus rule + caller wire-up, after SDK publish)"
 ---
 
@@ -152,6 +152,8 @@ the existing demosdk pinning pattern in `package.json`).
 |------|------------|
 | In-flight txs with stale nonces after fork activation | SDK already reads nonce live per tx; only stuck txs in custom integrations are at risk. Document in fork-activation runbook. |
 | Mempool count diverges from on-chain state (race) | Single-writer mempool; `countPendingByAddress` reads the same Postgres txn boundary as the validation path. PR 2 includes a stress test. |
+| Same-node TOCTOU — two concurrent same-sender submissions both read `pendingCount` before either is admitted, both pass with identical nonces | PR 3 wraps the validate+`Mempool.addTransaction` sequence in a per-sender critical section via `pg_advisory_xact_lock(hashtext(sender))`, released at commit. The lock serialises concurrent submissions from the same sender on a single node so both go through validation in order. PR 2 ships the validation logic but the caller is commented out, so the race is unreachable today. |
+| Stale mempool entries inflate count between sweeps | `countPendingByAddress` filters on the same `reference_block >= lastBlock - referenceBlockRoom` window that `cleanMempool` uses, so expired-but-unswept rows do not contribute to the expected nonce. |
 | Cross-RPC double-spend before block inclusion | Consensus rule (PR 3) is the safety net. Different RPCs may briefly accept the same nonce; only one survives consensus. |
 | Block-formation order matters when one block contains two same-sender txs with N+1 and N+2 | Block formation already orders by hash (stable); apply order is deterministic. `expectedPrior` rejects out-of-order application. |
 | Rollback semantics | `GCRNonceRoutines` already inverts add↔remove on `isRollback`. New `expectedPrior` check is skipped on rollback (we are unwinding, not validating forward progress). |
