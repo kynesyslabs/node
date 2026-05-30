@@ -71,7 +71,7 @@ Close the replay-protection gap end-to-end:
 
 Strict sequential per-sender:
 
-```
+```text
 incoming tx is valid iff
   tx.content.nonce === account.nonce + 1 + pending_count(sender_in_mempool)
 ```
@@ -125,9 +125,9 @@ set by governance before deployment.
 
 | PR | Scope | Files | Risk |
 |----|-------|-------|------|
-| 1 | Validation infra (no fork gate) | `validateTransaction.ts`, `HandleNativeOperations.ts`, tests | Med — introduces real validation behind the dead-stub caller, still commented out so live behaviour unchanged. |
+| 1 | Fork registration + validation infra (caller still commented) | `forkConfig.ts`, `loadForkConfig.ts`, `validateTransaction.ts`, `testing/devnet/genesis.devnet.json` | Med — registers the fork (default `activationHeight: null`) + ships the fork-gated `assignNonce` implementation. Caller remains commented so live behaviour is unchanged on pre-fork chains; devnet boots post-fork from block 0. |
 | 2 | Mempool-aware lookahead | `mempool.ts` (new `countPendingByAddress`), `assignNonce` consumer in `validateTransaction.ts`, tests | Med — touches mempool query API. |
-| 3 | Consensus rule + fork activation | new fork, `GCRNonceRoutines.ts`, `HandleNativeOperations.ts` emit-side, `validateTransaction.ts` uncomment caller, devnet fixture + e2e test | High — consensus rule change; rollout coordination across validators. |
+| 3 | Consensus rule + caller wire-up | `GCRNonceRoutines.ts`, `HandleNativeOperations.ts` emit-side, `validateTransaction.ts` uncomment caller, e2e test | High — consensus rule change; rollout coordination across validators. The fork itself is already registered in PR 1; this PR ships the apply-time rejection and emits the increment edit. |
 
 ### SDK change
 
