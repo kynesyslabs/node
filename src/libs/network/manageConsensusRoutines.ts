@@ -374,7 +374,16 @@ export default async function manageConsensusRoutines(
             }
 
             // INFO: Act on the greenlight
-            const greenLightReceived = manager.receiveGreenLight(
+            // Audit-sweep batch B (greploop iter 5): added missing
+            // `await`. receiveGreenLight is async, so the previous
+            // call site assigned a Promise<boolean> to
+            // `greenLightReceived` — which is always truthy, so the
+            // response.result was always 200 regardless of the
+            // actual return value. After the batch B change that
+            // converted an unreachable-state process.exit(1) inside
+            // receiveGreenLight to `return false`, the unawaited call
+            // was silently masking that 400-class failure as a 200.
+            const greenLightReceived = await manager.receiveGreenLight(
                 timestamp,
                 validatorPhase,
             )

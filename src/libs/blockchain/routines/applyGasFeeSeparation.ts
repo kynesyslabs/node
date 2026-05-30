@@ -22,8 +22,10 @@ KyneSys Labs: https://www.kynesys.xyz/
  *      additional_fee, rpc_address}` with the breakdown values + this
  *      node's signing pubkey. Peers verifying the signed ValidityData
  *      rely on those fields being present.
- *   3. (PROD only) Reads the sender's GCR balance and rejects if it is
- *      below the total fee.
+ *   3. Reads the sender's GCR balance and rejects if it is below the
+ *      total fee. Enforced in every environment as of audit-sweep
+ *      batch B (the previous PROD-only gate let non-prod nodes accept
+ *      unfunded transactions, which made devnet diverge from PROD).
  *   4. Generates the fee-distribution GCREdits via
  *      {@link generateFeeDistributionEdits} and prepends them onto
  *      `tx.content.gcr_edits` so the fee deductions apply before any
@@ -44,7 +46,10 @@ KyneSys Labs: https://www.kynesys.xyz/
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import type { Transaction as ITransaction } from "@kynesyslabs/demosdk/types"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { calculateFeeBreakdown } from "@/libs/blockchain/routines/calculateCurrentGas"
+import {
+    calculateFeeBreakdown,
+    type FeeBreakdown,
+} from "@/libs/blockchain/routines/calculateCurrentGas"
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
@@ -106,14 +111,37 @@ export async function applyGasFeeSeparation(
 
     // Compute per-component breakdown.
     const breakdown = await calculateFeeBreakdown(tx)
-    if (
-        !Number.isFinite(breakdown.total) ||
-        !Number.isInteger(breakdown.total) ||
-        breakdown.total < 0
-    ) {
-        return {
-            ok: false,
-            message: `calculateFeeBreakdown returned non-integer total: ${breakdown.total}`,
+
+    // Audit-sweep batch B: validate every fee component independently.
+    // calculateFeeBreakdown derives `total` as the direct sum of the
+    // three component locals, so asserting `total` alone, or asserting
+    // components-sum === total, is tautological with the current
+    // implementation. The real failure surface is each component
+    // becoming NaN / Infinity / negative / fractional via the
+    // `scalar * surge` multiplication: a misconfigured scalar
+    // (negative governance proposal, accidental float coefficient) or
+    // a broken `dynamicSurgeMultiplier` will produce one or more bad
+    // components, which then propagate into `tx.content.transaction_fee`
+    // and the fee-distribution edits and finally surface as
+    // validator-side consensus disagreement. Validate each component
+    // here so the tx is rejected at the RPC boundary with an
+    // actionable per-component message instead.
+    const components: Array<[keyof FeeBreakdown, number]> = [
+        ["network_fee", breakdown.network_fee],
+        ["rpc_fee", breakdown.rpc_fee],
+        ["additional_fee", breakdown.additional_fee],
+        ["total", breakdown.total],
+    ]
+    for (const [name, value] of components) {
+        if (
+            !Number.isFinite(value) ||
+            !Number.isInteger(value) ||
+            value < 0
+        ) {
+            return {
+                ok: false,
+                message: `calculateFeeBreakdown produced an invalid ${name}: ${value} (must be a non-negative integer; full breakdown: network_fee=${breakdown.network_fee}, rpc_fee=${breakdown.rpc_fee}, additional_fee=${breakdown.additional_fee}, total=${breakdown.total})`,
+            }
         }
     }
 
@@ -129,25 +157,28 @@ export async function applyGasFeeSeparation(
     tx.content.transaction_fee.additional_fee = breakdown.additional_fee
     tx.content.transaction_fee.rpc_address = rpcAddressHex
 
-    // Sender balance check — only enforced in PROD (matches the legacy
-    // defineGas behavior so non-prod testing can submit unfunded txs).
-    if (getSharedState.PROD) {
-        let senderBalance: bigint
-        try {
-            senderBalance = await GCR.getAccountBalance(senderAddress)
-        } catch (e) {
-            return {
-                ok: false,
-                message: `failed to read sender balance: ${
-                    e instanceof Error ? e.message : stringifyNonError(e)
-                }`,
-            }
+    // Audit-sweep batch B: balance check is now enforced in every
+    // environment. The previous PROD-only gate (paired with the same
+    // gate in validateTransaction.defineGas, also dropped in this
+    // batch) let non-prod nodes accept unfunded transactions, which
+    // made devnet/staging diverge from PROD validation semantics.
+    // Devnet uses a funded-genesis fixture, so unfunded broadcasts
+    // are no longer needed for local testing.
+    let senderBalance: bigint
+    try {
+        senderBalance = await GCR.getAccountBalance(senderAddress)
+    } catch (e) {
+        return {
+            ok: false,
+            message: `failed to read sender balance: ${
+                e instanceof Error ? e.message : stringifyNonError(e)
+            }`,
         }
-        if (senderBalance < BigInt(breakdown.total)) {
-            return {
-                ok: false,
-                message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
-            }
+    }
+    if (senderBalance < BigInt(breakdown.total)) {
+        return {
+            ok: false,
+            message: `sender balance ${senderBalance.toString()} < total fee ${breakdown.total}`,
         }
     }
 

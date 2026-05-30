@@ -381,8 +381,14 @@ export default class SecretaryManager {
     }
 
     /**
-     * Simulates the secretary going offline.
-     * If we're forging block x = 5, kill the node if it's the secretary
+     * Chaos-test helper. Currently unused in production paths.
+     *
+     * WARNING: process.exit(0) below is intentional — this method exists to
+     * simulate an abrupt secretary crash for resilience testing and deliberately
+     * bypasses graceful shutdown. Do not wire into production routines without
+     * an explicit gating flag.
+     *
+     * If we're forging block x = 10, kill the node if it is the secretary.
      */
     public async simulateSecretaryGoingOffline() {
         const weAreForgingBlock = this.shard.blockRef === 10
@@ -396,9 +402,14 @@ export default class SecretaryManager {
     }
 
     /**
-     * Simulates a normal node going offline.
+     * Chaos-test helper. Currently unused in production paths.
      *
-     * If we're forging block x = 5, kill normal this node if it's not the secretary
+     * WARNING: process.exit(0) below is intentional — this method exists to
+     * simulate an abrupt normal-node crash for resilience testing and
+     * deliberately bypasses graceful shutdown. Do not wire into production
+     * routines without an explicit gating flag.
+     *
+     * If we're forging block x = 5, kill the node if it is not the secretary.
      */
     public async simulateNormalNodeGoingOffline() {
         const weAreForgingBlock10 = this.shard.blockRef === 5
@@ -601,10 +612,20 @@ export default class SecretaryManager {
             }
 
             log.error(
-                `[SECRETARY ROUTINE] Error sending greenlight to ${pubKey}`,
+                `[SECRETARY ROUTINE] Error sending greenlight to ${pubKey} (result=${result?.result}) — skipping this validator and continuing with the round`,
             )
             log.error(`Response: ${JSON.stringify(result)}`)
-            process.exit(1)
+            // Audit-sweep batch B: was process.exit(1). A single
+            // misbehaving validator returning an unexpected HTTP
+            // status no longer kills the secretary mid-consensus
+            // round. The validator's waitStatus has already been
+            // cleared by the time this loop runs, so it does NOT
+            // automatically re-enter the wait queue — the round's
+            // fallback is the existing `_greenlight_timeout`
+            // boundary, which will fire and trigger the standard
+            // timeout-recovery path instead of taking the node down
+            // with partial round state.
+            continue
         }
 
         return true
@@ -674,12 +695,18 @@ export default class SecretaryManager {
             return true
         }
 
-        log.debug("We don't know what to do with this green light")
-        log.debug(`Validator phase: ${validatorPhase}`)
-        log.debug(`Our phase: ${this.ourValidatorPhase.currentPhase}`)
-        log.debug(`Secretary block timestamp: ${secretaryBlockTimestamp}`)
-        log.debug(`Block timestamp: ${this.blockTimestamp}`)
-        process.exit(1)
+        log.error(
+            "[SECRETARY] Received an unexpected green light — ignoring to preserve consensus round",
+        )
+        log.error(`[SECRETARY] Validator phase: ${validatorPhase}`)
+        log.error(
+            `[SECRETARY] Our phase: ${this.ourValidatorPhase.currentPhase}`,
+        )
+        log.error(
+            `[SECRETARY] Secretary block timestamp: ${secretaryBlockTimestamp}`,
+        )
+        log.error(`[SECRETARY] Block timestamp: ${this.blockTimestamp}`)
+        return false
     }
 
     /**
@@ -882,9 +909,8 @@ export default class SecretaryManager {
                 await Promise.all(waiters)
             } catch (error) {
                 log.error(
-                    `[SECRETARY] Error waiting for hanging greenlights: ${error}`,
+                    `[SECRETARY] Error waiting for hanging greenlights: ${error instanceof Error ? error.message : String(error)} — continuing with pre-held cleanup`,
                 )
-                process.exit(1)
             }
 
             Waiter.preHeld
