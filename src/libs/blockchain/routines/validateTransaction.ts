@@ -26,6 +26,7 @@ import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import Mempool from "@/libs/blockchain/mempool"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -362,19 +363,23 @@ async function defineGas(
 }
 
 /**
- * Audit-sweep batch C — PR 1: nonce-validation infrastructure.
+ * Audit-sweep batch C — PR 1 + PR 2: nonce-validation with mempool lookahead.
  *
  * Verifies an incoming transaction's `tx.content.nonce` against the
- * sender's current GCR account nonce. Fork-gated by `nonceEnforcement`:
+ * sender's current GCR account nonce, plus the count of txs from the
+ * same sender already queued in this node's mempool. Fork-gated by
+ * `nonceEnforcement`:
  *
  *  - Pre-fork (legacy): always returns true; bit-identical to the
  *    previous hardcoded stub. Re-syncing pre-fork blocks is unaffected.
  *
  *  - Post-fork: returns true iff
- *      `tx.content.nonce === account.nonce + 1`.
- *    This PR (PR 1) is a single-tx check; PR 2 extends it to account
- *    for pending mempool txs from the same sender so back-to-back
- *    submissions from one address are accepted in order.
+ *      `tx.content.nonce === account.nonce + 1 + pendingMempoolCount`.
+ *    The mempool count lets a sender submit N transactions in a row
+ *    while account.nonce has not yet advanced — each successive
+ *    submission expects a higher nonce. PR 3 wires the consensus-side
+ *    `expectedPrior` check that prevents cross-RPC double-submission
+ *    where a peer's mempool count diverges from this node's.
  *
  * The caller in `confirmTransaction` (lines 77-86) remains commented
  * out in PR 1 — this commit ships the validation infra without
@@ -463,14 +468,43 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
         return false
     }
 
+    // Audit-sweep batch C PR 2: account for txs already queued in
+    // mempool from the same sender. PR 1 enforced a strict
+    // `account.nonce + 1` equality, which rejected back-to-back
+    // submissions (the second tx still reads `account.nonce` because
+    // the first has not yet been included in a block, so both would
+    // claim the same nonce). Adding the pending-queue depth lets a
+    // sender submit N transactions in a row: the k-th submission
+    // expects `account.nonce + 1 + (k-1)`. The k-th tx is itself
+    // not yet in the mempool at this point, hence the `+ 1` for the
+    // current tx.
+    //
+    // Single-node correctness only: another node sees its own
+    // mempool, which may not contain the same pending set. PR 3's
+    // consensus-side `expectedPrior` check is the cross-node
+    // safety net — at block-application time, only one of any pair
+    // of competing same-nonce txs survives.
+    let pendingCount: number
+    try {
+        pendingCount = await Mempool.countPendingByAddress(senderAddress)
+    } catch (e) {
+        log.error(
+            `[assignNonce] failed to count mempool txs for ${senderAddress}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return false
+    }
+
     const txNonce = tx.content.nonce
-    const expected = account.nonce + 1
+    const expected = account.nonce + 1 + pendingCount
 
     if (!Number.isInteger(txNonce) || txNonce !== expected) {
         log.error(
             `[assignNonce] nonce mismatch for ${senderAddress}: ` +
                 `tx.content.nonce=${txNonce}, expected=${expected} ` +
-                `(account.nonce=${account.nonce})`,
+                `(account.nonce=${account.nonce}, ` +
+                `pendingMempoolCount=${pendingCount})`,
         )
         return false
     }

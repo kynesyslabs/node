@@ -2,8 +2,12 @@
 type: spec
 title: Audit-Sweep Batch C — Nonce-based Replay Protection
 date: 2026-05-30
-status: draft
+status: in-progress
 related: docs/specs/active-feature-test-addition-proposal.md, .ccb/bug-hunt-2026-05-28/FINAL_REPORT.md
+prs:
+  - "#884 (PR 1: fork registration + assignNonce infra — merged)"
+  - "#TBD (PR 2: mempool-aware lookahead)"
+  - "#TBD (PR 3: consensus rule + caller wire-up, after SDK publish)"
 ---
 
 # Audit-Sweep Batch C — Nonce-based Replay Protection

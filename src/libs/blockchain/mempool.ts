@@ -82,6 +82,42 @@ export default class Mempool {
     }
 
     /**
+     * Audit-sweep batch C PR 2 — count pending txs from a given sender.
+     *
+     * Used by `assignNonce` to compute the next expected nonce when a
+     * sender has prior txs already queued in mempool but not yet
+     * included in a block. The pattern is:
+     *
+     *   expected_nonce = account.nonce + 1 + countPendingByAddress(sender)
+     *
+     * Counts every tx whose `content.from` matches the supplied
+     * lowercase hex address. The mempool is the single-writer source
+     * of truth for queue depth on this node — cross-node race against
+     * a peer's mempool is resolved by the consensus-time
+     * `expectedPrior` check shipped in PR 3.
+     *
+     * Case sensitivity: the SDK and the rest of the codebase emit
+     * addresses as lowercase hex (`0x` + 64 hex chars). Stored
+     * `content.from` strings can in principle carry mixed case, so
+     * the comparison is lowercased on both sides via the SQL
+     * `LOWER(...)` function. Callers should still lowercase their
+     * input as defence in depth.
+     *
+     * @param address Lowercase hex pubkey of the sender.
+     * @returns Number of mempool rows with matching `content.from`.
+     */
+    public static async countPendingByAddress(
+        address: string,
+    ): Promise<number> {
+        return await this.repo
+            .createQueryBuilder("tx")
+            .where("LOWER(tx.content->>'from') = LOWER(:address)", {
+                address,
+            })
+            .getCount()
+    }
+
+    /**
      * Case-insensitive mempool lookup by transaction hash. Returns the
      * MempoolTx row or null if the hash is not in the mempool.
      */
