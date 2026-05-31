@@ -267,8 +267,24 @@ export default class Mempool {
                             }
                         }
 
+                        // PR #887 Greptile P1 (iter 2): live re-query
+                        // of the block tip inside the lock.
+                        // `blockHeight` outside the lock is the
+                        // `getSharedState.lastBlockNumber` snapshot
+                        // captured before any await; a block produced
+                        // between `confirmTransaction` and
+                        // `addTransaction` would diverge from the
+                        // cutoff `assignNonce` used (which goes
+                        // through `Chain.getLastBlockNumber()` —
+                        // `countPendingByAddress`). Mirror that path
+                        // so both windows align on the same
+                        // block tip and a still-valid tx is never
+                        // rejected for a stale-cutoff mismatch.
+                        const liveBlockHeight =
+                            await Chain.getLastBlockNumber()
                         const cutoff =
-                            blockHeight - getSharedState.referenceBlockRoom
+                            liveBlockHeight -
+                            getSharedState.referenceBlockRoom
                         const pendingCount = await mempoolRepo
                             .createQueryBuilder("tx")
                             .where(
