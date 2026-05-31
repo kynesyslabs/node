@@ -389,14 +389,17 @@ async function defineGas(
  * Concurrency caveat (TOCTOU). On a single node, two concurrent
  * submissions from the same sender both read `pendingCount` before
  * either is admitted to the mempool, so both compute the same
- * `expected` and both pass validation. PR 2 explicitly does NOT
- * close this window. The fix lands in PR 3 alongside the caller
- * wire-up, where the validate+`Mempool.addTransaction` sequence
- * is wrapped in a per-sender critical section (Postgres advisory
- * lock keyed by `hashtext(sender)`, released at commit). Today the
- * caller is commented out so the race is unreachable; the
- * surrounding lock is part of the PR 3 design lock-in
- * (see `docs/specs/audit-sweep-batch-c-nonce.md` — Risks section).
+ * `expected` and both pass validation here. Closed at the insert
+ * boundary by PR 4: `Mempool.addTransaction` wraps the per-sender
+ * `pg_advisory_xact_lock`-protected re-check + insert. The lock
+ * serialises concurrent same-sender ingress and the in-lock
+ * re-query of `account.nonce + pendingMempoolCount` catches the
+ * duplicate-nonce second submission before it occupies a mempool
+ * slot. See `docs/specs/audit-sweep-batch-c-nonce.md` Risks section
+ * for the cross-RPC safety net (PR 3's `expectedPrior` apply-time
+ * reject in `GCRNonceRoutines`) — that remains the only line of
+ * defence against cross-node replay since this node's mempool lock
+ * cannot serialise across peers.
  *
  * The caller in `confirmTransaction` (lines 77-86) remains commented
  * out in PR 1 — this commit ships the validation infra without

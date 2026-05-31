@@ -17,6 +17,8 @@ import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
+import { isForkActive } from "@/forks"
+import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
@@ -163,6 +165,122 @@ export default class Mempool {
 
             if (getSharedState.inConsensusLoop) {
                 blockRef = SecretaryManager.lastBlockRef + 1
+            }
+        }
+
+        // Audit-sweep batch C PR 4 — close the validate→addTransaction
+        // TOCTOU window for `nonceEnforcement`.
+        //
+        // `assignNonce` ran during the earlier `confirmTransaction`
+        // call, but that's a separate RPC round-trip from this
+        // execute-side insert. Between the two, two concurrent
+        // ingress paths for the same sender can both pass validation
+        // (each sees stale `account.nonce + pendingCount`) and reach
+        // here with duplicate nonces. The consensus-side
+        // `expectedPrior` check in `GCRNonceRoutines` (PR 3) catches
+        // them at block-apply time, but only after they both occupy
+        // mempool slots. Closing the gap at the insert point keeps
+        // the mempool clean and rejects the duplicate immediately.
+        //
+        // Design: wrap re-check + insert in a Postgres txn with a
+        // per-sender `pg_advisory_xact_lock`. Lock released at
+        // commit/rollback. Re-query account nonce + mempool count
+        // INSIDE the locked section so the values reflect any
+        // concurrent winner that beat us into the lock. If the
+        // re-check fails, return error without inserting.
+        //
+        // Skip when not native, when no sender (genesis path), when
+        // fork inactive, or when the tx doesn't carry a nonce —
+        // those paths preserve the legacy behaviour bit-identically.
+        const senderFromRaw = transaction.content?.from
+        const senderFrom =
+            typeof senderFromRaw === "string"
+                ? senderFromRaw.toLowerCase()
+                : null
+        const txNonce = transaction.content?.nonce
+        const blockHeight = getSharedState.lastBlockNumber ?? 0
+
+        if (
+            senderFrom &&
+            typeof txNonce === "number" &&
+            isForkActive("nonceEnforcement", blockHeight)
+        ) {
+            try {
+                return await this.repo.manager.transaction(async em => {
+                    // Postgres advisory locks operate on signed bigint
+                    // keys. `hashtext()` returns a 32-bit signed int —
+                    // ample collision space for distinct senders, no
+                    // false-positive interference with other lock
+                    // keyspaces in the project (none exist yet).
+                    await em.query(
+                        "SELECT pg_advisory_xact_lock(hashtext($1))",
+                        [`nonce:${senderFrom}`],
+                    )
+
+                    // Re-check inside the lock. The account row may have
+                    // advanced (a concurrent submission committed); the
+                    // mempool count likely changed.
+                    const gcrRepo = em.getRepository(GCRMain)
+                    const account = await gcrRepo.findOne({
+                        where: { pubkey: senderFrom },
+                    })
+                    if (!account) {
+                        return {
+                            confirmationBlock: null,
+                            error: "Nonce TOCTOU recheck: sender account missing",
+                        }
+                    }
+
+                    const cutoff =
+                        blockHeight - getSharedState.referenceBlockRoom
+                    const mempoolRepo = em.getRepository(MempoolTx)
+                    const pendingCount = await mempoolRepo
+                        .createQueryBuilder("tx")
+                        .where(
+                            "LOWER(tx.content->>'from') = LOWER(:address)",
+                            { address: senderFrom },
+                        )
+                        .andWhere("tx.reference_block >= :cutoff", { cutoff })
+                        .getCount()
+
+                    const expected = account.nonce + 1 + pendingCount
+                    if (txNonce !== expected) {
+                        log.error(
+                            `[Mempool.addTransaction] Nonce TOCTOU recheck mismatch for ${senderFrom}: ` +
+                                `tx.content.nonce=${txNonce}, expected=${expected} ` +
+                                `(account.nonce=${account.nonce}, pendingMempoolCount=${pendingCount})`,
+                        )
+                        return {
+                            confirmationBlock: null,
+                            error:
+                                "Nonce TOCTOU recheck failed: " +
+                                `tx.content.nonce=${txNonce}, expected=${expected}`,
+                        }
+                    }
+
+                    const saved = await mempoolRepo.save({
+                        ...transaction,
+                        timestamp: BigInt(transaction.content.timestamp),
+                        nonce: transaction.content.nonce,
+                        blockNumber: blockRef,
+                    })
+
+                    return {
+                        confirmationBlock: saved.blockNumber,
+                        error: "",
+                    }
+                })
+            } catch (error) {
+                let message = "Error: Failed to add transaction to mempool"
+                if (error instanceof QueryFailedError) {
+                    log.error(`Error saving tx: ${transaction.hash}`)
+                    log.error(error.message)
+                    message = "Error: Transaction already in mempool"
+                }
+                return {
+                    confirmationBlock: null,
+                    error: message,
+                }
             }
         }
 
