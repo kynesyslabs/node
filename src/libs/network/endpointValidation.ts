@@ -64,6 +64,15 @@ export async function handleValidateTransaction(
         )
         gcrEdits.forEach((gcredit: GCREdit) => {
             gcredit.txhash = ""
+            // Audit-sweep batch C PR 3 — strip the node-only
+            // `expectedPrior` field from the regen side before
+            // hashing. The SDK never populates it; the node fills it
+            // in at apply time from local GCR state. Leaving it on
+            // the regen side would diverge from the SDK-shipped edit
+            // and surface as a spurious GCREdit mismatch.
+            if (gcredit.type === "nonce" && "expectedPrior" in gcredit) {
+                delete (gcredit as { expectedPrior?: number }).expectedPrior
+            }
         })
 
         // Normalise the regenerated gcrEdits through the SAME serializer
@@ -134,9 +143,19 @@ export async function handleValidateTransaction(
         // Use the PRE-confirmTransaction snapshot, not tx.content.gcr_edits,
         // which `applyGasFeeSeparation` may have mutated by prepending
         // node-computed fee edits.
-        const txEditsBlanked = txShippedGcrEdits.map(
-            (e: GCREdit) => ({ ...e, txhash: "" }),
-        )
+        const txEditsBlanked = txShippedGcrEdits.map((e: GCREdit) => {
+            const blanked = { ...e, txhash: "" }
+            // Audit-sweep batch C PR 3 — symmetric strip of
+            // `expectedPrior` on the tx-side input. The SDK 4.0.5+
+            // type allows the field but the SDK runtime never writes
+            // it; an old or non-conformant client could nonetheless
+            // ship it. Drop it here so the hash is invariant under
+            // that choice, matching the regen-side strip above.
+            if (blanked.type === "nonce" && "expectedPrior" in blanked) {
+                delete (blanked as { expectedPrior?: number }).expectedPrior
+            }
+            return blanked
+        })
         const normalisedTxEdits = normaliseGcrEditsForHash(txEditsBlanked)
         const txGcrEditsHash = Hashing.sha256(
             JSON.stringify(normalisedTxEdits),

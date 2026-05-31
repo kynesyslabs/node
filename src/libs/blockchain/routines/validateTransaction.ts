@@ -77,8 +77,13 @@ export async function confirmTransaction(
     }
     */
 
-    /* NOTE Nonce assignment is done in the GCR too
-    let hasNonce = await assignNonce(tx)
+    // Audit-sweep batch C PR 3 — wire `assignNonce` into the live
+    // validation path. Pre-fork: `assignNonce` short-circuits to
+    // `true` (PR 1), so this is a noop. Post-fork: enforces strict
+    // sequential nonce semantics with mempool lookahead (PRs 1+2),
+    // and the matching consensus-side `expectedPrior` check on
+    // `GCRNonceRoutines` (this PR) is the cross-RPC safety net.
+    const hasNonce = await assignNonce(tx)
     if (!hasNonce) {
         validityData.data.message =
             "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
@@ -86,7 +91,7 @@ export async function confirmTransaction(
         validityData = await signValidityData(validityData)
         return validityData
     }
-    */
+
     // Verify tx validity
 
     const {
