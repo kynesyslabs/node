@@ -77,8 +77,13 @@ export async function confirmTransaction(
     }
     */
 
-    /* NOTE Nonce assignment is done in the GCR too
-    let hasNonce = await assignNonce(tx)
+    // Audit-sweep batch C PR 3 — wire `assignNonce` into the live
+    // validation path. Pre-fork: `assignNonce` short-circuits to
+    // `true` (PR 1), so this is a noop. Post-fork: enforces strict
+    // sequential nonce semantics with mempool lookahead (PRs 1+2),
+    // and the matching consensus-side `expectedPrior` check on
+    // `GCRNonceRoutines` (this PR) is the cross-RPC safety net.
+    const hasNonce = await assignNonce(tx)
     if (!hasNonce) {
         validityData.data.message =
             "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
@@ -86,7 +91,7 @@ export async function confirmTransaction(
         validityData = await signValidityData(validityData)
         return validityData
     }
-    */
+
     // Verify tx validity
 
     const {
@@ -519,6 +524,57 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
                 `pendingMempoolCount=${pendingCount})`,
         )
         return false
+    }
+
+    // Audit-sweep batch C PR 3 — populate `expectedPrior` on this
+    // tx's `nonce` GCREdit (if present) at validation time, NOT at
+    // apply time.
+    //
+    // Why validation time: the value must be a snapshot of the
+    // sender's nonce taken BEFORE this tx is bundled into a block.
+    // Populating at apply time would re-read `entities.accounts` —
+    // which already reflects prior in-block applies — so the
+    // expected value would track the apply-time state, defeating
+    // the cross-RPC safety net entirely (the second replay would
+    // see its own freshly-incremented value and pass the check).
+    //
+    // Formula: `expectedPrior = account.nonce + pendingCount`. This
+    // is the value the sender's nonce will be at the moment this tx
+    // applies, assuming all queued mempool txs from the same sender
+    // (which are ordered before this one) land first. For a single
+    // tx: `pendingCount === 0`, so `expectedPrior === account.nonce`.
+    // For the k-th of N back-to-back submissions:
+    // `expectedPrior === account.nonce + (k-1)`.
+    //
+    // The field is stripped from both sides of the hash compare in
+    // `endpointValidation`, so the signed tx hash is invariant under
+    // whether or not this populate ran. Pre-fork blocks re-sync
+    // bit-identically because the fork-gate above short-circuits.
+    //
+    // We mutate `tx.content.gcr_edits` in place. The hash strip
+    // means downstream serialisation / signing is unaffected.
+    if (Array.isArray(tx.content.gcr_edits)) {
+        const expectedPrior = account.nonce + pendingCount
+        for (const edit of tx.content.gcr_edits) {
+            if (edit.type === "nonce") {
+                // Normalise non-string forge-key accounts to lowercase
+                // hex before comparing, mirroring the same coercion in
+                // `GCRNonceRoutines.apply`. Direct `===` between an
+                // object and a string is always false, which would
+                // silently skip the populate and disable the cross-RPC
+                // safety net for any client shipping forge-format
+                // accounts (PR #886 review: CodeRabbit Major /
+                // Greptile P1).
+                const editAccount = (
+                    typeof edit.account === "string"
+                        ? edit.account
+                        : forgeToHex(edit.account)
+                ).toLowerCase()
+                if (editAccount === senderAddress) {
+                    edit.expectedPrior = expectedPrior
+                }
+            }
+        }
     }
 
     return true

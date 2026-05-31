@@ -6,8 +6,10 @@ status: in-progress
 related: docs/specs/active-feature-test-addition-proposal.md, .ccb/bug-hunt-2026-05-28/FINAL_REPORT.md
 prs:
   - "#884 (PR 1: fork registration + assignNonce infra — merged)"
-  - "#885 (PR 2: mempool-aware lookahead)"
-  - "#TBD (PR 3: consensus rule + caller wire-up, after SDK publish)"
+  - "#885 (PR 2: mempool-aware lookahead — merged)"
+  - "#TBD (PR 3: consensus rule + caller wire-up)"
+sdk_publish:
+  - "@kynesyslabs/demosdk 4.0.5 — adds `expectedPrior?: number` to GCREditNonce (type-only, runtime unchanged)"
 ---
 
 # Audit-Sweep Batch C — Nonce-based Replay Protection
@@ -111,19 +113,71 @@ type NonceGCREdit = {
 Introduce a new fork: `nonceEnforcement`, gated by genesis
 `forks.nonceEnforcement.activationHeight`. Behaviour:
 
-- **Pre-fork (legacy)**: `assignNonce` accepts any nonce.
-  `HandleNativeOperations` does not emit a `nonce` edit.
-  `GCRNonceRoutines` ignores `expectedPrior`. Bit-identical to today
-  for re-sync.
-- **Post-fork**: `assignNonce` enforces sequential semantics.
-  `HandleNativeOperations` emits a `+1` `nonce` edit with
-  `expectedPrior = account.nonce` populated by reading GCR at
-  emit-time. `GCRNonceRoutines` rejects the edit when
-  `expectedPrior !== undefined && account.nonce !== expectedPrior`.
+- **Pre-fork (legacy)**: `assignNonce` accepts any nonce. SDK
+  `GCRGeneration.createNonceEdit` ships the legacy shape (no
+  `expectedPrior`). `GCRNonceRoutines` ignores any `expectedPrior`
+  on legacy edits. Bit-identical to today for re-sync.
+- **Post-fork**: `assignNonce` enforces sequential semantics with
+  mempool lookahead (PR 2). The SDK still ships nonce edits without
+  `expectedPrior` — the **node populates it at validation time**
+  inside `assignNonce` itself, using the same account row +
+  pending-mempool-count it already loaded for the equality check:
+  `expectedPrior = account.nonce + pendingCount`. The populate
+  happens BEFORE the snapshot in `endpointValidation` is taken… no,
+  actually after — the snapshot is captured at line 48 (deep-clone
+  of `tx.content.gcr_edits`) **before** `confirmTransaction` runs.
+  When `assignNonce` mutates the real `tx.content.gcr_edits` array,
+  the snapshot is the unmodified pre-confirmTransaction shape.
+  Hash compare uses snapshot vs regen (both stripped of
+  `expectedPrior` symmetrically), so signature integrity is
+  preserved. The mutated array flows downstream into
+  `HandleGCR.applyTransaction`, which feeds the populated
+  `expectedPrior` into `GCRNonceRoutines`. Rejection fires when
+  `accountGCR.nonce !== expectedPrior` — the cross-RPC double-spend
+  safety net.
+
+  Why NOT populate at apply time: re-reading account state inside
+  the apply loop would see prior in-block applies, so a replay tx
+  bundled into the same block would see its own freshly-incremented
+  value and pass the check. Locking the value to validation-time
+  state (before any apply) is what makes the safety net actually
+  work.
 
 Devnet sets `activationHeight: 0` like other forks so local testing
 exercises the post-fork path from genesis. Production fork height is
 set by governance before deployment.
+
+#### Emission-site rationale (Path A vs B)
+
+The original design called for SDK-side emission of `expectedPrior`,
+which would have required either coordinated rollout (B) or
+SDK-side fork introspection (C). Both were rejected during PR 3
+implementation in favour of **Path A — node populates at
+validation time, SDK ships type-only**:
+
+- **Zero breaking change**: old SDK clients continue to work
+  post-fork without re-publishing. New SDK clients also do not need
+  to know about the field at runtime.
+- **Signature-safe**: `expectedPrior` is stripped from both
+  SDK-shipped and node-regen edits before the hash compare in
+  `endpointValidation`. The signed tx hash never includes it; nodes
+  populate it inside `assignNonce` from `account.nonce +
+  pendingMempoolCount` and the mutation flows downstream into the
+  apply pipeline.
+- **Single SDK publish stays minimal**: `expectedPrior?: number`
+  added to the type union only. No runtime change, no fork-status
+  RPC needed in the SDK.
+
+Initial draft of PR 3 wrote the populate inside
+`HandleGCR.applyTransaction`'s per-edit loop, reading the live
+account nonce from `entities.accounts`. That site is wrong: it
+re-reads state already advanced by prior in-block applies, so a
+replay tx bundled into the same block sees its own freshly-
+incremented value and passes the check. Locking the value at
+validation time (before any apply) is what makes the safety net
+actually work. See `endpointValidation.ts` for the strip + the
+symmetric blanking pattern (mirrors the existing `txhash`
+blanking).
 
 ### PR breakdown
 
@@ -131,7 +185,7 @@ set by governance before deployment.
 |----|-------|-------|------|
 | 1 | Fork registration + validation infra (caller still commented) | `forkConfig.ts`, `loadForkConfig.ts`, `validateTransaction.ts`, `testing/devnet/genesis.devnet.json` | Med — registers the fork (default `activationHeight: null`) + ships the fork-gated `assignNonce` implementation. Caller remains commented so live behaviour is unchanged on pre-fork chains; devnet boots post-fork from block 0. |
 | 2 | Mempool-aware lookahead | `mempool.ts` (new `countPendingByAddress`), `assignNonce` consumer in `validateTransaction.ts`, tests | Med — touches mempool query API. |
-| 3 | Consensus rule + caller wire-up | `GCRNonceRoutines.ts`, `HandleNativeOperations.ts` emit-side, `validateTransaction.ts` uncomment caller, e2e test | High — consensus rule change; rollout coordination across validators. The fork itself is already registered in PR 1; this PR ships the apply-time rejection and emits the increment edit. |
+| 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (fork-gated `expectedPrior` mismatch reject at apply time), `validateTransaction.ts` (uncomment caller + validation-time `expectedPrior` populate from `account.nonce + pendingCount`), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `package.json` (demosdk 4.0.3 → 4.0.5) | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the consensus-side rejection + validation-time populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). Cross-RPC e2e test against the devnet fixture is tracked as a follow-up PR; the strip + populate + reject pipeline is testable today via direct mempool injection. |
 
 ### SDK change
 
