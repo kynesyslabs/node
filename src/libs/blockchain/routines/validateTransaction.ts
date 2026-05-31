@@ -557,10 +557,19 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
         const expectedPrior = account.nonce + pendingCount
         for (const edit of tx.content.gcr_edits) {
             if (edit.type === "nonce") {
-                const editAccount =
+                // Normalise non-string forge-key accounts to lowercase
+                // hex before comparing, mirroring the same coercion in
+                // `GCRNonceRoutines.apply`. Direct `===` between an
+                // object and a string is always false, which would
+                // silently skip the populate and disable the cross-RPC
+                // safety net for any client shipping forge-format
+                // accounts (PR #886 review: CodeRabbit Major /
+                // Greptile P1).
+                const editAccount = (
                     typeof edit.account === "string"
-                        ? edit.account.toLowerCase()
-                        : edit.account
+                        ? edit.account
+                        : forgeToHex(edit.account)
+                ).toLowerCase()
                 if (editAccount === senderAddress) {
                     edit.expectedPrior = expectedPrior
                 }

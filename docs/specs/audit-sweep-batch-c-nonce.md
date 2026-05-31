@@ -152,8 +152,8 @@ set by governance before deployment.
 The original design called for SDK-side emission of `expectedPrior`,
 which would have required either coordinated rollout (B) or
 SDK-side fork introspection (C). Both were rejected during PR 3
-implementation in favour of **Path A — node populates at apply
-time, SDK ships type-only**:
+implementation in favour of **Path A — node populates at
+validation time, SDK ships type-only**:
 
 - **Zero breaking change**: old SDK clients continue to work
   post-fork without re-publishing. New SDK clients also do not need
@@ -161,13 +161,23 @@ time, SDK ships type-only**:
 - **Signature-safe**: `expectedPrior` is stripped from both
   SDK-shipped and node-regen edits before the hash compare in
   `endpointValidation`. The signed tx hash never includes it; nodes
-  populate it post-validation from local state.
+  populate it inside `assignNonce` from `account.nonce +
+  pendingMempoolCount` and the mutation flows downstream into the
+  apply pipeline.
 - **Single SDK publish stays minimal**: `expectedPrior?: number`
   added to the type union only. No runtime change, no fork-status
   RPC needed in the SDK.
 
-See `endpointValidation.ts` for the strip + the symmetric blanking
-pattern (mirrors the existing `txhash` blanking).
+Initial draft of PR 3 wrote the populate inside
+`HandleGCR.applyTransaction`'s per-edit loop, reading the live
+account nonce from `entities.accounts`. That site is wrong: it
+re-reads state already advanced by prior in-block applies, so a
+replay tx bundled into the same block sees its own freshly-
+incremented value and passes the check. Locking the value at
+validation time (before any apply) is what makes the safety net
+actually work. See `endpointValidation.ts` for the strip + the
+symmetric blanking pattern (mirrors the existing `txhash`
+blanking).
 
 ### PR breakdown
 
@@ -175,7 +185,7 @@ pattern (mirrors the existing `txhash` blanking).
 |----|-------|-------|------|
 | 1 | Fork registration + validation infra (caller still commented) | `forkConfig.ts`, `loadForkConfig.ts`, `validateTransaction.ts`, `testing/devnet/genesis.devnet.json` | Med — registers the fork (default `activationHeight: null`) + ships the fork-gated `assignNonce` implementation. Caller remains commented so live behaviour is unchanged on pre-fork chains; devnet boots post-fork from block 0. |
 | 2 | Mempool-aware lookahead | `mempool.ts` (new `countPendingByAddress`), `assignNonce` consumer in `validateTransaction.ts`, tests | Med — touches mempool query API. |
-| 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (apply-time `expectedPrior` reject), `validateTransaction.ts` (uncomment caller + validation-time `expectedPrior` populate from `account.nonce + pendingCount`), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `package.json` (demosdk 4.0.3 → 4.0.5), e2e test | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the apply-time rejection + validation-time populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). |
+| 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (fork-gated `expectedPrior` mismatch reject at apply time), `validateTransaction.ts` (uncomment caller + validation-time `expectedPrior` populate from `account.nonce + pendingCount`), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `package.json` (demosdk 4.0.3 → 4.0.5) | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the consensus-side rejection + validation-time populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). Cross-RPC e2e test against the devnet fixture is tracked as a follow-up PR; the strip + populate + reject pipeline is testable today via direct mempool injection. |
 
 ### SDK change
 

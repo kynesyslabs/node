@@ -67,7 +67,9 @@ export async function handleValidateTransaction(
             // Audit-sweep batch C PR 3 — strip the node-only
             // `expectedPrior` field from the regen side before
             // hashing. The SDK never populates it; the node fills it
-            // in at apply time from local GCR state. Leaving it on
+            // in at validation time inside `assignNonce` (see
+            // `validateTransaction.ts`) from
+            // `account.nonce + pendingMempoolCount`. Leaving it on
             // the regen side would diverge from the SDK-shipped edit
             // and surface as a spurious GCREdit mismatch.
             if (gcredit.type === "nonce" && "expectedPrior" in gcredit) {
