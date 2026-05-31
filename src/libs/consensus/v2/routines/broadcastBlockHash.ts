@@ -46,22 +46,37 @@ async function verifyIncomingSignatures(
                         signature: hexToUint8Array(signature),
                         publicKey: hexToUint8Array(identity),
                     })
-                return { identity, signature, isValid }
+                // `loggedFailure` marks whether the inner catch path
+                // already emitted an error for this entry — so the
+                // outer aggregator can skip its own "Invalid
+                // signature" log and avoid double-noise (PR #888
+                // Greptile P2).
+                return {
+                    identity,
+                    signature,
+                    isValid,
+                    loggedFailure: false,
+                }
             } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e)
                 log.error(
                     `[broadcastBlockHash] Signature verification threw for ${identity} (relayed by ${peerId}): ${msg}`,
                 )
-                return { identity, signature, isValid: false }
+                return {
+                    identity,
+                    signature,
+                    isValid: false,
+                    loggedFailure: true,
+                }
             }
         }),
     )
 
     const verified: Record<string, string> = {}
-    for (const { identity, signature, isValid } of checks) {
+    for (const { identity, signature, isValid, loggedFailure } of checks) {
         if (isValid) {
             verified[identity] = signature
-        } else {
+        } else if (!loggedFailure) {
             log.error(
                 `[broadcastBlockHash] Invalid signature relayed by ${peerId} for ${identity}; dropping. ` +
                     `Candidate block hash: ${candidateBlockHash}`,
@@ -176,14 +191,24 @@ async function proposeAndCollect(
         | undefined
     const incomingSignatures = extra?.signatures ?? {}
 
+    // PR #888 Greptile P1: a `pro` vote must carry cryptographic
+    // proof of agreement, not just an HTTP 200. A peer returning
+    // 200 with no signatures, or a signatures bundle that fails
+    // verification entirely, contributes no auditable evidence to
+    // `block.validation_data.signatures` — counting such a vote
+    // would mean BFT quorum can be reached on responses no one can
+    // later prove came from the claimed validators. Treat as `con`
+    // with an explicit rejectionReason so the operator can
+    // distinguish "peer attacked us" from "peer disagreed".
     if (Object.keys(incomingSignatures).length === 0) {
-        log.warn(
-            `[broadcastBlockHash] ${peerId} returned 200 but attached no signatures; counting as pro vote with no merge`,
+        log.error(
+            `[broadcastBlockHash] ${peerId} returned 200 but attached no signatures; treating as con`,
         )
         return {
             peerId,
-            vote: "pro",
+            vote: "con",
             signaturesToMerge: {},
+            rejectionReason: "200 with empty signatures map",
         }
     }
 
@@ -192,6 +217,26 @@ async function proposeAndCollect(
         block.hash,
         peerId,
     )
+
+    // PR #888 Greptile P1 (continued): a peer's signature on our
+    // block hash is the canonical attestation that this peer voted
+    // pro. We require it to be present AND verified before counting
+    // the vote. If the peer only relayed third-party signatures
+    // (e.g. malformed bundle dropped on verify, or 200 with only
+    // OTHER validators' signatures), that's a `con` — relayed
+    // signatures alone are not a vote.
+    if (!Object.prototype.hasOwnProperty.call(verified, peerId)) {
+        log.error(
+            `[broadcastBlockHash] ${peerId} returned 200 but its own signature is missing or failed verification; treating as con`,
+        )
+        return {
+            peerId,
+            vote: "con",
+            signaturesToMerge: {},
+            rejectionReason:
+                "200 without verifiable own signature on block hash",
+        }
+    }
 
     return {
         peerId,
@@ -244,9 +289,23 @@ export async function broadcastBlockHash(
     shard: Peer[],
 ): Promise<[number, number]> {
     const ourId = getSharedState.publicKeyHex
+
+    // PR #888 Greptile P2: snapshot `validation_data` once before
+    // fan-out. The receiver-side `manageProposeBlockHash` runs
+    // concurrently with our outbound broadcast (every shard member
+    // is calling every other simultaneously), and any inbound call
+    // mutates `getSharedState.candidateBlock.validation_data.
+    // signatures` — which is the SAME object as
+    // `block.validation_data`. Passing that live reference to every
+    // peer means each outbound call serialises a slightly different
+    // payload depending on what landed first. A `structuredClone`
+    // freezes the payload at fan-out time so every peer sees the
+    // same `validation_data` snapshot. Receivers still verify and
+    // merge what they get; the freeze only affects what we ship.
+    const validationDataSnapshot = structuredClone(block.validation_data)
     const proposeParams: [string, Block["validation_data"], string] = [
         block.hash,
-        block.validation_data,
+        validationDataSnapshot,
         ourId,
     ]
 
