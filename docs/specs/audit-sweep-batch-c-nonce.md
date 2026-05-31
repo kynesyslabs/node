@@ -7,7 +7,8 @@ related: docs/specs/active-feature-test-addition-proposal.md, .ccb/bug-hunt-2026
 prs:
   - "#884 (PR 1: fork registration + assignNonce infra — merged)"
   - "#885 (PR 2: mempool-aware lookahead — merged)"
-  - "#TBD (PR 3: consensus rule + caller wire-up)"
+  - "#886 (PR 3: consensus rule + caller wire-up — merged)"
+  - "#TBD (PR 4: same-node TOCTOU advisory lock)"
 sdk_publish:
   - "@kynesyslabs/demosdk 4.0.5 — adds `expectedPrior?: number` to GCREditNonce (type-only, runtime unchanged)"
 ---
@@ -186,6 +187,7 @@ blanking).
 | 1 | Fork registration + validation infra (caller still commented) | `forkConfig.ts`, `loadForkConfig.ts`, `validateTransaction.ts`, `testing/devnet/genesis.devnet.json` | Med — registers the fork (default `activationHeight: null`) + ships the fork-gated `assignNonce` implementation. Caller remains commented so live behaviour is unchanged on pre-fork chains; devnet boots post-fork from block 0. |
 | 2 | Mempool-aware lookahead | `mempool.ts` (new `countPendingByAddress`), `assignNonce` consumer in `validateTransaction.ts`, tests | Med — touches mempool query API. |
 | 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (fork-gated `expectedPrior` mismatch reject at apply time), `validateTransaction.ts` (uncomment caller + validation-time `expectedPrior` populate from `account.nonce + pendingCount`), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `package.json` (demosdk 4.0.3 → 4.0.5) | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the consensus-side rejection + validation-time populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). Cross-RPC e2e test against the devnet fixture is tracked as a follow-up PR; the strip + populate + reject pipeline is testable today via direct mempool injection. |
+| 4 | Same-node TOCTOU advisory lock | `mempool.ts` (per-sender `pg_advisory_xact_lock` + in-lock re-query around `addTransaction`), `validateTransaction.ts` (update assignNonce JSDoc to reflect actual TOCTOU mitigation site) | Low — fork-gated, local to a single function, no cross-node coordination. Closes the validate→addTransaction window that was a known carry-over from PR 2's docstring. Mempool stays clean instead of relying on the PR 3 consensus reject to clear duplicate-nonce admissions later. |
 
 ### SDK change
 
@@ -206,7 +208,7 @@ the existing demosdk pinning pattern in `package.json`).
 |------|------------|
 | In-flight txs with stale nonces after fork activation | SDK already reads nonce live per tx; only stuck txs in custom integrations are at risk. Document in fork-activation runbook. |
 | Mempool count diverges from on-chain state (race) | Single-writer mempool; `countPendingByAddress` reads the same Postgres txn boundary as the validation path. PR 2 includes a stress test. |
-| Same-node TOCTOU — two concurrent same-sender submissions both read `pendingCount` before either is admitted, both pass with identical nonces | PR 3 wraps the validate+`Mempool.addTransaction` sequence in a per-sender critical section via `pg_advisory_xact_lock(hashtext(sender))`, released at commit. The lock serialises concurrent submissions from the same sender on a single node so both go through validation in order. PR 2 ships the validation logic but the caller is commented out, so the race is unreachable today. |
+| Same-node TOCTOU — two concurrent same-sender submissions both read `pendingCount` before either is admitted, both pass with identical nonces | **PR 4** wraps the per-sender re-check + insert inside `Mempool.addTransaction` in a Postgres transaction with `pg_advisory_xact_lock(hashtext('nonce:' || sender))`. The lock serialises concurrent same-sender admissions on a single node. Inside the lock, the routine re-queries `account.nonce` + `countPendingByAddress` (so it sees any concurrent winner that beat it through validate) and rejects the second tx before it occupies a mempool slot. The lock is fork-gated on `nonceEnforcement`; pre-fork chains are bit-identical. The lock alone does not cover cross-node replay — that's the consensus-side `expectedPrior` apply-time reject in PR 3. |
 | Stale mempool entries inflate count between sweeps | `countPendingByAddress` filters on the same `reference_block >= lastBlock - referenceBlockRoom` window that `cleanMempool` uses, so expired-but-unswept rows do not contribute to the expected nonce. |
 | Cross-RPC double-spend before block inclusion | Consensus rule (PR 3) is the safety net. Different RPCs may briefly accept the same nonce; only one survives consensus. |
 | Block-formation order matters when one block contains two same-sender txs with N+1 and N+2 | Block formation already orders by hash (stable); apply order is deterministic. `expectedPrior` rejects out-of-order application. |
