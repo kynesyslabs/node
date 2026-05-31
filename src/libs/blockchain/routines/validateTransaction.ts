@@ -526,5 +526,47 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
         return false
     }
 
+    // Audit-sweep batch C PR 3 — populate `expectedPrior` on this
+    // tx's `nonce` GCREdit (if present) at validation time, NOT at
+    // apply time.
+    //
+    // Why validation time: the value must be a snapshot of the
+    // sender's nonce taken BEFORE this tx is bundled into a block.
+    // Populating at apply time would re-read `entities.accounts` —
+    // which already reflects prior in-block applies — so the
+    // expected value would track the apply-time state, defeating
+    // the cross-RPC safety net entirely (the second replay would
+    // see its own freshly-incremented value and pass the check).
+    //
+    // Formula: `expectedPrior = account.nonce + pendingCount`. This
+    // is the value the sender's nonce will be at the moment this tx
+    // applies, assuming all queued mempool txs from the same sender
+    // (which are ordered before this one) land first. For a single
+    // tx: `pendingCount === 0`, so `expectedPrior === account.nonce`.
+    // For the k-th of N back-to-back submissions:
+    // `expectedPrior === account.nonce + (k-1)`.
+    //
+    // The field is stripped from both sides of the hash compare in
+    // `endpointValidation`, so the signed tx hash is invariant under
+    // whether or not this populate ran. Pre-fork blocks re-sync
+    // bit-identically because the fork-gate above short-circuits.
+    //
+    // We mutate `tx.content.gcr_edits` in place. The hash strip
+    // means downstream serialisation / signing is unaffected.
+    if (Array.isArray(tx.content.gcr_edits)) {
+        const expectedPrior = account.nonce + pendingCount
+        for (const edit of tx.content.gcr_edits) {
+            if (edit.type === "nonce") {
+                const editAccount =
+                    typeof edit.account === "string"
+                        ? edit.account.toLowerCase()
+                        : edit.account
+                if (editAccount === senderAddress) {
+                    edit.expectedPrior = expectedPrior
+                }
+            }
+        }
+    }
+
     return true
 }

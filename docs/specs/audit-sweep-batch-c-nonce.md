@@ -119,14 +119,29 @@ Introduce a new fork: `nonceEnforcement`, gated by genesis
   on legacy edits. Bit-identical to today for re-sync.
 - **Post-fork**: `assignNonce` enforces sequential semantics with
   mempool lookahead (PR 2). The SDK still ships nonce edits without
-  `expectedPrior` — the **node populates it at apply time** in
-  `HandleGCR.applyTransaction` from the live in-memory account
-  state (`entities.accounts.get(pubkey).nonce`). Both sides of the
-  hash compare in `endpointValidation` strip the field before
-  hashing so the signature contract is unaffected.
-  `GCRNonceRoutines` rejects the edit when
+  `expectedPrior` — the **node populates it at validation time**
+  inside `assignNonce` itself, using the same account row +
+  pending-mempool-count it already loaded for the equality check:
+  `expectedPrior = account.nonce + pendingCount`. The populate
+  happens BEFORE the snapshot in `endpointValidation` is taken… no,
+  actually after — the snapshot is captured at line 48 (deep-clone
+  of `tx.content.gcr_edits`) **before** `confirmTransaction` runs.
+  When `assignNonce` mutates the real `tx.content.gcr_edits` array,
+  the snapshot is the unmodified pre-confirmTransaction shape.
+  Hash compare uses snapshot vs regen (both stripped of
+  `expectedPrior` symmetrically), so signature integrity is
+  preserved. The mutated array flows downstream into
+  `HandleGCR.applyTransaction`, which feeds the populated
+  `expectedPrior` into `GCRNonceRoutines`. Rejection fires when
   `accountGCR.nonce !== expectedPrior` — the cross-RPC double-spend
   safety net.
+
+  Why NOT populate at apply time: re-reading account state inside
+  the apply loop would see prior in-block applies, so a replay tx
+  bundled into the same block would see its own freshly-incremented
+  value and pass the check. Locking the value to validation-time
+  state (before any apply) is what makes the safety net actually
+  work.
 
 Devnet sets `activationHeight: 0` like other forks so local testing
 exercises the post-fork path from genesis. Production fork height is
@@ -160,7 +175,7 @@ pattern (mirrors the existing `txhash` blanking).
 |----|-------|-------|------|
 | 1 | Fork registration + validation infra (caller still commented) | `forkConfig.ts`, `loadForkConfig.ts`, `validateTransaction.ts`, `testing/devnet/genesis.devnet.json` | Med — registers the fork (default `activationHeight: null`) + ships the fork-gated `assignNonce` implementation. Caller remains commented so live behaviour is unchanged on pre-fork chains; devnet boots post-fork from block 0. |
 | 2 | Mempool-aware lookahead | `mempool.ts` (new `countPendingByAddress`), `assignNonce` consumer in `validateTransaction.ts`, tests | Med — touches mempool query API. |
-| 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (apply-time `expectedPrior` reject), `handleGCR.ts` (apply-time `expectedPrior` populate from in-memory account), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `validateTransaction.ts` (uncomment caller), `package.json` (demosdk 4.0.3 → 4.0.5), e2e test | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the apply-time rejection + populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). |
+| 3 | Consensus rule + caller wire-up (Path A) | `GCRNonceRoutines.ts` (apply-time `expectedPrior` reject), `validateTransaction.ts` (uncomment caller + validation-time `expectedPrior` populate from `account.nonce + pendingCount`), `endpointValidation.ts` (symmetric strip on both sides of hash compare), `package.json` (demosdk 4.0.3 → 4.0.5), e2e test | High — consensus rule change; rollout coordination across validators. The fork is already registered (PR 1) and validation infra is live (PR 2). This PR adds the apply-time rejection + validation-time populate, uncomments the validation caller, and bumps the SDK pin to 4.0.5 (which carries the type-only `expectedPrior?: number` field). |
 
 ### SDK change
 

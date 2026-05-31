@@ -43,8 +43,6 @@ import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
 
 import { In } from "typeorm"
 import { Mutex } from "async-mutex"
-import { isForkActive } from "@/forks"
-import { getSharedState } from "@/utilities/sharedState"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { GCRTLSNotaryRoutines } from "./gcr_routines/GCRTLSNotaryRoutines"
 import { GCRTLSNotary } from "@/model/entities/GCRv2/GCR_TLSNotary"
@@ -384,44 +382,6 @@ export default class HandleGCR {
         for (const edit of gcrEdits) {
             if (!simulate && tx.hash) {
                 edit.txhash = tx.hash
-            }
-
-            // Audit-sweep batch C PR 3 — populate `expectedPrior` on
-            // every `nonce` edit when the `nonceEnforcement` fork is
-            // active at the block this tx is being applied in. The
-            // SDK never writes the field (and `endpointValidation`
-            // stripped it from both sides before hashing), so this is
-            // the canonical fill site on the apply path.
-            //
-            // Read the account nonce LIVE from `entities.accounts` —
-            // not a per-tx snapshot — so a hypothetical second
-            // `nonce` edit in the same tx (e.g. consolidation tx with
-            // two operations) sees the post-first-apply value. For
-            // the common single-nonce-edit tx, this equals the
-            // on-chain account nonce at block-start.
-            //
-            // Block-height source: `tx.blockNumber` when known,
-            // falling back to `getSharedState.lastBlockNumber`. Block
-            // application paths set `tx.blockNumber` on inclusion;
-            // simulation / mempool replay use the chain tip.
-            //
-            // Rollback skips this entirely — see `GCRNonceRoutines`.
-            if (
-                !isRollback &&
-                edit.type === "nonce" &&
-                isGCRMainEdit(edit) &&
-                typeof (edit as GCREditNonce).expectedPrior !== "number"
-            ) {
-                const blockHeight =
-                    tx.blockNumber ?? getSharedState.lastBlockNumber ?? 0
-                if (isForkActive("nonceEnforcement", blockHeight)) {
-                    const pubkey = normalizePubkey(edit.account)
-                    const liveAccount = entities.accounts.get(pubkey)
-                    if (liveAccount) {
-                        ;(edit as GCREditNonce).expectedPrior =
-                            liveAccount.nonce
-                    }
-                }
             }
 
             let result: GCRResult
