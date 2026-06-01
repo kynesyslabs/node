@@ -115,6 +115,11 @@ export const TAG_TO_CATEGORY: Record<string, LogCategory> = {
     TLSN: "TLSN",
     NOTARY: "TLSN",
     ATTESTATION: "TLSN",
+
+    // DB - Database query logging and performance
+    DB: "DB",
+    DATABASE: "DB",
+    QUERY: "DB",
 }
 
 // Re-export LogCategory for convenience

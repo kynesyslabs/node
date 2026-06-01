@@ -35,6 +35,7 @@ export type LogCategory =
     | "MULTICHAIN" // Cross-chain/XM operations
     | "DAHR" // DAHR-specific operations
     | "TLSN" // TLSNotary HTTPS attestation operations
+    | "DB" // Database query logging and performance
     | "CMD" // Command execution and TUI commands
 
 /**

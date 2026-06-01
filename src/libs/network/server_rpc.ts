@@ -27,29 +27,32 @@ export async function serverRpcBun() {
     const rateLimiter = RateLimiter.getInstance()
 
     // Apply middlewares
-    // server.use(async (req, next) => {
-    //     const url = new URL(req.url)
-    //     let bodyLog = ""
-    //     if (req.method === "POST") {
-    //         try {
-    //             const cloned = req.clone()
-    //             const body = await cloned.text()
-    //             bodyLog = body.length > 1024
-    //                 ? body.slice(0, 768) + "...(truncated)..." + body.slice(-256)
-    //                 : body
-    //         } catch {
-    //             bodyLog = "(unreadable body)"
-    //         }
-    //     }
-    //     const requestStart = performance.now()
-    //     const response = await next()
-    //     const durationMs = (performance.now() - requestStart).toFixed(2)
-    //     const message = bodyLog
-    //         ? `[HTTP] ${req.method} ${url.pathname} -> ${response.status} (${durationMs}ms) body: ${bodyLog}`
-    //         : `[HTTP] ${req.method} ${url.pathname} -> ${response.status} (${durationMs}ms)`
-    //     log.only(message, false)
-    //     return response
-    // })
+    server.use(async (req, next) => {
+        const url = new URL(req.url)
+        let bodyLog = ""
+        if (req.method === "POST") {
+            try {
+                const cloned = req.clone()
+                const body = await cloned.text()
+                bodyLog = body.length > 256
+                    ? body.slice(0, 192) + "...(truncated)..." + body.slice(-64)
+                    : body
+            } catch {
+                bodyLog = "(unreadable body)"
+            }
+        }
+        const requestStart = performance.now()
+        const response = await next()
+        const elapsed = performance.now() - requestStart
+        const durationMs = elapsed.toFixed(2)
+        const slowPrefix = elapsed > 400 ? "⚠️⚠️ " : ""
+        const message = bodyLog
+            ? `[HTTP] ${req.method} ${url.pathname} -> ${response.status} (${slowPrefix}${durationMs}ms) body: ${bodyLog}`
+            : `[HTTP] ${req.method} ${url.pathname} -> ${response.status} (${slowPrefix}${durationMs}ms)`
+        log.only(message, false)
+        return response
+    })
+
     server.use(cors())
     server.use(rateLimiter.createMiddleware())
     server.use(json())

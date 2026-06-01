@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url"
 import { DataSource } from "typeorm"
 import { Config } from "src/config"
 
+import { QueryTimingLogger } from "./QueryTimingLogger.js"
 import { Blocks } from "./entities/Blocks.js"
 import { Consensus } from "./entities/Consensus.js"
 import { MempoolTx } from "./entities/Mempool.js"
@@ -75,7 +76,9 @@ export const dataSource = new DataSource({
         L2PSProof,
     ],
     synchronize: false,
-    logging: false,
+    logging: ["query", "error", "schema", "migration"],
+    logger: new QueryTimingLogger(),
+    maxQueryExecutionTime: 1,
 })
 
 class Datasource {

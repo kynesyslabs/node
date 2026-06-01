@@ -24,11 +24,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     )
 
     const lastBlockSigners = await getLastBlockSigners()
-
     const initialPeers = new Set(peers.map(peer => peer.identity))
-    log.only(
-        "Initial peers: " + JSON.stringify(Array.from(initialPeers), null, 2),
-    )
     for (const signer of lastBlockSigners) {
         const peer = peerman.getPeer(signer)
 
@@ -37,14 +33,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
             log.only("Adding peer: " + signer + " to the shard (is working)")
         }
     }
-    log.only(
-        "Final peers: " +
-            JSON.stringify(
-                peers.map(peer => peer.identity),
-                null,
-                2,
-            ),
-    )
+
 
     // Select up to 10 peers from the list using the seed as a source of randomness
     let maxShardSize = getSharedState.shardSize

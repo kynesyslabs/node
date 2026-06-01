@@ -107,6 +107,7 @@ const TABS: Tab[] = [
     { key: "-", label: "DAHR", category: "DAHR" },
     { key: "=", label: "TLSN", category: "TLSN" },
     { key: "\\", label: "CMD", category: "CMD" },
+    { key: "]", label: "DB", category: "DB" },
 ]
 
 // SECTION Command definitions for CMD tab
