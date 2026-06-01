@@ -93,7 +93,11 @@ export default async function findGenesisBlock() {
 
     if (!fs.existsSync("data/genesis.json")) {
         log.error("[GENESIS] No genesis block found, exiting")
-        process.exit(1)
+        // Audit-sweep batch E: was `process.exit(1)`. Throw so
+        // `main().catch → gracefulShutdown` handles uniformly.
+        throw new Error(
+            "[GENESIS] data/genesis.json missing — refusing to boot",
+        )
     }
 
     // Loading the genesis block

@@ -324,7 +324,18 @@ export async function consensusRoutine(): Promise<void> {
         console.error(error)
         console.error((error as Error).stack)
         log.error(`[CONSENSUS] ${error}`)
-        process.exit(1)
+        // Audit-sweep batch E: was `process.exit(1)`. Throwing here
+        // lets the surrounding `finally` block run consensus
+        // cleanup (`cleanupConsensusState`, `manager.
+        // endConsensusRoutine`, DTR waiter release) and bubbles up
+        // to the outer `main().catch` → `gracefulShutdown`, matching
+        // the pattern Epic-14 + batch A established for the peer
+        // layer. `process.exit` skipped the cleanup entirely.
+        throw error instanceof Error
+            ? error
+            : new Error(
+                  `[CONSENSUS] fatal consensus error: ${String(error)}`,
+              )
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
         if (DTRManager.poolSize > 0) {

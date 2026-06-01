@@ -67,7 +67,14 @@ export class BeforeFindGenesisHooks {
             )
         }
 
-        process.exit(0)
+        // Audit-sweep batch E: was `process.exit(0)`. The sole
+        // caller (`findGenesisBlock.ts:43`) is currently commented
+        // out, so this exit is a time-bomb — uncommenting the
+        // caller would have killed the node mid-boot the moment
+        // the maintenance hook finished its first run. Returning
+        // cleanly so the caller can resume the normal boot
+        // sequence after the one-shot point-award sweep completes.
+        return
     }
 
     /**

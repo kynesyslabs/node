@@ -117,7 +117,11 @@ export default class Identity {
 
         if (!bip39.validateMnemonic(mnemonic, wordlist)) {
             log.error("Invalid mnemonic: not a valid BIP39 mnemonic phrase")
-            process.exit(1)
+            // Audit-sweep batch E: was `process.exit(1)`. Throwing
+            // lets `main().catch → gracefulShutdown` run, matches
+            // the pattern Epic-14 + batches A/B established for
+            // boot paths.
+            throw new Error("Invalid mnemonic: not a valid BIP39 mnemonic phrase")
         }
 
         // Use raw mnemonic string to match wallet/SDK derivation
