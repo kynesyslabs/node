@@ -1,6 +1,7 @@
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
+import { DomainProofParser, DOMAIN_PROOF_PATH } from "./web2/domain"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
@@ -180,6 +181,7 @@ export async function verifyWeb2Proof(
         | typeof TwitterProofParser
         | typeof GithubProofParser
         | typeof DiscordProofParser
+        | typeof DomainProofParser
 
     switch (payload.context) {
         case "twitter":
@@ -194,6 +196,41 @@ export async function verifyWeb2Proof(
         case "discord":
             parser = DiscordProofParser
             break
+        case "domain": {
+            // The proof must be the well-known file ON the claimed domain.
+            // Binding the proof URL's host to the claimed hostname is what stops
+            // a sender from pointing at someone else's (their own) valid proof
+            // while claiming an unrelated domain.
+            let proofUrl: URL
+            try {
+                proofUrl = new URL(payload.proof as string)
+            } catch {
+                return {
+                    success: false,
+                    message: "Invalid domain proof URL",
+                }
+            }
+            if (proofUrl.protocol !== "https:") {
+                return {
+                    success: false,
+                    message: "Domain proof URL must use https",
+                }
+            }
+            if (proofUrl.pathname !== DOMAIN_PROOF_PATH) {
+                return {
+                    success: false,
+                    message: `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
+                }
+            }
+            if (proofUrl.hostname !== payload.username) {
+                return {
+                    success: false,
+                    message: "Proof host does not match the claimed domain",
+                }
+            }
+            parser = DomainProofParser
+            break
+        }
         default:
             return {
                 success: false,

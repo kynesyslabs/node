@@ -1,5 +1,6 @@
 import { Twitter } from "../../identity/tools/twitter"
 import { Discord } from "../../identity/tools/discord"
+import { fetchDomainProof, DOMAIN_PROOF_PATH } from "../../abstraction/web2/domain"
 import { UDIdentityManager } from "../../blockchain/gcr/gcr_routines/udIdentityManager"
 import ensureGCRForUser from "../../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import type { Tweet } from "@kynesyslabs/demosdk/types"
@@ -154,6 +155,46 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             response.response = {
                 success: false,
                 error: "Failed to get Discord message",
+            }
+        }
+        return response
+    },
+
+    getDomainProof: async (data, response) => {
+        if (!data.url) {
+            response.result = 400
+            response.response = { success: false, error: "No url specified" }
+            return response
+        }
+
+        let parsed: URL
+        try {
+            parsed = new URL(data.url)
+        } catch {
+            response.result = 400
+            response.response = { success: false, error: "Invalid url" }
+            return response
+        }
+
+        if (parsed.pathname !== DOMAIN_PROOF_PATH) {
+            response.result = 400
+            response.response = {
+                success: false,
+                error: `Proof must be hosted at ${DOMAIN_PROOF_PATH}`,
+            }
+            return response
+        }
+
+        try {
+            const { hostname, body } = await fetchDomainProof(data.url)
+            response.result = 200
+            response.response = { success: true, hostname, body }
+        } catch (error) {
+            log.error("[getDomainProof] " + error)
+            response.result = 400
+            response.response = {
+                success: false,
+                error: "Failed to fetch domain proof",
             }
         }
         return response

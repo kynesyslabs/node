@@ -402,6 +402,12 @@ const DESCRIPTORS: HandlerDescriptor[] = [
         authRequired: false,
         handler: createHttpFallbackHandler(),
     },
+    {
+        opcode: OmniOpcode.GET_DOMAIN_PROOF,
+        name: "getDomainProof",
+        authRequired: false,
+        handler: createHttpFallbackHandler(),
+    },
 
     // 0x6X Admin
     {

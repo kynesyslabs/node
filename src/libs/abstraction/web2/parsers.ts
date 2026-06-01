@@ -15,6 +15,7 @@ export abstract class Web2ProofParser {
             "https://canary.discord.com/channels",
             "https://discordapp.com/channels",
         ],
+        domain: ["https://"],
     }
 
     constructor() {}
