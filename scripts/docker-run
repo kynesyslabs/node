@@ -263,6 +263,39 @@ if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
         '
 fi
 
+# Always-sync host `demos_peerlist.json` -> `node_state` volume before `up`.
+#
+# Mirrors the .demos_identity sync above. Bare-metal `./run` reads
+# `$REPO_ROOT/demos_peerlist.json` directly (via PEER_LIST_FILE); the docker
+# flow keeps it inside the `demos_node_state` volume, surfaced at
+# /app/demos_peerlist.json by the entrypoint symlink. Without this sync a
+# dockerized node ignores the operator's bootstrap peer list and starts from
+# an empty/auto-generated one on a fresh volume.
+#
+# Sync rules (same as identity):
+#   - Only fires for SUBCOMMAND=up.
+#   - Only fires when `$REPO_ROOT/demos_peerlist.json` exists.
+#   - Overwrites the volume copy unconditionally — the repo file is the
+#     source of truth, including across --clean (which does NOT wipe
+#     node_state). To boot without seeding peers, `rm demos_peerlist.json`.
+#   - 0644 (not a secret) owned by uid 1000 to match the container's demos
+#     user, so the node can read (and rewrite) it.
+HOST_PEERLIST_FILE="${REPO_ROOT}/demos_peerlist.json"
+if [[ "$SUBCOMMAND" == "up" && -f "$HOST_PEERLIST_FILE" ]]; then
+    # Same hardcoded volume name as docker-compose.yml's `name:` override.
+    STATE_VOL="demos_node_state"
+    docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
+    echo "+ syncing demos_peerlist.json -> $STATE_VOL"
+    docker run --rm \
+        -v "$STATE_VOL":/state \
+        -v "$HOST_PEERLIST_FILE":/src/demos_peerlist.json:ro \
+        alpine sh -c '
+            cp /src/demos_peerlist.json /state/demos_peerlist.json &&
+            chmod 644 /state/demos_peerlist.json &&
+            chown 1000:1000 /state /state/demos_peerlist.json
+        '
+fi
+
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
 # of an empty array as unset. Without these guards the default (no
 # --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound
