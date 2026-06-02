@@ -324,6 +324,33 @@ export async function consensusRoutine(): Promise<void> {
         console.error(error)
         console.error((error as Error).stack)
         log.error(`[CONSENSUS] ${error}`)
+        // PR #898 Greptile P1: keep `process.exit(1)` here despite
+        // skipping the `finally` block below.
+        //
+        // `consensusRoutine` is invoked fire-and-forget at every
+        // caller (`mainLoop.ts:129`, `manageConsensusRoutines.ts:77`
+        // with explicit comment "Asynchronous function to avoid
+        // blocking the main thread"). The returned promise is never
+        // awaited, so a `throw` here becomes an unhandled rejection.
+        //
+        // The global `unhandledRejection` handler in `index.ts:94`
+        // intentionally does NOT exit ("let the node try to continue
+        // serving RPC"). That policy is correct for one-off RPC
+        // handler failures, but a fatal consensus error must take
+        // the node down so the supervisor restarts it with clean
+        // state — the alternative is a node serving RPC while its
+        // consensus routine is stuck in an undefined post-error
+        // state, silently accumulating divergence from the rest of
+        // the shard.
+        //
+        // The `finally` cleanup below would not run with
+        // `process.exit` AND would not run with `throw` given the
+        // fire-and-forget callers, so the behavioural delta of
+        // keeping `process.exit` here is zero. Restructuring the
+        // three call sites to await + catch with explicit
+        // gracefulShutdown delegation is the right long-term fix
+        // (tracked separately); for now `process.exit(1)` is the
+        // documented consensus-fatal escape hatch.
         process.exit(1)
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
