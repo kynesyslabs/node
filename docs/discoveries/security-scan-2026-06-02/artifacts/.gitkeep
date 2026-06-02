@@ -1,0 +1,3 @@
+# Placeholder so the artifacts/ directory is committed.
+# Real artifacts (bun-audit.json, npm-audit.json, gitleaks.sarif,
+# route-table.md, exposed-files.txt) are produced by stories S2–S8.
