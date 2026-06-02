@@ -49,7 +49,6 @@ demos_peerlist.json
 src/ssl/
 
 # ---- Build & Cache ----
-bun.lock
 bun.lockb
 package-lock.json
 *.tsbuildinfo
