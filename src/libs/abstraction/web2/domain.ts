@@ -153,12 +153,13 @@ export class DomainProofParser extends Web2ProofParser {
         } catch (error) {
             const errorMsg =
                 error instanceof Error ? error.message : String(error)
+            // Full detail (resolved IP / range from the SSRF guard) stays in the
+            // server log; the thrown message is static so verifyWeb2Proof cannot
+            // leak internal network info back to the caller.
             log.error(
                 `[DOMAIN] Failed to fetch proof for ${proofUrl}: ${errorMsg}`,
             )
-            throw new Error(
-                `Failed to read domain proof at ${proofUrl}: ${errorMsg}`,
-            )
+            throw new Error("Failed to fetch domain proof")
         }
 
         const payload = this.parsePayload(body)
