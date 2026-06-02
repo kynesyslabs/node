@@ -115,11 +115,22 @@ done
 # call tlsnotary:7047 on boot and crash-mark the subsystem if the
 # container isn't there. Saves operators from the confusing "TLSN
 # failed to initialize" error on a plain `./run --docker`.
+# Read ONLY the TLSNOTARY_ENABLED value out of .env. We deliberately do
+# NOT `source` .env here: it is a dotenv data file, not a shell script,
+# so `. ./.env` would *execute* every line. Any unquoted value with
+# spaces — e.g. `WHITELISTED_IPS=1.2.3.4, 5.6.7.8` — gets parsed as a
+# command and spews "<token>: command not found". Compose reads .env
+# itself for ${VAR} interpolation, so the only thing this script needs
+# from the file is the one flag below.
+TLSNOTARY_ENABLED_RAW=""
 if [[ -f .env ]]; then
-    # shellcheck disable=SC1091
-    set -a; . ./.env; set +a
+    line="$(grep -E '^[[:space:]]*TLSNOTARY_ENABLED[[:space:]]*=' .env | tail -n1 || true)"
+    line="${line#*=}"    # strip the key, keep the value
+    line="${line%%#*}"   # strip any inline comment
+    # strip surrounding quotes + whitespace
+    TLSNOTARY_ENABLED_RAW="$(printf '%s' "$line" | tr -d '"'\''[:space:]')"
 fi
-TLSNOTARY_ENABLED_RESOLVED="${TLSNOTARY_ENABLED:-true}"
+TLSNOTARY_ENABLED_RESOLVED="${TLSNOTARY_ENABLED_RAW:-true}"
 if [[ "$USE_PROXY" != "true" \
       && "$TLSNOTARY_ENABLED_RESOLVED" == "true" \
       && "$WANT_TLSN" == "true" ]]; then
