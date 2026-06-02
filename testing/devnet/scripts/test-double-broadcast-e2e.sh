@@ -144,6 +144,11 @@ fi
 # devnet boots. The double_broadcast_replay.mjs script asserts the
 # observed receiver delta equals AMOUNT_OS exactly.
 AMOUNT_OS="$((SENDER_BAL_OS / 10))"
+if [[ "${AMOUNT_OS}" -eq 0 ]]; then
+    echo "[double-broadcast-e2e] ERROR: computed AMOUNT_OS=0 (sender balance ${SENDER_BAL_OS} OS is too small for a 10% slice)."
+    echo "[double-broadcast-e2e]        a zero-value transfer does not exercise the double-spend path."
+    exit 1
+fi
 echo "[double-broadcast-e2e] transfer amount: ${AMOUNT_OS} OS (10% of sender balance)"
 
 echo "[double-broadcast-e2e] running double-broadcast script..."

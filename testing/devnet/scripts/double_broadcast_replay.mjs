@@ -98,7 +98,13 @@ if (senderBalBefore < amountOs) {
 // -----------------------------------------------------------------------------
 console.log("[double-broadcast] [1/4] pay() — building + signing single tx")
 const signedTx = await demos1.pay(RECEIVER_PUBKEY, amountOs)
-const localHash = signedTx?.hash
+if (!signedTx?.content) {
+    console.error(
+        "[double-broadcast] FAIL: pay() returned null/undefined or missing content; cannot build signed tx",
+    )
+    process.exit(1)
+}
+const localHash = signedTx.hash
 console.log(`[double-broadcast]   local tx hash: ${localHash}`)
 console.log(`[double-broadcast]   tx.content.nonce: ${signedTx.content.nonce}`)
 
@@ -180,14 +186,28 @@ const expectedDelta = amountOs
 for (let i = 0; i < maxPolls; i++) {
     polls = i + 1
     await new Promise(r => setTimeout(r, 2000))
-    const recInfo = await demos1.getAddressInfo(RECEIVER_PUBKEY)
-    const sendInfo = await demos1.getAddressInfo(sender)
-    const recBal = BigInt(recInfo?.balance ?? 0)
-    const sendNonce = Number(sendInfo?.nonce ?? 0)
-    observedDelta = recBal - receiverBalBefore
-    observedNonceDelta = sendNonce - senderNonceBefore
+    // Query both RPCs so a tx that committed on node-2 first (and
+    // hasn't replicated to node-1 yet) doesn't read as "neither tx
+    // landed". Take the MAX delta across nodes — if either side
+    // observed the credit, the credit landed. The post-loop double-
+    // spend assertion (observedDelta > expectedDelta) still catches
+    // a real replay because we'd see >1 credit *somewhere*.
+    const [recInfo1, recInfo2, sendInfo1, sendInfo2] = await Promise.all([
+        demos1.getAddressInfo(RECEIVER_PUBKEY),
+        demos2.getAddressInfo(RECEIVER_PUBKEY),
+        demos1.getAddressInfo(sender),
+        demos2.getAddressInfo(sender),
+    ])
+    const recBal1 = BigInt(recInfo1?.balance ?? 0)
+    const recBal2 = BigInt(recInfo2?.balance ?? 0)
+    const sendNonce1 = Number(sendInfo1?.nonce ?? 0)
+    const sendNonce2 = Number(sendInfo2?.nonce ?? 0)
+    const recBalMax = recBal1 > recBal2 ? recBal1 : recBal2
+    const sendNonceMax = sendNonce1 > sendNonce2 ? sendNonce1 : sendNonce2
+    observedDelta = recBalMax - receiverBalBefore
+    observedNonceDelta = sendNonceMax - senderNonceBefore
     console.log(
-        `[double-broadcast]   t=${(i + 1) * 2}s  receiver_delta=${observedDelta} OS  sender_nonce_delta=${observedNonceDelta}`,
+        `[double-broadcast]   t=${(i + 1) * 2}s  receiver_delta=${observedDelta} OS (n1=${recBal1 - receiverBalBefore}, n2=${recBal2 - receiverBalBefore})  sender_nonce_delta=${observedNonceDelta} (n1=${sendNonce1 - senderNonceBefore}, n2=${sendNonce2 - senderNonceBefore})`,
     )
     if (observedDelta >= expectedDelta) break
 }
