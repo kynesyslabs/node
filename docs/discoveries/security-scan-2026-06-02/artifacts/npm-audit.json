@@ -1,0 +1,5553 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@1inch/limit-order-protocol-utils": {
+      "name": "@1inch/limit-order-protocol-utils",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abi",
+        "@metamask/eth-sig-util",
+        "web3"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@1inch/limit-order-protocol-utils"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@arbitrum/sdk": {
+      "name": "@arbitrum/sdk",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "ethers"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@arbitrum/sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@aws-sdk/client-s3": {
+      "name": "@aws-sdk/client-s3",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/credential-provider-node",
+        "@aws-sdk/middleware-flexible-checksums",
+        "@aws-sdk/middleware-sdk-s3",
+        "@aws-sdk/middleware-user-agent",
+        "@aws-sdk/signature-v4-multi-region",
+        "@aws-sdk/util-user-agent-node",
+        "uuid"
+      ],
+      "effects": [],
+      "range": "3.529.1 - 3.895.0",
+      "nodes": [
+        "node_modules/@aws-sdk/client-s3"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/client-sso": {
+      "name": "@aws-sdk/client-sso",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/middleware-user-agent",
+        "@aws-sdk/util-user-agent-node"
+      ],
+      "effects": [
+        "@aws-sdk/credential-provider-sso"
+      ],
+      "range": "3.529.1 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/client-sso"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/core": {
+      "name": "@aws-sdk/core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "fast-xml-parser"
+      ],
+      "effects": [
+        "@aws-sdk/client-s3",
+        "@aws-sdk/client-sso",
+        "@aws-sdk/credential-provider-env",
+        "@aws-sdk/credential-provider-http",
+        "@aws-sdk/credential-provider-ini",
+        "@aws-sdk/credential-provider-process",
+        "@aws-sdk/credential-provider-sso",
+        "@aws-sdk/credential-provider-web-identity",
+        "@aws-sdk/middleware-flexible-checksums",
+        "@aws-sdk/middleware-sdk-s3",
+        "@aws-sdk/middleware-user-agent",
+        "@aws-sdk/nested-clients",
+        "@aws-sdk/token-providers"
+      ],
+      "range": "3.529.1 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/core"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-env": {
+      "name": "@aws-sdk/credential-provider-env",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-env"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-http": {
+      "name": "@aws-sdk/credential-provider-http",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [
+        "@aws-sdk/credential-provider-node"
+      ],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-http"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-ini": {
+      "name": "@aws-sdk/credential-provider-ini",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/credential-provider-env",
+        "@aws-sdk/credential-provider-http",
+        "@aws-sdk/credential-provider-process",
+        "@aws-sdk/credential-provider-sso",
+        "@aws-sdk/credential-provider-web-identity",
+        "@aws-sdk/nested-clients"
+      ],
+      "effects": [],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-ini"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-node": {
+      "name": "@aws-sdk/credential-provider-node",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/credential-provider-env",
+        "@aws-sdk/credential-provider-http",
+        "@aws-sdk/credential-provider-ini",
+        "@aws-sdk/credential-provider-process",
+        "@aws-sdk/credential-provider-sso",
+        "@aws-sdk/credential-provider-web-identity"
+      ],
+      "effects": [
+        "@aws-sdk/client-s3"
+      ],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-node"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-process": {
+      "name": "@aws-sdk/credential-provider-process",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-process"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-sso": {
+      "name": "@aws-sdk/credential-provider-sso",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/client-sso",
+        "@aws-sdk/core",
+        "@aws-sdk/token-providers"
+      ],
+      "effects": [],
+      "range": "3.529.1 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-sso"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/credential-provider-web-identity": {
+      "name": "@aws-sdk/credential-provider-web-identity",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/nested-clients"
+      ],
+      "effects": [],
+      "range": "3.667.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/credential-provider-web-identity"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/middleware-flexible-checksums": {
+      "name": "@aws-sdk/middleware-flexible-checksums",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [],
+      "range": "3.666.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/middleware-flexible-checksums"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/middleware-sdk-s3": {
+      "name": "@aws-sdk/middleware-sdk-s3",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [
+        "@aws-sdk/client-s3",
+        "@aws-sdk/signature-v4-multi-region"
+      ],
+      "range": "3.624.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/middleware-sdk-s3"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/middleware-user-agent": {
+      "name": "@aws-sdk/middleware-user-agent",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core"
+      ],
+      "effects": [
+        "@aws-sdk/client-s3",
+        "@aws-sdk/client-sso",
+        "@aws-sdk/util-user-agent-node"
+      ],
+      "range": "3.666.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/middleware-user-agent"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/nested-clients": {
+      "name": "@aws-sdk/nested-clients",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/middleware-user-agent",
+        "@aws-sdk/util-user-agent-node"
+      ],
+      "effects": [
+        "@aws-sdk/credential-provider-ini",
+        "@aws-sdk/credential-provider-web-identity",
+        "@aws-sdk/token-providers"
+      ],
+      "range": "<=3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/nested-clients"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/signature-v4-multi-region": {
+      "name": "@aws-sdk/signature-v4-multi-region",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/middleware-sdk-s3"
+      ],
+      "effects": [],
+      "range": "3.624.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/signature-v4-multi-region"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/token-providers": {
+      "name": "@aws-sdk/token-providers",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/core",
+        "@aws-sdk/nested-clients"
+      ],
+      "effects": [
+        "@aws-sdk/credential-provider-sso"
+      ],
+      "range": "3.730.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/token-providers"
+      ],
+      "fixAvailable": true
+    },
+    "@aws-sdk/util-user-agent-node": {
+      "name": "@aws-sdk/util-user-agent-node",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@aws-sdk/middleware-user-agent"
+      ],
+      "effects": [],
+      "range": "3.666.0 - 3.893.0",
+      "nodes": [
+        "node_modules/@aws-sdk/util-user-agent-node"
+      ],
+      "fixAvailable": true
+    },
+    "@bundlr-network/client": {
+      "name": "@bundlr-network/client",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@solana/wallet-adapter-base",
+        "@solana/web3.js",
+        "arbundles",
+        "axios",
+        "ethers",
+        "near-api-js"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@bundlr-network/client"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@cetusprotocol/cetus-sui-clmm-sdk": {
+      "name": "@cetusprotocol/cetus-sui-clmm-sdk",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "<=0.0.0-experimental-20250416150500 || >=3.8.0",
+      "nodes": [
+        "node_modules/@cetusprotocol/cetus-sui-clmm-sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@confio/ics23": {
+      "name": "@confio/ics23",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "protobufjs"
+      ],
+      "effects": [
+        "@cosmjs/stargate"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@confio/ics23"
+      ],
+      "fixAvailable": true
+    },
+    "@coral-xyz/anchor": {
+      "name": "@coral-xyz/anchor",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        "@coral-xyz/borsh",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@coral-xyz/anchor"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@coral-xyz/borsh": {
+      "name": "@coral-xyz/borsh",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@project-serum/anchor"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@coral-xyz/borsh",
+        "node_modules/@project-serum/anchor/node_modules/@coral-xyz/borsh"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@cosmjs/amino": {
+      "name": "@cosmjs/amino",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@cosmjs/crypto"
+      ],
+      "effects": [
+        "@cosmjs/proto-signing",
+        "@cosmjs/stargate"
+      ],
+      "range": "<=0.33.1",
+      "nodes": [
+        "node_modules/@cosmjs/amino"
+      ],
+      "fixAvailable": true
+    },
+    "@cosmjs/crypto": {
+      "name": "@cosmjs/crypto",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "elliptic"
+      ],
+      "effects": [
+        "@cosmjs/amino",
+        "@cosmjs/proto-signing",
+        "@cosmjs/tendermint-rpc"
+      ],
+      "range": "<=0.33.1",
+      "nodes": [
+        "node_modules/@cosmjs/crypto"
+      ],
+      "fixAvailable": true
+    },
+    "@cosmjs/proto-signing": {
+      "name": "@cosmjs/proto-signing",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@cosmjs/amino",
+        "@cosmjs/crypto"
+      ],
+      "effects": [
+        "@cosmjs/stargate"
+      ],
+      "range": "0.25.0-alpha.0 - 0.33.1",
+      "nodes": [
+        "node_modules/@cosmjs/proto-signing"
+      ],
+      "fixAvailable": true
+    },
+    "@cosmjs/stargate": {
+      "name": "@cosmjs/stargate",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@confio/ics23",
+        "@cosmjs/amino",
+        "@cosmjs/proto-signing",
+        "@cosmjs/tendermint-rpc"
+      ],
+      "effects": [],
+      "range": "<=0.33.1",
+      "nodes": [
+        "node_modules/@cosmjs/stargate"
+      ],
+      "fixAvailable": true
+    },
+    "@cosmjs/tendermint-rpc": {
+      "name": "@cosmjs/tendermint-rpc",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@cosmjs/crypto"
+      ],
+      "effects": [
+        "@cosmjs/stargate"
+      ],
+      "range": "<=0.33.1",
+      "nodes": [
+        "node_modules/@cosmjs/tendermint-rpc"
+      ],
+      "fixAvailable": true
+    },
+    "@ethereumjs/common": {
+      "name": "@ethereumjs/common",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "ethereumjs-util"
+      ],
+      "effects": [
+        "@ethereumjs/tx",
+        "web3-eth-accounts"
+      ],
+      "range": "2.2.0 - 2.6.5",
+      "nodes": [
+        "node_modules/@ethereumjs/common"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethereumjs/tx": {
+      "name": "@ethereumjs/tx",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethereumjs/common",
+        "ethereumjs-util"
+      ],
+      "effects": [
+        "web3-eth-accounts"
+      ],
+      "range": "<=3.5.2",
+      "nodes": [
+        "node_modules/@ethereumjs/tx"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/abi": {
+      "name": "@ethersproject/abi",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/hash"
+      ],
+      "effects": [
+        "@1inch/limit-order-protocol-utils",
+        "@ethersproject/contracts",
+        "ethers",
+        "web3-eth-abi"
+      ],
+      "range": "5.0.10 - 5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/abi"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/abstract-provider": {
+      "name": "@ethersproject/abstract-provider",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/transactions"
+      ],
+      "effects": [
+        "@ethersproject/abstract-signer",
+        "@ethersproject/contracts"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/abstract-provider"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/abstract-signer": {
+      "name": "@ethersproject/abstract-signer",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-provider"
+      ],
+      "effects": [
+        "@ethersproject/hash"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/abstract-signer"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/contracts": {
+      "name": "@ethersproject/contracts",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abi",
+        "@ethersproject/abstract-provider",
+        "@ethersproject/abstract-signer",
+        "@ethersproject/transactions"
+      ],
+      "effects": [
+        "ethers"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/contracts"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/hash": {
+      "name": "@ethersproject/hash",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-signer"
+      ],
+      "effects": [
+        "@ethersproject/abi",
+        "@ethersproject/providers",
+        "@ethersproject/wallet",
+        "@ethersproject/wordlists",
+        "ethers"
+      ],
+      "range": "5.0.6 - 5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/hash"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/hdnode": {
+      "name": "@ethersproject/hdnode",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-signer",
+        "@ethersproject/signing-key",
+        "@ethersproject/transactions",
+        "@ethersproject/wordlists"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/hdnode"
+      ],
+      "fixAvailable": true
+    },
+    "@ethersproject/json-wallets": {
+      "name": "@ethersproject/json-wallets",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-signer",
+        "@ethersproject/hdnode",
+        "@ethersproject/transactions"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/json-wallets"
+      ],
+      "fixAvailable": true
+    },
+    "@ethersproject/providers": {
+      "name": "@ethersproject/providers",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-provider",
+        "@ethersproject/abstract-signer",
+        "@ethersproject/hash",
+        "@ethersproject/transactions",
+        "ws"
+      ],
+      "effects": [
+        "ethers"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@ethersproject/providers"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/signing-key": {
+      "name": "@ethersproject/signing-key",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "elliptic"
+      ],
+      "effects": [
+        "@ethersproject/hdnode",
+        "@ethersproject/transactions",
+        "@ethersproject/wallet",
+        "arbundles",
+        "ethers"
+      ],
+      "range": "<=5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/signing-key"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/transactions": {
+      "name": "@ethersproject/transactions",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/signing-key"
+      ],
+      "effects": [
+        "@ethersproject/abstract-provider",
+        "@ethersproject/contracts",
+        "@ethersproject/json-wallets",
+        "@ethersproject/providers",
+        "web3-core-method"
+      ],
+      "range": "<=5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/transactions"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@ethersproject/wallet": {
+      "name": "@ethersproject/wallet",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abstract-provider",
+        "@ethersproject/abstract-signer",
+        "@ethersproject/hash",
+        "@ethersproject/hdnode",
+        "@ethersproject/json-wallets",
+        "@ethersproject/signing-key",
+        "@ethersproject/transactions",
+        "@ethersproject/wordlists"
+      ],
+      "effects": [],
+      "range": "<=5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/wallet"
+      ],
+      "fixAvailable": true
+    },
+    "@ethersproject/wordlists": {
+      "name": "@ethersproject/wordlists",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/hash"
+      ],
+      "effects": [
+        "@ethersproject/hdnode"
+      ],
+      "range": "5.0.8 - 5.8.0",
+      "nodes": [
+        "node_modules/@ethersproject/wordlists"
+      ],
+      "fixAvailable": true
+    },
+    "@fastify/ajv-compiler": {
+      "name": "@fastify/ajv-compiler",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "fast-uri"
+      ],
+      "effects": [
+        "fastify"
+      ],
+      "range": "3.1.0 - 3.6.0",
+      "nodes": [
+        "node_modules/@fastify/ajv-compiler"
+      ],
+      "fixAvailable": {
+        "name": "fastify",
+        "version": "5.8.5",
+        "isSemVerMajor": true
+      }
+    },
+    "@fastify/fast-json-stringify-compiler": {
+      "name": "@fastify/fast-json-stringify-compiler",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "fast-json-stringify"
+      ],
+      "effects": [],
+      "range": "3.0.0 - 5.0.0-pre.fv5.1",
+      "nodes": [
+        "node_modules/@fastify/fast-json-stringify-compiler"
+      ],
+      "fixAvailable": true
+    },
+    "@irys/sdk": {
+      "name": "@irys/sdk",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/contracts",
+        "@ethersproject/wallet",
+        "@near-js/crypto",
+        "@near-js/keystores-browser",
+        "@near-js/providers",
+        "@near-js/transactions",
+        "@solana/web3.js",
+        "aptos",
+        "arbundles"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@irys/sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@kynesyslabs/demosdk": {
+      "name": "@kynesyslabs/demosdk",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@coral-xyz/anchor",
+        "@cosmjs/proto-signing",
+        "@cosmjs/stargate",
+        "@metaplex-foundation/js",
+        "@multiversx/sdk-core",
+        "@multiversx/sdk-wallet",
+        "@project-serum/anchor",
+        "@solana/web3.js",
+        "bitcoinjs-message",
+        "ethers",
+        "near-api-js",
+        "rubic-sdk"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@kynesyslabs/demosdk"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@metamask/eth-sig-util": {
+      "name": "@metamask/eth-sig-util",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "ethereumjs-util"
+      ],
+      "effects": [
+        "@1inch/limit-order-protocol-utils"
+      ],
+      "range": "<=4.0.1",
+      "nodes": [
+        "node_modules/@metamask/eth-sig-util"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@metaplex-foundation/beet-solana": {
+      "name": "@metaplex-foundation/beet-solana",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@metaplex-foundation/mpl-bubblegum/node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@metaplex-foundation/mpl-candy-machine/node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@metaplex-foundation/mpl-token-metadata/node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@solana/spl-account-compression/node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/@metaplex-foundation/js/node_modules/@metaplex-foundation/beet-solana",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/@metaplex-foundation/js/node_modules/@metaplex-foundation/mpl-candy-machine/node_modules/@metaplex-foundation/beet-solana"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@metaplex-foundation/js": {
+      "name": "@metaplex-foundation/js",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@bundlr-network/client",
+        "@irys/sdk",
+        "@metaplex-foundation/beet-solana",
+        "@metaplex-foundation/mpl-auction-house",
+        "@metaplex-foundation/mpl-bubblegum",
+        "@metaplex-foundation/mpl-candy-guard",
+        "@metaplex-foundation/mpl-candy-machine",
+        "@metaplex-foundation/mpl-candy-machine-core",
+        "@metaplex-foundation/mpl-token-metadata",
+        "@solana/spl-account-compression",
+        "@solana/spl-token",
+        "@solana/web3.js",
+        "merkletreejs"
+      ],
+      "effects": [
+        "@solflare-wallet/utl-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/js",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/@metaplex-foundation/js"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@metaplex-foundation/mpl-auction-house": {
+      "name": "@metaplex-foundation/mpl-auction-house",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@solana/spl-token",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-auction-house"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@metaplex-foundation/mpl-bubblegum": {
+      "name": "@metaplex-foundation/mpl-bubblegum",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@metaplex-foundation/mpl-token-metadata",
+        "@solana/spl-account-compression",
+        "@solana/spl-token",
+        "@solana/web3.js"
+      ],
+      "effects": [],
+      "range": "<=0.11.0",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-bubblegum"
+      ],
+      "fixAvailable": true
+    },
+    "@metaplex-foundation/mpl-candy-guard": {
+      "name": "@metaplex-foundation/mpl-candy-guard",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-candy-guard"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@metaplex-foundation/mpl-candy-machine": {
+      "name": "@metaplex-foundation/mpl-candy-machine",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@metaplex-foundation/mpl-core",
+        "@solana/spl-token",
+        "@solana/web3.js"
+      ],
+      "effects": [],
+      "range": "<=5.1.0",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-candy-machine",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/@metaplex-foundation/js/node_modules/@metaplex-foundation/mpl-candy-machine"
+      ],
+      "fixAvailable": true
+    },
+    "@metaplex-foundation/mpl-candy-machine-core": {
+      "name": "@metaplex-foundation/mpl-candy-machine-core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@solana/web3.js"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-candy-machine-core"
+      ],
+      "fixAvailable": true
+    },
+    "@metaplex-foundation/mpl-core": {
+      "name": "@metaplex-foundation/mpl-core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@metaplex-foundation/mpl-candy-machine"
+      ],
+      "range": "<=0.0.5 || 0.6.0 - 0.6.1",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-core"
+      ],
+      "fixAvailable": true
+    },
+    "@metaplex-foundation/mpl-token-metadata": {
+      "name": "@metaplex-foundation/mpl-token-metadata",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@solana/spl-token",
+        "@solana/web3.js"
+      ],
+      "effects": [],
+      "range": "<=2.13.0",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-token-metadata"
+      ],
+      "fixAvailable": true
+    },
+    "@multiversx/sdk-core": {
+      "name": "@multiversx/sdk-core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "13.10.0-alpha.0 - 13.10.0 || >=13.12.0",
+      "nodes": [
+        "node_modules/@multiversx/sdk-core"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@multiversx/sdk-wallet": {
+      "name": "@multiversx/sdk-wallet",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@multiversx/sdk-wallet"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/accounts": {
+      "name": "@near-js/accounts",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/providers",
+        "@near-js/signers",
+        "@near-js/transactions",
+        "@near-js/utils"
+      ],
+      "effects": [],
+      "range": "1.0.0 - 1.3.1",
+      "nodes": [
+        "node_modules/@near-js/accounts"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/crypto": {
+      "name": "@near-js/crypto",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/types",
+        "@near-js/utils",
+        "bn.js",
+        "secp256k1"
+      ],
+      "effects": [
+        "@irys/sdk",
+        "@near-js/accounts",
+        "@near-js/keystores",
+        "@near-js/keystores-browser",
+        "@near-js/keystores-node",
+        "@near-js/signers",
+        "@near-js/transactions",
+        "@near-js/wallet-account",
+        "near-api-js"
+      ],
+      "range": "<=1.4.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/crypto",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/@near-js/crypto",
+        "node_modules/@near-js/crypto"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/keystores": {
+      "name": "@near-js/keystores",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/crypto",
+        "@near-js/types"
+      ],
+      "effects": [],
+      "range": "<=0.0.9 || 0.1.0-next.0 - 0.2.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/keystores-browser/node_modules/@near-js/keystores",
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/@near-js/transactions/node_modules/@near-js/signers/node_modules/@near-js/keystores",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/@near-js/signers/node_modules/@near-js/keystores",
+        "node_modules/@near-js/keystores"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/keystores-browser": {
+      "name": "@near-js/keystores-browser",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/keystores"
+      ],
+      "effects": [],
+      "range": "<=0.0.9 || 0.1.0-next.0 - 0.2.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/keystores-browser",
+        "node_modules/@near-js/keystores-browser"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/keystores-node": {
+      "name": "@near-js/keystores-node",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/keystores"
+      ],
+      "effects": [],
+      "range": "0.0.13 - 0.1.1",
+      "nodes": [
+        "node_modules/@near-js/keystores-node"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/providers": {
+      "name": "@near-js/providers",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/transactions",
+        "@near-js/transactions",
+        "@near-js/types",
+        "@near-js/utils",
+        "@near-js/utils",
+        "bn.js"
+      ],
+      "effects": [],
+      "range": "<=1.0.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/providers",
+        "node_modules/@near-js/providers"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/signers": {
+      "name": "@near-js/signers",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/keystores"
+      ],
+      "effects": [],
+      "range": "<=0.1.1 || 0.1.5 - 0.2.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/@near-js/transactions/node_modules/@near-js/signers",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/@near-js/signers",
+        "node_modules/@near-js/signers"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/transactions": {
+      "name": "@near-js/transactions",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/crypto",
+        "@near-js/crypto",
+        "@near-js/signers",
+        "@near-js/signers",
+        "@near-js/types",
+        "@near-js/utils",
+        "@near-js/utils",
+        "bn.js"
+      ],
+      "effects": [
+        "@near-js/providers"
+      ],
+      "range": "<=1.3.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/@near-js/transactions",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions",
+        "node_modules/@near-js/transactions"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/types": {
+      "name": "@near-js/types",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "bn.js"
+      ],
+      "effects": [],
+      "range": "<=0.0.4",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/crypto/node_modules/@near-js/types",
+        "node_modules/@irys/sdk/node_modules/@near-js/keystores-browser/node_modules/@near-js/keystores/node_modules/@near-js/types",
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/@near-js/types",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/@near-js/types"
+      ],
+      "fixAvailable": true
+    },
+    "@near-js/utils": {
+      "name": "@near-js/utils",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/types",
+        "bn.js",
+        "bs58"
+      ],
+      "effects": [
+        "@near-js/accounts",
+        "@near-js/crypto",
+        "@near-js/providers",
+        "@near-js/transactions",
+        "@near-js/wallet-account",
+        "near-api-js"
+      ],
+      "range": "<=1.0.1",
+      "nodes": [
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/@near-js/utils",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/@near-js/utils",
+        "node_modules/@near-js/utils"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@near-js/wallet-account": {
+      "name": "@near-js/wallet-account",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/accounts",
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/providers",
+        "@near-js/signers",
+        "@near-js/transactions",
+        "@near-js/utils"
+      ],
+      "effects": [],
+      "range": "1.0.0 - 1.3.1",
+      "nodes": [
+        "node_modules/@near-js/wallet-account"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/sdk": {
+      "name": "@pancakeswap/sdk",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@pancakeswap/swap-sdk-evm",
+        "@pancakeswap/swap-sdk-solana",
+        "@pancakeswap/v2-sdk",
+        "viem"
+      ],
+      "effects": [
+        "@pancakeswap/smart-router",
+        "@pancakeswap/tokens",
+        "@pancakeswap/v3-sdk"
+      ],
+      "range": ">=5.0.0",
+      "nodes": [
+        "node_modules/@pancakeswap/sdk",
+        "node_modules/@pancakeswap/smart-router/node_modules/@pancakeswap/sdk",
+        "node_modules/@pancakeswap/tokens/node_modules/@pancakeswap/sdk",
+        "node_modules/@pancakeswap/v3-sdk/node_modules/@pancakeswap/sdk"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/smart-router": {
+      "name": "@pancakeswap/smart-router",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@pancakeswap/sdk",
+        "@pancakeswap/tokens",
+        "@pancakeswap/v3-sdk",
+        "viem"
+      ],
+      "effects": [],
+      "range": ">=2.0.0",
+      "nodes": [
+        "node_modules/@pancakeswap/smart-router"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/swap-sdk-evm": {
+      "name": "@pancakeswap/swap-sdk-evm",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "viem"
+      ],
+      "effects": [],
+      "range": "<=1.0.4 || >=1.1.4",
+      "nodes": [
+        "node_modules/@pancakeswap/swap-sdk-evm"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/swap-sdk-solana": {
+      "name": "@pancakeswap/swap-sdk-solana",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@solana/spl-token",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@pancakeswap/sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@pancakeswap/swap-sdk-solana"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/tokens": {
+      "name": "@pancakeswap/tokens",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@pancakeswap/sdk"
+      ],
+      "effects": [
+        "@pancakeswap/v3-sdk"
+      ],
+      "range": ">=0.1.3",
+      "nodes": [
+        "node_modules/@pancakeswap/tokens"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/v2-sdk": {
+      "name": "@pancakeswap/v2-sdk",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@pancakeswap/swap-sdk-evm",
+        "viem"
+      ],
+      "effects": [
+        "@pancakeswap/sdk"
+      ],
+      "range": "<=1.0.4 || >=1.1.4",
+      "nodes": [
+        "node_modules/@pancakeswap/v2-sdk"
+      ],
+      "fixAvailable": true
+    },
+    "@pancakeswap/v3-sdk": {
+      "name": "@pancakeswap/v3-sdk",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@pancakeswap/sdk",
+        "@pancakeswap/tokens",
+        "viem"
+      ],
+      "effects": [
+        "@pancakeswap/smart-router"
+      ],
+      "range": ">=3.0.0",
+      "nodes": [
+        "node_modules/@pancakeswap/v3-sdk"
+      ],
+      "fixAvailable": true
+    },
+    "@project-serum/anchor": {
+      "name": "@project-serum/anchor",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@coral-xyz/borsh",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@project-serum/anchor"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "@protobufjs/utf8": {
+      "name": "@protobufjs/utf8",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1118933,
+          "name": "@protobufjs/utf8",
+          "dependency": "@protobufjs/utf8",
+          "title": "protobufjs has overlong UTF-8 decoding",
+          "url": "https://github.com/advisories/GHSA-q6x5-8v7m-xcrf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-176"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": "<=1.1.0"
+        }
+      ],
+      "effects": [],
+      "range": "<=1.1.0",
+      "nodes": [
+        "node_modules/@protobufjs/utf8"
+      ],
+      "fixAvailable": true
+    },
+    "@smithy/config-resolver": {
+      "name": "@smithy/config-resolver",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1111987,
+          "name": "@smithy/config-resolver",
+          "dependency": "@smithy/config-resolver",
+          "title": "AWS SDK for JavaScript v3 adopted defense in depth enhancement for region parameter value",
+          "url": "https://github.com/advisories/GHSA-6475-r3vj-m8vf",
+          "severity": "low",
+          "cwe": [
+            "CWE-20"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N"
+          },
+          "range": "<4.4.0"
+        }
+      ],
+      "effects": [],
+      "range": "<4.4.0",
+      "nodes": [
+        "node_modules/@smithy/config-resolver"
+      ],
+      "fixAvailable": true
+    },
+    "@smithy/core": {
+      "name": "@smithy/core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [],
+      "range": "3.8.0 - 3.11.1",
+      "nodes": [
+        "node_modules/@smithy/core"
+      ],
+      "fixAvailable": true
+    },
+    "@smithy/middleware-retry": {
+      "name": "@smithy/middleware-retry",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [],
+      "range": "<=4.2.4",
+      "nodes": [
+        "node_modules/@smithy/middleware-retry"
+      ],
+      "fixAvailable": true
+    },
+    "@solana/buffer-layout-utils": {
+      "name": "@solana/buffer-layout-utils",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js",
+        "bigint-buffer"
+      ],
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solana/buffer-layout-utils"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/spl-account-compression": {
+      "name": "@solana/spl-account-compression",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/beet-solana",
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@metaplex-foundation/js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solana/spl-account-compression"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/spl-token": {
+      "name": "@solana/spl-token",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@solana/buffer-layout-utils",
+        "@solana/spl-token-group",
+        "@solana/spl-token-metadata",
+        "@solana/web3.js",
+        "start-server-and-test"
+      ],
+      "effects": [
+        "@metaplex-foundation/mpl-auction-house",
+        "@metaplex-foundation/mpl-candy-machine",
+        "@metaplex-foundation/mpl-token-metadata",
+        "@pancakeswap/swap-sdk-solana",
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@metaplex-foundation/mpl-bubblegum/node_modules/@solana/spl-token",
+        "node_modules/@pancakeswap/swap-sdk-solana/node_modules/@solana/spl-token",
+        "node_modules/@solana/spl-token",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/@metaplex-foundation/js/node_modules/@solana/spl-token",
+        "node_modules/rubic-sdk/node_modules/@solana/spl-token"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/spl-token-group": {
+      "name": "@solana/spl-token-group",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solana/spl-token-group"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/spl-token-metadata": {
+      "name": "@solana/spl-token-metadata",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solana/spl-token-metadata"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/wallet-adapter-base": {
+      "name": "@solana/wallet-adapter-base",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@solana/web3.js"
+      ],
+      "effects": [
+        "@bundlr-network/client",
+        "arbundles"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solana/wallet-adapter-base"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solana/web3.js": {
+      "name": "@solana/web3.js",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1097089,
+          "name": "@solana/web3.js",
+          "dependency": "@solana/web3.js",
+          "title": "Handling untrusted input can result in a crash, leading to loss of availability / denial of service",
+          "url": "https://github.com/advisories/GHSA-8m45-2rjm-j347",
+          "severity": "high",
+          "cwe": [
+            "CWE-119"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=1.89 <1.89.2"
+        },
+        "bigint-buffer",
+        "jayson",
+        "rpc-websockets"
+      ],
+      "effects": [
+        "@bundlr-network/client",
+        "@coral-xyz/anchor",
+        "@coral-xyz/borsh",
+        "@kynesyslabs/demosdk",
+        "@metaplex-foundation/beet-solana",
+        "@metaplex-foundation/js",
+        "@metaplex-foundation/mpl-auction-house",
+        "@metaplex-foundation/mpl-bubblegum",
+        "@metaplex-foundation/mpl-candy-guard",
+        "@metaplex-foundation/mpl-candy-machine",
+        "@metaplex-foundation/mpl-candy-machine-core",
+        "@metaplex-foundation/mpl-core",
+        "@metaplex-foundation/mpl-token-metadata",
+        "@pancakeswap/swap-sdk-solana",
+        "@project-serum/anchor",
+        "@solana/spl-account-compression",
+        "@solana/spl-token",
+        "@solana/spl-token-group",
+        "@solana/spl-token-metadata",
+        "@solana/wallet-adapter-base",
+        "rubic-sdk"
+      ],
+      "range": "<=0.0.0-pr-29130 || 0.0.4 - 1.98.4",
+      "nodes": [
+        "node_modules/@kynesyslabs/demosdk/node_modules/@solana/web3.js",
+        "node_modules/@pancakeswap/swap-sdk-solana/node_modules/@solana/web3.js",
+        "node_modules/@solana/web3.js",
+        "node_modules/rubic-sdk/node_modules/@solana/spl-token/node_modules/@solana/web3.js",
+        "node_modules/rubic-sdk/node_modules/@solana/web3.js"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@solflare-wallet/utl-sdk": {
+      "name": "@solflare-wallet/utl-sdk",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@metaplex-foundation/js",
+        "axios"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@solflare-wallet/utl-sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "@teleportdao/bitcoin": {
+      "name": "@teleportdao/bitcoin",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@teleportdao/providers",
+        "axios",
+        "bitcoinjs-lib"
+      ],
+      "effects": [
+        "@teleportdao/contracts-helper",
+        "@teleportdao/teleswap-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@teleportdao/bitcoin"
+      ],
+      "fixAvailable": true
+    },
+    "@teleportdao/contracts-helper": {
+      "name": "@teleportdao/contracts-helper",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@teleportdao/bitcoin",
+        "bip32"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@teleportdao/contracts-helper"
+      ],
+      "fixAvailable": true
+    },
+    "@teleportdao/providers": {
+      "name": "@teleportdao/providers",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "axios"
+      ],
+      "effects": [
+        "@teleportdao/teleswap-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@teleportdao/providers"
+      ],
+      "fixAvailable": true
+    },
+    "@teleportdao/teleswap-sdk": {
+      "name": "@teleportdao/teleswap-sdk",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@teleportdao/bitcoin",
+        "@teleportdao/contracts-helper",
+        "@teleportdao/providers"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/@teleportdao/teleswap-sdk"
+      ],
+      "fixAvailable": true
+    },
+    "@tootallnate/once": {
+      "name": "@tootallnate/once",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1119438,
+          "name": "@tootallnate/once",
+          "dependency": "@tootallnate/once",
+          "title": "@tootallnate/once vulnerable to Incorrect Control Flow Scoping",
+          "url": "https://github.com/advisories/GHSA-vpq2-c234-7xj6",
+          "severity": "low",
+          "cwe": [
+            "CWE-705"
+          ],
+          "cvss": {
+            "score": 3.3,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<2.0.1"
+        }
+      ],
+      "effects": [
+        "http-proxy-agent"
+      ],
+      "range": "<2.0.1",
+      "nodes": [
+        "node_modules/node-gyp/node_modules/make-fetch-happen/node_modules/http-proxy-agent/node_modules/@tootallnate/once"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "@unstoppabledomains/resolution": {
+      "name": "@unstoppabledomains/resolution",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "elliptic"
+      ],
+      "effects": [],
+      "range": "1.7.0 - 1.8.3 || >=5.0.1",
+      "nodes": [
+        "node_modules/@unstoppabledomains/resolution"
+      ],
+      "fixAvailable": {
+        "name": "@unstoppabledomains/resolution",
+        "version": "5.0.0",
+        "isSemVerMajor": true
+      }
+    },
+    "@viaprotocol/router-sdk": {
+      "name": "@viaprotocol/router-sdk",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "axios"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/@viaprotocol/router-sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "ajv": {
+      "name": "ajv",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113714,
+          "name": "ajv",
+          "dependency": "ajv",
+          "title": "ajv has ReDoS when using `$data` option",
+          "url": "https://github.com/advisories/GHSA-2g4f-4pwh-qvx6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-400",
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<6.14.0"
+        },
+        {
+          "source": 1113715,
+          "name": "ajv",
+          "dependency": "ajv",
+          "title": "ajv has ReDoS when using `$data` option",
+          "url": "https://github.com/advisories/GHSA-2g4f-4pwh-qvx6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-400",
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=7.0.0-alpha.0 <8.18.0"
+        }
+      ],
+      "effects": [],
+      "range": "<6.14.0 || >=7.0.0-alpha.0 <8.18.0",
+      "nodes": [
+        "node_modules/@fastify/ajv-compiler/node_modules/ajv",
+        "node_modules/@modelcontextprotocol/sdk/node_modules/ajv",
+        "node_modules/ajv",
+        "node_modules/ajv-formats/node_modules/ajv",
+        "node_modules/fast-json-stringify/node_modules/ajv"
+      ],
+      "fixAvailable": true
+    },
+    "aptos": {
+      "name": "aptos",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        "axios",
+        "form-data"
+      ],
+      "effects": [
+        "@irys/sdk"
+      ],
+      "range": "<=1.21.0",
+      "nodes": [
+        "node_modules/aptos"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "arbundles": {
+      "name": "arbundles",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/hash",
+        "@ethersproject/signing-key",
+        "@ethersproject/transactions",
+        "@ethersproject/wallet",
+        "@solana/wallet-adapter-base",
+        "axios",
+        "ethers",
+        "secp256k1"
+      ],
+      "effects": [
+        "@bundlr-network/client"
+      ],
+      "range": ">=0.1.1",
+      "nodes": [
+        "node_modules/@bundlr-network/client/node_modules/arbundles",
+        "node_modules/arbundles"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "axios": {
+      "name": "axios",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1097679,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios Cross-Site Request Forgery Vulnerability",
+          "url": "https://github.com/advisories/GHSA-wf5p-g6vw-rhxx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-352"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N"
+          },
+          "range": ">=0.8.1 <0.28.0"
+        },
+        {
+          "source": 1111034,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios Requests Vulnerable To Possible SSRF and Credential Leakage via Absolute URL",
+          "url": "https://github.com/advisories/GHSA-jr5f-v2jv-69x6",
+          "severity": "high",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<0.30.0"
+        },
+        {
+          "source": 1112195,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios is vulnerable to DoS attack through lack of data size check",
+          "url": "https://github.com/advisories/GHSA-4hjh-wcwx-xvwj",
+          "severity": "high",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=1.0.0 <1.12.0"
+        },
+        {
+          "source": 1116672,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios has a NO_PROXY Hostname Normalization Bypass that Leads to SSRF",
+          "url": "https://github.com/advisories/GHSA-3p68-rc4w-qgx5",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-441",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": "<0.31.0"
+        },
+        {
+          "source": 1116673,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios has a NO_PROXY Hostname Normalization Bypass that Leads to SSRF",
+          "url": "https://github.com/advisories/GHSA-3p68-rc4w-qgx5",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-441",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.0"
+        },
+        {
+          "source": 1117573,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Authentication Bypass via Prototype Pollution Gadget in `validateStatus` Merge Strategy",
+          "url": "https://github.com/advisories/GHSA-w9j2-pvgh-6h63",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-287",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117574,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Authentication Bypass via Prototype Pollution Gadget in `validateStatus` Merge Strategy",
+          "url": "https://github.com/advisories/GHSA-w9j2-pvgh-6h63",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-287",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117575,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Incomplete Fix for CVE-2025-62718 — NO_PROXY Protection Bypassed via RFC 1122 Loopback Subnet (127.0.0.0/8) in Axios 1.15.0",
+          "url": "https://github.com/advisories/GHSA-pmwg-cvhr-8vh7",
+          "severity": "high",
+          "cwe": [
+            "CWE-183",
+            "CWE-441",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 7.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117576,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Incomplete Fix for CVE-2025-62718 — NO_PROXY Protection Bypassed via RFC 1122 Loopback Subnet (127.0.0.0/8) in Axios 1.15.0",
+          "url": "https://github.com/advisories/GHSA-pmwg-cvhr-8vh7",
+          "severity": "high",
+          "cwe": [
+            "CWE-183",
+            "CWE-441",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 7.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:L/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117577,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Invisible JSON Response Tampering via Prototype Pollution Gadget in `parseReviver`",
+          "url": "https://github.com/advisories/GHSA-3w6x-2g7m-8v23",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-915",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:H/A:N"
+          },
+          "range": ">=1.0.0 <1.15.2"
+        },
+        {
+          "source": 1117579,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Null Byte Injection via Reverse-Encoding in AxiosURLSearchParams",
+          "url": "https://github.com/advisories/GHSA-xhjh-pmcv-23jw",
+          "severity": "low",
+          "cwe": [
+            "CWE-116",
+            "CWE-626"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117580,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Null Byte Injection via Reverse-Encoding in AxiosURLSearchParams",
+          "url": "https://github.com/advisories/GHSA-xhjh-pmcv-23jw",
+          "severity": "low",
+          "cwe": [
+            "CWE-116",
+            "CWE-626"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117581,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: CRLF Injection in multipart/form-data body via unsanitized blob.type in formDataToStream",
+          "url": "https://github.com/advisories/GHSA-445q-vr5w-6q77",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-93"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117582,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: no_proxy bypass via IP alias allows SSRF",
+          "url": "https://github.com/advisories/GHSA-m7pr-hjqh-92cm",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 6.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117583,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: no_proxy bypass via IP alias allows SSRF",
+          "url": "https://github.com/advisories/GHSA-m7pr-hjqh-92cm",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 6.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117584,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: unbounded recursion in toFormData causes DoS via deeply nested request data",
+          "url": "https://github.com/advisories/GHSA-62hf-57xw-28j9",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117585,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: unbounded recursion in toFormData causes DoS via deeply nested request data",
+          "url": "https://github.com/advisories/GHSA-62hf-57xw-28j9",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117586,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios' HTTP adapter-streamed uploads bypass maxBodyLength when maxRedirects: 0",
+          "url": "https://github.com/advisories/GHSA-5c9x-8gcm-mpgx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117587,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios' HTTP adapter-streamed uploads bypass maxBodyLength when maxRedirects: 0",
+          "url": "https://github.com/advisories/GHSA-5c9x-8gcm-mpgx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117588,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: HTTP adapter streamed responses bypass maxContentLength",
+          "url": "https://github.com/advisories/GHSA-vf2m-468p-8v99",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117589,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: HTTP adapter streamed responses bypass maxContentLength",
+          "url": "https://github.com/advisories/GHSA-vf2m-468p-8v99",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117590,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Prototype Pollution Gadgets - Response Tampering, Data Exfiltration, and Request Hijacking",
+          "url": "https://github.com/advisories/GHSA-pf86-5x62-jrwf",
+          "severity": "high",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117591,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Prototype Pollution Gadgets - Response Tampering, Data Exfiltration, and Request Hijacking",
+          "url": "https://github.com/advisories/GHSA-pf86-5x62-jrwf",
+          "severity": "high",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117592,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Header Injection via Prototype Pollution",
+          "url": "https://github.com/advisories/GHSA-6chq-wfr3-2hj9",
+          "severity": "high",
+          "cwe": [
+            "CWE-113",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117593,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: Header Injection via Prototype Pollution",
+          "url": "https://github.com/advisories/GHSA-6chq-wfr3-2hj9",
+          "severity": "high",
+          "cwe": [
+            "CWE-113",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117594,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: XSRF Token Cross-Origin Leakage via Prototype Pollution Gadget in `withXSRFToken` Boolean Coercion",
+          "url": "https://github.com/advisories/GHSA-xx6v-rp6x-q39c",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-183",
+            "CWE-201"
+          ],
+          "cvss": {
+            "score": 5.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N"
+          },
+          "range": "<=0.31.0"
+        },
+        {
+          "source": 1117595,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios: XSRF Token Cross-Origin Leakage via Prototype Pollution Gadget in `withXSRFToken` Boolean Coercion",
+          "url": "https://github.com/advisories/GHSA-xx6v-rp6x-q39c",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-183",
+            "CWE-201"
+          ],
+          "cvss": {
+            "score": 5.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.1"
+        },
+        {
+          "source": 1117857,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios is Vulnerable to Denial of Service via __proto__ Key in mergeConfig",
+          "url": "https://github.com/advisories/GHSA-43fc-jf86-j433",
+          "severity": "high",
+          "cwe": [
+            "CWE-754",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=0.30.2"
+        },
+        {
+          "source": 1117858,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios is Vulnerable to Denial of Service via __proto__ Key in mergeConfig",
+          "url": "https://github.com/advisories/GHSA-43fc-jf86-j433",
+          "severity": "high",
+          "cwe": [
+            "CWE-754",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=1.0.0 <=1.13.4"
+        },
+        {
+          "source": 1118607,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios has prototype pollution read-side gadgets in HTTP adapter that allow credential injection and request hijacking",
+          "url": "https://github.com/advisories/GHSA-q8qp-cvcw-x6jj",
+          "severity": "high",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": ">=1.0.0 <1.15.2"
+        },
+        {
+          "source": 1119403,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios has Unrestricted Cloud Metadata Exfiltration via Header Injection Chain",
+          "url": "https://github.com/advisories/GHSA-fvcv-3m26-pcqx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-113",
+            "CWE-444",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": "<0.31.0"
+        },
+        {
+          "source": 1119404,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "Axios has Unrestricted Cloud Metadata Exfiltration via Header Injection Chain",
+          "url": "https://github.com/advisories/GHSA-fvcv-3m26-pcqx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-113",
+            "CWE-444",
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": ">=1.0.0 <1.15.0"
+        },
+        {
+          "source": 1119666,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios's shouldBypassProxy does not recognize IPv4-mapped IPv6 addresses, allowing NO_PROXY bypass (incomplete fix for CVE-2025-62718)",
+          "url": "https://github.com/advisories/GHSA-pjwm-pj3p-43mv",
+          "severity": "high",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 8.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "range": "<=0.31.1"
+        },
+        {
+          "source": 1119667,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios's shouldBypassProxy does not recognize IPv4-mapped IPv6 addresses, allowing NO_PROXY bypass (incomplete fix for CVE-2025-62718)",
+          "url": "https://github.com/advisories/GHSA-pjwm-pj3p-43mv",
+          "severity": "high",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 8.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "range": ">=1.0.0 <1.16.0"
+        },
+        {
+          "source": 1119668,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios has DoS & Header Injection via Prototype Pollution Read-Side Gadgets in axios merge functions",
+          "url": "https://github.com/advisories/GHSA-898c-q2cr-xwhg",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L"
+          },
+          "range": "<=0.31.1"
+        },
+        {
+          "source": 1119669,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios has DoS & Header Injection via Prototype Pollution Read-Side Gadgets in axios merge functions",
+          "url": "https://github.com/advisories/GHSA-898c-q2cr-xwhg",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 4.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:L"
+          },
+          "range": ">=1.0.0 <1.16.0"
+        },
+        {
+          "source": 1119673,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios Vulnerable to Credential Theft and Response Hijacking via Prototype Pollution Gadget in Config Merge",
+          "url": "https://github.com/advisories/GHSA-3g43-6gmg-66jw",
+          "severity": "high",
+          "cwe": [
+            "CWE-94",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L"
+          },
+          "range": ">=0.19.0 <0.31.1"
+        },
+        {
+          "source": 1119674,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios Vulnerable to Credential Theft and Response Hijacking via Prototype Pollution Gadget in Config Merge",
+          "url": "https://github.com/advisories/GHSA-3g43-6gmg-66jw",
+          "severity": "high",
+          "cwe": [
+            "CWE-94",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:L"
+          },
+          "range": ">=1.0.0 <1.15.2"
+        },
+        {
+          "source": 1119675,
+          "name": "axios",
+          "dependency": "axios",
+          "title": "axios Vulnerable to Full Man-in-the-Middle via Prototype Pollution Gadget in `config.proxy`",
+          "url": "https://github.com/advisories/GHSA-35jp-ww65-95wh",
+          "severity": "high",
+          "cwe": [
+            "CWE-441",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 8.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:C/C:H/I:H/A:N"
+          },
+          "range": ">=1.0.0 <1.16.0"
+        }
+      ],
+      "effects": [
+        "@bundlr-network/client",
+        "@solflare-wallet/utl-sdk",
+        "@teleportdao/bitcoin",
+        "@teleportdao/providers",
+        "@viaprotocol/router-sdk",
+        "aptos",
+        "arbundles",
+        "tronweb",
+        "wait-on"
+      ],
+      "range": "<=0.31.1 || 1.0.0 - 1.15.2",
+      "nodes": [
+        "node_modules/@bundlr-network/client/node_modules/arbundles/node_modules/axios",
+        "node_modules/@bundlr-network/client/node_modules/axios",
+        "node_modules/@solflare-wallet/utl-sdk/node_modules/axios",
+        "node_modules/@teleportdao/bitcoin/node_modules/axios",
+        "node_modules/@teleportdao/providers/node_modules/axios",
+        "node_modules/@viaprotocol/router-sdk/node_modules/axios",
+        "node_modules/aptos/node_modules/axios",
+        "node_modules/tronweb/node_modules/axios",
+        "node_modules/wait-on/node_modules/axios"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "base-x": {
+      "name": "base-x",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1104177,
+          "name": "base-x",
+          "dependency": "base-x",
+          "title": "Homograph attack allows Unicode lookalike characters to bypass validation.",
+          "url": "https://github.com/advisories/GHSA-xq7p-g2vc-g82p",
+          "severity": "high",
+          "cwe": [
+            "CWE-1007"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=3.0.10"
+        }
+      ],
+      "effects": [
+        "bs58"
+      ],
+      "range": "<=3.0.10",
+      "nodes": [
+        "node_modules/@near-js/utils/node_modules/bs58/node_modules/base-x"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "bigint-buffer": {
+      "name": "bigint-buffer",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1103747,
+          "name": "bigint-buffer",
+          "dependency": "bigint-buffer",
+          "title": "bigint-buffer Vulnerable to Buffer Overflow via toBigIntLE() Function",
+          "url": "https://github.com/advisories/GHSA-3gc7-fjrx-p6mg",
+          "severity": "high",
+          "cwe": [
+            "CWE-120"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=1.1.5"
+        }
+      ],
+      "effects": [
+        "@solana/buffer-layout-utils",
+        "@solana/web3.js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/bigint-buffer"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "bip32": {
+      "name": "bip32",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "tiny-secp256k1"
+      ],
+      "effects": [
+        "bitcoinjs-lib"
+      ],
+      "range": "1.0.1 - 2.0.6",
+      "nodes": [
+        "node_modules/@teleportdao/contracts-helper/node_modules/bip32",
+        "node_modules/bitcoinjs-ecpair/node_modules/bip32"
+      ],
+      "fixAvailable": true
+    },
+    "bitcoinjs-lib": {
+      "name": "bitcoinjs-lib",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "bip32",
+        "tiny-secp256k1"
+      ],
+      "effects": [
+        "@teleportdao/bitcoin"
+      ],
+      "range": "4.0.1 - 5.2.0",
+      "nodes": [
+        "node_modules/bitcoinjs-ecpair"
+      ],
+      "fixAvailable": true
+    },
+    "bitcoinjs-message": {
+      "name": "bitcoinjs-message",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "secp256k1"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": ">=1.0.1",
+      "nodes": [
+        "node_modules/bitcoinjs-message"
+      ],
+      "fixAvailable": {
+        "name": "@kynesyslabs/demosdk",
+        "version": "1.6.7",
+        "isSemVerMajor": true
+      }
+    },
+    "bn.js": {
+      "name": "bn.js",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113441,
+          "name": "bn.js",
+          "dependency": "bn.js",
+          "title": "bn.js affected by an infinite loop",
+          "url": "https://github.com/advisories/GHSA-378v-28hj-76wf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-835"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=5.0.0 <5.2.3"
+        },
+        {
+          "source": 1113442,
+          "name": "bn.js",
+          "dependency": "bn.js",
+          "title": "bn.js affected by an infinite loop",
+          "url": "https://github.com/advisories/GHSA-378v-28hj-76wf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-835"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<4.12.3"
+        }
+      ],
+      "effects": [
+        "@near-js/crypto",
+        "@near-js/providers",
+        "@near-js/transactions",
+        "@near-js/types",
+        "@near-js/utils",
+        "ethjs-unit",
+        "near-api-js",
+        "number-to-bn"
+      ],
+      "range": ">=5.0.0 <5.2.3 || <4.12.3",
+      "nodes": [
+        "node_modules/@bundlr-network/client/node_modules/near-api-js/node_modules/bn.js",
+        "node_modules/@bundlr-network/client/node_modules/near-api-js/node_modules/borsh/node_modules/bn.js",
+        "node_modules/@ensdomains/address-encoder/node_modules/bn.js",
+        "node_modules/@irys/sdk/node_modules/@near-js/crypto/node_modules/bn.js",
+        "node_modules/@irys/sdk/node_modules/@near-js/keystores-browser/node_modules/@near-js/keystores/node_modules/@near-js/types/node_modules/bn.js",
+        "node_modules/@irys/sdk/node_modules/@near-js/providers/node_modules/bn.js",
+        "node_modules/@irys/sdk/node_modules/@near-js/transactions/node_modules/bn.js",
+        "node_modules/@teleportdao/contracts-helper/node_modules/bip32/node_modules/tiny-secp256k1/node_modules/bn.js",
+        "node_modules/@unstoppabledomains/resolution/node_modules/bn.js",
+        "node_modules/asn1.js/node_modules/bn.js",
+        "node_modules/bitcoinjs-ecpair/node_modules/tiny-secp256k1/node_modules/bn.js",
+        "node_modules/bn.js",
+        "node_modules/elliptic/node_modules/bn.js",
+        "node_modules/eth-lib/node_modules/bn.js",
+        "node_modules/ethereumjs-abi/node_modules/bn.js",
+        "node_modules/ethereumjs-util/node_modules/bn.js",
+        "node_modules/ethjs-unit/node_modules/bn.js",
+        "node_modules/number-to-bn/node_modules/bn.js",
+        "node_modules/secp256k1/node_modules/bn.js",
+        "node_modules/swarm-js/node_modules/eth-lib/node_modules/bn.js"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "body-parser": {
+      "name": "body-parser",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "qs"
+      ],
+      "effects": [
+        "express"
+      ],
+      "range": "1.20.3 - 1.20.4 || 2.0.0-beta.1 - 2.0.2",
+      "nodes": [
+        "node_modules/servify/node_modules/body-parser"
+      ],
+      "fixAvailable": true
+    },
+    "brace-expansion": {
+      "name": "brace-expansion",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1115540,
+          "name": "brace-expansion",
+          "dependency": "brace-expansion",
+          "title": "brace-expansion: Zero-step sequence causes process hang and memory exhaustion",
+          "url": "https://github.com/advisories/GHSA-f886-m6hf-6m8v",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-400"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H"
+          },
+          "range": "<1.1.13"
+        },
+        {
+          "source": 1115541,
+          "name": "brace-expansion",
+          "dependency": "brace-expansion",
+          "title": "brace-expansion: Zero-step sequence causes process hang and memory exhaustion",
+          "url": "https://github.com/advisories/GHSA-f886-m6hf-6m8v",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-400"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=2.0.0 <2.0.3"
+        }
+      ],
+      "effects": [],
+      "range": "<1.1.13 || >=2.0.0 <2.0.3",
+      "nodes": [
+        "node_modules/brace-expansion",
+        "node_modules/filelist/node_modules/minimatch/node_modules/brace-expansion",
+        "node_modules/glob/node_modules/minimatch/node_modules/brace-expansion"
+      ],
+      "fixAvailable": true
+    },
+    "bs58": {
+      "name": "bs58",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "base-x"
+      ],
+      "effects": [
+        "@near-js/utils"
+      ],
+      "range": "3.0.0 - 4.0.0",
+      "nodes": [
+        "node_modules/@near-js/utils/node_modules/bs58"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "cacache": {
+      "name": "cacache",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "tar"
+      ],
+      "effects": [
+        "make-fetch-happen"
+      ],
+      "range": "14.0.0 - 18.0.4",
+      "nodes": [
+        "node_modules/node-gyp/node_modules/make-fetch-happen/node_modules/cacache"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "cbridge-revert-manager": {
+      "name": "cbridge-revert-manager",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "ethers"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/cbridge-revert-manager"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "circomlibjs": {
+      "name": "circomlibjs",
+      "severity": "low",
+      "isDirect": true,
+      "via": [
+        "ethers"
+      ],
+      "effects": [],
+      "range": ">=0.1.0",
+      "nodes": [
+        "node_modules/circomlibjs"
+      ],
+      "fixAvailable": {
+        "name": "circomlibjs",
+        "version": "0.0.8",
+        "isSemVerMajor": true
+      }
+    },
+    "diff": {
+      "name": "diff",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1112704,
+          "name": "diff",
+          "dependency": "diff",
+          "title": "jsdiff has a Denial of Service vulnerability in parsePatch and applyPatch",
+          "url": "https://github.com/advisories/GHSA-73rr-hh4g-fpgx",
+          "severity": "low",
+          "cwe": [
+            "CWE-400",
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=4.0.0 <4.0.4"
+        }
+      ],
+      "effects": [],
+      "range": "4.0.0 - 4.0.3",
+      "nodes": [
+        "node_modules/diff"
+      ],
+      "fixAvailable": true
+    },
+    "elliptic": {
+      "name": "elliptic",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1112030,
+          "name": "elliptic",
+          "dependency": "elliptic",
+          "title": "Elliptic Uses a Cryptographic Primitive with a Risky Implementation",
+          "url": "https://github.com/advisories/GHSA-848j-6mx2-7j84",
+          "severity": "low",
+          "cwe": [
+            "CWE-1240"
+          ],
+          "cvss": {
+            "score": 5.6,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          },
+          "range": "<=6.6.1"
+        }
+      ],
+      "effects": [
+        "@cosmjs/crypto",
+        "@ethersproject/signing-key",
+        "@unstoppabledomains/resolution",
+        "eth-lib",
+        "ethereumjs-util",
+        "secp256k1",
+        "tiny-secp256k1"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/elliptic"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "engine.io": {
+      "name": "engine.io",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "ws"
+      ],
+      "effects": [],
+      "range": "0.7.8 - 0.7.9 || 6.0.0 - 6.6.7",
+      "nodes": [
+        "node_modules/engine.io"
+      ],
+      "fixAvailable": true
+    },
+    "engine.io-client": {
+      "name": "engine.io-client",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "ws"
+      ],
+      "effects": [],
+      "range": "0.7.0 || 0.7.8 - 0.7.9 || 6.0.0 - 6.6.4",
+      "nodes": [
+        "node_modules/engine.io-client"
+      ],
+      "fixAvailable": true
+    },
+    "eth-lib": {
+      "name": "eth-lib",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "elliptic",
+        "servify"
+      ],
+      "effects": [
+        "swarm-js"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/eth-lib",
+        "node_modules/swarm-js/node_modules/eth-lib"
+      ],
+      "fixAvailable": true
+    },
+    "ethereum-cryptography": {
+      "name": "ethereum-cryptography",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "secp256k1"
+      ],
+      "effects": [
+        "ethereumjs-util"
+      ],
+      "range": "0.1.0 - 0.1.3",
+      "nodes": [
+        "node_modules/@ethereumjs/common/node_modules/ethereumjs-util/node_modules/ethereum-cryptography",
+        "node_modules/@ethereumjs/tx/node_modules/ethereumjs-util/node_modules/ethereum-cryptography",
+        "node_modules/ethereumjs-util/node_modules/ethereum-cryptography"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "ethereumjs-util": {
+      "name": "ethereumjs-util",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "elliptic",
+        "ethereum-cryptography"
+      ],
+      "effects": [
+        "@ethereumjs/common",
+        "@ethereumjs/tx",
+        "@metamask/eth-sig-util"
+      ],
+      "range": "1.0.2 - 2.4.0 || 4.5.1 || 5.2.1 || 6.2.1 || >=7.0.3",
+      "nodes": [
+        "node_modules/@ethereumjs/common/node_modules/ethereumjs-util",
+        "node_modules/@ethereumjs/tx/node_modules/ethereumjs-util",
+        "node_modules/ethereumjs-util"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "ethers": {
+      "name": "ethers",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": [
+        "@ethersproject/abi",
+        "@ethersproject/abstract-provider",
+        "@ethersproject/abstract-signer",
+        "@ethersproject/contracts",
+        "@ethersproject/hash",
+        "@ethersproject/hdnode",
+        "@ethersproject/json-wallets",
+        "@ethersproject/providers",
+        "@ethersproject/signing-key",
+        "@ethersproject/transactions",
+        "@ethersproject/wallet",
+        "@ethersproject/wordlists",
+        "ws"
+      ],
+      "effects": [
+        "@arbitrum/sdk",
+        "@bundlr-network/client",
+        "arbundles",
+        "cbridge-revert-manager",
+        "circomlibjs",
+        "rubic-sdk",
+        "tronweb"
+      ],
+      "range": ">=5.0.0-beta.119",
+      "nodes": [
+        "node_modules/@arbitrum/sdk/node_modules/ethers",
+        "node_modules/@bundlr-network/client/node_modules/ethers",
+        "node_modules/cbridge-revert-manager/node_modules/ethers",
+        "node_modules/circomlibjs/node_modules/ethers",
+        "node_modules/ethers",
+        "node_modules/rubic-sdk/node_modules/ethers",
+        "node_modules/tronweb/node_modules/ethers"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "ethjs-unit": {
+      "name": "ethjs-unit",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "bn.js",
+        "number-to-bn"
+      ],
+      "effects": [],
+      "range": ">=0.1.3",
+      "nodes": [
+        "node_modules/ethjs-unit"
+      ],
+      "fixAvailable": true
+    },
+    "express": {
+      "name": "express",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "body-parser",
+        "path-to-regexp",
+        "qs"
+      ],
+      "effects": [],
+      "range": "4.0.0-rc1 - 4.22.1 || 5.0.0-alpha.1 - 5.0.1",
+      "nodes": [
+        "node_modules/servify/node_modules/express"
+      ],
+      "fixAvailable": true
+    },
+    "fast-json-stringify": {
+      "name": "fast-json-stringify",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "fast-uri"
+      ],
+      "effects": [
+        "@fastify/fast-json-stringify-compiler",
+        "fastify"
+      ],
+      "range": "3.1.0 - 6.0.0",
+      "nodes": [
+        "node_modules/fast-json-stringify"
+      ],
+      "fixAvailable": {
+        "name": "fastify",
+        "version": "5.8.5",
+        "isSemVerMajor": true
+      }
+    },
+    "fast-uri": {
+      "name": "fast-uri",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1117870,
+          "name": "fast-uri",
+          "dependency": "fast-uri",
+          "title": "fast-uri vulnerable to path traversal via percent-encoded dot segments",
+          "url": "https://github.com/advisories/GHSA-q3j6-qgpj-74h6",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+          },
+          "range": "<=3.1.0"
+        },
+        {
+          "source": 1117884,
+          "name": "fast-uri",
+          "dependency": "fast-uri",
+          "title": "fast-uri vulnerable to host confusion via percent-encoded authority delimiters",
+          "url": "https://github.com/advisories/GHSA-v39h-62p7-jpjc",
+          "severity": "high",
+          "cwe": [
+            "CWE-436"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+          },
+          "range": "<=3.1.1"
+        }
+      ],
+      "effects": [
+        "@fastify/ajv-compiler",
+        "fast-json-stringify"
+      ],
+      "range": "<=3.1.1",
+      "nodes": [
+        "node_modules/@fastify/ajv-compiler/node_modules/ajv/node_modules/fast-uri",
+        "node_modules/@fastify/ajv-compiler/node_modules/fast-uri",
+        "node_modules/fast-json-stringify/node_modules/ajv/node_modules/fast-uri",
+        "node_modules/fast-json-stringify/node_modules/fast-uri",
+        "node_modules/fast-uri"
+      ],
+      "fixAvailable": {
+        "name": "fastify",
+        "version": "5.8.5",
+        "isSemVerMajor": true
+      }
+    },
+    "fast-xml-builder": {
+      "name": "fast-xml-builder",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1118965,
+          "name": "fast-xml-builder",
+          "dependency": "fast-xml-builder",
+          "title": "fast-xml-builder allows attribute values with unwanted quotes to bypass malicious or unwanted attributes",
+          "url": "https://github.com/advisories/GHSA-5wm8-gmm8-39j9",
+          "severity": "high",
+          "cwe": [
+            "CWE-91",
+            "CWE-611"
+          ],
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "range": "<=1.1.6"
+        }
+      ],
+      "effects": [],
+      "range": "<=1.1.6",
+      "nodes": [
+        "node_modules/fast-xml-builder"
+      ],
+      "fixAvailable": true
+    },
+    "fast-xml-parser": {
+      "name": "fast-xml-parser",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1117911,
+          "name": "fast-xml-parser",
+          "dependency": "fast-xml-parser",
+          "title": "fast-xml-parser XMLBuilder: XML Comment and CDATA Injection via Unescaped Delimiters",
+          "url": "https://github.com/advisories/GHSA-gh4j-gqv2-49f6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-91"
+          ],
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "range": "<5.7.0"
+        }
+      ],
+      "effects": [
+        "@aws-sdk/core"
+      ],
+      "range": "<5.7.0",
+      "nodes": [
+        "node_modules/fast-xml-parser"
+      ],
+      "fixAvailable": true
+    },
+    "fastify": {
+      "name": "fastify",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@fastify/ajv-compiler",
+        "@fastify/fast-json-stringify-compiler",
+        {
+          "source": 1112876,
+          "name": "fastify",
+          "dependency": "fastify",
+          "title": "Fastify Vulnerable to DoS via Unbounded Memory Allocation in sendWebStream",
+          "url": "https://github.com/advisories/GHSA-mrq3-vjjr-p77c",
+          "severity": "low",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<=5.7.2"
+        },
+        {
+          "source": 1112877,
+          "name": "fastify",
+          "dependency": "fastify",
+          "title": "Fastify's Content-Type header tab character allows body validation bypass",
+          "url": "https://github.com/advisories/GHSA-jx2c-rxcm-jvmq",
+          "severity": "high",
+          "cwe": [
+            "CWE-436"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+          },
+          "range": "<5.7.2"
+        },
+        {
+          "source": 1115367,
+          "name": "fastify",
+          "dependency": "fastify",
+          "title": "fastify: request.protocol and request.host Spoofable via X-Forwarded-Proto/Host from Untrusted Connections",
+          "url": "https://github.com/advisories/GHSA-444r-cwp2-x5xf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-348"
+          ],
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:A/AC:H/PR:N/UI:N/S:C/C:H/I:N/A:N"
+          },
+          "range": "<=5.8.2"
+        },
+        "fast-json-stringify"
+      ],
+      "effects": [],
+      "range": "<=5.8.2",
+      "nodes": [
+        "node_modules/fastify"
+      ],
+      "fixAvailable": {
+        "name": "fastify",
+        "version": "5.8.5",
+        "isSemVerMajor": true
+      }
+    },
+    "form-data": {
+      "name": "form-data",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1109538,
+          "name": "form-data",
+          "dependency": "form-data",
+          "title": "form-data uses unsafe random function in form-data for choosing boundary",
+          "url": "https://github.com/advisories/GHSA-fjxv-7rqg-78g4",
+          "severity": "critical",
+          "cwe": [
+            "CWE-330"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=4.0.0 <4.0.4"
+        },
+        {
+          "source": 1109540,
+          "name": "form-data",
+          "dependency": "form-data",
+          "title": "form-data uses unsafe random function in form-data for choosing boundary",
+          "url": "https://github.com/advisories/GHSA-fjxv-7rqg-78g4",
+          "severity": "critical",
+          "cwe": [
+            "CWE-330"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<2.5.4"
+        }
+      ],
+      "effects": [
+        "aptos",
+        "request"
+      ],
+      "range": ">=4.0.0 <4.0.4 || <2.5.4",
+      "nodes": [
+        "node_modules/aptos/node_modules/form-data",
+        "node_modules/request/node_modules/form-data"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "http-proxy-agent": {
+      "name": "http-proxy-agent",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "@tootallnate/once"
+      ],
+      "effects": [
+        "make-fetch-happen"
+      ],
+      "range": "4.0.1",
+      "nodes": [
+        "node_modules/node-gyp/node_modules/make-fetch-happen/node_modules/http-proxy-agent"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "iziswap-sdk": {
+      "name": "iziswap-sdk",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "web3"
+      ],
+      "effects": [
+        "rubic-sdk"
+      ],
+      "range": ">=1.1.2",
+      "nodes": [
+        "node_modules/iziswap-sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "jayson": {
+      "name": "jayson",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [
+        "@solana/web3.js"
+      ],
+      "range": ">=2.0.6",
+      "nodes": [
+        "node_modules/jayson"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "jsonpath": {
+      "name": "jsonpath",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1112974,
+          "name": "jsonpath",
+          "dependency": "jsonpath",
+          "title": "JSONPath vulnerable to Prototype Pollution due to insufficient input validation of object keys in lib/index.js",
+          "url": "https://github.com/advisories/GHSA-6c59-mwgh-r2x6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<1.2.0"
+        },
+        {
+          "source": 1114914,
+          "name": "jsonpath",
+          "dependency": "jsonpath",
+          "title": "jsonpath has Arbitrary Code Injection via Unsafe Evaluation of JSON Path Expressions",
+          "url": "https://github.com/advisories/GHSA-87r5-mp6g-5w5j",
+          "severity": "high",
+          "cwe": [
+            "CWE-94"
+          ],
+          "cvss": {
+            "score": 9.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "range": "<=1.2.1"
+        },
+        "underscore"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/jsonpath"
+      ],
+      "fixAvailable": true
+    },
+    "make-fetch-happen": {
+      "name": "make-fetch-happen",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "cacache",
+        "http-proxy-agent"
+      ],
+      "effects": [
+        "node-gyp"
+      ],
+      "range": "7.1.1 - 14.0.0",
+      "nodes": [
+        "node_modules/node-gyp/node_modules/make-fetch-happen"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "merkletreejs": {
+      "name": "merkletreejs",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-utils"
+      ],
+      "effects": [],
+      "range": "0.2.17 - 0.4.0",
+      "nodes": [
+        "node_modules/merkletreejs"
+      ],
+      "fixAvailable": true
+    },
+    "min-document": {
+      "name": "min-document",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1109626,
+          "name": "min-document",
+          "dependency": "min-document",
+          "title": "min-document vulnerable to prototype pollution",
+          "url": "https://github.com/advisories/GHSA-rx8g-88g5-qh64",
+          "severity": "low",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=2.19.0"
+        }
+      ],
+      "effects": [],
+      "range": "<=2.19.0",
+      "nodes": [
+        "node_modules/min-document"
+      ],
+      "fixAvailable": true
+    },
+    "minimatch": {
+      "name": "minimatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113459,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern",
+          "url": "https://github.com/advisories/GHSA-3ppc-4f35-3m26",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<3.1.3"
+        },
+        {
+          "source": 1113461,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern",
+          "url": "https://github.com/advisories/GHSA-3ppc-4f35-3m26",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=5.0.0 <5.1.7"
+        },
+        {
+          "source": 1113465,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has a ReDoS via repeated wildcards with non-matching literal in pattern",
+          "url": "https://github.com/advisories/GHSA-3ppc-4f35-3m26",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=9.0.0 <9.0.6"
+        },
+        {
+          "source": 1113538,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments",
+          "url": "https://github.com/advisories/GHSA-7r86-cg39-jmmj",
+          "severity": "high",
+          "cwe": [
+            "CWE-407"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<3.1.3"
+        },
+        {
+          "source": 1113540,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments",
+          "url": "https://github.com/advisories/GHSA-7r86-cg39-jmmj",
+          "severity": "high",
+          "cwe": [
+            "CWE-407"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=5.0.0 <5.1.8"
+        },
+        {
+          "source": 1113544,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch has ReDoS: matchOne() combinatorial backtracking via multiple non-adjacent GLOBSTAR segments",
+          "url": "https://github.com/advisories/GHSA-7r86-cg39-jmmj",
+          "severity": "high",
+          "cwe": [
+            "CWE-407"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=9.0.0 <9.0.7"
+        },
+        {
+          "source": 1113546,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions",
+          "url": "https://github.com/advisories/GHSA-23c5-xmqv-rm74",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<3.1.4"
+        },
+        {
+          "source": 1113548,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions",
+          "url": "https://github.com/advisories/GHSA-23c5-xmqv-rm74",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=5.0.0 <5.1.8"
+        },
+        {
+          "source": 1113552,
+          "name": "minimatch",
+          "dependency": "minimatch",
+          "title": "minimatch ReDoS: nested *() extglobs generate catastrophically backtracking regular expressions",
+          "url": "https://github.com/advisories/GHSA-23c5-xmqv-rm74",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=9.0.0 <9.0.7"
+        }
+      ],
+      "effects": [],
+      "range": "<=3.1.3 || 5.0.0 - 5.1.7 || 9.0.0 - 9.0.6",
+      "nodes": [
+        "node_modules/filelist/node_modules/minimatch",
+        "node_modules/glob/node_modules/minimatch",
+        "node_modules/minimatch"
+      ],
+      "fixAvailable": true
+    },
+    "near-api-js": {
+      "name": "near-api-js",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "@near-js/accounts",
+        "@near-js/crypto",
+        "@near-js/keystores",
+        "@near-js/keystores-browser",
+        "@near-js/keystores-node",
+        "@near-js/providers",
+        "@near-js/signers",
+        "@near-js/transactions",
+        "@near-js/utils",
+        "@near-js/wallet-account",
+        "bn.js"
+      ],
+      "effects": [
+        "@bundlr-network/client",
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "0.40.0 - 5.0.1",
+      "nodes": [
+        "node_modules/@bundlr-network/client/node_modules/near-api-js",
+        "node_modules/near-api-js"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "node-gyp": {
+      "name": "node-gyp",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "make-fetch-happen",
+        "tar"
+      ],
+      "effects": [
+        "sqlite3"
+      ],
+      "range": "<=10.3.1",
+      "nodes": [
+        "node_modules/node-gyp"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "number-to-bn": {
+      "name": "number-to-bn",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "bn.js"
+      ],
+      "effects": [
+        "web3-utils"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/number-to-bn"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "path-to-regexp": {
+      "name": "path-to-regexp",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1115527,
+          "name": "path-to-regexp",
+          "dependency": "path-to-regexp",
+          "title": "path-to-regexp vulnerable to Regular Expression Denial of Service via multiple route parameters",
+          "url": "https://github.com/advisories/GHSA-37ch-88jc-xwx2",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<0.1.13"
+        },
+        {
+          "source": 1115573,
+          "name": "path-to-regexp",
+          "dependency": "path-to-regexp",
+          "title": "path-to-regexp vulnerable to Denial of Service via sequential optional groups",
+          "url": "https://github.com/advisories/GHSA-j3q9-mxjg-w52f",
+          "severity": "high",
+          "cwe": [
+            "CWE-400",
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=8.0.0 <8.4.0"
+        },
+        {
+          "source": 1115582,
+          "name": "path-to-regexp",
+          "dependency": "path-to-regexp",
+          "title": "path-to-regexp vulnerable to Regular Expression Denial of Service via multiple wildcards",
+          "url": "https://github.com/advisories/GHSA-27v5-c462-wpq7",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=8.0.0 <8.4.0"
+        }
+      ],
+      "effects": [
+        "express"
+      ],
+      "range": "<=0.1.12 || 8.0.0 - 8.3.0",
+      "nodes": [
+        "node_modules/path-to-regexp",
+        "node_modules/router/node_modules/path-to-regexp"
+      ],
+      "fixAvailable": true
+    },
+    "picomatch": {
+      "name": "picomatch",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1115551,
+          "name": "picomatch",
+          "dependency": "picomatch",
+          "title": "Picomatch: Method Injection in POSIX Character Classes causes incorrect Glob Matching",
+          "url": "https://github.com/advisories/GHSA-3v7f-55p6-f55p",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": ">=4.0.0 <4.0.4"
+        },
+        {
+          "source": 1115554,
+          "name": "picomatch",
+          "dependency": "picomatch",
+          "title": "Picomatch has a ReDoS vulnerability via extglob quantifiers",
+          "url": "https://github.com/advisories/GHSA-c2c7-rcm5-vvqj",
+          "severity": "high",
+          "cwe": [
+            "CWE-1333"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=4.0.0 <4.0.4"
+        }
+      ],
+      "effects": [],
+      "range": "4.0.0 - 4.0.3",
+      "nodes": [
+        "node_modules/picomatch"
+      ],
+      "fixAvailable": true
+    },
+    "protobufjs": {
+      "name": "protobufjs",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1117571,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "Arbitrary code execution in protobufjs",
+          "url": "https://github.com/advisories/GHSA-xq3m-2v4x-88gg",
+          "severity": "critical",
+          "cwe": [
+            "CWE-94"
+          ],
+          "cvss": {
+            "score": 9.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "range": "<7.5.5"
+        },
+        {
+          "source": 1118641,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Code injection through bytes field defaults in generated toObject code",
+          "url": "https://github.com/advisories/GHSA-66ff-xgx4-vchm",
+          "severity": "high",
+          "cwe": [
+            "CWE-94"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118924,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Denial of service from crafted field names in generated code",
+          "url": "https://github.com/advisories/GHSA-2pr8-phx7-x9h3",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-20"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118926,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Prototype injection in generated message constructors",
+          "url": "https://github.com/advisories/GHSA-fx83-v9x8-x52w",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118928,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Code generation gadget after prototype pollution",
+          "url": "https://github.com/advisories/GHSA-75px-5xx7-5xc7",
+          "severity": "high",
+          "cwe": [
+            "CWE-94",
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 8.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118930,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Process-wide denial of service through unsafe option paths",
+          "url": "https://github.com/advisories/GHSA-jvwf-75h9-cwgg",
+          "severity": "high",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118932,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobuf.js: Denial of service through unbounded protobuf recursion",
+          "url": "https://github.com/advisories/GHSA-685m-2w69-288q",
+          "severity": "high",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1118935,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobufjs has overlong UTF-8 decoding",
+          "url": "https://github.com/advisories/GHSA-q6x5-8v7m-xcrf",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-176"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+          },
+          "range": "<=7.5.5"
+        },
+        {
+          "source": 1119378,
+          "name": "protobufjs",
+          "dependency": "protobufjs",
+          "title": "protobufjs: Denial of Service via unbounded recursive JSON descriptor expansion",
+          "url": "https://github.com/advisories/GHSA-jggg-4jg4-v7c6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<=7.5.7"
+        }
+      ],
+      "effects": [
+        "@confio/ics23"
+      ],
+      "range": "<=7.5.7",
+      "nodes": [
+        "node_modules/@confio/ics23/node_modules/protobufjs",
+        "node_modules/protobufjs"
+      ],
+      "fixAvailable": true
+    },
+    "qs": {
+      "name": "qs",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113161,
+          "name": "qs",
+          "dependency": "qs",
+          "title": "qs's arrayLimit bypass in comma parsing allows denial of service",
+          "url": "https://github.com/advisories/GHSA-w7fw-mjwx-w883",
+          "severity": "low",
+          "cwe": [
+            "CWE-20"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=6.7.0 <=6.14.1"
+        },
+        {
+          "source": 1113719,
+          "name": "qs",
+          "dependency": "qs",
+          "title": "qs's arrayLimit bypass in its bracket notation allows DoS via memory exhaustion",
+          "url": "https://github.com/advisories/GHSA-6rw7-vpxm-498p",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-20"
+          ],
+          "cvss": {
+            "score": 3.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": "<6.14.1"
+        },
+        {
+          "source": 1119502,
+          "name": "qs",
+          "dependency": "qs",
+          "title": "qs has a remotely triggerable DoS: qs.stringify crashes with TypeError on null/undefined entries in comma-format arrays when encodeValuesOnly is set",
+          "url": "https://github.com/advisories/GHSA-q8mj-m7cp-5q26",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-476"
+          ],
+          "cvss": {
+            "score": 5.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=6.11.1 <=6.15.1"
+        }
+      ],
+      "effects": [
+        "body-parser",
+        "express",
+        "request"
+      ],
+      "range": "<=6.15.1",
+      "nodes": [
+        "node_modules/request/node_modules/qs",
+        "node_modules/servify/node_modules/body-parser/node_modules/qs",
+        "node_modules/servify/node_modules/express/node_modules/qs"
+      ],
+      "fixAvailable": true
+    },
+    "request": {
+      "name": "request",
+      "severity": "critical",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1096727,
+          "name": "request",
+          "dependency": "request",
+          "title": "Server-Side Request Forgery in Request",
+          "url": "https://github.com/advisories/GHSA-p8p7-x288-28g6",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-918"
+          ],
+          "cvss": {
+            "score": 6.1,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+          },
+          "range": "<=2.88.2"
+        },
+        "form-data",
+        "qs",
+        "tough-cookie",
+        "uuid"
+      ],
+      "effects": [
+        "servify"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/request"
+      ],
+      "fixAvailable": true
+    },
+    "rollup": {
+      "name": "rollup",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1113516,
+          "name": "rollup",
+          "dependency": "rollup",
+          "title": "Rollup 4 has Arbitrary File Write via Path Traversal",
+          "url": "https://github.com/advisories/GHSA-mw96-cpmx-2vgc",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=3.0.0 <3.30.0"
+        }
+      ],
+      "effects": [],
+      "range": "3.0.0 - 3.29.5",
+      "nodes": [
+        "node_modules/rollup"
+      ],
+      "fixAvailable": true
+    },
+    "rpc-websockets": {
+      "name": "rpc-websockets",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "uuid"
+      ],
+      "effects": [
+        "@solana/web3.js"
+      ],
+      "range": "<=9.3.4 || 10.0.0",
+      "nodes": [
+        "node_modules/rpc-websockets",
+        "node_modules/rubic-sdk/node_modules/@solana/spl-token/node_modules/@solana/web3.js/node_modules/rpc-websockets",
+        "node_modules/rubic-sdk/node_modules/rpc-websockets"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "rubic-sdk": {
+      "name": "rubic-sdk",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@1inch/limit-order-protocol-utils",
+        "@arbitrum/sdk",
+        "@cetusprotocol/cetus-sui-clmm-sdk",
+        "@pancakeswap/sdk",
+        "@pancakeswap/smart-router",
+        "@pancakeswap/tokens",
+        "@solana/spl-token",
+        "@solana/web3.js",
+        "@solflare-wallet/utl-sdk",
+        "@teleportdao/teleswap-sdk",
+        "@viaprotocol/router-sdk",
+        "cbridge-revert-manager",
+        "ethers",
+        "iziswap-sdk",
+        "rpc-websockets",
+        "viem",
+        "web3",
+        "web3-eth",
+        "web3-utils"
+      ],
+      "effects": [
+        "@kynesyslabs/demosdk"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/rubic-sdk"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "secp256k1": {
+      "name": "secp256k1",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1100206,
+          "name": "secp256k1",
+          "dependency": "secp256k1",
+          "title": "secp256k1-node allows private key extraction over ECDH",
+          "url": "https://github.com/advisories/GHSA-584q-6j8j-r5pm",
+          "severity": "high",
+          "cwe": [
+            "CWE-200",
+            "CWE-354"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "=5.0.0"
+        },
+        "elliptic"
+      ],
+      "effects": [
+        "@near-js/crypto",
+        "arbundles",
+        "bitcoinjs-message",
+        "ethereum-cryptography"
+      ],
+      "range": ">=2.0.0",
+      "nodes": [
+        "node_modules/@bundlr-network/client/node_modules/arbundles/node_modules/secp256k1",
+        "node_modules/@ethereumjs/common/node_modules/ethereumjs-util/node_modules/ethereum-cryptography/node_modules/secp256k1",
+        "node_modules/@ethereumjs/tx/node_modules/ethereumjs-util/node_modules/ethereum-cryptography/node_modules/secp256k1",
+        "node_modules/@near-js/crypto/node_modules/secp256k1",
+        "node_modules/arbundles/node_modules/secp256k1",
+        "node_modules/ethereumjs-util/node_modules/ethereum-cryptography/node_modules/secp256k1",
+        "node_modules/secp256k1"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "servify": {
+      "name": "servify",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "request"
+      ],
+      "effects": [
+        "eth-lib"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/servify"
+      ],
+      "fixAvailable": true
+    },
+    "socket.io-adapter": {
+      "name": "socket.io-adapter",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "ws"
+      ],
+      "effects": [],
+      "range": "2.5.2 - 2.5.6",
+      "nodes": [
+        "node_modules/socket.io-adapter"
+      ],
+      "fixAvailable": true
+    },
+    "sqlite3": {
+      "name": "sqlite3",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "node-gyp",
+        "tar"
+      ],
+      "effects": [
+        "typeorm"
+      ],
+      "range": "5.0.0 - 5.1.7",
+      "nodes": [
+        "node_modules/sqlite3"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "start-server-and-test": {
+      "name": "start-server-and-test",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "wait-on"
+      ],
+      "effects": [
+        "@solana/spl-token"
+      ],
+      "range": "1.11.1 - 2.0.2",
+      "nodes": [
+        "node_modules/start-server-and-test"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "swarm-js": {
+      "name": "swarm-js",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "eth-lib",
+        "tar"
+      ],
+      "effects": [
+        "web3-bzz"
+      ],
+      "range": ">=0.1.36",
+      "nodes": [
+        "node_modules/swarm-js"
+      ],
+      "fixAvailable": true
+    },
+    "tar": {
+      "name": "tar",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1097493,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "Denial of service while parsing a tar file due to lack of folders count validation",
+          "url": "https://github.com/advisories/GHSA-f5x3-32g6-xq36",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-400"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:N/A:H"
+          },
+          "range": "<6.2.1"
+        },
+        {
+          "source": 1112659,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "node-tar Vulnerable to Arbitrary File Creation/Overwrite via Hardlink Path Traversal",
+          "url": "https://github.com/advisories/GHSA-34x7-hfp2-rc4v",
+          "severity": "high",
+          "cwe": [
+            "CWE-22",
+            "CWE-59"
+          ],
+          "cvss": {
+            "score": 8.2,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:N"
+          },
+          "range": "<7.5.7"
+        },
+        {
+          "source": 1113300,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "node-tar is Vulnerable to Arbitrary File Overwrite and Symlink Poisoning via Insufficient Path Sanitization",
+          "url": "https://github.com/advisories/GHSA-8qq5-rm4j-mr97",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=7.5.2"
+        },
+        {
+          "source": 1113375,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "Arbitrary File Read/Write via Hardlink Target Escape Through Symlink Chain in node-tar Extraction",
+          "url": "https://github.com/advisories/GHSA-83g3-92jg-28cx",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 7.1,
+            "vectorString": "CVSS:3.1/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N"
+          },
+          "range": "<7.5.8"
+        },
+        {
+          "source": 1114200,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "tar has Hardlink Path Traversal via Drive-Relative Linkpath",
+          "url": "https://github.com/advisories/GHSA-qffp-2rhf-9h96",
+          "severity": "high",
+          "cwe": [
+            "CWE-22",
+            "CWE-59"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=7.5.9"
+        },
+        {
+          "source": 1114302,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "node-tar Symlink Path Traversal via Drive-Relative Linkpath",
+          "url": "https://github.com/advisories/GHSA-9ppj-qmqm-q256",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=7.5.10"
+        },
+        {
+          "source": 1114680,
+          "name": "tar",
+          "dependency": "tar",
+          "title": "Race Condition in node-tar Path Reservations via Unicode Ligature Collisions on macOS APFS",
+          "url": "https://github.com/advisories/GHSA-r6q2-hw4h-h46w",
+          "severity": "high",
+          "cwe": [
+            "CWE-176",
+            "CWE-367"
+          ],
+          "cvss": {
+            "score": 8.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:H/A:L"
+          },
+          "range": "<=7.5.3"
+        }
+      ],
+      "effects": [
+        "cacache",
+        "node-gyp",
+        "sqlite3",
+        "swarm-js"
+      ],
+      "range": "<=7.5.10",
+      "nodes": [
+        "node_modules/swarm-js/node_modules/tar",
+        "node_modules/tar"
+      ],
+      "fixAvailable": {
+        "name": "sqlite3",
+        "version": "6.0.1",
+        "isSemVerMajor": true
+      }
+    },
+    "tar-fs": {
+      "name": "tar-fs",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1109532,
+          "name": "tar-fs",
+          "dependency": "tar-fs",
+          "title": "tar-fs has a symlink validation bypass if destination directory is predictable with a specific tarball",
+          "url": "https://github.com/advisories/GHSA-vj76-c3g6-qr5v",
+          "severity": "high",
+          "cwe": [
+            "CWE-22",
+            "CWE-61"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": ">=2.0.0 <2.1.4"
+        }
+      ],
+      "effects": [],
+      "range": "2.0.0 - 2.1.3",
+      "nodes": [
+        "node_modules/tar-fs"
+      ],
+      "fixAvailable": true
+    },
+    "tiny-secp256k1": {
+      "name": "tiny-secp256k1",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "elliptic"
+      ],
+      "effects": [
+        "bip32",
+        "bitcoinjs-lib"
+      ],
+      "range": "0.0.0-rc-1560324438 || 0.2.0 - 1.1.7",
+      "nodes": [
+        "node_modules/@teleportdao/contracts-helper/node_modules/bip32/node_modules/tiny-secp256k1",
+        "node_modules/bitcoinjs-ecpair/node_modules/tiny-secp256k1"
+      ],
+      "fixAvailable": true
+    },
+    "tmp": {
+      "name": "tmp",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1119610,
+          "name": "tmp",
+          "dependency": "tmp",
+          "title": "tmp has Path Traversal via unsanitized prefix/postfix that enables directory escape",
+          "url": "https://github.com/advisories/GHSA-ph9p-34f9-6g65",
+          "severity": "high",
+          "cwe": [
+            "CWE-22"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<0.2.6"
+        }
+      ],
+      "effects": [],
+      "range": "<0.2.6",
+      "nodes": [
+        "node_modules/tmp"
+      ],
+      "fixAvailable": true
+    },
+    "tough-cookie": {
+      "name": "tough-cookie",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1097682,
+          "name": "tough-cookie",
+          "dependency": "tough-cookie",
+          "title": "tough-cookie Prototype Pollution vulnerability",
+          "url": "https://github.com/advisories/GHSA-72xf-g2v4-qvf3",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 6.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+          },
+          "range": "<4.1.3"
+        }
+      ],
+      "effects": [
+        "request"
+      ],
+      "range": "<4.1.3",
+      "nodes": [
+        "node_modules/tough-cookie"
+      ],
+      "fixAvailable": true
+    },
+    "tronweb": {
+      "name": "tronweb",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "axios",
+        "ethers"
+      ],
+      "effects": [],
+      "range": ">=5.3.0",
+      "nodes": [
+        "node_modules/tronweb"
+      ],
+      "fixAvailable": true
+    },
+    "typeorm": {
+      "name": "typeorm",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "sqlite3"
+      ],
+      "effects": [],
+      "range": "0.3.7-dev.1b5aa62 - 0.4.0-alpha.1 || >=1.0.1-nightly.20260213",
+      "nodes": [
+        "node_modules/typeorm"
+      ],
+      "fixAvailable": {
+        "name": "typeorm",
+        "version": "1.0.0",
+        "isSemVerMajor": true
+      }
+    },
+    "underscore": {
+      "name": "underscore",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1117689,
+          "name": "underscore",
+          "dependency": "underscore",
+          "title": "Underscore has unlimited recursion in _.flatten and _.isEqual, potential for DoS attack",
+          "url": "https://github.com/advisories/GHSA-qpx9-hpmf-5gmw",
+          "severity": "high",
+          "cwe": [
+            "CWE-674",
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 5.9,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": "<=1.13.7"
+        }
+      ],
+      "effects": [
+        "jsonpath"
+      ],
+      "range": "<=1.13.7",
+      "nodes": [
+        "node_modules/underscore"
+      ],
+      "fixAvailable": true
+    },
+    "uuid": {
+      "name": "uuid",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1119441,
+          "name": "uuid",
+          "dependency": "uuid",
+          "title": "uuid: Missing buffer bounds check in v3/v5/v6 when buf is provided",
+          "url": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-787",
+            "CWE-1285"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:H/A:N"
+          },
+          "range": "<11.1.1"
+        }
+      ],
+      "effects": [
+        "@aws-sdk/client-s3",
+        "@cetusprotocol/cetus-sui-clmm-sdk",
+        "@multiversx/sdk-core",
+        "@multiversx/sdk-wallet",
+        "@smithy/core",
+        "@smithy/middleware-retry",
+        "jayson",
+        "request",
+        "rpc-websockets",
+        "web3-eth-accounts"
+      ],
+      "range": "<11.1.1",
+      "nodes": [
+        "node_modules/@aws-sdk/client-s3/node_modules/uuid",
+        "node_modules/@cetusprotocol/cetus-sui-clmm-sdk/node_modules/uuid",
+        "node_modules/@multiversx/sdk-core/node_modules/uuid",
+        "node_modules/@multiversx/sdk-wallet/node_modules/uuid",
+        "node_modules/@smithy/core/node_modules/uuid",
+        "node_modules/@smithy/middleware-retry/node_modules/uuid",
+        "node_modules/jayson/node_modules/uuid",
+        "node_modules/request/node_modules/uuid",
+        "node_modules/rpc-websockets/node_modules/uuid",
+        "node_modules/rubic-sdk/node_modules/@solana/spl-token/node_modules/@solana/web3.js/node_modules/rpc-websockets/node_modules/uuid",
+        "node_modules/rubic-sdk/node_modules/rpc-websockets/node_modules/uuid",
+        "node_modules/web3-eth/node_modules/web3-eth-accounts/node_modules/uuid"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "viem": {
+      "name": "viem",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "ws"
+      ],
+      "effects": [
+        "@pancakeswap/sdk",
+        "@pancakeswap/smart-router",
+        "@pancakeswap/swap-sdk-evm",
+        "@pancakeswap/v2-sdk",
+        "@pancakeswap/v3-sdk",
+        "rubic-sdk"
+      ],
+      "range": "<=0.0.0-wagmiv2-20230628182101 || 0.2.2 - 2.49.3",
+      "nodes": [
+        "node_modules/@pancakeswap/sdk/node_modules/viem",
+        "node_modules/@pancakeswap/swap-sdk-evm/node_modules/viem",
+        "node_modules/@pancakeswap/v2-sdk/node_modules/viem",
+        "node_modules/viem"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "wait-on": {
+      "name": "wait-on",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "axios"
+      ],
+      "effects": [
+        "start-server-and-test"
+      ],
+      "range": "5.0.0-rc.0 - 7.1.0",
+      "nodes": [
+        "node_modules/wait-on"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3": {
+      "name": "web3",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "web3-bzz",
+        "web3-core",
+        "web3-eth",
+        "web3-eth-personal",
+        "web3-net",
+        "web3-shh",
+        "web3-utils"
+      ],
+      "effects": [
+        "iziswap-sdk",
+        "rubic-sdk"
+      ],
+      "range": "1.0.0-beta.1 - 3.0.0-rc.5",
+      "nodes": [
+        "node_modules/@1inch/limit-order-protocol-utils/node_modules/web3",
+        "node_modules/iziswap-sdk/node_modules/web3",
+        "node_modules/rubic-sdk/node_modules/web3"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-bzz": {
+      "name": "web3-bzz",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        "swarm-js"
+      ],
+      "effects": [],
+      "range": "*",
+      "nodes": [
+        "node_modules/web3-bzz"
+      ],
+      "fixAvailable": true
+    },
+    "web3-core": {
+      "name": "web3-core",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-core-requestmanager",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-eth-ens"
+      ],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/@1inch/limit-order-protocol-utils/node_modules/web3/node_modules/web3-core",
+        "node_modules/iziswap-sdk/node_modules/web3/node_modules/web3-core",
+        "node_modules/rubic-sdk/node_modules/web3/node_modules/web3-core",
+        "node_modules/web3-eth/node_modules/web3-core",
+        "node_modules/web3-shh/node_modules/web3-core"
+      ],
+      "fixAvailable": true
+    },
+    "web3-core-helpers": {
+      "name": "web3-core-helpers",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-eth-iban",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-core-requestmanager",
+        "web3-core-subscriptions",
+        "web3-providers-http",
+        "web3-providers-ipc",
+        "web3-providers-ws"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/web3-core-helpers"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-core-method": {
+      "name": "web3-core-method",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/transactions",
+        "web3-core-helpers",
+        "web3-core-subscriptions",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-core",
+        "web3-eth-accounts",
+        "web3-eth-personal",
+        "web3-net"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/web3-core-method"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-core-requestmanager": {
+      "name": "web3-core-requestmanager",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core-helpers",
+        "web3-providers-http",
+        "web3-providers-ipc",
+        "web3-providers-ws"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-core-requestmanager"
+      ],
+      "fixAvailable": true
+    },
+    "web3-core-subscriptions": {
+      "name": "web3-core-subscriptions",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1108316,
+          "name": "web3-core-subscriptions",
+          "dependency": "web3-core-subscriptions",
+          "title": "web3-core-subscriptions has a Prototype Pollution vulnerability",
+          "url": "https://github.com/advisories/GHSA-hhf6-3xpg-pggx",
+          "severity": "low",
+          "cwe": [
+            "CWE-1321"
+          ],
+          "cvss": {
+            "score": 0,
+            "vectorString": null
+          },
+          "range": "<=2.0.0-alpha.1"
+        },
+        "web3-core-helpers"
+      ],
+      "effects": [
+        "web3-core-method",
+        "web3-eth",
+        "web3-eth-contract",
+        "web3-shh"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/web3-core-subscriptions"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-eth": {
+      "name": "web3-eth",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-core-subscriptions",
+        "web3-eth-abi",
+        "web3-eth-accounts",
+        "web3-eth-contract",
+        "web3-eth-ens",
+        "web3-eth-iban",
+        "web3-eth-personal",
+        "web3-net",
+        "web3-utils"
+      ],
+      "effects": [
+        "rubic-sdk",
+        "web3"
+      ],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-eth"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-eth-abi": {
+      "name": "web3-eth-abi",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@ethersproject/abi",
+        "web3-utils"
+      ],
+      "effects": [],
+      "range": "<=4.1.3-dev.e760667.0",
+      "nodes": [
+        "node_modules/web3-eth/node_modules/web3-eth-abi"
+      ],
+      "fixAvailable": true
+    },
+    "web3-eth-accounts": {
+      "name": "web3-eth-accounts",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "@ethereumjs/common",
+        "@ethereumjs/tx",
+        "eth-lib",
+        "uuid",
+        "web3-core",
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-eth"
+      ],
+      "range": "<=4.0.1-rc.2",
+      "nodes": [
+        "node_modules/web3-eth/node_modules/web3-eth-accounts"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-eth-contract": {
+      "name": "web3-eth-contract",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-core-subscriptions",
+        "web3-eth-abi",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-eth-ens"
+      ],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-eth/node_modules/web3-eth-contract"
+      ],
+      "fixAvailable": true
+    },
+    "web3-eth-ens": {
+      "name": "web3-eth-ens",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-helpers",
+        "web3-eth-abi",
+        "web3-eth-contract",
+        "web3-utils"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-eth/node_modules/web3-eth-ens"
+      ],
+      "fixAvailable": true
+    },
+    "web3-eth-iban": {
+      "name": "web3-eth-iban",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-utils"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-core-helpers/node_modules/web3-eth-iban",
+        "node_modules/web3-eth/node_modules/web3-eth-iban"
+      ],
+      "fixAvailable": true
+    },
+    "web3-eth-personal": {
+      "name": "web3-eth-personal",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-net",
+        "web3-utils"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/@1inch/limit-order-protocol-utils/node_modules/web3/node_modules/web3-eth-personal",
+        "node_modules/iziswap-sdk/node_modules/web3/node_modules/web3-eth-personal",
+        "node_modules/rubic-sdk/node_modules/web3/node_modules/web3-eth-personal",
+        "node_modules/web3-eth/node_modules/web3-eth-personal"
+      ],
+      "fixAvailable": true
+    },
+    "web3-net": {
+      "name": "web3-net",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-method",
+        "web3-utils"
+      ],
+      "effects": [
+        "web3-eth",
+        "web3-eth-personal",
+        "web3-shh"
+      ],
+      "range": "<=1.0.0-beta.55 || 1.2.0 - 3.0.0-rc.5",
+      "nodes": [
+        "node_modules/@1inch/limit-order-protocol-utils/node_modules/web3/node_modules/web3-net",
+        "node_modules/iziswap-sdk/node_modules/web3/node_modules/web3-net",
+        "node_modules/rubic-sdk/node_modules/web3/node_modules/web3-net",
+        "node_modules/web3-eth/node_modules/web3-net",
+        "node_modules/web3-shh/node_modules/web3-net"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-providers-http": {
+      "name": "web3-providers-http",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core-helpers"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-core-requestmanager/node_modules/web3-providers-http"
+      ],
+      "fixAvailable": true
+    },
+    "web3-providers-ipc": {
+      "name": "web3-providers-ipc",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core-helpers"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-core-requestmanager/node_modules/web3-providers-ipc"
+      ],
+      "fixAvailable": true
+    },
+    "web3-providers-ws": {
+      "name": "web3-providers-ws",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "web3-core-helpers"
+      ],
+      "effects": [],
+      "range": "<=3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-core-requestmanager/node_modules/web3-providers-ws"
+      ],
+      "fixAvailable": true
+    },
+    "web3-shh": {
+      "name": "web3-shh",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        "web3-core",
+        "web3-core-method",
+        "web3-core-subscriptions",
+        "web3-net"
+      ],
+      "effects": [
+        "web3"
+      ],
+      "range": "*",
+      "nodes": [
+        "node_modules/web3-shh"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "web3-utils": {
+      "name": "web3-utils",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        "ethjs-unit",
+        "number-to-bn"
+      ],
+      "effects": [
+        "merkletreejs",
+        "web3",
+        "web3-core",
+        "web3-core-helpers",
+        "web3-core-method",
+        "web3-eth-abi",
+        "web3-eth-contract",
+        "web3-eth-ens",
+        "web3-eth-iban",
+        "web3-eth-personal",
+        "web3-net"
+      ],
+      "range": "1.0.0-beta.8 - 3.0.0-rc.5",
+      "nodes": [
+        "node_modules/web3-utils"
+      ],
+      "fixAvailable": {
+        "name": "rubic-sdk",
+        "version": "5.47.2",
+        "isSemVerMajor": true
+      }
+    },
+    "ws": {
+      "name": "ws",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1119108,
+          "name": "ws",
+          "dependency": "ws",
+          "title": "ws: Uninitialized memory disclosure",
+          "url": "https://github.com/advisories/GHSA-58qx-3vcg-4xpx",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-908"
+          ],
+          "cvss": {
+            "score": 4.4,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:H/UI:N/S:U/C:H/I:N/A:N"
+          },
+          "range": ">=8.0.0 <8.20.1"
+        }
+      ],
+      "effects": [
+        "@ethersproject/providers",
+        "engine.io",
+        "engine.io-client",
+        "ethers",
+        "socket.io-adapter",
+        "viem"
+      ],
+      "range": "8.0.0 - 8.20.0",
+      "nodes": [
+        "node_modules/ws"
+      ],
+      "fixAvailable": {
+        "name": "ethers",
+        "version": "5.8.0",
+        "isSemVerMajor": true
+      }
+    },
+    "yaml": {
+      "name": "yaml",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1115556,
+          "name": "yaml",
+          "dependency": "yaml",
+          "title": "yaml is vulnerable to Stack Overflow via deeply nested YAML collections",
+          "url": "https://github.com/advisories/GHSA-48c2-rrv3-qjmp",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-674"
+          ],
+          "cvss": {
+            "score": 4.3,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L"
+          },
+          "range": ">=2.0.0 <2.8.3"
+        }
+      ],
+      "effects": [],
+      "range": "2.0.0 - 2.8.2",
+      "nodes": [
+        "node_modules/yaml"
+      ],
+      "fixAvailable": true
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 37,
+      "moderate": 81,
+      "high": 65,
+      "critical": 4,
+      "total": 187
+    },
+    "dependencies": {
+      "prod": 1977,
+      "dev": 795,
+      "optional": 106,
+      "peer": 14,
+      "peerOptional": 0,
+      "total": 2836
+    }
+  }
+}
