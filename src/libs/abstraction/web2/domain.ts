@@ -31,11 +31,11 @@ const DEV_ALLOWED_RANGES = new Set(["loopback", "private", "uniqueLocal"])
  *
  * @param allowLocal Permit loopback/private/unique-local (true outside prod).
  */
-async function assertAllowedHostname(
+async function resolveAndValidateHost(
     hostname: string,
     allowLocal: boolean,
-): Promise<void> {
-    let resolved: { address: string }[]
+): Promise<{ address: string; family: number }> {
+    let resolved: { address: string; family: number }[]
     try {
         resolved = await dns.promises.lookup(hostname, { all: true })
     } catch {
@@ -61,6 +61,10 @@ async function assertAllowedHostname(
             `Refusing to fetch from non-public address: ${hostname} (${address}, ${range})`,
         )
     }
+
+    // Return the first validated address so the caller can pin the socket to it
+    // (prevents DNS-rebinding between this check and connect time).
+    return resolved[0]
 }
 
 /**
@@ -89,9 +93,28 @@ export async function fetchDomainProof(
 
     // SSRF guard: block internal / metadata targets. Loopback/private hosts are
     // permitted only in dev so local test servers (localhost) remain reachable.
-    await assertAllowedHostname(parsed.hostname, !isProd)
+    const pinned = await resolveAndValidateHost(parsed.hostname, !isProd)
 
-    const agent = new https.Agent({ rejectUnauthorized: isProd })
+    // Pin the socket to the validated IP so DNS cannot rebind to an internal
+    // address between the check above and connect time. The URL still carries
+    // the original hostname, so the Host header and TLS SNI / cert validation
+    // are unchanged; only the address the socket dials is forced.
+    const agent = new https.Agent({
+        rejectUnauthorized: isProd,
+        lookup: (
+            _hostname: string,
+            options: { all?: boolean },
+            callback: (...args: any[]) => void,
+        ) => {
+            if (options && options.all) {
+                callback(null, [
+                    { address: pinned.address, family: pinned.family },
+                ])
+            } else {
+                callback(null, pinned.address, pinned.family)
+            }
+        },
+    } as https.AgentOptions)
 
     const response = await axios.get(url, {
         httpsAgent: agent,
