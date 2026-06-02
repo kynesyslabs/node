@@ -222,7 +222,9 @@ export async function verifyWeb2Proof(
                     message: `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
                 }
             }
-            if (proofUrl.hostname !== payload.username) {
+            // proofUrl.hostname is already lower-cased by the URL parser;
+            // normalise the client-supplied username so casing never mismatches.
+            if (proofUrl.hostname !== payload.username?.toLowerCase()) {
                 return {
                     success: false,
                     message: "Proof host does not match the claimed domain",

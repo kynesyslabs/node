@@ -15,6 +15,8 @@ export abstract class Web2ProofParser {
             "https://canary.discord.com/channels",
             "https://discordapp.com/channels",
         ],
+        // Only enforces the scheme here; the hostname<->claimed-domain binding
+        // and the exact DOMAIN_PROOF_PATH are validated upstream in verifyWeb2Proof.
         domain: ["https://"],
     }
 

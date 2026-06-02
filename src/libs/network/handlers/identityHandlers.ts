@@ -176,6 +176,15 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             return response
         }
 
+        if (parsed.protocol !== "https:") {
+            response.result = 400
+            response.response = {
+                success: false,
+                error: "Proof URL must use https",
+            }
+            return response
+        }
+
         if (parsed.pathname !== DOMAIN_PROOF_PATH) {
             response.result = 400
             response.response = {
@@ -190,7 +199,7 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             response.result = 200
             response.response = { success: true, hostname, body }
         } catch (error) {
-            log.error("[getDomainProof] " + error)
+            log.error("[getDomainProof] failed to fetch domain proof", error)
             response.result = 400
             response.response = {
                 success: false,

@@ -1,5 +1,7 @@
 import axios from "axios"
 import https from "https"
+import dns from "dns"
+import ipaddr from "ipaddr.js"
 import { Web2ProofParser } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import SharedState from "@/utilities/sharedState"
@@ -11,14 +13,66 @@ export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
 /** Max bytes we read from a well-known file — the proof payload is tiny. */
 const MAX_PROOF_BYTES = 4096
 
+/** Non-public ranges tolerated only outside production (for local testing). */
+const DEV_ALLOWED_RANGES = new Set(["loopback", "private", "uniqueLocal"])
+
+/**
+ * SSRF guard for the attacker-controlled proof URL.
+ *
+ * The proof URL is supplied by the caller, so without this a request could be
+ * pointed at internal services or the cloud-metadata endpoint
+ * (e.g. 169.254.169.254) and the response read back. We resolve every A/AAAA
+ * record and reject non-public targets:
+ *
+ * - link-local (incl. metadata), multicast, broadcast, reserved and CGNAT are
+ *   blocked in ALL environments;
+ * - loopback / private / unique-local are blocked in production but allowed
+ *   in dev, so local hosts (e.g. localhost) stay testable.
+ *
+ * @param allowLocal Permit loopback/private/unique-local (true outside prod).
+ */
+async function assertAllowedHostname(
+    hostname: string,
+    allowLocal: boolean,
+): Promise<void> {
+    let resolved: { address: string }[]
+    try {
+        resolved = await dns.promises.lookup(hostname, { all: true })
+    } catch {
+        throw new Error(`Could not resolve host: ${hostname}`)
+    }
+    if (resolved.length === 0) {
+        throw new Error(`Could not resolve host: ${hostname}`)
+    }
+
+    for (const { address } of resolved) {
+        let addr = ipaddr.parse(address)
+        // Classify the embedded v4 for IPv4-mapped IPv6 (::ffff:a.b.c.d).
+        if (
+            addr.kind() === "ipv6" &&
+            (addr as ipaddr.IPv6).isIPv4MappedAddress()
+        ) {
+            addr = (addr as ipaddr.IPv6).toIPv4Address()
+        }
+        const range = addr.range()
+        if (range === "unicast") continue
+        if (allowLocal && DEV_ALLOWED_RANGES.has(range)) continue
+        throw new Error(
+            `Refusing to fetch from non-public address: ${hostname} (${address}, ${range})`,
+        )
+    }
+}
+
 /**
  * Fetch a domain ownership proof file over HTTPS.
  *
  * The TLS certificate, validated during the handshake, binds the response to
  * the requested hostname — so a successful fetch is itself proof that the
  * content was served from a host presenting a valid cert for that domain.
- * (Certificate validation is enabled in production and relaxed in dev so local
- * self-signed hosts can be tested.)
+ *
+ * In production, certificate validation and the SSRF public-address check are
+ * enforced; both are relaxed in dev so local self-signed hosts (e.g. localhost)
+ * can be tested.
  *
  * @param url Full proof URL, e.g. https://example.com/.well-known/demos-cci.txt
  * @returns The trimmed file body and the verified hostname.
@@ -31,8 +85,13 @@ export async function fetchDomainProof(
         throw new Error("Domain proof URL must use https")
     }
 
-    const verifyCertificates = SharedState.getInstance().PROD
-    const agent = new https.Agent({ rejectUnauthorized: verifyCertificates })
+    const isProd = SharedState.getInstance().PROD
+
+    // SSRF guard: block internal / metadata targets. Loopback/private hosts are
+    // permitted only in dev so local test servers (localhost) remain reachable.
+    await assertAllowedHostname(parsed.hostname, !isProd)
+
+    const agent = new https.Agent({ rejectUnauthorized: isProd })
 
     const response = await axios.get(url, {
         httpsAgent: agent,
@@ -69,9 +128,13 @@ export class DomainProofParser extends Web2ProofParser {
         try {
             ;({ body } = await fetchDomainProof(proofUrl))
         } catch (error) {
-            log.error("[DOMAIN] Failed to fetch proof: " + error)
+            const errorMsg =
+                error instanceof Error ? error.message : String(error)
+            log.error(
+                `[DOMAIN] Failed to fetch proof for ${proofUrl}: ${errorMsg}`,
+            )
             throw new Error(
-                `Failed to read domain proof at ${proofUrl}`,
+                `Failed to read domain proof at ${proofUrl}: ${errorMsg}`,
             )
         }
 
