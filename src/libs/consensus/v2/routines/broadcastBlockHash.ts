@@ -112,7 +112,7 @@ async function proposeAndCollect(
             },
             true,
             {
-                allowedCodes: [401, 404],
+                allowedCodes: [401],
             },
         )
     } catch (e) {
