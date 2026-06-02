@@ -139,10 +139,35 @@ console.log(
 const confirmed1 = confirm1.status === "fulfilled" ? confirm1.value : null
 const confirmed2 = confirm2.status === "fulfilled" ? confirm2.value : null
 
-if (!confirmed1 && !confirmed2) {
+// CodeRabbit iter-3: require BOTH confirms to succeed. The whole point
+// of this test is to drive the cross-RPC scenario where two nodes both
+// validate the same signed tx (each sees stale per-node state) and
+// consensus dedupes at block-formation. If one RPC rejected at confirm
+// time, the test would proceed with a single broadcast — which is just
+// the normal happy-path, not the replay-protection path. That can pass
+// CI green without ever exercising the bug we shipped batches C–D to
+// fix.
+//
+// A rejected confirm here means one of:
+//   - RPC-side validation rejected (e.g. existing nonce check fired)
+//   - Network glitch
+// In either case it's an invalid environment for this test; fail fast
+// with a clear diagnostic instead of silently degrading to a single-
+// node submit.
+if (!confirmed1 || !confirmed2) {
     console.error(
-        "[double-broadcast] FAIL: both confirms rejected; nothing to broadcast — test cannot verify replay protection",
+        `[double-broadcast] FAIL: both confirms must succeed to exercise cross-RPC replay path. node-1=${confirm1.status} node-2=${confirm2.status}`,
     )
+    if (confirm1.status === "rejected") {
+        console.error(
+            `[double-broadcast]   node-1 reason: ${String(confirm1.reason).slice(0, 500)}`,
+        )
+    }
+    if (confirm2.status === "rejected") {
+        console.error(
+            `[double-broadcast]   node-2 reason: ${String(confirm2.reason).slice(0, 500)}`,
+        )
+    }
     process.exit(1)
 }
 
@@ -154,13 +179,11 @@ if (!confirmed1 && !confirmed2) {
 //    both reach block-formation.
 // -----------------------------------------------------------------------------
 console.log("[double-broadcast] [3/4] broadcast() in parallel on BOTH nodes")
+// Both confirmed1 and confirmed2 are guaranteed non-null past the
+// `!confirmed1 || !confirmed2` gate above.
 const broadcastResults = await Promise.allSettled([
-    confirmed1
-        ? DemosTransactions.broadcast(confirmed1, demos1)
-        : Promise.reject(new Error("node-1 confirm failed; skipping broadcast")),
-    confirmed2
-        ? DemosTransactions.broadcast(confirmed2, demos2)
-        : Promise.reject(new Error("node-2 confirm failed; skipping broadcast")),
+    DemosTransactions.broadcast(confirmed1, demos1),
+    DemosTransactions.broadcast(confirmed2, demos2),
 ])
 
 console.log(

@@ -124,14 +124,25 @@ get_balance_os() {
         | grep -oE '"balance":"[0-9]+"' | head -1 | sed 's/.*"\([0-9]*\)".*/\1/'
 }
 
-SENDER_BAL_OS="$(get_balance_os "${NODE1_URL}" "${SENDER_PUBKEY}")"
+# CodeRabbit iter-3: wrap balance probes in `if !` so a curl timeout,
+# HTTP error, or empty grep doesn't trip `set -e` mid-substitution and
+# kill the harness before the diagnostic block runs.
+if ! SENDER_BAL_OS="$(get_balance_os "${NODE1_URL}" "${SENDER_PUBKEY}")"; then
+    echo "[double-broadcast-e2e] ERROR: failed to query sender balance from node-1."
+    docker compose "${COMPOSE_FILES[@]}" logs --tail=80 node-1
+    exit 1
+fi
 echo "[double-broadcast-e2e] sender pre-balance on node-1: ${SENDER_BAL_OS} OS"
 if [[ -z "${SENDER_BAL_OS}" ]] || [[ "${SENDER_BAL_OS}" = "0" ]]; then
-    echo "[double-broadcast-e2e] ERROR: sender balance is 0 — genesis fixture didn't apply."
+    echo "[double-broadcast-e2e] ERROR: sender balance is 0 or empty — genesis fixture didn't apply or response shape changed."
     exit 1
 fi
 
-SENDER_BAL_OS_2="$(get_balance_os "${NODE2_URL}" "${SENDER_PUBKEY}")"
+if ! SENDER_BAL_OS_2="$(get_balance_os "${NODE2_URL}" "${SENDER_PUBKEY}")"; then
+    echo "[double-broadcast-e2e] ERROR: failed to query sender balance from node-2."
+    docker compose "${COMPOSE_FILES[@]}" logs --tail=80 node-2
+    exit 1
+fi
 echo "[double-broadcast-e2e] sender pre-balance on node-2: ${SENDER_BAL_OS_2} OS"
 if [[ "${SENDER_BAL_OS}" != "${SENDER_BAL_OS_2}" ]]; then
     echo "[double-broadcast-e2e] WARN: nodes disagree on sender balance (likely just sync lag)"
