@@ -69,7 +69,13 @@ echo "[double-broadcast-e2e] booting devnet (fixture genesis)..."
 # `down -v` first so we never reuse a stale Postgres volume — the
 # snapshot/restore preflight refuses to run against a non-empty DB.
 docker compose "${COMPOSE_FILES[@]}" down -v >/dev/null 2>&1 || true
-docker compose "${COMPOSE_FILES[@]}" up -d ${BUILD_FLAG} node-1 node-2 postgres tlsnotary
+# All 5 validators are required to reach the BFT 2/3+1 = 4-of-5 quorum
+# defined in `genesis.devnet.json`. Starting fewer (e.g., just node-1 +
+# node-2 the way `test-transfer-e2e.sh` does) leaves the network unable
+# to finalize a block and the post-broadcast poll loop times out with
+# "neither tx landed", masking the actual replay-protection signal.
+docker compose "${COMPOSE_FILES[@]}" up -d ${BUILD_FLAG} \
+    node-1 node-2 node-3 node-4 node-5 postgres tlsnotary
 
 # -----------------------------------------------------------------------------
 # 3. Wait for BOTH node-1 and node-2 RPCs to answer
