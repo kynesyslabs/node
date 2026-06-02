@@ -181,17 +181,10 @@ let observedDelta = 0n
 let observedNonceDelta = 0
 let polls = 0
 const maxPolls = 30
+const settlingPolls = 5 // ~10s extra after first observation
 const expectedDelta = amountOs
 
-for (let i = 0; i < maxPolls; i++) {
-    polls = i + 1
-    await new Promise(r => setTimeout(r, 2000))
-    // Query both RPCs so a tx that committed on node-2 first (and
-    // hasn't replicated to node-1 yet) doesn't read as "neither tx
-    // landed". Take the MAX delta across nodes — if either side
-    // observed the credit, the credit landed. The post-loop double-
-    // spend assertion (observedDelta > expectedDelta) still catches
-    // a real replay because we'd see >1 credit *somewhere*.
+async function sampleDeltas() {
     const [recInfo1, recInfo2, sendInfo1, sendInfo2] = await Promise.all([
         demos1.getAddressInfo(RECEIVER_PUBKEY),
         demos2.getAddressInfo(RECEIVER_PUBKEY),
@@ -204,12 +197,65 @@ for (let i = 0; i < maxPolls; i++) {
     const sendNonce2 = Number(sendInfo2?.nonce ?? 0)
     const recBalMax = recBal1 > recBal2 ? recBal1 : recBal2
     const sendNonceMax = sendNonce1 > sendNonce2 ? sendNonce1 : sendNonce2
-    observedDelta = recBalMax - receiverBalBefore
-    observedNonceDelta = sendNonceMax - senderNonceBefore
+    return {
+        delta: recBalMax - receiverBalBefore,
+        nonceDelta: sendNonceMax - senderNonceBefore,
+        n1Delta: recBal1 - receiverBalBefore,
+        n2Delta: recBal2 - receiverBalBefore,
+        n1Nonce: sendNonce1 - senderNonceBefore,
+        n2Nonce: sendNonce2 - senderNonceBefore,
+    }
+}
+
+// Phase 1: wait for the FIRST tx to land. Query both RPCs so a tx that
+// committed on node-2 first (and hasn't replicated to node-1) doesn't
+// read as "neither tx landed". Take the MAX delta across nodes — if
+// either side observed the credit, the credit landed.
+let firstObservedAt = -1
+for (let i = 0; i < maxPolls; i++) {
+    polls = i + 1
+    await new Promise(r => setTimeout(r, 2000))
+    const s = await sampleDeltas()
+    observedDelta = s.delta
+    observedNonceDelta = s.nonceDelta
     console.log(
-        `[double-broadcast]   t=${(i + 1) * 2}s  receiver_delta=${observedDelta} OS (n1=${recBal1 - receiverBalBefore}, n2=${recBal2 - receiverBalBefore})  sender_nonce_delta=${observedNonceDelta} (n1=${sendNonce1 - senderNonceBefore}, n2=${sendNonce2 - senderNonceBefore})`,
+        `[double-broadcast]   t=${(i + 1) * 2}s  receiver_delta=${observedDelta} OS (n1=${s.n1Delta}, n2=${s.n2Delta})  sender_nonce_delta=${observedNonceDelta} (n1=${s.n1Nonce}, n2=${s.n2Nonce})`,
     )
-    if (observedDelta >= expectedDelta) break
+    if (observedDelta >= expectedDelta) {
+        firstObservedAt = i
+        break
+    }
+}
+
+// Phase 2: SETTLING WINDOW (Greptile P1 iter-3). After the first credit
+// lands, the replayed tx — if the consensus `expectedPrior` check is
+// broken or absent — would apply in block N+1, one or two blocks later.
+// Without a settling window, the loop would have already broken on
+// `observedDelta >= expectedDelta` in block N and the assertions below
+// would run against a single snapshot, silently passing a real double-
+// spend that surfaces seconds later. Keep polling for ~10s after first
+// observation; if `observedDelta` then exceeds `expectedDelta`, the
+// assertion at line ~250 catches the replay.
+if (firstObservedAt >= 0 && firstObservedAt < maxPolls - 1) {
+    const settleStart = firstObservedAt + 1
+    const settleEnd = Math.min(settleStart + settlingPolls, maxPolls)
+    console.log(
+        `[double-broadcast] settling window: polling +${settleEnd - settleStart} more cycles to catch a late-applied replay`,
+    )
+    for (let i = settleStart; i < settleEnd; i++) {
+        polls = i + 1
+        await new Promise(r => setTimeout(r, 2000))
+        const s = await sampleDeltas()
+        observedDelta = s.delta
+        observedNonceDelta = s.nonceDelta
+        console.log(
+            `[double-broadcast]   t=${(i + 1) * 2}s  receiver_delta=${observedDelta} OS (n1=${s.n1Delta}, n2=${s.n2Delta})  sender_nonce_delta=${observedNonceDelta} (n1=${s.n1Nonce}, n2=${s.n2Nonce}) [settling]`,
+        )
+        // If the replay applied late we want to surface the inflated
+        // delta to the assertion block. Don't early-break the settling
+        // window — let it run its full length so we always wait the
+        // same amount of time before declaring success.
+    }
 }
 
 // -----------------------------------------------------------------------------
