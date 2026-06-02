@@ -1,0 +1,95 @@
+# Exposed Files — Tracked Path Names Matching Sensitive Patterns
+# Generated: 2026-06-02
+# Command: git ls-files | grep -Ei '(key|secret|password|token|\.env|\.pem|\.p12)'
+#
+# Total matches: 68. Most are false positives (the substring "token" matches
+# fungible/non-fungible token implementations, ACL test fixtures, and load
+# generators — none are credentials). Only the entries flagged [REVIEW] or
+# [FIXTURE] below carry real secret-handling risk.
+#
+# Schema: <path> | <category> | <bytes> | <hex signature (first 32 bytes)> | <notes>
+
+# === Real candidates (env files + key material) =============================
+
+.env.example                                              | env-template  | 12276 | 23 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d 3d | [REVIEW] env template with default dev creds (Grafana=demos, Neo4j=changeme-please, PG_PASSWORD=demospassword). Document but not a leaked secret.
+src/tests/.env                                            | env-test      | 35    | 52 50 43 5f 55 52 4c 3d 68 74 74 70 3a 2f 2f 38 35 2e 32 30 38 2e 34 38 2e 31 38 37 3a 35 33 35 | [OK] contains only RPC_URL=http://85.208.48.187:53550 (public devnet endpoint). No secret material.
+testing/devnet/.env.example                               | env-template  | 1063  | 23 20 44 65 76 6e 65 74 20 65 6e 76 69 72 6f 6e 6d 65 6e 74 20 6f 76 65 72 72 69 64 65 73 0a 23 | [OK] template only.
+testing/devnet/l2ps/live_local_001/private_key.txt        | fixture-key   | 65    | 30 66 31 65 32 64 33 63 34 62 35 61 36 39 37 38 38 37 39 36 61 35 62 34 63 33 64 32 65 31 66 30 | [FIXTURE] deterministic 32-byte L2PS test vector "0f1e2d3c…eeff0". Used by devnet/L2PS tests. Not a real key — pattern is the descending/ascending hex sentinel.
+
+# === False positives — "token" keyword (ERC-20-style asset code) ============
+
+src/libs/assets/FungibleToken.ts                           | code-fungible    | - | - | "token" in class name; no credential.
+src/libs/assets/NonFungibleToken.ts                        | code-nft         | - | - | "token" in class name; no credential.
+src/libs/blockchain/gcr/types/Token.ts                     | code-types       | - | - | type definitions.
+src/features/tlsnotary/tokenManager.ts                     | code-tlsnotary   | - | - | TLSNotary session token mgmt; no committed secret (verify in 04-auth review).
+src/model/entities/PgpKeyServer.ts                         | code-pgp         | - | - | PGP key server entity; schema only.
+src/libs/omniprotocol/integration/keys.ts                  | code-omni        | - | - | key serialization helpers.
+src/libs/utils/keyMaker.ts                                 | code-utils       | - | - | key generation helpers (not stored keys).
+src/libs/utils/showPubkey.ts                               | code-utils       | - | - | pubkey display utility.
+src/libs/consensus/v2/types/secretaryManager.ts            | code-consensus   | - | - | "secretary" not "secret".
+src/config/envKeys.ts                                      | code-config      | - | - | env variable key NAMES (strings), not values.
+src/features/zk/keys/verification_key.json                 | zk-vkey          | - | - | Groth16 verification key (public material by design).
+src/features/zk/keys/verification_key_merkle.json          | zk-vkey          | - | - | Groth16 verification key (public).
+scripts/derive-pubkey.ts                                   | script-pubkey    | - | - | derives public key only.
+scripts/regenerate_zk_keys.sh                              | script-zk        | - | - | regenerates ZK trusted-setup keys.
+specs/key_derivation.md                                    | doc-spec         | - | - | doc only.
+documentation/images/secretaryroutine.png                  | image            | - | - | "secretary" not "secret".
+
+# === Loadgen test files (43 entries, all ERC-20-style "token" tests) ========
+
+testing/loadgen/src/features/consensus/consensus_secretary_rotation.ts
+testing/loadgen/src/token_acl_burn_matrix.ts
+testing/loadgen/src/token_acl_matrix.ts
+testing/loadgen/src/token_acl_multi_permission_matrix.ts
+testing/loadgen/src/token_acl_pause_matrix.ts
+testing/loadgen/src/token_acl_smoke.ts
+testing/loadgen/src/token_acl_transfer_ownership_matrix.ts
+testing/loadgen/src/token_acl_updateacl_compat.ts
+testing/loadgen/src/token_burn_loadgen.ts
+testing/loadgen/src/token_burn_ramp.ts
+testing/loadgen/src/token_burn_smoke.ts
+testing/loadgen/src/token_consensus_consistency.ts
+testing/loadgen/src/token_edge_cases.ts
+testing/loadgen/src/token_holders_export.ts
+testing/loadgen/src/token_invariants_known_holders.ts
+testing/loadgen/src/token_mint_loadgen.ts
+testing/loadgen/src/token_mint_ramp.ts
+testing/loadgen/src/token_mint_smoke.ts
+testing/loadgen/src/token_names_from_runs.ts
+testing/loadgen/src/token_observe.ts
+testing/loadgen/src/token_pause_under_load.ts
+testing/loadgen/src/token_query_coverage.ts
+testing/loadgen/src/token_script_burn_loadgen.ts
+testing/loadgen/src/token_script_burn_ramp.ts
+testing/loadgen/src/token_script_complex_policy_dynamic_updates.ts
+testing/loadgen/src/token_script_complex_policy_escrow_state_machine.ts
+testing/loadgen/src/token_script_complex_policy_ramp.ts
+testing/loadgen/src/token_script_complex_policy_shared.ts
+testing/loadgen/src/token_script_complex_policy_smoke.ts
+testing/loadgen/src/token_script_complex_policy_vesting_lockup.ts
+testing/loadgen/src/token_script_hooks_correctness.ts
+testing/loadgen/src/token_script_mint_loadgen.ts
+testing/loadgen/src/token_script_mint_ramp.ts
+testing/loadgen/src/token_script_perf_shared.ts
+testing/loadgen/src/token_script_rejects.ts
+testing/loadgen/src/token_script_smoke.ts
+testing/loadgen/src/token_script_transfer_loadgen.ts
+testing/loadgen/src/token_script_transfer_ramp.ts
+testing/loadgen/src/token_script_upgrade_mid_load.ts
+testing/loadgen/src/token_settle_check.ts
+testing/loadgen/src/token_shared.ts
+testing/loadgen/src/token_smoke.ts
+testing/loadgen/src/token_transfer_loadgen.ts
+testing/loadgen/src/token_transfer_ramp.ts
+testing/scripts/analyze-token-observe.ts
+testing/scripts/run-chaos-token-script-transfer.sh
+testing/scripts/run-token-observe-under-load.sh
+testing/scripts/token-perf-baseline.sh
+
+# === Summary ================================================================
+
+# Tracked sensitive-pattern files: 68
+# Real candidates (needs review): 4 (.env.example, src/tests/.env, testing/devnet/.env.example, private_key.txt)
+# Confirmed fixture-only:         1 (private_key.txt — deterministic test vector)
+# Confirmed non-sensitive:        2 (.env files — only PUBLIC RPC URL + templates with default dev creds)
+# False positives (token/key keyword in code/test paths): 63

@@ -199,3 +199,7 @@ PR_RAW.md
 # the local-only source-of-truth fed into `bun snapshot:transform`.
 .snapshot-restore/
 .test-identity/
+
+# Gitleaks SARIF — 100 MB raw scan output containing redacted but real-looking
+# matches against git HISTORY (not HEAD). Summary in 02-secrets-in-tree.md.
+docs/discoveries/security-scan-2026-06-02/artifacts/gitleaks.sarif
