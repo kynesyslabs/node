@@ -203,3 +203,4 @@ PR_RAW.md
 # Gitleaks SARIF — 100 MB raw scan output containing redacted but real-looking
 # matches against git HISTORY (not HEAD). Summary in 02-secrets-in-tree.md.
 docs/discoveries/security-scan-2026-06-02/artifacts/gitleaks.sarif
+docs/discoveries/security-scan-2026-06-02

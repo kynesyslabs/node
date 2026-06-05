@@ -1,0 +1,44 @@
+# Devnet fixture override.
+#
+# Overlays genesis.devnet.json into every node's `data/genesis.json` so
+# a fresh `docker compose up` boots a chain that already has:
+#   - osDenomination fork active from block 0
+#   - all five devnet identities pre-funded with 1e18 DEM each
+#   - all five identities registered as validators
+#
+# Also mounts an empty `empty-snapshot/` dir over `/app/data/snapshot/`
+# so the image-baked production snapshot doesn't shadow our devnet
+# accounts (loadSnapshot returns `available: false` when manifest.json
+# is missing, which then triggers the legacy `genesisData.balances`
+# path so our 5 identities are seeded directly).
+#
+# Usage:
+#   cd testing/devnet
+#   docker compose -f docker-compose.yml -f docker-compose.fixture.yml up --build
+#
+# Without this overlay the devnet boots whatever genesis is baked into
+# the image (which has empty `balances` so every account starts at 0)
+# AND restores the production snapshot (whose identities don't match
+# our devnet mnemonics).
+
+services:
+  node-1:
+    volumes:
+      - ./genesis.devnet.json:/app/data/genesis.json:ro
+      - ./empty-snapshot:/app/data/snapshot:ro
+  node-2:
+    volumes:
+      - ./genesis.devnet.json:/app/data/genesis.json:ro
+      - ./empty-snapshot:/app/data/snapshot:ro
+  node-3:
+    volumes:
+      - ./genesis.devnet.json:/app/data/genesis.json:ro
+      - ./empty-snapshot:/app/data/snapshot:ro
+  node-4:
+    volumes:
+      - ./genesis.devnet.json:/app/data/genesis.json:ro
+      - ./empty-snapshot:/app/data/snapshot:ro
+  node-5:
+    volumes:
+      - ./genesis.devnet.json:/app/data/genesis.json:ro
+      - ./empty-snapshot:/app/data/snapshot:ro
