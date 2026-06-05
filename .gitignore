@@ -200,7 +200,10 @@ PR_RAW.md
 .snapshot-restore/
 .test-identity/
 
-# Gitleaks SARIF — 100 MB raw scan output containing redacted but real-looking
-# matches against git HISTORY (not HEAD). Summary in 02-secrets-in-tree.md.
+# Security scan reports are NEVER committed — kept on disk only.
+# Contains finding details (open vulnerabilities) and a 100 MB gitleaks SARIF
+# with redacted-but-real-looking matches against git HISTORY. The bare-dir
+# rule ignores the whole tree; the explicit sarif line documents the heaviest
+# offender. Do not re-add these to git.
+docs/discoveries/security-scan-2026-06-02/
 docs/discoveries/security-scan-2026-06-02/artifacts/gitleaks.sarif
-docs/discoveries/security-scan-2026-06-02

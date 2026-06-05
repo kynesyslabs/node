@@ -46,6 +46,7 @@ export const EnvKey = {
     WHITELISTED_KEYS: "WHITELISTED_KEYS",
     TRUSTED_PROXIES: "TRUSTED_PROXIES",
     XFF_MODE: "XFF_MODE",
+    CORS_ALLOWED_ORIGINS: "CORS_ALLOWED_ORIGINS",
     MCP_ENABLED: "MCP_ENABLED",
     RESTORE: "RESTORE",
 
@@ -135,6 +136,10 @@ export const EnvKey = {
     // --- IPFS ---
     IPFS_SWARM_PORT: "IPFS_SWARM_PORT",
     IPFS_API_PORT: "IPFS_API_PORT",
+
+    // --- External service credentials (compose-scoped; node may not see these) ---
+    GRAFANA_ADMIN_PASSWORD: "GRAFANA_ADMIN_PASSWORD",
+    NEO4J_AUTH: "NEO4J_AUTH",
 } as const
 
 export type EnvKey = (typeof EnvKey)[keyof typeof EnvKey]
