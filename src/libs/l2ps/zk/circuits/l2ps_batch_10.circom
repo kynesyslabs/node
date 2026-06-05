@@ -21,22 +21,32 @@ template BalanceTransfer() {
     signal output pre_hash;
     signal output post_hash;
     
+    // SECURITY FIX — range checks on every magnitude that can cause a
+    // BN254 field-wrap. The `sender_after` guard was already here;
+    // `sender_before`, `receiver_before`, `receiver_after`, and
+    // `amount` are added in DEM-756 (PATH-OS L2PS hardening report
+    // item 5). Without the pre-state guards, the equality constraints
+    // below can be satisfied by field-wrapped pre-state values that
+    // represent deeply-negative balances; without the post-state guard
+    // on `receiver_after`, an overflow on the receiver side still
+    // wraps the field. All five magnitudes get the same 64-bit bound.
+    component senderBeforeRange = Num2Bits(64);
+    senderBeforeRange.in <== sender_before;
+
+    component receiverBeforeRange = Num2Bits(64);
+    receiverBeforeRange.in <== receiver_before;
+
+    component amountRange = Num2Bits(64);
+    amountRange.in <== amount;
+
     sender_after === sender_before - amount;
     receiver_after === receiver_before + amount;
 
-    // SECURITY FIX — range checks on every magnitude that can cause a
-    // BN254 field-wrap. The `sender_after` guard was already here;
-    // `receiver_after` and `amount` are added in DEM-756 (PATH-OS L2PS
-    // hardening report item 5) so an overflow on the receiver side or
-    // an oversized amount cannot satisfy the proof.
     component senderAfterRange = Num2Bits(64);
     senderAfterRange.in <== sender_after;
 
     component receiverAfterRange = Num2Bits(64);
     receiverAfterRange.in <== receiver_after;
-
-    component amountRange = Num2Bits(64);
-    amountRange.in <== amount;
 
     component preHasher = Poseidon(2);
     preHasher.inputs[0] <== sender_before;

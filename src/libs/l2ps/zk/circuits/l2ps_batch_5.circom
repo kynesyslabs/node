@@ -21,24 +21,31 @@ template BalanceTransfer() {
     signal output pre_hash;
     signal output post_hash;
     
+    // SECURITY FIX — range checks on every magnitude that can cause a
+    // BN254 field-wrap. Without these the equality constraints below
+    // can be satisfied by field-wrapped pre-state values that
+    // represent deeply-negative balances (`receiver_before` of
+    // ~2^254) or by post-state values whose unconstrained sum exceeds
+    // the documented user-balance limit. All five magnitudes get the
+    // same 64-bit bound. Propagated here in DEM-756 / PATH-OS L2PS
+    // hardening report item 5; the equivalent guards live on batch_10.
+    component senderBeforeRange = Num2Bits(64);
+    senderBeforeRange.in <== sender_before;
+
+    component receiverBeforeRange = Num2Bits(64);
+    receiverBeforeRange.in <== receiver_before;
+
+    component amountRange = Num2Bits(64);
+    amountRange.in <== amount;
+
     sender_after === sender_before - amount;
     receiver_after === receiver_before + amount;
 
-    // SECURITY FIX — range checks on every magnitude that can cause a
-    // BN254 field-wrap. Without these an overdraw makes `sender_after`
-    // wrap to a value about the size of the curve order and the proof
-    // still accepts; same for a `receiver_after` overflow or an
-    // oversized `amount`. Mirrors the guard already present on batch-10
-    // — propagated here in DEM-756 / PATH-OS L2PS hardening report
-    // item 5. 64 bits is the user-balance limit.
     component senderAfterRange = Num2Bits(64);
     senderAfterRange.in <== sender_after;
 
     component receiverAfterRange = Num2Bits(64);
     receiverAfterRange.in <== receiver_after;
-
-    component amountRange = Num2Bits(64);
-    amountRange.in <== amount;
 
     component preHasher = Poseidon(2);
     preHasher.inputs[0] <== sender_before;
