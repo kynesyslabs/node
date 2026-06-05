@@ -1142,9 +1142,12 @@ export default class GCR {
             const DEFAULT_LIMIT = 100
             const MAX_LIMIT = 1000
             const parsedLimit = Number(limit)
+            // Floor of a fractional limit in (0, 1) is 0, which would request
+            // an empty page; clamp to a minimum of 1 so pageSize is always a
+            // positive integer.
             const pageSize =
                 Number.isFinite(parsedLimit) && parsedLimit > 0
-                    ? Math.min(Math.floor(parsedLimit), MAX_LIMIT)
+                    ? Math.max(1, Math.min(Math.floor(parsedLimit), MAX_LIMIT))
                     : DEFAULT_LIMIT
 
             const db = await Datasource.getInstance()
@@ -1171,7 +1174,7 @@ export default class GCR {
             // A full page means there may be more rows; hand back the last
             // pubkey as the next cursor. A short page is the end of the table.
             const nextCursor =
-                identities.length === pageSize
+                identities.length === pageSize && identities.length > 0
                     ? identities[identities.length - 1].pubkey
                     : null
 
