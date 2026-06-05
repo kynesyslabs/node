@@ -1108,6 +1108,103 @@ export default class GCR {
         // return awardedAccounts
     }
 
+    /**
+     * List the linked identities of every account, paginated.
+     *
+     * Returns only `pubkey` + the `identities` jsonb blob per account —
+     * never balance/nonce/points — so the payload stays focused and the
+     * `bigint` balance column (which `JSON.stringify` cannot serialize) is
+     * never touched.
+     *
+     * Pagination is keyset (a.k.a. seek) on the `pubkey` primary key, not
+     * offset: each page seeks `WHERE pubkey > :cursor ORDER BY pubkey ASC
+     * LIMIT :n`, which stays O(log n) on the PK index regardless of how
+     * deep into the table the caller is. The `gcr_main` table can hold a
+     * large number of jsonb-heavy rows, so an unbounded `find()` is
+     * deliberately avoided here.
+     *
+     * @param limit  Max rows per page. Clamped to [1, 1000]. Default 100.
+     * @param cursor The `pubkey` of the last row from the previous page.
+     *               Omit for the first page.
+     * @returns `RPCResponse` whose `response` is
+     *   `{ success, identities: [{ pubkey, identities }], count, limit, nextCursor }`.
+     *   `nextCursor` is the last `pubkey` of this page when a full page was
+     *   returned (more rows may exist), or `null` when the end was reached.
+     */
+    static async listIdentities(
+        limit = 100,
+        cursor?: string,
+    ): Promise<RPCResponse> {
+        try {
+            // Clamp the page size into a sane bound. A non-numeric or
+            // non-positive limit falls back to the default; the hard cap
+            // protects the node from a single huge response.
+            const DEFAULT_LIMIT = 100
+            const MAX_LIMIT = 1000
+            const parsedLimit = Number(limit)
+            const pageSize =
+                Number.isFinite(parsedLimit) && parsedLimit > 0
+                    ? Math.min(Math.floor(parsedLimit), MAX_LIMIT)
+                    : DEFAULT_LIMIT
+
+            const db = await Datasource.getInstance()
+            const gcrMainRepository = db.getDataSource().getRepository(GCRMain)
+
+            const qb = gcrMainRepository
+                .createQueryBuilder("gcr")
+                .select(["gcr.pubkey", "gcr.identities"])
+                .orderBy("gcr.pubkey", "ASC")
+                .limit(pageSize)
+
+            // Keyset seek: only rows strictly after the cursor pubkey.
+            if (cursor) {
+                qb.where("gcr.pubkey > :cursor", { cursor })
+            }
+
+            const accounts = await qb.getMany()
+
+            const identities = accounts.map(account => ({
+                pubkey: account.pubkey,
+                identities: account.identities,
+            }))
+
+            // A full page means there may be more rows; hand back the last
+            // pubkey as the next cursor. A short page is the end of the table.
+            const nextCursor =
+                identities.length === pageSize
+                    ? identities[identities.length - 1].pubkey
+                    : null
+
+            return {
+                result: 200,
+                response: {
+                    success: true,
+                    identities,
+                    count: identities.length,
+                    limit: pageSize,
+                    nextCursor,
+                },
+                extra: null,
+                require_reply: false,
+            }
+        } catch (error) {
+            log.error("Error listing identities: " + error)
+            return {
+                result: 500,
+                response: {
+                    success: false,
+                    error: "Failed to list identities",
+                    message:
+                        error instanceof Error
+                            ? error.message
+                            : "Unknown error",
+                },
+                extra: null,
+                require_reply: false,
+            }
+        }
+    }
+
     // static async getFlaggedAccounts(start: number, end: number) {
     //     const db = await Datasource.getInstance()
     //     const gcrMainRepository = db.getDataSource().getRepository(GCRMain)

@@ -36,6 +36,8 @@ import {
     RATE_LIMIT_POST_MAX_REQUESTS,
     RATE_LIMIT_POST_WINDOW_MS,
     RATE_LIMIT_TX_PER_BLOCK,
+    RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
+    RATE_LIMIT_IDENTITIES_WINDOW_MS,
     LOCALHOST_IPS,
     TWITTER_COOKIE_FILE,
 } from "./constants"
@@ -442,6 +444,7 @@ export default class SharedState {
         ],
         methodLimits: {
             POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
+            identities: { maxRequests: RATE_LIMIT_IDENTITIES_MAX_REQUESTS, windowMs: RATE_LIMIT_IDENTITIES_WINDOW_MS },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
         // Proxy-header trust — see RateLimiter constructor for resolution
