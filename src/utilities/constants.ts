@@ -41,6 +41,10 @@ export const IDENTITIES_MAX_CONCURRENT = 3
 export const IDENTITIES_MAX_QUEUE = 12
 /** How long a queued /identities caller waits for a slot before a 503. */
 export const IDENTITIES_ACQUIRE_TIMEOUT_MS = 2_000
+/** Default page size when /identities is called without a valid ?limit. */
+export const IDENTITIES_DEFAULT_LIMIT = 100
+/** Hard cap on the /identities page size so one request can't dump the table. */
+export const IDENTITIES_MAX_LIMIT = 1000
 
 /** Localhost IPs that always bypass rate limiting */
 export const LOCALHOST_IPS = [

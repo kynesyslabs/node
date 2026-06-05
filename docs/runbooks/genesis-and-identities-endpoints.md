@@ -44,6 +44,10 @@ Use `/genesisBlock` when you need block-level fields (hash, signatures,
 the raw `content` envelope). Use `/genesis` when you only need the chain
 parameters and pre-funded balances.
 
+Rate limit: `/genesisBlock` maps to the `genesisblock` method in the rate
+limiter's `pathMethodMap`, so it gets the default per-IP GET allowance
+(2000 req/60s) rather than falling through to the lax POST bucket.
+
 ---
 
 ## /identities
