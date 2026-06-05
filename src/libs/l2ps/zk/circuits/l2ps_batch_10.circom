@@ -23,12 +23,21 @@ template BalanceTransfer() {
     
     sender_after === sender_before - amount;
     receiver_after === receiver_before + amount;
-    
-    // REVIEW: SECURITY FIX - Enforce non-negativity with range check instead of squaring
-    // sender_after must fit in 64 bits (user balance limit)
-    component rangeCheck = Num2Bits(64);
-    rangeCheck.in <== sender_after;
-    
+
+    // SECURITY FIX — range checks on every magnitude that can cause a
+    // BN254 field-wrap. The `sender_after` guard was already here;
+    // `receiver_after` and `amount` are added in DEM-756 (PATH-OS L2PS
+    // hardening report item 5) so an overflow on the receiver side or
+    // an oversized amount cannot satisfy the proof.
+    component senderAfterRange = Num2Bits(64);
+    senderAfterRange.in <== sender_after;
+
+    component receiverAfterRange = Num2Bits(64);
+    receiverAfterRange.in <== receiver_after;
+
+    component amountRange = Num2Bits(64);
+    amountRange.in <== amount;
+
     component preHasher = Poseidon(2);
     preHasher.inputs[0] <== sender_before;
     preHasher.inputs[1] <== receiver_before;

@@ -1,5 +1,6 @@
 pragma circom 2.1.0;
 
+include "bitify.circom";
 include "poseidon.circom";
 
 /*
@@ -22,10 +23,23 @@ template BalanceTransfer() {
     
     sender_after === sender_before - amount;
     receiver_after === receiver_before + amount;
-    
-    signal check;
-    check <== sender_after * sender_after;
-    
+
+    // SECURITY FIX — range checks on every magnitude that can cause a
+    // BN254 field-wrap. Without these an overdraw makes `sender_after`
+    // wrap to a value about the size of the curve order and the proof
+    // still accepts; same for a `receiver_after` overflow or an
+    // oversized `amount`. Mirrors the guard already present on batch-10
+    // — propagated here in DEM-756 / PATH-OS L2PS hardening report
+    // item 5. 64 bits is the user-balance limit.
+    component senderAfterRange = Num2Bits(64);
+    senderAfterRange.in <== sender_after;
+
+    component receiverAfterRange = Num2Bits(64);
+    receiverAfterRange.in <== receiver_after;
+
+    component amountRange = Num2Bits(64);
+    amountRange.in <== amount;
+
     component preHasher = Poseidon(2);
     preHasher.inputs[0] <== sender_before;
     preHasher.inputs[1] <== receiver_before;
