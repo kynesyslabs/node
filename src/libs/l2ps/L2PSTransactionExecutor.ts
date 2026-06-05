@@ -225,10 +225,24 @@ export default class L2PSTransactionExecutor {
                 referenceHeight,
             )
 
+            // Canonicalise the wire amount and the fee in the same try
+            // block so any unexpected failure surfaces with a uniform
+            // "Invalid amount" error path. `L2PS_TX_FEE` is a constant
+            // `1` today and will not throw, but keeping both calls in
+            // the same guard prevents a silent regression if either
+            // input shape ever drifts.
             let amountCanonical: bigint
+            let feeCanonical: bigint
             try {
                 amountCanonical = canonicalizeAmountToOs(
                     rawAmount,
+                    forkActive,
+                )
+                // L2PS_TX_FEE is declared in DEM units (1 DEM).
+                // Canonicalise the same way as the wire amount so the
+                // balance check and the burn edit agree on units.
+                feeCanonical = canonicalizeAmountToOs(
+                    L2PS_TX_FEE,
                     forkActive,
                 )
             } catch (e) {
@@ -243,14 +257,6 @@ export default class L2PSTransactionExecutor {
                     message: "Invalid amount: must be a positive integer",
                 }
             }
-
-            // L2PS_TX_FEE is declared in DEM units (1 DEM). Canonicalise
-            // the same way as a wire-shape integer so the balance check
-            // and the burn edit agree on units.
-            const feeCanonical = canonicalizeAmountToOs(
-                L2PS_TX_FEE,
-                forkActive,
-            )
 
             // Check sender balance in L1 state (amount + fee). The L1
             // balance is persisted as an OS magnitude string, so compare
@@ -269,13 +275,17 @@ export default class L2PSTransactionExecutor {
 
             // Emit GCR edits in the magnitude downstream consumers expect:
             // OS string post-fork (matches the serializerGate wire shape
-            // the SDK ≥ v3.0.0 emits); legacy DEM number pre-fork.
-            const editAmount: string | number = forkActive
+            // the SDK ≥ v3.0.0 emits); pre-fork carries the legacy DEM
+            // magnitude as a string too — `GCREditBalance.amount` accepts
+            // `number | string`, and a string avoids the silent precision
+            // loss that `Number(bigint)` would introduce for any amount
+            // above `Number.MAX_SAFE_INTEGER`.
+            const editAmount: string = forkActive
                 ? denomination.toOsString(amountCanonical)
-                : Number(amountCanonical)
-            const editFee: string | number = forkActive
+                : amountCanonical.toString()
+            const editFee: string = forkActive
                 ? denomination.toOsString(feeCanonical)
-                : Number(feeCanonical)
+                : feeCanonical.toString()
 
             // 1. Burn the fee (remove from sender, no add anywhere)
             gcrEdits.push({
