@@ -21,8 +21,12 @@ import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
 import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/types"
+import { denomination } from "@kynesyslabs/demosdk"
 import L2PSProofManager from "./L2PSProofManager"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
+import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 
@@ -201,36 +205,84 @@ export default class L2PSTransactionExecutor {
         let affectedAccountsCount = 0
 
         if (nativePayload.nativeOperation === "send") {
-            const [to, amount] = nativePayload.args as [string, number]
+            const [to, rawAmount] = nativePayload.args as [
+                string,
+                number | string,
+            ]
             const sender = tx.content.from as string
 
-            // Validate amount (type check, integer, and positive)
-            if (typeof amount !== "number" || !Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
-                return { success: false, message: "Invalid amount: must be a positive integer" }
+            // Match the L1 native path: canonicalise the wire amount to
+            // an OS bigint through the fork-aware helper, then emit GCR
+            // edits in the magnitude the rest of the pipeline expects
+            // (OS string post-fork, legacy DEM number pre-fork). Without
+            // this the executor moves ~10^9× too little post-fork, and
+            // post-fork OS string amounts are rejected outright by the
+            // number-only validation that used to live here.
+            const referenceHeight =
+                getSharedState.lastBlockNumber ?? 0
+            const forkActive = isForkActive(
+                "osDenomination",
+                referenceHeight,
+            )
+
+            let amountCanonical: bigint
+            try {
+                amountCanonical = canonicalizeAmountToOs(
+                    rawAmount,
+                    forkActive,
+                )
+            } catch (e) {
+                return {
+                    success: false,
+                    message: `Invalid amount: ${(e as Error).message}`,
+                }
+            }
+            if (amountCanonical <= 0n) {
+                return {
+                    success: false,
+                    message: "Invalid amount: must be a positive integer",
+                }
             }
 
-            // Check sender balance in L1 state (amount + fee)
+            // L2PS_TX_FEE is declared in DEM units (1 DEM). Canonicalise
+            // the same way as a wire-shape integer so the balance check
+            // and the burn edit agree on units.
+            const feeCanonical = canonicalizeAmountToOs(
+                L2PS_TX_FEE,
+                forkActive,
+            )
+
+            // Check sender balance in L1 state (amount + fee). The L1
+            // balance is persisted as an OS magnitude string, so compare
+            // bigint-to-bigint regardless of fork status.
             const senderAccount = await this.getOrCreateL1Account(sender)
-            const totalRequired = BigInt(amount) + BigInt(L2PS_TX_FEE)
+            const totalRequired = amountCanonical + feeCanonical
             if (BigInt(senderAccount.balance) < totalRequired) {
                 return {
                     success: false,
-                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee)`,
+                    message: `Insufficient L1 balance: has ${senderAccount.balance}, needs ${totalRequired} (${amountCanonical} + ${feeCanonical} fee)`,
                 }
             }
 
             // Ensure receiver account exists
             await this.getOrCreateL1Account(to)
 
-            // Generate GCR edits for L1 state change
-            // These will be applied at consensus time
+            // Emit GCR edits in the magnitude downstream consumers expect:
+            // OS string post-fork (matches the serializerGate wire shape
+            // the SDK ≥ v3.0.0 emits); legacy DEM number pre-fork.
+            const editAmount: string | number = forkActive
+                ? denomination.toOsString(amountCanonical)
+                : Number(amountCanonical)
+            const editFee: string | number = forkActive
+                ? denomination.toOsString(feeCanonical)
+                : Number(feeCanonical)
 
             // 1. Burn the fee (remove from sender, no add anywhere)
             gcrEdits.push({
                 type: "balance",
                 operation: "remove",
                 account: sender,
-                amount: L2PS_TX_FEE,
+                amount: editFee,
                 txhash: tx.hash,
                 isRollback: false,
             })
@@ -241,7 +293,7 @@ export default class L2PSTransactionExecutor {
                     type: "balance",
                     operation: "remove",
                     account: sender,
-                    amount: amount,
+                    amount: editAmount,
                     txhash: tx.hash,
                     isRollback: false,
                 },
@@ -249,7 +301,7 @@ export default class L2PSTransactionExecutor {
                     type: "balance",
                     operation: "add",
                     account: to,
-                    amount: amount,
+                    amount: editAmount,
                     txhash: tx.hash,
                     isRollback: false,
                 },
