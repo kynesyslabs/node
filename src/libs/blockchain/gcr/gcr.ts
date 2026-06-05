@@ -65,6 +65,10 @@ import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
 import { Validators } from "@/model/entities/Validators"
+import {
+    IDENTITIES_DEFAULT_LIMIT,
+    IDENTITIES_MAX_LIMIT,
+} from "@/utilities/constants"
 
 export type GetNativeSubnetsTxsOptions = {
     txData?: boolean
@@ -1139,8 +1143,8 @@ export default class GCR {
             // Clamp the page size into a sane bound. A non-numeric or
             // non-positive limit falls back to the default; the hard cap
             // protects the node from a single huge response.
-            const DEFAULT_LIMIT = 100
-            const MAX_LIMIT = 1000
+            const DEFAULT_LIMIT = IDENTITIES_DEFAULT_LIMIT
+            const MAX_LIMIT = IDENTITIES_MAX_LIMIT
             const parsedLimit = Number(limit)
             // Floor of a fractional limit in (0, 1) is 0, which would request
             // an empty page; clamp to a minimum of 1 so pageSize is always a
