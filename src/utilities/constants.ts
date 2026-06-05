@@ -31,6 +31,17 @@ export const RATE_LIMIT_POST_MAX_REQUESTS = 200_000
 export const RATE_LIMIT_POST_WINDOW_MS = 86_400_000
 export const RATE_LIMIT_TX_PER_BLOCK = 4
 
+// /identities is an expensive full-table read; throttle it far below the
+// default GET allowance (per-IP) and cap how many can run at once (global).
+export const RATE_LIMIT_IDENTITIES_MAX_REQUESTS = 30
+export const RATE_LIMIT_IDENTITIES_WINDOW_MS = 60_000
+/** Max concurrent /identities executions across ALL callers. */
+export const IDENTITIES_MAX_CONCURRENT = 3
+/** Max callers allowed to wait for a free /identities slot before a fast 503. */
+export const IDENTITIES_MAX_QUEUE = 12
+/** How long a queued /identities caller waits for a slot before a 503. */
+export const IDENTITIES_ACQUIRE_TIMEOUT_MS = 2_000
+
 /** Localhost IPs that always bypass rate limiting */
 export const LOCALHOST_IPS = [
     "127.0.0.1",

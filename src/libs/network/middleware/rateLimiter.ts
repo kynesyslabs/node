@@ -529,6 +529,7 @@ export class RateLimiter {
                 "/public_logs": "public_logs",
                 "/diagnostics": "diagnostics",
                 "/genesis": "genesis",
+                "/identities": "identities",
             }
 
             if (req.method === "GET" && pathMethodMap[path]) {
