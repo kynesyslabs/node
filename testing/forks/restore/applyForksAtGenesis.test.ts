@@ -40,10 +40,10 @@ async function createTestDataSource(): Promise<DataSource> {
     })
     await ds.initialize()
 
-    // gcr_main — all columns that migrations touch
+    // gcr_main — all columns that migrations touch. NO assignedTxs (moved to
+    // gcr_assigned_txs by MoveAssignedTxsToOwnTable); mirrors real Postgres.
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT NOT NULL DEFAULT '[]',
         nonce INTEGER NOT NULL DEFAULT 0,
         balance BIGINT NOT NULL DEFAULT 0,
         identities TEXT NOT NULL DEFAULT '{}',
@@ -124,13 +124,12 @@ async function seedState(em: EntityManager): Promise<void> {
     for (const row of GCR_ROWS) {
         await em.query(
             `INSERT INTO gcr_main
-                (pubkey, "assignedTxs", nonce, balance, identities, points,
+                (pubkey, nonce, balance, identities, points,
                  "referralInfo", flagged, "flaggedReason", reviewed,
                  "createdAt", "updatedAt")
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 row.pubkey,
-                "[]",
                 0,
                 row.balance.toString(),
                 "{}",

@@ -54,10 +54,10 @@ async function createE2EDataSource(): Promise<DataSource> {
     })
     await ds.initialize()
 
-    // Minimal gcr_main required by osDenomination migration.
+    // Minimal gcr_main required by osDenomination migration. NO assignedTxs
+    // (moved to gcr_assigned_txs by MoveAssignedTxsToOwnTable); mirrors prod.
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT NOT NULL DEFAULT '[]',
         nonce INTEGER NOT NULL DEFAULT 0,
         balance BIGINT NOT NULL DEFAULT 0,
         identities TEXT NOT NULL DEFAULT '{}',
@@ -270,13 +270,12 @@ async function seedGcrMain(
     for (const f of fixtures) {
         await em.query(
             `INSERT INTO gcr_main
-                (pubkey, "assignedTxs", nonce, balance, identities, points,
+                (pubkey, nonce, balance, identities, points,
                  "referralInfo", flagged, "flaggedReason", reviewed,
                  "createdAt", "updatedAt")
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 f.pubkey,
-                JSON.stringify([]),
                 0,
                 f.balance.toString(),
                 JSON.stringify({}),

@@ -117,7 +117,6 @@ export async function isGasFeeSeparationMigrationApplied(
  * Postgres' JSONB binding.
  */
 function buildDefaultAccountFields(pubkey: string): {
-    assignedTxs: string
     nonce: number
     balance: string
     identities: string
@@ -127,8 +126,12 @@ function buildDefaultAccountFields(pubkey: string): {
     flaggedReason: string
     reviewed: number | boolean
 } {
+    // NOTE: no `assignedTxs` — that column was moved off gcr_main into the
+    // dedicated gcr_assigned_txs relation (MoveAssignedTxsToOwnTable). A
+    // freshly-created burn/treasury account has no assignments. Including it
+    // here raised `column "assignedTxs" of relation "gcr_main" does not exist`
+    // against the real Postgres schema at genesis fork pre-apply.
     return {
-        assignedTxs: JSON.stringify([]),
         nonce: 0,
         balance: "0",
         identities: JSON.stringify({ xm: {}, web2: {}, pqc: {}, ud: [] }),
@@ -205,13 +208,12 @@ async function ensureZeroAccount(
     const reviewedValue: boolean | number = isPg ? false : 0
     await entityManager.query(
         `INSERT INTO gcr_main (
-            pubkey, "assignedTxs", nonce, balance, identities,
+            pubkey, nonce, balance, identities,
             points, "referralInfo", flagged, "flaggedReason",
             reviewed, "createdAt", "updatedAt"
-        ) VALUES (${ph(1)}, ${ph(2)}, ${ph(3)}, ${ph(4)}, ${ph(5)}, ${ph(6)}, ${ph(7)}, ${ph(8)}, ${ph(9)}, ${ph(10)}, ${ph(11)}, ${ph(12)})`,
+        ) VALUES (${ph(1)}, ${ph(2)}, ${ph(3)}, ${ph(4)}, ${ph(5)}, ${ph(6)}, ${ph(7)}, ${ph(8)}, ${ph(9)}, ${ph(10)}, ${ph(11)})`,
         [
             pubkey,
-            fields.assignedTxs,
             fields.nonce,
             fields.balance,
             fields.identities,

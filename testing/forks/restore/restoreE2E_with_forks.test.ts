@@ -55,7 +55,6 @@ async function createE2EDataSource(): Promise<DataSource> {
 
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT NOT NULL DEFAULT '[]',
         nonce INTEGER NOT NULL DEFAULT 0,
         balance BIGINT NOT NULL DEFAULT 0,
         identities TEXT NOT NULL DEFAULT '{}',
@@ -246,15 +245,18 @@ async function simulateRestore(
     loader: SnapshotLoaderAvailable,
 ): Promise<void> {
     for await (const row of loader.streamGcrMain()) {
+        // Mirror the real restoreSnapshot: assignedTxs is NOT a gcr_main
+        // column (moved to gcr_assigned_txs). The snapshot rows still carry
+        // it as input; it is dropped from the gcr_main insert here. Fixtures
+        // use empty assignedTxs, so there are no gcr_assigned_txs rows to add.
         await em.query(
             `INSERT INTO gcr_main
-                (pubkey, "assignedTxs", nonce, balance, identities,
+                (pubkey, nonce, balance, identities,
                  points, "referralInfo", flagged, "flaggedReason",
                  reviewed, "createdAt", "updatedAt")
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 row.pubkey,
-                JSON.stringify(row.assignedTxs),
                 row.nonce,
                 row.balance.toString(),
                 JSON.stringify(row.identities),

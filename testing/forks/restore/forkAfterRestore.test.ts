@@ -46,10 +46,10 @@ async function createTestDataSource(): Promise<DataSource> {
     })
     await ds.initialize()
 
-    // gcr_main — matches production columns (TEXT for JSONB columns on SQLite)
+    // gcr_main — matches production columns (TEXT for JSONB columns on SQLite).
+    // NO assignedTxs: moved to gcr_assigned_txs by MoveAssignedTxsToOwnTable.
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT,
         nonce INTEGER,
         balance BIGINT,
         identities TEXT,
@@ -130,13 +130,12 @@ async function seedSnapshotShape(em: EntityManager): Promise<void> {
     for (const row of SNAPSHOT_ROWS) {
         await em.query(
             `INSERT INTO gcr_main
-                (pubkey, "assignedTxs", nonce, balance, identities,
+                (pubkey, nonce, balance, identities,
                  points, "referralInfo", flagged, "flaggedReason",
                  reviewed, "createdAt", "updatedAt")
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 row.pubkey,
-                "[]",
                 0,
                 row.balance.toString(),
                 "{}",
@@ -265,19 +264,7 @@ describe("fork activation on snapshot-restored state", () => {
         }
     })
 
-    it("assignedTxs=[] in snapshot shape is preserved through restore and not affected by osDenomination", async () => {
-        await ds.transaction(em => seedSnapshotShape(em))
-        await ds.transaction(em => runOsDenominationMigration(em, 1))
-
-        const rows: Array<{ "assignedTxs": string }> =
-            await ds.manager.query(
-                'SELECT "assignedTxs" FROM gcr_main',
-            )
-        for (const row of rows) {
-            // SQLite returns the JSON string; parse to verify it's an empty array.
-            const parsed = JSON.parse(row["assignedTxs"])
-            expect(Array.isArray(parsed)).toBe(true)
-            expect(parsed).toHaveLength(0)
-        }
-    })
+    // NOTE: removed the former "assignedTxs preserved through restore" test —
+    // assignedTxs is no longer a gcr_main column (moved to gcr_assigned_txs by
+    // MoveAssignedTxsToOwnTable), so there is nothing on gcr_main to preserve.
 })

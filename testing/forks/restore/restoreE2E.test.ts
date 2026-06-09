@@ -59,10 +59,10 @@ async function createE2EDataSource(): Promise<DataSource> {
     })
     await ds.initialize()
 
-    // gcr_main (full column set matching restore shape)
+    // gcr_main (matches real Postgres: NO assignedTxs — moved to
+    // gcr_assigned_txs by MoveAssignedTxsToOwnTable)
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT NOT NULL DEFAULT '[]',
         nonce INTEGER NOT NULL DEFAULT 0,
         balance BIGINT NOT NULL DEFAULT 0,
         identities TEXT NOT NULL DEFAULT '{}',
@@ -301,15 +301,16 @@ async function simulateRestore(
     let identity = 0
 
     for await (const row of loader.streamGcrMain()) {
+        // assignedTxs dropped from the gcr_main insert (moved to
+        // gcr_assigned_txs); mirrors the real restoreSnapshot.
         await em.query(
             `INSERT INTO gcr_main
-                (pubkey, "assignedTxs", nonce, balance, identities,
+                (pubkey, nonce, balance, identities,
                  points, "referralInfo", flagged, "flaggedReason",
                  reviewed, "createdAt", "updatedAt")
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 row.pubkey,
-                JSON.stringify(row.assignedTxs),
                 row.nonce,
                 row.balance.toString(),
                 JSON.stringify(row.identities),

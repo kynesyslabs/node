@@ -47,9 +47,11 @@ async function createTestDataSource(): Promise<DataSource> {
         entities: [],
     })
     await ds.initialize()
+    // Mirror the real Postgres gcr_main schema: NO assignedTxs column (it was
+    // moved to gcr_assigned_txs by MoveAssignedTxsToOwnTable). Keeping it here
+    // previously masked the gasFeeSeparation migration's bad INSERT.
     await ds.query(`CREATE TABLE gcr_main (
         pubkey TEXT PRIMARY KEY,
-        "assignedTxs" TEXT,
         nonce INTEGER,
         balance TEXT,
         identities TEXT,
@@ -85,13 +87,12 @@ async function seedExistingAccount(
 ) {
     await em.query(
         `INSERT INTO gcr_main (
-            pubkey, "assignedTxs", nonce, balance, identities,
+            pubkey, nonce, balance, identities,
             points, "referralInfo", flagged, "flaggedReason",
             reviewed, "createdAt", "updatedAt"
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
             pubkey,
-            "[]",
             0,
             balance.toString(),
             "{}",
