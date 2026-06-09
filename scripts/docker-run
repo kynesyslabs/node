@@ -20,6 +20,9 @@
 #                -> demos-network-devnet, volumes -> demos_*_devnet, and host
 #                ports offset +100 (RPC 53650, Omni 53651, signaling 3105,
 #                metrics 9190, ...). Composable with --clean/--rebuild/-d.
+#                Also syncs host data/genesis.json into the devnet node_data
+#                volume on every up (devnet-only) so genesis/validator-set
+#                edits take effect without a --rebuild.
 #   --no-monitor Drop the `monitoring` profile from the proxy bundle.
 #   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
 #   --clean      Wipe DB + bundled-data volumes (pgdata, node_data) before
@@ -118,7 +121,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -179,9 +182,11 @@ PROFILES=()
 if [[ "$USE_DEVNET" == "true" ]]; then
     CLEAN_VOLUMES=(demos_pgdata_devnet demos_node_data_devnet)
     STATE_VOL_NAME="demos_node_state_devnet"
+    DATA_VOL_NAME="demos_node_data_devnet"
 else
     CLEAN_VOLUMES=(demos_pgdata demos_node_data)
     STATE_VOL_NAME="demos_node_state"
+    DATA_VOL_NAME="demos_node_data"
 fi
 
 # Export build-time git provenance so `docker compose build` can bake it
@@ -337,6 +342,43 @@ if [[ "$SUBCOMMAND" == "up" && -f "$HOST_PEERLIST_FILE" ]]; then
             cp /src/demos_peerlist.json /state/demos_peerlist.json &&
             chmod 644 /state/demos_peerlist.json &&
             chown 1000:1000 /state /state/demos_peerlist.json
+        '
+fi
+
+# DEVNET ONLY — sync host `data/genesis.json` -> node_data volume before `up`.
+#
+# Unlike identity/peerlist, genesis is normally baked into the image at build
+# time (`COPY data/ ./data/` in the Dockerfile) and lives in the node_data
+# volume thereafter. That means a host edit to data/genesis.json does NOT
+# reach a running container without a full --rebuild — a sharp edge when
+# iterating on a devnet validator set (wrong/old validators -> the node's
+# pubkey is not in the shard -> NotInShardError loop).
+#
+# For devnet we copy the host genesis into the node_data volume on every `up`
+# so editing data/genesis.json is enough. Deliberately devnet-ONLY: the
+# mainnet/testnet stack must keep using the image-baked genesis as the single
+# source of truth (silently overwriting a validator's genesis from a possibly
+# stale host checkout would be dangerous). Operators who genuinely changed the
+# mainnet genesis rebuild the image instead.
+#
+# Sync rules:
+#   - Only fires for SUBCOMMAND=up AND --devnet.
+#   - Only fires when `$REPO_ROOT/data/genesis.json` exists.
+#   - Overwrites the volume copy unconditionally — the repo file is the source
+#     of truth for devnet. Runs AFTER --clean (which wipes node_data) so a
+#     fresh volume is reseeded with the current host genesis.
+#   - 0644 owned by uid 1000 to match the container's demos user.
+HOST_GENESIS_FILE="${REPO_ROOT}/data/genesis.json"
+if [[ "$USE_DEVNET" == "true" && "$SUBCOMMAND" == "up" && -f "$HOST_GENESIS_FILE" ]]; then
+    docker volume inspect "$DATA_VOL_NAME" >/dev/null 2>&1 || docker volume create "$DATA_VOL_NAME" >/dev/null
+    echo "+ [devnet] syncing data/genesis.json -> $DATA_VOL_NAME"
+    docker run --rm \
+        -v "$DATA_VOL_NAME":/data \
+        -v "$HOST_GENESIS_FILE":/src/genesis.json:ro \
+        alpine sh -c '
+            cp /src/genesis.json /data/genesis.json &&
+            chmod 644 /data/genesis.json &&
+            chown 1000:1000 /data/genesis.json
         '
 fi
 
