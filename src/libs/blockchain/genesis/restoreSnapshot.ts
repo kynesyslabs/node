@@ -21,7 +21,9 @@
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
+import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
+import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 
@@ -51,6 +53,7 @@ async function preflightEmpty(em: EntityManager): Promise<void> {
     const checks: Array<{ table: string; count: number }> = []
     for (const table of [
         "gcr_main",
+        "gcr_assigned_txs",
         "gcr_storageprogram",
         "identity_commitments",
         "blocks",
@@ -148,6 +151,87 @@ async function bulkInsertStream<T extends object>(
 }
 
 /**
+ * Insert gcr_main rows, routing the legacy per-account `assignedTxs` array
+ * into the dedicated `gcr_assigned_txs` relation.
+ *
+ * The snapshot JSONL predates `MoveAssignedTxsToOwnTable` (dumped from a
+ * node version where `assignedTxs` was a jsonb column on `gcr_main`). The
+ * current `GCRMain` entity has no such column, so inserting the seed
+ * verbatim raises `column "assignedTxs" of relation "gcr_main" does not
+ * exist`. We strip the field from the gcr_main insert and re-materialise
+ * each tx-hash assignment as a `(pubkey, tx_hash, block_number)` row in
+ * `gcr_assigned_txs` — matching `HandleGCR.bulkUpdateAssignedTxs`.
+ *
+ * `block_number` is not present in the legacy array (it stored bare
+ * hashes), so it falls back to the entity default (0). This is the
+ * snapshot-baseline convention: the snapshot is a single point-in-time
+ * state, not a per-block history.
+ *
+ * Both inserts run on the caller's transactional EntityManager, so a
+ * failure in either rolls the whole restore back.
+ */
+async function insertGcrMainStream(
+    em: EntityManager,
+    stream: AsyncIterable<GCRMainSeed>,
+    batchSize: number,
+    onBatch: (inserted: number) => void,
+): Promise<number> {
+    type AssignedRow = { pubkey: string; txHash: string }
+    let inserted = 0
+    let mainBatch: Omit<GCRMainSeed, "assignedTxs">[] = []
+    let assignedBatch: AssignedRow[] = []
+
+    // gcr_main: TypeORM maps only entity columns, so the seed minus
+    // assignedTxs is the exact column set. Cast mirrors the existing
+    // bulkInsertStream pattern (seed carries pre-bigint balance shape).
+    const flushMain = async () => {
+        if (mainBatch.length === 0) return
+        await em.insert(
+            GCRMain as unknown as { new (): Omit<GCRMainSeed, "assignedTxs"> },
+            mainBatch,
+        )
+        inserted += mainBatch.length
+        onBatch(inserted)
+        mainBatch = []
+    }
+
+    // gcr_assigned_txs: chunk by CHUNK_ASSIGNED_TXS so rows * 3 cols stay
+    // under Postgres's 65535 bind-parameter cap — an account with a large
+    // legacy assignedTxs array must not blow a single oversized INSERT.
+    // orIgnore: (pubkey, tx_hash) PK makes re-inserts idempotent (mirrors
+    // HandleGCR.bulkUpdateAssignedTxs), so a retried restore is safe.
+    const flushAssigned = async (force: boolean) => {
+        while (
+            assignedBatch.length >= CHUNK_ASSIGNED_TXS ||
+            (force && assignedBatch.length > 0)
+        ) {
+            const chunk = assignedBatch.slice(0, CHUNK_ASSIGNED_TXS)
+            assignedBatch = assignedBatch.slice(CHUNK_ASSIGNED_TXS)
+            await em
+                .createQueryBuilder()
+                .insert()
+                .into(GCRAssignedTx)
+                .values(chunk)
+                .orIgnore()
+                .execute()
+        }
+    }
+
+    for await (const row of stream) {
+        const { assignedTxs, ...mainRow } = row
+        mainBatch.push(mainRow)
+        for (const txHash of assignedTxs) {
+            assignedBatch.push({ pubkey: row.pubkey, txHash })
+        }
+        if (mainBatch.length >= batchSize) await flushMain()
+        await flushAssigned(false)
+    }
+    await flushMain()
+    await flushAssigned(true)
+    return inserted
+}
+
+/**
  * Restore the snapshot tables under the caller-owned transaction.
  *
  * The caller MUST have already verified that `loader.available === true`.
@@ -182,10 +266,11 @@ export async function restoreSnapshot(
 
     await preflightEmpty(em)
 
-    // Entity class shape differs from seed type (seed uses pre-bigint string for balance precision); cast lets em.insert accept the seed batch.
-    const gcrMainInserted = await bulkInsertStream<GCRMainSeed>(
+    // gcr_main rows carry a legacy `assignedTxs` array (pre-MoveAssignedTxsToOwnTable
+    // snapshot). insertGcrMainStream strips it from the gcr_main insert and
+    // routes the assignments into gcr_assigned_txs within this same transaction.
+    const gcrMainInserted = await insertGcrMainStream(
         em,
-        GCRMain as unknown as { new (): GCRMainSeed },
         loader.streamGcrMain(),
         GCR_MAIN_BATCH,
         n => {

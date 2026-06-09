@@ -27,6 +27,7 @@ import { tmpdir } from "node:os"
 import { randomUUID, createHash } from "node:crypto"
 
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { IdentityCommitment } from "@/model/entities/GCRv2/IdentityCommitment"
 
@@ -56,7 +57,7 @@ async function createDs(): Promise<DataSource> {
         database: PG_DATABASE,
         synchronize: false,
         logging: false,
-        entities: [GCRMain, GCRStorageProgram, IdentityCommitment],
+        entities: [GCRMain, GCRAssignedTx, GCRStorageProgram, IdentityCommitment],
     })
     await source.initialize()
     return source
@@ -70,6 +71,9 @@ type GcrSeed = {
     pubkey: string
     balance: string
     flaggedReason?: string
+    // Legacy per-account tx-hash array (pre-MoveAssignedTxsToOwnTable snapshot
+    // shape). Defaults to [] when omitted.
+    assignedTxs?: string[]
 }
 
 function makeGcrMainJsonl(seeds: GcrSeed[]): string {
@@ -77,7 +81,7 @@ function makeGcrMainJsonl(seeds: GcrSeed[]): string {
         .map(s =>
             JSON.stringify({
                 pubkey: s.pubkey,
-                assignedTxs: [],
+                assignedTxs: s.assignedTxs ?? [],
                 nonce: 0,
                 balance: s.balance,
                 identities: {},
@@ -191,12 +195,28 @@ async function writeTestSnapshot(
 // =============================================================================
 
 const GCR_SEEDS: GcrSeed[] = [
-    { pubkey: "0xpubkey01", balance: "1000000000000000000" },
-    { pubkey: "0xpubkey02", balance: "2000000000000000000" },
+    // pubkey01/02 carry legacy assignedTxs to exercise the routing into
+    // gcr_assigned_txs (snapshot rows predate MoveAssignedTxsToOwnTable).
+    {
+        pubkey: "0xpubkey01",
+        balance: "1000000000000000000",
+        assignedTxs: ["0xtxhashA", "0xtxhashB"],
+    },
+    {
+        pubkey: "0xpubkey02",
+        balance: "2000000000000000000",
+        assignedTxs: ["0xtxhashC"],
+    },
     { pubkey: "0xpubkey03", balance: "500000000000000000" },
     { pubkey: "0xpubkey04", balance: "0" },
     { pubkey: "0xpubkey05", balance: "9999999999998868586" },
 ]
+
+// Total assignedTxs across all seeds → expected gcr_assigned_txs row count.
+const EXPECTED_ASSIGNED_TX_ROWS = GCR_SEEDS.reduce(
+    (acc, s) => acc + (s.assignedTxs?.length ?? 0),
+    0,
+)
 
 const STORAGE_SEEDS: StorageSeed[] = [
     { storageAddress: "stor-test-001", sizeBytes: 120 },
@@ -247,7 +267,7 @@ afterEach(async () => {
     // so partial-genesis detection in preflightEmpty starts from a clean slate.
     if (pgAvailable && ds?.isInitialized) {
         await ds.query(
-            `TRUNCATE TABLE gcr_main, gcr_storageprogram, identity_commitments, blocks, validators CASCADE`,
+            `TRUNCATE TABLE gcr_main, gcr_assigned_txs, gcr_storageprogram, identity_commitments, blocks, validators CASCADE`,
         )
     }
 })
@@ -299,7 +319,47 @@ describe("genesisRestore integration (requires Postgres)", () => {
     )
 
     it.skipIf(!pgAvailable)(
-        "rows match snapshot exactly: nonce=0, assignedTxs=[], correct balance",
+        "legacy assignedTxs are routed into gcr_assigned_txs, NOT gcr_main (regression: column does not exist)",
+        async () => {
+            snapshotDir = join(tmpdir(), `test-genesis-restore-${randomUUID()}`)
+            prevSnapshotEnv = process.env.DEMOS_SNAPSHOT_DIR
+            process.env.DEMOS_SNAPSHOT_DIR = snapshotDir
+
+            await writeTestSnapshot(snapshotDir, GCR_SEEDS, STORAGE_SEEDS)
+
+            const loader = await loadSnapshot()
+            expect(loader.available).toBe(true)
+            if (!loader.available) return
+
+            // Must NOT throw `column "assignedTxs" of relation "gcr_main"
+            // does not exist` — the snapshot rows carry the legacy field.
+            await ds.transaction(async em => {
+                await restoreSnapshot(em, loader as SnapshotLoaderAvailable)
+            })
+
+            // All assignedTxs landed in gcr_assigned_txs.
+            const assignedCount = await ds.query(
+                "SELECT COUNT(*) AS cnt FROM gcr_assigned_txs",
+            )
+            expect(Number(assignedCount[0].cnt)).toBe(EXPECTED_ASSIGNED_TX_ROWS)
+
+            // pubkey01's two hashes are present and keyed to the right account.
+            const rows: Array<{ tx_hash: string }> = await ds.query(
+                "SELECT tx_hash FROM gcr_assigned_txs WHERE pubkey = $1 ORDER BY tx_hash",
+                ["0xpubkey01"],
+            )
+            expect(rows.map(r => r.tx_hash)).toEqual(["0xtxhashA", "0xtxhashB"])
+
+            // gcr_main row count unaffected; the account exists with its balance.
+            const gcrCount = await ds.query(
+                "SELECT COUNT(*) AS cnt FROM gcr_main",
+            )
+            expect(Number(gcrCount[0].cnt)).toBe(GCR_SEEDS.length)
+        },
+    )
+
+    it.skipIf(!pgAvailable)(
+        "rows match snapshot exactly: nonce=0, correct balance + sum",
         async () => {
             snapshotDir = join(tmpdir(), `test-genesis-restore-${randomUUID()}`)
             prevSnapshotEnv = process.env.DEMOS_SNAPSHOT_DIR
@@ -342,16 +402,18 @@ describe("genesisRestore integration (requires Postgres)", () => {
 
             await writeTestSnapshot(snapshotDir, GCR_SEEDS, STORAGE_SEEDS)
 
-            // Insert one stale row into gcr_main before calling restoreSnapshot
+            // Insert one stale row into gcr_main before calling restoreSnapshot.
+            // NOTE: no "assignedTxs" column — it was moved to gcr_assigned_txs
+            // (MoveAssignedTxsToOwnTable); referencing it here would itself
+            // raise "column does not exist".
             await ds.query(
                 `INSERT INTO gcr_main
-                    (pubkey, "assignedTxs", nonce, balance, identities, points,
+                    (pubkey, nonce, balance, identities, points,
                      "referralInfo", flagged, "flaggedReason", reviewed, "createdAt", "updatedAt")
                  VALUES
-                    ($1, $2::jsonb, 0, 0, $3::jsonb, $4::jsonb, $5::jsonb, false, '', false, NOW(), NOW())`,
+                    ($1, 0, 0, $2::jsonb, $3::jsonb, $4::jsonb, false, '', false, NOW(), NOW())`,
                 [
                     "0xstale",
-                    JSON.stringify([]),
                     JSON.stringify({}),
                     JSON.stringify({}),
                     JSON.stringify({}),
