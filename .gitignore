@@ -207,3 +207,6 @@ PR_RAW.md
 # offender. Do not re-add these to git.
 docs/discoveries/security-scan-2026-06-02/
 docs/discoveries/security-scan-2026-06-02/artifacts/gitleaks.sarif
+
+# Deep-audit reports contain confirmed open exploit chains. NEVER commit.
+docs/audits/

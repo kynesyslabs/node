@@ -16,6 +16,7 @@ import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
 import TxValidatorPool from "./validation/txValidatorPool"
+import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
 import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
 import { isForkActive } from "@/forks"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
@@ -438,6 +439,57 @@ export default class Mempool {
                 continue
             }
             validTransactions.push(unseenTransactions[i])
+        }
+
+        // AUDIT C1 (admission-side): the worker pool checks coherence +
+        // signature only — NOT that the attached gcr_edits are legitimately
+        // derived from the signed body. A self-signed tx carrying a forged
+        // edit (e.g. {balance, add, self, HUGE}) passes both and, before this
+        // gate, entered the mempool + gossiped shard-wide. Re-derive the
+        // expected edits here on the main thread and drop any tx whose shipped
+        // edits don't match. Runs on the main thread (not the worker, which
+        // deliberately avoids the SDK encryption index). Native txs only —
+        // non-native bundles carry no gcr_edits to forge.
+        //
+        // FORK GUARD: when gasFeeSeparation is active, confirmTransaction
+        // PREPENDS node-computed fee edits onto tx.content.gcr_edits before the
+        // tx is stored/gossiped, so a peer-received native tx legitimately
+        // carries edits that GCRGeneration.generate (which does NOT emit fee
+        // edits) would not reproduce — verifying here would false-reject every
+        // legit tx. gasFeeSeparation ships disabled; the apply-time, fork-gated
+        // enforcement (audit C1-apply) is the correct place to bind edits once
+        // that fork is live. So this admission guard only runs while the fork
+        // is inactive, where tx.content.gcr_edits is still the raw SDK shape.
+        const feeSeparationActive = isForkActive(
+            "gasFeeSeparation",
+            getSharedState.lastBlockNumber ?? 0,
+        )
+        if (!feeSeparationActive) {
+            const editVerifiedTransactions: Transaction[] = []
+            for (const tx of validTransactions) {
+                if (tx.content?.type !== "native") {
+                    editVerifiedTransactions.push(tx)
+                    continue
+                }
+                try {
+                    const { match } = await verifyGcrEditsMatch(tx)
+                    if (!match) {
+                        log.error(
+                            `[Mempool.receive] Rejecting tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,
+                        )
+                        continue
+                    }
+                    editVerifiedTransactions.push(tx)
+                } catch (e) {
+                    // Could not verify → reject (fail closed). A tx we cannot
+                    // bind must not be admitted.
+                    log.error(
+                        `[Mempool.receive] Rejecting tx ${tx.hash}: gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
+                    )
+                }
+            }
+            validTransactions.length = 0
+            validTransactions.push(...editVerifiedTransactions)
         }
 
         log.only(

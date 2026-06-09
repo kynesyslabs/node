@@ -14,22 +14,55 @@ export class SignatureVerifier {
     private static readonly MAX_CLOCK_SKEW = 5 * 60 * 1000
 
     /**
+     * Signature modes whose signed bytes actually cover the message payload.
+     * Only these may authenticate a payload-bearing, auth-required opcode —
+     * the others (SIGN_PUBKEY, SIGN_MESSAGE_ID, SIGN_MESSAGE_ID_TIMESTAMP) bind
+     * nothing about the payload, so a captured signature could authorise any
+     * substituted payload for the claimed identity (audit C3a).
+     */
+    private static readonly PAYLOAD_BINDING_MODES: ReadonlySet<SignatureMode> =
+        new Set([
+            SignatureMode.SIGN_FULL_PAYLOAD,
+            SignatureMode.SIGN_MESSAGE_ID_PAYLOAD_HASH,
+        ])
+
+    /**
      * Verify authentication block against message
      * @param auth Parsed authentication block
      * @param header Message header
      * @param payload Message payload
+     * @param requirePayloadBinding When true, reject signature modes that do
+     *   not cover the payload. The dispatcher sets this for every
+     *   auth-required opcode so the VERIFIER (not the sender) dictates the
+     *   minimum binding. Defaults to true — callers must opt OUT explicitly.
      * @returns Verification result
      */
     static async verify(
         auth: AuthBlock,
         header: OmniMessageHeader,
         payload: Buffer,
+        requirePayloadBinding = true,
     ): Promise<VerificationResult> {
         // 1. Validate algorithm
         if (!this.isSupportedAlgorithm(auth.algorithm)) {
             return {
                 valid: false,
                 error: `Unsupported signature algorithm: ${auth.algorithm}`,
+            }
+        }
+
+        // 1b. Enforce payload-binding on auth-required opcodes. A non-binding
+        // mode (e.g. SIGN_PUBKEY) proves key ownership only — its signature is
+        // a static, replayable bearer token that says nothing about the
+        // opcode/payload, letting a captured value authorise arbitrary
+        // messages for that identity. Reject before any further work.
+        if (
+            requirePayloadBinding &&
+            !this.PAYLOAD_BINDING_MODES.has(auth.signatureMode)
+        ) {
+            return {
+                valid: false,
+                error: `Signature mode ${auth.signatureMode} does not bind the payload; an auth-required opcode requires SIGN_FULL_PAYLOAD or SIGN_MESSAGE_ID_PAYLOAD_HASH`,
             }
         }
 
