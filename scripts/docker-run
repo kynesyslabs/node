@@ -7,13 +7,19 @@
 # users + existing CI scripts keep working unchanged.
 #
 # Usage:
-#   ./scripts/docker-run [--proxy] [--detach|-d] [docker-compose-args...]
+#   ./scripts/docker-run [--proxy] [--devnet] [--detach|-d] [docker-compose-args...]
 #
 # Flags handled here:
 #   --proxy      Merge docker-compose.proxy.yml + enable the `proxy`,
 #                `monitoring`, and `tlsnotary` compose profiles. Drops
 #                redundant host port mappings; only 80, 443, 443/udp,
 #                and 53551 (OmniProtocol) remain published.
+#   --devnet     Run a SECOND isolated stack alongside mainnet/testnet.
+#                Merges docker-compose.devnet.yml under the `demos-devnet`
+#                compose project: container names -> demos-*-devnet, network
+#                -> demos-network-devnet, volumes -> demos_*_devnet, and host
+#                ports offset +100 (RPC 53650, Omni 53651, signaling 3105,
+#                metrics 9190, ...). Composable with --clean/--rebuild/-d.
 #   --no-monitor Drop the `monitoring` profile from the proxy bundle.
 #   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
 #   --clean      Wipe DB + bundled-data volumes (pgdata, node_data) before
@@ -46,6 +52,9 @@
 #   ./scripts/docker-run --clean --proxy -d    # wipe + full prod stack
 #   ./scripts/docker-run --rebuild --clean -d  # rebuild image + wipe + up
 #   ./scripts/docker-run --rebuild -d          # rebuild image (no wipe), up
+#   ./scripts/docker-run --devnet -d           # devnet stack alongside mainnet
+#   ./scripts/docker-run --devnet --clean -d   # wipe devnet vols + fresh up
+#   ./scripts/docker-run --devnet down         # tear devnet down only
 
 set -euo pipefail
 
@@ -53,6 +62,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
 USE_PROXY=false
+USE_DEVNET=false
 WANT_MONITORING=true
 WANT_TLSN=true
 WIPE_VOLUMES=false
@@ -65,6 +75,14 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --proxy)
             USE_PROXY=true
+            shift
+            ;;
+        --devnet)
+            # Run a second, fully isolated stack alongside mainnet/testnet.
+            # Merges docker-compose.devnet.yml (remaps container names,
+            # network, volumes -> *_devnet, host ports +100) and runs under
+            # a distinct compose project name so nothing collides.
+            USE_DEVNET=true
             shift
             ;;
         --no-monitor|--no-monitoring)
@@ -100,7 +118,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,54p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -137,8 +155,34 @@ if [[ "$USE_PROXY" != "true" \
     EXTRA_PROFILES+=(--profile tlsnotary)
 fi
 
-COMPOSE_ARGS=(-f docker-compose.yml)
+# Devnet runs under its own compose project name so its containers,
+# default network, and project-scoped state are namespaced apart from the
+# mainnet/testnet stack — both can run on the same host simultaneously.
+# The devnet override file remaps the explicit `name:` volumes + host ports.
+COMPOSE_ARGS=()
+if [[ "$USE_DEVNET" == "true" ]]; then
+    if [[ ! -f docker-compose.devnet.yml ]]; then
+        echo "docker-compose.devnet.yml missing — cannot enable devnet mode." >&2
+        exit 1
+    fi
+    COMPOSE_ARGS+=(-p demos-devnet)
+fi
+COMPOSE_ARGS+=(-f docker-compose.yml)
+if [[ "$USE_DEVNET" == "true" ]]; then
+    COMPOSE_ARGS+=(-f docker-compose.devnet.yml)
+fi
 PROFILES=()
+
+# Volume name set the script manages directly (wipe + identity/peerlist sync).
+# Devnet remaps these to the *_devnet variants via the override's top-level
+# `name:` keys, so the helper steps below must target the matching names.
+if [[ "$USE_DEVNET" == "true" ]]; then
+    CLEAN_VOLUMES=(demos_pgdata_devnet demos_node_data_devnet)
+    STATE_VOL_NAME="demos_node_state_devnet"
+else
+    CLEAN_VOLUMES=(demos_pgdata demos_node_data)
+    STATE_VOL_NAME="demos_node_state"
+fi
 
 # Export build-time git provenance so `docker compose build` can bake it
 # into the image (consumed by src/utilities/nodeVersion.ts and surfaced
@@ -202,13 +246,13 @@ fi
 # name. Do NOT prefix with $(basename $REPO_ROOT) here; that targets a
 # parallel volume that compose never mounts.
 if [[ "$WIPE_VOLUMES" == "true" && "$SUBCOMMAND" == "up" ]]; then
-    echo "+ --clean: tearing down stack + wiping volumes (demos_pgdata, demos_node_data)"
+    echo "+ --clean: tearing down stack + wiping volumes (${CLEAN_VOLUMES[*]})"
     # Down with --volumes so anonymous volumes go too; named volumes
     # still need explicit removal below because compose only drops them
     # when `--volumes` is paired with full project teardown AND no other
     # containers reference them.
     docker compose "${COMPOSE_ARGS[@]}" ${PROFILES[@]+"${PROFILES[@]}"} ${EXTRA_PROFILES[@]+"${EXTRA_PROFILES[@]}"} down --volumes --remove-orphans || true
-    for vol in demos_pgdata demos_node_data; do
+    for vol in "${CLEAN_VOLUMES[@]}"; do
         if docker volume inspect "$vol" >/dev/null 2>&1; then
             echo "+ --clean: removing volume $vol"
             docker volume rm "$vol" || true
@@ -245,11 +289,11 @@ fi
 #     (0600, owned by uid 1000 to match the demos user inside the image).
 HOST_IDENTITY_FILE="${REPO_ROOT}/.demos_identity"
 if [[ "$SUBCOMMAND" == "up" && -f "$HOST_IDENTITY_FILE" ]]; then
-    # Volume name is hardcoded in docker-compose.yml via `name:` override
-    # (`demos_node_state`), NOT derived from the compose project name. Match
-    # the literal name here so the seeded mnemonic lands in the volume
-    # that compose actually mounts at /app/state.
-    STATE_VOL="demos_node_state"
+    # Volume name comes from docker-compose.yml's `name:` override
+    # (`demos_node_state`), or its devnet variant (`demos_node_state_devnet`)
+    # — NOT derived from the compose project name. Match the literal name so
+    # the seeded mnemonic lands in the volume compose mounts at /app/state.
+    STATE_VOL="$STATE_VOL_NAME"
     # Create the volume if it doesn't already exist so compose can mount it.
     docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
     echo "+ syncing .demos_identity -> $STATE_VOL"
@@ -282,8 +326,8 @@ fi
 #     user, so the node can read (and rewrite) it.
 HOST_PEERLIST_FILE="${REPO_ROOT}/demos_peerlist.json"
 if [[ "$SUBCOMMAND" == "up" && -f "$HOST_PEERLIST_FILE" ]]; then
-    # Same hardcoded volume name as docker-compose.yml's `name:` override.
-    STATE_VOL="demos_node_state"
+    # Same volume name as the identity sync above (mainnet or devnet variant).
+    STATE_VOL="$STATE_VOL_NAME"
     docker volume inspect "$STATE_VOL" >/dev/null 2>&1 || docker volume create "$STATE_VOL" >/dev/null
     echo "+ syncing demos_peerlist.json -> $STATE_VOL"
     docker run --rm \

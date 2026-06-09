@@ -5,6 +5,9 @@
 #   ./run --docker     -> docker compose launcher (scripts/docker-run)
 #   ./run --docker --proxy [...]
 #                      -> same, with Caddy + monitoring + tlsnotary profiles
+#   ./run --docker --devnet [...]
+#                      -> a second isolated stack alongside mainnet/testnet
+#                         (own project, network, volumes, +100 host ports)
 #
 # The --docker flag MUST be the first argument so we don't have to
 # scan an arbitrary number of bare-metal flags. Everything after

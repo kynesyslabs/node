@@ -1,0 +1,131 @@
+# =============================================================================
+# Compose override — devnet mode
+# =============================================================================
+# Runs a SECOND, fully isolated node stack alongside the normal mainnet/testnet
+# stack on the same host. Used together with docker-compose.yml (overlay, not a
+# replacement) plus a distinct compose project name so nothing collides.
+#
+# Everything that would otherwise clash with the mainnet stack is remapped:
+#   - container_name   demos-*         -> demos-*-devnet
+#   - network          demos-network   -> demos-network-devnet
+#   - named volumes    demos_*         -> demos_*_devnet
+#   - host ports       fixed +100 offset (53550 -> 53650, 53551 -> 53651, ...)
+#
+# Container-internal ports are NOT changed — only the host side of each mapping
+# is offset — so the node keeps listening on its usual ports inside its own
+# network namespace and the prometheus scrape target (node:9090) stays valid.
+#
+# Usage (preferred — the wrapper handles project name + identity/volume names):
+#   ./run --docker --devnet            # bring devnet up alongside mainnet
+#   ./run --docker --devnet --clean    # wipe devnet volumes, fresh up
+#   ./run --docker --devnet --rebuild  # rebuild image, devnet up
+#   ./run --docker --devnet down       # tear devnet down (mainnet untouched)
+#
+# Raw equivalent (if you bypass the wrapper, you MUST pass -p):
+#   docker compose -p demos-devnet \
+#       -f docker-compose.yml -f docker-compose.devnet.yml up -d
+#
+# Config: reuses the existing .env. The isolating bits below are hardcoded in
+# this override so they always win over .env regardless of operator settings.
+# Per-network secrets/genesis: clone the repo into a separate workspace dir
+# (e.g. ~/node-devnet/) and keep its own .env / .demos_identity there.
+#
+# Bare-metal deployments DO NOT use this file at all.
+# =============================================================================
+
+services:
+  postgres:
+    container_name: demos-postgres-devnet
+    networks: !override
+      - demos-network-devnet
+    # ports:
+    #   - "${PG_HOST_PORT:-5432}:5432"   # uncomment to access devnet DB from host
+
+  tlsnotary:
+    container_name: demos-tlsnotary-devnet
+    ports: !override
+      - "7147:7047"
+    networks: !override
+      - demos-network-devnet
+
+  node:
+    container_name: demos-node-devnet
+    networks: !override
+      - demos-network-devnet
+    # node_data/node_logs/node_state are isolated by the top-level `name:`
+    # remaps below (demos_*_devnet) — the parent's volume mounts are reused
+    # as-is, so no service-level volumes: restatement is needed here.
+    # Host ports offset by +100 so devnet binds different host ports than the
+    # mainnet stack. Both sides of each mapping differ: HOST:CONTAINER. The
+    # container side stays at the mainnet defaults; only the host side shifts.
+    ports: !override
+      - "53650:${RPC_PORT:-53550}"
+      - "53651:${OMNI_PORT:-53551}"
+      - "3105:${RPC_SIGNALING_PORT:-3005}"
+      - "9190:9090"
+
+  prometheus:
+    container_name: demos-prometheus-devnet
+    networks: !override
+      - demos-network-devnet
+    ports: !override
+      - "9191:9090"
+
+  grafana:
+    container_name: demos-grafana-devnet
+    networks: !override
+      - demos-network-devnet
+    ports: !override
+      - "3100:3000"
+
+  node-exporter:
+    container_name: demos-node-exporter-devnet
+    networks: !override
+      - demos-network-devnet
+    ports: !override
+      - "9200:9100"
+
+  neo4j:
+    container_name: demos-neo4j-devnet
+    networks: !override
+      - demos-network-devnet
+    ports: !override
+      - "7574:7474"
+      - "7787:7687"
+
+  caddy:
+    container_name: demos-caddy-devnet
+    networks: !override
+      - demos-network-devnet
+    ports: !override
+      - "8080:80"
+      - "8443:443"
+      - "8443:443/udp"
+
+networks:
+  demos-network-devnet:
+    name: demos-network-devnet
+    driver: bridge
+
+volumes:
+  # Distinct `name:` overrides so devnet volumes never alias the mainnet ones.
+  pgdata:
+    name: demos_pgdata_devnet
+  node_data:
+    name: demos_node_data_devnet
+  node_logs:
+    name: demos_node_logs_devnet
+  node_state:
+    name: demos_node_state_devnet
+  prometheus_data:
+    name: demos_prometheus_data_devnet
+  grafana_data:
+    name: demos_grafana_data_devnet
+  neo4j_data:
+    name: demos_neo4j_data_devnet
+  neo4j_logs:
+    name: demos_neo4j_logs_devnet
+  caddy_data:
+    name: demos_caddy_data_devnet
+  caddy_config:
+    name: demos_caddy_config_devnet
