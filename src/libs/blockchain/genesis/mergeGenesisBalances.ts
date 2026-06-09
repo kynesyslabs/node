@@ -106,8 +106,10 @@ function parseGenesisBalanceEntry(
  */
 function defaultEmptyAccountFields(pubkey: string) {
     const now = new Date()
+    // NOTE: no `assignedTxs` — that array was moved off gcr_main into the
+    // dedicated gcr_assigned_txs relation (MoveAssignedTxsToOwnTable). A
+    // freshly-merged genesis account simply has no assignments yet.
     return {
-        assignedTxs: [] as string[],
         identities: {
             xm: {},
             web2: {},
