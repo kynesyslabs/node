@@ -40,6 +40,7 @@ import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
 import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
+import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
@@ -351,6 +352,53 @@ export default class HandleGCR {
                 message: "No GCR edits to apply",
                 sideEffects: [],
                 appliedEditsCount: 0,
+            }
+        }
+
+        // AUDIT C1 (apply-side, defense in depth): re-derive the expected
+        // gcr_edits from the signed body and refuse to APPLY a native tx whose
+        // shipped edits don't match. The ingress guard (Mempool.receive) blocks
+        // forged edits at admission, but a node also applies edits from blocks
+        // it SYNCS (Sync.ts -> syncGCRTables -> applyTransactions), which never
+        // pass through local mempool admission. Without this, a malicious
+        // proposer's forged-edit tx, once in a block, is applied verbatim on
+        // sync. This is the consensus-critical boundary net.
+        //
+        // Gated:
+        //   - native txs only (others carry no balance edits to forge);
+        //   - not on simulate (pre-consensus dry run) or rollback (rollback
+        //     intentionally replays the stored edits in reverse);
+        //   - fork-gated on nonceEnforcement (active @0 on fresh chains) so
+        //     pre-fork apply is byte-identical for re-sync safety;
+        //   - skipped while gasFeeSeparation is ACTIVE: that fork prepends
+        //     node-computed fee edits the SDK regen cannot reproduce, so a
+        //     naive match would false-reject every tx. Binding under that fork
+        //     needs the fee edits factored into the regen — tracked separately.
+        if (
+            !simulate &&
+            !isRollback &&
+            tx.content.type === "native" &&
+            isForkActive(
+                "nonceEnforcement",
+                getSharedState.lastBlockNumber ?? 0,
+            ) &&
+            !isForkActive(
+                "gasFeeSeparation",
+                getSharedState.lastBlockNumber ?? 0,
+            )
+        ) {
+            const { match } = await verifyGcrEditsMatch(tx)
+            if (!match) {
+                log.error(
+                    `[applyTransaction] Refusing to apply tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,
+                )
+                return {
+                    success: false,
+                    entities,
+                    message: "GCREdit mismatch",
+                    sideEffects: [],
+                    appliedEditsCount: 0,
+                }
             }
         }
 
