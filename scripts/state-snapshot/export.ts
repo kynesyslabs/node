@@ -184,6 +184,32 @@ const SQL_IDENTITY = `SELECT json_build_object(
 WHERE NOT (provider = 'test' AND leaf_index = -1)
 ORDER BY commitment_hash`
 
+const SQL_VALIDATORS = `SELECT json_build_object(
+  'address', address,
+  'status', status,
+  'connection_url', connection_url,
+  'staked_amount', staked_amount,
+  'first_seen', first_seen,
+  'valid_at', valid_at,
+  'unstake_requested_at', unstake_requested_at,
+  'unstake_available_at', unstake_available_at
+) FROM validators ORDER BY address`
+
+const SQL_FORK_STATE = `SELECT json_build_object(
+  'fork_name', fork_name,
+  'applied', applied,
+  'applied_at_block', applied_at_block::text,
+  'applied_at', applied_at,
+  'pre_sum_dem', pre_sum_dem,
+  'post_sum_os', post_sum_os,
+  'gcr_v2_row_count', gcr_v2_row_count,
+  'legacy_row_count', legacy_row_count,
+  'validators_row_count', validators_row_count,
+  'capped_count', capped_count,
+  'total_value_lost_os', total_value_lost_os,
+  'malformed_validators_count', malformed_validators_count
+) FROM fork_state ORDER BY fork_name`
+
 const SQL_DROPPED_IDENTITY =
     "SELECT count(*) FROM identity_commitments WHERE provider = 'test' AND leaf_index = -1"
 const SQL_LATEST_BLOCK =
@@ -295,9 +321,24 @@ async function main(): Promise<void> {
     const storage = await exportTable(runner, "gcr_storageprogram.jsonl", SQL_STORAGE, "sizeBytes", outDir)
     console.log("Exporting identity_commitments...")
     const identity = await exportTable(runner, "identity_commitments.jsonl", SQL_IDENTITY, null, outDir)
+    console.log("Exporting validators...")
+    const validators = await exportTable(runner, "validators.jsonl", SQL_VALIDATORS, null, outDir)
+
+    // fork_state is tiny (one row per fork) and describes the snapshot itself,
+    // so it rides in the manifest rather than its own file. The restore path
+    // reads it to decide, per fork, whether to run the migration (pre-fork
+    // snapshot) or seed the marker and skip it (post-fork snapshot).
+    const forkStateRaw = (await psqlRaw(runner, SQL_FORK_STATE)).trim()
+    const forkState =
+        forkStateRaw.length > 0
+            ? forkStateRaw
+                  .split("\n")
+                  .filter(l => l.trim().length > 0)
+                  .map(l => JSON.parse(l))
+            : []
 
     const manifest = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         source: {
             host: hostname(),
             chain_block_height: Number.parseInt(blockHeightStr || "0", 10),
@@ -321,7 +362,12 @@ async function main(): Promise<void> {
                 sha256: identity.sha256,
                 rows: identity.rows,
             },
+            "validators.jsonl": {
+                sha256: validators.sha256,
+                rows: validators.rows,
+            },
         },
+        fork_state: forkState,
         transforms_applied: {
             nonces_reset_to_zero: true,
             assigned_txs_emptied: true,
@@ -339,7 +385,13 @@ async function main(): Promise<void> {
 
     console.log(green("\n✅ snapshot exported and verified"))
     console.log(
-        `   gcr_main=${gcrMain.rows} balance_sum=${gcrMain.balanceSum} storage=${storage.rows} size_bytes_sum=${storage.sizeBytesSum} identity=${identity.rows}`,
+        `   gcr_main=${gcrMain.rows} balance_sum=${gcrMain.balanceSum} storage=${storage.rows} size_bytes_sum=${storage.sizeBytesSum} identity=${identity.rows} validators=${validators.rows}`,
+    )
+    const appliedForks = forkState
+        .filter((f: { applied?: boolean }) => f.applied)
+        .map((f: { fork_name: string }) => f.fork_name)
+    console.log(
+        `   fork_state: ${forkState.length} row(s)${appliedForks.length ? ` (applied: ${appliedForks.join(", ")})` : ""}`,
     )
     console.log(
         `   source block ${manifest.source.chain_block_height} @ ${manifest.source.chain_block_hash.slice(0, 12)}... pg ${pgVersion}`,

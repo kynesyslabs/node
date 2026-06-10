@@ -415,6 +415,221 @@ describe("loadSnapshot — missing directory → available:false", () => {
     })
 })
 
+// =============================================================================
+// Tests: schemaVersion 2 (validators.jsonl + fork_state in manifest)
+// =============================================================================
+
+type ValidatorRow = {
+    address: string
+    status: string | null
+    connection_url: string | null
+    staked_amount: string
+    first_seen: number | null
+    valid_at: number | null
+    unstake_requested_at: number | null
+    unstake_available_at: number | null
+}
+
+function makeValidatorRow(overrides: Partial<ValidatorRow> = {}): ValidatorRow {
+    return {
+        address: "0xval1",
+        status: "2",
+        connection_url: "http://localhost",
+        staked_amount: "1000000000",
+        first_seen: 0,
+        valid_at: 0,
+        unstake_requested_at: null,
+        unstake_available_at: null,
+        ...overrides,
+    }
+}
+
+type V2Options = {
+    validators?: ValidatorRow[]
+    forkState?: unknown[]
+    omitValidatorsEntry?: boolean
+    omitForkState?: boolean
+    tamperValidators?: boolean
+}
+
+async function writeV2Fixture(dir: string, opts: V2Options = {}): Promise<void> {
+    const gcr = [makeGcrMainRow({ pubkey: "0xv2", balance: "100" })]
+    const storage = [makeStorageRow({ sizeBytes: 10 })]
+    const validators = opts.validators ?? [makeValidatorRow()]
+
+    const gcrContent = gcr.map(r => JSON.stringify(r)).join("\n") + "\n"
+    const storageContent = storage.map(r => JSON.stringify(r)).join("\n") + "\n"
+    const identityContent = ""
+    const validatorsContent =
+        validators.length > 0
+            ? validators.map(r => JSON.stringify(r)).join("\n") + "\n"
+            : ""
+
+    const forkState = opts.omitForkState
+        ? undefined
+        : (opts.forkState ?? [
+              {
+                  fork_name: "osDenomination",
+                  applied: true,
+                  applied_at_block: "0",
+                  applied_at: null,
+                  pre_sum_dem: "100",
+                  post_sum_os: "100000000000",
+                  gcr_v2_row_count: 1,
+                  legacy_row_count: 0,
+                  validators_row_count: 1,
+                  capped_count: 0,
+                  total_value_lost_os: "0",
+                  malformed_validators_count: 0,
+              },
+          ])
+
+    const files: Record<string, unknown> = {
+        "gcr_main.jsonl": {
+            sha256: sha256(gcrContent),
+            rows: gcr.length,
+            balance_sum: gcr
+                .reduce((a, r) => a + BigInt(r.balance), 0n)
+                .toString(),
+        },
+        "gcr_storageprogram.jsonl": {
+            sha256: sha256(storageContent),
+            rows: storage.length,
+            size_bytes_sum: storage.reduce((a, r) => a + r.sizeBytes, 0),
+        },
+        "identity_commitments.jsonl": {
+            sha256: sha256(identityContent),
+            rows: 0,
+        },
+    }
+    if (!opts.omitValidatorsEntry) {
+        files["validators.jsonl"] = {
+            sha256: sha256(validatorsContent),
+            rows: validators.length,
+        }
+    }
+
+    const manifest = {
+        schemaVersion: 2,
+        source: {
+            host: "test-host",
+            chain_block_height: 0,
+            chain_block_hash: "0x00",
+            node_version: "test",
+            pg_version: "16.0",
+            dumped_at: "2026-01-01T00:00:00Z",
+        },
+        files,
+        fork_state: forkState,
+        transforms_applied: {
+            nonces_reset_to_zero: true,
+            assigned_txs_emptied: true,
+            test_identity_commitments_dropped: 0,
+        },
+    }
+
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+        join(dir, "manifest.json"),
+        JSON.stringify(manifest, null, 2) + "\n",
+    )
+    await writeFile(join(dir, "gcr_main.jsonl"), gcrContent)
+    await writeFile(join(dir, "gcr_storageprogram.jsonl"), storageContent)
+    await writeFile(join(dir, "identity_commitments.jsonl"), identityContent)
+    await writeFile(
+        join(dir, "validators.jsonl"),
+        opts.tamperValidators ? validatorsContent + "X" : validatorsContent,
+    )
+}
+
+describe("verifySnapshot — schemaVersion 2", () => {
+    it("valid v2 snapshot verifies and exposes validators + fork_state", async () => {
+        await writeV2Fixture(snapshotDir)
+        const manifest = await verifySnapshot(snapshotDir)
+        expect(manifest.schemaVersion).toBe(2)
+        expect(manifest.files["validators.jsonl"]?.rows).toBe(1)
+        expect(manifest.fork_state).toHaveLength(1)
+        expect(manifest.fork_state?.[0].fork_name).toBe("osDenomination")
+        expect(manifest.fork_state?.[0].applied).toBe(true)
+    })
+
+    it("v2 missing validators.jsonl entry → throws", async () => {
+        await writeV2Fixture(snapshotDir, { omitValidatorsEntry: true })
+        await expect(verifySnapshot(snapshotDir)).rejects.toThrow(
+            /validators\.jsonl"\] missing/,
+        )
+    })
+
+    it("v2 missing fork_state → throws", async () => {
+        await writeV2Fixture(snapshotDir, { omitForkState: true })
+        await expect(verifySnapshot(snapshotDir)).rejects.toThrow(
+            /fork_state must be an array/,
+        )
+    })
+
+    it("v2 tampered validators.jsonl → sha256 mismatch", async () => {
+        await writeV2Fixture(snapshotDir, { tamperValidators: true })
+        await expect(verifySnapshot(snapshotDir)).rejects.toThrow(
+            /validators\.jsonl: sha256 mismatch/,
+        )
+    })
+
+    it("v2 fork_state entry missing required fields → throws", async () => {
+        await writeV2Fixture(snapshotDir, {
+            forkState: [{ applied: true }],
+        })
+        await expect(verifySnapshot(snapshotDir)).rejects.toThrow(
+            /fork_state entries require string fork_name/,
+        )
+    })
+})
+
+describe("loadSnapshot — validators stream", () => {
+    async function withSnapshotDir<T>(fn: () => Promise<T>): Promise<T> {
+        const prevEnv = process.env.DEMOS_SNAPSHOT_DIR
+        try {
+            process.env.DEMOS_SNAPSHOT_DIR = snapshotDir
+            return await fn()
+        } finally {
+            if (prevEnv === undefined) delete process.env.DEMOS_SNAPSHOT_DIR
+            else process.env.DEMOS_SNAPSHOT_DIR = prevEnv
+        }
+    }
+
+    it("v2 fixture streams validator rows", async () => {
+        await writeV2Fixture(snapshotDir, {
+            validators: [
+                makeValidatorRow({ address: "0xvalA" }),
+                makeValidatorRow({ address: "0xvalB", status: null }),
+            ],
+        })
+        await withSnapshotDir(async () => {
+            const loader = await loadSnapshot()
+            expect(loader.available).toBe(true)
+            if (!loader.available) return
+            const collected: string[] = []
+            for await (const v of loader.streamValidators()) {
+                collected.push(v.address)
+            }
+            expect(collected).toEqual(["0xvalA", "0xvalB"])
+        })
+    })
+
+    it("v1 fixture (no validators.jsonl) → streamValidators yields nothing", async () => {
+        await writeFixture(snapshotDir, { gcrMainRows: [] })
+        await withSnapshotDir(async () => {
+            const loader = await loadSnapshot()
+            expect(loader.available).toBe(true)
+            if (!loader.available) return
+            const collected: string[] = []
+            for await (const v of loader.streamValidators()) {
+                collected.push(v.address)
+            }
+            expect(collected).toHaveLength(0)
+        })
+    })
+})
+
 describe("loadSnapshot — valid fixture → available:true with streaming", () => {
     it("streams gcr_main rows correctly", async () => {
         const rows = [

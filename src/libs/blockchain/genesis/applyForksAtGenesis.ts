@@ -24,8 +24,15 @@
  */
 
 import type { EntityManager } from "typeorm"
-import { runOsDenominationMigration } from "src/forks/migrations/osDenomination"
-import { runGasFeeSeparationMigration } from "src/forks/migrations/gasFeeSeparation"
+import {
+    runOsDenominationMigration,
+    FORK_NAME as OS_FORK_NAME,
+} from "src/forks/migrations/osDenomination"
+import {
+    runGasFeeSeparationMigration,
+    FORK_NAME as GAS_FORK_NAME,
+} from "src/forks/migrations/gasFeeSeparation"
+import type { ForkStateEntry } from "src/libs/blockchain/genesis/verifySnapshot"
 import log from "src/utilities/logger"
 
 export interface GenesisForkConfig {
@@ -56,10 +63,17 @@ export interface ApplyForksReport {
  *   inside an active TypeORM transaction.
  * @param forks The `forks` block from `genesisData` (may be undefined/null
  *   for legacy dev-chain genesis files that carry no fork config).
+ * @param snapshotForkState Optional `fork_state` rows carried in the snapshot
+ *   manifest (schemaVersion 2). When a fork is marked `applied` there, the
+ *   snapshot data is ALREADY in that fork's target units — so we seed the
+ *   fork_state marker row and SKIP the migration rather than re-applying it
+ *   (which, for osDenomination, would multiply balances by 1e9 a second
+ *   time). Absent/false → run the migration as before (pre-fork snapshot).
  */
 export async function applyForksAtGenesis(
     em: EntityManager,
     forks: GenesisForkConfig | undefined,
+    snapshotForkState?: ForkStateEntry[],
 ): Promise<ApplyForksReport> {
     const t0 = Date.now()
 
@@ -78,28 +92,44 @@ export async function applyForksAtGenesis(
     let gasFeeSeparationApplied = false
 
     // --- 1. osDenomination ---------------------------------------------------
-    // Pre-apply unconditionally when the forks block is present in genesis.
-    // The snapshot ships pre-fork (DEM) values; the migration's job is to
-    // upgrade them in-place. activationHeight in genesis.json is left at 0
-    // (= "applied at genesis"); the block-N hook in chainBlocks.ts is
-    // already a no-op for height<=0 AND the migration's own idempotency
-    // guard prevents double-application either way.
+    // Pre-apply when the forks block is present in genesis. A pre-fork (DEM)
+    // snapshot has the migration RUN here to upgrade balances in-place. A
+    // post-fork (OS) snapshot already carries OS values + an `applied`
+    // fork_state row in its manifest — for that case we seed the marker and
+    // SKIP the migration so balances are not multiplied by 1e9 a second time.
     if (forks.osDenomination) {
-        log.info("[GENESIS][FORKS] pre-applying osDenomination at block 0")
-        await runOsDenominationMigration(em, 0)
+        const pre = findForkState(snapshotForkState, OS_FORK_NAME)
+        if (pre?.applied) {
+            log.info(
+                "[GENESIS][FORKS] osDenomination already applied in snapshot; seeding fork_state, skipping migration",
+            )
+            await seedForkStateRow(em, pre)
+        } else {
+            log.info("[GENESIS][FORKS] pre-applying osDenomination at block 0")
+            await runOsDenominationMigration(em, 0)
+        }
         osDenominationApplied = true
     }
 
     // --- 2. gasFeeSeparation -------------------------------------------------
     // gasFeeSeparation creates burn + treasury accounts in OS units.
     // Must run after osDenomination so the documented ordering invariant holds.
+    // Same pre/post-fork handling as osDenomination.
     if (forks.gasFeeSeparation) {
-        log.info("[GENESIS][FORKS] pre-applying gasFeeSeparation at block 0")
-        await runGasFeeSeparationMigration(
-            em,
-            0,
-            forks.gasFeeSeparation.treasuryAddress,
-        )
+        const pre = findForkState(snapshotForkState, GAS_FORK_NAME)
+        if (pre?.applied) {
+            log.info(
+                "[GENESIS][FORKS] gasFeeSeparation already applied in snapshot; seeding fork_state, skipping migration",
+            )
+            await seedForkStateRow(em, pre)
+        } else {
+            log.info("[GENESIS][FORKS] pre-applying gasFeeSeparation at block 0")
+            await runGasFeeSeparationMigration(
+                em,
+                0,
+                forks.gasFeeSeparation.treasuryAddress,
+            )
+        }
         gasFeeSeparationApplied = true
     }
 
@@ -111,4 +141,69 @@ export async function applyForksAtGenesis(
     )
 
     return { osDenominationApplied, gasFeeSeparationApplied, elapsed_ms }
+}
+
+function findForkState(
+    forkState: ForkStateEntry[] | undefined,
+    forkName: string,
+): ForkStateEntry | undefined {
+    if (!Array.isArray(forkState)) return undefined
+    return forkState.find(f => f.fork_name === forkName)
+}
+
+/**
+ * Render a positional parameter placeholder for the EntityManager's SQL
+ * dialect ($1.. for Postgres, ? for sqlite). Mirrors the helper in the
+ * migration modules so this code is portable to the sqlite test harness.
+ */
+function placeholder(em: EntityManager, oneBasedIndex: number): string {
+    const type = em.connection.options.type
+    if (type === "postgres" || type === "cockroachdb") return `$${oneBasedIndex}`
+    return "?"
+}
+
+/**
+ * Seed a `fork_state` row verbatim from a snapshot manifest entry. Used when a
+ * fork is already applied in the snapshot data: we record the durable marker
+ * (so {@link isOsDenominationMigrationApplied}-style guards see it) WITHOUT
+ * re-running the migration. Raw parameterized SQL keeps it portable across
+ * Postgres and the sqlite test harness; `applied` is bound as a boolean on
+ * Postgres and 0/1 on sqlite.
+ */
+async function seedForkStateRow(
+    em: EntityManager,
+    entry: ForkStateEntry,
+): Promise<void> {
+    const isPg =
+        em.connection.options.type === "postgres" ||
+        em.connection.options.type === "cockroachdb"
+    const appliedValue: boolean | number = isPg
+        ? !!entry.applied
+        : entry.applied
+          ? 1
+          : 0
+    const ph = (i: number) => placeholder(em, i)
+    await em.query(
+        `INSERT INTO fork_state (
+            fork_name, applied, applied_at_block, applied_at,
+            pre_sum_dem, post_sum_os,
+            gcr_v2_row_count, legacy_row_count, validators_row_count,
+            capped_count, total_value_lost_os,
+            malformed_validators_count
+        ) VALUES (${ph(1)}, ${ph(2)}, ${ph(3)}, ${ph(4)}, ${ph(5)}, ${ph(6)}, ${ph(7)}, ${ph(8)}, ${ph(9)}, ${ph(10)}, ${ph(11)}, ${ph(12)})`,
+        [
+            entry.fork_name,
+            appliedValue,
+            entry.applied_at_block ?? null,
+            entry.applied_at ?? null,
+            entry.pre_sum_dem ?? null,
+            entry.post_sum_os ?? null,
+            entry.gcr_v2_row_count ?? null,
+            entry.legacy_row_count ?? null,
+            entry.validators_row_count ?? null,
+            entry.capped_count ?? null,
+            entry.total_value_lost_os ?? null,
+            entry.malformed_validators_count ?? null,
+        ],
+    )
 }

@@ -149,12 +149,18 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
         // leaves the DB empty (otherwise a crash mid-restore would yield
         // corrupted half-restored state that the next boot's preflight
         // would refuse to retry).
+        const snapshotHasValidators =
+            snapshot.manifest.files["validators.jsonl"] !== undefined
         await dataSource.transaction(async em => {
             await restoreSnapshot(em, snapshot)
-            // Genesis-baked validators: seed from data/genesis.json inside
-            // the same transaction so a partial restore never ships without
-            // the founding validator set (and vice-versa).
+            // Validator set precedence: the snapshot wins. A schemaVersion 2
+            // snapshot carries validators.jsonl (restored above by
+            // restoreSnapshot), so we DON'T also seed from data/genesis.json.
+            // Only when the snapshot has no validators do we fall back to the
+            // genesis-baked list, inside the same transaction so a partial
+            // restore never ships without the founding validator set.
             if (
+                !snapshotHasValidators &&
                 Array.isArray(genesisData.validators) &&
                 (genesisData.validators as unknown[]).length > 0
             ) {
@@ -176,7 +182,14 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
             // Pre-apply forks deterministically at genesis. Migration output is
             // a pure function of input state — no consensus block-1 hook needed.
             // Pristine boot is fully post-fork; solo nodes don't sit at genesis.
-            await applyForksAtGenesis(em, genesisData.forks)
+            // The manifest's fork_state tells us which forks are ALREADY baked
+            // into the snapshot data (post-fork snapshot) so we seed the marker
+            // and skip re-applying them; absent → run as before (pre-fork).
+            await applyForksAtGenesis(
+                em,
+                genesisData.forks,
+                snapshot.manifest.fork_state,
+            )
         })
     } else {
         log.info(

@@ -428,4 +428,94 @@ describe("applyForksAtGenesis", () => {
         expect(typeof report.elapsed_ms).toBe("number")
         expect(report.elapsed_ms).toBeGreaterThanOrEqual(0)
     })
+
+    // -------------------------------------------------------------------------
+    // Test 8: post-fork snapshot — osDenomination already applied in manifest
+    //         fork_state → migration SKIPPED (balances unchanged), marker seeded
+    // -------------------------------------------------------------------------
+
+    it("snapshot fork_state applied → osDenomination skipped, balances NOT multiplied, marker seeded", async () => {
+        const report = await ds.transaction(async em => {
+            await seedState(em)
+            const forksConfig: GenesisForkConfig = {
+                osDenomination: { activationHeight: null },
+            } as GenesisForkConfig
+            // Manifest says the snapshot already carries OS-denominated values.
+            return applyForksAtGenesis(em, forksConfig, [
+                {
+                    fork_name: OS_FORK_NAME,
+                    applied: true,
+                    applied_at_block: "0",
+                    applied_at: null,
+                    pre_sum_dem: "4500000000",
+                    post_sum_os: "4500000000000000000",
+                    gcr_v2_row_count: GCR_ROWS.length,
+                    legacy_row_count: 0,
+                    validators_row_count: VALIDATOR_ROWS.length,
+                    capped_count: 0,
+                    total_value_lost_os: "0",
+                    malformed_validators_count: 0,
+                },
+            ])
+        })
+
+        expect(report.osDenominationApplied).toBe(true)
+
+        // Balances must be UNCHANGED (no second ×1e9 multiplication).
+        const gcrRows: Array<{ pubkey: string; balance: string }> =
+            await ds.query(
+                "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
+                GCR_ROWS.map(r => r.pubkey),
+            )
+        const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
+        for (const seed of GCR_ROWS) {
+            expect(balMap.get(seed.pubkey)).toBe(seed.balance)
+        }
+
+        // Validator stakes likewise unchanged.
+        const valRows: Array<{ address: string; staked_amount: string }> =
+            await ds.query("SELECT address, staked_amount FROM validators")
+        for (const seed of VALIDATOR_ROWS) {
+            const row = valRows.find(v => v.address === seed.address)
+            expect(BigInt(row!.staked_amount)).toBe(seed.staked_amount)
+        }
+
+        // fork_state marker seeded verbatim from the manifest.
+        const forkRows: Array<{
+            fork_name: string
+            applied: number
+            post_sum_os: string
+        }> = await ds.query(
+            "SELECT fork_name, applied, post_sum_os FROM fork_state WHERE fork_name = ?",
+            [OS_FORK_NAME],
+        )
+        expect(forkRows).toHaveLength(1)
+        expect(forkRows[0].applied).toBe(1)
+        expect(forkRows[0].post_sum_os).toBe("4500000000000000000")
+    })
+
+    // -------------------------------------------------------------------------
+    // Test 9: pre-fork snapshot — fork_state present but applied=false → RUN
+    // -------------------------------------------------------------------------
+
+    it("snapshot fork_state applied=false → migration still runs (balances × 1e9)", async () => {
+        await ds.transaction(async em => {
+            await seedState(em)
+            return applyForksAtGenesis(
+                em,
+                { osDenomination: { activationHeight: null } } as GenesisForkConfig,
+                [{ fork_name: OS_FORK_NAME, applied: false }],
+            )
+        })
+
+        const gcrRows: Array<{ pubkey: string; balance: string }> =
+            await ds.query(
+                "SELECT pubkey, balance FROM gcr_main WHERE pubkey IN (?, ?, ?, ?, ?) ORDER BY pubkey",
+                GCR_ROWS.map(r => r.pubkey),
+            )
+        const balMap = new Map(gcrRows.map(r => [r.pubkey, BigInt(r.balance)]))
+        for (const seed of GCR_ROWS) {
+            expect(balMap.get(seed.pubkey)).toBe(seed.balance * 1_000_000_000n)
+        }
+    })
 })

@@ -26,12 +26,14 @@ import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
+import { Validators } from "src/model/entities/Validators"
 
 import type {
     SnapshotLoaderAvailable,
     GCRMainSeed,
     GCRStorageProgramSeed,
     IdentityCommitmentSeed,
+    ValidatorSeed,
 } from "src/libs/blockchain/genesis/loadSnapshot"
 
 // Batch sizes chosen by data-shape. gcr_main rows are skinny; storage
@@ -40,6 +42,7 @@ import type {
 const GCR_MAIN_BATCH = 500
 const STORAGE_BATCH = 100
 const IDENTITY_BATCH = 100
+const VALIDATORS_BATCH = 200
 
 /**
  * Pre-flight check: every target table must be empty AND the chain must
@@ -105,16 +108,16 @@ async function preflightEmpty(em: EntityManager): Promise<void> {
         if (isPartialGenesis) {
             throw new Error(
                 `[GENESIS][SNAPSHOT] partial genesis detected: gcr_main has ${gcrMainCount} row(s) but blocks is empty. ` +
-                    `A previous boot's snapshot restore committed but block-0 insertion did not complete. ` +
-                    `Wipe with './run -b true' or remove data_* folders, then retry.`,
+                    "A previous boot's snapshot restore committed but block-0 insertion did not complete. " +
+                    "Wipe with './run -b true' or remove data_* folders, then retry.",
             )
         }
 
         throw new Error(
-            `[GENESIS][SNAPSHOT] snapshot restore requires empty database; ` +
+            "[GENESIS][SNAPSHOT] snapshot restore requires empty database; " +
                 `found rows in: ${detail}. ` +
-                `If the chain is already initialised, no action is needed. ` +
-                `To wipe and re-restore, use './run -b true' or remove data_* folders, then retry.`,
+                "If the chain is already initialised, no action is needed. " +
+                "To wipe and re-restore, use './run -b true' or remove data_* folders, then retry.",
         )
     }
 }
@@ -247,6 +250,7 @@ export type RestoreReport = {
     gcrMain: number
     gcrStorageProgram: number
     identityCommitments: number
+    validators: number
     elapsed_ms: number
 }
 
@@ -330,15 +334,48 @@ export async function restoreSnapshot(
         )
     }
 
+    // validators: only present in schemaVersion 2 snapshots. When the manifest
+    // carries a validators.jsonl entry, the snapshot owns the validator set
+    // (chainGenesis skips the genesis.json seeding path in that case). The
+    // staked amounts ride the same pre/post-OS contract as balances: if the
+    // snapshot is pre-fork, applyForksAtGenesis multiplies them ×1e9.
+    const validatorsEntry = manifest.files["validators.jsonl"]
+    let validatorsInserted = 0
+    if (validatorsEntry) {
+        const expectedValidators = validatorsEntry.rows
+        validatorsInserted = await bulkInsertStream<ValidatorSeed>(
+            em,
+            Validators as unknown as { new (): ValidatorSeed },
+            loader.streamValidators(),
+            VALIDATORS_BATCH,
+            n => {
+                log.info(
+                    `[GENESIS][SNAPSHOT] validators: inserted ${n}/${expectedValidators}`,
+                )
+            },
+        )
+        if (validatorsInserted !== expectedValidators) {
+            throw new Error(
+                `[GENESIS][SNAPSHOT] validators row mismatch: inserted ${validatorsInserted}, manifest expects ${expectedValidators}`,
+            )
+        }
+        if (validatorsInserted === 0) {
+            log.info(
+                `[GENESIS][SNAPSHOT] validators: inserted 0/${expectedValidators}`,
+            )
+        }
+    }
+
     const elapsed_ms = Date.now() - t0
     log.info(
-        `[GENESIS][SNAPSHOT] restore complete: gcr_main=${gcrMainInserted}, gcr_storageprogram=${storageInserted}, identity_commitments=${identityInserted} elapsed=${elapsed_ms}ms`,
+        `[GENESIS][SNAPSHOT] restore complete: gcr_main=${gcrMainInserted}, gcr_storageprogram=${storageInserted}, identity_commitments=${identityInserted}, validators=${validatorsInserted} elapsed=${elapsed_ms}ms`,
     )
 
     return {
         gcrMain: gcrMainInserted,
         gcrStorageProgram: storageInserted,
         identityCommitments: identityInserted,
+        validators: validatorsInserted,
         elapsed_ms,
     }
 }

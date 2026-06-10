@@ -23,6 +23,30 @@ export type SnapshotFileEntry = {
     size_bytes_sum?: number
 }
 
+/**
+ * One `fork_state` row carried verbatim in the manifest (schemaVersion 2+).
+ *
+ * Lets a snapshot self-describe which migrations are already baked into its
+ * data, so the restore path can decide — per fork — whether to RUN the
+ * migration (pre-fork snapshot) or just SEED the marker row and skip it
+ * (post-fork snapshot). `fork_name` + `applied` are required; the remaining
+ * forensic fields are dumped as-is from the source DB.
+ */
+export type ForkStateEntry = {
+    fork_name: string
+    applied: boolean
+    applied_at_block?: number | string | null
+    applied_at?: string | null
+    pre_sum_dem?: string | null
+    post_sum_os?: string | null
+    gcr_v2_row_count?: number | null
+    legacy_row_count?: number | null
+    validators_row_count?: number | null
+    capped_count?: number | null
+    total_value_lost_os?: string | null
+    malformed_validators_count?: number | null
+}
+
 export type SnapshotManifest = {
     schemaVersion: number
     source: {
@@ -37,7 +61,11 @@ export type SnapshotManifest = {
         "gcr_main.jsonl": SnapshotFileEntry & { balance_sum: string }
         "gcr_storageprogram.jsonl": SnapshotFileEntry & { size_bytes_sum: number }
         "identity_commitments.jsonl": SnapshotFileEntry
+        // schemaVersion 2+: validator set carried in the snapshot.
+        "validators.jsonl"?: SnapshotFileEntry
     }
+    // schemaVersion 2+: fork_state rows from the source DB.
+    fork_state?: ForkStateEntry[]
     transforms_applied: {
         nonces_reset_to_zero: boolean
         assigned_txs_emptied: boolean
@@ -52,9 +80,10 @@ function isRecord(x: unknown): x is Record<string, unknown> {
 function parseManifest(raw: string): SnapshotManifest {
     const parsed: unknown = JSON.parse(raw)
     if (!isRecord(parsed)) throw new Error("manifest is not an object")
-    if (parsed.schemaVersion !== 1) {
+    if (parsed.schemaVersion !== 1 && parsed.schemaVersion !== 2) {
         throw new Error(`unsupported schemaVersion: ${String(parsed.schemaVersion)}`)
     }
+    const isV2 = parsed.schemaVersion === 2
     if (!isRecord(parsed.files)) throw new Error("manifest.files missing")
     if (!isRecord(parsed.source)) throw new Error("manifest.source missing")
     if (!isRecord(parsed.transforms_applied)) {
@@ -78,7 +107,7 @@ function parseManifest(raw: string): SnapshotManifest {
         if (key === "gcr_main.jsonl") {
             if (typeof entry.balance_sum !== "string" || entry.balance_sum.length === 0) {
                 throw new Error(
-                    `manifest.files["gcr_main.jsonl"].balance_sum missing or not a string`,
+                    "manifest.files[\"gcr_main.jsonl\"].balance_sum missing or not a string",
                 )
             }
         }
@@ -88,11 +117,57 @@ function parseManifest(raw: string): SnapshotManifest {
                 !Number.isSafeInteger(entry.size_bytes_sum)
             ) {
                 throw new Error(
-                    `manifest.files["gcr_storageprogram.jsonl"].size_bytes_sum missing or not a safe integer`,
+                    "manifest.files[\"gcr_storageprogram.jsonl\"].size_bytes_sum missing or not a safe integer",
                 )
             }
         }
     }
+
+    // schemaVersion 2 additions. The validators.jsonl entry + fork_state are
+    // REQUIRED for v2 and OPTIONAL (ignored) for v1, so an existing v1
+    // snapshot keeps loading unchanged while a v2 snapshot is fully validated.
+    const validatorsEntry = (parsed.files as Record<string, unknown>)[
+        "validators.jsonl"
+    ]
+    if (isV2 && !isRecord(validatorsEntry)) {
+        throw new Error(
+            "manifest.files[\"validators.jsonl\"] missing (schemaVersion 2)",
+        )
+    }
+    if (validatorsEntry !== undefined) {
+        if (
+            !isRecord(validatorsEntry) ||
+            typeof validatorsEntry.sha256 !== "string" ||
+            typeof validatorsEntry.rows !== "number"
+        ) {
+            throw new Error("manifest.files[\"validators.jsonl\"] malformed")
+        }
+    }
+
+    if (isV2) {
+        if (!Array.isArray(parsed.fork_state)) {
+            throw new Error(
+                "manifest.fork_state must be an array (schemaVersion 2)",
+            )
+        }
+        for (const fs of parsed.fork_state) {
+            if (
+                !isRecord(fs) ||
+                typeof fs.fork_name !== "string" ||
+                typeof fs.applied !== "boolean"
+            ) {
+                throw new Error(
+                    "manifest.fork_state entries require string fork_name and boolean applied",
+                )
+            }
+        }
+    } else if (
+        parsed.fork_state !== undefined &&
+        !Array.isArray(parsed.fork_state)
+    ) {
+        throw new Error("manifest.fork_state must be an array when present")
+    }
+
     return parsed as unknown as SnapshotManifest
 }
 
@@ -323,6 +398,29 @@ export async function verifySnapshot(
         throw new Error(
             `identity_commitments.jsonl: row count mismatch (got ${identityStats.rows}, expected ${identityExpected.rows})`,
         )
+    }
+
+    // validators: only present in schemaVersion 2 snapshots. Gate on the
+    // manifest entry so v1 snapshots (no validators.jsonl) skip this check.
+    const validatorsExpected = manifest.files["validators.jsonl"]
+    if (validatorsExpected) {
+        const validatorsPath = resolve(snapshotDir, "validators.jsonl")
+        try {
+            await stat(validatorsPath)
+        } catch {
+            throw new Error(`snapshot file missing: ${validatorsPath}`)
+        }
+        const validatorsStats = await readFileSinglePass(validatorsPath)
+        if (validatorsStats.sha256 !== validatorsExpected.sha256) {
+            throw new Error(
+                `validators.jsonl: sha256 mismatch (got ${validatorsStats.sha256}, expected ${validatorsExpected.sha256})`,
+            )
+        }
+        if (validatorsStats.rows !== validatorsExpected.rows) {
+            throw new Error(
+                `validators.jsonl: row count mismatch (got ${validatorsStats.rows}, expected ${validatorsExpected.rows})`,
+            )
+        }
     }
 
     return manifest

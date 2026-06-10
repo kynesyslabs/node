@@ -121,6 +121,27 @@ export type IdentityCommitmentSeed = {
     createdAt: Date
 }
 
+/**
+ * One validators row, normalized for insertion into the Validators entity.
+ *
+ * The `Validators` entity uses snake_case property names that match its
+ * columns, so the JSONL keys, the seed keys, and the column names all line
+ * up — no translation needed (unlike identity_commitments). `staked_amount`
+ * stays a string (the column is text bigint-as-string).
+ *
+ * Only present in schemaVersion 2 snapshots.
+ */
+export type ValidatorSeed = {
+    address: string
+    status: string | null
+    connection_url: string | null
+    staked_amount: string
+    first_seen: number | null
+    valid_at: number | null
+    unstake_requested_at: number | null
+    unstake_available_at: number | null
+}
+
 // ----------------------------------------------------------------------------
 // Loader public API
 // ----------------------------------------------------------------------------
@@ -134,6 +155,8 @@ export type SnapshotLoaderAvailable = {
     streamGcrMain: () => AsyncIterable<GCRMainSeed>
     streamGcrStorageProgram: () => AsyncIterable<GCRStorageProgramSeed>
     streamIdentityCommitments: () => AsyncIterable<IdentityCommitmentSeed>
+    // Yields nothing when the snapshot carries no validators.jsonl (v1).
+    streamValidators: () => AsyncIterable<ValidatorSeed>
     getSnapshotManifest: () => SnapshotManifest
 }
 
@@ -179,6 +202,15 @@ function requireInt(obj: Record<string, unknown>, key: string): number {
     const v = obj[key]
     if (typeof v !== "number" || !Number.isSafeInteger(v)) {
         throw new Error(`field ${key} must be safe integer, got ${typeof v}`)
+    }
+    return v
+}
+
+function optionalInt(obj: Record<string, unknown>, key: string): number | null {
+    const v = obj[key]
+    if (v === null || v === undefined) return null
+    if (typeof v !== "number" || !Number.isSafeInteger(v)) {
+        throw new Error(`field ${key} must be safe integer|null, got ${typeof v}`)
     }
     return v
 }
@@ -348,6 +380,23 @@ function parseIdentityCommitmentRow(
     }
 }
 
+function parseValidatorRow(line: string, lineNo: number): ValidatorSeed {
+    const obj: unknown = JSON.parse(line)
+    if (!isRecord(obj)) {
+        throw new Error(`validators row ${lineNo}: not an object`)
+    }
+    return {
+        address: requireString(obj, "address"),
+        status: optionalString(obj, "status"),
+        connection_url: optionalString(obj, "connection_url"),
+        staked_amount: requireString(obj, "staked_amount"),
+        first_seen: optionalInt(obj, "first_seen"),
+        valid_at: optionalInt(obj, "valid_at"),
+        unstake_requested_at: optionalInt(obj, "unstake_requested_at"),
+        unstake_available_at: optionalInt(obj, "unstake_available_at"),
+    }
+}
+
 async function* streamLines(path: string): AsyncIterable<{
     line: string
     lineNo: number
@@ -409,6 +458,10 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
     const gcrMainPath = resolve(snapshotDir, "gcr_main.jsonl")
     const storagePath = resolve(snapshotDir, "gcr_storageprogram.jsonl")
     const identityPath = resolve(snapshotDir, "identity_commitments.jsonl")
+    const validatorsPath = resolve(snapshotDir, "validators.jsonl")
+    // validators.jsonl only exists in schemaVersion 2 snapshots; gate on the
+    // manifest entry (verifySnapshot has already confirmed the file if listed).
+    const hasValidators = manifest.files["validators.jsonl"] !== undefined
 
     async function* streamGcrMain(): AsyncIterable<GCRMainSeed> {
         for await (const { line, lineNo } of streamLines(gcrMainPath)) {
@@ -428,6 +481,13 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
         }
     }
 
+    async function* streamValidators(): AsyncIterable<ValidatorSeed> {
+        if (!hasValidators) return
+        for await (const { line, lineNo } of streamLines(validatorsPath)) {
+            yield parseValidatorRow(line, lineNo)
+        }
+    }
+
     return {
         available: true,
         snapshotDir,
@@ -435,6 +495,7 @@ export async function loadSnapshot(): Promise<SnapshotLoader> {
         streamGcrMain,
         streamGcrStorageProgram,
         streamIdentityCommitments,
+        streamValidators,
         getSnapshotManifest: () => manifest,
     }
 }

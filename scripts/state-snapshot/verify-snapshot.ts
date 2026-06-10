@@ -37,8 +37,20 @@ export async function verifyDefaultSnapshot(): Promise<SnapshotManifest> {
 async function runCli(): Promise<void> {
     const manifest = await verifySnapshot(SNAPSHOT_DIR)
     const m = manifest.files
+    const validators = m["validators.jsonl"]
+        ? ` validators=${m["validators.jsonl"].rows}`
+        : ""
+    const forks = manifest.fork_state
+        ? ` fork_state=${manifest.fork_state.length}` +
+          (manifest.fork_state.some(f => f.applied)
+              ? `(applied: ${manifest.fork_state
+                    .filter(f => f.applied)
+                    .map(f => f.fork_name)
+                    .join(",")})`
+              : "")
+        : ""
     console.log(
-        `verify OK: gcr_main=${m["gcr_main.jsonl"].rows} balance_sum=${m["gcr_main.jsonl"].balance_sum} storage=${m["gcr_storageprogram.jsonl"].rows} size_bytes_sum=${m["gcr_storageprogram.jsonl"].size_bytes_sum} identity=${m["identity_commitments.jsonl"].rows}`,
+        `verify OK (v${manifest.schemaVersion}): gcr_main=${m["gcr_main.jsonl"].rows} balance_sum=${m["gcr_main.jsonl"].balance_sum} storage=${m["gcr_storageprogram.jsonl"].rows} size_bytes_sum=${m["gcr_storageprogram.jsonl"].size_bytes_sum} identity=${m["identity_commitments.jsonl"].rows}${validators}${forks}`,
     )
 }
 
