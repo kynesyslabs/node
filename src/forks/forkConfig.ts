@@ -172,11 +172,17 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         treasuryAddress: PLACEHOLDER_TREASURY_ADDRESS,
     },
     nonceEnforcement: {
-        activationHeight: null,
+        // Active from genesis on fresh chains (audit C5). Mirrors
+        // osDenomination's height-0 default: a brand-new chain boots fully
+        // post-fork. Genesis can still override per-deployment. Existing
+        // chains that need a coordinated mid-chain activation set an explicit
+        // future height in their genesis instead.
+        activationHeight: 0,
         description:
-            "Sequential per-sender nonce enforcement (audit-sweep batch C). " +
+            "Sequential per-sender nonce enforcement (audit-sweep batch C + C5). " +
             "Validates tx.content.nonce at RPC ingress, emits +1 nonce GCREdit " +
-            "per native tx, rejects same-nonce replays at consensus apply-time.",
+            "per native tx, rejects same-nonce replays at consensus apply-time. " +
+            "Paired with confirmed-tx-hash uniqueness at apply time.",
     },
 }
 

@@ -37,6 +37,9 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
+import Chain from "src/libs/blockchain/chain"
+import { isForkActive } from "@/forks"
+import { getSharedState } from "@/utilities/sharedState"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
@@ -645,7 +648,7 @@ export default class HandleGCR {
             "storage",
             "escrow",
         ])
-        const finalTxs = []
+        let finalTxs = []
 
         for (const tx of txs) {
             if (toFilter.has(tx.content.type)) {
@@ -670,6 +673,41 @@ export default class HandleGCR {
         log.debug(
             `[applyTransactions] Filtered ${txs.length} txs to ${finalTxs.length} txs`,
         )
+
+        // AUDIT C5 — confirmed-tx-hash uniqueness (fork-gated, replay net).
+        // The mempool/pre-merge filters drop already-confirmed hashes, but
+        // those are read-before-mutate and can be raced or bypassed (e.g. a
+        // tx injected straight onto the apply path). Re-query the confirmed
+        // set HERE and drop any tx whose hash already sits in a confirmed
+        // block, so a tx's balance edits can never be applied twice. Gated on
+        // nonceEnforcement (same replay-protection fork, active @0 on fresh
+        // chains): pre-fork the legacy behaviour is bit-identical for re-sync
+        // safety. Skipped on rollback (rollback intentionally re-touches
+        // confirmed txs). One batched query, not one per tx.
+        if (
+            !isRollback &&
+            finalTxs.length > 0 &&
+            isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)
+        ) {
+            const confirmed = await Chain.getExistingTransactionHashes(
+                finalTxs.map(t => t.hash),
+            )
+            if (confirmed.size > 0) {
+                const before = finalTxs.length
+                finalTxs = finalTxs.filter(t => {
+                    if (confirmed.has(t.hash)) {
+                        log.warning(
+                            `[applyTransactions] Dropping already-confirmed tx ${t.hash} (uniqueness guard)`,
+                        )
+                        return false
+                    }
+                    return true
+                })
+                log.debug(
+                    `[applyTransactions] Uniqueness guard dropped ${before - finalTxs.length} confirmed tx(s)`,
+                )
+            }
+        }
 
         const entities = await this.prepareEntities(finalTxs)
         const groups = this.partitionIndependentTxs(finalTxs)
