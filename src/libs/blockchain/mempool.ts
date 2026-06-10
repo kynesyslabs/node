@@ -424,8 +424,19 @@ export default class Mempool {
         }
 
         const now = Date.now()
-        const results =
-            await TxValidatorPool.getInstance().validate(unseenTransactions)
+        // Coherence must canonicalize tx amounts the same way the
+        // signer/consensus do (audit H1). Compute the osDenomination fork
+        // state at the node-local chain tip here and thread it into the
+        // validator (the worker has no forkConfig/height). Height from local
+        // state — never tx.blockNumber.
+        const coherenceIsPostFork = isForkActive(
+            "osDenomination",
+            getSharedState.lastBlockNumber ?? 0,
+        )
+        const results = await TxValidatorPool.getInstance().validate(
+            unseenTransactions,
+            coherenceIsPostFork,
+        )
         const end = Date.now()
         log.only(
             `[Mempool.receive] TxValidatorPool.validate() took ${end - now}ms for ${unseenTransactions.length} transactions`,
