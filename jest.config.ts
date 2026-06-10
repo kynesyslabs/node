@@ -34,6 +34,14 @@ const jestConfig: JestConfigWithTsJest = {
     preset: "ts-jest",
     roots: ["<rootDir>"],
     modulePaths: ["./"],
+    // `.ccb/` holds CCB agent-workspace clones (full repo + node_modules
+    // copies). jest-haste-map otherwise sees duplicate package.json /
+    // test files there and aborts with "name looked up in the Haste module
+    // map ... several different files". They are never real test targets —
+    // exclude them so the chain-importing suites (datasource graph) can run.
+    modulePathIgnorePatterns: ["<rootDir>/.ccb/"],
+    testPathIgnorePatterns: ["/node_modules/", "<rootDir>/.ccb/"],
+    haste: { throwOnModuleCollision: false },
     transform: { "^.+\\.(t|j)s?$": ["ts-jest", { isolatedModules: true }] },
 
     // INFO: Tests involving ledger lookups need this

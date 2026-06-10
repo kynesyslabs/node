@@ -24,6 +24,10 @@ import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/
 import { denomination } from "@kynesyslabs/demosdk"
 import L2PSProofManager from "./L2PSProofManager"
 import HandleGCR from "@/libs/blockchain/gcr/handleGCR"
+import {
+    validateEditConservation,
+    normalizeAccount,
+} from "./editConservation"
 import { canonicalizeAmountToOs } from "@/forks/amountCanonical"
 import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
@@ -173,8 +177,36 @@ export default class L2PSTransactionExecutor {
             return this.handleNativeTransaction(tx, simulate)
         }
 
-        // Handle demoswork and other types with gcr_edits
+        // Handle demoswork and other types with gcr_edits.
+        //
+        // AUDIT C4: these gcr_edits are passed through verbatim from a
+        // participant-signed L2PS tx and later applied to L1 gcr_main at
+        // consensus with NO ZK soundness (the proof is a sha256 self-check,
+        // not a PLONK verify — see L2PSProofManager.verifyProof). Per-edit
+        // validateGCREdit only checks a `remove` has balance, so before this
+        // guard a signed tx could carry {balance,add,self,HUGE} (mint) or
+        // {balance,remove,victim} (theft). Enforce two tx-level invariants
+        // the canonical native path already satisfies:
+        //   1. balance DEBITS (remove) may only touch the SIGNER's account —
+        //      you cannot debit someone else;
+        //   2. balance edits are zero-sum (Σremove == Σadd) — no net mint.
+        // `add` may credit any account (legit transfers), as long as it is
+        // funded by an equal remove from the signer.
         if (tx.content.gcr_edits && tx.content.gcr_edits.length > 0) {
+            const signerAccounts: string[] = []
+            for (const s of [
+                tx.content.from,
+                tx.content.from_ed25519_address,
+            ]) {
+                if (s != null) signerAccounts.push(normalizeAccount(s))
+            }
+            const conservation = validateEditConservation(
+                tx.content.gcr_edits,
+                signerAccounts,
+            )
+            if (!conservation.success) {
+                return conservation
+            }
             for (const edit of tx.content.gcr_edits) {
                 const editResult = await this.validateGCREdit(edit, simulate)
                 if (!editResult.success) {
