@@ -83,13 +83,20 @@ services:
     profiles: [tlsnotary]
     environment:
       NS_NOTARIZATION__MAX_SENT_DATA: ${TLSNOTARY_MAX_SENT_DATA:-32768}
+      # NS_PORT makes the notary LISTEN on ${TLSNOTARY_PORT} inside the
+      # container, so the host mapping below is 1:1 (same port inside and
+      # out). Required for multi-instance mode: the node reports its
+      # TLSNOTARY_PORT on the tlsn endpoints, and clients dial that port on
+      # the host — a container-internal 7047 behind a remapped host port
+      # would make the node advertise a port nothing listens on.
+      NS_PORT: ${TLSNOTARY_PORT:-7047}
     ports:
-      - "${TLSNOTARY_PORT:-7047}:7047"
+      - "${TLSNOTARY_PORT:-7047}:${TLSNOTARY_PORT:-7047}"
     # The upstream image has no curl/wget so its packaged HTTP healthcheck
     # always fails. Use bash's /dev/tcp pseudo-device to verify the notary
     # is listening — bash IS in the image, the default sh (dash) is not enough.
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7047"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/${TLSNOTARY_PORT:-7047}"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -157,10 +164,12 @@ services:
       # METRICS_HOST_PORT in the ports stanza to remap on the host.
       METRICS_PORT: 9090
       METRICS_HOST: ${METRICS_HOST:-0.0.0.0}
-      # TLSNotary — service name from this compose
+      # TLSNotary — service name from this compose. The port matches the
+      # notary's NS_PORT (and its 1:1 host mapping), so the value the node
+      # advertises on the tlsn endpoints is dialable from outside.
       TLSNOTARY_ENABLED: ${TLSNOTARY_ENABLED:-true}
       TLSNOTARY_HOST: tlsnotary
-      TLSNOTARY_PORT: 7047
+      TLSNOTARY_PORT: ${TLSNOTARY_PORT:-7047}
       TLSNOTARY_MODE: ${TLSNOTARY_MODE:-docker}
       TLSNOTARY_FATAL: ${TLSNOTARY_FATAL:-false}
       TLSNOTARY_SIGNING_KEY: ${TLSNOTARY_SIGNING_KEY:-}

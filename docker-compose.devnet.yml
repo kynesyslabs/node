@@ -43,13 +43,19 @@ services:
 
   tlsnotary:
     container_name: demos-tlsnotary-devnet
+    environment:
+      NS_PORT: 7147
     ports: !override
-      - "7147:7047"
+      - "7147:7147"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/7147"]
     networks: !override
       - demos-network-devnet
 
   node:
     container_name: demos-node-devnet
+    environment:
+      TLSNOTARY_PORT: 7147
     networks: !override
       - demos-network-devnet
     # node_data/node_logs/node_state are isolated by the top-level `name:`
