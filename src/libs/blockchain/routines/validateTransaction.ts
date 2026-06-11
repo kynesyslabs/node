@@ -113,18 +113,28 @@ export async function confirmTransaction(
 
     log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
 
-    // Check sender balance covers the transfer amount
-    if (tx.content.amount > 0) {
-        const from = typeof tx.content.from === "string" ? tx.content.from : forgeToHex(tx.content.from)
-        let fromBalance = 0
+    // Check sender balance covers the transfer amount.
+    //
+    // `tx.content.amount` was widened from `number` to `number | string`
+    // by the v4 bigint-widening work; coerce through BigInt so the
+    // comparison is precise for post-fork OS magnitudes (which a plain
+    // `Number` cast would round).
+    const txAmount = BigInt(tx.content.amount ?? 0)
+    if (txAmount > 0n) {
+        const from = typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+        // `GCR.getGCRNativeBalance` was renamed to `getAccountBalance`
+        // on stabilisation and now returns `bigint` directly.
+        let fromBalance = 0n
         try {
-            fromBalance = await GCR.getGCRNativeBalance(from)
+            fromBalance = await GCR.getAccountBalance(from)
         } catch {
             // Address not in GCR — balance is 0
         }
-        if (fromBalance < tx.content.amount) {
+        if (fromBalance < txAmount) {
             validityData.data.message =
-                `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${tx.content.amount} but have ${fromBalance}\n`
+                `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
             validityData.data.valid = false
             validityData = await signValidityData(validityData)
             return validityData
