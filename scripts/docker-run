@@ -7,7 +7,7 @@
 # users + existing CI scripts keep working unchanged.
 #
 # Usage:
-#   ./scripts/docker-run [--proxy] [--devnet] [--detach|-d] [docker-compose-args...]
+#   ./scripts/docker-run [--proxy] [--devnet] [--port <p>] [--db <p>] [--detach|-d] [docker-compose-args...]
 #
 # Flags handled here:
 #   --proxy      Merge docker-compose.proxy.yml + enable the `proxy`,
@@ -23,6 +23,21 @@
 #                Also syncs host data/genesis.json into the devnet node_data
 #                volume on every up (devnet-only) so genesis/validator-set
 #                edits take effect without a --rebuild.
+#   --port <p>   Node RPC host port (default 53550). A NON-default port runs
+#                a fully isolated extra instance: compose project demos-<p>,
+#                container names demos-*_<p>, network demos-network_<p>,
+#                volumes demos_*_<p>. Every other published host port shifts
+#                by the same offset (<p> - 53550): Omni, signaling, metrics,
+#                tlsnotary, prometheus, grafana, node-exporter, neo4j. Pick
+#                instance ports 100 apart (53650, 53750, ...) so the derived
+#                ports of different instances never overlap. Stopping or
+#                wiping one instance (`--port <p> down -v`, `--port <p>
+#                --clean`) never touches another. Not combinable with
+#                --devnet (which pins its own ports/names); --proxy is not
+#                multi-instance safe (Caddy binds fixed 80/443).
+#   --db <p>     Publish PostgreSQL on host port <p> (internal-only without
+#                this flag). Merges docker-compose.db-port.yml and exports
+#                PG_HOST_PORT=<p>. Composable with --port.
 #   --no-monitor Drop the `monitoring` profile from the proxy bundle.
 #   --no-tlsn    Drop the `tlsnotary` profile from the proxy bundle.
 #   --clean      Wipe DB + bundled-data volumes (pgdata, node_data) before
@@ -58,6 +73,9 @@
 #   ./scripts/docker-run --devnet -d           # devnet stack alongside mainnet
 #   ./scripts/docker-run --devnet --clean -d   # wipe devnet vols + fresh up
 #   ./scripts/docker-run --devnet down         # tear devnet down only
+#   ./scripts/docker-run --port 53650 --db 5433 -d  # second isolated instance
+#   ./scripts/docker-run --port 53650 down     # tear that instance down only
+#   ./scripts/docker-run --port 53650 down -v  # ...and delete its volumes
 
 set -euo pipefail
 
@@ -70,6 +88,8 @@ WANT_MONITORING=true
 WANT_TLSN=true
 WIPE_VOLUMES=false
 REBUILD_IMAGE=false
+NODE_PORT=""
+DB_PORT=""
 PASSTHROUGH=()
 
 EXTRA_PROFILES=()
@@ -96,6 +116,22 @@ while [[ $# -gt 0 ]]; do
             WANT_TLSN=false
             shift
             ;;
+        --port)
+            if [[ $# -lt 2 || ! "${2:-}" =~ ^[0-9]+$ ]]; then
+                echo "scripts/docker-run: --port requires a numeric value" >&2
+                exit 2
+            fi
+            NODE_PORT="$2"
+            shift 2
+            ;;
+        --db)
+            if [[ $# -lt 2 || ! "${2:-}" =~ ^[0-9]+$ ]]; then
+                echo "scripts/docker-run: --db requires a numeric value" >&2
+                exit 2
+            fi
+            DB_PORT="$2"
+            shift 2
+            ;;
         --clean)
             WIPE_VOLUMES=true
             shift
@@ -121,7 +157,9 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --help|-h)
-            sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
+            # Print the full comment header (line 2 up to the first
+            # non-comment line) so the range never drifts as docs grow.
+            awk 'NR >= 2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
             exit 0
             ;;
         *)
@@ -130,6 +168,83 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# ---------------------------------------------------------------------------
+# Multi-instance support (--port / --db).
+#
+# Default published host ports from docker-compose.yml. A non-default --port
+# shifts every one of them by the same offset and namespaces the instance:
+# compose project demos-<port> + INSTANCE_SUFFIX=_<port> (interpolated into
+# every container/network/volume `name:` in docker-compose.yml). The exports
+# below take precedence over .env values (shell env > .env in compose
+# interpolation) — intentional, mirroring how --devnet pins its ports.
+# ---------------------------------------------------------------------------
+DEFAULT_RPC_PORT=53550
+DEFAULT_OMNI_PORT=53551
+DEFAULT_SIGNALING_PORT=3005
+DEFAULT_METRICS_HOST_PORT=9090
+DEFAULT_TLSNOTARY_PORT=7047
+DEFAULT_PROMETHEUS_PORT=9091
+DEFAULT_GRAFANA_PORT=3000
+DEFAULT_NODE_EXPORTER_PORT=9100
+DEFAULT_NEO4J_HTTP_PORT=7474
+DEFAULT_NEO4J_BOLT_PORT=7687
+MIN_PORT=1
+MAX_PORT=65535
+
+# Exported unconditionally (empty by default) so a stray INSTANCE_SUFFIX
+# inherited from the calling shell can never leak into compose interpolation.
+INSTANCE_SUFFIX=""
+export INSTANCE_SUFFIX
+INSTANCE_PROJECT=""
+
+if [[ -n "$NODE_PORT" ]]; then
+    if [[ "$USE_DEVNET" == "true" ]]; then
+        echo "scripts/docker-run: --port cannot be combined with --devnet (devnet pins its own ports/names)" >&2
+        exit 2
+    fi
+    if (( NODE_PORT < MIN_PORT || NODE_PORT > MAX_PORT )); then
+        echo "scripts/docker-run: --port must be in ${MIN_PORT}-${MAX_PORT}" >&2
+        exit 2
+    fi
+
+    PORT_OFFSET=$(( NODE_PORT - DEFAULT_RPC_PORT ))
+    export RPC_PORT="$NODE_PORT"
+    export OMNI_PORT=$(( DEFAULT_OMNI_PORT + PORT_OFFSET ))
+    export RPC_SIGNALING_PORT=$(( DEFAULT_SIGNALING_PORT + PORT_OFFSET ))
+    export METRICS_HOST_PORT=$(( DEFAULT_METRICS_HOST_PORT + PORT_OFFSET ))
+    export TLSNOTARY_PORT=$(( DEFAULT_TLSNOTARY_PORT + PORT_OFFSET ))
+    export PROMETHEUS_PORT=$(( DEFAULT_PROMETHEUS_PORT + PORT_OFFSET ))
+    export GRAFANA_PORT=$(( DEFAULT_GRAFANA_PORT + PORT_OFFSET ))
+    export NODE_EXPORTER_PORT=$(( DEFAULT_NODE_EXPORTER_PORT + PORT_OFFSET ))
+    export NEO4J_HTTP_PORT=$(( DEFAULT_NEO4J_HTTP_PORT + PORT_OFFSET ))
+    export NEO4J_BOLT_PORT=$(( DEFAULT_NEO4J_BOLT_PORT + PORT_OFFSET ))
+
+    for derived_port in "$OMNI_PORT" "$RPC_SIGNALING_PORT" "$METRICS_HOST_PORT" \
+        "$TLSNOTARY_PORT" "$PROMETHEUS_PORT" "$GRAFANA_PORT" \
+        "$NODE_EXPORTER_PORT" "$NEO4J_HTTP_PORT" "$NEO4J_BOLT_PORT"; do
+        if (( derived_port < MIN_PORT || derived_port > MAX_PORT )); then
+            echo "scripts/docker-run: derived host port ${derived_port} is out of range (offset ${PORT_OFFSET} from --port ${NODE_PORT}); pick a --port closer to ${DEFAULT_RPC_PORT}" >&2
+            exit 2
+        fi
+    done
+
+    # --port 53550 IS the default instance — no namespacing, so it keeps
+    # addressing the same containers/volumes as a flag-less invocation.
+    if (( NODE_PORT != DEFAULT_RPC_PORT )); then
+        INSTANCE_SUFFIX="_${NODE_PORT}"
+        export INSTANCE_SUFFIX
+        INSTANCE_PROJECT="demos-${NODE_PORT}"
+    fi
+fi
+
+if [[ -n "$DB_PORT" ]]; then
+    if (( DB_PORT < MIN_PORT || DB_PORT > MAX_PORT )); then
+        echo "scripts/docker-run: --db must be in ${MIN_PORT}-${MAX_PORT}" >&2
+        exit 2
+    fi
+    export PG_HOST_PORT="$DB_PORT"
+fi
 
 # Auto-enable tlsnotary profile when the node has TLSNOTARY_ENABLED=true
 # in .env (or defaults to true via .env.example). The node will try to
@@ -169,24 +284,36 @@ if [[ "$USE_DEVNET" == "true" ]]; then
         exit 1
     fi
     COMPOSE_ARGS+=(-p demos-devnet)
+elif [[ -n "$INSTANCE_PROJECT" ]]; then
+    # Distinct project name is what guarantees compose never sees another
+    # instance's containers as orphans of this one (and vice versa).
+    COMPOSE_ARGS+=(-p "$INSTANCE_PROJECT")
 fi
 COMPOSE_ARGS+=(-f docker-compose.yml)
 if [[ "$USE_DEVNET" == "true" ]]; then
     COMPOSE_ARGS+=(-f docker-compose.devnet.yml)
 fi
+if [[ -n "$DB_PORT" ]]; then
+    if [[ ! -f docker-compose.db-port.yml ]]; then
+        echo "docker-compose.db-port.yml missing — cannot publish the DB port." >&2
+        exit 1
+    fi
+    COMPOSE_ARGS+=(-f docker-compose.db-port.yml)
+fi
 PROFILES=()
 
 # Volume name set the script manages directly (wipe + identity/peerlist sync).
 # Devnet remaps these to the *_devnet variants via the override's top-level
-# `name:` keys, so the helper steps below must target the matching names.
+# `name:` keys; --port instances to the *_<port> variants via INSTANCE_SUFFIX
+# — the helper steps below must target the matching names.
 if [[ "$USE_DEVNET" == "true" ]]; then
     CLEAN_VOLUMES=(demos_pgdata_devnet demos_node_data_devnet)
     STATE_VOL_NAME="demos_node_state_devnet"
     DATA_VOL_NAME="demos_node_data_devnet"
 else
-    CLEAN_VOLUMES=(demos_pgdata demos_node_data)
-    STATE_VOL_NAME="demos_node_state"
-    DATA_VOL_NAME="demos_node_data"
+    CLEAN_VOLUMES=("demos_pgdata${INSTANCE_SUFFIX}" "demos_node_data${INSTANCE_SUFFIX}")
+    STATE_VOL_NAME="demos_node_state${INSTANCE_SUFFIX}"
+    DATA_VOL_NAME="demos_node_data${INSTANCE_SUFFIX}"
 fi
 
 # Export build-time git provenance so `docker compose build` can bake it

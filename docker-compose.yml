@@ -21,6 +21,13 @@
 #   demos_prometheus_data, demos_grafana_data, demos_neo4j_data,
 #   demos_neo4j_logs
 #
+# Multi-instance: every fixed name (containers, network, volumes) carries an
+# `${INSTANCE_SUFFIX:-}` interpolation. Unset (the default) it expands to ""
+# and yields the exact names documented above. `./run --docker --port <p>`
+# exports INSTANCE_SUFFIX=_<p> plus a distinct compose project name so a
+# second stack runs fully isolated on the same host (demos-node_53560,
+# demos_pgdata_53560, demos-network_53560, ...).
+#
 # Wipe everything (DANGER): docker compose down -v
 # =============================================================================
 
@@ -40,7 +47,7 @@ services:
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:16-alpine
-    container_name: demos-postgres
+    container_name: demos-postgres${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_USER:-demosuser}
@@ -56,6 +63,8 @@ services:
     logging: *default-logging
     networks:
       - demos-network
+    # Host publishing is opt-in via docker-compose.db-port.yml (added by
+    # `./run --docker --db <port>`), which maps ${PG_HOST_PORT}:5432.
     # ports:
     #   - "${PG_HOST_PORT:-5332}:5432"   # uncomment to access DB from host
 
@@ -65,7 +74,7 @@ services:
   # ---------------------------------------------------------------------------
   tlsnotary:
     image: ghcr.io/tlsnotary/tlsn/notary-server:v0.1.0-alpha.12
-    container_name: demos-tlsnotary
+    container_name: demos-tlsnotary${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     platform: linux/amd64
     # Profile-gated so COMPOSE_PROFILES=...,tlsnotary actually controls the
@@ -112,7 +121,7 @@ services:
         GIT_BRANCH: ${GIT_BRANCH:-}
         GIT_DIRTY: ${GIT_DIRTY:-false}
         BUILT_AT: ${BUILT_AT:-}
-    container_name: demos-node
+    container_name: demos-node${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -213,7 +222,7 @@ services:
   # ---------------------------------------------------------------------------
   prometheus:
     image: prom/prometheus:v2.48.0
-    container_name: demos-prometheus
+    container_name: demos-prometheus${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     profiles: [monitoring]
     command:
@@ -254,7 +263,7 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:10.2.2
-    container_name: demos-grafana
+    container_name: demos-grafana${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     profiles: [monitoring]
     # Wait until Prometheus reports healthy (Epic 13 T13). Previously a
@@ -319,7 +328,7 @@ services:
   # ---------------------------------------------------------------------------
   node-exporter:
     image: prom/node-exporter:v1.7.0
-    container_name: demos-node-exporter
+    container_name: demos-node-exporter${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     profiles: [full]
     command:
@@ -348,7 +357,7 @@ services:
   # ---------------------------------------------------------------------------
   neo4j:
     image: neo4j:5.21
-    container_name: demos-neo4j
+    container_name: demos-neo4j${INSTANCE_SUFFIX:-}
     restart: unless-stopped
     profiles: [neo4j]
     environment:
@@ -389,7 +398,7 @@ services:
   # ---------------------------------------------------------------------------
   caddy:
     image: caddy:2-alpine
-    container_name: demos-caddy
+    container_name: demos-caddy${INSTANCE_SUFFIX:-}
     profiles: [proxy]
     restart: unless-stopped
     ports:
@@ -434,7 +443,7 @@ services:
 
 networks:
   demos-network:
-    name: demos-network
+    name: demos-network${INSTANCE_SUFFIX:-}
     driver: bridge
 
 volumes:
@@ -442,23 +451,26 @@ volumes:
   # have predictable identifiers that match what the docs reference.
   # Without this, `node_state` would actually be `<projectname>_node_state`,
   # silently breaking seeding commands like `docker run -v node_state:/state`.
+  # ${INSTANCE_SUFFIX:-} expands to "" by default (names stay exactly as
+  # documented); `./run --docker --port <p>` sets it to `_<p>` so each
+  # instance owns a disjoint volume set.
   pgdata:
-    name: demos_pgdata
+    name: demos_pgdata${INSTANCE_SUFFIX:-}
   node_data:
-    name: demos_node_data
+    name: demos_node_data${INSTANCE_SUFFIX:-}
   node_logs:
-    name: demos_node_logs
+    name: demos_node_logs${INSTANCE_SUFFIX:-}
   node_state:
-    name: demos_node_state
+    name: demos_node_state${INSTANCE_SUFFIX:-}
   prometheus_data:
-    name: demos_prometheus_data
+    name: demos_prometheus_data${INSTANCE_SUFFIX:-}
   grafana_data:
-    name: demos_grafana_data
+    name: demos_grafana_data${INSTANCE_SUFFIX:-}
   neo4j_data:
-    name: demos_neo4j_data
+    name: demos_neo4j_data${INSTANCE_SUFFIX:-}
   neo4j_logs:
-    name: demos_neo4j_logs
+    name: demos_neo4j_logs${INSTANCE_SUFFIX:-}
   caddy_data:
-    name: demos_caddy_data
+    name: demos_caddy_data${INSTANCE_SUFFIX:-}
   caddy_config:
-    name: demos_caddy_config
+    name: demos_caddy_config${INSTANCE_SUFFIX:-}

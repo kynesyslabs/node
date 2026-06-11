@@ -8,6 +8,10 @@
 #   ./run --docker --devnet [...]
 #                      -> a second isolated stack alongside mainnet/testnet
 #                         (own project, network, volumes, +100 host ports)
+#   ./run --docker --port <p> --db <p> [...]
+#                      -> an isolated extra instance keyed on the RPC host
+#                         port (own project, names, volumes, offset ports);
+#                         --db additionally publishes PostgreSQL on the host
 #
 # The --docker flag MUST be the first argument so we don't have to
 # scan an arbitrary number of bare-metal flags. Everything after

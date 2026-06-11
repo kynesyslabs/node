@@ -1,0 +1,19 @@
+# =============================================================================
+# Compose override — publish PostgreSQL to the host
+# =============================================================================
+# The base compose keeps postgres internal-only (deliberate security default).
+# This override is merged by `./run --docker --db <port>` to expose it:
+#
+#   ./run --docker --db 5433
+#   -> docker compose -f docker-compose.yml -f docker-compose.db-port.yml up
+#      with PG_HOST_PORT=5433 exported
+#
+# Raw equivalent:
+#   PG_HOST_PORT=5433 docker compose \
+#       -f docker-compose.yml -f docker-compose.db-port.yml up -d
+# =============================================================================
+
+services:
+  postgres:
+    ports:
+      - "${PG_HOST_PORT:-5332}:5432"
