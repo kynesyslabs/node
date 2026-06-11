@@ -7,6 +7,7 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
+import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
 
@@ -85,12 +86,32 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
             continue
         }
 
-        const txs = response.response as Transaction[]
+        const rawTxs = response.response as Transaction[]
+        // Defensive: a peer's response must be an array. A malformed/hostile
+        // peer returning a non-array would otherwise throw on iteration and
+        // abort the whole merge round.
+        if (!Array.isArray(rawTxs)) {
+            log.error(
+                `[mergeMempools] Non-array tx payload from ${peer.connection.string}, skipping`,
+            )
+            continue
+        }
+        // Cap per-peer ingestion so one peer cannot push unbounded validation
+        // work onto the consensus tick (audit H4). Truncation is logged — never
+        // silently dropped — so an operator can see a peer hitting the cap.
+        let txs = rawTxs
+        if (txs.length > MERGE_MEMPOOL_MAX_TXS_PER_PEER) {
+            log.warning(
+                `[mergeMempools] Peer ${peer.connection.string} returned ${txs.length} txs; ` +
+                    `capping at ${MERGE_MEMPOOL_MAX_TXS_PER_PEER} for this round`,
+            )
+            txs = txs.slice(0, MERGE_MEMPOOL_MAX_TXS_PER_PEER)
+        }
         log.only(
             `[mergeMempools] Received ${txs.length} transactions from ${peer.connection.string}`,
         )
         for (const tx of txs) {
-            if (!merged.has(tx.hash)) {
+            if (tx && typeof tx.hash === "string" && !merged.has(tx.hash)) {
                 merged.set(tx.hash, tx)
             }
         }

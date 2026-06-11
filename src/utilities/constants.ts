@@ -18,6 +18,15 @@ export const DEFAULT_BLOCK_TIME = 10
 /** How often to recheck peers (ms) */
 export const PEER_RECHECK_INTERVAL_MS = 10_000
 
+/**
+ * Max transactions accepted from a single peer in one mergeMempools round.
+ * Bounds the work a peer can push onto the consensus-critical tick — without
+ * a cap one peer can return an unbounded tx list, forcing unbounded
+ * validation+insert synchronously inside block production (audit H4).
+ * Generous (a healthy mempool is far smaller) but finite.
+ */
+export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
+
 // --- Batch sync ---
 export const BATCH_SYNC_BLOCK_SIZE = 100
 export const BATCH_SYNC_TX_SIZE = 100

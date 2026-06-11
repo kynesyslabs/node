@@ -23,6 +23,10 @@ export type WorkerRequest =
           requestId: string
           txs: Transaction[]
           identityHints: IdentityHintMap
+          // osDenomination fork state at the node-local chain tip, computed on
+          // the main thread (the worker has no forkConfig/height). Drives the
+          // coherence serializer's amount canonicalization (audit H1).
+          isPostFork: boolean
       }
     | {
           type: "sign"

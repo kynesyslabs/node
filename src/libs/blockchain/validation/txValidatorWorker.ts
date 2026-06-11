@@ -40,7 +40,11 @@ port.on("message", async (msg: WorkerRequest) => {
             const results: TxValidationResult[] = []
             for (const tx of msg.txs) {
                 results.push(
-                    await validateTx(tx, msg.identityHints[tx.hash] ?? null),
+                    await validateTx(
+                        tx,
+                        msg.identityHints[tx.hash] ?? null,
+                        msg.isPostFork,
+                    ),
                 )
             }
             port.postMessage({

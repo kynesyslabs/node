@@ -37,6 +37,10 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
+import Chain from "src/libs/blockchain/chain"
+import { isForkActive } from "@/forks"
+import { getSharedState } from "@/utilities/sharedState"
+import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
@@ -351,6 +355,53 @@ export default class HandleGCR {
             }
         }
 
+        // AUDIT C1 (apply-side, defense in depth): re-derive the expected
+        // gcr_edits from the signed body and refuse to APPLY a native tx whose
+        // shipped edits don't match. The ingress guard (Mempool.receive) blocks
+        // forged edits at admission, but a node also applies edits from blocks
+        // it SYNCS (Sync.ts -> syncGCRTables -> applyTransactions), which never
+        // pass through local mempool admission. Without this, a malicious
+        // proposer's forged-edit tx, once in a block, is applied verbatim on
+        // sync. This is the consensus-critical boundary net.
+        //
+        // Gated:
+        //   - native txs only (others carry no balance edits to forge);
+        //   - not on simulate (pre-consensus dry run) or rollback (rollback
+        //     intentionally replays the stored edits in reverse);
+        //   - fork-gated on nonceEnforcement (active @0 on fresh chains) so
+        //     pre-fork apply is byte-identical for re-sync safety;
+        //   - skipped while gasFeeSeparation is ACTIVE: that fork prepends
+        //     node-computed fee edits the SDK regen cannot reproduce, so a
+        //     naive match would false-reject every tx. Binding under that fork
+        //     needs the fee edits factored into the regen — tracked separately.
+        if (
+            !simulate &&
+            !isRollback &&
+            tx.content.type === "native" &&
+            isForkActive(
+                "nonceEnforcement",
+                getSharedState.lastBlockNumber ?? 0,
+            ) &&
+            !isForkActive(
+                "gasFeeSeparation",
+                getSharedState.lastBlockNumber ?? 0,
+            )
+        ) {
+            const { match } = await verifyGcrEditsMatch(tx)
+            if (!match) {
+                log.error(
+                    `[applyTransaction] Refusing to apply tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,
+                )
+                return {
+                    success: false,
+                    entities,
+                    message: "GCREdit mismatch",
+                    sideEffects: [],
+                    appliedEditsCount: 0,
+                }
+            }
+        }
+
         const gcrEdits = [...tx.content.gcr_edits]
 
         // INFO: Reverse order of gcr_edits for rollback
@@ -645,7 +696,7 @@ export default class HandleGCR {
             "storage",
             "escrow",
         ])
-        const finalTxs = []
+        let finalTxs = []
 
         for (const tx of txs) {
             if (toFilter.has(tx.content.type)) {
@@ -670,6 +721,41 @@ export default class HandleGCR {
         log.debug(
             `[applyTransactions] Filtered ${txs.length} txs to ${finalTxs.length} txs`,
         )
+
+        // AUDIT C5 — confirmed-tx-hash uniqueness (fork-gated, replay net).
+        // The mempool/pre-merge filters drop already-confirmed hashes, but
+        // those are read-before-mutate and can be raced or bypassed (e.g. a
+        // tx injected straight onto the apply path). Re-query the confirmed
+        // set HERE and drop any tx whose hash already sits in a confirmed
+        // block, so a tx's balance edits can never be applied twice. Gated on
+        // nonceEnforcement (same replay-protection fork, active @0 on fresh
+        // chains): pre-fork the legacy behaviour is bit-identical for re-sync
+        // safety. Skipped on rollback (rollback intentionally re-touches
+        // confirmed txs). One batched query, not one per tx.
+        if (
+            !isRollback &&
+            finalTxs.length > 0 &&
+            isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)
+        ) {
+            const confirmed = await Chain.getExistingTransactionHashes(
+                finalTxs.map(t => t.hash),
+            )
+            if (confirmed.size > 0) {
+                const before = finalTxs.length
+                finalTxs = finalTxs.filter(t => {
+                    if (confirmed.has(t.hash)) {
+                        log.warning(
+                            `[applyTransactions] Dropping already-confirmed tx ${t.hash} (uniqueness guard)`,
+                        )
+                        return false
+                    }
+                    return true
+                })
+                log.debug(
+                    `[applyTransactions] Uniqueness guard dropped ${before - finalTxs.length} confirmed tx(s)`,
+                )
+            }
+        }
 
         const entities = await this.prepareEntities(finalTxs)
         const groups = this.partitionIndependentTxs(finalTxs)

@@ -13,11 +13,13 @@ KyneSys Labs: https://www.kynesys.xyz/
 // REVIEW Conflict handling between peers (longest chain)
 
 import { getSharedState } from "src/utilities/sharedState"
+import { isForkActive } from "@/forks"
 import Peer from "../../peer/Peer"
 import PeerManager from "../../peer/PeerManager"
 import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
+import { verifyBlock } from "../validation/verifyBlock"
 import {
     RPCRequest,
     RPCResponse,
@@ -319,6 +321,31 @@ export async function syncBlock(block: Block, peer: Peer) {
     if (exists) {
         log.debug("Block already exists, skipping ...")
         return true
+    }
+
+    // AUDIT C2 — verify a synced block's hash + signature quorum before insert.
+    // Without this, an unauthenticated peer could push a forged block at the
+    // tip and poison the chain head. Fork-gated on nonceEnforcement (active @0)
+    // so pre-fork re-sync is byte-identical. Tip-only: this guard relies on the
+    // CURRENT shard (getShard over online validators), valid for a tip block
+    // (number == lastBlockNumber + 1) but not deep history — so only enforce
+    // when the block sits at our tip. Deep-history batch sync keeps its prior
+    // behaviour (height-stable shard derivation is a tracked follow-up).
+    const isTipBlock = block.number === (getSharedState.lastBlockNumber ?? 0) + 1
+    if (
+        isTipBlock &&
+        isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)
+    ) {
+        const verdict = await verifyBlock(block as never)
+        if (!verdict.valid) {
+            log.error(
+                `[syncBlock] Rejecting synced block ${block.number} (${block.hash}): ${verdict.reason}`,
+            )
+            return false
+        }
+        log.info(
+            `[syncBlock] Block ${block.number} passed signature-quorum verification`,
+        )
     }
 
     await Chain.insertBlock(block, [], null, false)

@@ -306,7 +306,16 @@ export default class TxValidatorPool {
         await Promise.all(terminations)
     }
 
-    async validate(txs: Transaction[]): Promise<TxValidationResult[]> {
+    /**
+     * @param isPostFork osDenomination fork state at the node-local chain tip,
+     *   supplied by the caller (Mempool.receive). Threaded to the coherence
+     *   check so it canonicalizes amounts identically to the signer/consensus
+     *   (audit H1). The worker cannot compute it (no forkConfig/height).
+     */
+    async validate(
+        txs: Transaction[],
+        isPostFork: boolean,
+    ): Promise<TxValidationResult[]> {
         log.only("[TxValidatorPool] validate() called")
         log.only(`[TxValidatorPool] txs length: ${txs.length}`)
 
@@ -316,12 +325,12 @@ export default class TxValidatorPool {
             log.warning(
                 "[TxValidatorPool] validate() called but pool not started; using inline fallback",
             )
-            return this.validateInline(txs)
+            return this.validateInline(txs, isPostFork)
         }
 
         // Small batches and unstarted pool both take the inline path.
         if (txs.length < SMALL_BATCH_THRESHOLD) {
-            return this.validateInline(txs)
+            return this.validateInline(txs, isPostFork)
         }
 
         const now = Date.now()
@@ -332,7 +341,7 @@ export default class TxValidatorPool {
         const dispatched = chunks.map(c =>
             c.length === 0
                 ? Promise.resolve([] as TxValidationResult[])
-                : this.dispatchChunk(c, hints),
+                : this.dispatchChunk(c, hints, isPostFork),
         )
         const settled = await Promise.allSettled(dispatched)
 
@@ -445,16 +454,18 @@ export default class TxValidatorPool {
 
     private async validateInline(
         txs: Transaction[],
+        isPostFork: boolean,
     ): Promise<TxValidationResult[]> {
         const hints = await prefetchIdentities(txs)
         return Promise.all(
-            txs.map(tx => validateTx(tx, hints[tx.hash] ?? null)),
+            txs.map(tx => validateTx(tx, hints[tx.hash] ?? null, isPostFork)),
         )
     }
 
     private dispatchChunk(
         txs: Transaction[],
         hints: IdentityHintMap,
+        isPostFork: boolean,
     ): Promise<TxValidationResult[]> {
         // Round-robin worker selection. We allow each worker to hold multiple
         // in-flight requests because validation throughput per worker is
@@ -488,6 +499,7 @@ export default class TxValidatorPool {
                 requestId,
                 txs,
                 identityHints: subHints,
+                isPostFork,
             }
             try {
                 handle.worker.postMessage(req)

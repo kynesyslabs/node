@@ -35,11 +35,14 @@ export async function dispatchOmniMessage<TPayload = unknown>(
             )
         }
 
-        // Verify signature
+        // Verify signature. requirePayloadBinding=true: this is the
+        // auth-required path, so the signature MUST cover the payload — reject
+        // non-binding modes like SIGN_PUBKEY (audit C3a).
         const verificationResult = await SignatureVerifier.verify(
             options.message.auth,
             options.message.header,
             options.message.payload as Buffer,
+            true,
         )
 
         if (!verificationResult.valid) {

@@ -40,8 +40,13 @@ export default async function manageConsensusRoutines(
 ): Promise<RPCResponse> {
     log.debug("👍👍👍👍👍👍👍👍👍 RECEIVED CONSENSUS CALL 👍👍👍👍👍👍👍👍")
 
+    // getPeer returns undefined for an unknown sender. `sender` is
+    // attacker-controllable on the consensus ingress, so dereferencing
+    // peer.connection.string directly let any caller crash this handler
+    // (and the crash escalates to process.exit via consensusRoutine's
+    // catch — see H3). The lookup is only used for this debug line.
     const peer = PeerManager.getInstance().getPeer(sender)
-    log.debug("Sender: " + peer.connection.string)
+    log.debug("Sender: " + (peer?.connection?.string ?? sender))
     log.debug("Payload: " + JSON.stringify(payload))
     log.debug("-----------------------------")
     const response = _.cloneDeep(emptyResponse)
