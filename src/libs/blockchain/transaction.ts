@@ -89,7 +89,6 @@ export default class Transaction implements ITransaction {
         })
     }
 
-
     // INFO Given a transaction, sign it with the private key of the sender
     public static async sign(
         tx: Transaction,
@@ -233,13 +232,27 @@ export default class Transaction implements ITransaction {
         // owning block context, it should pass `block.number`; otherwise
         // we fall back to the chain head.
         const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
+        let content = tx.content
+        if (Array.isArray(content?.gcr_edits)) {
+            const strippedEdits = content.gcr_edits.map(edit => {
+                if (!("expectedPrior" in edit)) {
+                    return edit
+                }
+
+                const stripped = { ...edit }
+                delete (stripped as { expectedPrior?: number }).expectedPrior
+                return stripped
+            })
+            content = { ...content, gcr_edits: strippedEdits }
+        }
+
         const derivedHash = Hashing.sha256(
-            serializeTransactionContent(tx.content, height),
+            serializeTransactionContent(content, height),
         )
 
-        const coherence = derivedHash === tx.hash
-        return coherence
+        return derivedHash === tx.hash
     }
+
     /**
      * Validates the 'to' field of a transaction to ensure it's a valid Ed25519 public key.
      *
@@ -307,8 +320,9 @@ export default class Transaction implements ITransaction {
             )
             return {
                 valid: false,
-                message: `Error validating TO field: ${e instanceof Error ? e.message : String(e)
-                    }`,
+                message: `Error validating TO field: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
             }
         }
     }

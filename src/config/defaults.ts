@@ -6,6 +6,7 @@
  */
 
 import type { AppConfig } from "./types"
+import { demToOs } from "@kynesyslabs/demosdk/utils"
 
 export const DEFAULT_CONFIG: AppConfig = {
     server: {
@@ -42,10 +43,10 @@ export const DEFAULT_CONFIG: AppConfig = {
         rpcFee: 1,
         networkFee: 1,
         burnFee: 1,
-        minValidatorStake: "1000000000000000000",
+        minValidatorStake: demToOs(1000).toString(),
         identityFile: ".demos_identity",
         peerListFile: "demos_peerlist.json",
-        exposedUrl: "",  // calculated from serverPort if empty
+        exposedUrl: "", // calculated from serverPort if empty
         sudoPubkey: null,
         maxMessageSize: 0,
         consensusCheckInterval: 0,
