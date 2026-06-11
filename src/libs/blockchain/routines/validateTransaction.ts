@@ -151,37 +151,69 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
     try {
         const l2psPayload = (tx.content?.data as any)?.[1]
         const l2psUid = l2psPayload?.l2ps_uid as string | undefined
-        if (!l2psUid) return null // Can't check without UID, let handleL2PS catch it
+        if (!l2psUid) {
+            // Fail closed — `confirmTransaction` treats null as
+            // "balance OK" and would sign ValidityData claiming the tx
+            // is valid even though we never verified it.
+            return `[Tx Validation] [BALANCE ERROR] L2PS transaction missing l2ps_uid — cannot verify sender balance\n`
+        }
 
         const parallelNetworks = ParallelNetworks.getInstance()
         let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
         if (!l2psInstance) {
             l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
         }
-        if (!l2psInstance) return null // No L2PS config, let handleL2PS catch it
+        if (!l2psInstance) {
+            return `[Tx Validation] [BALANCE ERROR] L2PS network ${l2psUid} is not loaded on this node — cannot verify sender balance\n`
+        }
 
         const decryptedTx = await l2psInstance.decryptTx(tx as any)
-        if (!decryptedTx?.content?.from) return null
+        if (!decryptedTx?.content?.from) {
+            return `[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n`
+        }
 
         const sender = decryptedTx.content.from as string
 
+        // L2PS_TX_FEE is only burned by the executor on `native` /
+        // `send` — see `L2PSTransactionExecutor.handleNativeTransaction()`.
+        // Charging the fee for other tx types here would reject valid
+        // non-send L2PS payloads (web2, crosschain, gcr_edits-only).
         let amount = 0
-        if (decryptedTx.content.type === "native" && Array.isArray(decryptedTx.content.data)) {
+        let feeBearing = false
+        if (
+            decryptedTx.content.type === "native" &&
+            Array.isArray(decryptedTx.content.data)
+        ) {
             const nativePayload = decryptedTx.content.data[1] as INativePayload
             if (nativePayload?.nativeOperation === "send") {
+                feeBearing = true
                 const [, sendAmount] = nativePayload.args as [string, number]
-                amount = sendAmount || 0
+                if (
+                    typeof sendAmount !== "number" ||
+                    !Number.isFinite(sendAmount) ||
+                    sendAmount < 0
+                ) {
+                    return `[Tx Validation] [BALANCE ERROR] Invalid native send amount: ${String(sendAmount)}\n`
+                }
+                amount = sendAmount
             }
         }
 
-        const totalRequired = amount + L2PS_TX_FEE
+        const fee = feeBearing ? L2PS_TX_FEE : 0
+        const totalRequired = amount + fee
+        if (totalRequired === 0) return null
+
         const balance = await L2PSTransactionExecutor.getBalance(sender)
         if (balance < BigInt(totalRequired)) {
             return `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${totalRequired} but have ${balance}\n`
         }
     } catch (error) {
-        log.error(`[confirmTransaction] L2PS balance pre-check error: ${error instanceof Error ? error.message : error}`)
-        // Don't block on decryption errors — let handleL2PS deal with it
+        const message = error instanceof Error ? error.message : String(error)
+        log.error(`[confirmTransaction] L2PS balance pre-check error: ${message}`)
+        // Fail closed — a decryption / load throw means we cannot vouch
+        // for the tx; signing ValidityData claiming balance-OK here was
+        // the original fail-open hole.
+        return `[Tx Validation] [BALANCE ERROR] L2PS balance pre-check failed: ${message}\n`
     }
     return null
 }
