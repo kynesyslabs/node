@@ -36,7 +36,7 @@ const CRON_MARKER = "#demos-snapshot-cron"
 
 const DEFAULT_INTERVAL_HOURS = 6
 const DEFAULT_KEEP_DAYS = 7
-const DEFAULT_BASEDIR = join(homedir(), "demosdb")
+const DEFAULT_BASEDIR = join(homedir(), "snapshots")
 const LOG_FILE_NAME = "export.log"
 
 // Matches dated snapshot dir names produced by --run: YYYY-MM-DD_HH-MM.

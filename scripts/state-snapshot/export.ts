@@ -22,7 +22,7 @@
  * shared `verifySnapshot()` integrity gate as a self-check.
  *
  * Usage:
- *   bun run snapshot:export [--docker | --native] [--outdir <dir>] [--service <name>] [--no-backup]
+ *   bun run snapshot:export [--docker | --native] [--outdir <dir>] [--service <name>]
  *
  * Mode (how postgres is reached):
  *   --docker   (default) run psql inside the compose postgres container via
@@ -34,11 +34,9 @@
  *   --outdir <dir>   output directory. Default data/snapshot.
  *                    (--out is accepted as a legacy alias.)
  *   --service <name> compose service name for --docker. Default postgres.
- *   --no-backup      do not move the existing output dir to <dir>.bak first.
  */
 
-import { existsSync } from "node:fs"
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { hostname } from "node:os"
 import { resolve } from "node:path"
@@ -307,7 +305,6 @@ async function main(): Promise<void> {
     const mode: "docker" | "native" = flags.native ? "native" : "docker"
     const service = typeof flags.service === "string" ? flags.service : "postgres"
     const outDir = resolveOutDir(flags)
-    const backup = !flags["no-backup"]
 
     const runner = makeRunner(mode, service)
 
@@ -329,13 +326,6 @@ async function main(): Promise<void> {
         await readFile(resolve(REPO_ROOT, "package.json"), "utf8"),
     )
 
-    // Back up + reset the output dir.
-    if (backup && existsSync(outDir)) {
-        const bak = outDir + ".bak"
-        await rm(bak, { recursive: true, force: true })
-        await rename(outDir, bak)
-        console.log(`Backed up existing snapshot -> ${bak}`)
-    }
     await mkdir(outDir, { recursive: true })
 
     console.log("Exporting gcr_main...")
@@ -424,4 +414,8 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch(e => exitWith(e instanceof Error ? e.stack ?? e.message : String(e)))
+if (import.meta.main) {
+    main().catch(e =>
+        exitWith(e instanceof Error ? e.stack ?? e.message : String(e)),
+    )
+}
