@@ -41,6 +41,7 @@
         "validator:exit": "bunx tsx scripts/validator.ts exit",
         "restore": "bun run src/utilities/backupAndRestore.ts",
         "snapshot:export": "bun scripts/state-snapshot/export.ts",
+        "snapshot:cron": "bun scripts/state-snapshot/cron.ts",
         "snapshot:transform": "bun scripts/state-snapshot/transform.ts",
         "snapshot:verify": "bun scripts/state-snapshot/verify-snapshot.ts",
         "snapshot:dry-run": "bun scripts/state-snapshot/dry-run-restore.ts",

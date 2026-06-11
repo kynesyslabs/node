@@ -22,7 +22,7 @@
  * shared `verifySnapshot()` integrity gate as a self-check.
  *
  * Usage:
- *   bun run snapshot:export [--docker | --native] [--out <dir>] [--service <name>] [--no-backup]
+ *   bun run snapshot:export [--docker | --native] [--outdir <dir>] [--service <name>] [--no-backup]
  *
  * Mode (how postgres is reached):
  *   --docker   (default) run psql inside the compose postgres container via
@@ -31,7 +31,8 @@
  *              localhost:5332, demosuser/demos). Requires a host-reachable DB.
  *
  * Flags:
- *   --out <dir>      output directory. Default data/snapshot.
+ *   --outdir <dir>   output directory. Default data/snapshot.
+ *                    (--out is accepted as a legacy alias.)
  *   --service <name> compose service name for --docker. Default postgres.
  *   --no-backup      do not move the existing output dir to <dir>.bak first.
  */
@@ -56,7 +57,7 @@ function exitWith(msg: string, code = 1): never {
 const green = (s: string): string => `\x1b[32m${s}\x1b[0m`
 const yellow = (s: string): string => `\x1b[33m${s}\x1b[0m`
 
-function parseArgs(argv: string[]): {
+export function parseArgs(argv: string[]): {
     flags: Record<string, string>
 } {
     const flags: Record<string, string> = {}
@@ -73,6 +74,30 @@ function parseArgs(argv: string[]): {
         }
     }
     return { flags }
+}
+
+const DEFAULT_OUT_DIR_SEGMENTS = ["data", "snapshot"] as const
+
+/**
+ * Resolve the snapshot output directory from parsed flags.
+ *
+ * `--outdir <dir>` is the primary flag; `--out <dir>` is kept as a legacy
+ * alias. When both are passed, `--outdir` wins. With neither, the default is
+ * `<repoRoot>/data/snapshot`.
+ */
+export function resolveOutDir(
+    flags: Record<string, string>,
+    repoRoot: string = REPO_ROOT,
+): string {
+    const rawOutDir = flags.outdir ?? flags.out
+    if (rawOutDir === undefined) {
+        return resolve(repoRoot, ...DEFAULT_OUT_DIR_SEGMENTS)
+    }
+    // parseArgs stores valueless flags as the string "true".
+    if (rawOutDir === "true") {
+        throw new Error("--outdir requires a directory path")
+    }
+    return resolve(rawOutDir)
 }
 
 // PG connection params, mirroring src/config envKeys + defaults.
@@ -281,9 +306,7 @@ async function main(): Promise<void> {
     }
     const mode: "docker" | "native" = flags.native ? "native" : "docker"
     const service = typeof flags.service === "string" ? flags.service : "postgres"
-    const outDir = flags.out
-        ? resolve(flags.out)
-        : resolve(REPO_ROOT, "data", "snapshot")
+    const outDir = resolveOutDir(flags)
     const backup = !flags["no-backup"]
 
     const runner = makeRunner(mode, service)
