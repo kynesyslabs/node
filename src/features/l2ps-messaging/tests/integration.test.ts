@@ -23,6 +23,160 @@ function send(ws: ServerWebSocket<WSData>, frame: ProtocolFrame) {
     ws.send(JSON.stringify(frame))
 }
 
+/** Parse + structural-validate; returns null after sending an error. */
+function parseIncomingFrame(
+    ws: ServerWebSocket<WSData>,
+    msg: string,
+): ProtocolFrame | null {
+    if (msg.length > MAX_MESSAGE_SIZE) {
+        sendError(ws, "INVALID_MESSAGE", "Message too large")
+        return null
+    }
+    let frame: ProtocolFrame
+    try {
+        frame = JSON.parse(msg)
+    } catch {
+        sendError(ws, "INVALID_MESSAGE", "Invalid JSON")
+        return null
+    }
+    if (
+        !frame.type ||
+        typeof frame.type !== "string" ||
+        !frame.payload ||
+        typeof frame.payload !== "object"
+    ) {
+        sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload")
+        return null
+    }
+    return frame
+}
+
+function dispatchFrame(
+    ws: ServerWebSocket<WSData>,
+    frame: ProtocolFrame,
+): void {
+    switch (frame.type) {
+        case "register":
+            handleRegister(ws, frame.payload as any)
+            return
+        case "send":
+            handleSend(ws, frame.payload as any)
+            return
+        case "discover":
+            handleDiscover(ws)
+            return
+        case "request_public_key":
+            handleRequestPublicKey(ws, frame.payload as any)
+            return
+        default:
+            sendError(ws, "INVALID_MESSAGE", `Unknown type: ${frame.type}`)
+    }
+}
+
+function handleRegister(
+    ws: ServerWebSocket<WSData>,
+    payload: { publicKey?: string; l2psUid?: string },
+): void {
+    const { publicKey, l2psUid } = payload
+    if (!publicKey || !l2psUid) {
+        sendError(ws, "INVALID_MESSAGE", "Missing fields")
+        return
+    }
+    ws.data.publicKey = publicKey
+    ws.data.l2psUid = l2psUid
+    peers.set(publicKey, { publicKey, l2psUid, ws })
+    const onlinePeers = Array.from(peers.values())
+        .filter(p => p.l2psUid === l2psUid && p.publicKey !== publicKey)
+        .map(p => p.publicKey)
+    send(ws, {
+        type: "registered",
+        payload: { success: true, publicKey, l2psUid, onlinePeers },
+        timestamp: Date.now(),
+    })
+    for (const pk of onlinePeers) {
+        const p = peers.get(pk)
+        if (p) {
+            send(p.ws, {
+                type: "peer_joined",
+                payload: { publicKey },
+                timestamp: Date.now(),
+            })
+        }
+    }
+}
+
+function handleSend(
+    ws: ServerWebSocket<WSData>,
+    payload: { to?: string; encrypted?: any; messageHash?: string },
+): void {
+    if (!ws.data.publicKey) {
+        sendError(ws, "REGISTRATION_REQUIRED", "Register first")
+        return
+    }
+    const { to, encrypted, messageHash } = payload
+    if (!to || !encrypted || !messageHash) {
+        sendError(ws, "INVALID_MESSAGE", "Missing fields")
+        return
+    }
+    if (!encrypted.ciphertext || !encrypted.nonce) {
+        sendError(ws, "INVALID_MESSAGE", "Bad encrypted payload")
+        return
+    }
+    if (to === ws.data.publicKey) {
+        sendError(ws, "INVALID_MESSAGE", "Cannot send to yourself")
+        return
+    }
+    const recipient = peers.get(to)
+    const online = !!recipient && recipient.l2psUid === ws.data.l2psUid
+    if (online && recipient) {
+        send(recipient.ws, {
+            type: "message",
+            payload: {
+                from: ws.data.publicKey,
+                encrypted,
+                messageHash,
+                offline: false,
+            },
+            timestamp: Date.now(),
+        })
+        send(ws, {
+            type: "message_sent",
+            payload: { messageHash, l2psStatus: "submitted" },
+            timestamp: Date.now(),
+        })
+    } else {
+        send(ws, {
+            type: "message_queued",
+            payload: { messageHash, status: "queued" },
+            timestamp: Date.now(),
+        })
+    }
+}
+
+function handleDiscover(ws: ServerWebSocket<WSData>): void {
+    const l2psUid = ws.data.l2psUid
+    const list = Array.from(peers.values())
+        .filter(p => !l2psUid || p.l2psUid === l2psUid)
+        .map(p => p.publicKey)
+    send(ws, {
+        type: "discover_response",
+        payload: { peers: list },
+        timestamp: Date.now(),
+    })
+}
+
+function handleRequestPublicKey(
+    ws: ServerWebSocket<WSData>,
+    payload: { targetId?: string },
+): void {
+    const target = peers.get(payload.targetId ?? "")
+    send(ws, {
+        type: "public_key_response",
+        payload: { targetId: payload.targetId, publicKey: target?.publicKey ?? null },
+        timestamp: Date.now(),
+    })
+}
+
 function sendError(ws: ServerWebSocket<WSData>, code: string, message: string) {
     send(ws, { type: "error", payload: { code, message }, timestamp: Date.now() })
 }
@@ -38,83 +192,17 @@ beforeAll(() => {
             return new Response("Upgrade required", { status: 426 })
         },
         websocket: {
+            // Bun.serve dropped the WSData generic on the outer Server
+            // type, so the dispatcher hands us ws as
+            // ServerWebSocket<unknown>. Re-narrow at the boundary; the
+            // upgrade() handler above guarantees the shape. Per-case
+            // handlers extracted as top-level fns to keep cognitive
+            // complexity bounded.
             message(wsAny, raw) {
-                // Bun.serve dropped the WSData generic on the outer
-                // Server type, so the dispatcher hands us ws as
-                // ServerWebSocket<unknown>. Re-narrow locally — the
-                // upgrade() handler above guarantees the shape.
                 const ws = wsAny as ServerWebSocket<WSData>
-                const msg = raw as string
-                if (msg.length > MAX_MESSAGE_SIZE) {
-                    sendError(ws, "INVALID_MESSAGE", "Message too large")
-                    return
-                }
-
-                let frame: ProtocolFrame
-                try { frame = JSON.parse(msg) } catch {
-                    sendError(ws, "INVALID_MESSAGE", "Invalid JSON")
-                    return
-                }
-
-                if (!frame.type || typeof frame.type !== "string" || !frame.payload || typeof frame.payload !== "object") {
-                    sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload")
-                    return
-                }
-
-                switch (frame.type) {
-                    case "register": {
-                        const { publicKey, l2psUid } = frame.payload as any
-                        if (!publicKey || !l2psUid) {
-                            sendError(ws, "INVALID_MESSAGE", "Missing fields")
-                            return
-                        }
-                        // Skip crypto verification for test — just register
-                        ws.data.publicKey = publicKey
-                        ws.data.l2psUid = l2psUid
-                        peers.set(publicKey, { publicKey, l2psUid, ws })
-                        const onlinePeers = Array.from(peers.values())
-                            .filter(p => p.l2psUid === l2psUid && p.publicKey !== publicKey)
-                            .map(p => p.publicKey)
-                        send(ws, { type: "registered", payload: { success: true, publicKey, l2psUid, onlinePeers }, timestamp: Date.now() })
-                        for (const pk of onlinePeers) {
-                            const p = peers.get(pk)
-                            if (p) send(p.ws, { type: "peer_joined", payload: { publicKey }, timestamp: Date.now() })
-                        }
-                        break
-                    }
-                    case "send": {
-                        if (!ws.data.publicKey) { sendError(ws, "REGISTRATION_REQUIRED", "Register first"); return }
-                        const { to, encrypted, messageHash } = frame.payload as any
-                        if (!to || !encrypted || !messageHash) { sendError(ws, "INVALID_MESSAGE", "Missing fields"); return }
-                        if (!encrypted.ciphertext || !encrypted.nonce) { sendError(ws, "INVALID_MESSAGE", "Bad encrypted payload"); return }
-                        if (to === ws.data.publicKey) { sendError(ws, "INVALID_MESSAGE", "Cannot send to yourself"); return }
-                        const recipient = peers.get(to)
-                        const online = !!recipient && recipient.l2psUid === ws.data.l2psUid
-                        if (online) {
-                            send(recipient!.ws, { type: "message", payload: { from: ws.data.publicKey, encrypted, messageHash, offline: false }, timestamp: Date.now() })
-                            send(ws, { type: "message_sent", payload: { messageHash, l2psStatus: "submitted" }, timestamp: Date.now() })
-                        } else {
-                            send(ws, { type: "message_queued", payload: { messageHash, status: "queued" }, timestamp: Date.now() })
-                        }
-                        break
-                    }
-                    case "discover": {
-                        const l2psUid = ws.data.l2psUid
-                        const list = Array.from(peers.values())
-                            .filter(p => !l2psUid || p.l2psUid === l2psUid)
-                            .map(p => p.publicKey)
-                        send(ws, { type: "discover_response", payload: { peers: list }, timestamp: Date.now() })
-                        break
-                    }
-                    case "request_public_key": {
-                        const { targetId } = frame.payload as any
-                        const target = peers.get(targetId)
-                        send(ws, { type: "public_key_response", payload: { targetId, publicKey: target?.publicKey ?? null }, timestamp: Date.now() })
-                        break
-                    }
-                    default:
-                        sendError(ws, "INVALID_MESSAGE", `Unknown type: ${frame.type}`)
-                }
+                const frame = parseIncomingFrame(ws, raw as string)
+                if (!frame) return
+                dispatchFrame(ws, frame)
             },
             open() {},
             close(wsAny) {
