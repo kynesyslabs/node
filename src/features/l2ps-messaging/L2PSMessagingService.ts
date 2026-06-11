@@ -7,13 +7,11 @@
  */
 
 import { dataSource } from "@/model/datasource"
-import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import Transaction from "@/libs/blockchain/transaction"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
-import { Hashing } from "@kynesyslabs/demosdk/encryption"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import type { SerializedEncryptedMessage, StoredMessage } from "./types"
 
@@ -164,6 +162,18 @@ export class L2PSMessagingService {
 
             // Encrypt as L2PS transaction
             const encryptedTx = await parallelNetworks.encryptTransaction(l2psUid, tx)
+            if (!encryptedTx?.hash) {
+                // Defensive guard against the !-assertions below — if the
+                // encrypted wrapper has no hash (unexpected shape from
+                // parallelNetworks), mempool writes would silently land
+                // a literal `undefined` and corrupt the per-tx lookup
+                // index. Bail with a clear message instead.
+                return {
+                    success: false,
+                    error: "L2PS encryption returned a transaction without a hash",
+                }
+            }
+            const encryptedTxHash = encryptedTx.hash
 
             // Submit to L2PS mempool
             const mempoolResult = await L2PSMempool.addTransaction(
@@ -181,12 +191,12 @@ export class L2PSMessagingService {
             // Execute (IM messages have no state changes, so execution is lightweight)
             try {
                 const execResult = await L2PSTransactionExecutor.execute(
-                    l2psUid, tx, encryptedTx.hash!, false,
+                    l2psUid, tx, encryptedTxHash, false,
                 )
                 if (execResult.success) {
-                    await L2PSMempool.updateStatus(encryptedTx.hash!, "executed")
+                    await L2PSMempool.updateStatus(encryptedTxHash, "executed")
                 } else {
-                    await L2PSMempool.updateStatus(encryptedTx.hash!, "failed")
+                    await L2PSMempool.updateStatus(encryptedTxHash, "failed")
                     log.warning(`[L2PS-IM] Execution failed: ${execResult.message}`)
                 }
             } catch (execError) {
@@ -197,14 +207,14 @@ export class L2PSMessagingService {
             // Record in L2PS transaction history
             try {
                 await L2PSTransactionExecutor.recordTransaction(
-                    l2psUid, tx, "", encryptedTx.hash!, 0, "pending",
+                    l2psUid, tx, "", encryptedTxHash, 0, "pending",
                 )
             } catch (recordError) {
                 log.warning(`[L2PS-IM] Record error: ${recordError}`)
             }
 
             log.info(`[L2PS-IM] Message ${messageId.slice(0, 8)}... submitted to L2PS`)
-            return { success: true, txHash: encryptedTx.hash! }
+            return { success: true, txHash: encryptedTxHash }
         } catch (error) {
             const msg = error instanceof Error ? error.message : "Unknown error"
             log.error(`[L2PS-IM] Submit error: ${msg}`)
@@ -236,11 +246,35 @@ export class L2PSMessagingService {
 
     /**
      * Mark queued messages as sent after offline delivery.
+     *
+     * Releases the per-sender offline-quota slot for each transition,
+     * mirroring the increment in `processMessage`. Without this
+     * decrement, a sender that bursts up to `MAX_OFFLINE_MESSAGES_PER_SENDER`
+     * stays at the cap forever even after every recipient comes back
+     * online and drains the queue.
      */
     async markDelivered(messageIds: string[]): Promise<void> {
         if (messageIds.length === 0) return
         const repo = dataSource.getRepository(L2PSMessage)
+
+        // Pull `fromKey` + current status BEFORE the update so the
+        // decrement only fires for rows that were genuinely queued
+        // (status === "queued" → "sent"). A row already past "queued"
+        // (e.g. re-delivered) must not decrement again.
+        const rows = await repo.find({
+            where: messageIds.map(id => ({ id })),
+            select: ["id", "fromKey", "status"],
+        })
+
         await repo.update(messageIds, { status: "sent" })
+
+        for (const row of rows) {
+            if (row.status !== "queued") continue
+            const count = this.offlineMessageCounts.get(row.fromKey) ?? 0
+            if (count > 0) {
+                this.offlineMessageCounts.set(row.fromKey, count - 1)
+            }
+        }
     }
 
     /**

@@ -302,7 +302,13 @@ export class L2PSMessagingServer {
                 this.sendError(ws, "INVALID_PROOF", "History proof failed")
                 return
             }
-        } catch {
+        } catch (error) {
+            // Log the underlying error before we collapse it into the
+            // generic INVALID_PROOF response. Auth failures here are
+            // operationally interesting — attack attempts, key/scheme
+            // misconfigurations — and the silent catch left operators
+            // blind to all of them.
+            log.warn(`[L2PS-IM] History proof verification error: ${error}`)
             this.sendError(ws, "INVALID_PROOF", "Proof verification error")
             return
         }

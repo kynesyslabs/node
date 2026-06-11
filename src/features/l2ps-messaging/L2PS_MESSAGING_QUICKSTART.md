@@ -23,7 +23,7 @@ L2PS Messaging provides encrypted real-time chat on top of the Demos L2PS infras
 An L2PS network must be set up and running. See [L2PS Quick Start](../../libs/l2ps/L2PS_QUICKSTART.md) for details.
 
 Verify your L2PS network is loaded:
-```
+```text
 [L2PS] Loaded network: testnet_l2ps_001
 ```
 
@@ -31,7 +31,7 @@ Verify your L2PS network is loaded:
 
 ```bash
 ./run
-```
+```text
 
 ---
 
@@ -50,12 +50,12 @@ L2PS_MESSAGING_PORT=3006
 
 ```bash
 ./run
-```
+```text
 
 Watch for:
 ```
 [L2PS-IM] Messaging server started on port 3006
-```
+```text
 
 ---
 
@@ -91,7 +91,7 @@ Before sending messages, register with your ed25519 key and target L2PS network:
   },
   "timestamp": 1709312400001
 }
-```
+```text
 
 ### 3.2 Send Message
 
@@ -121,7 +121,7 @@ Before sending messages, register with your ed25519 key and target L2PS network:
   },
   "timestamp": 1709312400001
 }
-```
+```text
 
 **Response (recipient offline):**
 ```json
@@ -152,7 +152,7 @@ Messages arrive as:
   },
   "timestamp": 1709312400000
 }
-```
+```text
 
 `offline: true` means the message was delivered from the offline queue.
 
@@ -193,7 +193,7 @@ Messages arrive as:
   },
   "timestamp": 1709312400001
 }
-```
+```text
 
 ### 3.5 Discover Online Peers
 
@@ -214,7 +214,7 @@ Messages arrive as:
   },
   "timestamp": 1709312400001
 }
-```
+```text
 
 ### 3.6 Request Public Key
 
@@ -231,7 +231,7 @@ Messages arrive as:
 **Peer joined:**
 ```json
 { "type": "peer_joined", "payload": { "publicKey": "<key>" }, "timestamp": ... }
-```
+```text
 
 **Peer left:**
 ```json
@@ -242,7 +242,7 @@ Messages arrive as:
 
 ## 4. Message Flow
 
-```
+```text
 Sender (SDK)                       Node                         Recipient (SDK)
     │                               │                                │
     │  1. Encrypt message           │                                │
@@ -280,6 +280,7 @@ This is because non-state-changing messages can't be disputed — the cryptograp
 | 🔄 **l2ps_pending** | In L2PS mempool |
 | 📦 **l2ps_batched** | Included in L2PS batch |
 | ✓ **l2ps_confirmed** | Confirmed on L1 |
+| ❌ **failed** | L2PS submission or transaction execution failed (terminal) |
 
 ---
 
@@ -287,7 +288,7 @@ This is because non-state-changing messages can't be disputed — the cryptograp
 
 ```bash
 bun test src/features/l2ps-messaging/tests/
-```
+```text
 
 Expected output:
 ```
@@ -297,7 +298,7 @@ bun test v1.3.3
  0 fail
  78 expect() calls
 Ran 37 tests across 2 files.
-```
+```text
 
 ---
 
@@ -336,7 +337,7 @@ ORDER BY timestamp DESC LIMIT 50;
 
 ## 9. Architecture
 
-```
+```text
 src/features/l2ps-messaging/
 ├── index.ts                    # Feature exports, init/shutdown
 ├── L2PSMessagingServer.ts      # Bun WebSocket server (real-time delivery)
@@ -415,7 +416,7 @@ grep "submitted to L2PS" logs/*.log
 
 # Errors
 grep "L2PS-IM.*error" logs/*.log
-```
+```text
 
 ---
 

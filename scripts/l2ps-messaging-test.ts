@@ -132,16 +132,21 @@ async function main() {
     // ── Step 2: Register ─────────────────────────────────────────
     console.log("\n  [2/5] Registering peers...")
 
-    // Alice registration — timestamp must match between proof and frame
+    // Alice registration — timestamp must match between proof and frame.
+    // Register the response listener BEFORE `send()`; otherwise a fast
+    // server reply can land before we attach the handler, and the test
+    // hangs until the waitFor timeout fires instead of seeing the
+    // response immediately.
     const aliceTs = Date.now()
     const aliceProof = signMessage(`register:${alice.publicKey}:${aliceTs}`, alice.privateKey)
+    const aliceRegPromise = waitForAny(wsAlice, ["registered", "error"])
     wsAlice.send(frame("register", {
         publicKey: alice.publicKey,
         l2psUid: L2PS_UID,
         proof: aliceProof,
     }, aliceTs))
 
-    const aliceReg = await waitForAny(wsAlice, ["registered", "error"])
+    const aliceReg = await aliceRegPromise
     if (!aliceReg || aliceReg.type === "error") {
         console.error(`\n  FAIL: Alice registration failed`)
         if (aliceReg) console.error(`  Error: ${aliceReg.payload.code} - ${aliceReg.payload.message}`)
@@ -150,17 +155,18 @@ async function main() {
     }
     log("Alice", `Registered. Online peers: ${aliceReg.payload.onlinePeers.length}`)
 
-    // Bob registration
+    // Bob registration — same listener-before-send rule.
     const bobTs = Date.now()
     const bobProof = signMessage(`register:${bob.publicKey}:${bobTs}`, bob.privateKey)
     const bobJoinedPromise = waitFor(wsAlice, "peer_joined")
+    const bobRegPromise = waitForAny(wsBob, ["registered", "error"])
     wsBob.send(frame("register", {
         publicKey: bob.publicKey,
         l2psUid: L2PS_UID,
         proof: bobProof,
     }, bobTs))
 
-    const bobReg = await waitForAny(wsBob, ["registered", "error"])
+    const bobReg = await bobRegPromise
     if (!bobReg || bobReg.type === "error") {
         console.error(`\n  FAIL: Bob registration failed`)
         if (bobReg) console.error(`  Error: ${bobReg.payload.code} - ${bobReg.payload.message}`)
@@ -174,8 +180,9 @@ async function main() {
 
     // ── Step 3: Discover ─────────────────────────────────────────
     console.log("\n  [3/5] Discovering peers...")
+    const discoverPromise = waitFor(wsAlice, "discover_response")
     wsAlice.send(frame("discover", {}))
-    const discoverResp = await waitFor(wsAlice, "discover_response")
+    const discoverResp = await discoverPromise
     log("Alice", `Online peers: [${discoverResp.payload.peers.map((p: string) => p.slice(0, 12) + "...").join(", ")}]`)
 
     // ── Step 4: Send messages ────────────────────────────────────

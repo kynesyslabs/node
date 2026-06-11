@@ -13,7 +13,13 @@ import type { SerializedEncryptedMessage } from "./types"
 
 /**
  * Compute a deterministic message hash for dedup and integrity.
- * Hash = SHA256(from + to + content + timestamp)
+ *
+ * Hash input is canonical JSON of the field bag rather than a
+ * `from:to:content:ts` concatenation. The bare-string form was
+ * delimiter-ambiguous: a `from` of `"a:b"` would collide with a
+ * different `to` value, silently weakening the unique-row invariant on
+ * `l2ps_messages.message_hash`. Field names + JSON quoting keep every
+ * tuple distinct.
  */
 export function computeMessageHash(
     from: string,
@@ -21,7 +27,7 @@ export function computeMessageHash(
     content: string,
     timestamp: number,
 ): string {
-    const input = `${from}:${to}:${content}:${timestamp}`
+    const input = JSON.stringify({ from, to, content, timestamp })
     return Hashing.sha256(input)
 }
 
