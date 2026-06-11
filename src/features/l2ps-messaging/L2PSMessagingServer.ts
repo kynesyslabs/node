@@ -34,13 +34,16 @@ interface WSData {
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
-    private server: Server<WSData>
+    // Bun.Server / Bun.serve dropped the WSData generic; the cast on
+    // `ws.data` accesses at call sites still narrows correctly because
+    // we set ws.data in `upgrade()`.
+    private server: Server
     private service: L2PSMessagingService
 
     constructor(port: number) {
         this.service = L2PSMessagingService.getInstance()
 
-        this.server = Bun.serve<WSData>({
+        this.server = Bun.serve({
             port,
             fetch: (req, server) => {
                 if (server.upgrade(req, { data: { publicKey: null, l2psUid: null } })) {
@@ -49,9 +52,14 @@ export class L2PSMessagingServer {
                 return new Response("WebSocket upgrade required", { status: 426 })
             },
             websocket: {
-                message: (ws, message) => this.handleMessage(ws, message as string),
-                open: (ws) => log.debug("[L2PS-IM] New connection"),
-                close: (ws) => this.handleClose(ws),
+                // Bun.serve no longer carries a WSData generic on the
+                // outer Server type; ws.data is `unknown` at the dispatch
+                // boundary even though we set it in upgrade(). The cast
+                // is sound because every connection passes through the
+                // upgrade() above which provides a fully-shaped WSData.
+                message: (ws, message) => this.handleMessage(ws as ServerWebSocket<WSData>, message as string),
+                open: () => log.debug("[L2PS-IM] New connection"),
+                close: (ws) => this.handleClose(ws as ServerWebSocket<WSData>),
             },
         })
 

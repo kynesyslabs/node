@@ -153,6 +153,10 @@ const indexState: {
     // Server references for graceful shutdown
     rpcServer: any
     signalingServer: any
+    // L2PS Messaging (instant-messaging WebSocket sidecar)
+    L2PS_MESSAGING_ENABLED: boolean
+    L2PS_MESSAGING_PORT: number
+    l2psMessagingServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,

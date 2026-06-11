@@ -33,5 +33,5 @@ export class L2PSMessage {
     timestamp: string
 
     @Column("text", { name: "status", default: "delivered" })
-    status: "delivered" | "queued" | "sent" | "l2ps_pending" | "l2ps_batched" | "l2ps_confirmed"
+    status: "delivered" | "queued" | "sent" | "l2ps_pending" | "l2ps_batched" | "l2ps_confirmed" | "failed"
 }

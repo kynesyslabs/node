@@ -15,7 +15,7 @@ import type { ProtocolFrame } from "../types"
 
 interface WSData { publicKey: string | null; l2psUid: string | null }
 
-let server: Server<WSData>
+let server: Server
 let port: number
 const peers = new Map<string, { publicKey: string; l2psUid: string; ws: ServerWebSocket<WSData> }>()
 
@@ -31,14 +31,19 @@ const MAX_MESSAGE_SIZE = 256 * 1024
 
 beforeAll(() => {
     port = 19876 + Math.floor(Math.random() * 1000)
-    server = Bun.serve<WSData>({
+    server = Bun.serve({
         port,
         fetch: (req, server) => {
             if (server.upgrade(req, { data: { publicKey: null, l2psUid: null } })) return undefined
             return new Response("Upgrade required", { status: 426 })
         },
         websocket: {
-            message(ws, raw) {
+            message(wsAny, raw) {
+                // Bun.serve dropped the WSData generic on the outer
+                // Server type, so the dispatcher hands us ws as
+                // ServerWebSocket<unknown>. Re-narrow locally — the
+                // upgrade() handler above guarantees the shape.
+                const ws = wsAny as ServerWebSocket<WSData>
                 const msg = raw as string
                 if (msg.length > MAX_MESSAGE_SIZE) {
                     sendError(ws, "INVALID_MESSAGE", "Message too large")
@@ -111,8 +116,9 @@ beforeAll(() => {
                         sendError(ws, "INVALID_MESSAGE", `Unknown type: ${frame.type}`)
                 }
             },
-            open(ws) {},
-            close(ws) {
+            open() {},
+            close(wsAny) {
+                const ws = wsAny as ServerWebSocket<WSData>
                 const pk = ws.data.publicKey
                 if (!pk) return
                 const peer = peers.get(pk)
