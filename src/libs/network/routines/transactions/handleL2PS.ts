@@ -74,28 +74,89 @@ async function decryptAndValidate(
 
 
 /**
+ * Per-sender in-process serialisation gate for the balance pre-check.
+ *
+ * Without this, two concurrent broadcasts from the same sender both
+ * race past `checkSenderBalance` while the on-chain state still shows
+ * the pre-debit balance — the executor then debits twice from a wallet
+ * that only had funds for one. The serial-by-sender lock funnels every
+ * (check + insert + execute) sequence for a single sender so the second
+ * tx sees the balance the first one will land on. In-process is
+ * sufficient because every L2PS tx for a given sender arrives through
+ * one node entry point; cross-node ordering is already handled
+ * downstream by the mempool + consensus pipeline.
+ */
+const senderLocks = new Map<string, Promise<void>>()
+async function withSenderLock<T>(
+    sender: string,
+    fn: () => Promise<T>,
+): Promise<T> {
+    const previous = senderLocks.get(sender) ?? Promise.resolve()
+    let release: () => void = () => undefined
+    const next = new Promise<void>(res => {
+        release = res
+    })
+    senderLocks.set(sender, previous.then(() => next))
+    try {
+        await previous
+        return await fn()
+    } finally {
+        release()
+        // Drop the map entry once the queue has drained so long-lived
+        // senders don't leak entries here.
+        if (senderLocks.get(sender) === previous.then(() => next)) {
+            senderLocks.delete(sender)
+        }
+    }
+}
+
+/**
+ * Whether the decrypted tx is an L2PS-fee-bearing operation. Mirrors
+ * `L2PSTransactionExecutor.handleNativeTransaction()`, which only burns
+ * `L2PS_TX_FEE` on `native` / `send`. Charging the fee on any other tx
+ * type would incorrectly reject valid L2PS payloads at this gate.
+ */
+function isL2PSFeeBearing(decryptedTx: Transaction): boolean {
+    if (decryptedTx.content.type !== "native") return false
+    const data = decryptedTx.content.data
+    if (!Array.isArray(data)) return false
+    const payload = data[1] as INativePayload | undefined
+    return payload?.nativeOperation === "send"
+}
+
+/**
  * Check sender balance before mempool insertion.
  * Returns an error message if balance is insufficient, null if OK.
+ *
+ * `L2PS_TX_FEE` is only added when the inner tx actually burns it — the
+ * executor charges it solely on `native` / `send`, so charging it here
+ * for other tx types incorrectly rejected valid payloads.
  */
 async function checkSenderBalance(decryptedTx: Transaction): Promise<string | null> {
     const sender = decryptedTx.content.from as string
     if (!sender) return "Missing sender address in decrypted transaction"
 
-    // Extract amount from native payload
+    const feeBearing = isL2PSFeeBearing(decryptedTx)
+
+    // `amount` is only meaningful when the inner tx is a native send.
     let amount = 0
-    if (decryptedTx.content.type === "native" && Array.isArray(decryptedTx.content.data)) {
-        const nativePayload = decryptedTx.content.data[1] as INativePayload
-        if (nativePayload?.nativeOperation === "send") {
-            const [, sendAmount] = nativePayload.args as [string, number]
-            amount = sendAmount || 0
+    if (feeBearing) {
+        const [, sendAmount] = (decryptedTx.content.data as any[])[1]
+            .args as [string, number]
+        if (typeof sendAmount !== "number" || !Number.isFinite(sendAmount) || sendAmount < 0) {
+            return `Invalid native send amount: ${String(sendAmount)}`
         }
+        amount = sendAmount
     }
 
-    const totalRequired = amount + L2PS_TX_FEE
+    const fee = feeBearing ? L2PS_TX_FEE : 0
+    const totalRequired = amount + fee
+    if (totalRequired === 0) return null
+
     try {
         const balance = await L2PSTransactionExecutor.getBalance(sender)
         if (balance < BigInt(totalRequired)) {
-            return `Insufficient balance: need ${totalRequired} (${amount} + ${L2PS_TX_FEE} fee) but have ${balance}`
+            return `Insufficient balance: need ${totalRequired} (${amount} + ${fee} fee) but have ${balance}`
         }
     } catch (error) {
         return `Balance check failed: ${error instanceof Error ? error.message : "Unknown error"}`
@@ -143,15 +204,34 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, `Decrypted transaction hash mismatch: expected ${originalHash}, got ${decryptedTx.hash}`)
     }
 
-    // Pre-check sender balance BEFORE mempool insertion
-    const balanceError = await checkSenderBalance(decryptedTx)
-    if (balanceError) {
-        log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
-        return createErrorResponse(response, 400, balanceError)
+    const sender = decryptedTx.content.from as string
+    if (!sender) {
+        return createErrorResponse(
+            response,
+            400,
+            "Missing sender address in decrypted transaction",
+        )
     }
 
-    // Process Valid Transaction
-    return await processValidL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+    // Serialise (check + insert + execute) per sender — see
+    // `withSenderLock` for why this closes the TOCTOU window between
+    // the balance read and the executor debit. Two concurrent
+    // broadcasts from the same wallet without this gate would both
+    // see the pre-debit balance and both pass.
+    return await withSenderLock(sender, async () => {
+        const balanceError = await checkSenderBalance(decryptedTx)
+        if (balanceError) {
+            log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
+            return createErrorResponse(response, 400, balanceError)
+        }
+        return await processValidL2PSTransaction(
+            response,
+            l2psUid,
+            l2psTx,
+            decryptedTx,
+            originalHash,
+        )
+    })
 }
 
 /**

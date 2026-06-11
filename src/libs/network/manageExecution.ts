@@ -8,6 +8,21 @@ import * as Security from "src/libs/network/securityModule"
 import _ from "lodash"
 import log from "src/utilities/logger"
 
+/**
+ * JSON.stringify that never throws — guards the failure-log path
+ * against circular refs and BigInt values that would otherwise abort
+ * the response back to the client.
+ */
+function safeStringifyExtra(value: unknown): string {
+    try {
+        return JSON.stringify(value, (_k, v) =>
+            typeof v === "bigint" ? v.toString() + "n" : v,
+        )
+    } catch (e) {
+        return `<unserialisable: ${(e as Error).message}>`
+    }
+}
+
 export async function manageExecution(
     content: BundleContent,
     sender: string,
@@ -89,7 +104,11 @@ export async function manageExecution(
                 returnValue.require_reply = result.require_reply
                 returnValue.extra = result.extra
                 if (!result.success) {
-                    log.error(`[SERVER] broadcastTx FAILED — returning to client: result=${returnValue.result}, extra=${JSON.stringify(returnValue.extra)}, response.extra=${result.response?.extra}`)
+                    // Safe-serialise: a `returnValue.extra` containing a
+                    // circular reference or a BigInt would otherwise make
+                    // `JSON.stringify` throw, abort the error-handling
+                    // branch, and leave the client with no response.
+                    log.error(`[SERVER] broadcastTx FAILED — returning to client: result=${returnValue.result}, extra=${safeStringifyExtra(returnValue.extra)}, response.extra=${result.response?.extra}`)
                 }
                 break
             } catch (error) {
