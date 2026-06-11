@@ -153,22 +153,6 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
             snapshot.manifest.files["validators.jsonl"] !== undefined
         await dataSource.transaction(async em => {
             await restoreSnapshot(em, snapshot)
-            // Validator set precedence: the snapshot wins. A schemaVersion 2
-            // snapshot carries validators.jsonl (restored above by
-            // restoreSnapshot), so we DON'T also seed from data/genesis.json.
-            // Only when the snapshot has no validators do we fall back to the
-            // genesis-baked list, inside the same transaction so a partial
-            // restore never ships without the founding validator set.
-            if (
-                !snapshotHasValidators &&
-                Array.isArray(genesisData.validators) &&
-                (genesisData.validators as unknown[]).length > 0
-            ) {
-                await seedValidators(
-                    em,
-                    genesisData.validators as GenesisValidatorSeed[],
-                )
-            }
             // Overlay genesisData.balances on top of the snapshot rows.
             // Historical behavior silently dropped balances when a
             // snapshot was present — operator-written top-ups (e.g.
@@ -190,6 +174,22 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
                 genesisData.forks,
                 snapshot.manifest.fork_state,
             )
+            // Validator set precedence: the snapshot wins. A schemaVersion 2
+            // snapshot carries validators.jsonl (restored above by
+            // restoreSnapshot), so we DON'T also seed from data/genesis.json.
+            // Only when the snapshot has no validators do we fall back to the
+            // genesis-baked list, inside the same transaction so a partial
+            // restore never ships without the founding validator set.
+            if (
+                !snapshotHasValidators &&
+                Array.isArray(genesisData.validators) &&
+                (genesisData.validators as unknown[]).length > 0
+            ) {
+                await seedValidators(
+                    em,
+                    genesisData.validators as GenesisValidatorSeed[],
+                )
+            }
         })
     } else {
         log.info(
