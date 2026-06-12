@@ -23,10 +23,11 @@ jest.mock("@/libs/blockchain/chain", () => ({
     default: { getLastBlockNumber: jest.fn() },
 }))
 
-// GCR.getGCRValidatorStatus is the one external dep we need to control.
+// GCR.getGCRValidatorStatus and getAccountBalance are the external deps
+// we need to control.
 jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorStatus: jest.fn() },
+    default: { getGCRValidatorStatus: jest.fn(), getAccountBalance: jest.fn() },
 }))
 
 // sharedState pulls in the whole framework (Chain → Peer → SDK/utils);
@@ -35,6 +36,19 @@ jest.mock("@/libs/blockchain/gcr/gcr", () => ({
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
     getSharedState: { networkParameters: null },
+}))
+
+// calculateCurrentGas transitively imports Chain/GCR, which this isolated
+// suite cannot resolve. Pin the flat fee breakdown (matches prod:
+// networkFee + rpcFee + additionalFee = 1 + 1 + 0).
+jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
+    __esModule: true,
+    calculateFeeBreakdown: jest.fn(async () => ({
+        network_fee: 1,
+        rpc_fee: 1,
+        additional_fee: 0,
+        total: 2,
+    })),
 }))
 
 import Chain from "@/libs/blockchain/chain"
@@ -56,6 +70,12 @@ beforeAll(async () => {
 })
 
 const SENDER = "deadbeef"
+
+// Payload amounts ride as bigint-encoded strings; the constant itself is a
+// bigint (demToOs result).
+const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
+// Flat fee-breakdown total pinned by the calculateCurrentGas mock above.
+const GAS_FEE = 2n
 
 function stakeTx(amount: string, connectionUrl = "https://v.example") {
     return {
@@ -97,6 +117,10 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
     beforeEach(() => {
         jest.clearAllMocks()
         jest.mocked(Chain.getLastBlockNumber).mockResolvedValue(100 as never)
+        // Default: balance comfortably covers any stake in these tests.
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(
+            (DEFAULT_MIN_VALIDATOR_STAKE * 2n) as never,
+        )
     })
 
     it("accepts a first-time stake at the minimum", async () => {
@@ -104,7 +128,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+            stakeTx(MIN_STAKE),
         )
         expect(r.valid).toBe(true)
     })
@@ -125,7 +149,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             null as never,
         )
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE, ""),
+            stakeTx(MIN_STAKE, ""),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("connectionUrl required")
@@ -179,7 +203,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             status: VALIDATOR_STATUS_EXITED,
         } as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+            stakeTx(MIN_STAKE),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("not eligible")
@@ -195,7 +219,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             status: null,
         } as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+            stakeTx(MIN_STAKE),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("not eligible")
@@ -207,7 +231,7 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             status: "FROZEN",
         } as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+            stakeTx(MIN_STAKE),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("not eligible")
@@ -219,19 +243,89 @@ describe("ValidatorsManagement.manageValidatorStakeTx", () => {
             status: undefined,
         } as never)
         const r = await ValidatorsManagement.manageValidatorStakeTx(
-            stakeTx(DEFAULT_MIN_VALIDATOR_STAKE),
+            stakeTx(MIN_STAKE),
         )
         expect(r.valid).toBe(false)
         expect(r.message).toContain("not eligible")
     })
 
     it("rejects when sender is missing", async () => {
-        const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
+        const tx = stakeTx(MIN_STAKE)
         tx.content.from = ""
         tx.content.from_ed25519_address = ""
         const r = await ValidatorsManagement.manageValidatorStakeTx(tx)
         expect(r.valid).toBe(false)
         expect(r.message).toContain("sender")
+    })
+
+    it("rejects a first-time stake when balance cannot cover stake + gas", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
+        // Balance equals the stake exactly — gas pushes it over.
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(
+            DEFAULT_MIN_VALIDATOR_STAKE as never,
+        )
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx(MIN_STAKE),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("Insufficient balance")
+    })
+
+    it("accepts a stake when balance covers stake + gas exactly", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue(null as never)
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(
+            (DEFAULT_MIN_VALIDATOR_STAKE + GAS_FEE) as never,
+        )
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx(MIN_STAKE),
+        )
+        expect(r.valid).toBe(true)
+    })
+
+    it("rejects a top-up when balance cannot cover the increase + gas", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: VALIDATOR_STATUS_ACTIVE,
+            staked_amount: MIN_STAKE,
+        } as never)
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(50n as never)
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx("100"),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("Insufficient balance")
+    })
+
+    // Double-stake regression: the stake is not debited from the balance,
+    // so each increase must be checked against the cumulative staked total —
+    // two stakes of 600 against a balance of 1000 must not yield 1200 staked.
+    it("rejects a second stake when the cumulative total would exceed the balance", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: VALIDATOR_STATUS_ACTIVE,
+            staked_amount: "600",
+        } as never)
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(1000n as never)
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx("600"),
+        )
+        expect(r.valid).toBe(false)
+        expect(r.message).toContain("Insufficient balance")
+    })
+
+    it("accepts a top-up when balance covers prior stake + increase + gas exactly", async () => {
+        jest.mocked(GCR.getGCRValidatorStatus).mockResolvedValue({
+            address: SENDER,
+            status: VALIDATOR_STATUS_ACTIVE,
+            staked_amount: "600",
+        } as never)
+        jest.mocked(GCR.getAccountBalance).mockResolvedValue(
+            (600n + 300n + GAS_FEE) as never,
+        )
+        const r = await ValidatorsManagement.manageValidatorStakeTx(
+            stakeTx("300"),
+        )
+        expect(r.valid).toBe(true)
     })
 })
 

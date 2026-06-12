@@ -8,6 +8,7 @@ import forge from "node-forge"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "../gcr/gcr"
 import Transaction from "../transaction"
+import { calculateFeeBreakdown } from "./calculateCurrentGas"
 import { requireSender } from "src/libs/network/utils/txHelpers"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
@@ -80,6 +81,31 @@ export default class ValidatorsManagement {
 
         const existing = await GCR.getGCRValidatorStatus(sender)
         const min = getMinValidatorStake()
+
+        // The stake must be backed by funds: the cumulative staked amount
+        // after this tx (prior stake + increase) plus the tx gas fee must
+        // be covered by the sender's balance. The stake itself is not
+        // debited in Phase 0, so checking only the increase would let two
+        // sequential stakes each pass against the same balance and push
+        // the staked total above what the account holds.
+        let priorStake: bigint
+        try {
+            priorStake = BigInt(existing?.staked_amount ?? "0")
+        } catch {
+            return {
+                valid: false,
+                message: `Invalid persisted staked_amount=${existing?.staked_amount}`,
+            }
+        }
+        const balance = await GCR.getAccountBalance(sender)
+        const gasFee = BigInt((await calculateFeeBreakdown(tx)).total)
+        const totalStake = priorStake + amount
+        if (balance < totalStake + gasFee) {
+            return {
+                valid: false,
+                message: `Insufficient balance for stake: total stake ${totalStake} (existing ${priorStake} + new ${amount}) + gas ${gasFee} exceeds balance ${balance}`,
+            }
+        }
 
         if (!existing) {
             // New validator registration

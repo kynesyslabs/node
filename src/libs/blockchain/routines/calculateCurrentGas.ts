@@ -3,7 +3,6 @@ import sizeOf from "src/utilities/sizeOf"
 
 import Chain from "../chain"
 import GCR from "../gcr/gcr"
-import Transaction from "../transaction"
 
 /**
  * Split fee breakdown returned by {@link calculateFeeBreakdown}.
@@ -69,7 +68,6 @@ async function dynamicSurgeMultiplier(): Promise<number> {
 export async function calculateFeeBreakdown(
     payload: unknown,
 ): Promise<FeeBreakdown> {
-    void Transaction
     const payloadSize = sizeOf(payload)
     void payloadSize
     const surge = await dynamicSurgeMultiplier()
@@ -135,7 +133,6 @@ async function calculateComposedGas(): Promise<number> {
 export default async function calculateCurrentGas(
     payload: unknown,
 ): Promise<number> {
-    void Transaction
     const payloadSize = sizeOf(payload)
     void payloadSize
     // Today: flat-fee-only — payload size does not affect cost. When

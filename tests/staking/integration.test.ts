@@ -39,13 +39,26 @@ jest.mock("@/libs/blockchain/chain", () => ({
 
 jest.mock("@/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: { getGCRValidatorStatus: jest.fn() },
+    default: { getGCRValidatorStatus: jest.fn(), getAccountBalance: jest.fn() },
 }))
 
 // sharedState pulls in the whole framework — substitute a minimal stand-in.
 jest.mock("@/utilities/sharedState", () => ({
     __esModule: true,
     getSharedState: { networkParameters: null },
+}))
+
+// Pin the flat fee breakdown (prod: networkFee + rpcFee + additionalFee =
+// 1 + 1 + 0) — the real module reads fee scalars off the sharedState
+// stand-in.
+jest.mock("@/libs/blockchain/routines/calculateCurrentGas", () => ({
+    __esModule: true,
+    calculateFeeBreakdown: jest.fn(async () => ({
+        network_fee: 1,
+        rpc_fee: 1,
+        additional_fee: 0,
+        total: 2,
+    })),
 }))
 
 import Chain from "@/libs/blockchain/chain"
@@ -103,6 +116,10 @@ function createRepo() {
 // ---------- tx factories ----------
 
 const SENDER = "aabbcc"
+
+// Payload amounts ride as bigint-encoded strings; the constant itself is a
+// bigint (demToOs result).
+const MIN_STAKE = DEFAULT_MIN_VALIDATOR_STAKE.toString()
 
 function stakeTx(amount: string, hash = "0xhash_stake") {
     return {
@@ -195,6 +212,10 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         jest.clearAllMocks()
         repo = createRepo()
         ;(Chain.getLastBlockNumber as jest.Mock).mockResolvedValue(100 as never)
+        // Default: balance comfortably covers stake + gas.
+        ;(GCR.getAccountBalance as jest.Mock).mockResolvedValue(
+            (DEFAULT_MIN_VALIDATOR_STAKE * 2n) as never,
+        )
     })
 
     async function apply(tx: any, currentBlock: number) {
@@ -214,7 +235,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
             null as never,
         )
 
-        const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
+        const tx = stakeTx(MIN_STAKE)
         const handled = await handleStakingTx(tx)
         expect(handled.success).toBe(true)
         // Edit is the SDK's responsibility (GCRGeneration.generate); we
@@ -225,7 +246,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
             type: "validatorStake",
             operation: "stake",
             account: SENDER,
-            amount: DEFAULT_MIN_VALIDATOR_STAKE,
+            amount: MIN_STAKE,
             connectionUrl: "https://v.example",
             txhash: "0xhash_stake",
             isRollback: false,
@@ -235,7 +256,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         expect(row).toMatchObject({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
-            staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
+            staked_amount: MIN_STAKE,
             connection_url: "https://v.example",
             first_seen: 100,
             valid_at: 100,
@@ -250,18 +271,18 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         )
 
         // 1. Initial stake at block 100.
-        const t1 = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE, "0xtx1")
+        const t1 = stakeTx(MIN_STAKE, "0xtx1")
         await handleStakingTx(t1)
         attachStakingEdit(t1)
         let row = await apply(t1, 100)
         expect(row?.status).toBe(VALIDATOR_STATUS_ACTIVE)
-        expect(row?.staked_amount).toBe(DEFAULT_MIN_VALIDATOR_STAKE)
+        expect(row?.staked_amount).toBe(MIN_STAKE)
 
         // 2. Top-up at block 200 — GCR now reports the validator as ACTIVE.
         ;(GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue({
             address: SENDER,
             status: VALIDATOR_STATUS_ACTIVE,
-            staked_amount: DEFAULT_MIN_VALIDATOR_STAKE,
+            staked_amount: MIN_STAKE,
         } as never)
         const t2 = stakeTx("500", "0xtx2")
         await handleStakingTx(t2)
@@ -326,7 +347,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
         (GCR.getGCRValidatorStatus as jest.Mock).mockResolvedValue(
             null as never,
         )
-        const tx = stakeTx(DEFAULT_MIN_VALIDATOR_STAKE)
+        const tx = stakeTx(MIN_STAKE)
         const r1 = await handleStakingTx(tx)
         const r2 = await handleStakingTx(tx)
         expect(r1.success).toBe(true)
@@ -353,7 +374,7 @@ describe("staking integration: tx -> gcr_edits -> Validators row", () => {
                 data: [
                     "validatorStake",
                     {
-                        amount: DEFAULT_MIN_VALIDATOR_STAKE,
+                        amount: MIN_STAKE,
                         connectionUrl: "https://v.example",
                     },
                 ],

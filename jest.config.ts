@@ -22,6 +22,8 @@ const jestConfig: JestConfigWithTsJest = {
             "<rootDir>/tests/mocks/demosdk-types.ts",
         "^@kynesyslabs/demosdk/websdk$":
             "<rootDir>/tests/mocks/demosdk-websdk.ts",
+        "^@kynesyslabs/demosdk/utils$":
+            "<rootDir>/tests/mocks/demosdk-utils.ts",
         "^@kynesyslabs/demosdk/xm-localsdk$":
             "<rootDir>/tests/mocks/demosdk-xm-localsdk.ts",
         "^@kynesyslabs/demosdk/abstraction$":
