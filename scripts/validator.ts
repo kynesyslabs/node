@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from "node:fs"
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
-const DEFAULT_AMOUNT_DEM = "1_000_000_000"
+const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
 const DEFAULT_IDENTITY_FILE = ".demos_identity"
 
