@@ -42,6 +42,9 @@ import { denomination } from "@kynesyslabs/demosdk"
 import Chain from "src/libs/blockchain/chain"
 import Hashing from "src/libs/crypto/hashing"
 import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
+import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
+import { forgeToHex } from "@/libs/crypto/forgeUtils"
 import log from "src/utilities/logger"
 
 export interface GcrEditsVerification {
@@ -81,7 +84,17 @@ function blankVolatileEditFields(edit: GCREdit): GCREdit {
  */
 export async function verifyGcrEditsMatch(
     tx: Transaction,
+    options: { expectFeeEdits?: boolean } = {},
 ): Promise<GcrEditsVerification> {
+    // expectFeeEdits distinguishes WHERE the tx is being checked:
+    //   - APPLY time (block txs, post-confirmTransaction): the shipped edits
+    //     carry node-computed gasFeeSeparation fee edits, so the regen must
+    //     reproduce them too -> pass true.
+    //   - INGRESS time (peer gossip, pre-confirmTransaction): the shipped edits
+    //     are the raw SDK shape with NO fee edits, so the regen must NOT add
+    //     them -> pass false (default).
+    const { expectFeeEdits = false } = options
+
     // Snapshot the shipped edits (deep copy) so nothing downstream observes a
     // mutation from this read-only check.
     const txShippedGcrEdits: GCREdit[] = JSON.parse(
@@ -90,6 +103,49 @@ export async function verifyGcrEditsMatch(
 
     // Regenerate the expected edit set from the signed body.
     const regen = await GCRGeneration.generate(tx)
+
+    // When gasFeeSeparation is active, confirmTransaction PREPENDS
+    // node-computed fee-distribution edits onto tx.content.gcr_edits before the
+    // tx is stored/gossiped/applied (applyGasFeeSeparation,
+    // validateTransaction.ts). The shipped edits therefore carry those fee
+    // edits, but GCRGeneration.generate does NOT emit them — so a naive compare
+    // would mismatch every legit tx (audit C1-apply / 184). Reproduce them on
+    // the regen side and prepend, matching the shipped ordering.
+    //
+    // CRITICAL: derive the fee edits from the SHIPPED transaction_fee
+    // (amounts + rpc_address), NOT by re-running applyGasFeeSeparation —
+    // that re-stamps rpc_address with THIS node's pubkey, so a verifying node
+    // would route the rpc-fee to itself and diverge from the originator's
+    // edits, false-rejecting every cross-node tx. generateFeeDistributionEdits
+    // is a pure function of (sender, shipped rpc_address, shipped fee amounts,
+    // txHash) + the deterministic fee-distribution config, so feeding it the
+    // shipped values reproduces the originator's exact fee edits on any node.
+    const gasFeeActive = isForkActive(
+        "gasFeeSeparation",
+        getSharedState.lastBlockNumber ?? 0,
+    )
+    if (expectFeeEdits && gasFeeActive && tx.content?.type === "native") {
+        const fee = tx.content.transaction_fee
+        if (fee) {
+            const senderAddress =
+                typeof tx.content.from === "string"
+                    ? tx.content.from
+                    : forgeToHex(tx.content.from as never)
+            const feeEdits = generateFeeDistributionEdits({
+                senderAddress,
+                rpcAddress: fee.rpc_address ?? null,
+                networkFee: Number(fee.network_fee),
+                rpcFee: Number(fee.rpc_fee),
+                additionalFee: Number(fee.additional_fee),
+                txHash: tx.hash ?? "",
+                isRollback: false,
+            })
+            // Prepend to match applyGasFeeSeparation's ordering
+            // ([fee edits..., base edits]).
+            regen.unshift(...(feeEdits as unknown as GCREdit[]))
+        }
+    }
+
     regen.forEach((gcredit: GCREdit) => {
         gcredit.txhash = ""
         if (gcredit.type === "nonce" && "expectedPrior" in gcredit) {

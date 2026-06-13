@@ -369,11 +369,10 @@ export default class HandleGCR {
         //   - not on simulate (pre-consensus dry run) or rollback (rollback
         //     intentionally replays the stored edits in reverse);
         //   - fork-gated on nonceEnforcement (active @0 on fresh chains) so
-        //     pre-fork apply is byte-identical for re-sync safety;
-        //   - skipped while gasFeeSeparation is ACTIVE: that fork prepends
-        //     node-computed fee edits the SDK regen cannot reproduce, so a
-        //     naive match would false-reject every tx. Binding under that fork
-        //     needs the fee edits factored into the regen — tracked separately.
+        //     pre-fork apply is byte-identical for re-sync safety.
+        //   - works under gasFeeSeparation too: verifyGcrEditsMatch reproduces
+        //     the node-computed fee edits on the regen side (audit 184), so the
+        //     binding stays live when that fork is active instead of going dark.
         if (
             !simulate &&
             !isRollback &&
@@ -381,13 +380,11 @@ export default class HandleGCR {
             isForkActive(
                 "nonceEnforcement",
                 getSharedState.lastBlockNumber ?? 0,
-            ) &&
-            !isForkActive(
-                "gasFeeSeparation",
-                getSharedState.lastBlockNumber ?? 0,
             )
         ) {
-            const { match } = await verifyGcrEditsMatch(tx)
+            const { match } = await verifyGcrEditsMatch(tx, {
+                expectFeeEdits: true,
+            })
             if (!match) {
                 log.error(
                     `[applyTransaction] Refusing to apply tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,
