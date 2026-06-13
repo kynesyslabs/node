@@ -462,20 +462,19 @@ export default class Mempool {
         // deliberately avoids the SDK encryption index). Native txs only —
         // non-native bundles carry no gcr_edits to forge.
         //
-        // FORK GUARD: when gasFeeSeparation is active, confirmTransaction
-        // PREPENDS node-computed fee edits onto tx.content.gcr_edits before the
-        // tx is stored/gossiped, so a peer-received native tx legitimately
-        // carries edits that GCRGeneration.generate (which does NOT emit fee
-        // edits) would not reproduce — verifying here would false-reject every
-        // legit tx. gasFeeSeparation ships disabled; the apply-time, fork-gated
-        // enforcement (audit C1-apply) is the correct place to bind edits once
-        // that fork is live. So this admission guard only runs while the fork
-        // is inactive, where tx.content.gcr_edits is still the raw SDK shape.
-        const feeSeparationActive = isForkActive(
+        // A gossiped native tx was confirmed upstream, so when
+        // gasFeeSeparation is active it ALREADY carries the node-computed fee
+        // edits (verified: the originator's confirmTransaction prepended them;
+        // getMempool serves the stored mutated tx). verifyGcrEditsMatch with
+        // expectFeeEdits reproduces those fee edits from the SHIPPED
+        // transaction_fee (incl. the originator's rpc_address) so the match
+        // holds cross-node (audit 184). expectFeeEdits is keyed on the fork so
+        // pre-fork the regen stays fee-free.
+        const expectFeeEdits = isForkActive(
             "gasFeeSeparation",
             getSharedState.lastBlockNumber ?? 0,
         )
-        if (!feeSeparationActive) {
+        {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
                 if (tx.content?.type !== "native") {
@@ -483,7 +482,9 @@ export default class Mempool {
                     continue
                 }
                 try {
-                    const { match } = await verifyGcrEditsMatch(tx)
+                    const { match } = await verifyGcrEditsMatch(tx, {
+                        expectFeeEdits,
+                    })
                     if (!match) {
                         log.error(
                             `[Mempool.receive] Rejecting tx ${tx.hash}: gcr_edits do not match regenerated set (forged-edit guard)`,

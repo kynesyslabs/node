@@ -12,7 +12,7 @@
       "activationHeight": 0
     },
     "gasFeeSeparation": {
-      "activationHeight": null,
+      "activationHeight": 0,
       "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
     },
     "nonceEnforcement": {
@@ -20,19 +20,69 @@
     }
   },
   "balances": [
-    ["0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c", "1000000000000000000"],
-    ["0xada03cd462baf34482dbbc3da4c3b7b1cfbbfc43b511bbf7dd1fdb3aa071bc49", "1000000000000000000"],
-    ["0x28ad16d38781b36772f1902bd01622927d49c8937e51785ceb63776395332041", "1000000000000000000"],
-    ["0x61b56a6e92c7aa612cdea408f62c0adef3367fd9e196c81af438705cd1cdd2f8", "1000000000000000000"],
-    ["0x8832cd9bf2ffd90fc0dba087708016755f683120be3ad99ce1d1ec12d490b87a", "1000000000000000000"]
+    [
+      "0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c",
+      "1000000000000000000"
+    ],
+    [
+      "0xada03cd462baf34482dbbc3da4c3b7b1cfbbfc43b511bbf7dd1fdb3aa071bc49",
+      "1000000000000000000"
+    ],
+    [
+      "0x28ad16d38781b36772f1902bd01622927d49c8937e51785ceb63776395332041",
+      "1000000000000000000"
+    ],
+    [
+      "0x61b56a6e92c7aa612cdea408f62c0adef3367fd9e196c81af438705cd1cdd2f8",
+      "1000000000000000000"
+    ],
+    [
+      "0x8832cd9bf2ffd90fc0dba087708016755f683120be3ad99ce1d1ec12d490b87a",
+      "1000000000000000000"
+    ]
   ],
   "timestamp": "1692734616",
   "status": "confirmed",
   "validators": [
-    {"address": "0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c", "status": "2", "connection_url": "http://node-1:63551", "staked_amount": "1000000000000000000", "first_seen": 0, "valid_at": 0},
-    {"address": "0xada03cd462baf34482dbbc3da4c3b7b1cfbbfc43b511bbf7dd1fdb3aa071bc49", "status": "2", "connection_url": "http://node-2:63553", "staked_amount": "1000000000000000000", "first_seen": 0, "valid_at": 0},
-    {"address": "0x28ad16d38781b36772f1902bd01622927d49c8937e51785ceb63776395332041", "status": "2", "connection_url": "http://node-3:63555", "staked_amount": "1000000000000000000", "first_seen": 0, "valid_at": 0},
-    {"address": "0x61b56a6e92c7aa612cdea408f62c0adef3367fd9e196c81af438705cd1cdd2f8", "status": "2", "connection_url": "http://node-4:63557", "staked_amount": "1000000000000000000", "first_seen": 0, "valid_at": 0},
-    {"address": "0x8832cd9bf2ffd90fc0dba087708016755f683120be3ad99ce1d1ec12d490b87a", "status": "2", "connection_url": "http://node-5:63559", "staked_amount": "1000000000000000000", "first_seen": 0, "valid_at": 0}
+    {
+      "address": "0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c",
+      "status": "2",
+      "connection_url": "http://node-1:63551",
+      "staked_amount": "1000000000000000000",
+      "first_seen": 0,
+      "valid_at": 0
+    },
+    {
+      "address": "0xada03cd462baf34482dbbc3da4c3b7b1cfbbfc43b511bbf7dd1fdb3aa071bc49",
+      "status": "2",
+      "connection_url": "http://node-2:63553",
+      "staked_amount": "1000000000000000000",
+      "first_seen": 0,
+      "valid_at": 0
+    },
+    {
+      "address": "0x28ad16d38781b36772f1902bd01622927d49c8937e51785ceb63776395332041",
+      "status": "2",
+      "connection_url": "http://node-3:63555",
+      "staked_amount": "1000000000000000000",
+      "first_seen": 0,
+      "valid_at": 0
+    },
+    {
+      "address": "0x61b56a6e92c7aa612cdea408f62c0adef3367fd9e196c81af438705cd1cdd2f8",
+      "status": "2",
+      "connection_url": "http://node-4:63557",
+      "staked_amount": "1000000000000000000",
+      "first_seen": 0,
+      "valid_at": 0
+    },
+    {
+      "address": "0x8832cd9bf2ffd90fc0dba087708016755f683120be3ad99ce1d1ec12d490b87a",
+      "status": "2",
+      "connection_url": "http://node-5:63559",
+      "staked_amount": "1000000000000000000",
+      "first_seen": 0,
+      "valid_at": 0
+    }
   ]
 }

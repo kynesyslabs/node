@@ -165,11 +165,17 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "DEM→OS denomination change. amount field becomes OS string.",
     },
     gasFeeSeparation: {
-        activationHeight: null,
+        // Active from genesis on fresh chains (mirrors osDenomination /
+        // nonceEnforcement height-0 default). Requires a REAL treasury — the
+        // loader rejects the placeholder zero address when activationHeight is
+        // set, to avoid routing fees into the burn address. Genesis may
+        // override both fields per deployment.
+        activationHeight: 0,
         description:
             "Gas fee separation (DEM-665). Splits gas into network/rpc/additional " +
             "components with per-component burn/treasury/rpc-operator distribution.",
-        treasuryAddress: PLACEHOLDER_TREASURY_ADDRESS,
+        treasuryAddress:
+            "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
     nonceEnforcement: {
         // Active from genesis on fresh chains (audit C5). Mirrors
