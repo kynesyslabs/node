@@ -17,6 +17,12 @@ fi
 echo ""
 "${SCRIPT_DIR}/generate-identities.sh"
 
+# Sync the genesis validator set to the freshly-generated identities.
+# Without this the genesis validators stay stale and no node's pubkey is in
+# the validator set -> NotInShardError -> no consensus.
+echo ""
+"${SCRIPT_DIR}/generate-genesis.sh"
+
 # Generate peerlist
 echo ""
 "${SCRIPT_DIR}/generate-peerlist.sh"
