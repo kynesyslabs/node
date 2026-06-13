@@ -143,15 +143,37 @@ export async function verifyGcrEditsMatch(
             typeof tx.content.from === "string"
                 ? tx.content.from
                 : forgeToHex(tx.content.from as never)
+        const networkFee = Number(fee.network_fee)
+        const rpcFee = Number(fee.rpc_fee)
+        const additionalFee = Number(fee.additional_fee)
         const feeEdits = generateFeeDistributionEdits({
             senderAddress,
             rpcAddress: fee.rpc_address ?? null,
-            networkFee: Number(fee.network_fee),
-            rpcFee: Number(fee.rpc_fee),
-            additionalFee: Number(fee.additional_fee),
+            networkFee,
+            rpcFee,
+            additionalFee,
             txHash: tx.hash ?? "",
             isRollback: false,
         })
+        // FAIL CLOSED (Greptile P1, iter2): generateFeeDistributionEdits
+        // returns [] both when fees are genuinely zero AND when
+        // getSharedState.feeDistribution is null (a bootstrap race where the
+        // fork is active but the runtime view wasn't primed). If the shipped
+        // tx declares a positive fee but we produced no fee edits, the two are
+        // indistinguishable — and a tx with {0,0,0} fees + no fee edits would
+        // pass the match. Reject when any declared fee component is positive
+        // but no fee edits were generated, so a fee-bearing tx can never be
+        // admitted/applied without its fee edits.
+        if (
+            feeEdits.length === 0 &&
+            (networkFee > 0 || rpcFee > 0 || additionalFee > 0)
+        ) {
+            return {
+                match: false,
+                txEditsHash: "",
+                regenEditsHash: "",
+            }
+        }
         // Prepend to match applyGasFeeSeparation's ordering
         // ([fee edits..., base edits]). GCREditBalance is a GCREdit union
         // member, so this is a widening assignment — no cast needed.

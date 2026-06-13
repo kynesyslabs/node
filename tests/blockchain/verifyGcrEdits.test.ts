@@ -286,4 +286,16 @@ describe("verifyGcrEditsMatch — gasFeeSeparation fee binding (audit 184)", () 
         })
         expect(result.match).toBe(false)
     })
+
+    it("fails closed when a positive fee is declared but no fee edits generate (Greptile iter2)", async () => {
+        // generateFeeDistributionEdits returns [] (e.g. feeDistribution not
+        // primed, or a {0,0,0} bypass attempt). makeFeeTx declares positive
+        // fee components, so producing zero fee edits must reject.
+        mockFeeEdits.mockImplementation(() => [])
+        const result = await verifyGcrEditsMatch(
+            makeFeeTx([FEE_EDIT, ...canonicalSendEdits()]),
+            { expectFeeEdits: true },
+        )
+        expect(result.match).toBe(false)
+    })
 })
