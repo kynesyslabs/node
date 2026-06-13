@@ -43,15 +43,15 @@ jest.mock("@kynesyslabs/demosdk/encryption", () => ({
     hexToUint8Array: (h: string) => new Uint8Array(Buffer.from(h, "hex")),
 }))
 
-// Shard set + seed are controllable per test.
+// Height-stable validator set, controllable per test. verifyBlock resolves it
+// via GCR.getGCRValidatorsAtBlock(block.number-1) -> [{address}].
 let SHARD: string[] = []
-jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
+jest.mock("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
-    default: async () => SHARD.map(identity => ({ identity })),
-}))
-jest.mock("src/libs/consensus/v2/routines/getCommonValidatorSeed", () => ({
-    __esModule: true,
-    default: async () => ({ commonValidatorSeed: "seed" }),
+    default: {
+        getGCRValidatorsAtBlock: async () =>
+            SHARD.map(address => ({ address })),
+    },
 }))
 
 // verify() passes iff the identity is in VALID_SIGNERS.
@@ -138,10 +138,20 @@ describe("verifyBlock — sync-path quorum (audit C2)", () => {
         expect(r.valid).toBe(false)
     })
 
-    it("rejects on empty shard set", async () => {
+    it("rejects on empty validator set", async () => {
         SHARD = []
         const r = await verifyBlock(block(5, { [A]: "01" }))
         expect(r.valid).toBe(false)
-        expect(r.reason).toMatch(/empty shard/i)
+        expect(r.reason).toMatch(/empty validator set/i)
+    })
+
+    it("verifies a deep-history (non-tip) block via the height-stable set (C2-deep)", async () => {
+        // Block 999 far from any tip — verifyBlock resolves the signer set
+        // height-stably (getGCRValidatorsAtBlock), not from the current tip,
+        // so a deep block validates with a real quorum.
+        const r = await verifyBlock(
+            block(999, { [A]: "01", [B]: "02", [C]: "03" }),
+        )
+        expect(r.valid).toBe(true)
     })
 })

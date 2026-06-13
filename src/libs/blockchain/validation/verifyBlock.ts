@@ -27,12 +27,13 @@ KyneSys Labs: https://www.kynesys.xyz/
  * hash.
  *
  * SCOPE / SAFETY:
- *   - Genesis (block 0) is exempt: it has no shard and no signatures.
- *   - The shard set comes from `getShard` over the CURRENT online validators,
- *     which is correct for a TIP block (number == lastBlockNumber + 1) but NOT
- *     for deep-history batch sync. Callers MUST only apply this at the tip;
- *     historical-batch verification needs a height-stable shard derivation
- *     (tracked separately).
+ *   - Genesis (block 0) is exempt: it has no validator set and no signatures.
+ *   - The eligible signer set is resolved HEIGHT-STABLY via
+ *     `GCR.getGCRValidatorsAtBlock(block.number - 1)` (DB filter
+ *     `valid_at <= height AND status="2"`), so verification is correct at the
+ *     tip AND during deep/batch catch-up sync (blocks apply in order, so the
+ *     validator records below N are persisted before N is verified). This
+ *     superseded the earlier tip-only getShard() approach (audit C2-deep).
  *   - Fork-gated by the caller (nonceEnforcement, active @0): pre-fork the
  *     sync path keeps its legacy (no-verify) behaviour so re-syncing an old
  *     chain is byte-identical.
@@ -47,8 +48,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import log from "src/utilities/logger"
 import TxValidatorPool from "./txValidatorPool"
-import getShard from "src/libs/consensus/v2/routines/getShard"
-import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
+import GCR from "src/libs/blockchain/gcr/gcr"
 
 export interface BlockVerification {
     valid: boolean
@@ -83,31 +83,43 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         return { valid: false, reason: "block has no validation_data.signatures" }
     }
 
-    let shardIdentities: Set<string>
+    // Resolve the eligible signer set HEIGHT-STABLY from the persisted
+    // validator table: the validators valid as of the parent block (N-1) are
+    // exactly those eligible to sign block N. getGCRValidatorsAtBlock filters
+    // `valid_at <= height AND status="2"` from DB, so it returns the correct
+    // set for ANY height — at the tip AND during deep/batch catch-up sync
+    // (blocks apply in order, so validator stake/exit changes below N are
+    // already persisted when N is verified). This replaces the previous
+    // getShard() call, which used the CURRENT online set and was only valid at
+    // the tip — that was the C2 tip-only limitation (audit C2-deep).
+    let validatorIdentities: Set<string>
     try {
-        const { commonValidatorSeed } = await getCommonValidatorSeed(
-            block as never,
+        const validators = (await GCR.getGCRValidatorsAtBlock(
+            block.number - 1,
+        )) as Array<{ address: string | null }>
+        validatorIdentities = new Set(
+            validators
+                .map(v => v.address)
+                .filter((a): a is string => typeof a === "string"),
         )
-        const shard = await getShard(commonValidatorSeed)
-        shardIdentities = new Set(shard.map(p => p.identity))
     } catch (e) {
         return {
             valid: false,
-            reason: `could not resolve shard: ${e instanceof Error ? e.message : String(e)}`,
+            reason: `could not resolve validator set: ${e instanceof Error ? e.message : String(e)}`,
         }
     }
-    if (shardIdentities.size === 0) {
-        return { valid: false, reason: "empty shard set for block" }
+    if (validatorIdentities.size === 0) {
+        return { valid: false, reason: "empty validator set for block" }
     }
 
     // 3. Verify each signature over the recomputed hash; count only signers in
-    //    the shard. Duplicate identities collapse via the Set of verified
-    //    signers, so one validator cannot be double-counted.
+    //    the validator set. Duplicate identities collapse via the Set of
+    //    verified signers, so one validator cannot be double-counted.
     const message = new TextEncoder().encode(block.hash)
     const verifiedSigners = new Set<string>()
     await Promise.all(
         Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!shardIdentities.has(identity)) return
+            if (!validatorIdentities.has(identity)) return
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
@@ -125,11 +137,11 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
     )
 
     // 4. Quorum: same 2/3 threshold the proposer path uses (PoRBFT.isBlockValid).
-    const threshold = Math.floor((shardIdentities.size * 2) / 3) + 1
+    const threshold = Math.floor((validatorIdentities.size * 2) / 3) + 1
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
-            reason: `insufficient verified signatures: ${verifiedSigners.size}/${shardIdentities.size} (need ${threshold})`,
+            reason: `insufficient verified signatures: ${verifiedSigners.size}/${validatorIdentities.size} (need ${threshold})`,
         }
     }
 

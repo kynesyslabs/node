@@ -324,18 +324,12 @@ export async function syncBlock(block: Block, peer: Peer) {
     }
 
     // AUDIT C2 — verify a synced block's hash + signature quorum before insert.
-    // Without this, an unauthenticated peer could push a forged block at the
-    // tip and poison the chain head. Fork-gated on nonceEnforcement (active @0)
-    // so pre-fork re-sync is byte-identical. Tip-only: this guard relies on the
-    // CURRENT shard (getShard over online validators), valid for a tip block
-    // (number == lastBlockNumber + 1) but not deep history — so only enforce
-    // when the block sits at our tip. Deep-history batch sync keeps its prior
-    // behaviour (height-stable shard derivation is a tracked follow-up).
-    const isTipBlock = block.number === (getSharedState.lastBlockNumber ?? 0) + 1
-    if (
-        isTipBlock &&
-        isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)
-    ) {
+    // Without this, an unauthenticated peer could push a forged block and
+    // poison the chain. The eligible signer set is resolved height-stably
+    // (validators valid as of block.number-1), so this is correct at the tip
+    // AND during deep/batch catch-up sync (audit C2-deep). Fork-gated on
+    // nonceEnforcement (active @0) so pre-fork re-sync is byte-identical.
+    if (isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)) {
         const verdict = await verifyBlock(block as never)
         if (!verdict.valid) {
             log.error(
@@ -563,11 +557,31 @@ async function batchDownloadBlocks(
         } unique transactions`,
     )
 
-    // Process each block in order
+    // Process each block in order. Order matters for the height-stable
+    // verify: each block's validator set (valid_at <= number-1) is already
+    // persisted by the time the next block is checked.
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
+
+        // AUDIT C2-deep — verify hash + signature quorum on EACH historical
+        // block before insert (height-stable signer set). Fork-gated on
+        // nonceEnforcement so pre-fork batch sync is byte-identical.
+        if (
+            isForkActive(
+                "nonceEnforcement",
+                getSharedState.lastBlockNumber ?? 0,
+            )
+        ) {
+            const verdict = await verifyBlock(block as never)
+            if (!verdict.valid) {
+                log.error(
+                    `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
+                )
+                return false
+            }
+        }
 
         // Insert block
         await Chain.insertBlock(block, [], null, false)
