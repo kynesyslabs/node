@@ -8,7 +8,14 @@
 import { ucrypto, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import { Ed25519SignedObject, signedObject } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
+import Hashing from "src/libs/crypto/hashing"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+
+/**
+ * Max age of a timestamp-bound auth header (audit C3b). A captured header is
+ * only replayable within this window, not forever.
+ */
+const AUTH_TIMESTAMP_MAX_AGE_MS = 5 * 60 * 1000
 
 export interface VerificationResult {
     /**
@@ -54,6 +61,8 @@ const SUPPORTED_ALGORITHMS = ["ed25519", "falcon", "ml-dsa"]
 export async function verifySignature(
     identity: string,
     signature: string,
+    timestamp?: string | null,
+    requireTimestampBinding = false,
 ): Promise<VerificationResult> {
     if (!identity || !signature) {
         return {
@@ -62,6 +71,42 @@ export async function verifySignature(
             publicKey: null,
             algorithm: null,
             error: "Missing identity or signature",
+        }
+    }
+
+    // AUDIT C3b — when timestamp-binding is required (nonceEnforcement fork
+    // active), the auth signature must cover `${identity}:${timestamp}` with a
+    // fresh timestamp, so a captured header is not a static replayable bearer
+    // token. A legacy client that signs the bare public key (no/empty
+    // timestamp) is rejected with a clear upgrade message.
+    if (requireTimestampBinding) {
+        if (!timestamp) {
+            return {
+                valid: false,
+                identity,
+                publicKey: null,
+                algorithm: null,
+                error: "Missing timestamp header — update your SDK (auth now requires a timestamp-bound signature)",
+            }
+        }
+        const ts = Number(timestamp)
+        if (!Number.isFinite(ts)) {
+            return {
+                valid: false,
+                identity,
+                publicKey: null,
+                algorithm: null,
+                error: "Malformed timestamp header",
+            }
+        }
+        if (Math.abs(Date.now() - ts) > AUTH_TIMESTAMP_MAX_AGE_MS) {
+            return {
+                valid: false,
+                identity,
+                publicKey: null,
+                algorithm: null,
+                error: "Auth timestamp outside acceptable window",
+            }
         }
     }
 
@@ -79,11 +124,16 @@ export async function verifySignature(
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
 
+            // Bound form signs sha256(`${identity}:${timestamp}`); legacy form
+            // signs the bare publicKey hex (splits[1]).
+            const authMessage = requireTimestampBinding
+                ? Hashing.sha256(`${identity}:${timestamp}`)
+                : publicKeyHex
+
             signatureObj = {
                 algorithm: algorithm,
                 signature: signatureBytes,
-                // Message is the public key hex portion (splits[1]), matching validateIdentityHeaders
-                message: new TextEncoder().encode(publicKeyHex),
+                message: new TextEncoder().encode(authMessage),
                 publicKey: publicKeyBytes,
             } as Ed25519SignedObject
         } else {
@@ -94,11 +144,14 @@ export async function verifySignature(
             const publicKeyBytes = hexToUint8Array(publicKeyHex)
             const signatureBytes = hexToUint8Array(signature)
 
+            const authMessage = requireTimestampBinding
+                ? Hashing.sha256(`${identity}:${timestamp}`)
+                : identity
+
             signatureObj = {
                 algorithm: algorithm,
                 signature: signatureBytes,
-                // Message is the full identity string, matching validateIdentityHeaders
-                message: new TextEncoder().encode(identity),
+                message: new TextEncoder().encode(authMessage),
                 publicKey: publicKeyBytes,
             } as Ed25519SignedObject
         }

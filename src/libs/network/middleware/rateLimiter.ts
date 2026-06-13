@@ -4,6 +4,7 @@ import ipaddr from "ipaddr.js"
 import log from "src/utilities/logger"
 import { Middleware } from "../bunServer"
 import { getSharedState } from "@/utilities/sharedState"
+import { isForkActive } from "@/forks"
 import { getAuthContext, setAuthContext } from "../authContext"
 import {
     verifySignature,
@@ -575,11 +576,24 @@ export class RateLimiter {
             // Check for identity/signature headers for key-based whitelisting
             const identity = req.headers.get("identity")
             const signature = req.headers.get("signature")
+            const timestamp = req.headers.get("timestamp")
             let verifyResult: VerificationResult | null = null
 
             if (identity && signature) {
-                // Verify signature
-                verifyResult = await verifySignature(identity, signature)
+                // AUDIT C3b — once nonceEnforcement is active, require the
+                // timestamp-bound auth signature (kills the static replayable
+                // token). Pre-fork keeps the legacy bare-pubkey verification so
+                // re-sync / old chains stay byte-identical.
+                const requireTimestampBinding = isForkActive(
+                    "nonceEnforcement",
+                    getSharedState.lastBlockNumber ?? 0,
+                )
+                verifyResult = await verifySignature(
+                    identity,
+                    signature,
+                    timestamp,
+                    requireTimestampBinding,
+                )
 
                 if (!verifyResult.valid) {
                     // Invalid signature - return 401
