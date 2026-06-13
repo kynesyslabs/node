@@ -249,8 +249,41 @@ export class BroadcastManager {
             }
         }
 
-        peer.sync.block = parseInt(splits[1])
-        peer.sync.block_hash = splits[2]
+        const claimedBlock = parseInt(splits[1])
+        const claimedHash = splits[2]
+
+        // AUDIT H5 — do not accept a forged self-reported sync state. getShard
+        // admits peers to the validator shard when their reported
+        // (block, block_hash) matches our chain head, so an unverified claim
+        // is shard-stuffing leverage. Validate the claim against OUR chain:
+        //   - reject a block ahead of what we know (can't corroborate it);
+        //   - for a height we have, reject a hash that disagrees with ours.
+        // An honest synced peer reports our real head and still passes.
+        if (!Number.isInteger(claimedBlock) || claimedBlock < 0) {
+            return {
+                result: 400,
+                message: "Invalid sync block number",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+        if (claimedBlock > (getSharedState.lastBlockNumber ?? 0)) {
+            return {
+                result: 400,
+                message: "Reported sync block is ahead of our chain; cannot corroborate",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+        const ourBlock = await Chain.getBlockByNumber(claimedBlock)
+        if (!ourBlock || ourBlock.hash !== claimedHash) {
+            return {
+                result: 400,
+                message: "Reported sync block hash does not match our chain",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
+
+        peer.sync.block = claimedBlock
+        peer.sync.block_hash = claimedHash
         peer.sync.status = splits[0] === "1" ? true : false
 
         return {

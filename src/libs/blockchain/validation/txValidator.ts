@@ -93,7 +93,26 @@ export async function validateTxSignature(
             })
         }
     } else {
-        // ed25519 path: no separate ownership precheck. The single verify below IS the main signature.
+        // ed25519 path: the signer IS the ed25519 identity, so `from` (the key
+        // the main signature is verified against) and `from_ed25519_address`
+        // (the recorded ed25519 identity used by downstream identity/IM logic)
+        // MUST be the same key. Without this check (audit H2) a tx could be
+        // signed by `from` while recording a DIFFERENT `from_ed25519_address`,
+        // an identity-confusion: the signer pays but another address is logged
+        // as the ed25519 identity. The optional-`sender` ownership precheck in
+        // Transaction.validateSignature never runs on this pure gossip path, so
+        // enforce equality here. (PQC branches above legitimately differ:
+        // `from` is the PQC key, `from_ed25519_address` the ed25519 co-signer.)
+        const from = (tx.content.from as string) ?? ""
+        const fromEd = (tx.content.from_ed25519_address as string) ?? ""
+        if (from.toLowerCase() !== fromEd.toLowerCase()) {
+            return {
+                hash: tx.hash,
+                valid: false,
+                reason: "ed25519 tx 'from' does not match 'from_ed25519_address'",
+            }
+        }
+        // The single verify below IS the main signature.
         ed25519SignatureVerified = true
     }
 
