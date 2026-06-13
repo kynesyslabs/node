@@ -126,24 +126,36 @@ export async function verifyGcrEditsMatch(
     )
     if (expectFeeEdits && gasFeeActive && tx.content?.type === "native") {
         const fee = tx.content.transaction_fee
-        if (fee) {
-            const senderAddress =
-                typeof tx.content.from === "string"
-                    ? tx.content.from
-                    : forgeToHex(tx.content.from as never)
-            const feeEdits = generateFeeDistributionEdits({
-                senderAddress,
-                rpcAddress: fee.rpc_address ?? null,
-                networkFee: Number(fee.network_fee),
-                rpcFee: Number(fee.rpc_fee),
-                additionalFee: Number(fee.additional_fee),
-                txHash: tx.hash ?? "",
-                isRollback: false,
-            })
-            // Prepend to match applyGasFeeSeparation's ordering
-            // ([fee edits..., base edits]).
-            regen.unshift(...(feeEdits as unknown as GCREdit[]))
+        // FAIL CLOSED (Greptile P1): with the fork active, a native tx MUST
+        // carry transaction_fee (applyGasFeeSeparation stamps it on every
+        // confirmed tx). A null fee means the tx never went through
+        // applyGasFeeSeparation on its originator — i.e. it bypassed fee
+        // deduction. Reject it rather than verifying against a fee-free regen,
+        // which would silently admit a no-fee tx.
+        if (!fee) {
+            return {
+                match: false,
+                txEditsHash: "",
+                regenEditsHash: "",
+            }
         }
+        const senderAddress =
+            typeof tx.content.from === "string"
+                ? tx.content.from
+                : forgeToHex(tx.content.from as never)
+        const feeEdits = generateFeeDistributionEdits({
+            senderAddress,
+            rpcAddress: fee.rpc_address ?? null,
+            networkFee: Number(fee.network_fee),
+            rpcFee: Number(fee.rpc_fee),
+            additionalFee: Number(fee.additional_fee),
+            txHash: tx.hash ?? "",
+            isRollback: false,
+        })
+        // Prepend to match applyGasFeeSeparation's ordering
+        // ([fee edits..., base edits]). GCREditBalance is a GCREdit union
+        // member, so this is a widening assignment — no cast needed.
+        regen.unshift(...feeEdits)
     }
 
     regen.forEach((gcredit: GCREdit) => {

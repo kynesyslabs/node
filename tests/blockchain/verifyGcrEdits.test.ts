@@ -261,4 +261,29 @@ describe("verifyGcrEditsMatch — gasFeeSeparation fee binding (audit 184)", () 
         })
         expect(result.match).toBe(false)
     })
+
+    it("fails closed when transaction_fee is null under active gasFee (Greptile P1)", async () => {
+        // A native tx with no transaction_fee while the fork is active never
+        // went through applyGasFeeSeparation -> reject rather than verify
+        // against a fee-free regen.
+        const noFeeTx = {
+            hash: "tx-no-fee",
+            blockNumber: 0,
+            content: {
+                type: "native",
+                from: SENDER,
+                from_ed25519_address: SENDER,
+                transaction_fee: null,
+                gcr_edits: canonicalSendEdits(),
+                data: [
+                    "native",
+                    { nativeOperation: "send", args: [RECIPIENT, 100] },
+                ],
+            },
+        } as unknown as Transaction
+        const result = await verifyGcrEditsMatch(noFeeTx, {
+            expectFeeEdits: true,
+        })
+        expect(result.match).toBe(false)
+    })
 })

@@ -382,8 +382,17 @@ export default class HandleGCR {
                 getSharedState.lastBlockNumber ?? 0,
             )
         ) {
+            // Own the fork check at the call site (matches Mempool.receive)
+            // so both ingress + apply decide expectFeeEdits the same way and
+            // neither relies on verifyGcrEditsMatch's internal re-check
+            // (Greptile P2). A confirmed/applied tx carries fee edits exactly
+            // when gasFeeSeparation is active.
+            const expectFeeEdits = isForkActive(
+                "gasFeeSeparation",
+                getSharedState.lastBlockNumber ?? 0,
+            )
             const { match } = await verifyGcrEditsMatch(tx, {
-                expectFeeEdits: true,
+                expectFeeEdits,
             })
             if (!match) {
                 log.error(
