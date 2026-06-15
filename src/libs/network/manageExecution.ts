@@ -108,7 +108,7 @@ export async function manageExecution(
                     // circular reference or a BigInt would otherwise make
                     // `JSON.stringify` throw, abort the error-handling
                     // branch, and leave the client with no response.
-                    log.error(`[SERVER] broadcastTx FAILED — returning to client: result=${returnValue.result}, extra=${safeStringifyExtra(returnValue.extra)}, response.extra=${result.response?.extra}`)
+                    log.error(`[SERVER] broadcastTx FAILED — returning to client: result=${returnValue.result}, extra=${safeStringifyExtra(returnValue.extra)}, response.extra=${safeStringifyExtra(result.response?.extra)}`)
                 }
                 break
             } catch (error) {

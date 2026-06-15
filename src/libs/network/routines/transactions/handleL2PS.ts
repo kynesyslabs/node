@@ -1,4 +1,4 @@
-import type { BlockContent, L2PSTransaction, RPCResponse, INativePayload } from "@kynesyslabs/demosdk/types"
+import type { BlockContent, L2PSTransaction, RPCResponse } from "@kynesyslabs/demosdk/types"
 import Chain from "src/libs/blockchain/chain"
 import Transaction from "src/libs/blockchain/transaction"
 import { emptyResponse } from "../../server_rpc"
@@ -6,7 +6,8 @@ import { emptyResponse } from "../../server_rpc"
 import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
-import L2PSTransactionExecutor, { L2PS_TX_FEE } from "@/libs/l2ps/L2PSTransactionExecutor"
+import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
 
 /**
@@ -96,73 +97,23 @@ async function withSenderLock<T>(
     const next = new Promise<void>(res => {
         release = res
     })
-    senderLocks.set(sender, previous.then(() => next))
+    // Stash the chained promise in a single const so the cleanup-time
+    // identity check below compares the SAME object we wrote into the
+    // map. Two separate `previous.then(() => next)` calls would each
+    // allocate a fresh promise and the strict-equality check would
+    // always be false — the unbounded-leak the comment claims to
+    // prevent.
+    const chained = previous.then(() => next)
+    senderLocks.set(sender, chained)
     try {
         await previous
         return await fn()
     } finally {
         release()
-        // Drop the map entry once the queue has drained so long-lived
-        // senders don't leak entries here.
-        if (senderLocks.get(sender) === previous.then(() => next)) {
+        if (senderLocks.get(sender) === chained) {
             senderLocks.delete(sender)
         }
     }
-}
-
-/**
- * Whether the decrypted tx is an L2PS-fee-bearing operation. Mirrors
- * `L2PSTransactionExecutor.handleNativeTransaction()`, which only burns
- * `L2PS_TX_FEE` on `native` / `send`. Charging the fee on any other tx
- * type would incorrectly reject valid L2PS payloads at this gate.
- */
-function isL2PSFeeBearing(decryptedTx: Transaction): boolean {
-    if (decryptedTx.content.type !== "native") return false
-    const data = decryptedTx.content.data
-    if (!Array.isArray(data)) return false
-    const payload = data[1] as INativePayload | undefined
-    return payload?.nativeOperation === "send"
-}
-
-/**
- * Check sender balance before mempool insertion.
- * Returns an error message if balance is insufficient, null if OK.
- *
- * `L2PS_TX_FEE` is only added when the inner tx actually burns it — the
- * executor charges it solely on `native` / `send`, so charging it here
- * for other tx types incorrectly rejected valid payloads.
- */
-async function checkSenderBalance(decryptedTx: Transaction): Promise<string | null> {
-    const sender = decryptedTx.content.from as string
-    if (!sender) return "Missing sender address in decrypted transaction"
-
-    const feeBearing = isL2PSFeeBearing(decryptedTx)
-
-    // `amount` is only meaningful when the inner tx is a native send.
-    let amount = 0
-    if (feeBearing) {
-        const [, sendAmount] = (decryptedTx.content.data as any[])[1]
-            .args as [string, number]
-        if (typeof sendAmount !== "number" || !Number.isFinite(sendAmount) || sendAmount < 0) {
-            return `Invalid native send amount: ${String(sendAmount)}`
-        }
-        amount = sendAmount
-    }
-
-    const fee = feeBearing ? L2PS_TX_FEE : 0
-    const totalRequired = amount + fee
-    if (totalRequired === 0) return null
-
-    try {
-        const balance = await L2PSTransactionExecutor.getBalance(sender)
-        if (balance < BigInt(totalRequired)) {
-            return `Insufficient balance: need ${totalRequired} (${amount} + ${fee} fee) but have ${balance}`
-        }
-    } catch (error) {
-        return `Balance check failed: ${error instanceof Error ? error.message : "Unknown error"}`
-    }
-
-    return null
 }
 
 export default async function handleL2PS(
@@ -219,7 +170,12 @@ export default async function handleL2PS(
     // broadcasts from the same wallet without this gate would both
     // see the pre-debit balance and both pass.
     return await withSenderLock(sender, async () => {
-        const balanceError = await checkSenderBalance(decryptedTx)
+        // checkInnerTxBalance keeps both call sites (handleL2PS and
+        // confirmTransaction.checkL2PSBalance) on one implementation
+        // that canonicalises amount + fee to OS units before comparing
+        // with the OS-magnitude balance. Charging DEM-unit values
+        // against OS-unit balance was a silent no-op post-fork.
+        const balanceError = await checkInnerTxBalance(decryptedTx)
         if (balanceError) {
             log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
             return createErrorResponse(response, 400, balanceError)

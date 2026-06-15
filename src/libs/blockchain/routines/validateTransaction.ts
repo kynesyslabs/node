@@ -18,7 +18,6 @@ import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
-import type { INativePayload } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -29,7 +28,7 @@ import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Mempool from "@/libs/blockchain/mempool"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
-import L2PSTransactionExecutor, { L2PS_TX_FEE } from "@/libs/l2ps/L2PSTransactionExecutor"
+import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -118,8 +117,20 @@ export async function confirmTransaction(
     // `tx.content.amount` was widened from `number` to `number | string`
     // by the v4 bigint-widening work; coerce through BigInt so the
     // comparison is precise for post-fork OS magnitudes (which a plain
-    // `Number` cast would round).
-    const txAmount = BigInt(tx.content.amount ?? 0)
+    // `Number` cast would round). Wrap the BigInt cast because a
+    // misbehaving client can ship `1.5` or `"abc"`, both of which throw
+    // — without the catch the whole RPC handler would crash instead of
+    // returning a signed-invalid `ValidityData`.
+    let txAmount: bigint
+    try {
+        txAmount = BigInt(tx.content.amount ?? 0)
+    } catch (e) {
+        validityData.data.message =
+            `[Tx Validation] [AMOUNT ERROR] Invalid tx amount ${JSON.stringify(tx.content.amount)}: ${(e as Error).message}\n`
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
     if (txAmount > 0n) {
         const from = typeof tx.content.from === "string"
             ? tx.content.from
@@ -246,8 +257,13 @@ async function runTypeDispatcher(
  * Returns error string on any "cannot verify" outcome rather than null;
  * `confirmTransaction` reads null as "balance OK" and would otherwise
  * sign ValidityData claiming the tx is valid even though we never
- * actually verified it — a fail-open hole. `L2PS_TX_FEE` is only added
- * for `native` / `send` because the executor only burns it there.
+ * actually verified it — a fail-open hole.
+ *
+ * The amount + fee comparison is delegated to `checkInnerTxBalance`,
+ * the same helper `handleL2PS.checkSenderBalance` uses, so both call
+ * sites canonicalise units identically against the OS-magnitude
+ * balance (the previous DEM-vs-OS mismatch made the gate a silent
+ * no-op post-osDenomination fork).
  */
 async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
     try {
@@ -271,37 +287,8 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
             return `[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n`
         }
 
-        const sender = decryptedTx.content.from as string
-
-        let amount = 0
-        let feeBearing = false
-        if (
-            decryptedTx.content.type === "native" &&
-            Array.isArray(decryptedTx.content.data)
-        ) {
-            const nativePayload = decryptedTx.content.data[1] as INativePayload
-            if (nativePayload?.nativeOperation === "send") {
-                feeBearing = true
-                const [, sendAmount] = nativePayload.args as [string, number]
-                if (
-                    typeof sendAmount !== "number" ||
-                    !Number.isFinite(sendAmount) ||
-                    sendAmount < 0
-                ) {
-                    return `[Tx Validation] [BALANCE ERROR] Invalid native send amount: ${String(sendAmount)}\n`
-                }
-                amount = sendAmount
-            }
-        }
-
-        const fee = feeBearing ? L2PS_TX_FEE : 0
-        const totalRequired = amount + fee
-        if (totalRequired === 0) return null
-
-        const balance = await L2PSTransactionExecutor.getBalance(sender)
-        if (balance < BigInt(totalRequired)) {
-            return `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${totalRequired} but have ${balance}\n`
-        }
+        const innerError = await checkInnerTxBalance(decryptedTx as Transaction)
+        if (innerError) return `[Tx Validation] [BALANCE ERROR] ${innerError}\n`
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         log.error(`[confirmTransaction] L2PS balance pre-check error: ${message}`)
