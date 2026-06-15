@@ -8,6 +8,7 @@ import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "./PeerManager"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import Hashing from "../crypto/hashing"
 
 export interface SyncData {
     status: boolean
@@ -272,11 +273,13 @@ export default class Peer {
         request: RPCRequest,
         isAuthenticated = true,
     ): Promise<RPCResponse> {
-        const timestamp = new Date().toISOString()
-        log.info(`[RPC Call] [${request.method}] [${timestamp}] Making RPC call to: ${this.connection.string}`)
+        const timestamp = Date.now()
+        const timestampReadable = new Date(timestamp).toISOString()
+        log.info(
+            `[RPC Call] [${request.method}] [${timestampReadable}] Making RPC call to: ${this.connection.string}`,
+        )
 
         const method = request.method
-        const currentTimestampReadable = timestamp
         // Prepare a request with our identity
         let pubkey = ""
         let signature = ""
@@ -286,12 +289,14 @@ export default class Peer {
                 await ucrypto.getIdentity(getSharedState.signingAlgorithm)
             ).publicKey
             const hexPublicKey = uint8ArrayToHex(ourPublicKey as Uint8Array)
+            pubkey = getSharedState.signingAlgorithm + ":" + hexPublicKey
             const bufferSignature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
-                new TextEncoder().encode(hexPublicKey),
+                new TextEncoder().encode(
+                    Hashing.sha256(`${pubkey}:${timestamp}`),
+                ),
             )
 
-            pubkey = getSharedState.signingAlgorithm + ":" + hexPublicKey
             signature = uint8ArrayToHex(bufferSignature.signature)
         }
 
@@ -321,6 +326,7 @@ export default class Peer {
                         "Content-Type": "application/json",
                         identity: pubkey,
                         signature,
+                        timestamp: timestamp,
                     },
                     timeout: RPC_TIMEOUT_MS,
                     signal: abortController.signal,
@@ -328,9 +334,13 @@ export default class Peer {
             )
 
             clearTimeout(timeoutId)
-            log.info(`[RPC Call] [${method}] [${currentTimestampReadable}] Response received`)
+            log.info(
+                `[RPC Call] [${method}] [${timestampReadable}] Response received`,
+            )
             if (response.data.result === 200) {
-                log.info(`[RPC Call] [${method}] [${currentTimestampReadable}] Response OK: ${response.data.result}`)
+                log.info(
+                    `[RPC Call] [${method}] [${timestampReadable}] Response OK: ${response.data.result}`,
+                )
             }
 
             return response.data
@@ -347,7 +357,9 @@ export default class Peer {
                     error.name === "AbortError" ||
                     error.code === "ETIMEDOUT")
             ) {
-                log.warn(`[RPC Call] [${method}] [${currentTimestampReadable}] Request timeout/aborted to: ${connectionUrl}`)
+                log.warn(
+                    `[RPC Call] [${method}] [${timestampReadable}] Request timeout/aborted to: ${connectionUrl}`,
+                )
                 PeerManager.markPeerOffline(this)
 
                 return {
@@ -362,7 +374,9 @@ export default class Peer {
             }
 
             if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
-                log.warn(`[RPC Call] [${method}] [${currentTimestampReadable}] Connection refused to: ${connectionUrl}`)
+                log.warn(
+                    `[RPC Call] [${method}] [${timestampReadable}] Connection refused to: ${connectionUrl}`,
+                )
                 PeerManager.markPeerOffline(this)
 
                 return {
@@ -376,13 +390,17 @@ export default class Peer {
                 }
             }
 
-            const errorMsg = error instanceof Error ? error.message : String(error)
-            log.error(`[RPC Call] [${method}] [${currentTimestampReadable}] Error making RPC call: ${errorMsg}`)
+            const errorMsg =
+                error instanceof Error ? error.message : String(error)
+            log.error(
+                `[RPC Call] [${method}] [${timestampReadable}] Error making RPC call: ${errorMsg}`,
+            )
             log.error(`[RPC Call] CONNECTION URL: ${connectionUrl}`)
 
             return {
                 result: 500,
-                response: error instanceof Error ? error.message : String(error),
+                response:
+                    error instanceof Error ? error.message : String(error),
                 require_reply: false,
                 extra: null,
             }
@@ -404,7 +422,10 @@ export default class Peer {
             const response = await axios.get(url)
             return response.data
         } catch (e) {
-            return { status: 0, error: e instanceof Error ? e.message : String(e) }
+            return {
+                status: 0,
+                error: e instanceof Error ? e.message : String(e),
+            }
         }
     }
 
