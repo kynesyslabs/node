@@ -268,10 +268,19 @@ export async function verifyWeb2Proof(
         const { message, type, signature } = await instance.readData(
             payload.proof as string,
         )
+        // Domain proofs (#897): the signed message is bound to the verified
+        // host AND the sender, so a valid proof can't be lifted onto another
+        // domain or identity. Reconstruct it here from payload.username (already
+        // asserted === the proof URL host above) and the tx sender; the parsed
+        // payload tag is ignored for domain. Other contexts verify as-parsed.
+        const messageToVerify =
+            payload.context === "domain"
+                ? `dw2p:domain:${(payload.username as string).toLowerCase()}:${sender}`
+                : message
         try {
             const verified = await TxValidatorPool.getInstance().verify({
                 algorithm: type,
-                message: new TextEncoder().encode(message),
+                message: new TextEncoder().encode(messageToVerify),
                 publicKey: hexToUint8Array(sender),
                 signature: hexToUint8Array(signature),
             })
