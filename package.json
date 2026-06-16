@@ -181,7 +181,6 @@
         "socket.io-parser": ">=4.2.6",
         "valibot": ">=1.2.0",
         "fast-xml-parser": ">=5.3.4",
-        "validator": ">=13.15.20",
-        "@kynesyslabs/demosdk": "4.0.7"
+        "validator": ">=13.15.20"
     }
 }
