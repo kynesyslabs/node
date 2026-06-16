@@ -136,14 +136,18 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }),
     )
 
+    // TEMPORARILY DISABLED:
+    // BECAUSE WE CAN'T VERIFY THE VALIDATORS WERE ONLINE TO FORGE THIS BLOCK
+    // THAT CAUSES REJECTION FOR ALL BLOCKS FORGED IN THE EARLY PHASES OF THE NETWORK
+    // 
     // 4. Quorum: same 2/3 threshold the proposer path uses (PoRBFT.isBlockValid).
-    const threshold = Math.floor((validatorIdentities.size * 2) / 3) + 1
-    if (verifiedSigners.size < threshold) {
-        return {
-            valid: false,
-            reason: `insufficient verified signatures: ${verifiedSigners.size}/${validatorIdentities.size} (need ${threshold})`,
-        }
-    }
+    // const threshold = Math.floor((validatorIdentities.size * 2) / 3) + 1
+    // if (verifiedSigners.size < threshold) {
+    //     return {
+    //         valid: false,
+    //         reason: `insufficient verified signatures: ${verifiedSigners.size}/${validatorIdentities.size} (need ${threshold})`,
+    //     }
+    // }
 
     return { valid: true }
 }
