@@ -142,6 +142,30 @@ describe("ensureValidatorSeed", () => {
         expect(transaction).not.toHaveBeenCalled()
     })
 
+    it("rejects empty status", async () => {
+        repoCount.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                validators: [makeSeed({ status: "" })],
+            }),
+        ).rejects.toThrow(/status/)
+        expect(transaction).not.toHaveBeenCalled()
+    })
+
+    it("rejects non-string status", async () => {
+        repoCount.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                // status is typed as `string` on GenesisValidatorSeed; runtime
+                // genesis.json is hand-edited, so the validator must catch a
+                // numeric value too — mirrors seedValidators.validateSeed.
+                validators: [makeSeed({ status: 2 as unknown as string })],
+            }),
+        ).rejects.toThrow(/status/)
+    })
+
     it("rejects zero stake", async () => {
         repoCount.mockResolvedValue(0)
 
@@ -149,7 +173,7 @@ describe("ensureValidatorSeed", () => {
             ensureValidatorSeed({
                 validators: [makeSeed({ staked_amount: "0" })],
             }),
-        ).rejects.toThrow(/staked_amount/)
+        ).rejects.toThrow(/staked_amount must be > 0/)
     })
 
     it("rejects non-bigint stake string", async () => {
@@ -159,7 +183,7 @@ describe("ensureValidatorSeed", () => {
             ensureValidatorSeed({
                 validators: [makeSeed({ staked_amount: "1.5" })],
             }),
-        ).rejects.toThrow(/staked_amount/)
+        ).rejects.toThrow(/staked_amount is not a valid bigint/)
     })
 
     it("rejects negative valid_at", async () => {

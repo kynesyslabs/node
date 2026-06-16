@@ -134,16 +134,20 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
             `[BOOT] genesis.validators[${index}].status must be a non-empty string`,
         )
     }
+    // Split the BigInt() parse from the positivity check so the
+    // operator sees a distinct, actionable message for each failure
+    // mode — matches `seedValidators.ts::validateSeed` exactly.
+    let stake: bigint
     try {
-        const stake = BigInt(seed.staked_amount)
-        if (stake <= 0n) {
-            throw new Error(`got "${seed.staked_amount}"`)
-        }
-    } catch (e) {
+        stake = BigInt(seed.staked_amount)
+    } catch {
         throw new ConsensusInvariantError(
-            `[BOOT] genesis.validators[${index}].staked_amount invalid: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
+            `[BOOT] genesis.validators[${index}].staked_amount is not a valid bigint: "${seed.staked_amount}"`,
+        )
+    }
+    if (stake <= 0n) {
+        throw new ConsensusInvariantError(
+            `[BOOT] genesis.validators[${index}].staked_amount must be > 0, got "${seed.staked_amount}"`,
         )
     }
     if (seed.connection_url !== null) {

@@ -491,11 +491,21 @@ async function preMainLoop() {
             if (typeof genesisData === "string") {
                 genesisData = JSON.parse(genesisData)
             }
-        } catch {
-            // findGenesisBlock would have already thrown if genesis.json
-            // were required but missing. Treat any read/parse failure
-            // here as "no seed available"; ensureValidatorSeed handles
-            // the empty case explicitly.
+        } catch (e) {
+            // findGenesisBlock validates data/genesis.json on the
+            // fresh-chain path; on a subsequent boot it can early-return
+            // without re-reading the file, so a missing/corrupt file
+            // here is genuinely possible (operator deleted it,
+            // permissions changed, snapshot replay skipped). Log the
+            // real cause so the operator sees it BEFORE the
+            // ConsensusInvariantError from ensureValidatorSeed(null)
+            // points them at a misleading "carries no validator set"
+            // message.
+            log.error(
+                `[BOOT] failed to read data/genesis.json for validator seed reconcile: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            )
         }
         await ensureValidatorSeed(genesisData)
     }

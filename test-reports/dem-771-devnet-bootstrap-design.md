@@ -2,7 +2,7 @@
 
 Author: shitikyan
 Date: 2026-06-16
-Status: Proposal (no code merged)
+Status: Implemented in PR #943 (sections 4.1 and 4.2 are bundled into a single routine; rollout plan in §7 reflects the unified shape).
 
 ## 1. Scope
 
@@ -49,56 +49,65 @@ consensus silently does nothing, the process keeps running.
 
 Three changes. Each one is small and independently mergeable.
 
-### 4.1. Idempotent re-seed on boot
+### 4.1. Idempotent re-seed + integrated self-check on boot
 
 **File**: new `src/libs/blockchain/routines/ensureValidatorSeed.ts`.
 **Wired into**: `src/index.ts` immediately after `findGenesisBlock()`.
 
+The routine bundles the re-seed and the fail-loud self-check (originally
+sketched separately in §4.2) into a single function: the only sensible
+"empty validators table + nothing to seed" handling is to throw with the
+operator-actionable message, so it lives in the same place.
+
 ```ts
-export async function ensureValidatorSeed(genesisData: any): Promise<void> {
-    const count = await Validators.count()
-    if (count > 0) return            // healthy
+export async function ensureValidatorSeed(genesisData: unknown) {
+    const existing = await countValidators()
+    if (existing > 0) return { reseeded: false, count: existing }   // healthy
 
-    const seed = (genesisData?.validators ?? []) as GenesisValidatorSeed[]
-    if (seed.length === 0) return    // nothing to seed; falls through to 4.2
+    const seed = extractSeed(genesisData)
+    if (seed.length === 0) {
+        // Integrated self-check (was §4.2): nothing left to do; node
+        // would otherwise come up with quorum impossible.
+        throw new ConsensusInvariantError(
+            "[BOOT] validators table empty and data/genesis.json " +
+            "carries no validator set; chain cannot reach consensus. " +
+            "Restore data/snapshot/ from a healthy peer and re-run with " +
+            "`./run --reset`, or fix data/genesis.json.",
+        )
+    }
+    seed.forEach(validateSeedEntry)
 
-    log.warning(
-        `[BOOT] validators table empty; re-seeding ${seed.length} entries from genesis.json`,
-    )
-    const db = (await Datasource.getInstance()).getDataSource()
-    await db.transaction(async em => {
-        await upsertValidators(em, seed)     // ON CONFLICT (address) DO NOTHING
-    })
+    await db.transaction(em => upsertValidators(em, seed))   // ON CONFLICT DO NOTHING
+    const after = await countValidators()
+    if (after === 0) {
+        throw new ConsensusInvariantError(
+            "[BOOT] validator re-seed produced 0 rows; aborting boot.",
+        )
+    }
+    return { reseeded: true, count: after }
 }
 ```
 
-**Safety**: the gate `count > 0` means we never resurrect addresses
+**Safety**: the gate `existing > 0` means we never resurrect addresses
 that legitimately unstaked — if the dynamic set has even one entry, we
 leave the table alone. We only re-seed when the table is fully empty,
 which is unambiguously a broken state.
 
-**Effect**: the failure mode we hit today self-heals at boot. No
-operator action required.
+**Effect**: the previously silent failure mode (empty validators →
+silent quorum death) self-heals at boot; truly unrecoverable state
+fails loud with the remediation command embedded in the error message.
 
-### 4.2. Boot self-check (fail loud when unrecoverable)
+### 4.2. Fail-loud self-check — bundled into 4.1
 
-After `ensureValidatorSeed()`:
+Originally outlined as a separate post-call check in `src/index.ts`.
+The implementation collapses it into `ensureValidatorSeed` itself:
+there is no reasonable handling of "validators empty + nothing to
+seed" other than throwing, so the throw lives next to the read.
 
-```ts
-const count = await Validators.count()
-if (count === 0) {
-    throw new Error(
-        `[BOOT] validators table empty and genesis.json carries no ` +
-        `validator set; chain cannot reach consensus. Either restore ` +
-        `data/snapshot/ from a healthy peer and re-run './run --reset', ` +
-        `or fix data/genesis.json.`,
-    )
-}
-```
-
-This only fires when 4.1 had nothing to seed — i.e. the chain is
-genuinely unrecoverable from local data alone. The error message names
-the remediation.
+The boot wire in `src/index.ts` is therefore a single
+`await ensureValidatorSeed(genesisData)` call (preceded by a defensive
+read of `data/genesis.json` whose IO/parse errors are logged rather
+than swallowed).
 
 ### 4.3. `./run --reset` — one-command clean restart
 
@@ -144,13 +153,19 @@ No SSH. No remote coordination. No memorising a 6-step procedure.
 
 ## 7. Rollout
 
-1. PR-1: `ensureValidatorSeed` + `upsertValidators` helper + unit
-   tests. Wire into `src/index.ts`. Behind no flag — the gate
-   (`count === 0`) is already conservative.
-2. PR-2: boot self-check throw (section 4.2). Trivial.
-3. PR-3: `wipe-and-reboot.sh --devnet` + `./run --reset` /
-   `./run --docker --reset` dispatch.
+Shipped as a single PR (#943) rather than the originally-sketched
+three: the boot self-check (§4.2) collapses into `ensureValidatorSeed`
+itself, leaving two units of work that are too small to split.
 
-Each PR is independently testable and revertible. Order matters only
-for the user-visible message: ship 4.1 first so the self-check in 4.2
-never fires for the failure mode we already know how to fix.
+1. **PR-1 / #943** — `ensureValidatorSeed` (re-seed + integrated
+   fail-loud self-check) + unit tests + wire into `src/index.ts` +
+   `wipe-and-reboot.sh --devnet` + `./run --docker --reset` /
+   `./run --docker --devnet --reset` dispatch.
+
+Future follow-ups (separate tickets, not blocking this fix):
+
+- P2P validator-set sync (gossip the active set to late-joining
+  peers without requiring a local snapshot).
+- Migrate the `./run` wrapper toward a subcommand surface
+  (`./run reset`, `./run status`, ...) once more operator
+  workflows accumulate.
