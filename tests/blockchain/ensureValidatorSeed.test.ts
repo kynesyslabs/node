@@ -142,6 +142,27 @@ describe("ensureValidatorSeed", () => {
         expect(transaction).not.toHaveBeenCalled()
     })
 
+    it("rejects null entry in validators[]", async () => {
+        repoCount.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                validators: [null as unknown as GenesisValidatorSeed],
+            }),
+        ).rejects.toThrow(/must be an object/)
+        expect(transaction).not.toHaveBeenCalled()
+    })
+
+    it("rejects primitive entry in validators[]", async () => {
+        repoCount.mockResolvedValue(0)
+
+        await expect(
+            ensureValidatorSeed({
+                validators: ["nope" as unknown as GenesisValidatorSeed],
+            }),
+        ).rejects.toThrow(/must be an object/)
+    })
+
     it("rejects empty status", async () => {
         repoCount.mockResolvedValue(0)
 

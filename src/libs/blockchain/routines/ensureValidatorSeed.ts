@@ -124,6 +124,17 @@ function extractSeed(genesisData: unknown): GenesisValidatorSeed[] {
  * path; both must stay in sync if the schema evolves.
  */
 function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
+    // Guard the whole row first so a `null` / non-object element in
+    // genesis.json (e.g. an editor accidentally writes `[null, {...}]`)
+    // surfaces as a ConsensusInvariantError with the offending index,
+    // not a native `Cannot read properties of null` TypeError.
+    if (seed === null || typeof seed !== "object") {
+        throw new ConsensusInvariantError(
+            `[BOOT] genesis.validators[${index}] must be an object, got ${JSON.stringify(
+                seed,
+            )}`,
+        )
+    }
     if (!ADDRESS_RE.test(seed.address)) {
         throw new ConsensusInvariantError(
             `[BOOT] genesis.validators[${index}].address invalid: expected 0x + 64 hex chars, got "${seed.address}"`,
