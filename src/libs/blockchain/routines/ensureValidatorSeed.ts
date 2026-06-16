@@ -11,20 +11,31 @@
  * calling `getValidators` and seeing zero.
  *
  * This routine runs once during boot, AFTER `findGenesisBlock`. It is
- * conservative: if the validators table has any rows it does nothing
- * (so dynamically-staked validators are never overwritten and
- * legitimately-unstaked addresses are never resurrected). It only
- * touches the table when it is completely empty AND `data/genesis.json`
- * carries a non-empty validators[] block.
+ * conservative — `count > 0` short-circuits to a no-op so dynamically
+ * staked rows are never overwritten and legitimately unstaked rows are
+ * never resurrected. When the table is empty the recovery order is:
  *
- * If the table is empty and there is nothing to seed from genesis, we
- * throw — the chain cannot reach consensus from local data alone and
- * the operator needs to either restore `data/snapshot/` or fix
- * `data/genesis.json`.
+ *   1. `data/snapshot/validators.jsonl` (preferred). Snapshots are the
+ *      authoritative state-at-snapshot-time and include every dynamic
+ *      stake event that landed before the snapshot was taken. Re-seeding
+ *      from snapshot keeps mainnet operators from losing post-genesis
+ *      stakers when the table gets wiped out-of-band.
+ *   2. `data/genesis.json::validators[]` (fallback) BUT ONLY when the
+ *      chain is still at block 0. Past block 0, genesis-baked addresses
+ *      may have legitimately unstaked and newer staked addresses are
+ *      not represented; auto-seeding from genesis after the chain has
+ *      moved would silently revert the validator set. We refuse to boot
+ *      in that situation and ask the operator to restore a snapshot.
+ *   3. If neither source is usable we throw with a remediation message.
  */
 
 import type { EntityManager } from "typeorm"
 
+import Chain from "src/libs/blockchain/chain"
+import {
+    loadSnapshot,
+    type ValidatorSeed as SnapshotValidatorSeed,
+} from "src/libs/blockchain/genesis/loadSnapshot"
 import Datasource from "src/model/datasource"
 import { Validators } from "src/model/entities/Validators"
 import log from "src/utilities/logger"
@@ -36,6 +47,22 @@ export interface GenesisValidatorSeed {
     staked_amount: string
     first_seen: number
     valid_at: number
+}
+
+/**
+ * Internal upsert shape used for both genesis and snapshot rows. The
+ * snapshot type allows nulls on `status`, `first_seen`, `valid_at`; the
+ * Validators entity columns are nullable so we pass them through as-is.
+ */
+interface ValidatorUpsertRow {
+    address: string
+    status: string | null
+    connection_url: string | null
+    staked_amount: string
+    first_seen: number | null
+    valid_at: number | null
+    unstake_requested_at: number | null
+    unstake_available_at: number | null
 }
 
 /** Matches `0x` followed by exactly 64 hex characters. */
@@ -53,6 +80,8 @@ export interface EnsureValidatorSeedResult {
     reseeded: boolean
     /** Row count in `validators` after the routine returns. */
     count: number
+    /** Which source supplied the rows; `null` when we did not reseed. */
+    source: "snapshot" | "genesis" | null
 }
 
 /**
@@ -61,48 +90,79 @@ export interface EnsureValidatorSeedResult {
  *
  * @param genesisData Parsed contents of `data/genesis.json`. May be any
  *                    shape — the routine extracts `validators` defensively
- *                    and treats anything malformed as "no seed available".
+ *                    and treats anything malformed as "no genesis seed
+ *                    available".
  */
 export async function ensureValidatorSeed(
     genesisData: unknown,
 ): Promise<EnsureValidatorSeedResult> {
     const existing = await countValidators()
     if (existing > 0) {
-        return { reseeded: false, count: existing }
+        return { reseeded: false, count: existing, source: null }
     }
 
-    const seed = extractSeed(genesisData)
+    const db = (await Datasource.getInstance()).getDataSource()
+    const lastBlock = await Chain.getLastBlockNumber()
+
+    // Primary recovery — snapshot, when it carries validators.jsonl.
+    // Snapshots are the safe source on a chain that has advanced past
+    // genesis because they capture post-genesis staking events.
+    const snapshotRows = await loadSnapshotValidators()
+    if (snapshotRows.length > 0) {
+        log.warning(
+            `[BOOT] validators table empty; re-seeding ${snapshotRows.length} entries from data/snapshot/validators.jsonl`,
+        )
+        await db.transaction(em => upsertValidators(em, snapshotRows))
+        return await assertSeededAndReturn("snapshot")
+    }
+
+    // Fallback — genesis-baked validators, but ONLY at block 0. On an
+    // advanced chain we refuse to boot: a genesis seed would resurrect
+    // historically unstaked addresses and silently lose any validator
+    // that staked after genesis.
+    if (lastBlock > 0) {
+        throw new ConsensusInvariantError(
+            `[BOOT] validators table empty at block ${lastBlock} and no ` +
+                `usable snapshot at data/snapshot/. Auto-seeding from ` +
+                `data/genesis.json after the chain has advanced is unsafe ` +
+                `(it would revert the validator set to the founders and ` +
+                `lose every staked validator). Restore data/snapshot/ from ` +
+                `a healthy peer and re-run, or accept a full wipe via ` +
+                `\`./run --docker --reset\`.`,
+        )
+    }
+
+    const seed = extractGenesisSeed(genesisData)
     if (seed.length === 0) {
         throw new ConsensusInvariantError(
-            "[BOOT] validators table empty and data/genesis.json carries no " +
-                "validator set; chain cannot reach consensus. Restore " +
-                "data/snapshot/ from a healthy peer and re-run with " +
-                "`./run --reset`, or fix data/genesis.json.",
+            "[BOOT] validators table empty and neither data/snapshot/ nor " +
+                "data/genesis.json carries a validator set; chain cannot " +
+                "reach consensus. Restore data/snapshot/ from a healthy " +
+                "peer and re-run with `./run --docker --reset`, or fix " +
+                "data/genesis.json.",
         )
     }
 
     seed.forEach(validateSeedEntry)
-
     log.warning(
-        `[BOOT] validators table empty; re-seeding ${seed.length} entries from data/genesis.json`,
+        `[BOOT] validators table empty at block 0; re-seeding ${seed.length} entries from data/genesis.json`,
     )
+    await db.transaction(em => upsertValidators(em, seed.map(genesisToRow)))
+    return await assertSeededAndReturn("genesis")
+}
 
-    const db = (await Datasource.getInstance()).getDataSource()
-    await db.transaction(async em => {
-        await upsertValidators(em, seed)
-    })
-
+async function assertSeededAndReturn(
+    source: "snapshot" | "genesis",
+): Promise<EnsureValidatorSeedResult> {
     const after = await countValidators()
     if (after === 0) {
         throw new ConsensusInvariantError(
-            "[BOOT] validator re-seed produced 0 rows; aborting boot. " +
-                "Check DB connectivity and data/genesis.json.validators[] " +
-                "shape.",
+            `[BOOT] validator re-seed from ${source} produced 0 rows; ` +
+                `aborting boot. Check DB connectivity and the source file.`,
         )
     }
-
-    log.info(`[BOOT] validators re-seeded; table now has ${after} rows`)
-    return { reseeded: true, count: after }
+    log.info(`[BOOT] validators re-seeded from ${source}; ${after} rows`)
+    return { reseeded: true, count: after, source }
 }
 
 async function countValidators(): Promise<number> {
@@ -110,7 +170,70 @@ async function countValidators(): Promise<number> {
     return db.getRepository(Validators).count()
 }
 
-function extractSeed(genesisData: unknown): GenesisValidatorSeed[] {
+/**
+ * Returns the snapshot's validator rows as upsert-ready objects, or an
+ * empty array when no snapshot is present / the snapshot is schemaVersion
+ * 1 (no validators.jsonl). Tolerant of stream-read failures — they are
+ * logged and treated as "no snapshot source".
+ */
+async function loadSnapshotValidators(): Promise<ValidatorUpsertRow[]> {
+    let snapshot: Awaited<ReturnType<typeof loadSnapshot>>
+    try {
+        snapshot = await loadSnapshot()
+    } catch (e) {
+        log.warning(
+            `[BOOT] failed to load data/snapshot/ for validator recovery: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return []
+    }
+    if (!snapshot.available) return []
+    if (!snapshot.manifest.files["validators.jsonl"]) return []
+
+    const rows: ValidatorUpsertRow[] = []
+    try {
+        for await (const v of snapshot.streamValidators()) {
+            rows.push(snapshotToRow(v))
+        }
+    } catch (e) {
+        log.warning(
+            `[BOOT] failed to stream validators.jsonl from snapshot: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return []
+    }
+    return rows
+}
+
+function snapshotToRow(v: SnapshotValidatorSeed): ValidatorUpsertRow {
+    return {
+        address: v.address,
+        status: v.status,
+        connection_url: v.connection_url,
+        staked_amount: v.staked_amount,
+        first_seen: v.first_seen,
+        valid_at: v.valid_at,
+        unstake_requested_at: v.unstake_requested_at,
+        unstake_available_at: v.unstake_available_at,
+    }
+}
+
+function genesisToRow(v: GenesisValidatorSeed): ValidatorUpsertRow {
+    return {
+        address: v.address,
+        status: v.status,
+        connection_url: v.connection_url,
+        staked_amount: v.staked_amount,
+        first_seen: v.first_seen,
+        valid_at: v.valid_at,
+        unstake_requested_at: null,
+        unstake_available_at: null,
+    }
+}
+
+function extractGenesisSeed(genesisData: unknown): GenesisValidatorSeed[] {
     if (!genesisData || typeof genesisData !== "object") return []
     const raw = (genesisData as { validators?: unknown }).validators
     if (!Array.isArray(raw)) return []
@@ -122,6 +245,11 @@ function extractSeed(genesisData: unknown): GenesisValidatorSeed[] {
  * `src/libs/blockchain/genesis/seedValidators.ts::validateSeed`.
  * Duplicated rather than imported to avoid touching the genesis-init
  * path; both must stay in sync if the schema evolves.
+ *
+ * Only applied to genesis-sourced rows. Snapshot rows go through the
+ * loader's own typed stream and bypass this — the loader already
+ * enforces the wider schema (status / first_seen / valid_at may be
+ * null) so re-validating here would reject legitimate snapshot input.
  */
 function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
     // Guard the whole row first so a `null` / non-object element in
@@ -185,20 +313,11 @@ function validateSeedEntry(seed: GenesisValidatorSeed, index: number): void {
 
 async function upsertValidators(
     em: EntityManager,
-    seeds: GenesisValidatorSeed[],
+    rows: ValidatorUpsertRow[],
 ): Promise<void> {
     const BATCH = 100
-    for (let i = 0; i < seeds.length; i += BATCH) {
-        const batch = seeds.slice(i, i + BATCH).map(v => ({
-            address: v.address,
-            status: v.status,
-            connection_url: v.connection_url,
-            staked_amount: v.staked_amount,
-            first_seen: v.first_seen,
-            valid_at: v.valid_at,
-            unstake_requested_at: null,
-            unstake_available_at: null,
-        }))
+    for (let i = 0; i < rows.length; i += BATCH) {
+        const batch = rows.slice(i, i + BATCH)
 
         // ON CONFLICT (address) DO NOTHING. Defence in depth: even if the
         // `count > 0` early-return ever stops gating correctly, this

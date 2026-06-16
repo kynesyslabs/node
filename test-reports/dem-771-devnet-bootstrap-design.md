@@ -54,48 +54,74 @@ Three changes. Each one is small and independently mergeable.
 **File**: new `src/libs/blockchain/routines/ensureValidatorSeed.ts`.
 **Wired into**: `src/index.ts` immediately after `findGenesisBlock()`.
 
-The routine bundles the re-seed and the fail-loud self-check (originally
-sketched separately in §4.2) into a single function: the only sensible
-"empty validators table + nothing to seed" handling is to throw with the
-operator-actionable message, so it lives in the same place.
+The routine bundles the re-seed, source-priority decision, and the
+fail-loud self-check (originally sketched separately in §4.2) into a
+single function. The recovery order is the critical part — naive
+"seed from genesis whenever empty" is unsafe on mainnet because
+genesis-baked addresses may have legitimately unstaked, and any
+validator that staked after block 0 is not represented in
+`data/genesis.json`. The snapshot is the authoritative
+state-at-snapshot-time and includes every dynamic stake event up to
+that point, so it is the safe primary source on an advanced chain.
 
 ```ts
 export async function ensureValidatorSeed(genesisData: unknown) {
     const existing = await countValidators()
-    if (existing > 0) return { reseeded: false, count: existing }   // healthy
+    if (existing > 0) return { reseeded: false, count: existing, source: null }
 
-    const seed = extractSeed(genesisData)
-    if (seed.length === 0) {
-        // Integrated self-check (was §4.2): nothing left to do; node
-        // would otherwise come up with quorum impossible.
+    const lastBlock = await Chain.getLastBlockNumber()
+
+    // 1. Primary: snapshot (authoritative at snapshot-time, includes
+    //    post-genesis stakers).
+    const snapshotRows = await loadSnapshotValidators()   // [] on v1 / missing / IO error
+    if (snapshotRows.length > 0) {
+        await db.transaction(em => upsertValidators(em, snapshotRows))
+        return { reseeded: true, count: ..., source: "snapshot" }
+    }
+
+    // 2. Fallback: genesis-baked, BUT only at block 0. Auto-seeding
+    //    from genesis after the chain has advanced would revert the
+    //    validator set to the founders and silently lose every
+    //    dynamic staker.
+    if (lastBlock > 0) {
         throw new ConsensusInvariantError(
-            "[BOOT] validators table empty and data/genesis.json " +
-            "carries no validator set; chain cannot reach consensus. " +
-            "Restore data/snapshot/ from a healthy peer and re-run with " +
-            "`./run --reset`, or fix data/genesis.json.",
+            `[BOOT] validators table empty at block ${lastBlock} and no ` +
+            `usable snapshot. Restore data/snapshot/ from a healthy peer ` +
+            `and re-run, or accept a full wipe via \`./run --docker --reset\`.`,
+        )
+    }
+
+    const seed = extractGenesisSeed(genesisData)
+    if (seed.length === 0) {
+        throw new ConsensusInvariantError(
+            "[BOOT] neither snapshot nor genesis has validators; " +
+            "chain cannot reach consensus.",
         )
     }
     seed.forEach(validateSeedEntry)
-
-    await db.transaction(em => upsertValidators(em, seed))   // ON CONFLICT DO NOTHING
-    const after = await countValidators()
-    if (after === 0) {
-        throw new ConsensusInvariantError(
-            "[BOOT] validator re-seed produced 0 rows; aborting boot.",
-        )
-    }
-    return { reseeded: true, count: after }
+    await db.transaction(em => upsertValidators(em, seed.map(genesisToRow)))
+    return { reseeded: true, count: ..., source: "genesis" }
 }
 ```
 
-**Safety**: the gate `existing > 0` means we never resurrect addresses
-that legitimately unstaked — if the dynamic set has even one entry, we
-leave the table alone. We only re-seed when the table is fully empty,
-which is unambiguously a broken state.
+**Safety guarantees**:
+
+| State | Action |
+|---|---|
+| `count > 0` | no-op (never overwrite dynamic stakers / resurrect unstaked) |
+| `count = 0` + snapshot has `validators.jsonl` | reseed from snapshot, any block height |
+| `count = 0` + no snapshot + `block = 0` | reseed from `genesis.validators[]` (cold-start dev) |
+| `count = 0` + no snapshot + `block > 0` | **refuse to boot** with remediation |
+| `count = 0` + nothing usable | throw with operator-actionable message |
+
+The "no auto-genesis past block 0" rule is what makes this safe for
+mainnet: a wiped validators table at block N requires a real snapshot
+to recover from, not a silent revert to the founders.
 
 **Effect**: the previously silent failure mode (empty validators →
-silent quorum death) self-heals at boot; truly unrecoverable state
-fails loud with the remediation command embedded in the error message.
+silent quorum death) self-heals at boot when a snapshot is available;
+truly unrecoverable state fails loud with the remediation command
+embedded in the error message.
 
 ### 4.2. Fail-loud self-check — bundled into 4.1
 
