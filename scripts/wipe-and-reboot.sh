@@ -12,8 +12,9 @@
 # What it does, in order:
 #   1. Sanity-check the working tree is on a branch + clean (operator
 #      pushed everything they meant to push).
-#   2. Stops the stack via `./scripts/docker-run down`.
-#   3. Removes all three named volumes (PG data, node data, node state).
+#   2. Stops the stack via `./scripts/docker-run down` (or `--devnet down`).
+#   3. Removes the three named volumes (PG data, node data, node state)
+#      belonging to the targeted stack.
 #   4. Forces a `--no-cache` rebuild of the node image (so source
 #      changes since the last build are picked up).
 #   5. Boots the stack detached.
@@ -25,9 +26,13 @@
 # are idempotent.
 #
 # Usage:
-#   ./scripts/wipe-and-reboot.sh             # interactive confirm before wipe
-#   ./scripts/wipe-and-reboot.sh --yes       # skip the confirmation
-#   ./scripts/wipe-and-reboot.sh --no-rebuild  # skip the --no-cache image rebuild
+#   ./scripts/wipe-and-reboot.sh                # mainnet/testnet stack, interactive
+#   ./scripts/wipe-and-reboot.sh --yes          # skip confirmation
+#   ./scripts/wipe-and-reboot.sh --no-rebuild   # skip --no-cache rebuild
+#   ./scripts/wipe-and-reboot.sh --devnet       # devnet stack (demos-devnet project,
+#                                               # demos_*_devnet volumes, +100 ports)
+#
+# Flags compose: `--devnet --yes --no-rebuild` is valid.
 
 set -euo pipefail
 
@@ -37,12 +42,14 @@ cd "$REPO_ROOT"
 
 YES=0
 DO_REBUILD=1
+IS_DEVNET=0
 for arg in "$@"; do
     case "$arg" in
         --yes|-y) YES=1 ;;
         --no-rebuild) DO_REBUILD=0 ;;
+        --devnet) IS_DEVNET=1 ;;
         -h|--help)
-            sed -n '2,30p' "$0"
+            sed -n '2,37p' "$0"
             exit 0
             ;;
         *)
@@ -52,10 +59,29 @@ for arg in "$@"; do
     esac
 done
 
+# Stack-specific names. The devnet override uses a different compose
+# project (demos-devnet) and namespaced volumes (demos_*_devnet); the
+# script must wipe whichever set matches the targeted stack.
+if [[ "$IS_DEVNET" -eq 1 ]]; then
+    STACK_LABEL="devnet"
+    DOCKER_RUN_ARGS=(--devnet)
+    VOLUMES=(demos_pgdata_devnet demos_node_data_devnet demos_node_state_devnet)
+    VOLUME_RE='^demos_.*_devnet$'
+    COMPOSE_PROJECT=demos-devnet
+else
+    STACK_LABEL="mainnet/testnet"
+    DOCKER_RUN_ARGS=()
+    VOLUMES=(demos_pgdata demos_node_data demos_node_state)
+    # Match `demos_*` but explicitly exclude the devnet siblings so we
+    # don't mistake an idle devnet stack for stale mainnet volumes.
+    VOLUME_RE='^demos_[^_]+(_[^_]+)?$'
+    COMPOSE_PROJECT=""
+fi
+
 # -----------------------------------------------------------------------------
 # 1. Sanity-check the working tree
 # -----------------------------------------------------------------------------
-echo "[1/6] working-tree sanity check..."
+echo "[1/6] working-tree sanity check (target: ${STACK_LABEL})..."
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
 if [[ -z "$CURRENT_BRANCH" ]]; then
     echo "  WARN: not on a git branch (detached HEAD?). Continuing anyway."
@@ -73,8 +99,9 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$YES" -ne 1 ]]; then
     echo
-    echo "[!] About to WIPE all chain data volumes (demos_pgdata,"
-    echo "    demos_node_data, demos_node_state). This is destructive."
+    echo "[!] About to WIPE all chain data volumes for the ${STACK_LABEL} stack:"
+    printf '      %s\n' "${VOLUMES[@]}"
+    echo "    This is destructive."
     read -r -p "    Type 'wipe' to confirm: " confirm
     if [[ "$confirm" != "wipe" ]]; then
         echo "    aborted."
@@ -85,9 +112,9 @@ fi
 # -----------------------------------------------------------------------------
 # 3. Stop the stack
 # -----------------------------------------------------------------------------
-echo "[2/6] stopping docker stack..."
+echo "[2/6] stopping docker stack (${STACK_LABEL})..."
 if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run down >/dev/null 2>&1 || true
+    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" down >/dev/null 2>&1 || true
 else
     docker compose down >/dev/null 2>&1 || true
 fi
@@ -95,10 +122,16 @@ fi
 # -----------------------------------------------------------------------------
 # 4. Wipe volumes
 # -----------------------------------------------------------------------------
-echo "[3/6] removing data volumes (demos_pgdata, demos_node_data, demos_node_state)..."
-docker volume rm demos_pgdata demos_node_data demos_node_state 2>/dev/null || true
+echo "[3/6] removing data volumes (${VOLUMES[*]})..."
+docker volume rm "${VOLUMES[@]}" 2>/dev/null || true
 
-remaining="$(docker volume ls --format '{{.Name}}' | grep -E '^demos_' || true)"
+remaining="$(docker volume ls --format '{{.Name}}' | grep -E "$VOLUME_RE" || true)"
+if [[ "$IS_DEVNET" -eq 0 ]]; then
+    # On the mainnet/testnet path our VOLUME_RE intentionally matches
+    # demos_<single>_<single> and would catch idle devnet siblings.
+    # Filter them out so the warning stays accurate.
+    remaining="$(echo "$remaining" | grep -v '_devnet$' || true)"
+fi
 if [[ -n "$remaining" ]]; then
     echo "  WARN: leftover demos_* volumes still present (may shadow the wipe):"
     echo "$remaining" | sed 's/^/    /'
@@ -110,7 +143,7 @@ fi
 if [[ "$DO_REBUILD" -eq 1 ]]; then
     echo "[4/6] rebuilding node image (--no-cache)..."
     if [[ -x ./scripts/docker-run ]]; then
-        ./scripts/docker-run --rebuild build
+        ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" --rebuild build
     else
         docker compose build --no-cache node
     fi
@@ -123,7 +156,7 @@ fi
 # -----------------------------------------------------------------------------
 echo "[5/6] booting stack..."
 if [[ -x ./scripts/docker-run ]]; then
-    ./scripts/docker-run up -d
+    ./scripts/docker-run "${DOCKER_RUN_ARGS[@]}" up -d
 else
     docker compose up -d
 fi
@@ -137,4 +170,10 @@ echo "        [GENESIS][BALANCES] overlaying N entries from genesisData.balances
 echo "        [GENESIS][BALANCES] overlay done — total=N updated=X inserted=Y"
 echo "        [FORKS] Loaded fork \"osDenomination\" with activationHeight=0"
 echo
-docker compose logs -f node 2>&1 | grep --line-buffered -E "GENESIS|BALANCES|FORK"
+if [[ -n "$COMPOSE_PROJECT" ]]; then
+    docker compose -p "$COMPOSE_PROJECT" logs -f node 2>&1 \
+        | grep --line-buffered -E "GENESIS|BALANCES|FORK"
+else
+    docker compose logs -f node 2>&1 \
+        | grep --line-buffered -E "GENESIS|BALANCES|FORK"
+fi
