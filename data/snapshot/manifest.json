@@ -1,32 +1,66 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "source": {
-    "host": "node3.demos.sh",
-    "chain_block_height": 2285755,
-    "chain_block_hash": "3c6a0b81e4cc8fdd44719f79f5f71938e75f465802f312c4fb475886a36b8338",
+    "host": "vmi2200529.contaboserver.net",
+    "chain_block_height": 47681,
+    "chain_block_hash": "24c4d4d0e0e7d87d55dc311e6681c11aed60eac039363bf1ad7f5b02b0eb290c",
     "node_version": "0.9.8",
-    "pg_version": "17.0",
-    "dumped_at": "2026-05-19T15:22:00Z"
+    "pg_version": "16.14",
+    "dumped_at": "2026-06-16T11:57:46.386Z"
   },
   "files": {
     "gcr_main.jsonl": {
-      "sha256": "b50513ce9632c5460a608d29cc0f4593cbb961bcf585a017323100a9bef10b55",
-      "rows": 13880,
-      "balance_sum": "15024999999998868586"
+      "sha256": "2fa661b47bc98189944616e91161ca7aaf459eb243ad37df29a252257ae355fa",
+      "rows": 13895,
+      "balance_sum": "15024999999998868528000000000"
     },
     "gcr_storageprogram.jsonl": {
-      "sha256": "30f6f31243b77c66c25cadf5523c251a7aada7e858b669288f5c6b53cd11ee9f",
-      "rows": 1382,
-      "size_bytes_sum": 1269189
+      "sha256": "f0fc8d8a72eda8d5b290c47bc6169dc4679ffaa31f00936361237c400c0eb2d6",
+      "rows": 1397,
+      "size_bytes_sum": 1278061
     },
     "identity_commitments.jsonl": {
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "rows": 0
+      "sha256": "a5387a97d75a26f7ef36b1ec68ed9b975036ae21f2fae890f46c435abafde109",
+      "rows": 2
+    },
+    "validators.jsonl": {
+      "sha256": "87b5709b55eb2d9c5df6d3c2027192d1c09482b576fcd5f9b3daaf284871624b",
+      "rows": 4
     }
   },
+  "fork_state": [
+    {
+      "fork_name": "gasFeeSeparation",
+      "applied": true,
+      "applied_at_block": "0",
+      "applied_at": "2026-06-10T16:17:44.98",
+      "pre_sum_dem": null,
+      "post_sum_os": null,
+      "gcr_v2_row_count": null,
+      "legacy_row_count": null,
+      "validators_row_count": null,
+      "capped_count": null,
+      "total_value_lost_os": null,
+      "malformed_validators_count": null
+    },
+    {
+      "fork_name": "osDenomination",
+      "applied": true,
+      "applied_at_block": "0",
+      "applied_at": "2026-06-10T16:17:44.907",
+      "pre_sum_dem": "19024999999998868586",
+      "post_sum_os": "19024999999998868586000000000",
+      "gcr_v2_row_count": 13880,
+      "legacy_row_count": 0,
+      "validators_row_count": 4,
+      "capped_count": 0,
+      "total_value_lost_os": "0",
+      "malformed_validators_count": 0
+    }
+  ],
   "transforms_applied": {
     "nonces_reset_to_zero": true,
     "assigned_txs_emptied": true,
-    "test_identity_commitments_dropped": 1
+    "test_identity_commitments_dropped": 0
   }
 }
