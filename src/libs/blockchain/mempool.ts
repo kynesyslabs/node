@@ -191,8 +191,9 @@ export default class Mempool {
         // re-check fails, return error without inserting.
         //
         // Skip when not native, when no sender (genesis path), when
-        // fork inactive, or when the tx doesn't carry a nonce —
-        // those paths preserve the legacy behaviour bit-identically.
+        // fork inactive, when the tx doesn't carry a nonce, or when the
+        // tx is a system relay type (see below) — those paths preserve
+        // the legacy behaviour bit-identically.
         const senderFromRaw = transaction.content?.from
         const senderFrom =
             typeof senderFromRaw === "string"
@@ -201,9 +202,25 @@ export default class Mempool {
         const txNonce = transaction.content?.nonce
         const blockHeight = getSharedState.lastBlockNumber ?? 0
 
+        // System relay transactions carry a node-generated nonce that is
+        // monotonic-for-uniqueness, NOT a sequential per-account counter:
+        // `l2psBatch` is emitted by L2PSBatchAggregator from the node's
+        // own identity, carries amount=0 and no `nonce` GCR edit, so it
+        // never advances the sender's account.nonce. The sequential
+        // `account.nonce + 1 + pendingCount` check below is designed for
+        // value-transfer txs and would reject every batch (the
+        // timestamp-based nonce never equals account.nonce+1), trapping
+        // the aggregator in a permanent retry loop. Replay safety for
+        // these txs comes from the in-mempool hash dedup, not the nonce.
+        const SYSTEM_RELAY_TX_TYPES = new Set(["l2psBatch"])
+        const isSystemRelayTx =
+            typeof transaction.content?.type === "string" &&
+            SYSTEM_RELAY_TX_TYPES.has(transaction.content.type)
+
         if (
             senderFrom &&
             typeof txNonce === "number" &&
+            !isSystemRelayTx &&
             isForkActive("nonceEnforcement", blockHeight)
         ) {
             try {
