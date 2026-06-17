@@ -231,9 +231,19 @@ export async function verifyWeb2Proof(
                     message: "Domain proof URL must use the default https port",
                 }
             }
+            // The claimed domain comes from an untrusted payload; guard its type
+            // before calling toLowerCase() (optional chaining only covers
+            // null/undefined, so a non-string would throw and escape as a 500
+            // instead of a clean verification failure).
+            if (typeof payload.username !== "string") {
+                return {
+                    success: false,
+                    message: "Domain proof is missing a valid claimed domain",
+                }
+            }
             // proofUrl.hostname is already lower-cased by the URL parser;
             // normalise the client-supplied username so casing never mismatches.
-            if (proofUrl.hostname !== payload.username?.toLowerCase()) {
+            if (proofUrl.hostname !== payload.username.toLowerCase()) {
                 return {
                     success: false,
                     message: "Proof host does not match the claimed domain",
