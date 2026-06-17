@@ -36,6 +36,7 @@ import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
+import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
@@ -478,6 +479,36 @@ async function preMainLoop() {
     log.info("[BOOTSTRAP] Looking for the genesis block")
     await findGenesisBlock()
     await loadGenesisIdentities()
+    // DEM-771: reconcile the validators table. No-op on healthy boot,
+    // re-seeds from data/genesis.json when the table was emptied
+    // out-of-band, throws when the chain is unrecoverable from local
+    // state alone.
+    {
+        let genesisData: unknown = null
+        try {
+            const raw = fs.readFileSync("data/genesis.json", "utf8")
+            genesisData = JSON.parse(raw)
+            if (typeof genesisData === "string") {
+                genesisData = JSON.parse(genesisData)
+            }
+        } catch (e) {
+            // findGenesisBlock validates data/genesis.json on the
+            // fresh-chain path; on a subsequent boot it can early-return
+            // without re-reading the file, so a missing/corrupt file
+            // here is genuinely possible (operator deleted it,
+            // permissions changed, snapshot replay skipped). Log the
+            // real cause so the operator sees it BEFORE the
+            // ConsensusInvariantError from ensureValidatorSeed(null)
+            // points them at a misleading "carries no validator set"
+            // message.
+            log.error(
+                `[BOOT] failed to read data/genesis.json for validator seed reconcile: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            )
+        }
+        await ensureValidatorSeed(genesisData)
+    }
     log.info("[CHAIN] 🖥️ Found the genesis block")
 
     // Governance state must be in sharedState BEFORE any inbound traffic
