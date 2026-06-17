@@ -158,11 +158,21 @@ CONFIG_JSON=$(cat <<EOF
 EOF
 )
 
-echo "[1/3] writing subnet files into ${CONTAINER}:${DIR}..."
-docker exec "$CONTAINER" mkdir -p "$DIR"
-docker exec -i "$CONTAINER" sh -c "cat > ${DIR}/private_key.txt && chmod 600 ${DIR}/private_key.txt" <<< "$KEY_HEX"
-docker exec -i "$CONTAINER" sh -c "cat > ${DIR}/iv.txt && chmod 600 ${DIR}/iv.txt" <<< "$IV_HEX"
-docker exec -i "$CONTAINER" sh -c "cat > ${DIR}/config.json" <<< "$CONFIG_JSON"
+# The container runs as a non-root user (typically `demos`) whose home
+# does not own `data/`, so the user can't `mkdir` under it. Detect the
+# owner of an existing data-owned path (the node's identity file is a
+# reliable anchor) and run the writes as root + chown back so the node
+# user can still read its own files at boot.
+OWNER="$(docker exec "$CONTAINER" sh -c 'stat -c %U .demos_identity 2>/dev/null || stat -c %U .' || echo demos)"
+OWNER="${OWNER:-demos}"
+
+echo "[1/3] writing subnet files into ${CONTAINER}:${DIR} (owner=${OWNER})..."
+docker exec -u root "$CONTAINER" mkdir -p "$DIR"
+docker exec -u root -i "$CONTAINER" sh -c "cat > ${DIR}/private_key.txt" <<< "$KEY_HEX"
+docker exec -u root -i "$CONTAINER" sh -c "cat > ${DIR}/iv.txt" <<< "$IV_HEX"
+docker exec -u root -i "$CONTAINER" sh -c "cat > ${DIR}/config.json" <<< "$CONFIG_JSON"
+docker exec -u root "$CONTAINER" chown -R "${OWNER}:${OWNER}" "$DIR"
+docker exec -u root "$CONTAINER" chmod 600 "${DIR}/private_key.txt" "${DIR}/iv.txt"
 
 echo "[2/3] verifying files..."
 docker exec "$CONTAINER" ls -la "$DIR"
