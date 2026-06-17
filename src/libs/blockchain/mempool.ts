@@ -21,6 +21,19 @@ import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
 import { isForkActive } from "@/forks"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 
+/**
+ * System relay transaction types: node-generated txs that carry no
+ * balance edits and no `nonce` GCR edit, so they never advance the
+ * sender's account.nonce. Their `content.nonce` is monotonic-for-
+ * uniqueness (see L2PSBatchAggregator.getNextBatchNonce), NOT a
+ * sequential per-account counter, so the value-transfer nonce TOCTOU
+ * check in `addTransaction` must not apply to them. Admission is still
+ * gated on the tx originating from THIS node's own identity (see
+ * `addTransaction`) so an arbitrary signer cannot label a tx with one
+ * of these types to bypass the per-account nonce throttle.
+ */
+const SYSTEM_RELAY_TX_TYPES = new Set<string>(["l2psBatch"])
+
 export default class Mempool {
     public static repo: Repository<MempoolTx> = null
     public static async init() {
@@ -202,25 +215,37 @@ export default class Mempool {
         const txNonce = transaction.content?.nonce
         const blockHeight = getSharedState.lastBlockNumber ?? 0
 
-        // System relay transactions carry a node-generated nonce that is
-        // monotonic-for-uniqueness, NOT a sequential per-account counter:
-        // `l2psBatch` is emitted by L2PSBatchAggregator from the node's
-        // own identity, carries amount=0 and no `nonce` GCR edit, so it
-        // never advances the sender's account.nonce. The sequential
-        // `account.nonce + 1 + pendingCount` check below is designed for
-        // value-transfer txs and would reject every batch (the
-        // timestamp-based nonce never equals account.nonce+1), trapping
-        // the aggregator in a permanent retry loop. Replay safety for
-        // these txs comes from the in-mempool hash dedup, not the nonce.
-        const SYSTEM_RELAY_TX_TYPES = new Set(["l2psBatch"])
-        const isSystemRelayTx =
+        // System relay transactions (SYSTEM_RELAY_TX_TYPES, e.g.
+        // `l2psBatch`) carry a node-generated monotonic-for-uniqueness
+        // nonce, not a sequential per-account counter, and never advance
+        // the sender's account.nonce (no `nonce` GCR edit). The
+        // sequential `account.nonce + 1 + pendingCount` check below is
+        // built for value-transfer txs and would reject every batch (the
+        // timestamp nonce never equals account.nonce+1), trapping the
+        // L2PSBatchAggregator in a permanent retry loop.
+        //
+        // The exemption is gated on the tx originating from THIS node's
+        // OWN identity. The aggregator only ever submits batch txs from
+        // the node's own keypair, via a direct local addTransaction call;
+        // legitimate batch txs reach other nodes inside a block, not via
+        // mempool admission. Gating on own-identity means an arbitrary
+        // signer (or a remote peer) cannot self-label a tx `l2psBatch`
+        // to skip the per-account nonce throttle and flood the mempool —
+        // their `from` won't match this node's identity and they stay on
+        // the enforced path. Replay safety for the node's own batches
+        // comes from the in-mempool hash dedup above, not the nonce.
+        const ownIdentityHex =
+            getSharedState.publicKeyHex?.toLowerCase() ?? null
+        const isOwnSystemRelayTx =
             typeof transaction.content?.type === "string" &&
-            SYSTEM_RELAY_TX_TYPES.has(transaction.content.type)
+            SYSTEM_RELAY_TX_TYPES.has(transaction.content.type) &&
+            ownIdentityHex !== null &&
+            senderFrom === ownIdentityHex
 
         if (
             senderFrom &&
             typeof txNonce === "number" &&
-            !isSystemRelayTx &&
+            !isOwnSystemRelayTx &&
             isForkActive("nonceEnforcement", blockHeight)
         ) {
             try {
