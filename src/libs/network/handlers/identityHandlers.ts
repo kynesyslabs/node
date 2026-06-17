@@ -194,6 +194,16 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             return response
         }
 
+        // Default https port only — consistent with verifyWeb2Proof / the parser.
+        if (parsed.port !== "") {
+            response.result = 400
+            response.response = {
+                success: false,
+                error: "Proof URL must use the default https port",
+            }
+            return response
+        }
+
         try {
             const { hostname, body } = await fetchDomainProof(data.url)
             response.result = 200
