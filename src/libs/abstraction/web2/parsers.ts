@@ -1,6 +1,9 @@
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 
+/** The well-known path a domain owner hosts to prove control. */
+export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
+
 export abstract class Web2ProofParser {
     formats = {
         github: [
@@ -15,14 +18,37 @@ export abstract class Web2ProofParser {
             "https://canary.discord.com/channels",
             "https://discordapp.com/channels",
         ],
-        // Only enforces the scheme here; the hostname<->claimed-domain binding
-        // and the exact DOMAIN_PROOF_PATH are validated upstream in verifyWeb2Proof.
+        // `domain` is validated structurally below (https + exact
+        // DOMAIN_PROOF_PATH), not via this prefix list.
         domain: ["https://"],
     }
 
     constructor() {}
 
     verifyProofFormat(proofUrl: string, context: string) {
+        // A domain proof must be the well-known file served over https on the
+        // claimed host. Enforcing the full shape here — the choke point every
+        // parser's readData runs through — means no opcode can route a domain
+        // proof past the path/scheme check (it previously lived only in
+        // verifyWeb2Proof, so a new caller could bypass it).
+        if (context === "domain") {
+            let url: URL
+            try {
+                url = new URL(proofUrl)
+            } catch {
+                throw new Error("Invalid domain proof URL")
+            }
+            if (url.protocol !== "https:") {
+                throw new Error("Domain proof URL must use https")
+            }
+            if (url.pathname !== DOMAIN_PROOF_PATH) {
+                throw new Error(
+                    `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
+                )
+            }
+            return
+        }
+
         if (
             !this.formats[context].some((format: string) =>
                 proofUrl.startsWith(format),

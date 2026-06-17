@@ -2,13 +2,14 @@ import axios from "axios"
 import https from "https"
 import dns from "dns"
 import ipaddr from "ipaddr.js"
-import { Web2ProofParser } from "./parsers"
+import { Web2ProofParser, DOMAIN_PROOF_PATH } from "./parsers"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import SharedState from "@/utilities/sharedState"
 import log from "src/utilities/logger"
 
-/** The well-known path a domain owner hosts to prove control. */
-export const DOMAIN_PROOF_PATH = "/.well-known/demos-cci.txt"
+// Defined in ./parsers (the format choke point) and re-exported here so the
+// existing import site (verifyWeb2Proof) keeps resolving it from ./web2/domain.
+export { DOMAIN_PROOF_PATH }
 
 /** Max bytes we read from a well-known file — the proof payload is tiny. */
 const MAX_PROOF_BYTES = 4096
