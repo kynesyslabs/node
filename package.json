@@ -114,7 +114,7 @@
         "@metaplex-foundation/js": "^0.20.1",
         "@modelcontextprotocol/sdk": "^1.13.3",
         "@noble/ed25519": "^3.0.0",
-        "@noble/hashes": "^2.0.1",
+        "@noble/hashes": "1.8.0",
         "@octokit/core": "^6.1.5",
         "@scure/bip39": "^2.0.1",
         "@solana/web3.js": "^1.98.4",
