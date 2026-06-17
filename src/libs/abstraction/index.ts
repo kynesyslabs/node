@@ -222,6 +222,15 @@ export async function verifyWeb2Proof(
                     message: `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
                 }
             }
+            // Reject non-default ports: URL.hostname strips the port, so the
+            // host<->claim check below would otherwise pass example.com:9999,
+            // letting a claim ride on a service the owner may not control.
+            if (proofUrl.port !== "") {
+                return {
+                    success: false,
+                    message: "Domain proof URL must use the default https port",
+                }
+            }
             // proofUrl.hostname is already lower-cased by the URL parser;
             // normalise the client-supplied username so casing never mismatches.
             if (proofUrl.hostname !== payload.username?.toLowerCase()) {

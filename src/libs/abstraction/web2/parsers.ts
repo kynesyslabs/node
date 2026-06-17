@@ -46,6 +46,14 @@ export abstract class Web2ProofParser {
                     `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
                 )
             }
+            // A non-default port lets a claim ride on a service the domain owner
+            // may not control (URL.hostname strips the port, so the host<->claim
+            // check alone would pass example.com:9999). Require the default 443.
+            if (url.port !== "") {
+                throw new Error(
+                    "Domain proof URL must use the default https port",
+                )
+            }
             return
         }
 
