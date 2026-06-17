@@ -20,7 +20,7 @@ bun run show:pubkey
 cat publickey*
 ```
 
-Head over to https://faucet.demos.sh and paste your public key to get 1000 DEM. Repeat again to acquire 2000 DEM.
+Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
 
 ## Staking
 
