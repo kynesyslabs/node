@@ -6,7 +6,7 @@
  */
 
 // --- Application metadata ---
-export const APP_VERSION = "0.9.8"
+export const APP_VERSION = "0.9.9 RC"
 export const APP_VERSION_NAME = "Oxlong Michael"
 export const DEFAULT_SIGNING_ALGORITHM = "ed25519" as const
 
