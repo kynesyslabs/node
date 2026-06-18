@@ -126,6 +126,7 @@
                             "application/json": {
                                 "schema": {
                                     "type": "object",
+                                    "required": ["version"],
                                     "properties": {
                                         "version": {
                                             "type": "string"
