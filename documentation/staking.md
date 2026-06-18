@@ -24,6 +24,14 @@ Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
 
 ## Staking
 
+Update your node's `demos_peerlist.json` to look like this:
+
+```json
+{
+    "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156":"http://node3.demos.sh:53550"
+}
+```
+
 Run the following command in the node source folder to stake the DEM you acquired:
 
 ```sh
@@ -38,14 +46,6 @@ Update your `.env` file to include your exposed URL
 EXPOSED_URL=http://<your-ipaddress>:53550
 
 # other keys here
-```
-
-Confirm your node's `demos_peerlist.json` looks like this:
-
-```json
-{
-    "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156":"http://node3.demos.sh:53550"
-}
 ```
 
 Then restart your node by running the following command:
