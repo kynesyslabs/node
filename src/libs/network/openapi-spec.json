@@ -123,9 +123,20 @@
                     "200": {
                         "description": "Successful response",
                         "content": {
-                            "text/plain": {
+                            "application/json": {
                                 "schema": {
-                                    "type": "string"
+                                    "type": "object",
+                                    "required": ["version"],
+                                    "properties": {
+                                        "version": {
+                                            "type": "string"
+                                        },
+                                        "commit": {
+                                            "type": "string",
+                                            "nullable": true,
+                                            "description": "Git commit hash of the running binary, or null if unresolvable."
+                                        }
+                                    }
                                 }
                             }
                         }

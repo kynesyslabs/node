@@ -46,6 +46,7 @@ import {
     buildInitialSubsystemRegistry,
     type SubsystemInfo,
 } from "./subsystemRegistry"
+import { NODE_VERSION } from "./nodeVersion"
 
 dotenv.config()
 
@@ -80,6 +81,14 @@ export default class SharedState {
     prod = Config.getInstance().core.prod
     version = APP_VERSION
     version_name = APP_VERSION_NAME
+
+    // Git commit hash of the running binary, resolved once at boot from
+    // `.git/HEAD` (or the GIT_COMMIT env override). Exposed over /version
+    // so the exact running revision can be confirmed — and any future
+    // tamper-detection can pin against the build it expects. `null` when
+    // the commit can't be resolved (e.g. a stripped Docker image without
+    // .git/ and no GIT_COMMIT build arg).
+    commitHash = NODE_VERSION.commit
     signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
     // Node start time in milliseconds since epoch — set when this singleton

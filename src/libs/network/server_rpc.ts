@@ -234,7 +234,12 @@ export async function serverRpcBun() {
         })
     })
 
-    server.get("/version", () => jsonResponse(getSharedState.version))
+    server.get("/version", () =>
+        jsonResponse({
+            version: getSharedState.version,
+            commit: getSharedState.commitHash,
+        }),
+    )
 
     server.get("/publickey", () => jsonResponse(getSharedState.publicKeyHex))
 
