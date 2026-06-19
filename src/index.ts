@@ -154,6 +154,10 @@ const indexState: {
     // Server references for graceful shutdown
     rpcServer: any
     signalingServer: any
+    // L2PS Messaging (instant-messaging WebSocket sidecar)
+    L2PS_MESSAGING_ENABLED: boolean
+    L2PS_MESSAGING_PORT: number
+    l2psMessagingServer: any
 } = {
     OVERRIDE_PORT: null,
     OVERRIDE_IS_TESTER: null,
@@ -185,6 +189,29 @@ const indexState: {
     // Server references for graceful shutdown
     rpcServer: null,
     signalingServer: null,
+    // L2PS Messaging — port is validated up-front so a typo in
+    // L2PS_MESSAGING_PORT does not propagate into Bun.serve() as `NaN` or
+    // a negative/over-range value (which would fail at server-bind time
+    // with an opaque error instead of telling the operator the env was
+    // malformed).
+    L2PS_MESSAGING_ENABLED: process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true",
+    L2PS_MESSAGING_PORT: parseL2PSMessagingPort(process.env.L2PS_MESSAGING_PORT),
+    l2psMessagingServer: null as any,
+}
+
+function parseL2PSMessagingPort(raw: string | undefined): number {
+    const fallback = 3006
+    if (raw === undefined || raw === "") return fallback
+    const n = Number.parseInt(raw, 10)
+    if (!Number.isInteger(n) || n < 1 || n > 65535) {
+        // Use console here because the logger may not be initialised yet
+        // at module-init time (this runs before the boot tracker).
+        console.warn(
+            `[L2PS-IM] L2PS_MESSAGING_PORT="${raw}" is not a valid port (expected 1..65535); falling back to ${fallback}`,
+        )
+        return fallback
+    }
+    return n
 }
 
 // SECTION Preparation methods
@@ -850,6 +877,20 @@ async function main() {
             process.exit(1)
         }
 
+        // Start L2PS Messaging server (failsafe)
+        if (indexState.L2PS_MESSAGING_ENABLED) {
+            try {
+                const { startL2PSMessaging } = await import("./features/l2ps-messaging")
+                indexState.L2PS_MESSAGING_PORT = await getNextAvailablePort(
+                    indexState.L2PS_MESSAGING_PORT,
+                )
+                indexState.l2psMessagingServer = startL2PSMessaging(indexState.L2PS_MESSAGING_PORT)
+                log.info(`[L2PS-IM] Messaging server started on port ${indexState.L2PS_MESSAGING_PORT}`)
+            } catch (error) {
+                log.error("[L2PS-IM] Failed to start messaging server: " + error)
+            }
+        }
+
         // Start MCP server (failsafe)
         if (indexState.MCP_ENABLED) {
             bootTracker.start("mcp.server")
@@ -1372,6 +1413,17 @@ async function gracefulShutdown(signal: string) {
             HttpRateLimiter.getInstance().destroy()
         } catch (_) {
             /* may not be initialized */
+        }
+
+        // Stop L2PS Messaging server if running
+        if (indexState.l2psMessagingServer) {
+            log.info("[SHUTDOWN] Stopping L2PS Messaging server...")
+            try {
+                const { stopL2PSMessaging } = await import("./features/l2ps-messaging")
+                stopL2PSMessaging()
+            } catch (error) {
+                log.error(`[SHUTDOWN] Error stopping L2PS Messaging: ${error}`)
+            }
         }
 
         log.info("[CORE] Cleanup complete, exiting...")

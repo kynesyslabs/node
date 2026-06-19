@@ -15,8 +15,22 @@ import { execSync } from "child_process"
 import { join } from "path"
 import { createHash, randomBytes } from "crypto"
 
-// npx path - hardcoded to /usr/bin/npx for reliability
-const NPX = "/usr/bin/npx"
+// npx path — resolved lazily on first use. Eager `which npx` at import
+// time threw `Command failed: which npx` in CI / minimal containers
+// where npx is not on PATH, crashing every consumer of this module on
+// require. Callers see a clear error only when they actually need npx.
+let _NPX: string | undefined
+function getNpx(): string {
+    if (_NPX !== undefined) return _NPX
+    try {
+        _NPX = execSync("which npx").toString().trim()
+    } catch (e) {
+        throw new Error(
+            `setup-zk: cannot locate 'npx' on PATH (${(e as Error).message}). Install Node/npm or set PATH before running this script.`,
+        )
+    }
+    return _NPX
+}
 
 const KEYS_DIR = "src/features/zk/keys"
 const CIRCUITS_DIR = "src/features/zk/circuits"
@@ -164,7 +178,7 @@ async function generateKeys(circuitName: string) {
     log("  → Generating initial proving key (phase 0)...", "yellow")
     try {
         execSync(
-            `${NPX} snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
+            `${getNpx()} snarkjs groth16 setup ${r1csPath} ${ptauPath} ${zkeyPath0}`,
             { stdio: "inherit" },
         )
         log("  ✓ Initial proving key generated", "green")
@@ -180,7 +194,7 @@ async function generateKeys(circuitName: string) {
         const entropy = randomBytes(32).toString("hex")
 
         execSync(
-            `${NPX} snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
+            `${getNpx()} snarkjs zkey contribute ${zkeyPath0} ${zkeyPath1} --name="ProductionContribution" -e="${entropy}"`,
             { stdio: "inherit" },
         )
         log("  ✓ Contribution added (gamma and delta are now distinct)", "green")
@@ -193,7 +207,7 @@ async function generateKeys(circuitName: string) {
     log("  → Exporting verification key from contributed zkey...", "yellow")
     try {
         execSync(
-            `${NPX} snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
+            `${getNpx()} snarkjs zkey export verificationkey ${zkeyPath1} ${vkeyPath}`,
             { stdio: "inherit" },
         )
         log("  ✓ Verification key exported", "green")

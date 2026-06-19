@@ -19,7 +19,6 @@ import type {
     HistoryMessage,
     ErrorCode,
 } from "./types"
-import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 /** Max raw WebSocket message size (256 KB) */
 const MAX_MESSAGE_SIZE = 256 * 1024
@@ -35,13 +34,16 @@ interface WSData {
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
-    private server: Server<WSData>
+    // Bun.Server / Bun.serve dropped the WSData generic; the cast on
+    // `ws.data` accesses at call sites still narrows correctly because
+    // we set ws.data in `upgrade()`.
+    private server: Server
     private service: L2PSMessagingService
 
     constructor(port: number) {
         this.service = L2PSMessagingService.getInstance()
 
-        this.server = Bun.serve<WSData>({
+        this.server = Bun.serve({
             port,
             fetch: (req, server) => {
                 if (server.upgrade(req, { data: { publicKey: null, l2psUid: null } })) {
@@ -50,9 +52,14 @@ export class L2PSMessagingServer {
                 return new Response("WebSocket upgrade required", { status: 426 })
             },
             websocket: {
-                message: (ws, message) => this.handleMessage(ws, message as string),
-                open: (ws) => log.debug("[L2PS-IM] New connection"),
-                close: (ws) => this.handleClose(ws),
+                // Bun.serve no longer carries a WSData generic on the
+                // outer Server type; ws.data is `unknown` at the dispatch
+                // boundary even though we set it in upgrade(). The cast
+                // is sound because every connection passes through the
+                // upgrade() above which provides a fully-shaped WSData.
+                message: (ws, message) => this.handleMessage(ws as ServerWebSocket<WSData>, message as string),
+                open: () => log.debug("[L2PS-IM] New connection"),
+                close: (ws) => this.handleClose(ws as ServerWebSocket<WSData>),
             },
         })
 
@@ -76,9 +83,7 @@ export class L2PSMessagingServer {
         let frame: ProtocolFrame
         try {
             frame = JSON.parse(raw)
-        } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error)
-            log.warn("[L2PSMessagingServer] Invalid JSON message:", errorMsg)
+        } catch {
             this.sendError(ws, "INVALID_MESSAGE", "Invalid JSON")
             return
         }
@@ -139,7 +144,7 @@ export class L2PSMessagingServer {
         // Verify proof of key ownership: sign("register:{publicKey}:{timestamp}")
         const proofMessage = `register:${publicKey}:${msg.timestamp}`
         try {
-            const valid = await TxValidatorPool.getInstance().verify({
+            const valid = await ucrypto.verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(publicKey),
@@ -157,9 +162,7 @@ export class L2PSMessagingServer {
         // Remove old connection if re-registering
         const existing = this.peers.get(publicKey)
         if (existing) {
-            try { (existing.ws as ServerWebSocket<WSData>).close() } catch (error) {
-                log.debug("[L2PSMessagingServer] Failed to close existing WebSocket:", error instanceof Error ? error.message : String(error))
-            }
+            try { (existing.ws as ServerWebSocket<WSData>).close() } catch {}
         }
 
         // Register peer
@@ -289,7 +292,7 @@ export class L2PSMessagingServer {
         // Verify proof: sign("history:{peerKey}:{timestamp}")
         const proofMessage = `history:${peerKey}:${msg.timestamp}`
         try {
-            const valid = await TxValidatorPool.getInstance().verify({
+            const valid = await ucrypto.verify({
                 algorithm: getSharedState.signingAlgorithm,
                 message: new TextEncoder().encode(proofMessage),
                 publicKey: this.hexToUint8Array(myKey),
@@ -300,8 +303,12 @@ export class L2PSMessagingServer {
                 return
             }
         } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : String(error)
-            log.warn("[L2PSMessagingServer] History proof verification failed:", errorMsg)
+            // Log the underlying error before we collapse it into the
+            // generic INVALID_PROOF response. Auth failures here are
+            // operationally interesting — attack attempts, key/scheme
+            // misconfigurations — and the silent catch left operators
+            // blind to all of them.
+            log.warn(`[L2PS-IM] History proof verification error: ${error}`)
             this.sendError(ws, "INVALID_PROOF", "Proof verification error")
             return
         }
