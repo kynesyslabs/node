@@ -1,6 +1,7 @@
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
+import { DomainProofParser, DOMAIN_PROOF_PATH } from "./web2/domain"
 import { type Web2ProofParser } from "./web2/parsers"
 import { Web2CoreTargetIdentityPayload } from "@kynesyslabs/demosdk/abstraction"
 import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
@@ -180,6 +181,7 @@ export async function verifyWeb2Proof(
         | typeof TwitterProofParser
         | typeof GithubProofParser
         | typeof DiscordProofParser
+        | typeof DomainProofParser
 
     switch (payload.context) {
         case "twitter":
@@ -194,6 +196,62 @@ export async function verifyWeb2Proof(
         case "discord":
             parser = DiscordProofParser
             break
+        case "domain": {
+            // The proof must be the well-known file ON the claimed domain.
+            // Binding the proof URL's host to the claimed hostname is what stops
+            // a sender from pointing at someone else's (their own) valid proof
+            // while claiming an unrelated domain.
+            let proofUrl: URL
+            try {
+                proofUrl = new URL(payload.proof as string)
+            } catch {
+                return {
+                    success: false,
+                    message: "Invalid domain proof URL",
+                }
+            }
+            if (proofUrl.protocol !== "https:") {
+                return {
+                    success: false,
+                    message: "Domain proof URL must use https",
+                }
+            }
+            if (proofUrl.pathname !== DOMAIN_PROOF_PATH) {
+                return {
+                    success: false,
+                    message: `Domain proof must be hosted at ${DOMAIN_PROOF_PATH}`,
+                }
+            }
+            // Reject non-default ports: URL.hostname strips the port, so the
+            // host<->claim check below would otherwise pass example.com:9999,
+            // letting a claim ride on a service the owner may not control.
+            if (proofUrl.port !== "") {
+                return {
+                    success: false,
+                    message: "Domain proof URL must use the default https port",
+                }
+            }
+            // The claimed domain comes from an untrusted payload; guard its type
+            // before calling toLowerCase() (optional chaining only covers
+            // null/undefined, so a non-string would throw and escape as a 500
+            // instead of a clean verification failure).
+            if (typeof payload.username !== "string") {
+                return {
+                    success: false,
+                    message: "Domain proof is missing a valid claimed domain",
+                }
+            }
+            // proofUrl.hostname is already lower-cased by the URL parser;
+            // normalise the client-supplied username so casing never mismatches.
+            if (proofUrl.hostname !== payload.username.toLowerCase()) {
+                return {
+                    success: false,
+                    message: "Proof host does not match the claimed domain",
+                }
+            }
+            parser = DomainProofParser
+            break
+        }
         default:
             return {
                 success: false,
@@ -229,10 +287,21 @@ export async function verifyWeb2Proof(
         const { message, type, signature } = await instance.readData(
             payload.proof as string,
         )
+        // Domain proofs (#897 / DEM-767): the signed message is domain-separated
+        // and bound to the verified host AND the sender, so a signature can't be
+        // lifted onto another domain, identity, or web2 context. Reconstruct it
+        // from payload.username (already asserted === the proof URL host above)
+        // and the tx sender; the parsed payload tag is ignored for domain.
+        // This shape MUST stay in lockstep with the SDK's createDomainProofPayload.
+        // Freshness (nonce/issuedAt) is the Tier-2 follow-up tracked in DEM-767.
+        const messageToVerify =
+            payload.context === "domain"
+                ? `dacs-domain:v1:${(payload.username as string).toLowerCase()}:${sender}`
+                : message
         try {
             const verified = await TxValidatorPool.getInstance().verify({
                 algorithm: type,
-                message: new TextEncoder().encode(message),
+                message: new TextEncoder().encode(messageToVerify),
                 publicKey: hexToUint8Array(sender),
                 signature: hexToUint8Array(signature),
             })

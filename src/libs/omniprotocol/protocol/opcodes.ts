@@ -62,6 +62,7 @@ export enum OmniOpcode {
     WEB2_PROXY_REQUEST = 0x52,
     GET_TWEET = 0x53,
     GET_DISCORD_MESSAGE = 0x54,
+    GET_DOMAIN_PROOF = 0x55,
 
     // 0x6X Admin Operations
     ADMIN_RATE_LIMIT_UNBLOCK = 0x60,
