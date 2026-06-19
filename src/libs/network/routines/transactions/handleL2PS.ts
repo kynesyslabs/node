@@ -7,6 +7,7 @@ import { L2PS, L2PSEncryptedPayload } from "@kynesyslabs/demosdk/l2ps"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
+import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import log from "@/utilities/logger"
 
 /**
@@ -72,6 +73,49 @@ async function decryptAndValidate(
 }
 
 
+
+/**
+ * Per-sender in-process serialisation gate for the balance pre-check.
+ *
+ * Without this, two concurrent broadcasts from the same sender both
+ * race past `checkSenderBalance` while the on-chain state still shows
+ * the pre-debit balance — the executor then debits twice from a wallet
+ * that only had funds for one. The serial-by-sender lock funnels every
+ * (check + insert + execute) sequence for a single sender so the second
+ * tx sees the balance the first one will land on. In-process is
+ * sufficient because every L2PS tx for a given sender arrives through
+ * one node entry point; cross-node ordering is already handled
+ * downstream by the mempool + consensus pipeline.
+ */
+const senderLocks = new Map<string, Promise<void>>()
+async function withSenderLock<T>(
+    sender: string,
+    fn: () => Promise<T>,
+): Promise<T> {
+    const previous = senderLocks.get(sender) ?? Promise.resolve()
+    let release: () => void = () => undefined
+    const next = new Promise<void>(res => {
+        release = res
+    })
+    // Stash the chained promise in a single const so the cleanup-time
+    // identity check below compares the SAME object we wrote into the
+    // map. Two separate `previous.then(() => next)` calls would each
+    // allocate a fresh promise and the strict-equality check would
+    // always be false — the unbounded-leak the comment claims to
+    // prevent.
+    const chained = previous.then(() => next)
+    senderLocks.set(sender, chained)
+    try {
+        await previous
+        return await fn()
+    } finally {
+        release()
+        if (senderLocks.get(sender) === chained) {
+            senderLocks.delete(sender)
+        }
+    }
+}
+
 export default async function handleL2PS(
     l2psTx: L2PSTransaction,
 ): Promise<RPCResponse> {
@@ -111,8 +155,39 @@ export default async function handleL2PS(
         return createErrorResponse(response, 400, `Decrypted transaction hash mismatch: expected ${originalHash}, got ${decryptedTx.hash}`)
     }
 
-    // Process Valid Transaction
-    return await processValidL2PSTransaction(response, l2psUid, l2psTx, decryptedTx, originalHash)
+    const sender = decryptedTx.content.from as string
+    if (!sender) {
+        return createErrorResponse(
+            response,
+            400,
+            "Missing sender address in decrypted transaction",
+        )
+    }
+
+    // Serialise (check + insert + execute) per sender — see
+    // `withSenderLock` for why this closes the TOCTOU window between
+    // the balance read and the executor debit. Two concurrent
+    // broadcasts from the same wallet without this gate would both
+    // see the pre-debit balance and both pass.
+    return await withSenderLock(sender, async () => {
+        // checkInnerTxBalance keeps both call sites (handleL2PS and
+        // confirmTransaction.checkL2PSBalance) on one implementation
+        // that canonicalises amount + fee to OS units before comparing
+        // with the OS-magnitude balance. Charging DEM-unit values
+        // against OS-unit balance was a silent no-op post-fork.
+        const balanceError = await checkInnerTxBalance(decryptedTx)
+        if (balanceError) {
+            log.error(`[handleL2PS] Balance pre-check failed: ${balanceError}`)
+            return createErrorResponse(response, 400, balanceError)
+        }
+        return await processValidL2PSTransaction(
+            response,
+            l2psUid,
+            l2psTx,
+            decryptedTx,
+            originalHash,
+        )
+    })
 }
 
 /**

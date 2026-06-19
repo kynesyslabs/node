@@ -27,6 +27,8 @@ import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSep
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Mempool from "@/libs/blockchain/mempool"
+import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
+import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -106,6 +108,59 @@ export async function confirmTransaction(
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
+    }
+
+    log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
+
+    // Check sender balance covers the transfer amount.
+    //
+    // `tx.content.amount` was widened from `number` to `number | string`
+    // by the v4 bigint-widening work; coerce through BigInt so the
+    // comparison is precise for post-fork OS magnitudes (which a plain
+    // `Number` cast would round). Wrap the BigInt cast because a
+    // misbehaving client can ship `1.5` or `"abc"`, both of which throw
+    // — without the catch the whole RPC handler would crash instead of
+    // returning a signed-invalid `ValidityData`.
+    let txAmount: bigint
+    try {
+        txAmount = BigInt(tx.content.amount ?? 0)
+    } catch (e) {
+        validityData.data.message =
+            `[Tx Validation] [AMOUNT ERROR] Invalid tx amount ${JSON.stringify(tx.content.amount)}: ${(e as Error).message}\n`
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+    if (txAmount > 0n) {
+        const from = typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from)
+        // `GCR.getGCRNativeBalance` was renamed to `getAccountBalance`
+        // on stabilisation and now returns `bigint` directly.
+        let fromBalance = 0n
+        try {
+            fromBalance = await GCR.getAccountBalance(from)
+        } catch {
+            // Address not in GCR — balance is 0
+        }
+        if (fromBalance < txAmount) {
+            validityData.data.message =
+                `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
+            validityData.data.valid = false
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
+
+    // For L2PS encrypted transactions, decrypt inner tx and check balance
+    if (tx.content.type === "l2psEncryptedTx") {
+        const l2psBalanceError = await checkL2PSBalance(tx)
+        if (l2psBalanceError) {
+            validityData.data.message = l2psBalanceError
+            validityData.data.valid = false
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
     }
 
     validityData.data.message =
@@ -194,6 +249,53 @@ async function runTypeDispatcher(
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
     return { ok: true }
+}
+
+/**
+ * Decrypt L2PS encrypted tx and check inner tx balance before mempool.
+ *
+ * Returns error string on any "cannot verify" outcome rather than null;
+ * `confirmTransaction` reads null as "balance OK" and would otherwise
+ * sign ValidityData claiming the tx is valid even though we never
+ * actually verified it — a fail-open hole.
+ *
+ * The amount + fee comparison is delegated to `checkInnerTxBalance`,
+ * the same helper `handleL2PS.checkSenderBalance` uses, so both call
+ * sites canonicalise units identically against the OS-magnitude
+ * balance (the previous DEM-vs-OS mismatch made the gate a silent
+ * no-op post-osDenomination fork).
+ */
+async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
+    try {
+        const l2psPayload = (tx.content?.data as any)?.[1]
+        const l2psUid = l2psPayload?.l2ps_uid as string | undefined
+        if (!l2psUid) {
+            return `[Tx Validation] [BALANCE ERROR] L2PS transaction missing l2ps_uid — cannot verify sender balance\n`
+        }
+
+        const parallelNetworks = ParallelNetworks.getInstance()
+        let l2psInstance = await parallelNetworks.getL2PS(l2psUid)
+        if (!l2psInstance) {
+            l2psInstance = await parallelNetworks.loadL2PS(l2psUid)
+        }
+        if (!l2psInstance) {
+            return `[Tx Validation] [BALANCE ERROR] L2PS network ${l2psUid} is not loaded on this node — cannot verify sender balance\n`
+        }
+
+        const decryptedTx = await l2psInstance.decryptTx(tx as any)
+        if (!decryptedTx?.content?.from) {
+            return `[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n`
+        }
+
+        const innerError = await checkInnerTxBalance(decryptedTx as Transaction)
+        if (innerError) return `[Tx Validation] [BALANCE ERROR] ${innerError}\n`
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        log.error(`[confirmTransaction] L2PS balance pre-check error: ${message}`)
+        // Fail closed — see fn docstring.
+        return `[Tx Validation] [BALANCE ERROR] L2PS balance pre-check failed: ${message}\n`
+    }
+    return null
 }
 
 async function signValidityData(data: ValidityData): Promise<ValidityData> {
