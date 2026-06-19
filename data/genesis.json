@@ -21,7 +21,7 @@
   "status": "confirmed",
   "validators": [
       {
-          "address": "0xd17624072cb243567b9699cee0fef34c324298b1fb4e9361e284b3cf4091d98a",
+          "address": "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
           "status": "2",
           "connection_url": "https://node2.demos.sh",
           "staked_amount": "1000000000000000000",
@@ -29,7 +29,7 @@
           "valid_at": 0
       },
       {
-          "address": "0x5c4bd4ca9dee1579cd4a64453388b6d82cf18101b2d4957ec4d503c4ff094779",
+          "address": "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
           "status": "2",
           "connection_url": "https://node3.demos.sh",
           "staked_amount": "1000000000000000000",
