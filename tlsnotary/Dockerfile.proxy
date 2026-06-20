@@ -1,0 +1,32 @@
+# wstcp — WebSocket-to-TCP proxy for TLSNotary
+#
+# Forwards browser WebSocket connections to the notary's TCP port so that
+# tlsn-js (which cannot open raw TCP sockets) can reach the notary.
+#
+# Build:  docker build -f Dockerfile.proxy -t tlsn-proxy .
+# Run:    docker run -p 55688:55688 tlsn-proxy notary:7047
+
+# ── Builder ──────────────────────────────────────────────────────────────────
+FROM rust:alpine AS builder
+
+RUN apk add --no-cache musl-dev
+
+RUN cargo install wstcp
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates \
+    && addgroup -S wstcp \
+    && adduser -S -G wstcp wstcp
+
+COPY --from=builder /usr/local/cargo/bin/wstcp /usr/local/bin/wstcp
+
+USER wstcp
+
+EXPOSE 55688
+
+# First arg after the image is the TCP target (e.g. notary:7047).
+# Override via `command:` in docker-compose.
+ENTRYPOINT ["wstcp", "--bind-addr", "0.0.0.0:55688"]
+CMD ["notary:7047"]
