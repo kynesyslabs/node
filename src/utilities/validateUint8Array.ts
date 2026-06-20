@@ -6,11 +6,11 @@ export default function validateIfUint8Array(
         return input
     }
 
-    // Handle hex strings
-    if (typeof input === "string" && input.startsWith("0x")) {
-        const hexString = input.slice(2) // Remove "0x" prefix
-        // Validate hex string before conversion
-        if (hexString.length % 2 === 0 && /^[0-9a-fA-F]*$/.test(hexString)) {
+    // Handle hex strings (with or without 0x prefix)
+    if (typeof input === "string") {
+        const hexString = input.startsWith("0x") ? input.slice(2) : input
+        const isHex = /^[0-9a-fA-F]+$/.test(hexString) && hexString.length % 2 === 0
+        if (isHex) {
             return Buffer.from(hexString, "hex")
         }
 
