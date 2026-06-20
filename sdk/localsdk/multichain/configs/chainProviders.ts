@@ -51,4 +51,10 @@ export const chainProviders = {
         testnet: "https://fullnode.testnet.aptoslabs.com/v1",
         devnet: "https://fullnode.devnet.aptoslabs.com/v1",
     },
+    tron: {
+        mainnet: "https://api.trongrid.io",
+        testnet: "https://api.shasta.trongrid.io",
+        shasta: "https://api.shasta.trongrid.io",
+        nile: "https://nile.trongrid.io",
+    },
 }
