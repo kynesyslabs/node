@@ -164,8 +164,8 @@ async function proposeAndCollect(
                     `missingFromUs=${missingFromUs.length}, ` +
                     `missingFromThem=${missingFromThem.length}`,
             )
-            log.error("Missing from us: " + missingFromUs.join(", "))
-            log.error("Missing from them: " + missingFromThem.join(", "))
+            log.error("Missing from us: " + JSON.stringify(missingFromUs, null, 2))
+            log.error("Missing from them: " + JSON.stringify(missingFromThem, null, 2))
             log.debug(
                 `[broadcastBlockHash] Their block: ${JSON.stringify(
                     extra.ourBlock,
