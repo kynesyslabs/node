@@ -5,6 +5,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
+import Mempool from "@/libs/blockchain/mempool"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -165,6 +166,14 @@ async function proposeAndCollect(
                     `missingFromThem=${missingFromThem.length}`,
             )
             log.error("Missing from us: " + JSON.stringify(missingFromUs, null, 2))
+
+            if (missingFromThem.length > 0){
+                // check if the missing transactions are in the mempool
+                const missing = await Mempool.getTransactionsByHashes(missingFromThem)
+                log.error("Missing txs, found in mempool: " + missing.length)
+                log.error("Missing txs, found in mempool: " + JSON.stringify(missing, null, 2))
+            }
+
             log.error("Missing from them: " + JSON.stringify(missingFromThem, null, 2))
             log.debug(
                 `[broadcastBlockHash] Their block: ${JSON.stringify(
