@@ -62,6 +62,7 @@ export async function consensusRoutine(): Promise<void> {
     let successfulTxs: string[] = []
     let failedTxs: string[] = []
     let tempMempool: Transaction[] = []
+    let exitReason = ""
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -152,6 +153,7 @@ export async function consensusRoutine(): Promise<void> {
                 log.error(
                     "[CONSENSUS ROUTINE] Block timestamp could not be resolved, exiting the consensus routine",
                 )
+                exitReason = "blockTimestampNotReceived"
                 return
             }
         }
@@ -240,6 +242,7 @@ export async function consensusRoutine(): Promise<void> {
 
             // INFO: Release DTR transaction relay waiter
         } else {
+            exitReason = "voteError"
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
@@ -376,7 +379,7 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
 
-        if (txs.length !== tempMempool.length) {
+        if (exitReason !== "voteError" && txs.length !== tempMempool.length) {
             const diff = tempMempool.filter(
                 tx => !txs.some(t => t.hash === tx.hash),
             )
