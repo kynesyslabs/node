@@ -136,10 +136,12 @@ export async function getTransactionHistory(
 export async function getBlockTransactions(
     blockHash: string,
 ): Promise<Transaction[]> {
+    log.debug("[getBlockTransactions] Getting block transactions for block: " + blockHash)
     const { getBlockByHash } = await import("./chainBlocks")
     let block = await getBlockByHash(blockHash)
 
     if (!block) {
+        log.debug("[getBlockTransactions] Block not found, checking candidate block")
         if (blockHash === getSharedState.candidateBlock.hash) {
             block = getSharedState.candidateBlock
         } else {
