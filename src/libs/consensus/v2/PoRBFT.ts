@@ -368,6 +368,14 @@ export async function consensusRoutine(): Promise<void> {
         const txs = await Chain.getTransactionsFromHashes(
             tempMempool.map(tx => tx.hash),
         )
+
+        for (const tx of txs) {
+            if (tx.blockNumber !== blockRef) {
+                log.error("Transaction block number mismatch: " + tx.hash + ", expected: " + blockRef + ", got: " + tx.blockNumber)
+                process.exit(1)
+            }
+        }
+
         if (txs.length !== tempMempool.length) {
             const diff = tempMempool.filter(
                 tx => !txs.some(t => t.hash === tx.hash),
