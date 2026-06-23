@@ -190,6 +190,7 @@ export async function consensusRoutine(): Promise<void> {
             failedTxs = failedTxs.concat(localFailedTxs)
 
             if (failedTxs.length > 0) {
+                log.error("Failed txs: " + JSON.stringify(failedTxs, null, 2))
                 //  Prune the mempool of the failed txs
                 // NOTE The mempool should now be updated with only the successful txs
                 const pruneStart = Date.now()
@@ -362,6 +363,25 @@ export async function consensusRoutine(): Promise<void> {
         manager.endConsensusRoutine()
 
         log.only("[consensusRoutine] Consensus routine ended")
+
+        // COnfirm all transactions in the block, were inserted in the transaction table
+        const txs = await Chain.getTransactionsFromHashes(
+            tempMempool.map(tx => tx.hash),
+        )
+        if (txs.length !== tempMempool.length) {
+            const diff = tempMempool.filter(
+                tx => !txs.some(t => t.hash === tx.hash),
+            )
+            log.error(
+                "Transactions not inserted: " +
+                    JSON.stringify(
+                        diff.map(tx => tx.hash),
+                        null,
+                        2,
+                    ),
+            )
+            process.exit(1)
+        }
     }
 }
 
