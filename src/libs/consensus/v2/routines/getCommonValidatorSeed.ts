@@ -117,6 +117,15 @@ export default async function getCommonValidatorSeed(
         }
     }
 
+    log.error(
+        "Last few blocks: " +
+            JSON.stringify(
+                lastFewBlocks.map(b => ({ hash: b.hash, number: b.number })),
+                null,
+                2,
+            ),
+    )
+
     if (!genesisHash) {
         // NOTE: Only happens when forging genesis block
         // INFO: check if genesis is lastBlock
