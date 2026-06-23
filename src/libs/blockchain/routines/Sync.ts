@@ -359,9 +359,28 @@ export async function syncBlock(block: Block, peer: Peer) {
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
     if (txs.length < block.content.ordered_transactions.length) {
-        log.error("[fastSync] No transactions received for block: " + block.hash)
-        log.error("Block transactions: " + JSON.stringify(block.content.ordered_transactions, null, 2))
+        log.error(
+            "[fastSync] No transactions received for block: " + block.hash,
+        )
+        log.error(
+            "Block transactions: " +
+                JSON.stringify(block.content.ordered_transactions, null, 2),
+        )
         process.exit(1)
+    }
+
+    for (const tx of txs) {
+        if (tx.blockNumber !== block.number) {
+            log.error(
+                "Transaction block number mismatch: " +
+                    tx.hash +
+                    ", expected: " +
+                    block.number +
+                    ", got: " +
+                    tx.blockNumber,
+            )
+            process.exit(1)
+        }
     }
 
     // ! Sync the native tables
