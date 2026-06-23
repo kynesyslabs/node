@@ -358,7 +358,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
-    if (txs.length === 0 && block.content.ordered_transactions.length > 0) {
+    if (txs.length < block.content.ordered_transactions.length) {
         log.error("[fastSync] No transactions received for block: " + block.hash)
         log.error("Block transactions: " + JSON.stringify(block.content.ordered_transactions, null, 2))
         process.exit(1)
