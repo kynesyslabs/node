@@ -28,6 +28,9 @@ export function __resetValidatorCache(): void {
  * @returns An array of peers that are currently considered online and are active validators
  */
 export default async function getShard(seed: string): Promise<Peer[]> {
+    log.debug("================================================")
+    log.debug("Getting shard with seed: " + seed)
+    log.debug("================================================")
     // ! we need to get the peers from the last 3 blocks too
     const peerman = PeerManager.getInstance()
     const allPeers = await peerman.getOnlinePeers()
@@ -103,6 +106,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     // REVIEW: sort available peers by .identity (which is a hex string)
     // before choosing the peers for a uniform sample across nodes
     availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
+    log.debug("Available peers: " + JSON.stringify(availablePeers.map(p => p.connection.string), null, 2))
+
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
@@ -112,6 +117,8 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
+
+    log.debug("Shard: " + JSON.stringify(shard.map(p => p.connection.string), null, 2))
 
     log.info(
         `[getShard] active validators in DB: ${activeValidators.length}; online+validator peers: ${validatedPeers.length}; shard size: ${shard.length}`,
