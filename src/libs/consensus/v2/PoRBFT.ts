@@ -374,12 +374,24 @@ export async function consensusRoutine(): Promise<void> {
 
         for (const tx of txs) {
             if (tx.blockNumber !== blockRef) {
-                log.error("Transaction block number mismatch: " + tx.hash + ", expected: " + blockRef + ", got: " + tx.blockNumber)
+                log.error(
+                    "Transaction block number mismatch: " +
+                        tx.hash +
+                        ", expected: " +
+                        blockRef +
+                        ", got: " +
+                        tx.blockNumber,
+                )
                 process.exit(1)
             }
         }
 
-        if (exitReason !== "voteError" && txs.length !== tempMempool.length) {
+        if (
+            !new Set(["blockTimestampNotReceived", "voteError"]).has(
+                exitReason,
+            ) &&
+            txs.length !== tempMempool.length
+        ) {
             const diff = tempMempool.filter(
                 tx => !txs.some(t => t.hash === tx.hash),
             )
