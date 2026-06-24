@@ -13,6 +13,7 @@ import { BroadcastManager } from "../communications/broadcastManager"
 import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
+import { getSharedState } from "@/utilities/sharedState"
 
 interface GCRRoutinePayload {
     method: string
@@ -231,9 +232,13 @@ export default async function manageGCRRoutines(
                     "Failed to fetch Ethos score",
                     "Ethos API returned no score data",
                 ]
-                const isSafeError = safeEthosErrors.some(safe => errorMsg.includes(safe))
+                const isSafeError = safeEthosErrors.some(safe =>
+                    errorMsg.includes(safe),
+                )
                 response.extra = {
-                    error: isSafeError ? errorMsg : "Failed to fetch Ethos score",
+                    error: isSafeError
+                        ? errorMsg
+                        : "Failed to fetch Ethos score",
                 }
             }
             break
@@ -241,9 +246,8 @@ export default async function manageGCRRoutines(
 
         case "getEthosIdentities": {
             try {
-                response.response = await EthosIdentityProvider.listIdentities(
-                    sender,
-                )
+                response.response =
+                    await EthosIdentityProvider.listIdentities(sender)
             } catch (error) {
                 response.result = 400
                 response.response = null
@@ -255,10 +259,20 @@ export default async function manageGCRRoutines(
         }
 
         case "syncNewBlock": {
-            response.response = await BroadcastManager.handleNewBlock(
-                sender,
-                params[0],
-            )
+            const block = params[0]
+
+            if (block.number <= getSharedState.lastBlockNumber) {
+                response.result = 200
+                response.response = "Block is already processed"
+                break
+            }
+
+            await BroadcastManager.broadcastGuard.runExclusive(async () => {
+                response.response = await BroadcastManager.handleNewBlock(
+                    sender,
+                    params[0],
+                )
+            })
             break
         }
 

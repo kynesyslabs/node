@@ -619,6 +619,7 @@ async function batchDownloadBlocks(
             }
         }
 
+
         // Insert block
         await Chain.insertBlock(block, [], null, false)
         log.info(

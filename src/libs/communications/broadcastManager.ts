@@ -7,12 +7,15 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
+import { Mutex } from "async-mutex"
 
 /**
- * 
+ *
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
+    static broadcastGuard = new Mutex()
+
     /**
      * Broadcasts a new block to the network
      *
@@ -50,7 +53,10 @@ export class BroadcastManager {
         type BroadcastResult = { pubkey: string; result: RPCResponse }
         const settled = await Promise.allSettled(promises)
         const responses = settled
-            .filter((r): r is PromiseFulfilledResult<BroadcastResult> => r.status === "fulfilled")
+            .filter(
+                (r): r is PromiseFulfilledResult<BroadcastResult> =>
+                    r.status === "fulfilled",
+            )
             .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
@@ -79,6 +85,14 @@ export class BroadcastManager {
     static async handleNewBlock(sender: string, block: Block) {
         log.debug("handleNewBlock called with block: " + block.number)
         const peerman = PeerManager.getInstance()
+
+        if (block.number <= getSharedState.lastBlockNumber) {
+            return {
+                result: 200,
+                message: "Block is already processed",
+                syncData: peerman.ourSyncDataString,
+            }
+        }
 
         if (Waiter.isWaiting(Waiter.keys.SYNC_WAIT_FOR_BLOCK)) {
             Waiter.resolve(Waiter.keys.SYNC_WAIT_FOR_BLOCK, [
@@ -202,7 +216,10 @@ export class BroadcastManager {
         type SyncResult = { pubkey: string; result: RPCResponse }
         const settled = await Promise.allSettled(promises)
         const responses = settled
-            .filter((r): r is PromiseFulfilledResult<SyncResult> => r.status === "fulfilled")
+            .filter(
+                (r): r is PromiseFulfilledResult<SyncResult> =>
+                    r.status === "fulfilled",
+            )
             .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
@@ -269,7 +286,8 @@ export class BroadcastManager {
         if (claimedBlock > (getSharedState.lastBlockNumber ?? 0)) {
             return {
                 result: 400,
-                message: "Reported sync block is ahead of our chain; cannot corroborate",
+                message:
+                    "Reported sync block is ahead of our chain; cannot corroborate",
                 syncData: peerman.ourSyncDataString,
             }
         }
