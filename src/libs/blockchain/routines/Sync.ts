@@ -810,11 +810,24 @@ async function requestBlocks(): Promise<boolean> {
 
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]) {
+    log.debug("Syncing GCR tables with " + txs.length + " transactions")
+    log.debug(
+        "Tx hashes: " +
+            JSON.stringify(
+                txs.map(tx => tx.hash),
+                null,
+                2,
+            ),
+    )
     // confirm all txs are inserted
     await HandleGCR.applyTransactions(txs, false)
 
     const confirmed = await Chain.getExistingTransactionHashes(
         txs.map(tx => tx.hash),
+    )
+
+    log.debug(
+        "Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2),
     )
 
     if (confirmed.size !== txs.length) {
