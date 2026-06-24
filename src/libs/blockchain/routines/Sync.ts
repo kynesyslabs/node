@@ -822,26 +822,15 @@ export async function syncGCRTables(txs: Transaction[]) {
     // confirm all txs are inserted
     await HandleGCR.applyTransactions(txs, false)
 
-    const confirmed = await Chain.getExistingTransactionHashes(
-        txs.map(tx => tx.hash),
-    )
-
-    log.debug(
-        "Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2),
-    )
-
-    if (confirmed.size !== txs.length) {
-        log.error("[syncGCRTables] Not all txs are inserted")
-        log.error(
-            "Failed txs: " +
-                JSON.stringify(
-                    txs.filter(tx => !confirmed.has(tx.hash)),
-                    null,
-                    2,
-                ),
-        )
-        process.exit(1)
+    for (const tx of txs) {
+        const res = await Chain.checkTxExists(tx.hash)
+        if (!res) {
+            log.error("[syncGCRTables] Transaction not found: " + tx.hash)
+            process.exit(1)
+        }
     }
+
+    log.debug("[syncGCRTables] All transactions are inserted")
 }
 
 // Helper function to ask for the transactions in a block
