@@ -123,7 +123,11 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.blockRef,
         )
 
-        tempMempool = await filterMempoolByValidNonce(tempMempool)
+        const { validTxs, failedTxs: failed } =
+            await filterMempoolByValidNonce(tempMempool)
+        tempMempool = validTxs
+        failedTxs = failedTxs.concat(failed)
+
         preventForgingEnded(blockRef)
 
         log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
@@ -565,6 +569,7 @@ async function filterMempoolByValidNonce(mempool: Transaction[]) {
         "[filterMempoolByValidNonce] Initial mempool length: " + mempool.length,
     )
     const validTxs: Transaction[] = []
+    const failedTxs: string[] = []
     const nonceAccounts = new Set<string>()
 
     for (const tx of mempool) {
@@ -616,13 +621,14 @@ async function filterMempoolByValidNonce(mempool: Transaction[]) {
         log.debug(
             `[filterMempoolByValidNonce] dropping ${tx.hash}: invalid nonce edit`,
         )
+        failedTxs.push(tx.hash)
     }
 
     log.debug(
         "[filterMempoolByValidNonce] Final mempool length: " + validTxs.length,
     )
 
-    return validTxs
+    return { validTxs, failedTxs }
 }
 
 /**
