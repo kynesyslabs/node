@@ -17,6 +17,8 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import GCR from "@/libs/blockchain/gcr/gcr"
+import { normalizeAccount } from "@/libs/l2ps/editConservation"
 
 /* INFO
 # Semaphore system
@@ -120,6 +122,8 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.members,
             manager.shard.blockRef,
         )
+
+        tempMempool = await filterMempoolByValidNonce(tempMempool)
         preventForgingEnded(blockRef)
 
         log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
@@ -545,6 +549,80 @@ async function mergeAndOrderMempools(
     }
 
     return finalMempool
+}
+
+/**
+ * Filter mempool transactions by valid nonce. Removes transactions that will fail
+ * because the previous transaction changed the nonce of an account in the next transaction.
+ *
+ * @param mempool - The sorted mempool transactions
+ *
+ * @returns The filtered mempool transactions
+ *  */
+async function filterMempoolByValidNonce(mempool: Transaction[]) {
+    log.debug("[filterMempoolByValidNonce] Filtering mempool by valid nonce")
+    log.debug(
+        "[filterMempoolByValidNonce] Initial mempool length: " + mempool.length,
+    )
+    const validTxs: Transaction[] = []
+    const nonceAccounts = new Set<string>()
+
+    for (const tx of mempool) {
+        for (const edit of tx.content.gcr_edits) {
+            if (edit.type === "nonce") {
+                nonceAccounts.add(normalizeAccount(edit.account))
+            }
+        }
+    }
+
+    log.debug(
+        "[filterMempoolByValidNonce] Found " +
+            nonceAccounts.size +
+            " Nonce accounts",
+    )
+
+    // fetch all nonce counts from the db
+    const nonces = await GCR.getAccountNonces(Array.from(nonceAccounts))
+
+    txLoop: for (const tx of mempool) {
+        const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
+
+        if (nonceEdits.length === 0) {
+            validTxs.push(tx)
+            continue txLoop
+        }
+
+        for (const edit of nonceEdits) {
+            const acct = normalizeAccount(edit.account)
+            const expected = nonces[acct] + 1
+
+            if (tx.content.nonce === expected) {
+                validTxs.push(tx)
+                nonces[acct]++
+                continue txLoop
+            } else {
+                log.debug(
+                    "[filterMempoolByValidNonce] Invalid nonce edit for tx: " +
+                        tx.hash +
+                        ", account: " +
+                        acct,
+                )
+                log.debug(
+                    `[filterMempoolByValidNonce] Expected ${expected}, got ${tx.content.nonce}`,
+                )
+            }
+        }
+
+        log.debug(
+            `[filterMempoolByValidNonce] dropping ${tx.hash}: invalid nonce edit`,
+        )
+    }
+
+    log.debug(
+        "[filterMempoolByValidNonce] Final mempool length: " + validTxs.length,
+    )
+
+    return validTxs
 }
 
 /**

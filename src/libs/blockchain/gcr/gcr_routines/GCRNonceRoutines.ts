@@ -77,27 +77,27 @@ export default class GCRNonceRoutines {
         // fall back to `getSharedState.lastBlockNumber`. Apply paths
         // run inside block processing so the shared-state tip is
         // accurate.
-        // if (
-        //     !editOperation.isRollback &&
-        //     typeof editOperation.expectedPrior === "number"
-        // ) {
-        //     const blockHeight = getSharedState.lastBlockNumber ?? 0
-        //     if (isForkActive("nonceEnforcement", blockHeight)) {
-        //         if (actualNonce !== editOperation.expectedPrior) {
-        //             log.error(
-        //                 `[GCRNonceRoutines] expectedPrior mismatch for ${editOperationAccount}: ` +
-        //                     `accountGCR.nonce=${actualNonce}, expectedPrior=${editOperation.expectedPrior} — ` +
-        //                     "rejecting nonce edit (cross-RPC replay or out-of-order apply)",
-        //             )
-        //             return {
-        //                 success: false,
-        //                 message:
-        //                     `Nonce expectedPrior mismatch: account.nonce=${actualNonce}, ` +
-        //                     `expectedPrior=${editOperation.expectedPrior}`,
-        //             }
-        //         }
-        //     }
-        // }
+        if (
+            !editOperation.isRollback &&
+            typeof editOperation.expectedPrior === "number"
+        ) {
+            const blockHeight = getSharedState.lastBlockNumber ?? 0
+            if (isForkActive("nonceEnforcement", blockHeight)) {
+                if (actualNonce !== editOperation.expectedPrior) {
+                    log.error(
+                        `[GCRNonceRoutines] expectedPrior mismatch for ${editOperationAccount}: ` +
+                            `accountGCR.nonce=${actualNonce}, expectedPrior=${editOperation.expectedPrior} — ` +
+                            "rejecting nonce edit (cross-RPC replay or out-of-order apply)",
+                    )
+                    return {
+                        success: false,
+                        message:
+                            `Nonce expectedPrior mismatch: account.nonce=${actualNonce}, ` +
+                            `expectedPrior=${editOperation.expectedPrior}`,
+                    }
+                }
+            }
+        }
 
         if (editOperation.operation === "add") {
             accountGCR.nonce += editOperation.amount

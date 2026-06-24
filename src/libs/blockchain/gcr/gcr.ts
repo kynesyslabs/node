@@ -140,6 +140,36 @@ export default class GCR {
         }
     }
 
+    static async getAccountNonce(pubkey: string): Promise<number> {
+        const db = await Datasource.getInstance()
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
+
+        const account = await gcrRepository.findOne({
+            where: { pubkey },
+        })
+
+        return account ? account.nonce : 0
+    }
+
+    static async getAccountNonces(
+        pubkeys: string[],
+    ): Promise<Record<string, number>> {
+        const db = await Datasource.getInstance()
+        const gcrRepository = db.getDataSource().getRepository(GCRMain)
+
+        const accounts = await gcrRepository.find({
+            where: { pubkey: In(pubkeys) },
+            select: ["pubkey", "nonce"],
+        })
+
+        // return a map of pubkey to nonce, 0 for missing accounts
+        return pubkeys.reduce((acc, pubkey) => {
+            acc[pubkey] =
+                accounts.find(account => account.pubkey === pubkey)?.nonce ?? 0
+            return acc
+        }, {})
+    }
+
     static async getGCRLastBlockBaseGas(): Promise<number> {
         // TODO Implement and make it dynamic
         return 1
@@ -214,7 +244,7 @@ export default class GCR {
         }
     }
 
-// INFO Get a validator (or a public key anyway) status in the staking
+    // INFO Get a validator (or a public key anyway) status in the staking
     // NOTE While accepting a blockNumber, it defaults to the last one
     static async getGCRValidatorStatus(
         publicKeyHex: string,
