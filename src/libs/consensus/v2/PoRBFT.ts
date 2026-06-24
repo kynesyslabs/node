@@ -109,6 +109,14 @@ export async function consensusRoutine(): Promise<void> {
             false,
         )
 
+        // if we have less than shard size of nodes, abort the consensus routine
+        if (manager.shard.members.length < getSharedState.shardSize) {
+            log.error(
+                "[consensusRoutine] Less than shard size of nodes, aborting consensus routine",
+            )
+            return
+        }
+
         // INFO: Broadcast our validation phase to the secretary
         await updateValidatorPhase(1, blockRef)
         preventForgingEnded(blockRef)
