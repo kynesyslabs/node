@@ -406,23 +406,23 @@ export async function consensusRoutine(): Promise<void> {
             }
         }
 
-        if (
-            !new Set(["blockTimestampNotReceived"]).has(exitReason) &&
-            txs.length !== tempMempool.length
-        ) {
-            const diff = tempMempool.filter(
-                tx => !txs.some(t => t.hash === tx.hash),
-            )
-            log.error(
-                "Transactions not inserted: " +
-                    JSON.stringify(
-                        diff.map(tx => tx.hash),
-                        null,
-                        2,
-                    ),
-            )
-            process.exit(1)
-        }
+        // if (
+        //     !new Set(["blockTimestampNotReceived"]).has(exitReason) &&
+        //     txs.length !== tempMempool.length
+        // ) {
+        //     const diff = tempMempool.filter(
+        //         tx => !txs.some(t => t.hash === tx.hash),
+        //     )
+        //     log.error(
+        //         "Transactions not inserted: " +
+        //             JSON.stringify(
+        //                 diff.map(tx => tx.hash),
+        //                 null,
+        //                 2,
+        //             ),
+        //     )
+        //     process.exit(1)
+        // }
     }
 }
 
