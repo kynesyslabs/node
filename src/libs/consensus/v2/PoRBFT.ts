@@ -807,7 +807,7 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param pro - The number of votes for the block
  */
 async function finalizeBlock(block: Block, pro: number): Promise<void> {
-    await Chain.insertBlock(block) // NOTE Transactions are added to the Transactions table here
+    await Chain.insertBlock(block, [], null, true) // NOTE Transactions are added to the Transactions table here
     log.info("[CONSENSUS] Block added to the chain")
 }
 

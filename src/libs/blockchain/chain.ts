@@ -146,7 +146,7 @@ export default class Chain {
         block: Block,
         operations: Operation[] = [],
         position?: number,
-        cleanMempool = true,
+        cleanMempool = false,
     ): Promise<Blocks> {
         return blockOps.insertBlock(block, operations, position, cleanMempool)
     }

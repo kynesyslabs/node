@@ -242,13 +242,30 @@ export async function insertBlock(
         return existingBlock
     }
 
-    let transactionEntities = await Mempool.getTransactionsByHashes(
-        orderedTransactionsHashes,
+    let transactionEntities: Transaction[] = []
+
+    // Only fetch txs from mempool if cleanMempool is true
+    // ie. only when inserting block from consensus routine
+    if (cleanMempool) {
+        transactionEntities = await Mempool.getTransactionsByHashes(
+            orderedTransactionsHashes,
+        )
+        transactionEntities = transactionEntities.map(tx => ({
+            ...tx,
+            blockNumber: block.number,
+        }))
+    }
+
+    log.debug("================================================")
+    log.debug("Saving Transactions for block: " + block.number)
+    log.debug(
+        JSON.stringify(
+            transactionEntities.map(tx => tx.hash),
+            null,
+            2,
+        ),
     )
-    transactionEntities = transactionEntities.map(tx => ({
-        ...tx,
-        blockNumber: block.number,
-    }))
+    log.debug("================================================")
 
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
@@ -416,9 +433,8 @@ export async function insertBlock(
                 // is deferred to post-commit (below) — RAM never ahead of DB.
                 const govProposalRepo =
                     transactionalEntityManager.getRepository(NetworkUpgrade)
-                const govVoteRepo = transactionalEntityManager.getRepository(
-                    NetworkUpgradeVote,
-                )
+                const govVoteRepo =
+                    transactionalEntityManager.getRepository(NetworkUpgradeVote)
                 await tallyUpgradeVotes(
                     block.number,
                     govProposalRepo,
