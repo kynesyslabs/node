@@ -392,7 +392,18 @@ export async function syncBlock(block: Block, peer: Peer) {
         const success = await Chain.insertTransactionsFromSync(txs)
         if (success) {
             log.info("[fastSync] Transactions inserted successfully")
+
+            // confirm all txs are inserted
+            for (const tx of txs) {
+                const res = await Chain.checkTxExists(tx.hash)
+                if (!res) {
+                    log.error("[syncGCRTables] Transaction not found: " + tx.hash)
+                    process.exit(1)
+                }
+            }
+            log.debug("[syncGCRTables] All transactions are inserted")
             return true
+            
         }
 
         log.error("[fastSync] Transactions insertion failed")
@@ -810,27 +821,7 @@ async function requestBlocks(): Promise<boolean> {
 
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]) {
-    log.debug("Syncing GCR tables with " + txs.length + " transactions")
-    log.debug(
-        "Tx hashes: " +
-            JSON.stringify(
-                txs.map(tx => tx.hash),
-                null,
-                2,
-            ),
-    )
-    // confirm all txs are inserted
     await HandleGCR.applyTransactions(txs, false)
-
-    for (const tx of txs) {
-        const res = await Chain.checkTxExists(tx.hash)
-        if (!res) {
-            log.error("[syncGCRTables] Transaction not found: " + tx.hash)
-            process.exit(1)
-        }
-    }
-
-    log.debug("[syncGCRTables] All transactions are inserted")
 }
 
 // Helper function to ask for the transactions in a block
