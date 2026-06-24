@@ -85,10 +85,9 @@ export async function confirmTransaction(
     // sequential nonce semantics with mempool lookahead (PRs 1+2),
     // and the matching consensus-side `expectedPrior` check on
     // `GCRNonceRoutines` (this PR) is the cross-RPC safety net.
-    const hasNonce = await assignNonce(tx)
-    if (!hasNonce) {
-        validityData.data.message =
-            "[Native Tx Validation] [NONCE ERROR] Nonce not assigned\n"
+    const res = await assignNonce(tx)
+    if (!res.success) {
+        validityData.data.message = res.message
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
@@ -110,7 +109,9 @@ export async function confirmTransaction(
         return validityData
     }
 
-    log.debug("[TX] confirmTransaction - Transaction validity verified, compiling ValidityData")
+    log.debug(
+        "[TX] confirmTransaction - Transaction validity verified, compiling ValidityData",
+    )
 
     // Check sender balance covers the transfer amount.
     //
@@ -125,16 +126,16 @@ export async function confirmTransaction(
     try {
         txAmount = BigInt(tx.content.amount ?? 0)
     } catch (e) {
-        validityData.data.message =
-            `[Tx Validation] [AMOUNT ERROR] Invalid tx amount ${JSON.stringify(tx.content.amount)}: ${(e as Error).message}\n`
+        validityData.data.message = `[Tx Validation] [AMOUNT ERROR] Invalid tx amount ${JSON.stringify(tx.content.amount)}: ${(e as Error).message}\n`
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
     }
     if (txAmount > 0n) {
-        const from = typeof tx.content.from === "string"
-            ? tx.content.from
-            : forgeToHex(tx.content.from)
+        const from =
+            typeof tx.content.from === "string"
+                ? tx.content.from
+                : forgeToHex(tx.content.from)
         // `GCR.getGCRNativeBalance` was renamed to `getAccountBalance`
         // on stabilisation and now returns `bigint` directly.
         let fromBalance = 0n
@@ -144,8 +145,7 @@ export async function confirmTransaction(
             // Address not in GCR — balance is 0
         }
         if (fromBalance < txAmount) {
-            validityData.data.message =
-                `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
+            validityData.data.message = `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
             validityData.data.valid = false
             validityData = await signValidityData(validityData)
             return validityData
@@ -189,9 +189,7 @@ export async function confirmTransaction(
         if (feeBoundsResult.ok === false) {
             validityData.data.valid = false
             validityData.data.message =
-                "[Tx Validation] [FEE ERROR] " +
-                feeBoundsResult.message +
-                "\n"
+                "[Tx Validation] [FEE ERROR] " + feeBoundsResult.message + "\n"
             validityData = await signValidityData(validityData)
             return validityData
         }
@@ -231,21 +229,19 @@ async function runTypeDispatcher(
         type === "validatorUnstake" ||
         type === "validatorExit"
     ) {
-        const { handleStakingTx } = await import(
-            "@/libs/network/routines/transactions/handleStakingTx"
+        const { handleStakingTx } =
+            await import("@/libs/network/routines/transactions/handleStakingTx")
+        const r = await handleStakingTx(
+            tx as unknown as Parameters<typeof handleStakingTx>[0],
         )
-        const r = await handleStakingTx(tx as unknown as Parameters<
-            typeof handleStakingTx
-        >[0])
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
     if (type === "networkUpgrade" || type === "networkUpgradeVote") {
-        const { handleGovernanceTx } = await import(
-            "@/libs/network/routines/transactions/handleGovernanceTx"
+        const { handleGovernanceTx } =
+            await import("@/libs/network/routines/transactions/handleGovernanceTx")
+        const r = await handleGovernanceTx(
+            tx as unknown as Parameters<typeof handleGovernanceTx>[0],
         )
-        const r = await handleGovernanceTx(tx as unknown as Parameters<
-            typeof handleGovernanceTx
-        >[0])
         return r.success ? { ok: true } : { ok: false, message: r.message }
     }
     return { ok: true }
@@ -270,7 +266,7 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
         const l2psPayload = (tx.content?.data as any)?.[1]
         const l2psUid = l2psPayload?.l2ps_uid as string | undefined
         if (!l2psUid) {
-            return `[Tx Validation] [BALANCE ERROR] L2PS transaction missing l2ps_uid — cannot verify sender balance\n`
+            return "[Tx Validation] [BALANCE ERROR] L2PS transaction missing l2ps_uid — cannot verify sender balance\n"
         }
 
         const parallelNetworks = ParallelNetworks.getInstance()
@@ -284,14 +280,16 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
 
         const decryptedTx = await l2psInstance.decryptTx(tx as any)
         if (!decryptedTx?.content?.from) {
-            return `[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n`
+            return "[Tx Validation] [BALANCE ERROR] L2PS payload decryption produced no sender — cannot verify balance\n"
         }
 
         const innerError = await checkInnerTxBalance(decryptedTx as Transaction)
         if (innerError) return `[Tx Validation] [BALANCE ERROR] ${innerError}\n`
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
-        log.error(`[confirmTransaction] L2PS balance pre-check error: ${message}`)
+        log.error(
+            `[confirmTransaction] L2PS balance pre-check error: ${message}`,
+        )
         // Fail closed — see fn docstring.
         return `[Tx Validation] [BALANCE ERROR] L2PS balance pre-check failed: ${message}\n`
     }
@@ -524,7 +522,9 @@ async function defineGas(
  *
  * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
  */
-export async function assignNonce(tx: Transaction): Promise<boolean> {
+export async function assignNonce(
+    tx: Transaction,
+): Promise<{ success: boolean; message?: string }> {
     // Greptile + CodeRabbit PR #884 feedback: fork gating must use
     // node-local chain state only. `tx.blockNumber` is attacker-
     // controlled on the ingress path (the caller is RPC-facing), so
@@ -542,7 +542,9 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
     if (!isForkActive("nonceEnforcement", blockHeight)) {
         // Pre-fork: legacy accept-all behaviour. Preserves bit-identical
         // re-sync of every block authored before the fork activation.
-        return true
+        return {
+            success: true,
+        }
     }
 
     // CodeRabbit feedback: canonicalise to lowercase so submissions
@@ -579,7 +581,12 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
                 e instanceof Error ? e.message : String(e)
             }`,
         )
-        return false
+        return {
+            success: false,
+            message: `[assignNonce] failed to load sender account for ${senderAddress}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        }
     }
 
     if (!account) {
@@ -587,7 +594,10 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
             `[assignNonce] no GCR account for sender ${senderAddress} — ` +
                 "rejecting nonce check",
         )
-        return false
+        return {
+            success: false,
+            message: `[assignNonce] no GCR account for sender ${senderAddress}`,
+        }
     }
 
     // Audit-sweep batch C PR 2: account for txs already queued in
@@ -615,7 +625,12 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
                 e instanceof Error ? e.message : String(e)
             }`,
         )
-        return false
+        return {
+            success: false,
+            message: `[assignNonce] failed to count mempool txs for ${senderAddress}: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        }
     }
 
     const txNonce = tx.content.nonce
@@ -628,7 +643,10 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
                 `(account.nonce=${account.nonce}, ` +
                 `pendingMempoolCount=${pendingCount})`,
         )
-        return false
+        return {
+            success: false,
+            message: `nonce mismatch for ${senderAddress}: tx.content.nonce=${txNonce}, expected=${expected} (account.nonce=${account.nonce}, pendingMempoolCount=${pendingCount})`,
+        }
     }
 
     // Audit-sweep batch C PR 3 — populate `expectedPrior` on this
@@ -682,5 +700,7 @@ export async function assignNonce(tx: Transaction): Promise<boolean> {
         }
     }
 
-    return true
+    return {
+        success: true,
+    }
 }
