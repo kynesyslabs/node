@@ -59,6 +59,14 @@ export async function handleValidateTransaction(
         const handleGcrEditsStart = Date.now()
         const gcrEdits = await GCRGeneration.generate(tx)
         const handleGcrEditsEnd = Date.now()
+
+        // check nonce from db
+        const nonce = await GCR.getAccountNonce(tx.content.from_ed25519_address)
+        log.debug("================================================")
+        log.debug("Tx hash: " + tx.hash)
+        log.debug("Account nonce on RPC: " + nonce)
+        log.debug("================================================")
+
         log.only(
             `[handleValidateTransaction] GCR edits generated in ${handleGcrEditsEnd - handleGcrEditsStart}ms`,
         )

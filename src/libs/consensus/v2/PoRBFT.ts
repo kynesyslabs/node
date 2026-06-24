@@ -319,13 +319,17 @@ export async function consensusRoutine(): Promise<void> {
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
-            for (const txHash of successfulTxs) {
-                const tx = tempMempool.find(tx => tx.hash === txHash)
-                if (tx) {
-                    txsToRollback.push(tx)
+
+            if (successfulTxs.length > 0) {
+                for (const txHash of successfulTxs) {
+                    const tx = tempMempool.find(tx => tx.hash === txHash)
+                    if (tx) {
+                        txsToRollback.push(tx)
+                    }
                 }
+
+                await rollbackGCREditsFromTxs(txsToRollback)
             }
-            await rollbackGCREditsFromTxs(txsToRollback)
             // await Mempool.removeTransactionsByHashes(successfulTxs)
 
             // Also rollback any L2PS proofs that were applied
