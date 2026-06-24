@@ -746,7 +746,7 @@ export default class HandleGCR {
             const confirmed = await Chain.getExistingTransactionHashes(
                 finalTxs.map(t => t.hash),
             )
-            if (confirmed.size > 0) {
+            if (confirmed.size < finalTxs.length) {
                 log.error("Found confirmed txs during tx application")
                 // fetch confirmed txs from db
                 const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
