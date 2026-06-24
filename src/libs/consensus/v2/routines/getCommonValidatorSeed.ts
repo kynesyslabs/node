@@ -131,7 +131,7 @@ export default async function getCommonValidatorSeed(
         }
     }
 
-    log.error(
+    log.debug(
         "Last few blocks: " +
             JSON.stringify(
                 lastFewBlocks.map(b => ({ hash: b.hash, number: b.number })),

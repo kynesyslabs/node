@@ -47,6 +47,8 @@ import {
     type SubsystemInfo,
 } from "./subsystemRegistry"
 import { NODE_VERSION } from "./nodeVersion"
+import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
+import getCommonValidatorSeed from "@/libs/consensus/v2/routines/getCommonValidatorSeed"
 
 dotenv.config()
 
@@ -170,18 +172,28 @@ export default class SharedState {
         // TLS configuration
         tls: {
             enabled: Config.getInstance().omni.tls.enabled,
-            mode: (Config.getInstance().omni.tls.mode as "self-signed" | "ca") || "self-signed",
+            mode:
+                (Config.getInstance().omni.tls.mode as "self-signed" | "ca") ||
+                "self-signed",
             certPath: Config.getInstance().omni.tls.certPath,
             keyPath: Config.getInstance().omni.tls.keyPath,
             caPath: Config.getInstance().omni.tls.caPath,
-            minVersion: (Config.getInstance().omni.tls.minVersion as "TLSv1.2" | "TLSv1.3") || "TLSv1.3",
+            minVersion:
+                (Config.getInstance().omni.tls.minVersion as
+                    | "TLSv1.2"
+                    | "TLSv1.3") || "TLSv1.3",
         },
         // Rate limiting configuration
         rateLimit: {
             enabled: Config.getInstance().omni.rateLimit.enabled,
-            maxConnectionsPerIP: Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
-            maxRequestsPerSecondPerIP: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp || 2_000,
-            maxRequestsPerSecondPerIdentity: Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIdentity || 1_000,
+            maxConnectionsPerIP:
+                Config.getInstance().omni.rateLimit.maxConnectionsPerIp,
+            maxRequestsPerSecondPerIP:
+                Config.getInstance().omni.rateLimit.maxRequestsPerSecondPerIp ||
+                2_000,
+            maxRequestsPerSecondPerIdentity:
+                Config.getInstance().omni.rateLimit
+                    .maxRequestsPerSecondPerIdentity || 1_000,
             windowMs: 1000,
             entryTTL: 60000,
             cleanupInterval: 10000,
@@ -442,18 +454,25 @@ export default class SharedState {
     // SECTION Rate limiting configuration
     rateLimitConfig = {
         enabled: true,
-        defaultLimit: { maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS, windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS },
+        defaultLimit: {
+            maxRequests: RATE_LIMIT_DEFAULT_MAX_REQUESTS,
+            windowMs: RATE_LIMIT_DEFAULT_WINDOW_MS,
+        },
         blockDurationMs: undefined,
         whitelistedIPs: [
             ...LOCALHOST_IPS,
             ...Config.getInstance().core.whitelistedIPs,
         ],
-        whitelistedKeys: [
-            ...Config.getInstance().core.whitelistedKeys,
-        ],
+        whitelistedKeys: [...Config.getInstance().core.whitelistedKeys],
         methodLimits: {
-            POST: { maxRequests: RATE_LIMIT_POST_MAX_REQUESTS, windowMs: RATE_LIMIT_POST_WINDOW_MS },
-            identities: { maxRequests: RATE_LIMIT_IDENTITIES_MAX_REQUESTS, windowMs: RATE_LIMIT_IDENTITIES_WINDOW_MS },
+            POST: {
+                maxRequests: RATE_LIMIT_POST_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_POST_WINDOW_MS,
+            },
+            identities: {
+                maxRequests: RATE_LIMIT_IDENTITIES_MAX_REQUESTS,
+                windowMs: RATE_LIMIT_IDENTITIES_WINDOW_MS,
+            },
         },
         txPerBlock: RATE_LIMIT_TX_PER_BLOCK,
         // Proxy-header trust — see RateLimiter constructor for resolution
@@ -473,10 +492,26 @@ export default class SharedState {
             }
         }
 
+        const consensusInfo: Record<string, any> = {}
+        const secman = SecretaryManager.getInstance()
+
+        if (secman && secman.shard.members.length > 0) {
+            const cvsa = await getCommonValidatorSeed()
+            consensusInfo.blockRef = secman.shard.blockRef
+            consensusInfo.cvsa = cvsa.commonValidatorSeed
+            consensusInfo.cvsaBlockRef = cvsa.lastBlockNumber
+            consensusInfo.secretary = secman.secretary.identity
+            consensusInfo.shard = secman.shard.members.map(m => ({
+                identity: m.identity,
+                url: m.connection.string + "/info",
+            }))
+        }
+
         const info = {
             version: this.version,
             identity: this.publicKeyHex,
             connectionString: await this.getConnectionString(),
+            consensusInfo: consensusInfo,
             peerlist: peerlist,
         }
 
