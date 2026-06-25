@@ -23,7 +23,8 @@
  * this driver only proves the three sequential txs are not dropped.
  *
  * Env (set by the wrapper script):
- *   NODE1_URL, NODE2_URL, NODE3_URL  RPC URLs (three distinct nodes)
+ *   NODE1_URL, NODE2_URL[, NODE3_URL]  RPC URLs — >=2 required (RC devnet is
+ *                                      2 validators; NODE3_URL optional)
  *   IDENTITY_PATH                    sender mnemonic file
  *   RECEIVER_PUBKEY                  0x... receiver
  *   AMOUNT_OS                        per-tx amount, decimal string
