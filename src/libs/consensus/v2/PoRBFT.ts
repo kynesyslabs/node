@@ -17,6 +17,8 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import { isForkActive } from "@/forks"
+import { orderDeterministically } from "./routines/deterministicOrder"
 
 /* INFO
 # Semaphore system
@@ -499,6 +501,19 @@ async function mergeAndOrderMempools(
 
     for (const [type, count] of Object.entries(typeCounts)) {
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
+    }
+
+    // P-ORDER (Epic #21): impose a deterministic (sender, nonce, hash) order so
+    // every honest node forging the same merged set produces a byte-identical
+    // ordered_transactions list (vote convergence) and same-sender txs apply in
+    // nonce order. Fork-gated so blocks authored before activation re-sync
+    // bit-identically under their legacy (timestamp) order.
+    if (isForkActive("nonceEnforcement", blockRef)) {
+        const ordered = orderDeterministically(finalMempool)
+        log.only(
+            `[mergeAndOrderMempools] Deterministic (sender,nonce,hash) order applied to ${ordered.length} txs`,
+        )
+        return ordered as (Transaction & { reference_block: number })[]
     }
 
     return finalMempool
