@@ -100,9 +100,16 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const deterministicRandomness = Alea(seed)
     const availablePeers = [...validatedPeers]
 
-    // REVIEW: sort available peers by .identity (which is a hex string)
-    // before choosing the peers for a uniform sample across nodes
-    availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
+    // Sort available peers by .identity (hex string) before sampling so the
+    // shard selection is identical across nodes. P-CLOCK (epic #21 #195):
+    // plain byte comparison, NOT localeCompare — localeCompare is
+    // locale-sensitive, so under different host locales two nodes could order
+    // the peer list differently and select divergent shards (a latent
+    // consensus split). Hex identities are ASCII, so < / > is a stable total
+    // order on every node.
+    availablePeers.sort((a, b) =>
+        a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
+    )
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {

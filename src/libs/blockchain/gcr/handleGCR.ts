@@ -41,6 +41,7 @@ import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
+import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
 import GCRValidatorStakeRoutines from "./gcr_routines/GCRValidatorStakeRoutines"
@@ -110,6 +111,46 @@ export interface AssignedTxRecord {
 type IndexedSideEffect = {
     txIndex: number
     fn: () => Promise<void>
+}
+
+/**
+ * Epic #21 #204: derive the gasFeeSeparation fee-distribution edits for a tx
+ * at APPLY time, from the SDK-shipped `transaction_fee`. Returns [] when the
+ * fork is inactive, the tx is non-native, or no fee is owed. Pure +
+ * deterministic across nodes (same shipped fee + same fee-distribution config
+ * => same edits), so applied state never diverges. rpc_address is null at this
+ * stage (rpc share folds to treasury); BFT-committed rpc routing is a
+ * follow-up. Mirrors the pre-#204 prepend that confirmTransaction used to do,
+ * moved here so the gossiped tx stays byte-identical to the signed one.
+ */
+function deriveFeeEditsForApply(tx: Transaction): GCREdit[] {
+    if (tx.content?.type !== "native") return []
+    if (!isForkActive("gasFeeSeparation", getSharedState.lastBlockNumber ?? 0)) {
+        return []
+    }
+    const fee = tx.content.transaction_fee
+    if (!fee) return []
+    const senderAddress =
+        typeof tx.content.from === "string"
+            ? tx.content.from
+            : forgeToHex(tx.content.from as never)
+    // Derive the fee edits from the SDK-shipped transaction_fee — the SAME
+    // source verifyGcrEditsMatch regenerates from at apply, so the injected
+    // edits and the binding check agree. (Number() handles the OS-string wire
+    // shape: "1000000000" -> 1000000000.) The shipped fee was already bound to
+    // the node's computed total at ingress (applyGasFeeSeparation), so a forged
+    // / underpaid fee cannot reach here. rpc_address is null at the RC stage ->
+    // the rpc share folds to treasury deterministically (BFT-committed rpc
+    // routing is the mainnet follow-up).
+    return generateFeeDistributionEdits({
+        senderAddress,
+        rpcAddress: fee.rpc_address ?? null,
+        networkFee: Number(fee.network_fee),
+        rpcFee: Number(fee.rpc_fee),
+        additionalFee: Number(fee.additional_fee),
+        txHash: tx.hash ?? "",
+        isRollback: false,
+    }) as GCREdit[]
 }
 
 /**
@@ -382,11 +423,11 @@ export default class HandleGCR {
                 getSharedState.lastBlockNumber ?? 0,
             )
         ) {
-            // Own the fork check at the call site (matches Mempool.receive)
-            // so both ingress + apply decide expectFeeEdits the same way and
-            // neither relies on verifyGcrEditsMatch's internal re-check
-            // (Greptile P2). A confirmed/applied tx carries fee edits exactly
-            // when gasFeeSeparation is active.
+            // Epic #21 #204: by the time apply runs, applyTransactions has
+            // prepended the derived fee edits onto tx.content.gcr_edits (when
+            // gasFeeSeparation is active), so the shipped set DOES carry fee
+            // edits here — the binding regen must reproduce them too.
+            // expectFeeEdits mirrors the fork, matching the derive step.
             const expectFeeEdits = isForkActive(
                 "gasFeeSeparation",
                 getSharedState.lastBlockNumber ?? 0,
@@ -760,6 +801,29 @@ export default class HandleGCR {
                 log.debug(
                     `[applyTransactions] Uniqueness guard dropped ${before - finalTxs.length} confirmed tx(s)`,
                 )
+            }
+        }
+
+        // Epic #21 #204: derive gasFeeSeparation fee-distribution edits at
+        // APPLY time from each tx's SDK-shipped transaction_fee and prepend
+        // them onto the in-memory tx (NOT the gossiped/stored one — this is a
+        // post-admission local copy, never re-hashed). confirmTransaction no
+        // longer mutates the signed tx, so the gossiped tx is byte-identical to
+        // what the sender signed (coherence passes cross-node). Deriving here —
+        // before prepareEntities + partitionIndependentTxs — means the fee
+        // accounts (burn/treasury) are loaded into the entity cache and grouped
+        // correctly. Skipped on rollback (the stored edits are replayed in
+        // reverse as-is). Every node derives identical edits from the same
+        // shipped fee, so applied state never diverges.
+        if (!isRollback) {
+            for (const tx of finalTxs) {
+                const feeEdits = deriveFeeEditsForApply(tx)
+                if (feeEdits.length > 0) {
+                    tx.content.gcr_edits = [
+                        ...feeEdits,
+                        ...(tx.content.gcr_edits ?? []),
+                    ]
+                }
             }
         }
 

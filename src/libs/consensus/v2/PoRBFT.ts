@@ -17,6 +17,15 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import { isForkActive } from "@/forks"
+import { orderDeterministically } from "./routines/deterministicOrder"
+
+// P-MINSHARD (epic #21 #197): minimum validators that must agree before a
+// block can finalize. Below this the BFT 2/3+1 math degenerates (a 1-node
+// shard self-certifies). 2 = testnet RC minimum. Kept as a module constant
+// (not env) so every node agrees; promote to a genesis/fork parameter when
+// the validator set policy is finalized for mainnet.
+const MIN_SHARD = 2
 
 /* INFO
 # Semaphore system
@@ -501,6 +510,19 @@ async function mergeAndOrderMempools(
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
+    // P-ORDER (Epic #21): impose a deterministic (sender, nonce, hash) order so
+    // every honest node forging the same merged set produces a byte-identical
+    // ordered_transactions list (vote convergence) and same-sender txs apply in
+    // nonce order. Fork-gated so blocks authored before activation re-sync
+    // bit-identically under their legacy (timestamp) order.
+    if (isForkActive("nonceEnforcement", blockRef)) {
+        const ordered = orderDeterministically(finalMempool)
+        log.only(
+            `[mergeAndOrderMempools] Deterministic (sender,nonce,hash) order applied to ${ordered.length} txs`,
+        )
+        return ordered as (Transaction & { reference_block: number })[]
+    }
+
     return finalMempool
 }
 
@@ -667,6 +689,18 @@ async function voteOnBlock(
  * @returns True if the block is valid, false otherwise
  */
 function isBlockValid(pro: number, totalVotes: number): boolean {
+    // P-MINSHARD (epic #21 #197): absolute participation floor. With a
+    // 1-node shard the BFT threshold collapses to floor(2/3)+1 = 1, so a
+    // lone node self-certifies its own block — the solo-fork source (Bug B):
+    // it forges alone, rejoins, and its divergent block has a "valid"
+    // signature count nobody else endorsed. Refuse to finalize below
+    // MIN_SHARD so a block always carries genuine multi-validator agreement.
+    // Testnet RC runs a 2-node minimum, so MIN_SHARD=2 (both must agree:
+    // floor(2*2/3)+1 = 2). A legitimate shrink below the floor correctly
+    // STALLS the chain (safety over liveness) rather than forking.
+    if (totalVotes < MIN_SHARD) {
+        return false
+    }
     const threshold = Math.floor((totalVotes * 2) / 3) + 1
     return pro >= threshold
 }
