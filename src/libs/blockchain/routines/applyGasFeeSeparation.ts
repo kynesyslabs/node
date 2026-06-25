@@ -148,10 +148,55 @@ export async function applyGasFeeSeparation(
     // tx.hash) -> peers reject as "not coherent" -> divergent blocks ->
     // permanent vote split -> chain frozen on any tx. The fee edits are
     // now derived deterministically AT APPLY from the SDK-shipped
-    // transaction_fee (see deriveFeeEdits in handleGCR), so the gossiped
-    // tx stays byte-identical to what the sender signed. This routine
-    // keeps only the balance pre-check below (reject under-funded txs at
-    // ingress with an actionable message); it no longer writes to `tx`.
+    // transaction_fee (see deriveFeeEditsForApply in handleGCR), so the
+    // gossiped tx stays byte-identical to what the sender signed. This
+    // routine no longer writes to `tx`; it ENFORCES the shipped fee (below)
+    // and does the balance pre-check.
+
+    // Greptile P1 (epic #21 #204): because the fee is now charged at apply
+    // from the SDK-shipped transaction_fee — NOT from the node-computed
+    // `breakdown` — a client could ship `{network_fee:0, rpc_fee:0,
+    // additional_fee:0}` and pass ingress while paying nothing. Bind the
+    // shipped fee to the canonical breakdown here: reject any tx whose
+    // shipped components don't match what the node computes. Compared in OS
+    // via toOsBigint (the shipped value is a DEM number pre-serialize or an
+    // OS string post-serialize; breakdown is in the same base unit the SDK
+    // signs), so the check is unit-robust. Without this the fee floor is
+    // unenforced.
+    const shippedFee = tx.content.transaction_fee
+    if (!shippedFee) {
+        return {
+            ok: false,
+            message:
+                "post-gasFeeSeparation tx is missing transaction_fee — refusing (cannot bind shipped fee to breakdown)",
+        }
+    }
+    // Compare the shipped fee TOTAL to the computed total, in OS. We bind
+    // the total — not per-component — because the SDK ships the whole fee in
+    // network_fee (rpc_fee/additional_fee = 0) whereas the node SPLITS it
+    // (network/rpc/additional) for distribution. The split is the node's
+    // deterministic, config-driven concern (see deriveFeeEditsForApply); the
+    // sender only commits to paying the total. A DEM number is ×1e9 to OS; an
+    // OS string is taken as-is.
+    const toOs = (v: unknown): bigint => {
+        if (typeof v === "string") return BigInt(v)
+        return BigInt(Math.round(Number(v ?? 0))) * 1_000_000_000n
+    }
+    const shippedTotalOs =
+        toOs(shippedFee.network_fee) +
+        toOs(shippedFee.rpc_fee) +
+        toOs(shippedFee.additional_fee)
+    const computedTotalOs = BigInt(breakdown.total) * 1_000_000_000n
+    if (shippedTotalOs !== computedTotalOs) {
+        return {
+            ok: false,
+            message:
+                `transaction_fee total mismatch: shipped=${shippedTotalOs} OS ` +
+                `(network=${String(shippedFee.network_fee)} rpc=${String(shippedFee.rpc_fee)} additional=${String(shippedFee.additional_fee)}) ` +
+                `but node computed ${computedTotalOs} OS (total=${breakdown.total}). ` +
+                "Refusing — fee underpayment / forged fee.",
+        }
+    }
 
     // Audit-sweep batch B: balance check is now enforced in every
     // environment. The previous PROD-only gate (paired with the same

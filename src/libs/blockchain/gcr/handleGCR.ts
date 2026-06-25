@@ -134,6 +134,14 @@ function deriveFeeEditsForApply(tx: Transaction): GCREdit[] {
         typeof tx.content.from === "string"
             ? tx.content.from
             : forgeToHex(tx.content.from as never)
+    // Derive the fee edits from the SDK-shipped transaction_fee — the SAME
+    // source verifyGcrEditsMatch regenerates from at apply, so the injected
+    // edits and the binding check agree. (Number() handles the OS-string wire
+    // shape: "1000000000" -> 1000000000.) The shipped fee was already bound to
+    // the node's computed total at ingress (applyGasFeeSeparation), so a forged
+    // / underpaid fee cannot reach here. rpc_address is null at the RC stage ->
+    // the rpc share folds to treasury deterministically (BFT-committed rpc
+    // routing is the mainnet follow-up).
     return generateFeeDistributionEdits({
         senderAddress,
         rpcAddress: fee.rpc_address ?? null,

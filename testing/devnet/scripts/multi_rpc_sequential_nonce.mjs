@@ -31,18 +31,21 @@
 import { readFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
+// NODE3_URL is OPTIONAL — the documented RC devnet is 2 validators
+// (genesis.devnet.json). With 2 RPCs the round-robin just alternates
+// node-1 / node-2; a 3rd is used if provided. (Greptile P2.)
 const NODE_URLS = [
     process.env.NODE1_URL,
     process.env.NODE2_URL,
     process.env.NODE3_URL,
-]
+].filter(Boolean)
 const IDENTITY_PATH = process.env.IDENTITY_PATH
 const RECEIVER_PUBKEY = process.env.RECEIVER_PUBKEY
 const AMOUNT_OS = process.env.AMOUNT_OS
 
-if (NODE_URLS.some(u => !u) || !IDENTITY_PATH || !RECEIVER_PUBKEY || !AMOUNT_OS) {
+if (NODE_URLS.length < 2 || !IDENTITY_PATH || !RECEIVER_PUBKEY || !AMOUNT_OS) {
     console.error(
-        "[multi-rpc-seq] missing env: NODE1_URL NODE2_URL NODE3_URL IDENTITY_PATH RECEIVER_PUBKEY AMOUNT_OS",
+        "[multi-rpc-seq] missing env: need >=2 of NODE1_URL/NODE2_URL/NODE3_URL plus IDENTITY_PATH RECEIVER_PUBKEY AMOUNT_OS",
     )
     process.exit(2)
 }
