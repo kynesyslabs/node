@@ -171,30 +171,36 @@ export async function applyGasFeeSeparation(
                 "post-gasFeeSeparation tx is missing transaction_fee — refusing (cannot bind shipped fee to breakdown)",
         }
     }
-    // Compare the shipped fee TOTAL to the computed total, in OS. We bind
-    // the total — not per-component — because the SDK ships the whole fee in
-    // network_fee (rpc_fee/additional_fee = 0) whereas the node SPLITS it
-    // (network/rpc/additional) for distribution. The split is the node's
-    // deterministic, config-driven concern (see deriveFeeEditsForApply); the
-    // sender only commits to paying the total. A DEM number is ×1e9 to OS; an
-    // OS string is taken as-is.
+    // Bind the shipped fee PER-COMPONENT to the node-computed breakdown, in
+    // OS. Per-component (not just total) because the fee is charged at apply
+    // from the shipped components (deriveFeeEditsForApply) — binding only the
+    // total would let a client skew the split (e.g. put everything in
+    // network_fee, rpc_fee=0) and pass validation while the apply-time
+    // distribution emits no RPC-fee block, making fee routing deterministically
+    // wrong (Greptile P1 #2). The SDK ships the same component split the node
+    // computes (network/rpc/additional), so a legit tx matches exactly; a
+    // skewed or underpaid one is rejected. A DEM number is ×1e9 to OS; an OS
+    // string is taken as-is.
     const toOs = (v: unknown): bigint => {
         if (typeof v === "string") return BigInt(v)
         return BigInt(Math.round(Number(v ?? 0))) * 1_000_000_000n
     }
-    const shippedTotalOs =
-        toOs(shippedFee.network_fee) +
-        toOs(shippedFee.rpc_fee) +
-        toOs(shippedFee.additional_fee)
-    const computedTotalOs = BigInt(breakdown.total) * 1_000_000_000n
-    if (shippedTotalOs !== computedTotalOs) {
-        return {
-            ok: false,
-            message:
-                `transaction_fee total mismatch: shipped=${shippedTotalOs} OS ` +
-                `(network=${String(shippedFee.network_fee)} rpc=${String(shippedFee.rpc_fee)} additional=${String(shippedFee.additional_fee)}) ` +
-                `but node computed ${computedTotalOs} OS (total=${breakdown.total}). ` +
-                "Refusing — fee underpayment / forged fee.",
+    const componentChecks: Array<[string, unknown, number]> = [
+        ["network_fee", shippedFee.network_fee, breakdown.network_fee],
+        ["rpc_fee", shippedFee.rpc_fee, breakdown.rpc_fee],
+        ["additional_fee", shippedFee.additional_fee, breakdown.additional_fee],
+    ]
+    for (const [name, shipped, computed] of componentChecks) {
+        const shippedOs = toOs(shipped)
+        const computedOs = BigInt(computed) * 1_000_000_000n
+        if (shippedOs !== computedOs) {
+            return {
+                ok: false,
+                message:
+                    `transaction_fee.${name} mismatch: shipped=${String(shipped)} ` +
+                    `(=${shippedOs} OS) but node computed ${computed} (=${computedOs} OS). ` +
+                    "Refusing — fee underpayment / forged or skewed fee split.",
+            }
         }
     }
 

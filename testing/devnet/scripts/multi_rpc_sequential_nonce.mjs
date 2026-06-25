@@ -125,8 +125,16 @@ async function sample() {
         ...clients.map(c => c.getAddressInfo(RECEIVER_PUBKEY)),
         ...clients.map(c => c.getAddressInfo(sender)),
     ])
-    const recBals = infos.slice(0, N).map(x => BigInt(x?.balance ?? 0))
-    const sendNonces = infos.slice(N).map(x => Number(x?.nonce ?? 0))
+    // Slice by clients.length (number of RPCs queried), NOT N (tx count).
+    // infos = [...receiver-per-client, ...sender-per-client], so the split is
+    // at clients.length. Using N would mix sender/receiver objects when
+    // N != clients.length (e.g. 2-RPC devnet, N=3). (Greptile P2.)
+    const recBals = infos
+        .slice(0, clients.length)
+        .map(x => BigInt(x?.balance ?? 0))
+    const sendNonces = infos
+        .slice(clients.length)
+        .map(x => Number(x?.nonce ?? 0))
     const recMax = recBals.reduce((a, b) => (a > b ? a : b), 0n)
     const nonceMax = sendNonces.reduce((a, b) => (a > b ? a : b), 0)
     return { delta: recMax - receiverBalBefore, nonceDelta: nonceMax - senderNonceBefore }
