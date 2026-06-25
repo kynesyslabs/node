@@ -2,7 +2,24 @@
 
 Date: 2026-06-25
 Branch: `stabilisation`
-Status: discovery + CONVERGED plan (3 adversarial rounds + 7-scenario simulation). No code changed yet.
+Status: SHIPPED (stability fixes) + architectural follow-up scoped. See "Implementation status" below.
+
+## Implementation status (2026-06-25)
+
+**SHIPPED + verified on 2-node devnet (the testnet RC config), branch `fix/consensus-deterministic-ordering-ep21`:**
+- ✅ **P-ORDER** (#189, commit c831ce0c8) — deterministic (sender,nonce,hash) mempool ordering, fork-gated.
+- ✅ **#204 root cause** (commit b07f5e3bf) — the actual cross-RPC freeze. `confirmTransaction` mutated the SDK-signed tx (prepended fee edits + overwrote `transaction_fee`) → coherence failed on gossip → divergent blocks → no tx committed. Fix: derive-at-apply (node no longer mutates the signed tx; fee edits derived deterministically at apply from the shipped `transaction_fee`).
+- ✅ **P-MINSHARD** (#197, commit fcf6feb6e) — `isBlockValid` refuses to finalize below MIN_SHARD=2 (kills 1-node self-certify / solo-fork). + getShard localeCompare→byte sort (determinism).
+
+**Verified:** single tx commits (was frozen); 4 sequential cross-RPC txs land in nonce order; both nodes byte-identical; fees→treasury; no double-spend on replay; chain advances pro=2/con=0. The colleague's reported instability (txs accepted but never committing, chain stalling) is RESOLVED.
+
+**NOT shipped — one coupled architectural change (its own plan + approval needed):**
+- ⏳ **P-TRIM** (#193) + **P-DETECT** (#194) + **P-CLOCK** (#195) + **P-ADMIT** (#196) = a state-root-vote redesign. Verified blocker: the vote+signatures bind the PRE-execution block hash and `verifyBlock` recomputes that hash on sync, so an honest header (trim failed txs) requires sealing the block AFTER apply and voting on the post-apply hash — which restructures the consensus loop, the vote path (peers must apply before voting), and `verifyBlock`, AND requires full execution determinism first (P-CLOCK: ~9 Date.now/new Date + network-fetch sites in the apply path; unbounded tail per audit). High blast radius; not bounded. P-ADMIT (future-nonce) depends on P-TRIM (gap exclusion at forge). With #204+P-ORDER, sequential txs already commit fine, so these are hardening/throughput, not stability.
+
+---
+
+(original plan below — retained for reference)
+
 Tracking: Mycelium Epic #21 (tasks #189–#202).
 Target: testnet Release Candidate, **dozens of validators**, **min 2 nodes** operationally.
 
