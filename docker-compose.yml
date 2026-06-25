@@ -212,16 +212,10 @@ services:
       # prometheus.yml scrape target (node:9090) stays valid. The
       # host-side port is independently configurable via METRICS_HOST_PORT.
       - "${METRICS_HOST_PORT:-9090}:9090"
-      # TLSNotary wstcp proxy pool. requestTLSNproxy spawns one wstcp per
-      # target domain on a dynamic port in 55000-57000 (see
-      # src/features/tlsnotary/portAllocator.ts) and hands the client back
-      # a ws://localhost:<port> URL. Publish the whole range so that URL is
-      # reachable from the host. NOTE: this publishes 2001 ports — it is the
-      # attack surface the WSTCP_BIND_HOST notes in proxyManager.ts warn
-      # about; acceptable here because direct docker mode has no reverse
-      # proxy to front the pool. wstcp must keep binding 0.0.0.0 inside the
-      # container (its default) for Docker to forward to it.
-      - "55000-57000:55000-57000"
+      # TLSNotary wstcp proxy — publish only the single advertised proxy
+      # port from .env (TLSNOTARY_PROXY_PORT) so the URL the node hands to
+      # clients is reachable from the host.
+      - "${TLSNOTARY_PROXY_PORT:-55688}:${TLSNOTARY_PROXY_PORT:-55688}"
     healthcheck:
       # Mirrors the Dockerfile HEALTHCHECK so compose-level wait + watch
       # commands work without depending on the image build (Epic 13 T11).
