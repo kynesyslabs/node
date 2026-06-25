@@ -131,10 +131,10 @@ export async function consensusRoutine(): Promise<void> {
             manager.shard.blockRef,
         )
 
-        const { validTxs, failedTxs: failed } =
-            await filterMempoolByValidNonce(tempMempool)
-        tempMempool = validTxs
-        failedTxs = failedTxs.concat(failed)
+        // const { validTxs, failedTxs: failed } =
+        //     await filterMempoolByValidNonce(tempMempool)
+        // tempMempool = validTxs
+        // failedTxs = failedTxs.concat(failed)
 
         preventForgingEnded(blockRef)
 

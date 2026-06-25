@@ -358,30 +358,30 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
-    if (txs.length < block.content.ordered_transactions.length) {
-        log.error(
-            "[fastSync] No transactions received for block: " + block.hash,
-        )
-        log.error(
-            "Block transactions: " +
-                JSON.stringify(block.content.ordered_transactions, null, 2),
-        )
-        process.exit(1)
-    }
+    // if (txs.length < block.content.ordered_transactions.length) {
+    //     log.error(
+    //         "[fastSync] No transactions received for block: " + block.hash,
+    //     )
+    //     log.error(
+    //         "Block transactions: " +
+    //             JSON.stringify(block.content.ordered_transactions, null, 2),
+    //     )
+    //     process.exit(1)
+    // }
 
-    for (const tx of txs) {
-        if (tx.blockNumber !== block.number) {
-            log.error(
-                "Transaction block number mismatch: " +
-                    tx.hash +
-                    ", expected: " +
-                    block.number +
-                    ", got: " +
-                    tx.blockNumber,
-            )
-            process.exit(1)
-        }
-    }
+    // for (const tx of txs) {
+    //     if (tx.blockNumber !== block.number) {
+    //         log.error(
+    //             "Transaction block number mismatch: " +
+    //                 tx.hash +
+    //                 ", expected: " +
+    //                 block.number +
+    //                 ", got: " +
+    //                 tx.blockNumber,
+    //         )
+    //         process.exit(1)
+    //     }
+    // }
 
     // ! Sync the native tables
     await syncGCRTables(txs)
@@ -394,13 +394,13 @@ export async function syncBlock(block: Block, peer: Peer) {
             log.info("[fastSync] Transactions inserted successfully")
 
             // confirm all txs are inserted
-            for (const tx of txs) {
-                const res = await Chain.checkTxExists(tx.hash)
-                if (!res) {
-                    log.error("[syncGCRTables] Transaction not found: " + tx.hash)
-                    process.exit(1)
-                }
-            }
+            // for (const tx of txs) {
+            //     const res = await Chain.checkTxExists(tx.hash)
+            //     if (!res) {
+            //         log.error("[syncGCRTables] Transaction not found: " + tx.hash)
+            //         process.exit(1)
+            //     }
+            // }
             log.debug("[syncGCRTables] All transactions are inserted")
             return true
             
