@@ -110,7 +110,10 @@ export async function consensusRoutine(): Promise<void> {
         )
 
         // if we have less than shard size of nodes, abort the consensus routine
-        if (manager.shard.members.length < getSharedState.shardSize) {
+        if (
+            manager.shard.members.length <
+            Math.floor((getSharedState.shardSize * 2) / 3) + 1
+        ) {
             log.error(
                 "[consensusRoutine] Less than shard size of nodes, aborting consensus routine",
             )
@@ -804,8 +807,15 @@ async function voteOnBlock(
  * @returns True if the block is valid, false otherwise
  */
 function isBlockValid(pro: number, totalVotes: number): boolean {
+    // vote count threshold
     const threshold = Math.floor((totalVotes * 2) / 3) + 1
-    return pro >= threshold
+
+    // minimum validators threshold
+    // attempts to fix forking bug
+    const isMinimumValidators =
+        pro >= Math.floor((getSharedState.shardSize * 2) / 3) + 1
+
+    return isMinimumValidators && pro >= threshold
 }
 
 /**
