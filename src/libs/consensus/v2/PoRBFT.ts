@@ -410,7 +410,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         if (
-            !new Set(["blockTimestampNotReceived"]).has(exitReason) &&
+            !new Set(["blockTimestampNotReceived", "voteError"]).has(exitReason) &&
             txs.length !== tempMempool.length
         ) {
             const diff = tempMempool.filter(
