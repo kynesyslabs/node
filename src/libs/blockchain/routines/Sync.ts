@@ -987,14 +987,14 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<{ latestChainBlock: number; ourLatestBlock: number }> {
-    // if (getSharedState.inSyncLoop) {
-    //     log.debug("[fastSync] Sync loop already running, skipping")
+    if (getSharedState.inSyncLoop) {
+        log.debug("[fastSync] Sync loop already running, skipping")
 
-    //     return {
-    //         latestChainBlock: latestBlock(),
-    //         ourLatestBlock: getSharedState.lastBlockNumber,
-    //     }
-    // }
+        return {
+            latestChainBlock: latestBlock(),
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
+    }
 
     log.debug("[fastSync] Starting sync loop")
     try {

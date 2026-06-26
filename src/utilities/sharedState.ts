@@ -245,7 +245,7 @@ export default class SharedState {
         PeerManager.getInstance().updateOurPeerSyncData()
 
         if (synced) {
-            this.fastSyncCount += 1
+            this.fastSyncCount += synced ? 1 : 0
         }
     }
 
