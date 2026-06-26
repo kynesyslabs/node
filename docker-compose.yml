@@ -173,6 +173,13 @@ services:
       TLSNOTARY_MODE: ${TLSNOTARY_MODE:-docker}
       TLSNOTARY_FATAL: ${TLSNOTARY_FATAL:-false}
       TLSNOTARY_SIGNING_KEY: ${TLSNOTARY_SIGNING_KEY:-}
+      # wstcp proxy port window. The node spawns dynamic wstcp proxies in
+      # this range and the host reverse proxy forwards /tlsn/<port>/ to them,
+      # so the SAME range must be host-published in `ports:` below — kept
+      # narrow to avoid a 2000-port mapping. Both stanzas read these vars so
+      # the allocation range and the published range can never drift.
+      TLSNOTARY_PROXY_PORT_MIN: ${TLSNOTARY_PROXY_PORT_MIN:-55000}
+      TLSNOTARY_PROXY_PORT_MAX: ${TLSNOTARY_PROXY_PORT_MAX:-55063}
       # Logging & misc
       LOG_LEVEL: ${LOG_LEVEL:-info}
       PROD: ${PROD:-false}
@@ -198,6 +205,12 @@ services:
       - "${RPC_PORT:-53550}:${RPC_PORT:-53550}"
       - "${OMNI_PORT:-53551}:${OMNI_PORT:-53551}"
       - "${RPC_SIGNALING_PORT:-3005}:${RPC_SIGNALING_PORT:-3005}"
+      # wstcp TLSNotary proxy range, bound to 127.0.0.1 so ONLY the host's
+      # reverse proxy can reach it (not the public internet). The node
+      # allocates dynamic proxy ports here and nginx forwards
+      # /tlsn/<port>/ to them — without this mapping every verification
+      # 502s. MUST match TLSNOTARY_PROXY_PORT_MIN/MAX in `environment:`.
+      - "127.0.0.1:${TLSNOTARY_PROXY_PORT_MIN:-55000}-${TLSNOTARY_PROXY_PORT_MAX:-55063}:${TLSNOTARY_PROXY_PORT_MIN:-55000}-${TLSNOTARY_PROXY_PORT_MAX:-55063}"
       # MCP (Model Context Protocol) intentionally NOT host-published.
       # The server binds `localhost` inside the container (src/index.ts)
       # and the SDK has no built-in authentication — publishing this port
