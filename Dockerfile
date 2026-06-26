@@ -148,9 +148,12 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Without it the proxy never binds its port and every verification fails
 # with an nginx 502 / CloseEvent 1006 on the prover.
 FROM rust:1-slim AS wstcp
-# Pin the version + --locked so the image is reproducible and an upstream
-# wstcp release can't silently change behaviour or break the build.
-RUN cargo install wstcp --version 0.2.1 --locked --root /wstcp
+# Pin the version so an upstream wstcp release can't silently change
+# behaviour or break the build. `--locked` is intentionally omitted: the
+# crate's bundled Cargo.lock pins dependency versions that no longer
+# compile on the current toolchain, so we let cargo resolve compatible
+# deps for this exact wstcp version.
+RUN cargo install wstcp --version 0.2.1 --root /wstcp
 
 FROM oven/bun:1.3-debian AS runtime
 
