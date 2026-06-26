@@ -14,8 +14,6 @@ import { Mutex } from "async-mutex"
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
-    static broadcastGuard = new Mutex()
-
     /**
      * Broadcasts a new block to the network
      *

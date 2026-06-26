@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 // REVIEW Conflict handling between peers (longest chain)
-
+import { Mutex } from "async-mutex"
 import { getSharedState } from "src/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import Peer from "../../peer/Peer"
@@ -40,8 +40,15 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
-import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
 import { getLastBlockSigners } from "../chainBlocks"
+
+/**
+ * Used to prevent block insert operations from happening concurrently.
+ * 
+ * 1. Via fastSync routine
+ * 2. Via the new block broadcast routine
+ */
+export const syncLock = new Mutex()
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -397,13 +404,14 @@ export async function syncBlock(block: Block, peer: Peer) {
             for (const tx of txs) {
                 const res = await Chain.checkTxExists(tx.hash)
                 if (!res) {
-                    log.error("[syncGCRTables] Transaction not found: " + tx.hash)
+                    log.error(
+                        "[syncGCRTables] Transaction not found: " + tx.hash,
+                    )
                     process.exit(1)
                 }
             }
             log.debug("[syncGCRTables] All transactions are inserted")
             return true
-            
         }
 
         log.error("[fastSync] Transactions insertion failed")
@@ -618,7 +626,6 @@ async function batchDownloadBlocks(
                 return false
             }
         }
-
 
         // Insert block
         await Chain.insertBlock(block, [], null, false)
@@ -1012,10 +1019,12 @@ export async function fastSync(
         let synced: boolean
         if (getSharedState.fastSyncCount > 0) {
             const result = await Promise.race([
-                fastSyncRoutine(peers).then(v => ({
-                    kind: "done" as const,
-                    value: v,
-                })),
+                syncLock
+                    .runExclusive(async () => fastSyncRoutine(peers))
+                    .then(v => ({
+                        kind: "done" as const,
+                        value: v,
+                    })),
                 sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
                     kind: "timeout" as const,
                     value: false,

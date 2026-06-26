@@ -14,6 +14,7 @@ import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRSto
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { getSharedState } from "@/utilities/sharedState"
+import { syncLock } from "../blockchain/routines/Sync"
 
 interface GCRRoutinePayload {
     method: string
@@ -267,7 +268,7 @@ export default async function manageGCRRoutines(
                 break
             }
 
-            await BroadcastManager.broadcastGuard.runExclusive(async () => {
+            await syncLock.runExclusive(async () => {
                 response.response = await BroadcastManager.handleNewBlock(
                     sender,
                     params[0],
