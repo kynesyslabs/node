@@ -25,10 +25,7 @@ import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
-import {
-    ucrypto,
-    uint8ArrayToHex,
-} from "@kynesyslabs/demosdk/encryption"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
@@ -36,6 +33,7 @@ import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { serializeTransactionContent } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
+import type { TransactionStatus } from "@/utilities/constants"
 
 interface TransactionResponse {
     status: string
@@ -50,7 +48,7 @@ export default class Transaction implements ITransaction {
     signature: ISignature | null = null
     ed25519_signature: string | null = null
     hash: string | null = null
-    status: string | null = null
+    status: string | TransactionStatus | null = null
     blockNumber: number | null = null
 
     constructor(data?: Partial<ITransaction>) {
@@ -451,10 +449,7 @@ export default class Transaction implements ITransaction {
         }
     }
 
-    public static toRawTransaction(
-        tx: Transaction,
-        status = "confirmed",
-    ): RawTransaction {
+    public static toRawTransaction(tx: Transaction): RawTransaction {
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
             tx.content.to = tx.content.to["data"]?.toString("hex")
@@ -475,7 +470,7 @@ export default class Transaction implements ITransaction {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
             ed25519_signature: tx.ed25519_signature,
-            status: status,
+            status: tx.status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,

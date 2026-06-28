@@ -1,6 +1,7 @@
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
 import { bigintNumericTransformer } from "./transformers"
+import type { TransactionStatus } from "@/utilities/constants"
 
 @Entity("transactions")
 @Index("idx_transactions_hash", ["hash"])
@@ -21,7 +22,7 @@ export class Transactions {
     ed25519_signature: string
 
     @Column("varchar", { name: "status" })
-    status: string
+    status: string | TransactionStatus
 
     @Column("varchar", { name: "hash", unique: true })
     hash: string

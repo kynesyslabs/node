@@ -193,9 +193,8 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
 
 export async function insertBlock(
     block: Block,
-    operations: any[] = [],
+    blockTxs: Transaction[],
     position?: number,
-    cleanMempool = true,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
@@ -244,12 +243,25 @@ export async function insertBlock(
 
     let transactionEntities: Transaction[] = []
 
-    // Only fetch txs from mempool if cleanMempool is true
-    // ie. only when inserting block from consensus routine
-    if (cleanMempool) {
-        transactionEntities = await Mempool.getTransactionsByHashes(
-            orderedTransactionsHashes,
-        )
+    if (blockTxs.length > 0 && block.content.ordered_transactions.length > 0) {
+        // confirm array contains all the txs in the block
+        const blockTxsHashes = blockTxs.map(tx => tx.hash)
+        const blockOrderedTransactionsHashes =
+            block.content.ordered_transactions
+
+        if (
+            blockTxsHashes.every(hash =>
+                blockOrderedTransactionsHashes.includes(hash),
+            )
+        ) {
+            transactionEntities = blockTxs
+        } else {
+            log.error(
+                "Block transactions mismatch with block ordered transactions",
+            )
+            process.exit(1)
+        }
+
         transactionEntities = transactionEntities.map(tx => ({
             ...tx,
             blockNumber: block.number,
@@ -348,7 +360,7 @@ export async function insertBlock(
 
                 if (transactionEntities.length > 0) {
                     const rawTransactions = transactionEntities.map(tx =>
-                        Transaction.toRawTransaction(tx, "confirmed"),
+                        Transaction.toRawTransaction(tx),
                     )
 
                     const { skipped } = await chunkedInsert(
@@ -377,19 +389,7 @@ export async function insertBlock(
 
                 const insertTransactionsEnd = Date.now()
                 log.only(
-                    `[insertBlock] Insert transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
-                )
-
-                const removeTransactionsStart = Date.now()
-                if (cleanMempool) {
-                    await Mempool.removeTransactionsByHashes(
-                        transactionEntities.map(tx => tx.hash),
-                        transactionalEntityManager,
-                    )
-                }
-                const removeTransactionsEnd = Date.now()
-                log.only(
-                    `[insertBlock] Remove transactions took ${removeTransactionsEnd - removeTransactionsStart}ms`,
+                    `[insertBlock] Insert ${transactionEntities.length} transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
                 )
 
                 const commitmentsStart = Date.now()

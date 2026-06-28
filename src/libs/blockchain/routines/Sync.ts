@@ -343,7 +343,7 @@ export async function syncBlock(block: Block, peer: Peer) {
         )
     }
 
-    await Chain.insertBlock(block, [], null, false)
+    await Chain.insertBlock(block, [])
     log.debug("Block inserted successfully")
     log.debug(
         `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
@@ -622,7 +622,7 @@ async function batchDownloadBlocks(
         }
 
         // Insert block
-        await Chain.insertBlock(block, [], null, false)
+        await Chain.insertBlock(block, [])
         log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )

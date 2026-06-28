@@ -11,7 +11,12 @@ import { createBlock } from "./routines/createBlock"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
-import { BlockInvalidError, ForgingEndedError, NotInShardError } from "@/errors"
+import {
+    BlockInvalidError,
+    ErrorCode,
+    ForgingEndedError,
+    NotInShardError,
+} from "@/errors"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
@@ -19,6 +24,18 @@ import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
+import { MempoolTx } from "@/model/entities/Mempool"
+import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
+
+export interface FailedTranscation {
+    txhash: string
+    code: ErrorCode
+    message: string
+}
+
+type TxHash = string
+type MempoolTransaction = Transaction & { reference_block: number }
 
 /* INFO
 # Semaphore system
@@ -61,10 +78,12 @@ export async function consensusRoutine(): Promise<void> {
     const manager = SecretaryManager.getInstance(blockRef, true)
 
     // Defining the variables needed for rolling back the GCREdits
-    let successfulTxs: string[] = []
-    let failedTxs: string[] = []
-    let tempMempool: Transaction[] = []
     let exitReason = ""
+    const successfulTxs: TxHash[] = []
+    const failedTxs: FailedTranscation[] = []
+
+    const blockTxs: MempoolTransaction[] = []
+    const txMap: Map<TxHash, MempoolTransaction> = new Map()
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -129,22 +148,32 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        tempMempool = await mergeAndOrderMempools(
+        const initialMempool = await mergeAndOrderMempools(
             manager.shard.members,
             manager.shard.blockRef,
         )
 
-        const { validTxs, failedTxs: failed } =
-            await filterMempoolByValidNonce(tempMempool)
-        tempMempool = validTxs
-        failedTxs = failedTxs.concat(failed)
+        // filter txs by reference block
+        const res = filterMempoolByRefBlock(initialMempool)
+        failedTxs.push(...res.failedTxs)
+
+        const resNonce = await filterMempoolByNonce(res.validTxs)
+        failedTxs.push(...resNonce.failedTxs)
+
+        // Write final mempool used to forge the block
+        blockTxs.push(...resNonce.validTxs)
+
+        // Generate map of txs by hash
+        for (const tx of blockTxs) {
+            txMap.set(tx.hash, tx)
+        }
 
         preventForgingEnded(blockRef)
 
-        log.only(`[consensusRoutine] Our mempool size: ${tempMempool.length}`)
+        log.only(`[consensusRoutine] Our mempool size: ${blockTxs.length}`)
         log.only(
             `[consensusRoutine] Our mempool: ${JSON.stringify(
-                tempMempool.map(tx => tx.hash),
+                blockTxs.map(tx => tx.hash),
                 null,
                 2,
             )}`,
@@ -178,7 +207,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(tempMempool, []) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(blockTxs, []) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
@@ -199,30 +228,41 @@ export async function consensusRoutine(): Promise<void> {
             // await applyGCRForNewBlock(mempool)
 
             // Applying the GCREdits and see if everything is consistent
-            const {
-                successfulTxs: localSuccessfulTxs,
-                failedTxs: localFailedTxs,
-            } = await applyGCREditsFromMergedMempool(tempMempool)
+            const applyRes = await applyGCREditsFromMergedMempool(blockTxs)
 
             BroadcastManager.broadcastNewBlock(block)
             DTRManager.releaseDTRWaiter(block)
 
-            successfulTxs = successfulTxs.concat(localSuccessfulTxs)
-            failedTxs = failedTxs.concat(localFailedTxs)
+            successfulTxs.push(...applyRes.successfulTxs)
+            failedTxs.push(...applyRes.failedTxs)
 
             if (failedTxs.length > 0) {
-                log.error("Failed txs: " + JSON.stringify(failedTxs, null, 2))
-                //  Prune the mempool of the failed txs
-                // NOTE The mempool should now be updated with only the successful txs
-                const pruneStart = Date.now()
-                await Mempool.removeTransactionsByHashes(failedTxs)
-                const pruneEnd = Date.now()
-                log.only(
-                    `[consensusRoutine] Prune took ${pruneEnd - pruneStart}ms with ${failedTxs.length} failed txs`,
+                log.warn(
+                    `[consensusRoutine] Block ${blockRef} contains ${failedTxs.length} failed txs`,
                 )
+                log.error("Failed txs: " + JSON.stringify(failedTxs, null, 2))
+
+                for (const failed of failedTxs) {
+                    const tx = txMap.get(failed.txhash)
+                    if (tx) {
+                        tx.status = TRANSACTION_STATUS.FAILED
+                    }
+                }
             }
 
-            // INFO: CONSENSUS ACTION 4b: Apply pending L2PS proofs to L1 state
+            if (successfulTxs.length > 0) {
+                log.info(
+                    `[consensusRoutine] Successfully Applied ${successfulTxs.length} transactions`,
+                )
+                for (const successful of successfulTxs) {
+                    const tx = txMap.get(successful)
+                    if (tx) {
+                        tx.status = TRANSACTION_STATUS.CONFIRMED
+                    }
+                }
+            }
+
+            // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
             const l2psStart = Date.now()
             const l2psResult = await L2PSConsensus.applyPendingProofs(
@@ -248,18 +288,20 @@ export async function consensusRoutine(): Promise<void> {
                     " votes",
             )
             const finalizeStart = Date.now()
-            await finalizeBlock(block, pro)
+
+            // Call finalizeBlock with final block transactions with updated status
+            await finalizeBlock(
+                block,
+                blockTxs.map(tx => txMap.get(tx.hash)),
+            )
+            await Mempool.removeTransactionsByHashes(
+                blockTxs.map(tx => tx.hash),
+            )
             const finalizeEnd = Date.now()
             log.only(
                 `[consensusRoutine] Finalize took ${finalizeEnd - finalizeStart}ms`,
             )
             log.only("[consensusRoutine] Block finalized")
-            // REVIEW: Should we await this?
-            // REVIEW: All nodes broadcast the block for redundancy
-            // if (manager.checkIfWeAreSecretary()) {
-            // }
-
-            // INFO: Release DTR transaction relay waiter
         } else {
             exitReason = "voteError"
             log.error(
@@ -270,36 +312,6 @@ export async function consensusRoutine(): Promise<void> {
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
             )
         }
-
-        // // Check if the block is valid
-        // if (isBlockValid(pro, manager.shard.members.length)) {
-        //     log.debug(
-        //         "[consensusRoutine] [result] Block is valid with " +
-        //             pro +
-        //             " votes",
-        //     )
-        //     await finalizeBlock(block, pro)
-
-        //     // REVIEW: Should we await this?
-        //     // REVIEW: All nodes broadcast the block for redundancy
-        //     // if (manager.checkIfWeAreSecretary()) {
-        //     BroadcastManager.broadcastNewBlock(block)
-        //     // }
-
-        //     // INFO: Release DTR transaction relay waiter
-        //     await DTRManager.releaseDTRWaiter(block)
-        // } else {
-        //     log.error(
-        //         `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
-        //     )
-        //     // Raising an error to rollback the GCREdits
-        //     throw new BlockInvalidError(
-        //         `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
-        //     )
-        // }
-
-        // INFO: CONSENSUS ACTION 7: End the consensus routine
-        // await updateValidatorPhase(7, blockRef)
     } catch (error) {
         if (
             error instanceof NotInShardError ||
@@ -333,7 +345,7 @@ export async function consensusRoutine(): Promise<void> {
 
             if (successfulTxs.length > 0) {
                 for (const txHash of successfulTxs) {
-                    const tx = tempMempool.find(tx => tx.hash === txHash)
+                    const tx = txMap.get(txHash)
                     if (tx) {
                         txsToRollback.push(tx)
                     }
@@ -341,7 +353,6 @@ export async function consensusRoutine(): Promise<void> {
 
                 await rollbackGCREditsFromTxs(txsToRollback)
             }
-            // await Mempool.removeTransactionsByHashes(successfulTxs)
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)
@@ -351,33 +362,6 @@ export async function consensusRoutine(): Promise<void> {
         console.error(error)
         console.error((error as Error).stack)
         log.error(`[CONSENSUS] ${error}`)
-        // PR #898 Greptile P1: keep `process.exit(1)` here despite
-        // skipping the `finally` block below.
-        //
-        // `consensusRoutine` is invoked fire-and-forget at every
-        // caller (`mainLoop.ts:129`, `manageConsensusRoutines.ts:77`
-        // with explicit comment "Asynchronous function to avoid
-        // blocking the main thread"). The returned promise is never
-        // awaited, so a `throw` here becomes an unhandled rejection.
-        //
-        // The global `unhandledRejection` handler in `index.ts:94`
-        // intentionally does NOT exit ("let the node try to continue
-        // serving RPC"). That policy is correct for one-off RPC
-        // handler failures, but a fatal consensus error must take
-        // the node down so the supervisor restarts it with clean
-        // state — the alternative is a node serving RPC while its
-        // consensus routine is stuck in an undefined post-error
-        // state, silently accumulating divergence from the rest of
-        // the shard.
-        //
-        // The `finally` cleanup below would not run with
-        // `process.exit` AND would not run with `throw` given the
-        // fire-and-forget callers, so the behavioural delta of
-        // keeping `process.exit` here is zero. Restructuring the
-        // three call sites to await + catch with explicit
-        // gracefulShutdown delegation is the right long-term fix
-        // (tracked separately); for now `process.exit(1)` is the
-        // documented consensus-fatal escape hatch.
         process.exit(1)
     } finally {
         // INFO: If there was a relayed tx past finalize block step, release
@@ -392,7 +376,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // COnfirm all transactions in the block, were inserted in the transaction table
         const txs = await Chain.getTransactionsFromHashes(
-            tempMempool.map(tx => tx.hash),
+            blockTxs.map(tx => tx.hash),
         )
 
         for (const tx of txs) {
@@ -410,10 +394,12 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         if (
-            !new Set(["blockTimestampNotReceived", "voteError"]).has(exitReason) &&
-            txs.length !== tempMempool.length
+            !new Set(["blockTimestampNotReceived", "voteError"]).has(
+                exitReason,
+            ) &&
+            txs.length !== blockTxs.length
         ) {
-            const diff = tempMempool.filter(
+            const diff = blockTxs.filter(
                 tx => !txs.some(t => t.hash === tx.hash),
             )
             log.error(
@@ -508,7 +494,7 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
 async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
-): Promise<(Transaction & { reference_block: number })[]> {
+): Promise<MempoolTransaction[]> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.getMempool(blockRef)
 
@@ -569,6 +555,38 @@ async function mergeAndOrderMempools(
 }
 
 /**
+ * Filter mempool transactions by reference block. Removes transactions
+ * that will fail because the reference block is out of range.
+ *
+ * @param mempool - The mempool transactions
+ * @returns The valid and failed transactions
+ */
+function filterMempoolByRefBlock(mempool: MempoolTransaction[]) {
+    // map of failed tx hashes and their reason
+    const failedTxs: Array<FailedTranscation> = []
+    const validTxs: MempoolTransaction[] = []
+
+    for (const tx of mempool) {
+        if (
+            !isReferenceBlockAllowed(
+                tx.reference_block,
+                getSharedState.lastBlockNumber,
+            )
+        ) {
+            failedTxs.push({
+                txhash: tx.hash,
+                code: ErrorCode.TX_REFERENCE_BLOCK_OUT_OF_RANGE,
+                message: ` Reference block ${tx.reference_block} is out of range. Expected: ${tx.reference_block} - ${getSharedState.lastBlockNumber - getSharedState.referenceBlockRoom}`,
+            })
+        } else {
+            validTxs.push(tx)
+        }
+    }
+
+    return { validTxs, failedTxs }
+}
+
+/**
  * Filter mempool transactions by valid nonce. Removes transactions that will fail
  * because the previous transaction changed the nonce of an account in the next transaction.
  *
@@ -576,13 +594,13 @@ async function mergeAndOrderMempools(
  *
  * @returns The filtered mempool transactions
  *  */
-async function filterMempoolByValidNonce(mempool: Transaction[]) {
+async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
     log.debug("[filterMempoolByValidNonce] Filtering mempool by valid nonce")
     log.debug(
         "[filterMempoolByValidNonce] Initial mempool length: " + mempool.length,
     )
-    const validTxs: Transaction[] = []
-    const failedTxs: string[] = []
+    const validTxs: MempoolTransaction[] = []
+    const failedTxs: Array<FailedTranscation> = []
     const nonceAccounts = new Set<string>()
 
     for (const tx of mempool) {
@@ -618,23 +636,40 @@ async function filterMempoolByValidNonce(mempool: Transaction[]) {
                 validTxs.push(tx)
                 nonces[acct]++
                 continue txLoop
-            } else {
+            } else if (tx.content.nonce < expected) {
+                failedTxs.push({
+                    txhash: tx.hash,
+                    code: ErrorCode.TX_NONCE_INVALID_LOW,
+                    message: `Invalid nonce edit. Expected ${expected}, got ${tx.content.nonce}`,
+                })
+
                 log.debug(
-                    "[filterMempoolByValidNonce] Invalid nonce edit for tx: " +
-                        tx.hash +
-                        ", account: " +
+                    `[TX_NONCE_INVALID_LOW] dropping ${tx.hash}: invalid nonce edit`,
+                )
+                log.debug(
+                    "[TX_NONCE_INVALID_LOW] Invalid nonce edit for account: " +
                         acct,
                 )
                 log.debug(
-                    `[filterMempoolByValidNonce] Expected ${expected}, got ${tx.content.nonce}`,
+                    `[TX_NONCE_INVALID_LOW] Expected ${expected}, got ${tx.content.nonce}`,
+                )
+            } else {
+                failedTxs.push({
+                    txhash: tx.hash,
+                    code: ErrorCode.TX_NONCE_INVALID_HIGH,
+                    message: `Invalid nonce edit. Expected ${expected}, got ${tx.content.nonce}`,
+                })
+
+                log.debug(`[TX_NONCE_INVALID_HIGH] keeping tx: ${tx.hash}`)
+                log.debug(
+                    "[TX_NONCE_INVALID_HIGH] Invalid nonce edit for account: " +
+                        acct,
+                )
+                log.debug(
+                    `[TX_NONCE_INVALID_HIGH] Expected ${expected}, got ${tx.content.nonce}`,
                 )
             }
         }
-
-        log.debug(
-            `[filterMempoolByValidNonce] dropping ${tx.hash}: invalid nonce edit`,
-        )
-        failedTxs.push(tx.hash)
     }
 
     log.debug(
@@ -667,9 +702,9 @@ async function rollbackGCREditsFromTxs(txs: Transaction[]) {
  * @returns The successful and failed GCREdits
  */
 async function applyGCREditsFromMergedMempool(
-    mempool: Transaction[],
-): Promise<{ successfulTxs: string[]; failedTxs: string[] }> {
-    const failedTxs: string[] = []
+    mempool: MempoolTransaction[],
+): Promise<{ successfulTxs: string[]; failedTxs: FailedTranscation[] }> {
+    const failedTxs: FailedTranscation[] = []
 
     if (mempool.length === 0) {
         return { successfulTxs: [], failedTxs: [] }
@@ -682,18 +717,30 @@ async function applyGCREditsFromMergedMempool(
 
     const pendingTxs = mempool.filter(tx => {
         if (existingTxHashes.has(tx.hash)) {
-            failedTxs.push(tx.hash)
+            failedTxs.push({
+                txhash: tx.hash,
+                code: ErrorCode.TX_ALREADY_EXECUTED,
+                message: `Transaction ${tx.hash} already executed`,
+            })
             return false
         }
+
         return true
     })
 
     if (pendingTxs.length === 0) {
-        return { successfulTxs: [], failedTxs: allTxHashes }
+        return { successfulTxs: [], failedTxs }
     }
 
     const res = await HandleGCR.applyTransactions(pendingTxs, false)
-    failedTxs.push(...res.failedTxs)
+    failedTxs.concat(
+        res.failedTxs.map(txhash => ({
+            txhash: txhash,
+            code: ErrorCode.TX_EXECUTE_FAILED,
+            message: `Transaction ${txhash} execution failed`,
+        })),
+    )
+
     return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
 }
 
@@ -824,8 +871,11 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
  * @param block - The block
  * @param pro - The number of votes for the block
  */
-async function finalizeBlock(block: Block, pro: number): Promise<void> {
-    await Chain.insertBlock(block, [], null, true) // NOTE Transactions are added to the Transactions table here
+async function finalizeBlock(
+    block: Block,
+    txs: MempoolTransaction[],
+): Promise<void> {
+    await Chain.insertBlock(block, txs) // NOTE Transactions are added to the Transactions table here
     log.info("[CONSENSUS] Block added to the chain")
 }
 

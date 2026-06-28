@@ -239,10 +239,9 @@ export async function getExistingTransactionHashes(
 
 export async function insertTransaction(
     transaction: Transaction,
-    status = "confirmed",
 ): Promise<boolean> {
     log.debug("[insertTransaction] Inserting transaction: " + transaction.hash)
-    const rawTransaction = Transaction.toRawTransaction(transaction, status)
+    const rawTransaction = Transaction.toRawTransaction(transaction)
 
     try {
         // REVIEW P5a: bridge wire-shape `RawTransaction` to entity-shape
@@ -273,7 +272,7 @@ export async function insertTransactionsFromSync(
     try {
         await dataSource.transaction(async em => {
             const rawTransactions = transactions.map(tx =>
-                Transaction.toRawTransaction(tx, "confirmed"),
+                Transaction.toRawTransaction(tx),
             )
             const { skipped } = await chunkedInsert(
                 em,

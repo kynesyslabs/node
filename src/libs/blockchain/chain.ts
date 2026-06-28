@@ -144,15 +144,14 @@ export default class Chain {
     // ── Mutations ─────────────────────────────────────────────
     static async insertBlock(
         block: Block,
-        operations: Operation[] = [],
+        blockTxs: Transaction[],
         position?: number,
-        cleanMempool = false,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, operations, position, cleanMempool)
+        return blockOps.insertBlock(block, blockTxs, position)
     }
 
-    static async insertTransaction(transaction: Transaction, status = "confirmed"): Promise<boolean> {
-        return txOps.insertTransaction(transaction, status)
+    static async insertTransaction(transaction: Transaction): Promise<boolean> {
+        return txOps.insertTransaction(transaction)
     }
 
     static async insertTransactionsFromSync(transactions: Transaction[]): Promise<boolean> {
