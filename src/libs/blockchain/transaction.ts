@@ -21,18 +21,15 @@ import {
     RawTransaction,
     Transaction as ITransaction,
 } from "@kynesyslabs/demosdk/types"
-import type { ISignature, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
 import {
-    hexToUint8Array,
     ucrypto,
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
-import IdentityManager from "./gcr/gcr_routines/identityManager"
-import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
@@ -147,7 +144,11 @@ export default class Transaction implements ITransaction {
     ) {
         const structured = this.structured(tx)
         if (!structured.valid) {
-            return null // TODO Improve return type
+            return {
+                success: false,
+                message: structured.message,
+                confirmation: null,
+            }
         }
 
         const { success, message } = await this.validateSignature(tx, sender)
@@ -232,22 +233,8 @@ export default class Transaction implements ITransaction {
         // owning block context, it should pass `block.number`; otherwise
         // we fall back to the chain head.
         const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
-        let content = tx.content
-        if (Array.isArray(content?.gcr_edits)) {
-            const strippedEdits = content.gcr_edits.map(edit => {
-                if (!("expectedPrior" in edit)) {
-                    return edit
-                }
-
-                const stripped = { ...edit }
-                delete (stripped as { expectedPrior?: number }).expectedPrior
-                return stripped
-            })
-            content = { ...content, gcr_edits: strippedEdits }
-        }
-
         const derivedHash = Hashing.sha256(
-            serializeTransactionContent(content, height),
+            serializeTransactionContent(tx.content, height),
         )
 
         return derivedHash === tx.hash

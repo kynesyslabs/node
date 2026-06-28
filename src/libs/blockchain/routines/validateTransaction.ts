@@ -20,15 +20,14 @@ import log from "src/utilities/logger"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
-import Datasource from "@/model/datasource"
-import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Mempool from "@/libs/blockchain/mempool"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
+import { normalizePubkey } from "../gcr/handleGCR"
 
 // INFO Cryptographically validate a transaction and calculate gas
 // REVIEW is it overkill to write an interface for the return value?
@@ -57,49 +56,14 @@ export async function confirmTransaction(
         signature: null,
         rpc_public_key: {
             type: getSharedState.signingAlgorithm,
-            data: uint8ArrayToHex(
-                (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
-                    .publicKey as Uint8Array,
-            ),
+            data: getSharedState.publicKeyHex,
         },
     }
-    /* REVIEW We are not using this method anymore, GCREdits take care of the gas operation
-    let gas_operation: Operation
-    let gas_calculus = await defineGas(tx, validityData, privateKey)
-    // If we receive an Operation, we can continue
-    // Else, we return the validity data with its error message
-    // REVIEW We are checking against a known property to ensure we have either an Operation or a ValidityData
-    if (gas_calculus[0]) {
-        gas_operation = gas_calculus[1] as Operation
-        validityData.data.gas_operation = gas_operation
-    } else {
-        validityData = gas_calculus[1] as ValidityData
-        validityData = await signValidityData(validityData)
-        return validityData
-    }
-    */
 
-    // Audit-sweep batch C PR 3 — wire `assignNonce` into the live
-    // validation path. Pre-fork: `assignNonce` short-circuits to
-    // `true` (PR 1), so this is a noop. Post-fork: enforces strict
-    // sequential nonce semantics with mempool lookahead (PRs 1+2),
-    // and the matching consensus-side `expectedPrior` check on
-    // `GCRNonceRoutines` (this PR) is the cross-RPC safety net.
-    const res = await assignNonce(tx)
-    if (!res.success) {
-        validityData.data.message = res.message
-        validityData.data.valid = false
-        validityData = await signValidityData(validityData)
-        return validityData
-    }
-
-    // Verify tx validity
-
-    const {
-        confirmation,
-        message,
-        success: verified,
-    } = await Transaction.confirmTx(tx, sender) // REVIEW Are the buffers ok?
+    const { message, success: verified } = await Transaction.confirmTx(
+        tx,
+        sender,
+    )
 
     if (!verified) {
         validityData.data.message =
@@ -109,20 +73,64 @@ export async function confirmTransaction(
         return validityData
     }
 
+    // Check nonce > current nonce
+    const currentNonce = await GCR.getAccountNonce(
+        normalizePubkey(tx.content.from_ed25519_address),
+    )
+
+    if (tx.content.nonce <= currentNonce) {
+        validityData.data.message =
+            "[Tx Validation] [NONCE ERROR] Transaction nonce error. Expected >=" +
+            (currentNonce + 1) +
+            ", got: " +
+            tx.content.nonce +
+            "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     log.debug(
         "[TX] confirmTransaction - Transaction validity verified, compiling ValidityData",
     )
 
-    // Check sender balance covers the transfer amount.
-    //
-    // `tx.content.amount` was widened from `number` to `number | string`
-    // by the v4 bigint-widening work; coerce through BigInt so the
-    // comparison is precise for post-fork OS magnitudes (which a plain
-    // `Number` cast would round). Wrap the BigInt cast because a
-    // misbehaving client can ship `1.5` or `"abc"`, both of which throw
-    // — without the catch the whole RPC handler would crash instead of
-    // returning a signed-invalid `ValidityData`.
+    // Confirm that nonce gcr_edit increments the nonce by exactly 1
+    const nonceEdit = tx.content.gcr_edits.find(edit => edit.type === "nonce")
+    if (nonceEdit) {
+        if (nonceEdit.amount !== 1) {
+            validityData.data.message =
+                "[Tx Validation] [NONCE ERROR] Nonce edit amount must be 1, got: " +
+                nonceEdit.amount +
+                "\n"
+            validityData.data.valid = false
+            validityData = await signValidityData(validityData)
+            return validityData
+        }
+    }
+
+    // Check tx in transaction table
+    const dbTx = await Chain.getTransactionFromHash(tx.hash)
+    if (dbTx) {
+        validityData.data.message =
+            "[Tx Validation] [TX EXISTS ERROR] Transaction already executed in block number: " +
+            dbTx.blockNumber
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
+    // Check tx in mempool
+    const mempoolTx = await Mempool.checkTransactionByHash(tx.hash)
+    if (mempoolTx) {
+        validityData.data.message =
+            "[Tx Validation] [TX EXISTS ERROR] Transaction already in mempool\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     let txAmount: bigint
+
     try {
         txAmount = BigInt(tx.content.amount ?? 0)
     } catch (e) {
@@ -131,19 +139,14 @@ export async function confirmTransaction(
         validityData = await signValidityData(validityData)
         return validityData
     }
+
     if (txAmount > 0n) {
         const from =
             typeof tx.content.from === "string"
                 ? tx.content.from
                 : forgeToHex(tx.content.from)
-        // `GCR.getGCRNativeBalance` was renamed to `getAccountBalance`
-        // on stabilisation and now returns `bigint` directly.
-        let fromBalance = 0n
-        try {
-            fromBalance = await GCR.getAccountBalance(from)
-        } catch {
-            // Address not in GCR — balance is 0
-        }
+
+        const fromBalance = await GCR.getAccountBalance(from)
         if (fromBalance < txAmount) {
             validityData.data.message = `[Tx Validation] [BALANCE ERROR] Insufficient balance: need ${txAmount} but have ${fromBalance}\n`
             validityData.data.valid = false
@@ -208,6 +211,7 @@ export async function confirmTransaction(
                 (e instanceof Error ? e.message : String(e)),
         }
     }
+
     if (dispatchResult.ok === false) {
         validityData.data.valid = false
         validityData.data.message =
@@ -465,242 +469,4 @@ async function defineGas(
     log.debug("[TX] defineGas - Gas Operation derived")
     //console.log(gas_operation)
     return [true, gasOperation]
-}
-
-/**
- * Audit-sweep batch C — PR 1 + PR 2: nonce-validation with mempool lookahead.
- *
- * Verifies an incoming transaction's `tx.content.nonce` against the
- * sender's current GCR account nonce, plus the count of txs from the
- * same sender already queued in this node's mempool. Fork-gated by
- * `nonceEnforcement`:
- *
- *  - Pre-fork (legacy): always returns true; bit-identical to the
- *    previous hardcoded stub. Re-syncing pre-fork blocks is unaffected.
- *
- *  - Post-fork: returns true iff
- *      `tx.content.nonce === account.nonce + 1 + pendingMempoolCount`.
- *    The mempool count lets a sender submit N transactions in a row
- *    while account.nonce has not yet advanced — each successive
- *    submission expects a higher nonce. PR 3 wires the consensus-side
- *    `expectedPrior` check that prevents cross-RPC double-submission
- *    where a peer's mempool count diverges from this node's.
- *
- * Concurrency caveat (TOCTOU). On a single node, two concurrent
- * submissions from the same sender both read `pendingCount` before
- * either is admitted to the mempool, so both compute the same
- * `expected` and both pass validation here. Closed at the insert
- * boundary by PR 4: `Mempool.addTransaction` wraps the per-sender
- * `pg_advisory_xact_lock`-protected re-check + insert. The lock
- * serialises concurrent same-sender ingress and the in-lock
- * re-query of `account.nonce + pendingMempoolCount` catches the
- * duplicate-nonce second submission before it occupies a mempool
- * slot. See `docs/specs/audit-sweep-batch-c-nonce.md` Risks section
- * for the cross-RPC safety net (PR 3's `expectedPrior` apply-time
- * reject in `GCRNonceRoutines`) — that remains the only line of
- * defence against cross-node replay since this node's mempool lock
- * cannot serialise across peers.
- *
- * The caller in `confirmTransaction` (lines 77-86) remains commented
- * out in PR 1 — this commit ships the validation infra without
- * wiring it into the live tx path. PR 3 uncomments the caller once
- * the consensus-side rejection (GCREdit `expectedPrior`) is in place,
- * so the validation and the apply-time check ship together behind
- * the same fork gate.
- *
- * Strictly read-only against the GCR. Uses a direct `findOne` lookup
- * rather than `ensureGCRForUser` so an unknown sender pubkey cannot
- * provision a phantom account row as a side effect of nonce
- * validation (PR #884 review: Greptile P1 / CodeRabbit Critical). The
- * increment side is shipped by PR 3 as a `+1` nonce GCREdit emitted
- * from `HandleNativeOperations.handle()` and applied by
- * `GCRNonceRoutines` at consensus time.
- *
- * Fork-gate block height is read from `getSharedState.lastBlockNumber`
- * only — never from the tx, which is attacker-controlled on the
- * ingress path (PR #884 review: CodeRabbit Critical).
- *
- * See `docs/specs/audit-sweep-batch-c-nonce.md` for the full design.
- */
-export async function assignNonce(
-    tx: Transaction,
-): Promise<{ success: boolean; message?: string }> {
-    // Greptile + CodeRabbit PR #884 feedback: fork gating must use
-    // node-local chain state only. `tx.blockNumber` is attacker-
-    // controlled on the ingress path (the caller is RPC-facing), so
-    // pinning to it would let a forged tx select a pre-fork height
-    // and bypass enforcement once the caller is uncommented in PR 3.
-    //
-    // The tx is destined for the next block (`lastBlockNumber + 1`).
-    // Using `lastBlockNumber` here is slightly conservative at the
-    // exact activation boundary — if `activationHeight ===
-    // lastBlockNumber + 1`, the gate reads inactive at ingress but
-    // active at inclusion. PR 3's consensus-side `expectedPrior`
-    // check is the safety net for that one-block window.
-    const blockHeight = getSharedState.lastBlockNumber ?? 0
-
-    if (!isForkActive("nonceEnforcement", blockHeight)) {
-        // Pre-fork: legacy accept-all behaviour. Preserves bit-identical
-        // re-sync of every block authored before the fork activation.
-        return {
-            success: true,
-        }
-    }
-
-    // CodeRabbit feedback: canonicalise to lowercase so submissions
-    // that differ only in casing target the same GCR row. The wire
-    // pubkey format is lowercase hex by convention, but we don't
-    // want validation to depend on caller discipline.
-    const senderAddressRaw: string =
-        typeof tx.content.from === "string"
-            ? tx.content.from
-            : forgeToHex(tx.content.from)
-    const senderAddress = senderAddressRaw.toLowerCase()
-
-    // Greptile P1 feedback: must be a pure read. The previous draft
-    // used `ensureGCRForUser`, which calls `HandleGCR.createAccount`
-    // for unknown pubkeys. Once the caller is uncommented in PR 3,
-    // validation runs before signature verification, so any
-    // syntactically valid `from` could provision a phantom account
-    // (DB bloat + free side-effect ahead of crypto check). Use a
-    // direct repository lookup and treat unknown sender as invalid
-    // nonce — a real sender that has never transacted has
-    // `account.nonce === 0`, so they were created at genesis or by
-    // a prior received tx; never having a row means they can't have
-    // a valid nonce to submit either.
-    let account: GCRMain | null
-    try {
-        const db = await Datasource.getInstance()
-        const gcrRepository = db.getDataSource().getRepository(GCRMain)
-        account = await gcrRepository.findOne({
-            where: { pubkey: senderAddress },
-        })
-    } catch (e) {
-        log.error(
-            `[assignNonce] failed to load sender account for ${senderAddress}: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
-        )
-        return {
-            success: false,
-            message: `[assignNonce] failed to load sender account for ${senderAddress}: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
-        }
-    }
-
-    if (!account) {
-        log.error(
-            `[assignNonce] no GCR account for sender ${senderAddress} — ` +
-                "rejecting nonce check",
-        )
-        return {
-            success: false,
-            message: `[assignNonce] no GCR account for sender ${senderAddress}`,
-        }
-    }
-
-    // Audit-sweep batch C PR 2: account for txs already queued in
-    // mempool from the same sender. PR 1 enforced a strict
-    // `account.nonce + 1` equality, which rejected back-to-back
-    // submissions (the second tx still reads `account.nonce` because
-    // the first has not yet been included in a block, so both would
-    // claim the same nonce). Adding the pending-queue depth lets a
-    // sender submit N transactions in a row: the k-th submission
-    // expects `account.nonce + 1 + (k-1)`. The k-th tx is itself
-    // not yet in the mempool at this point, hence the `+ 1` for the
-    // current tx.
-    //
-    // Single-node correctness only: another node sees its own
-    // mempool, which may not contain the same pending set. PR 3's
-    // consensus-side `expectedPrior` check is the cross-node
-    // safety net — at block-application time, only one of any pair
-    // of competing same-nonce txs survives.
-    let pendingCount: number
-    try {
-        pendingCount = await Mempool.countPendingByAddress(senderAddress)
-    } catch (e) {
-        log.error(
-            `[assignNonce] failed to count mempool txs for ${senderAddress}: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
-        )
-        return {
-            success: false,
-            message: `[assignNonce] failed to count mempool txs for ${senderAddress}: ${
-                e instanceof Error ? e.message : String(e)
-            }`,
-        }
-    }
-
-    const txNonce = tx.content.nonce
-    const expected = account.nonce + 1 + pendingCount
-
-    if (!Number.isInteger(txNonce) || txNonce !== expected) {
-        log.error(
-            `[assignNonce] nonce mismatch for ${senderAddress}: ` +
-                `tx.content.nonce=${txNonce}, expected=${expected} ` +
-                `(account.nonce=${account.nonce}, ` +
-                `pendingMempoolCount=${pendingCount})`,
-        )
-        return {
-            success: false,
-            message: `nonce mismatch for ${senderAddress}: tx.content.nonce=${txNonce}, expected=${expected} (account.nonce=${account.nonce}, pendingMempoolCount=${pendingCount})`,
-        }
-    }
-
-    // Audit-sweep batch C PR 3 — populate `expectedPrior` on this
-    // tx's `nonce` GCREdit (if present) at validation time, NOT at
-    // apply time.
-    //
-    // Why validation time: the value must be a snapshot of the
-    // sender's nonce taken BEFORE this tx is bundled into a block.
-    // Populating at apply time would re-read `entities.accounts` —
-    // which already reflects prior in-block applies — so the
-    // expected value would track the apply-time state, defeating
-    // the cross-RPC safety net entirely (the second replay would
-    // see its own freshly-incremented value and pass the check).
-    //
-    // Formula: `expectedPrior = account.nonce + pendingCount`. This
-    // is the value the sender's nonce will be at the moment this tx
-    // applies, assuming all queued mempool txs from the same sender
-    // (which are ordered before this one) land first. For a single
-    // tx: `pendingCount === 0`, so `expectedPrior === account.nonce`.
-    // For the k-th of N back-to-back submissions:
-    // `expectedPrior === account.nonce + (k-1)`.
-    //
-    // The field is stripped from both sides of the hash compare in
-    // `endpointValidation`, so the signed tx hash is invariant under
-    // whether or not this populate ran. Pre-fork blocks re-sync
-    // bit-identically because the fork-gate above short-circuits.
-    //
-    // We mutate `tx.content.gcr_edits` in place. The hash strip
-    // means downstream serialisation / signing is unaffected.
-    if (Array.isArray(tx.content.gcr_edits)) {
-        const expectedPrior = account.nonce + pendingCount
-        for (const edit of tx.content.gcr_edits) {
-            if (edit.type === "nonce") {
-                // Normalise non-string forge-key accounts to lowercase
-                // hex before comparing, mirroring the same coercion in
-                // `GCRNonceRoutines.apply`. Direct `===` between an
-                // object and a string is always false, which would
-                // silently skip the populate and disable the cross-RPC
-                // safety net for any client shipping forge-format
-                // accounts (PR #886 review: CodeRabbit Major /
-                // Greptile P1).
-                const editAccount = (
-                    typeof edit.account === "string"
-                        ? edit.account
-                        : forgeToHex(edit.account)
-                ).toLowerCase()
-                if (editAccount === senderAddress) {
-                    edit.expectedPrior = expectedPrior
-                }
-            }
-        }
-    }
-
-    return {
-        success: true,
-    }
 }

@@ -249,16 +249,6 @@ export default class Mempool {
             isForkActive("nonceEnforcement", blockHeight)
         ) {
             try {
-                // PR #887 Greptile P1: explicit `READ COMMITTED`. The
-                // default Postgres txn isolation can be flipped by
-                // server / connection-pool config, and under
-                // `REPEATABLE READ` or `SERIALIZABLE` the txn
-                // snapshot is taken at `BEGIN` — BEFORE the advisory
-                // lock fires — so the in-lock re-query of
-                // `pendingCount` would see stale data and the entire
-                // TOCTOU guarantee silently collapses. Pinning the
-                // level here makes the lock + recheck semantics
-                // independent of operator configuration.
                 return await this.repo.manager.transaction(
                     "READ COMMITTED",
                     async em => {
@@ -273,17 +263,19 @@ export default class Mempool {
                             [`nonce:${senderFrom}`],
                         )
 
-                        // PR #887 Greptile P2: re-check the hash
-                        // INSIDE the lock so a second concurrent
-                        // submission of the identical tx (same
-                        // hash) gets a clear "already in mempool"
-                        // error instead of falling through to the
-                        // nonce-mismatch message. The outer
-                        // `checkTransactionByHash` runs before the
-                        // lock and lets both racers past, so the
-                        // in-lock check is the only place where
-                        // duplicate-hash concurrency is
-                        // distinguishable from nonce reuse.
+                        // Check transaction hash in transaction table
+                        const tx = await Chain.getTransactionFromHash(
+                            transaction.hash,
+                        )
+                        if (tx) {
+                            return {
+                                confirmationBlock: null,
+                                error:
+                                    "Transaction already executed in block number: " +
+                                    tx.blockNumber,
+                            }
+                        }
+
                         const mempoolRepo = em.getRepository(MempoolTx)
                         const hashExists = await mempoolRepo.exists({
                             where: { hash: transaction.hash },
@@ -295,62 +287,26 @@ export default class Mempool {
                             }
                         }
 
-                        // Re-check inside the lock. The account row
-                        // may have advanced (a concurrent submission
-                        // committed); the mempool count likely
-                        // changed.
                         const gcrRepo = em.getRepository(GCRMain)
                         const account = await gcrRepo.findOne({
                             where: { pubkey: senderFrom },
                         })
-                        if (!account) {
-                            return {
-                                confirmationBlock: null,
-                                error: "Nonce TOCTOU recheck: sender account missing",
-                            }
-                        }
 
-                        // PR #887 Greptile P1 (iter 2): live re-query
-                        // of the block tip inside the lock.
-                        // `blockHeight` outside the lock is the
-                        // `getSharedState.lastBlockNumber` snapshot
-                        // captured before any await; a block produced
-                        // between `confirmTransaction` and
-                        // `addTransaction` would diverge from the
-                        // cutoff `assignNonce` used (which goes
-                        // through `Chain.getLastBlockNumber()` —
-                        // `countPendingByAddress`). Mirror that path
-                        // so both windows align on the same
-                        // block tip and a still-valid tx is never
-                        // rejected for a stale-cutoff mismatch.
-                        const liveBlockHeight =
-                            await Chain.getLastBlockNumber()
-                        const cutoff =
-                            liveBlockHeight -
-                            getSharedState.referenceBlockRoom
-                        const pendingCount = await mempoolRepo
-                            .createQueryBuilder("tx")
-                            .where(
-                                "LOWER(tx.content->>'from') = LOWER(:address)",
-                                { address: senderFrom },
-                            )
-                            .andWhere("tx.reference_block >= :cutoff", {
-                                cutoff,
-                            })
-                            .getCount()
-
-                        const expected = account.nonce + 1 + pendingCount
-                        if (txNonce !== expected) {
+                        const accountNonce = account?.nonce ?? 0
+                        if (txNonce <= accountNonce) {
                             log.error(
-                                `[Mempool.addTransaction] Nonce TOCTOU recheck mismatch for ${senderFrom}: ` +
-                                    `tx.content.nonce=${txNonce}, expected=${expected} ` +
-                                    `(account.nonce=${account.nonce}, pendingMempoolCount=${pendingCount})`,
+                                `[Mempool.addTransaction] Invalid nonce for ${senderFrom}: ` +
+                                    `tx.content.nonce=${txNonce}, expected >=${accountNonce + 1} `,
                             )
+
                             return {
                                 confirmationBlock: null,
                                 error:
-                                    "Nonce TOCTOU recheck failed: " +
-                                    `tx.content.nonce=${txNonce}, expected=${expected}`,
+                                    "Invalid nonce for transaction: " +
+                                    transaction.hash +
+                                    " (expected >= " +
+                                    (accountNonce + 1) +
+                                    ")",
                             }
                         }
 

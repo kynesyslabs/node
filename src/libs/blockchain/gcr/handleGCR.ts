@@ -126,7 +126,7 @@ export function isGCRMainEdit(
 /**
  * Helper to normalize pubkey from different formats
  */
-function normalizePubkey(account: string | Uint8Array): string {
+export function normalizePubkey(account: string | Uint8Array): string {
     return typeof account === "string" ? account : forgeToHex(account)
 }
 

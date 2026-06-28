@@ -330,12 +330,6 @@ export async function syncBlock(block: Block, peer: Peer) {
         return true
     }
 
-    // AUDIT C2 — verify a synced block's hash + signature quorum before insert.
-    // Without this, an unauthenticated peer could push a forged block and
-    // poison the chain. The eligible signer set is resolved height-stably
-    // (validators valid as of block.number-1), so this is correct at the tip
-    // AND during deep/batch catch-up sync (audit C2-deep). Fork-gated on
-    // nonceEnforcement (active @0) so pre-fork re-sync is byte-identical.
     if (isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)) {
         const verdict = await verifyBlock(block as never)
         if (!verdict.valid) {
