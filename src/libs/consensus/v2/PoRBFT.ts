@@ -28,6 +28,7 @@ import { MempoolTx } from "@/model/entities/Mempool"
 import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
+import { orderDeterministically } from "./routines/deterministicOrder"
 
 export interface FailedTranscation {
     txhash: string
