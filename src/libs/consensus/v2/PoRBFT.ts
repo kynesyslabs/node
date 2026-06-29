@@ -581,6 +581,7 @@ async function mergeAndOrderMempools(
     const outboundPool = preMempool.filter(tx => !preExisting.has(tx.hash))
 
     log.debug("[mergeAndOrderMempools] Sending mempool: " + outboundPool.length)
+    log.debug("[mergeAndOrderMempools] Sending mempool: " + JSON.stringify(outboundPool.map(tx => tx.hash), null, 2))
 
     // Merge with peers
     await mergeMempools(outboundPool, shard)
