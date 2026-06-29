@@ -408,13 +408,6 @@ export class DTRManager {
                 }
             }
 
-            // Note: staking/governance type dispatcher runs in
-            // confirmTransaction() before validityData is signed, so by
-            // the time we reach this point on the relay receiver, the tx
-            // already carries any synthesized gcr_edit and signature
-            // verification above attests to it. No additional dispatcher
-            // call is needed here.
-
             // Add validated transaction to mempool
             const { confirmationBlock, error } = await Mempool.addTransaction(
                 {
@@ -423,6 +416,14 @@ export class DTRManager {
                 },
                 blockNumber,
             )
+
+            log.debug(
+                "[receiveRelayedTransaction] Added relayed transaction to mempool: " +
+                    tx.hash,
+            )
+            log.debug("Block Number: " + blockNumber)
+            log.debug("Confirmation Block: " + confirmationBlock)
+            log.debug("Tx reference block: " + validityData.data.reference_block)
 
             if (error) {
                 log.error(

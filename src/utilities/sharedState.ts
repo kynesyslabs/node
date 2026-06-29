@@ -495,7 +495,7 @@ export default class SharedState {
         const consensusInfo: Record<string, any> = {}
         const secman = SecretaryManager.getInstance()
 
-        if (secman && secman.shard.members.length > 0) {
+        if (secman && secman.shard && (secman.shard.members || []).length > 0) {
             const cvsa = await getCommonValidatorSeed()
             consensusInfo.blockRef = secman.shard.blockRef
             consensusInfo.cvsa = cvsa.commonValidatorSeed
