@@ -1059,7 +1059,7 @@ export default class GCR {
             }
         }
 
-        const { confirmationBlock, error } = await Mempool.addTransaction({
+        const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
             ...tx,
             reference_block: await Chain.getLastBlockNumber(),
         })

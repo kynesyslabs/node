@@ -379,7 +379,7 @@ export async function handleExecuteTransaction(
         }
 
         try {
-            const { confirmationBlock, error } = await Mempool.addTransaction({
+            const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
                 ...queriedTx,
                 reference_block: validatedData.data.reference_block,
             })

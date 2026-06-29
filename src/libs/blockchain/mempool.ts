@@ -164,17 +164,16 @@ export default class Mempool {
      * @param blockRef - The block number to add the transaction to
      * @returns The confirmation block and error if any
      */
-    public static async addTransaction(
+    public static async addTransactionWithLock(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
     ) {
         return await this.lock.runExclusive(
-            async () =>
-                await this.addTransactionWithLock(transaction, blockRef),
+            async () => await this.addTransaction(transaction, blockRef),
         )
     }
 
-    public static async addTransactionWithLock(
+    public static async addTransaction(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
     ) {
