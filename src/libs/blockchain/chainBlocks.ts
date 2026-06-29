@@ -27,6 +27,7 @@ import {
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -209,6 +210,7 @@ export async function insertBlock(
     newBlock.content = block.content
     newBlock.status = "confirmed"
     newBlock.content.ordered_transactions = orderedTransactionsHashes
+    newBlock.attrs = block.attrs
 
     let existingBlock = null
 
@@ -259,6 +261,15 @@ export async function insertBlock(
             log.error(
                 "Block transactions mismatch with block ordered transactions",
             )
+            process.exit(1)
+        }
+
+        const status = new Set([TRANSACTION_STATUS.CONFIRMED, TRANSACTION_STATUS.FAILED])
+
+        // confirm all txs have a status set
+        const txsWithoutStatus = transactionEntities.filter(tx => !status.has(tx.status))
+        if (txsWithoutStatus.length > 0) {
+            log.error("Transactions without status: " + JSON.stringify(txsWithoutStatus, null, 2))
             process.exit(1)
         }
 

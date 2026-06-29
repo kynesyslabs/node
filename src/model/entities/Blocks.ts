@@ -29,4 +29,7 @@ export class Blocks {
 
     @Column("json", { name: "validation_data" })
     validation_data: NonNullable<{ signatures: { [signer: string]: string } }>
+
+    @Column("jsonb", { name: "attrs", nullable: true })
+    attrs: Record<string, any> | null
 }

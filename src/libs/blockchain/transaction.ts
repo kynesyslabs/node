@@ -50,6 +50,7 @@ export default class Transaction implements ITransaction {
     hash: string | null = null
     status: string | TransactionStatus | null = null
     blockNumber: number | null = null
+    attrs: Record<string, any> | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data
@@ -489,6 +490,7 @@ export default class Transaction implements ITransaction {
             // runs (P6). The DB column is nullable.
             rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
+            attrs: tx.attrs,
         }
 
         return rawTx
@@ -550,6 +552,7 @@ export default class Transaction implements ITransaction {
             gcr_edits: JSON.parse(rawTx.content).gcr_edits,
         }
         tx.ed25519_signature = rawTx.ed25519_signature
+        tx.attrs = typeof rawTx.attrs === "string" ? JSON.parse(rawTx.attrs) : rawTx.attrs
 
         return tx
     }

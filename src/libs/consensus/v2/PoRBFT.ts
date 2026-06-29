@@ -4,7 +4,7 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer, PeerManager } from "src/libs/peer"
+import { Peer } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
@@ -17,7 +17,7 @@ import {
     ForgingEndedError,
     NotInShardError,
 } from "@/errors"
-import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR, { normalizePubkey } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
@@ -27,14 +27,17 @@ import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import Hashing from "@/libs/crypto/hashing"
 
 export interface FailedTranscation {
     txhash: string
     code: ErrorCode
     message: string
+    attrs?: Record<string, any> | null
 }
 
 type TxHash = string
+const whitelistedCodes = new Set<ErrorCode>([ErrorCode.TX_NONCE_INVALID_HIGH])
 type MempoolTransaction = Transaction & { reference_block: number }
 
 /* INFO
@@ -63,6 +66,8 @@ type MempoolTransaction = Transaction & { reference_block: number }
  a message (greenlight) to continue the consensus routine.
 */
 
+export const txMap: Map<TxHash, MempoolTransaction> = new Map()
+
 /**
  * The main consensus routine calling all the subroutines.
  */
@@ -83,7 +88,7 @@ export async function consensusRoutine(): Promise<void> {
     const failedTxs: FailedTranscation[] = []
 
     const blockTxs: MempoolTransaction[] = []
-    const txMap: Map<TxHash, MempoolTransaction> = new Map()
+    const blockAttrs: Record<string, any> = {}
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -154,10 +159,8 @@ export async function consensusRoutine(): Promise<void> {
         )
 
         // filter txs by reference block
-        const res = filterMempoolByRefBlock(initialMempool)
-        failedTxs.push(...res.failedTxs)
-
-        const resNonce = await filterMempoolByNonce(res.validTxs)
+        // const res = filterMempoolByRefBlock(initialMempool)
+        const resNonce = await filterMempoolByNonce(initialMempool)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block
@@ -217,35 +220,71 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
-            // INFO: CONSENSUS ACTION 4: Apply the GCR operations to the state before forging the block
-            /**
-             * Here we apply the GCR operations to the state before forging the block
-             * so that the GCR hash is included in the block.
-             * A list of successful and failed GCR operations is returned.
-             * NOTE A mandatory validator status is updated to reflect that the GCR operations have been applied
-             * */
-            // ? The following line could be outdated once we use the GCREdit stuff
-            // await applyGCRForNewBlock(mempool)
+            // Filter out failed txs (from the nonce filter)
+            const toApplyTxs = blockTxs.filter(
+                tx => tx.status !== TRANSACTION_STATUS.FAILED,
+            )
 
-            // Applying the GCREdits and see if everything is consistent
-            const applyRes = await applyGCREditsFromMergedMempool(blockTxs)
+            // Filter out expired txs
+            const refRes = filterMempoolByRefBlock(toApplyTxs)
+            if (refRes.failedTxs.length > 0) {
+                for (const failed of refRes.failedTxs) {
+                    const tx = txMap.get(failed.txhash)
+                    if (tx) {
+                        tx.status = TRANSACTION_STATUS.FAILED
+                        tx.attrs = {
+                            code: failed.code,
+                            message: failed.message,
+                            reference_block: tx.reference_block,
+                            ...(failed.attrs ?? {}),
+                        }
+                    }
+                }
+            }
 
-            BroadcastManager.broadcastNewBlock(block)
-            DTRManager.releaseDTRWaiter(block)
+            // confirm all transaction past this point are not status failed
+            const uncleanTxs = refRes.validTxs.filter(
+                tx => tx.status === TRANSACTION_STATUS.FAILED,
+            )
+            if (uncleanTxs.length > 0) {
+                log.error("Block trying to apply failed transactions")
+                log.error("Unclean txs: " + JSON.stringify(uncleanTxs, null, 2))
+                process.exit(1)
+            }
+
+            const applyRes = await applyGCREditsFromMergedMempool(
+                refRes.validTxs,
+            )
+
+            blockAttrs["gcrAppliedTxCount"] = applyRes.successfulTxs.length
+            blockAttrs["gcrAppliedTxsHash"] = Hashing.sha256(
+                JSON.stringify(applyRes.successfulTxs),
+            )
+            blockAttrs["gcrAppliedTxs"] = applyRes.successfulTxs
+            block.attrs = blockAttrs
 
             successfulTxs.push(...applyRes.successfulTxs)
             failedTxs.push(...applyRes.failedTxs)
 
-            if (failedTxs.length > 0) {
+            if (applyRes.failedTxs.length > 0) {
                 log.warn(
-                    `[consensusRoutine] Block ${blockRef} contains ${failedTxs.length} failed txs`,
+                    `[consensusRoutine] Block ${blockRef} contains ${applyRes.failedTxs.length} failed txs`,
                 )
-                log.error("Failed txs: " + JSON.stringify(failedTxs, null, 2))
+                log.error(
+                    "Failed txs: " +
+                        JSON.stringify(applyRes.failedTxs, null, 2),
+                )
 
-                for (const failed of failedTxs) {
+                for (const failed of applyRes.failedTxs) {
                     const tx = txMap.get(failed.txhash)
                     if (tx) {
                         tx.status = TRANSACTION_STATUS.FAILED
+                        tx.attrs = {
+                            code: failed.code,
+                            message: failed.message,
+                            reference_block: tx.reference_block,
+                            ...(failed.attrs ?? {}),
+                        }
                     }
                 }
             }
@@ -258,9 +297,31 @@ export async function consensusRoutine(): Promise<void> {
                     const tx = txMap.get(successful)
                     if (tx) {
                         tx.status = TRANSACTION_STATUS.CONFIRMED
+                        tx.attrs = {
+                            reference_block: tx.reference_block,
+                        }
                     }
                 }
             }
+
+            // confirm all transactions in the block are either confirmed or failed
+            const states = new Set([
+                TRANSACTION_STATUS.CONFIRMED,
+                TRANSACTION_STATUS.FAILED,
+            ])
+            const untouchedTxs = blockTxs.filter(tx => !states.has(tx.status))
+            if (untouchedTxs.length > 0) {
+                log.error(
+                    "Block contains transactions that are not confirmed or failed",
+                )
+                log.error(
+                    "Untouched txs: " + JSON.stringify(untouchedTxs, null, 2),
+                )
+                process.exit(1)
+            }
+
+            BroadcastManager.broadcastNewBlock(block)
+            DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
@@ -294,15 +355,28 @@ export async function consensusRoutine(): Promise<void> {
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
             )
-            await Mempool.removeTransactionsByHashes(
-                blockTxs.map(tx => tx.hash),
-            )
+
+            // Keep whitelisted failed txs in mempool for the next consensus round
+            const failedTxsToRemove = failedTxs
+                .filter(tx => !whitelistedCodes.has(tx.code))
+                .map(tx => tx.txhash)
+
+            const txsToRemove = new Set([
+                ...failedTxsToRemove,
+                ...blockTxs.map(tx => tx.hash),
+            ])
+
+            // Remove the rest!
+            await Mempool.removeTransactionsByHashes(Array.from(txsToRemove))
+
             const finalizeEnd = Date.now()
             log.only(
                 `[consensusRoutine] Finalize took ${finalizeEnd - finalizeStart}ms`,
             )
             log.only("[consensusRoutine] Block finalized")
         } else {
+            log.debug("Block is not valid with " + pro + " votes")
+            process.exit(1)
             exitReason = "voteError"
             log.error(
                 `[consensusRoutine] [result] Block is not valid with ${pro} votes`,
@@ -551,7 +625,7 @@ async function mergeAndOrderMempools(
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
-    return finalMempool
+    return orderDeterministically<MempoolTransaction>(finalMempool)
 }
 
 /**
@@ -575,8 +649,8 @@ function filterMempoolByRefBlock(mempool: MempoolTransaction[]) {
         ) {
             failedTxs.push({
                 txhash: tx.hash,
-                code: ErrorCode.TX_REFERENCE_BLOCK_OUT_OF_RANGE,
-                message: ` Reference block ${tx.reference_block} is out of range. Expected: ${tx.reference_block} - ${getSharedState.lastBlockNumber - getSharedState.referenceBlockRoom}`,
+                code: ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE,
+                message: `Reference block expired. Expected: ${getSharedState.lastBlockNumber - getSharedState.referenceBlockRoom + 1} - ${getSharedState.lastBlockNumber} got ${tx.reference_block}`,
             })
         } else {
             validTxs.push(tx)
@@ -637,14 +711,17 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
                 nonces[acct]++
                 continue txLoop
             } else if (tx.content.nonce < expected) {
-                failedTxs.push({
-                    txhash: tx.hash,
+                // Update the transaction status as failed, but include in block
+                tx.status = TRANSACTION_STATUS.FAILED
+                tx.attrs = {
                     code: ErrorCode.TX_NONCE_INVALID_LOW,
                     message: `Invalid nonce edit. Expected ${expected}, got ${tx.content.nonce}`,
-                })
+                    reference_block: tx.reference_block,
+                }
+                validTxs.push(tx)
 
                 log.debug(
-                    `[TX_NONCE_INVALID_LOW] dropping ${tx.hash}: invalid nonce edit`,
+                    `[TX_NONCE_INVALID_LOW] including tx as failed: ${tx.hash}: invalid nonce edit`,
                 )
                 log.debug(
                     "[TX_NONCE_INVALID_LOW] Invalid nonce edit for account: " +
@@ -704,7 +781,7 @@ async function rollbackGCREditsFromTxs(txs: Transaction[]) {
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
 ): Promise<{ successfulTxs: string[]; failedTxs: FailedTranscation[] }> {
-    const failedTxs: FailedTranscation[] = []
+    let failedTxs: FailedTranscation[] = []
 
     if (mempool.length === 0) {
         return { successfulTxs: [], failedTxs: [] }
@@ -719,8 +796,8 @@ async function applyGCREditsFromMergedMempool(
         if (existingTxHashes.has(tx.hash)) {
             failedTxs.push({
                 txhash: tx.hash,
-                code: ErrorCode.TX_ALREADY_EXECUTED,
-                message: `Transaction ${tx.hash} already executed`,
+                code: ErrorCode.TX_EXISTS,
+                message: "Transaction already exists",
             })
             return false
         }
@@ -733,15 +810,25 @@ async function applyGCREditsFromMergedMempool(
     }
 
     const res = await HandleGCR.applyTransactions(pendingTxs, false)
-    failedTxs.concat(
+    failedTxs = failedTxs.concat(
         res.failedTxs.map(txhash => ({
             txhash: txhash,
             code: ErrorCode.TX_EXECUTE_FAILED,
-            message: `Transaction ${txhash} execution failed`,
+            message: "Transaction execution failed",
         })),
     )
 
-    return { successfulTxs: res.successfulTxs, failedTxs: failedTxs }
+    // Concat the successful and skipped txs
+    const successfulTxsSet = new Set(res.successfulTxs.concat(res.skippedTxs))
+
+    const successfulTxs = []
+    for (const tx of pendingTxs) {
+        if (successfulTxsSet.has(tx.hash)) {
+            successfulTxs.push(tx.hash)
+        }
+    }
+
+    return { successfulTxs, failedTxs }
 }
 
 // /**
@@ -943,6 +1030,7 @@ async function updateValidatorPhase(
  * Cleanup the consensus state.
  */
 function cleanupConsensusState(): void {
+    txMap.clear()
     getSharedState.candidateBlock = null
     getSharedState.lastConsensusTime = getSharedState.currentUTCTime // REVIEW Using the current UTC time as the last consensus time
     getSharedState.inConsensusLoop = false
@@ -950,4 +1038,43 @@ function cleanupConsensusState(): void {
 
     // INFO: Somehow this is not reset when starting a consensus??
     getSharedState.startingConsensus = false
+}
+
+/**
+ * Sorts a list of transactions deterministically
+ *
+ * @param txs - The transactions to sort
+ * @returns The sorted transactions
+ */
+export function orderDeterministically<T extends Transaction>(txs: T[]): T[] {
+    return [...txs].sort(compareTxDeterministic)
+}
+
+/**
+ * Compare two txs by (sender ASC, nonce ASC, hash ASC). Plain string/number
+ * comparison only — NO localeCompare (locale-sensitive, would diverge across
+ * nodes with different locales).
+ */
+export function compareTxDeterministic(
+    txa: Transaction,
+    txb: Transaction,
+): number {
+    const sa = normalizePubkey(txa.content.from_ed25519_address)
+    const sb = normalizePubkey(txb.content.from_ed25519_address)
+
+    if (sa < sb) return -1
+    if (sa > sb) return 1
+
+    const na = txa.content.nonce
+    const nb = txb.content.nonce
+
+    if (na !== nb) return na - nb
+
+    const ha = txa.hash ?? ""
+    const hb = txb.hash ?? ""
+
+    if (ha < hb) return -1
+    if (ha > hb) return 1
+
+    return 0
 }

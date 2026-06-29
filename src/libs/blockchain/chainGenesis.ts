@@ -55,6 +55,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     genesisTx.hash = Hashing.sha256(
         serializeTransactionContent(genesisTx.content, GENESIS_BLOCK_HEIGHT),
     )
+    genesisTx.attrs = {}
 
     genesisBlock.content.timestamp = genesisTx.content.timestamp
     genesisBlock.content.ordered_transactions.push(genesisTx.hash)

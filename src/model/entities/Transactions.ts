@@ -118,4 +118,7 @@ export class Transactions {
     // `from_ed25519_address`).
     @Column("varchar", { name: "rpcAddress", nullable: true })
     rpcAddress: string | null
+
+    @Column("jsonb", { name: "attrs", nullable: true })
+    attrs: Record<string, any> | null
 }

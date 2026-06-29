@@ -693,7 +693,7 @@ export default class HandleGCR {
     static async applyTransactions(txs: Transaction[], isRollback: boolean) {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
-
+        const skippedTxs: string[] = []
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         // filter out txs that don't mutate entities
@@ -706,6 +706,8 @@ export default class HandleGCR {
 
         for (const tx of txs) {
             if (toFilter.has(tx.content.type)) {
+                skippedTxs.push(tx.hash)
+
                 // add the tx to the assignedTxsUpdates map
                 const sender = normalizePubkey(
                     tx.content.from_ed25519_address || tx.content.from,
@@ -855,7 +857,7 @@ export default class HandleGCR {
         )
         log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
-        return { successfulTxs, failedTxs }
+        return { successfulTxs, failedTxs, skippedTxs }
     }
 
     /**

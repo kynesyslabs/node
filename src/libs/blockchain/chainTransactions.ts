@@ -13,6 +13,8 @@ import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
 import Mempool from "./mempool"
 import { getSharedState } from "@/utilities/sharedState"
 import { getBlockByHash } from "./chainBlocks"
+import { txMap as consensusTxMap } from "../consensus/v2/PoRBFT"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -147,15 +149,32 @@ export async function getBlockTransactions(
         txHashes = new Set(
             getSharedState.candidateBlock.content.ordered_transactions,
         )
-        const blockNumber = getSharedState.candidateBlock.number
+        const mempoolTxs = []
+        const status = new Set([
+            TRANSACTION_STATUS.CONFIRMED,
+            TRANSACTION_STATUS.FAILED,
+        ])
 
-        // fetch transactions from mempool
-        const mempoolTxs = await Mempool.getTransactionsByHashes(
-            getSharedState.candidateBlock.content.ordered_transactions,
-        )
+        for (const hash of txHashes) {
+            const tx = consensusTxMap.get(hash)
+
+            if (tx) {
+                mempoolTxs.push(tx)
+
+                if (!status.has(tx.status)) {
+                    log.error(
+                        "Transaction status mismatch: " +
+                            hash +
+                            " " +
+                            tx.status,
+                    )
+                    process.exit(1)
+                }
+            }
+        }
 
         for (const tx of mempoolTxs) {
-            txs.push({ ...tx, blockNumber, hash: tx.hash })
+            txs.push(tx)
             txHashes.delete(tx.hash)
         }
     }

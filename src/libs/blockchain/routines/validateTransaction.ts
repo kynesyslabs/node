@@ -73,6 +73,19 @@ export async function confirmTransaction(
         return validityData
     }
 
+    // Check if the transaction status is set
+    if (tx.status) {
+        validityData.data.message =
+            "[Tx Validation] [STATUS ERROR] Transaction status should be nullish. Got: <" +
+            typeof(tx.status) +
+            ">" +
+            tx.status +
+            "\n"
+        validityData.data.valid = false
+        validityData = await signValidityData(validityData)
+        return validityData
+    }
+
     // Check nonce > current nonce
     const currentNonce = await GCR.getAccountNonce(
         normalizePubkey(tx.content.from_ed25519_address),
