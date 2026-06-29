@@ -153,12 +153,9 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        const initialMempool = await Mempool.lock.runExclusive(
-            async () =>
-                await mergeAndOrderMempools(
-                    manager.shard.members,
-                    manager.shard.blockRef,
-                ),
+        const initialMempool = await mergeAndOrderMempools(
+            manager.shard.members,
+            manager.shard.blockRef,
         )
 
         // filter txs by reference block
@@ -573,7 +570,9 @@ async function mergeAndOrderMempools(
     blockRef: number,
 ): Promise<MempoolTransaction[]> {
     // Fetch mempool, check chain for executed txs.
-    const preMempool = await Mempool.getMempool(blockRef)
+    const preMempool = await Mempool.lock.runExclusive(
+        async () => await Mempool.getMempool(blockRef),
+    )
 
     log.only(`[mergeAndOrderMempools] Pre mempool: ${preMempool.length} txs`)
     const preHashes = preMempool.map(tx => tx.hash)
