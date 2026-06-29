@@ -423,7 +423,9 @@ export class DTRManager {
             )
             log.debug("Block Number: " + blockNumber)
             log.debug("Confirmation Block: " + confirmationBlock)
-            log.debug("Tx reference block: " + validityData.data.reference_block)
+            log.debug(
+                "Tx reference block: " + validityData.data.reference_block,
+            )
 
             if (error) {
                 log.error(
@@ -498,11 +500,14 @@ export class DTRManager {
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
-            const res = await this.receiveRelayedTransactions({
-                payload: txsToRelay,
-                blockRef: getSharedState.lastBlockHash,
-                blockNumber: getSharedState.lastBlockNumber + 1,
-            })
+            const res = await Mempool.lock.runExclusive(
+                async () =>
+                    await this.receiveRelayedTransactions({
+                        payload: txsToRelay,
+                        blockRef: getSharedState.lastBlockHash,
+                        blockNumber: getSharedState.lastBlockNumber + 1,
+                    }),
+            )
 
             for (const tx of txsToRelay) {
                 DTRManager.validityDataCache.delete(tx.data.transaction.hash)

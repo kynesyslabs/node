@@ -7,19 +7,20 @@ import {
     QueryFailedError,
     Repository,
 } from "typeorm"
+import { Mutex } from "async-mutex"
 import Datasource from "@/model/datasource"
 
+import Chain from "./chain"
 import log from "src/utilities/logger"
+import { isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
-import SecretaryManager from "../consensus/v2/types/secretaryManager"
-import Chain from "./chain"
 import { getSharedState } from "@/utilities/sharedState"
-import TxValidatorPool from "./validation/txValidatorPool"
-import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
-import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
-import { isForkActive } from "@/forks"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
+import TxValidatorPool from "./validation/txValidatorPool"
+import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
+import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
+import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -35,6 +36,8 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 const SYSTEM_RELAY_TX_TYPES = new Set<string>(["l2psBatch"])
 
 export default class Mempool {
+    public static lock = new Mutex()
+
     public static repo: Repository<MempoolTx> = null
     public static async init() {
         const db = await Datasource.getInstance()

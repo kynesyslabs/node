@@ -151,11 +151,14 @@ export async function consensusRoutine(): Promise<void> {
         // NOTE: Instead of averaging the time, we'll use the secretary timestamp
         // await synchronizeAndAverageTime(shard)
 
-        // INFO: CONSENSUS ACTION 2: Merge and order the mempools
+        // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        const initialMempool = await mergeAndOrderMempools(
-            manager.shard.members,
-            manager.shard.blockRef,
+        const initialMempool = await Mempool.lock.runExclusive(
+            async () =>
+                await mergeAndOrderMempools(
+                    manager.shard.members,
+                    manager.shard.blockRef,
+                ),
         )
 
         // filter txs by reference block
@@ -581,7 +584,14 @@ async function mergeAndOrderMempools(
     const outboundPool = preMempool.filter(tx => !preExisting.has(tx.hash))
 
     log.debug("[mergeAndOrderMempools] Sending mempool: " + outboundPool.length)
-    log.debug("[mergeAndOrderMempools] Sending mempool: " + JSON.stringify(outboundPool.map(tx => tx.hash), null, 2))
+    log.debug(
+        "[mergeAndOrderMempools] Sending mempool: " +
+            JSON.stringify(
+                outboundPool.map(tx => tx.hash),
+                null,
+                2,
+            ),
+    )
 
     // Merge with peers
     await mergeMempools(outboundPool, shard)
