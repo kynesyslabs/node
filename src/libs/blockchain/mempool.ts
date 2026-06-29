@@ -157,7 +157,24 @@ export default class Mempool {
         return await this.repo.findOne({ where: { hash: ILike(hash) } })
     }
 
+    /**
+     * Add a transaction to the mempool with exclusive lock
+     *
+     * @param transaction - The transaction to add to the mempool
+     * @param blockRef - The block number to add the transaction to
+     * @returns The confirmation block and error if any
+     */
     public static async addTransaction(
+        transaction: Transaction & { reference_block: number },
+        blockRef?: number,
+    ) {
+        return await this.lock.runExclusive(
+            async () =>
+                await this.addTransactionWithLock(transaction, blockRef),
+        )
+    }
+
+    public static async addTransactionWithLock(
         transaction: Transaction & { reference_block: number },
         blockRef?: number,
     ) {
