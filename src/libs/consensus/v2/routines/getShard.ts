@@ -60,7 +60,9 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     if (cachedBlock === lastBlock && cachedValidators !== null) {
         activeValidators = cachedValidators
     } else {
-        activeValidators = await GCR.getGCRValidatorsAtBlock(lastBlock) as Validators[]
+        activeValidators = (await GCR.getGCRValidatorsAtBlock(
+            lastBlock,
+        )) as Validators[]
         cachedBlock = lastBlock
         cachedValidators = activeValidators
     }
@@ -106,7 +108,14 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     availablePeers.sort((a, b) =>
         a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
     )
-    log.debug("Available peers: " + JSON.stringify(availablePeers.map(p => p.connection.string), null, 2))
+    log.debug(
+        "Available peers: " +
+            JSON.stringify(
+                availablePeers.map(p => p.connection.string),
+                null,
+                2,
+            ),
+    )
 
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
@@ -118,7 +127,14 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         availablePeers.splice(index, 1)
     }
 
-    log.debug("Shard: " + JSON.stringify(shard.map(p => p.connection.string), null, 2))
+    log.debug(
+        "Shard: " +
+            JSON.stringify(
+                shard.map(p => p.connection.string),
+                null,
+                2,
+            ),
+    )
 
     log.info(
         `[getShard] active validators in DB: ${activeValidators.length}; online+validator peers: ${validatedPeers.length}; shard size: ${shard.length}`,

@@ -67,7 +67,9 @@ export default class PeerManager {
         try {
             peerList = JSON.parse(rawPeerList)
         } catch (error) {
-            log.warning("[PEER] Corrupt peer list file, treating as empty: " + error)
+            log.warning(
+                "[PEER] Corrupt peer list file, treating as empty: " + error,
+            )
             peerList = {}
         }
 
@@ -217,8 +219,14 @@ export default class PeerManager {
         try {
             parsedHostname = new URL(peer.connection.string).hostname
         } catch (_e) {
-            log.warning("[PEERMANAGER] Invalid connection string URL, rejecting peer: " + peer.connection.string)
-            return [false, "Invalid connection string: " + peer.connection.string]
+            log.warning(
+                "[PEERMANAGER] Invalid connection string URL, rejecting peer: " +
+                    peer.connection.string,
+            )
+            return [
+                false,
+                "Invalid connection string: " + peer.connection.string,
+            ]
         }
 
         if (
@@ -349,7 +357,7 @@ export default class PeerManager {
     }
 
     // REVIEW This method should be tested and finalized with the new peer structure
-    static async sayHelloToPeer(peer: Peer, recursive = false) {
+    static async sayHelloToPeer(peer: Peer, waitForDiscovery = false) {
         // TODO test and finalize this method
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
         const signedConnectionString = await TxValidatorPool.getInstance().sign(
@@ -387,7 +395,8 @@ export default class PeerManager {
         )
 
         const newPeersUnfiltered = PeerManager.helloPeerCallback(response, peer)
-        if (!recursive) {
+
+        if (newPeersUnfiltered.length === 0) {
             return
         }
 
@@ -397,12 +406,13 @@ export default class PeerManager {
             ({ publicKey }) => !peerManager.getPeer(publicKey),
         )
 
-        // say hello to the new peers
-        await Promise.all(
-            newPeers.map(peer =>
-                PeerManager.sayHelloToPeer(new Peer(peer.url, peer.publicKey)),
-            ),
+        const promise = newPeers.map(peer =>
+            PeerManager.sayHelloToPeer(new Peer(peer.url, peer.publicKey)),
         )
+
+        if (waitForDiscovery) {
+            await Promise.all(promise)
+        }
     }
 
     // Callback for the hello peer
