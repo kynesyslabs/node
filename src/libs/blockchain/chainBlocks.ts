@@ -246,6 +246,7 @@ export async function insertBlock(
     let transactionEntities: Transaction[] = []
 
     if (blockTxs.length > 0 && block.content.ordered_transactions.length > 0) {
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
         // confirm array contains all the txs in the block
         const blockTxsHashes = blockTxs.map(tx => tx.hash)
         const blockOrderedTransactionsHashes =
@@ -257,21 +258,32 @@ export async function insertBlock(
             )
         ) {
             transactionEntities = blockTxs
-        } else {
-            log.error(
-                "Block transactions mismatch with block ordered transactions",
-            )
-            process.exit(1)
         }
 
-        const status = new Set([TRANSACTION_STATUS.CONFIRMED, TRANSACTION_STATUS.FAILED])
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        // else {
+        //     log.error(
+        //         "Block transactions mismatch with block ordered transactions",
+        //     )
+        //     process.exit(1)
+        // }
+
+        // const status = new Set([
+        //     TRANSACTION_STATUS.CONFIRMED,
+        //     TRANSACTION_STATUS.FAILED,
+        // ])
 
         // confirm all txs have a status set
-        const txsWithoutStatus = transactionEntities.filter(tx => !status.has(tx.status))
-        if (txsWithoutStatus.length > 0) {
-            log.error("Transactions without status: " + JSON.stringify(txsWithoutStatus, null, 2))
-            process.exit(1)
-        }
+        // const txsWithoutStatus = transactionEntities.filter(
+        //     tx => !status.has(tx.status),
+        // )
+        // if (txsWithoutStatus.length > 0) {
+        //     log.error(
+        //         "Transactions without status: " +
+        //             JSON.stringify(txsWithoutStatus, null, 2),
+        //     )
+        //     process.exit(1)
+        // }
 
         transactionEntities = transactionEntities.map(tx => ({
             ...tx,

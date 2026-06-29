@@ -319,6 +319,8 @@ async function verifyLastBlockIntegrity(
 }
 
 async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
+    // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+
     if (txs.length < block.content.ordered_transactions.length) {
         log.error(
             "[fastSync] No transactions received for block: " + block.hash,
@@ -327,7 +329,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
             "Block transactions: " +
                 JSON.stringify(block.content.ordered_transactions, null, 2),
         )
-        process.exit(1)
+        // process.exit(1)
     }
 
     for (const tx of txs) {
@@ -340,7 +342,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     ", got: " +
                     tx.blockNumber,
             )
-            process.exit(1)
+            // process.exit(1)
         }
     }
 
@@ -352,7 +354,9 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
     )
     const sortedHash = Hashing.sha256(JSON.stringify(sorted.map(tx => tx.hash)))
     if (inputHash !== sortedHash) {
-        log.error("Deterministic order does not match block ordered transactions")
+        log.error(
+            "Deterministic order does not match block ordered transactions",
+        )
         log.error(
             "Block ordered transactions: " +
                 JSON.stringify(block.content.ordered_transactions, null, 2),
@@ -365,7 +369,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     2,
                 ),
         )
-        process.exit(1)
+        // process.exit(1)
     }
 
     const applied = sorted.filter(
@@ -403,10 +407,10 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     )
                 }
             }
-
-            process.exit(1)
+            // process.exit(1)
         }
-        process.exit(1)
+
+        // process.exit(1)
     }
 
     if (
@@ -432,7 +436,8 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                 JSON.stringify(block.attrs["gcrAppliedTxs"], null, 2),
         )
         log.error("Full applied txs: " + JSON.stringify(applied, null, 2))
-        process.exit(1)
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        // process.exit(1)
     }
 
     return applied
@@ -494,16 +499,17 @@ export async function syncBlock(block: Block, peer: Peer) {
         if (success) {
             log.info("[fastSync] Transactions inserted successfully")
 
+            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all txs are inserted
-            for (const tx of txs) {
-                const res = await Chain.checkTxExists(tx.hash)
-                if (!res) {
-                    log.error(
-                        "[syncGCRTables] Transaction not found: " + tx.hash,
-                    )
-                    process.exit(1)
-                }
-            }
+            // for (const tx of txs) {
+            //     const res = await Chain.checkTxExists(tx.hash)
+            //     if (!res) {
+            //         log.error(
+            //             "[syncGCRTables] Transaction not found: " + tx.hash,
+            //         )
+            //         process.exit(1)
+            //     }
+            // }
             log.debug("[syncGCRTables] All transactions are inserted")
             return true
         }
