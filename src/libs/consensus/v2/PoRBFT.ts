@@ -580,6 +580,8 @@ async function mergeAndOrderMempools(
             : new Set<string>()
     const outboundPool = preMempool.filter(tx => !preExisting.has(tx.hash))
 
+    log.debug("[mergeAndOrderMempools] Sending mempool: " + outboundPool.length)
+
     // Merge with peers
     await mergeMempools(outboundPool, shard)
     await updateValidatorPhase(3, blockRef)
