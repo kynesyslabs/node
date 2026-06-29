@@ -21,6 +21,34 @@
   },
   "balances": [
     [
+      "0xcae7bd6d464b7a0a98a4bd56c77cfe8a5744482895c0f360004fb07cb92b95df",
+      "1000000000000000000"
+    ],
+    [
+      "0x6cadb8f60fd1422eebc720c5e21b03f06ee5a403b0d034d6065bb61360822d0c",
+      "1000000000000000000"
+    ],
+    [
+      "0x4ba5feb6acda082d5cd937aa53f8f041a3feb8bb2cf496740d1e4138dd9190dd",
+      "1000000000000000000"
+    ],
+    [
+      "0x12a3995c683af5a5293d1ddb4711f8c88437e876c2ea35a864c98fdb59ed1cde",
+      "1000000000000000000"
+    ],
+    [
+      "0x9ee7b9928d1f7d6c81ce96cbd9f637571c39e4ec76f0dd8c04ffa8119baf50e5",
+      "1000000000000000000"
+    ],
+    [
+      "0xe786ca8eb06e716ff53a6fdd36a0ff20e6f69d37fb72a95d454df01b39d980ef",
+      "1000000000000000000"
+    ],
+    [
+      "0x8a2738bc4a34ddcf89a476e91eb05813ab51425cbb3d5940d5572cce0da62b69",
+      "1000000000000000000"
+    ],
+    [
       "0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c",
       "1000000000000000000"
     ],
@@ -45,41 +73,17 @@
   "status": "confirmed",
   "validators": [
     {
-      "address": "0xf09ca2d3ce1dd6260048749a679e31779fc1f298481dd1dda322cc215f9a7d6c",
+      "address": "0xcae7bd6d464b7a0a98a4bd56c77cfe8a5744482895c0f360004fb07cb92b95df",
       "status": "2",
-      "connection_url": "http://node-1:63551",
+      "connection_url": "http://node-1:53551",
       "staked_amount": "1000000000000000000",
       "first_seen": 0,
       "valid_at": 0
     },
     {
-      "address": "0xada03cd462baf34482dbbc3da4c3b7b1cfbbfc43b511bbf7dd1fdb3aa071bc49",
+      "address": "0x6cadb8f60fd1422eebc720c5e21b03f06ee5a403b0d034d6065bb61360822d0c",
       "status": "2",
-      "connection_url": "http://node-2:63553",
-      "staked_amount": "1000000000000000000",
-      "first_seen": 0,
-      "valid_at": 0
-    },
-    {
-      "address": "0x28ad16d38781b36772f1902bd01622927d49c8937e51785ceb63776395332041",
-      "status": "2",
-      "connection_url": "http://node-3:63555",
-      "staked_amount": "1000000000000000000",
-      "first_seen": 0,
-      "valid_at": 0
-    },
-    {
-      "address": "0x61b56a6e92c7aa612cdea408f62c0adef3367fd9e196c81af438705cd1cdd2f8",
-      "status": "2",
-      "connection_url": "http://node-4:63557",
-      "staked_amount": "1000000000000000000",
-      "first_seen": 0,
-      "valid_at": 0
-    },
-    {
-      "address": "0x8832cd9bf2ffd90fc0dba087708016755f683120be3ad99ce1d1ec12d490b87a",
-      "status": "2",
-      "connection_url": "http://node-5:63559",
+      "connection_url": "http://node-2:53553",
       "staked_amount": "1000000000000000000",
       "first_seen": 0,
       "valid_at": 0

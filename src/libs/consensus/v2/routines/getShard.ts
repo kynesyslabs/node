@@ -103,9 +103,9 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const deterministicRandomness = Alea(seed)
     const availablePeers = [...validatedPeers]
 
-    // REVIEW: sort available peers by .identity (which is a hex string)
-    // before choosing the peers for a uniform sample across nodes
-    availablePeers.sort((a, b) => a.identity.localeCompare(b.identity))
+    availablePeers.sort((a, b) =>
+        a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
+    )
     log.debug("Available peers: " + JSON.stringify(availablePeers.map(p => p.connection.string), null, 2))
 
     // REVIEW: check if this is the right way to do it

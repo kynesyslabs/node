@@ -42,7 +42,7 @@ import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
 import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
-import { orderDeterministically } from "@/libs/consensus/v2/PoRBFT"
+import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
 
 /**

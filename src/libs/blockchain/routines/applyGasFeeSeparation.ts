@@ -45,7 +45,6 @@ KyneSys Labs: https://www.kynesys.xyz/
 
 import { GCREdit } from "@kynesyslabs/demosdk/types"
 import type { Transaction as ITransaction } from "@kynesyslabs/demosdk/types"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import {
     calculateFeeBreakdown,
     type FeeBreakdown,
@@ -53,8 +52,6 @@ import {
 import { generateFeeDistributionEdits } from "@/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { forgeToHex } from "@/libs/crypto/forgeUtils"
-import { getSharedState } from "@/utilities/sharedState"
-import log from "@/utilities/logger"
 
 export type ApplyGasFeeSeparationResult =
     | { ok: true }
@@ -145,17 +142,67 @@ export async function applyGasFeeSeparation(
         }
     }
 
-    // Stamp the transaction with the per-component values + this
-    // node's pubkey as the rpc_address. Peers receiving the signed
-    // ValidityData rely on these fields being present.
-    const rpcAddressHex = uint8ArrayToHex(
-        (await ucrypto.getIdentity(getSharedState.signingAlgorithm))
-            .publicKey as Uint8Array,
-    )
-    tx.content.transaction_fee.network_fee = breakdown.network_fee
-    tx.content.transaction_fee.rpc_fee = breakdown.rpc_fee
-    tx.content.transaction_fee.additional_fee = breakdown.additional_fee
-    tx.content.transaction_fee.rpc_address = rpcAddressHex
+    // Epic #21 #204: do NOT mutate tx.content. Stamping transaction_fee
+    // and prepending fee edits AFTER the SDK signed the tx broke
+    // validateTxCoherence on the gossip path (derived hash != signed
+    // tx.hash) -> peers reject as "not coherent" -> divergent blocks ->
+    // permanent vote split -> chain frozen on any tx. The fee edits are
+    // now derived deterministically AT APPLY from the SDK-shipped
+    // transaction_fee (see deriveFeeEditsForApply in handleGCR), so the
+    // gossiped tx stays byte-identical to what the sender signed. This
+    // routine no longer writes to `tx`; it ENFORCES the shipped fee (below)
+    // and does the balance pre-check.
+
+    // Greptile P1 (epic #21 #204): because the fee is now charged at apply
+    // from the SDK-shipped transaction_fee — NOT from the node-computed
+    // `breakdown` — a client could ship `{network_fee:0, rpc_fee:0,
+    // additional_fee:0}` and pass ingress while paying nothing. Bind the
+    // shipped fee to the canonical breakdown here: reject any tx whose
+    // shipped components don't match what the node computes. Compared in OS
+    // via toOsBigint (the shipped value is a DEM number pre-serialize or an
+    // OS string post-serialize; breakdown is in the same base unit the SDK
+    // signs), so the check is unit-robust. Without this the fee floor is
+    // unenforced.
+    const shippedFee = tx.content.transaction_fee
+    if (!shippedFee) {
+        return {
+            ok: false,
+            message:
+                "post-gasFeeSeparation tx is missing transaction_fee — refusing (cannot bind shipped fee to breakdown)",
+        }
+    }
+    // Bind the shipped fee PER-COMPONENT to the node-computed breakdown, in
+    // OS. Per-component (not just total) because the fee is charged at apply
+    // from the shipped components (deriveFeeEditsForApply) — binding only the
+    // total would let a client skew the split (e.g. put everything in
+    // network_fee, rpc_fee=0) and pass validation while the apply-time
+    // distribution emits no RPC-fee block, making fee routing deterministically
+    // wrong (Greptile P1 #2). The SDK ships the same component split the node
+    // computes (network/rpc/additional), so a legit tx matches exactly; a
+    // skewed or underpaid one is rejected. A DEM number is ×1e9 to OS; an OS
+    // string is taken as-is.
+    const toOs = (v: unknown): bigint => {
+        if (typeof v === "string") return BigInt(v)
+        return BigInt(Math.round(Number(v ?? 0))) * 1_000_000_000n
+    }
+    const componentChecks: Array<[string, unknown, number]> = [
+        ["network_fee", shippedFee.network_fee, breakdown.network_fee],
+        ["rpc_fee", shippedFee.rpc_fee, breakdown.rpc_fee],
+        ["additional_fee", shippedFee.additional_fee, breakdown.additional_fee],
+    ]
+    for (const [name, shipped, computed] of componentChecks) {
+        const shippedOs = toOs(shipped)
+        const computedOs = BigInt(computed) * 1_000_000_000n
+        if (shippedOs !== computedOs) {
+            return {
+                ok: false,
+                message:
+                    `transaction_fee.${name} mismatch: shipped=${String(shipped)} ` +
+                    `(=${shippedOs} OS) but node computed ${computed} (=${computedOs} OS). ` +
+                    "Refusing — fee underpayment / forged or skewed fee split.",
+            }
+        }
+    }
 
     // Audit-sweep batch B: balance check is now enforced in every
     // environment. The previous PROD-only gate (paired with the same
@@ -182,45 +229,30 @@ export async function applyGasFeeSeparation(
         }
     }
 
-    // Generate fee-distribution edits and prepend onto the tx's
-    // existing gcr_edits. Prepend (rather than append) so the fee
-    // deductions apply before any tx-level operation — same intent as
-    // the legacy gas-Operation slot.
-    const feeEdits = generateFeeDistributionEdits({
-        senderAddress,
-        rpcAddress: rpcAddressHex,
-        networkFee: breakdown.network_fee,
-        rpcFee: breakdown.rpc_fee,
-        additionalFee: breakdown.additional_fee,
-        txHash: tx.hash ?? "",
-        isRollback: false,
-    })
-
-    // PR #817 Greptile P1 (silent fee bypass):
-    // generateFeeDistributionEdits returns [] when
-    // `requireFeeDistribution` returns null — either feeDistribution
-    // hasn't been primed at all, or every percentage is still 0
-    // (transient window between loadForkConfigFromGenesis and
-    // loadNetworkParameters). Silently accepting the tx in that
-    // window would charge nothing while marking the tx valid, which
-    // is exactly the failure mode the prior guard was meant to
-    // prevent. Refuse the tx whenever the breakdown demanded a
-    // non-zero total but no edits were generated.
-    if (breakdown.total > 0 && feeEdits.length === 0) {
-        return {
-            ok: false,
-            message:
-                "fee distribution not primed — refusing to accept post-fork tx without fee collection " +
-                `(breakdown.total=${breakdown.total}, but generateFeeDistributionEdits returned 0 edits)`,
+    // Epic #21 #204: fee edits are NO LONGER prepended here. They are
+    // derived at apply (deriveFeeEdits in handleGCR) from the SDK-shipped
+    // transaction_fee so every node applies an identical set without
+    // mutating the signed tx. We still fail closed at ingress if fees are
+    // owed but the distribution config isn't primed, to preserve the
+    // "never silently accept a no-fee post-fork tx" guard.
+    if (breakdown.total > 0) {
+        const probe = generateFeeDistributionEdits({
+            senderAddress,
+            rpcAddress: null,
+            networkFee: breakdown.network_fee,
+            rpcFee: breakdown.rpc_fee,
+            additionalFee: breakdown.additional_fee,
+            txHash: tx.hash ?? "",
+            isRollback: false,
+        })
+        if (probe.length === 0) {
+            return {
+                ok: false,
+                message:
+                    "fee distribution not primed — refusing to accept post-fork tx without fee collection " +
+                    `(breakdown.total=${breakdown.total}, but generateFeeDistributionEdits returned 0 edits)`,
+            }
         }
     }
-
-    tx.content.gcr_edits = [
-        ...(feeEdits as GCREdit[]),
-        ...((tx.content.gcr_edits ?? []) as GCREdit[]),
-    ]
-    log.debug(
-        `[TX] applyGasFeeSeparation - prepended ${feeEdits.length} fee edits onto tx ${tx.hash}`,
-    )
     return { ok: true }
 }

@@ -212,6 +212,10 @@ services:
       # prometheus.yml scrape target (node:9090) stays valid. The
       # host-side port is independently configurable via METRICS_HOST_PORT.
       - "${METRICS_HOST_PORT:-9090}:9090"
+      # TLSNotary wstcp proxy — publish only the single advertised proxy
+      # port from .env (TLSNOTARY_PROXY_PORT) so the URL the node hands to
+      # clients is reachable from the host.
+      - "${TLSNOTARY_PROXY_PORT:-55688}:${TLSNOTARY_PROXY_PORT:-55688}"
     healthcheck:
       # Mirrors the Dockerfile HEALTHCHECK so compose-level wait + watch
       # commands work without depending on the image build (Epic 13 T11).

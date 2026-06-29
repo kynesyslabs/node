@@ -487,10 +487,12 @@ export default class Mempool {
         // transaction_fee (incl. the originator's rpc_address) so the match
         // holds cross-node (audit 184). expectFeeEdits is keyed on the fork so
         // pre-fork the regen stays fee-free.
-        const expectFeeEdits = isForkActive(
-            "gasFeeSeparation",
-            getSharedState.lastBlockNumber ?? 0,
-        )
+        // Epic #21 #204: at INGRESS the gossiped tx is byte-identical to what
+        // the sender signed — confirmTransaction no longer prepends fee edits
+        // onto it (those are derived at apply). So the shipped set carries NO
+        // fee edits here; the binding regen must NOT add them either, or every
+        // legit tx false-mismatches. (Fee edits are bound at apply, where they
+        // are derived: see HandleGCR.applyTransactions.)
         {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
@@ -500,7 +502,7 @@ export default class Mempool {
                 }
                 try {
                     const { match } = await verifyGcrEditsMatch(tx, {
-                        expectFeeEdits,
+                        expectFeeEdits: false,
                     })
                     if (!match) {
                         log.error(
