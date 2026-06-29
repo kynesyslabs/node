@@ -156,6 +156,19 @@ export class DTRManager {
         blockNumber: number
         blockRef: string
     }): Promise<RPCResponse> {
+        log.debug(
+            "[receiveRelayedTransactions] Receiving relayed transactions: " +
+                data.payload.length,
+        )
+        log.debug(
+            "[receiveRelayedTransactions] Receiving relayed transactions: " +
+                JSON.stringify(
+                    data.payload.map(vd => vd.data.transaction.hash),
+                    null,
+                    2,
+                ),
+        )
+
         try {
             if (getSharedState.inConsensusLoop) {
                 if (
@@ -300,6 +313,11 @@ export class DTRManager {
             },
             require_reply: false,
         }
+
+        log.debug(
+            "[receiveRelayedTransaction] Receiving relayed transaction: " +
+                validityData.data.transaction.hash,
+        )
 
         try {
             // Make sure we're using the same signing algorithm
