@@ -51,7 +51,7 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         if (
             peer &&
             !initialPeers.has(signer) &&
-            peer.sync.block == getSharedState.lastBlockNumber
+            getSharedState.lastBlockNumber - peer.sync.block <= 1
         ) {
             peers.push(peer)
         }
