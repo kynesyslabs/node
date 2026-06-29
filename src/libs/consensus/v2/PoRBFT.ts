@@ -244,14 +244,14 @@ export async function consensusRoutine(): Promise<void> {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all transaction past this point are not status failed
-            // const uncleanTxs = refRes.validTxs.filter(
-            //     tx => tx.status === TRANSACTION_STATUS.FAILED,
-            // )
-            // if (uncleanTxs.length > 0) {
-            //     log.error("Block trying to apply failed transactions")
-            //     log.error("Unclean txs: " + JSON.stringify(uncleanTxs, null, 2))
-            //     process.exit(1)
-            // }
+            const uncleanTxs = refRes.validTxs.filter(
+                tx => tx.status === TRANSACTION_STATUS.FAILED,
+            )
+            if (uncleanTxs.length > 0) {
+                log.error("Block trying to apply failed transactions")
+                log.error("Unclean txs: " + JSON.stringify(uncleanTxs, null, 2))
+                process.exit(1)
+            }
 
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
@@ -307,20 +307,20 @@ export async function consensusRoutine(): Promise<void> {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all transactions in the block are either confirmed or failed
-            // const states = new Set([
-            //     TRANSACTION_STATUS.CONFIRMED,
-            //     TRANSACTION_STATUS.FAILED,
-            // ])
-            // const untouchedTxs = blockTxs.filter(tx => !states.has(tx.status))
-            // if (untouchedTxs.length > 0) {
-            //     log.error(
-            //         "Block contains transactions that are not confirmed or failed",
-            //     )
-            //     log.error(
-            //         "Untouched txs: " + JSON.stringify(untouchedTxs, null, 2),
-            //     )
-            //     process.exit(1)
-            // }
+            const states = new Set([
+                TRANSACTION_STATUS.CONFIRMED,
+                TRANSACTION_STATUS.FAILED,
+            ])
+            const untouchedTxs = blockTxs.filter(tx => !states.has(tx.status))
+            if (untouchedTxs.length > 0) {
+                log.error(
+                    "Block contains transactions that are not confirmed or failed",
+                )
+                log.error(
+                    "Untouched txs: " + JSON.stringify(untouchedTxs, null, 2),
+                )
+                process.exit(1)
+            }
 
             BroadcastManager.broadcastNewBlock(block)
             DTRManager.releaseDTRWaiter(block)
@@ -452,42 +452,42 @@ export async function consensusRoutine(): Promise<void> {
 
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
         // Confirm all transactions in the block, were inserted in the transaction table
-        // const txs = await Chain.getTransactionsFromHashes(
-        //     blockTxs.map(tx => tx.hash),
-        // )
-        // for (const tx of txs) {
-        //     if (tx.blockNumber !== blockRef) {
-        //         log.error(
-        //             "Transaction block number mismatch: " +
-        //                 tx.hash +
-        //                 ", expected: " +
-        //                 blockRef +
-        //                 ", got: " +
-        //                 tx.blockNumber,
-        //         )
-        //         process.exit(1)
-        //     }
-        // }
+        const txs = await Chain.getTransactionsFromHashes(
+            blockTxs.map(tx => tx.hash),
+        )
+        for (const tx of txs) {
+            if (tx.blockNumber !== blockRef) {
+                log.error(
+                    "Transaction block number mismatch: " +
+                        tx.hash +
+                        ", expected: " +
+                        blockRef +
+                        ", got: " +
+                        tx.blockNumber,
+                )
+                process.exit(1)
+            }
+        }
 
-        // if (
-        //     !new Set(["blockTimestampNotReceived", "voteError"]).has(
-        //         exitReason,
-        //     ) &&
-        //     txs.length !== blockTxs.length
-        // ) {
-        //     const diff = blockTxs.filter(
-        //         tx => !txs.some(t => t.hash === tx.hash),
-        //     )
-        //     log.error(
-        //         "Transactions not inserted: " +
-        //             JSON.stringify(
-        //                 diff.map(tx => tx.hash),
-        //                 null,
-        //                 2,
-        //             ),
-        //     )
-        //     process.exit(1)
-        // }
+        if (
+            !new Set(["blockTimestampNotReceived", "voteError"]).has(
+                exitReason,
+            ) &&
+            txs.length !== blockTxs.length
+        ) {
+            const diff = blockTxs.filter(
+                tx => !txs.some(t => t.hash === tx.hash),
+            )
+            log.error(
+                "Transactions not inserted: " +
+                    JSON.stringify(
+                        diff.map(tx => tx.hash),
+                        null,
+                        2,
+                    ),
+            )
+            process.exit(1)
+        }
     }
 }
 

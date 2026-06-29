@@ -150,10 +150,10 @@ export async function getBlockTransactions(
             getSharedState.candidateBlock.content.ordered_transactions,
         )
         const mempoolTxs = []
-        // const status = new Set([
-        //     TRANSACTION_STATUS.CONFIRMED,
-        //     TRANSACTION_STATUS.FAILED,
-        // ])
+        const status = new Set([
+            TRANSACTION_STATUS.CONFIRMED,
+            TRANSACTION_STATUS.FAILED,
+        ])
 
         for (const hash of txHashes) {
             const tx = consensusTxMap.get(hash)
@@ -162,15 +162,15 @@ export async function getBlockTransactions(
                 mempoolTxs.push(tx)
 
                 // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-                // if (!status.has(tx.status)) {
-                //     log.error(
-                //         "Transaction status mismatch: " +
-                //             hash +
-                //             " " +
-                //             tx.status,
-                //     )
-                //     process.exit(1)
-                // }
+                if (!status.has(tx.status)) {
+                    log.error(
+                        "Transaction status mismatch: " +
+                            hash +
+                            " " +
+                            tx.status,
+                    )
+                    process.exit(1)
+                }
             }
         }
 

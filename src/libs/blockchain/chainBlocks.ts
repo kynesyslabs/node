@@ -261,29 +261,29 @@ export async function insertBlock(
         }
 
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        // else {
-        //     log.error(
-        //         "Block transactions mismatch with block ordered transactions",
-        //     )
-        //     process.exit(1)
-        // }
+        else {
+            log.error(
+                "Block transactions mismatch with block ordered transactions",
+            )
+            process.exit(1)
+        }
 
-        // const status = new Set([
-        //     TRANSACTION_STATUS.CONFIRMED,
-        //     TRANSACTION_STATUS.FAILED,
-        // ])
+        const status = new Set([
+            TRANSACTION_STATUS.CONFIRMED,
+            TRANSACTION_STATUS.FAILED,
+        ])
 
         // confirm all txs have a status set
-        // const txsWithoutStatus = transactionEntities.filter(
-        //     tx => !status.has(tx.status),
-        // )
-        // if (txsWithoutStatus.length > 0) {
-        //     log.error(
-        //         "Transactions without status: " +
-        //             JSON.stringify(txsWithoutStatus, null, 2),
-        //     )
-        //     process.exit(1)
-        // }
+        const txsWithoutStatus = transactionEntities.filter(
+            tx => !status.has(tx.status),
+        )
+        if (txsWithoutStatus.length > 0) {
+            log.error(
+                "Transactions without status: " +
+                    JSON.stringify(txsWithoutStatus, null, 2),
+            )
+            process.exit(1)
+        }
 
         transactionEntities = transactionEntities.map(tx => ({
             ...tx,

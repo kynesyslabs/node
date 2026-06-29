@@ -794,10 +794,10 @@ export default class HandleGCR {
                 log.error("Found confirmed txs during tx application")
                 // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
                 // fetch confirmed txs from db
-                // const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
-                // log.error("Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2))
-                // log.error("Confirmed txs full: " + JSON.stringify(confirmedTxs.map(t => t.hash), null, 2))
-                // process.exit(1)
+                const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
+                log.error("Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2))
+                log.error("Confirmed txs full: " + JSON.stringify(confirmedTxs.map(t => t.hash), null, 2))
+                process.exit(1)
 
                 const before = finalTxs.length
                 finalTxs = finalTxs.filter(t => {

@@ -329,7 +329,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
             "Block transactions: " +
                 JSON.stringify(block.content.ordered_transactions, null, 2),
         )
-        // process.exit(1)
+        process.exit(1)
     }
 
     for (const tx of txs) {
@@ -342,7 +342,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     ", got: " +
                     tx.blockNumber,
             )
-            // process.exit(1)
+            process.exit(1)
         }
     }
 
@@ -369,7 +369,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     2,
                 ),
         )
-        // process.exit(1)
+        process.exit(1)
     }
 
     const applied = sorted.filter(
@@ -407,10 +407,10 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     )
                 }
             }
-            // process.exit(1)
+            process.exit(1)
         }
 
-        // process.exit(1)
+        process.exit(1)
     }
 
     if (
@@ -437,7 +437,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
         )
         log.error("Full applied txs: " + JSON.stringify(applied, null, 2))
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        // process.exit(1)
+        process.exit(1)
     }
 
     return applied
@@ -501,15 +501,15 @@ export async function syncBlock(block: Block, peer: Peer) {
 
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all txs are inserted
-            // for (const tx of txs) {
-            //     const res = await Chain.checkTxExists(tx.hash)
-            //     if (!res) {
-            //         log.error(
-            //             "[syncGCRTables] Transaction not found: " + tx.hash,
-            //         )
-            //         process.exit(1)
-            //     }
-            // }
+            for (const tx of txs) {
+                const res = await Chain.checkTxExists(tx.hash)
+                if (!res) {
+                    log.error(
+                        "[syncGCRTables] Transaction not found: " + tx.hash,
+                    )
+                    process.exit(1)
+                }
+            }
             log.debug("[syncGCRTables] All transactions are inserted")
             return true
         }
