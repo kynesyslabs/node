@@ -1227,7 +1227,12 @@ export async function waitForPeerStatus(
         }
 
         const waitFor = signerIds
-            ? onlinePeers.filter(p => signerIds.has(p.identity))
+            ? onlinePeers.filter(
+                  p =>
+                      signerIds.has(p.identity) &&
+                      // only wait for peers that are upto 2 blocks behind us
+                      getSharedState.lastBlockNumber - p.sync.block <= 2,
+              )
             : onlinePeers.filter(p => p.sync.block >= ourBlock - 2)
 
         if (waitFor.length === 0) {
