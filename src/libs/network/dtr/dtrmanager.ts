@@ -409,7 +409,7 @@ export class DTRManager {
             }
 
             // Add validated transaction to mempool
-            const { confirmationBlock, error } = await Mempool.addTransactionWithLock(
+            const { confirmationBlock, error } = await Mempool.addTransaction(
                 {
                     ...tx,
                     reference_block: validityData.data.reference_block,
