@@ -30,7 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     core: {
         prod: false,
-        shardSize: 3,
+        shardSize: 4,
         mainLoopSleepTime: 1000,
         rpcFeePercent: 10,
         // Flat per-tx fee components. Total cost of a tx today is the sum
