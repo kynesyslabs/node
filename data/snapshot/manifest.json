@@ -2,30 +2,30 @@
   "schemaVersion": 2,
   "source": {
     "host": "vmi2200529.contaboserver.net",
-    "chain_block_height": 47681,
-    "chain_block_hash": "24c4d4d0e0e7d87d55dc311e6681c11aed60eac039363bf1ad7f5b02b0eb290c",
+    "chain_block_height": 98118,
+    "chain_block_hash": "3efa76e5a90f0021082c6f2b9867f5e3cced89f4669085cb44d77f39c5988d1a",
     "node_version": "0.9.8",
     "pg_version": "16.14",
-    "dumped_at": "2026-06-16T11:57:46.386Z"
+    "dumped_at": "2026-06-30T21:00:33.466Z"
   },
   "files": {
     "gcr_main.jsonl": {
-      "sha256": "2fa661b47bc98189944616e91161ca7aaf459eb243ad37df29a252257ae355fa",
-      "rows": 13895,
-      "balance_sum": "15024999999998868528000000000"
+      "sha256": "b8cdd120cb2b9683d69aae05cf91e3a8e3a611cd77def1e0e98835d9b76134b9",
+      "rows": 13970,
+      "balance_sum": "15024999999998858696000000000"
     },
     "gcr_storageprogram.jsonl": {
-      "sha256": "f0fc8d8a72eda8d5b290c47bc6169dc4679ffaa31f00936361237c400c0eb2d6",
-      "rows": 1397,
-      "size_bytes_sum": 1278061
+      "sha256": "329b8785f01a4f78963d2482633bf7a73c028a7516f7f5605a1f652e2b8ce978",
+      "rows": 1401,
+      "size_bytes_sum": 1278303
     },
     "identity_commitments.jsonl": {
-      "sha256": "a5387a97d75a26f7ef36b1ec68ed9b975036ae21f2fae890f46c435abafde109",
+      "sha256": "8a7db2443168ea602116b5c5948c056393213d3767f602eb30fc102d3e230d22",
       "rows": 2
     },
     "validators.jsonl": {
-      "sha256": "0c7f382c600728af4c7fb89159304141dc167dea80325565f3d99a1fd68505ca",
-      "rows": 6
+      "sha256": "6b9d2da86bbe0ae99b9b8fb8bd88d2221ef82cb70b430faa6e4a1412a74cbc0d",
+      "rows": 8
     }
   },
   "fork_state": [

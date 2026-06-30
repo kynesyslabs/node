@@ -197,9 +197,6 @@ async function proposeAndCollect(
                     2,
                 )}`,
             )
-
-            // TODO: Remove this before merging
-            process.exit(1)
         }
 
         return {
