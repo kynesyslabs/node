@@ -45,9 +45,9 @@ export async function writeSql(sqlQuery: string) {
 // rows * inserted-column-count stays under PG_BIND_BUDGET. If you add a
 // column to one of these entities, update its divisor.
 const PG_BIND_BUDGET = 65000
-export const CHUNK_TRANSACTIONS = Math.floor(PG_BIND_BUDGET / 16) // Transactions: 16 inserted cols
+export const CHUNK_TRANSACTIONS = Math.floor(PG_BIND_BUDGET / 18) // Transactions: 18 inserted cols (id is generated)
 export const CHUNK_MEMPOOL_TX = Math.floor(PG_BIND_BUDGET / 10) // MempoolTx: 10 inserted cols
-export const CHUNK_ASSIGNED_TXS = Math.floor(PG_BIND_BUDGET / 10) // GCRAssignedTx: 3 inserted cols
+export const CHUNK_ASSIGNED_TXS = Math.floor(PG_BIND_BUDGET / 4) // GCRAssignedTx: 4 physical cols (assigned_at may be bound)
 
 export interface ChunkedInsertResult {
     inserted: number
