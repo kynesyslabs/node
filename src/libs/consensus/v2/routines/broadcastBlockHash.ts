@@ -170,8 +170,8 @@ async function proposeAndCollect(
             if (missingFromThem.length > 0){
                 // check if the missing transactions are in the mempool
                 const missing = await Mempool.getTransactionsByHashes(missingFromThem)
-                log.error("Missing txs, found in mempool: " + missing.length)
-                log.error("Missing txs, found in mempool: " + JSON.stringify(missing.map(tx => ({
+                log.error("Missing from them, found in mempool: " + missing.length)
+                log.error("Missing from them, found in mempool: " + JSON.stringify(missing.map(tx => ({
                     hash: tx.hash,
                     blockNumber: tx.blockNumber,
                     referenceBlock: tx.reference_block,
@@ -181,8 +181,8 @@ async function proposeAndCollect(
             if (missingFromUs.length > 0){
                 // check if the missing transactions are in the mempool
                 const missing = await Mempool.getTransactionsByHashes(missingFromUs)
-                log.error("Missing txs, found in mempool: " + missing.length)
-                log.error("Missing txs, found in mempool: " + JSON.stringify(missing.map(tx => ({
+                log.error("Missing from us, found in mempool: " + missing.length)
+                log.error("Missing from us, found in mempool: " + JSON.stringify(missing.map(tx => ({
                     hash: tx.hash,
                     blockNumber: tx.blockNumber,
                     referenceBlock: tx.reference_block,
