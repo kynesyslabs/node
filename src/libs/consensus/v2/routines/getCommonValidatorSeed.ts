@@ -183,7 +183,7 @@ export default async function getCommonValidatorSeed(
     if (!ignoreCache) {
         log.debug("Caching CVSA result")
         lastCVSAResult = { commonValidatorSeed, lastBlockNumber }
-        lastBlockHash = getSharedState.lastBlockHash
+        lastBlockHash = lastBlock.hash
     }
 
     return { commonValidatorSeed, lastBlockNumber }
