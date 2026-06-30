@@ -45,6 +45,15 @@ import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
 
+function shuffleArray<T>(array: T[]): T[] {
+    const shuffled = [...array]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+    }
+    return shuffled
+}
+
 /**
  * Used to prevent block insert operations from happening concurrently.
  *
@@ -375,6 +384,9 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
         }
     }
 
+    // for testing, shuffle list
+    // TODO: Remove this before merging
+    txs = shuffleArray(txs)
     const sorted = orderDeterministically(txs)
 
     // confirm sorted txs are in the same order as block ordered transactions
@@ -481,7 +493,7 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    const exists = await Chain.getBlockByNumber(block.number)
+    let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
         return true
@@ -498,6 +510,13 @@ export async function syncBlock(block: Block, peer: Peer) {
         log.info(
             `[syncBlock] Block ${block.number} passed signature-quorum verification`,
         )
+    }
+
+    // check exists again
+    exists = await Chain.getBlockByNumber(block.number)
+    if (exists) {
+        log.error("Block already exists, skipping ...")
+        return false
     }
 
     await Chain.insertBlock(block, [])
@@ -754,6 +773,13 @@ async function batchDownloadBlocks(
                 )
                 return false
             }
+        }
+
+        // check exists again
+        const exists = await Chain.getBlockByNumber(block.number)
+        if (exists) {
+            log.error("Block already exists, skipping ...")
+            return false
         }
 
         // Insert block

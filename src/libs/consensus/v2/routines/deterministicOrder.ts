@@ -20,19 +20,25 @@ export function compareTxDeterministic(
     txa: Transaction,
     txb: Transaction,
 ): number {
-    const sa = normalizePubkey(txa.content.from_ed25519_address)
-    const sb = normalizePubkey(txb.content.from_ed25519_address)
+    const sa = normalizePubkey(txa.content.from_ed25519_address).toLowerCase()
+    const sb = normalizePubkey(txb.content.from_ed25519_address).toLowerCase()
 
     if (sa < sb) return -1
     if (sa > sb) return 1
 
-    const na = txa.content.nonce
-    const nb = txb.content.nonce
+    const na = Number(txa.content.nonce)
+    const nb = Number(txb.content.nonce)
 
     if (na !== nb) return na - nb
 
-    const ha = txa.hash ?? ""
-    const hb = txb.hash ?? ""
+    const ha = txa.hash
+    const hb = txb.hash
+
+    if (!ha || !hb) {
+        throw new Error(
+            "compareTxDeterministic: missing tx hash — cannot order deterministically",
+        )
+    }
 
     if (ha < hb) return -1
     if (ha > hb) return 1

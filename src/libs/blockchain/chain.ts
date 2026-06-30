@@ -71,6 +71,10 @@ export default class Chain {
         return blockOps.getLastBlockHash()
     }
 
+    static async getBlockHash(number: number): Promise<string | null> {
+        return blockOps.getBlockHash(number)
+    }
+
     static async getLastBlockTransactionSet(): Promise<Set<string>> {
         return blockOps.getLastBlockTransactionSet()
     }

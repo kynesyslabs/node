@@ -79,6 +79,14 @@ export async function getLastBlockHash() {
     return getSharedState.lastBlockHash
 }
 
+export async function getBlockHash(number: number) {
+    const block = await getBlocksRepo().findOne({
+        where: { number },
+        select: { hash: true },
+    })
+    return block ? block.hash : null
+}
+
 export async function getLastBlockTransactionSet(): Promise<Set<string>> {
     const query = getBlocksRepo()
         .createQueryBuilder("block")

@@ -45,7 +45,7 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
     }
 
     // Verify last block hash is the same as this block's previous hash
-    const lastBlockHash = await Chain.getLastBlockHash()
+    const lastBlockHash = await Chain.getBlockHash(block.number - 1)
     if (lastBlockHash !== block.content.previousHash) {
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
         log.error(
