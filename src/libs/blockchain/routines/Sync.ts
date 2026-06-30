@@ -325,11 +325,40 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
         log.error(
             "[fastSync] No transactions received for block: " + block.hash,
         )
-        log.error(
-            "Block transactions: " +
-                JSON.stringify(block.content.ordered_transactions, null, 2),
-        )
-        process.exit(1)
+        log.debug("Trying to get transaction from signers")
+
+        const masterSet = new Set(block.content.ordered_transactions)
+        const missingTxs = masterSet.difference(new Set(txs.map(tx => tx.hash)))
+
+        // get signers for block
+        const signers = Object.keys(block.validation_data?.signatures || {})
+        for (const signer of signers) {
+            const peer = peerManager.getPeer(signer)
+
+            if (!peer) continue
+
+            const res = await askTxsForBlock(block, peer)
+
+            for (const tx of res) {
+                if (missingTxs.has(tx.hash)) {
+                    txs.push(tx)
+                    missingTxs.delete(tx.hash)
+                }
+            }
+
+            if (missingTxs.size === 0) break
+        }
+
+        if (missingTxs.size > 0) {
+            log.error(
+                `[fastSync] Still missing ${missingTxs.size} transactions even after asking from signers`,
+            )
+            log.error(
+                "Missing transactions: " +
+                    JSON.stringify(Array.from(missingTxs), null, 2),
+            )
+            process.exit(1)
+        }
     }
 
     for (const tx of txs) {
@@ -968,7 +997,11 @@ export async function askTxsForBlock(
         retries: 3,
     })
 
-    if (res.result === 200) {
+    if (
+        res.result === 200 &&
+        Array.isArray(res.response) &&
+        res.response.length > 0
+    ) {
         return res.response as Transaction[]
     }
 
