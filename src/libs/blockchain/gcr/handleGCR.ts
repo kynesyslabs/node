@@ -36,7 +36,7 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
-import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
+import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
@@ -229,8 +229,9 @@ export default class HandleGCR {
         if (rows.length === 0) return
 
         const repo = dataSource.getRepository(GCRAssignedTx)
-        for (let i = 0; i < rows.length; i += CHUNK_ASSIGNED_TXS) {
-            const chunk = rows.slice(i, i + CHUNK_ASSIGNED_TXS)
+        const chunkSize = maxRowsPerInsert(repo, GCRAssignedTx)
+        for (let i = 0; i < rows.length; i += chunkSize) {
+            const chunk = rows.slice(i, i + chunkSize)
             await repo
                 .createQueryBuilder()
                 .insert()

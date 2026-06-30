@@ -21,7 +21,7 @@
 import type { EntityManager } from "typeorm"
 
 import log from "src/utilities/logger"
-import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
+import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
@@ -198,18 +198,14 @@ async function insertGcrMainStream(
         mainBatch = []
     }
 
-    // gcr_assigned_txs: chunk by CHUNK_ASSIGNED_TXS so rows * 3 cols stay
-    // under Postgres's 65535 bind-parameter cap — an account with a large
-    // legacy assignedTxs array must not blow a single oversized INSERT.
-    // orIgnore: (pubkey, tx_hash) PK makes re-inserts idempotent (mirrors
-    // HandleGCR.bulkUpdateAssignedTxs), so a retried restore is safe.
+    const assignedChunkSize = maxRowsPerInsert(em, GCRAssignedTx)
     const flushAssigned = async (force: boolean) => {
         while (
-            assignedBatch.length >= CHUNK_ASSIGNED_TXS ||
+            assignedBatch.length >= assignedChunkSize ||
             (force && assignedBatch.length > 0)
         ) {
-            const chunk = assignedBatch.slice(0, CHUNK_ASSIGNED_TXS)
-            assignedBatch = assignedBatch.slice(CHUNK_ASSIGNED_TXS)
+            const chunk = assignedBatch.slice(0, assignedChunkSize)
+            assignedBatch = assignedBatch.slice(assignedChunkSize)
             await em
                 .createQueryBuilder()
                 .insert()

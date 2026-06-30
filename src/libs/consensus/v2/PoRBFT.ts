@@ -403,6 +403,7 @@ export async function consensusRoutine(): Promise<void> {
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
         ) {
+            exitReason = "abortConsensus"
             // INFO: If we're past merge mempools phase
             log.warn(
                 "[consensusRoutine] Aborted consensus routine at phase: " +
@@ -471,7 +472,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         if (
-            !new Set(["blockTimestampNotReceived", "voteError"]).has(
+            !new Set(["blockTimestampNotReceived", "voteError", "abortConsensus"]).has(
                 exitReason,
             ) &&
             txs.length !== blockTxs.length

@@ -41,13 +41,21 @@ export async function writeSql(sqlQuery: string) {
     }
 }
 
-// Postgres caps bind parameters at 65535 (uint16). Chunk row counts so
-// rows * inserted-column-count stays under PG_BIND_BUDGET. If you add a
-// column to one of these entities, update its divisor.
+// Postgres caps bind parameters at 65535 (uint16) per query
 const PG_BIND_BUDGET = 65000
-export const CHUNK_TRANSACTIONS = Math.floor(PG_BIND_BUDGET / 18) // Transactions: 18 inserted cols (id is generated)
-export const CHUNK_MEMPOOL_TX = Math.floor(PG_BIND_BUDGET / 10) // MempoolTx: 10 inserted cols
-export const CHUNK_ASSIGNED_TXS = Math.floor(PG_BIND_BUDGET / 4) // GCRAssignedTx: 4 physical cols (assigned_at may be bound)
+
+/**
+ * Largest row count that keeps a single bulk INSERT under the Postgres
+ * bind-parameter cap, derived from the target entity's physical column count.
+ */
+export function maxRowsPerInsert<T extends ObjectLiteral>(
+    runner: EntityManager | Repository<T>,
+    target: EntityTarget<T>,
+): number {
+    const manager = runner instanceof EntityManager ? runner : runner.manager
+    const columnCount = manager.connection.getMetadata(target).columns.length
+    return Math.max(1, Math.floor(PG_BIND_BUDGET / columnCount))
+}
 
 export interface ChunkedInsertResult {
     inserted: number
@@ -62,7 +70,6 @@ export async function chunkedInsert<T extends ObjectLiteral>(
     runner: EntityManager | Repository<T>,
     target: EntityTarget<T>,
     rows: any[],
-    chunkSize: number,
     orUpdate?: {
         conflictTarget?: string | string[]
         overwrite: string[]
@@ -70,6 +77,7 @@ export async function chunkedInsert<T extends ObjectLiteral>(
 ): Promise<ChunkedInsertResult> {
     let inserted = 0
     let skipped = 0
+    const chunkSize = maxRowsPerInsert(runner, target)
     for (let i = 0; i < rows.length; i += chunkSize) {
         const chunk = rows.slice(i, i + chunkSize)
         const query = runner

@@ -9,7 +9,7 @@ import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
+import { chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
@@ -390,7 +390,6 @@ export async function insertBlock(
                         transactionalEntityManager,
                         Transactions,
                         rawTransactions.map(tx => toTransactionsEntity(tx)),
-                        CHUNK_TRANSACTIONS,
                     )
                     if (skipped > 0) {
                         log.warn(

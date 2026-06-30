@@ -18,7 +18,7 @@ import { Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
-import { CHUNK_MEMPOOL_TX, chunkedInsert } from "./chainDb"
+import { chunkedInsert } from "./chainDb"
 import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 
@@ -537,7 +537,6 @@ export default class Mempool {
                     this.repo,
                     MempoolTx,
                     validTransactions as any[],
-                    CHUNK_MEMPOOL_TX,
                     {
                         conflictTarget: ["hash"],
                         overwrite: ["blockNumber"],

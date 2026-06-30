@@ -3,11 +3,7 @@ import log from "src/utilities/logger"
 import Transaction, { toTransactionsEntity } from "./transaction"
 import { Transactions } from "src/model/entities/Transactions"
 import { L2PSHash } from "src/model/entities/L2PSHashes"
-import {
-    CHUNK_TRANSACTIONS,
-    chunkedInsert,
-    getTransactionsRepo,
-} from "./chainDb"
+import { chunkedInsert, getTransactionsRepo } from "./chainDb"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import type { L2PSHashUpdatePayload, TxStatus } from "./chainTypes"
 import Mempool from "./mempool"
@@ -298,7 +294,6 @@ export async function insertTransactionsFromSync(
                 em,
                 Transactions,
                 rawTransactions as any[],
-                CHUNK_TRANSACTIONS,
             )
             if (skipped > 0) {
                 log.warn(
