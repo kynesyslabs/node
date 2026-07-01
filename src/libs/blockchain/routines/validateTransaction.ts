@@ -88,7 +88,7 @@ export async function confirmTransaction(
 
     // Check nonce > current nonce
     const currentNonce = await GCR.getAccountNonce(
-        normalizePubkey(tx.content.from_ed25519_address),
+        normalizePubkey(tx.content.from_ed25519_address || tx.content.from),
     )
 
     if (tx.content.nonce <= currentNonce) {
