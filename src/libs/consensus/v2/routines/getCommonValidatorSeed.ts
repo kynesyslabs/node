@@ -69,6 +69,14 @@ export default async function getCommonValidatorSeed(
     commonValidatorSeed: string
     lastBlockNumber: number
 }> {
+    if (lastBlock) {
+        log.debug("--------------------------------")
+        log.debug("Using custom last block")
+        log.debug("Last block hash: " + lastBlock.hash)
+        log.debug("Last block number: " + lastBlock.number)
+        log.debug("--------------------------------")
+    }
+
     const ignoreCache = lastBlock !== null
 
     if (
@@ -76,6 +84,12 @@ export default async function getCommonValidatorSeed(
         lastBlockHash &&
         getSharedState.lastBlockHash === lastBlockHash
     ) {
+        log.debug("[getCommonValidatorSeed] Returning cached result")
+        log.debug("Common validator seed: " + lastCVSAResult.commonValidatorSeed)
+        log.debug("Last block number: " + lastCVSAResult.lastBlockNumber)
+        log.debug("--------------------------------")
+        log.debug("Last block hash: " + lastBlockHash)
+        log.debug("--------------------------------")
         return lastCVSAResult
     }
 
@@ -116,6 +130,15 @@ export default async function getCommonValidatorSeed(
             break
         }
     }
+
+    log.debug(
+        "Last few blocks: " +
+            JSON.stringify(
+                lastFewBlocks.map(b => ({ hash: b.hash, number: b.number })),
+                null,
+                2,
+            ),
+    )
 
     if (!genesisHash) {
         // NOTE: Only happens when forging genesis block
@@ -158,8 +181,9 @@ export default async function getCommonValidatorSeed(
     logger(`Common validator seed: ${commonValidatorSeed}`)
 
     if (!ignoreCache) {
+        log.debug("Caching CVSA result")
         lastCVSAResult = { commonValidatorSeed, lastBlockNumber }
-        lastBlockHash = getSharedState.lastBlockHash
+        lastBlockHash = lastBlock.hash
     }
 
     return { commonValidatorSeed, lastBlockNumber }

@@ -1,17 +1,12 @@
 import log from "src/utilities/logger"
 import Block from "./block"
-import Mempool from "./mempool"
 import Transaction from "./transaction"
 import Hashing from "../crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import HandleGCR from "./gcr/handleGCR"
 import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorSeed"
 import { insertBlock } from "./chainBlocks"
-import type { Operation } from "@kynesyslabs/demosdk/types"
-import {
-    serializeTransactionContent,
-    serializeBlockContent,
-} from "@/forks"
+import { serializeTransactionContent, serializeBlockContent } from "@/forks"
 import Datasource from "src/model/datasource"
 import { loadSnapshot } from "src/libs/blockchain/genesis/loadSnapshot"
 import { restoreSnapshot } from "src/libs/blockchain/genesis/restoreSnapshot"
@@ -60,6 +55,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
     genesisTx.hash = Hashing.sha256(
         serializeTransactionContent(genesisTx.content, GENESIS_BLOCK_HEIGHT),
     )
+    genesisTx.attrs = {}
 
     genesisBlock.content.timestamp = genesisTx.content.timestamp
     genesisBlock.content.ordered_transactions.push(genesisTx.hash)
@@ -83,30 +79,10 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
         genesisBlock as any,
     )
     genesisBlock.next_proposer = commonValidatorSeed
-
-    const genesisOp: Operation = {
-        operator: "genesis",
-        actor: "DEMOS Network",
-        params: genesisData,
-        hash: genesisBlock.hash,
-        nonce: 0,
-        timestamp: genesisBlock.content.timestamp,
-        status: true,
-        fees: {
-            network_fee: 0,
-            rpc_fee: 0,
-            additional_fee: 0,
-            // DEM-665: Operations are internal — they do not carry a
-            // routing rpc_address. The field is structurally required
-            // by the SDK's TxFee interface so we set `null`.
-            rpc_address: null,
-        },
-    }
-
-    log.debug("[GENESIS] Block generated, ready to insert it")
-    log.debug("[GENESIS] inserting transaction into the mempool")
-    await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }, 0)
-    log.debug("[GENESIS] inserted transaction")
+    // log.debug("[GENESIS] Block generated, ready to insert it")
+    // log.debug("[GENESIS] inserting transaction into the mempool")
+    // await Mempool.addTransaction({ ...genesisTx, reference_block: 0 }, 0)
+    // log.debug("[GENESIS] inserted transaction")
 
     // SECTION: Restoring account data
     //
@@ -239,8 +215,7 @@ export async function generateGenesisBlock(genesisData: any): Promise<Block> {
             )
         }
     }
-    // !SECTION Restoring account data
 
-    await insertBlock(genesisBlock, [genesisOp], 0)
+    await insertBlock(genesisBlock, [genesisTx], 0)
     return genesisBlock
 }

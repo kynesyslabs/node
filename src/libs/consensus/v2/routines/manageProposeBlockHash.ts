@@ -16,12 +16,14 @@ export default async function manageProposeBlockHash(
     validationData: ValidationData,
     peerId: string,
 ): Promise<RPCResponse> {
+    log.debug("Received manageProposeBlockHash, block hash: " + blockHash)
     const response = _.cloneDeep(emptyResponse)
 
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard
     const { commonValidatorSeed } = await getCommonValidatorSeed()
     const shard = await getShard(commonValidatorSeed)
+    log.debug("Shard: " + JSON.stringify(shard.map(s => s.connection.string), null, 2))
 
     const validator = shard.find(validator => validator.identity === peerId)
     const peer = PeerManager.getInstance().getPeer(peerId)

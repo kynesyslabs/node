@@ -23,6 +23,7 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
 import { Transaction } from "@kynesyslabs/demosdk/types"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 /**
  * Result of applying a single proof
@@ -476,6 +477,7 @@ export default class L2PSConsensus {
                     amount: 0,
                     nonce: blockNumber,
                     timestamp: Date.now(),
+                    status: TRANSACTION_STATUS.CONFIRMED,
                     data: [
                         "l2psBatch",
                         {
@@ -521,10 +523,7 @@ export default class L2PSConsensus {
             }
 
             // Insert into L1 transactions table
-            const success = await Chain.insertTransaction(
-                l1BatchTx as any,
-                "confirmed",
-            )
+            const success = await Chain.insertTransaction(l1BatchTx as any)
 
             if (success) {
                 log.info(

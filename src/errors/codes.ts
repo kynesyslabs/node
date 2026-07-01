@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention */
 /**
  * Machine-readable error codes used across the application.
  *
@@ -78,6 +79,13 @@ export const ErrorCode = {
     // --- Multichain ---
     MULTICHAIN_UNSUPPORTED: "MULTICHAIN_UNSUPPORTED",
     MULTICHAIN_BRIDGE_FAILED: "MULTICHAIN_BRIDGE_FAILED",
+
+    // --- Transaction ---
+    TX_EXECUTE_FAILED: "TX_EXECUTE_FAILED",
+    TX_EXISTS: "TX_EXISTS",
+    TX_NONCE_INVALID_LOW: "TX_NONCE_INVALID_LOW",
+    TX_NONCE_INVALID_HIGH: "TX_NONCE_INVALID_HIGH",
+    TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE: "TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE",
 } as const
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode]

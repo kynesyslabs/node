@@ -28,6 +28,9 @@ export function __resetValidatorCache(): void {
  * @returns An array of peers that are currently considered online and are active validators
  */
 export default async function getShard(seed: string): Promise<Peer[]> {
+    log.debug("================================================")
+    log.debug("Getting shard with seed: " + seed)
+    log.debug("================================================")
     // ! we need to get the peers from the last 3 blocks too
     const peerman = PeerManager.getInstance()
     const allPeers = await peerman.getOnlinePeers()
@@ -45,7 +48,11 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     for (const signer of lastBlockSigners) {
         const peer = peerman.getPeer(signer)
 
-        if (peer && !initialPeers.has(signer)) {
+        if (
+            peer &&
+            !initialPeers.has(signer) &&
+            getSharedState.lastBlockNumber - peer.sync.block <= 1
+        ) {
             peers.push(peer)
         }
     }
@@ -57,7 +64,9 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     if (cachedBlock === lastBlock && cachedValidators !== null) {
         activeValidators = cachedValidators
     } else {
-        activeValidators = await GCR.getGCRValidatorsAtBlock(lastBlock) as Validators[]
+        activeValidators = (await GCR.getGCRValidatorsAtBlock(
+            lastBlock,
+        )) as Validators[]
         cachedBlock = lastBlock
         cachedValidators = activeValidators
     }
@@ -100,16 +109,18 @@ export default async function getShard(seed: string): Promise<Peer[]> {
     const deterministicRandomness = Alea(seed)
     const availablePeers = [...validatedPeers]
 
-    // Sort available peers by .identity (hex string) before sampling so the
-    // shard selection is identical across nodes. P-CLOCK (epic #21 #195):
-    // plain byte comparison, NOT localeCompare — localeCompare is
-    // locale-sensitive, so under different host locales two nodes could order
-    // the peer list differently and select divergent shards (a latent
-    // consensus split). Hex identities are ASCII, so < / > is a stable total
-    // order on every node.
     availablePeers.sort((a, b) =>
         a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
     )
+    log.debug(
+        "Available peers: " +
+            JSON.stringify(
+                availablePeers.map(p => p.connection.string),
+                null,
+                2,
+            ),
+    )
+
     // REVIEW: check if this is the right way to do it
     // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
     for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
@@ -119,6 +130,15 @@ export default async function getShard(seed: string): Promise<Peer[]> {
         shard.push(availablePeers[index])
         availablePeers.splice(index, 1)
     }
+
+    log.debug(
+        "Shard: " +
+            JSON.stringify(
+                shard.map(p => p.connection.string),
+                null,
+                2,
+            ),
+    )
 
     log.info(
         `[getShard] active validators in DB: ${activeValidators.length}; online+validator peers: ${validatedPeers.length}; shard size: ${shard.length}`,

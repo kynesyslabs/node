@@ -39,22 +39,8 @@ export function validateTxCoherence(
     tx: Transaction,
     isPostFork: boolean,
 ): TxValidationResult {
-    let content = tx.content
-    if (Array.isArray(content?.gcr_edits)) {
-        const strippedEdits = content.gcr_edits.map(edit => {
-            if (!("expectedPrior" in edit)) {
-                return edit
-            }
-
-            const stripped = { ...edit }
-            delete (stripped as { expectedPrior?: number }).expectedPrior
-            return stripped
-        })
-        content = { ...content, gcr_edits: strippedEdits }
-    }
-
     const derivedHash = Hashing.sha256(
-        serializeTransactionContent(content, isPostFork),
+        serializeTransactionContent(tx.content, isPostFork),
     )
 
     if (derivedHash !== tx.hash) {

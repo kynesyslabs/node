@@ -36,7 +36,7 @@ import { forgeToHex } from "@/libs/crypto/forgeUtils"
 // REVIEW Trying to use the new GCRv2
 import { GCRMain } from "src/model/entities/GCRv2/GCR_Main"
 import { GCRAssignedTx } from "src/model/entities/GCRv2/GCRAssignedTx"
-import { CHUNK_ASSIGNED_TXS } from "src/libs/blockchain/chainDb"
+import { maxRowsPerInsert } from "src/libs/blockchain/chainDb"
 import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
@@ -167,7 +167,7 @@ export function isGCRMainEdit(
 /**
  * Helper to normalize pubkey from different formats
  */
-function normalizePubkey(account: string | Uint8Array): string {
+export function normalizePubkey(account: string | Uint8Array): string {
     return typeof account === "string" ? account : forgeToHex(account)
 }
 
@@ -229,8 +229,9 @@ export default class HandleGCR {
         if (rows.length === 0) return
 
         const repo = dataSource.getRepository(GCRAssignedTx)
-        for (let i = 0; i < rows.length; i += CHUNK_ASSIGNED_TXS) {
-            const chunk = rows.slice(i, i + CHUNK_ASSIGNED_TXS)
+        const chunkSize = maxRowsPerInsert(repo, GCRAssignedTx)
+        for (let i = 0; i < rows.length; i += chunkSize) {
+            const chunk = rows.slice(i, i + chunkSize)
             await repo
                 .createQueryBuilder()
                 .insert()
@@ -734,7 +735,7 @@ export default class HandleGCR {
     static async applyTransactions(txs: Transaction[], isRollback: boolean) {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
-
+        const skippedTxs: string[] = []
         const assignedTxsUpdates = new Map<string, AssignedTxRecord[]>()
 
         // filter out txs that don't mutate entities
@@ -747,6 +748,8 @@ export default class HandleGCR {
 
         for (const tx of txs) {
             if (toFilter.has(tx.content.type)) {
+                skippedTxs.push(tx.hash)
+
                 // add the tx to the assignedTxsUpdates map
                 const sender = normalizePubkey(
                     tx.content.from_ed25519_address || tx.content.from,
@@ -787,7 +790,16 @@ export default class HandleGCR {
             const confirmed = await Chain.getExistingTransactionHashes(
                 finalTxs.map(t => t.hash),
             )
+
             if (confirmed.size > 0) {
+                log.error("Found confirmed txs during tx application")
+                // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+                // fetch confirmed txs from db
+                const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
+                log.error("Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2))
+                log.error("Confirmed txs full: " + JSON.stringify(confirmedTxs.map(t => t.hash), null, 2))
+                process.exit(1)
+
                 const before = finalTxs.length
                 finalTxs = finalTxs.filter(t => {
                     if (confirmed.has(t.hash)) {
@@ -911,7 +923,7 @@ export default class HandleGCR {
         )
         log.only(`[applyTransactions] Total txs: ${txs.length}`)
 
-        return { successfulTxs, failedTxs }
+        return { successfulTxs, failedTxs, skippedTxs }
     }
 
     /**

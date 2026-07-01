@@ -9,7 +9,7 @@ import { Transactions } from "src/model/entities/Transactions"
 import { IdentityCommitment } from "src/model/entities/GCRv2/IdentityCommitment"
 import { getSharedState } from "src/utilities/sharedState"
 import { updateMerkleTreeAfterBlock } from "@/features/zk/merkle/updateMerkleTreeAfterBlock"
-import { CHUNK_TRANSACTIONS, chunkedInsert, getBlocksRepo } from "./chainDb"
+import { chunkedInsert, getBlocksRepo } from "./chainDb"
 import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
@@ -27,6 +27,7 @@ import {
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
 import type { FindManyOptions } from "typeorm"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 export function isGenesis(block: Block): boolean {
     if (block.number === 0) {
@@ -76,6 +77,14 @@ export async function getLastBlockHash() {
     }
 
     return getSharedState.lastBlockHash
+}
+
+export async function getBlockHash(number: number) {
+    const block = await getBlocksRepo().findOne({
+        where: { number },
+        select: { hash: true },
+    })
+    return block ? block.hash : null
 }
 
 export async function getLastBlockTransactionSet(): Promise<Set<string>> {
@@ -193,9 +202,8 @@ export async function getOnlinePeersForLastThreeBlocks(): Promise<any[]> {
 
 export async function insertBlock(
     block: Block,
-    operations: any[] = [],
+    blockTxs: Transaction[],
     position?: number,
-    cleanMempool = true,
 ): Promise<Blocks> {
     const blocksRepo = getBlocksRepo()
     const orderedTransactionsHashes = block.content.ordered_transactions
@@ -210,6 +218,7 @@ export async function insertBlock(
     newBlock.content = block.content
     newBlock.status = "confirmed"
     newBlock.content.ordered_transactions = orderedTransactionsHashes
+    newBlock.attrs = block.attrs
 
     let existingBlock = null
 
@@ -242,17 +251,64 @@ export async function insertBlock(
         return existingBlock
     }
 
-    const transactionEntities = await Mempool.getTransactionsByHashes(
-        orderedTransactionsHashes,
-    )
+    let transactionEntities: Transaction[] = []
 
-    // DEBUG: Confirm all transactions' blockNumber == block.number
-    // if (transactionEntities.some(tx => tx.blockNumber !== block.number)) {
-    //     log.error(
-    //         `[insertBlock] Transaction blockNumber mismatch: ${transactionEntities.map(tx => tx.blockNumber).join(", ")}`,
-    //     )
-    //     process.exit(1)
-    // }
+    if (blockTxs.length > 0 && block.content.ordered_transactions.length > 0) {
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        // confirm array contains all the txs in the block
+        const blockTxsHashes = blockTxs.map(tx => tx.hash)
+        const blockOrderedTransactionsHashes =
+            block.content.ordered_transactions
+
+        if (
+            blockTxsHashes.every(hash =>
+                blockOrderedTransactionsHashes.includes(hash),
+            )
+        ) {
+            transactionEntities = blockTxs
+        }
+
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        else {
+            log.error(
+                "Block transactions mismatch with block ordered transactions",
+            )
+            process.exit(1)
+        }
+
+        const status = new Set([
+            TRANSACTION_STATUS.CONFIRMED,
+            TRANSACTION_STATUS.FAILED,
+        ])
+
+        // confirm all txs have a status set
+        const txsWithoutStatus = transactionEntities.filter(
+            tx => !status.has(tx.status),
+        )
+        if (txsWithoutStatus.length > 0) {
+            log.error(
+                "Transactions without status: " +
+                    JSON.stringify(txsWithoutStatus, null, 2),
+            )
+            process.exit(1)
+        }
+
+        transactionEntities = transactionEntities.map(tx => ({
+            ...tx,
+            blockNumber: block.number,
+        }))
+    }
+
+    log.debug("================================================")
+    log.debug("Saving Transactions for block: " + block.number)
+    log.debug(
+        JSON.stringify(
+            transactionEntities.map(tx => tx.hash),
+            null,
+            2,
+        ),
+    )
+    log.debug("================================================")
 
     const db = await Datasource.getInstance()
     const dataSource = db.getDataSource()
@@ -335,14 +391,13 @@ export async function insertBlock(
 
                 if (transactionEntities.length > 0) {
                     const rawTransactions = transactionEntities.map(tx =>
-                        Transaction.toRawTransaction(tx, "confirmed"),
+                        Transaction.toRawTransaction(tx),
                     )
 
                     const { skipped } = await chunkedInsert(
                         transactionalEntityManager,
                         Transactions,
                         rawTransactions.map(tx => toTransactionsEntity(tx)),
-                        CHUNK_TRANSACTIONS,
                     )
                     if (skipped > 0) {
                         log.warn(
@@ -364,19 +419,7 @@ export async function insertBlock(
 
                 const insertTransactionsEnd = Date.now()
                 log.only(
-                    `[insertBlock] Insert transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
-                )
-
-                const removeTransactionsStart = Date.now()
-                if (cleanMempool) {
-                    await Mempool.removeTransactionsByHashes(
-                        transactionEntities.map(tx => tx.hash),
-                        transactionalEntityManager,
-                    )
-                }
-                const removeTransactionsEnd = Date.now()
-                log.only(
-                    `[insertBlock] Remove transactions took ${removeTransactionsEnd - removeTransactionsStart}ms`,
+                    `[insertBlock] Insert ${transactionEntities.length} transactions took ${insertTransactionsEnd - insertTransactionsStart}ms`,
                 )
 
                 const commitmentsStart = Date.now()
@@ -420,9 +463,8 @@ export async function insertBlock(
                 // is deferred to post-commit (below) — RAM never ahead of DB.
                 const govProposalRepo =
                     transactionalEntityManager.getRepository(NetworkUpgrade)
-                const govVoteRepo = transactionalEntityManager.getRepository(
-                    NetworkUpgradeVote,
-                )
+                const govVoteRepo =
+                    transactionalEntityManager.getRepository(NetworkUpgradeVote)
                 await tallyUpgradeVotes(
                     block.number,
                     govProposalRepo,

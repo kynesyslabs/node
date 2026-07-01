@@ -62,5 +62,13 @@ export const LOCALHOST_IPS = [
     "::ffff:127.0.0.1",
 ] as const
 
+export const TRANSACTION_STATUS = {
+    CONFIRMED: "confirmed" as const,
+    FAILED: "failed" as const,
+    PENDING: "pending" as const,
+} as const
+
+export type TransactionStatus = typeof TRANSACTION_STATUS[keyof typeof TRANSACTION_STATUS]
+
 // --- File defaults ---
 export const TWITTER_COOKIE_FILE = "twitter_cookies.json"

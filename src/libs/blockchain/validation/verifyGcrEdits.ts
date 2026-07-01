@@ -64,11 +64,7 @@ export interface GcrEditsVerification {
  *     the node fills it at validation time. (Audit-sweep batch C PR 3.)
  */
 function blankVolatileEditFields(edit: GCREdit): GCREdit {
-    const blanked: GCREdit = { ...edit, txhash: "" }
-    if (blanked.type === "nonce" && "expectedPrior" in blanked) {
-        delete (blanked as { expectedPrior?: number }).expectedPrior
-    }
-    return blanked
+    return { ...edit, txhash: "" }
 }
 
 /**
@@ -174,17 +170,11 @@ export async function verifyGcrEditsMatch(
                 regenEditsHash: "",
             }
         }
-        // Prepend to match applyGasFeeSeparation's ordering
-        // ([fee edits..., base edits]). GCREditBalance is a GCREdit union
-        // member, so this is a widening assignment — no cast needed.
         regen.unshift(...feeEdits)
     }
 
     regen.forEach((gcredit: GCREdit) => {
         gcredit.txhash = ""
-        if (gcredit.type === "nonce" && "expectedPrior" in gcredit) {
-            delete (gcredit as { expectedPrior?: number }).expectedPrior
-        }
     })
 
     // Both sides must be normalised through the SAME canonical wire-shape

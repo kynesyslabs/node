@@ -11,7 +11,7 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 // REVIEW Conflict handling between peers (longest chain)
-
+import { Mutex } from "async-mutex"
 import { getSharedState } from "src/utilities/sharedState"
 import { isForkActive } from "@/forks"
 import Peer from "../../peer/Peer"
@@ -40,8 +40,18 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
-import SecretaryManager from "@/libs/consensus/v2/types/secretaryManager"
 import { getLastBlockSigners } from "../chainBlocks"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
+import Hashing from "@/libs/crypto/hashing"
+
+/**
+ * Used to prevent block insert operations from happening concurrently.
+ *
+ * 1. Via fastSync routine
+ * 2. Via the new block broadcast routine
+ */
+export const syncLock = new Mutex()
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -308,6 +318,169 @@ async function verifyLastBlockIntegrity(
     return false
 }
 
+async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
+    // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+
+    if (txs.length < block.content.ordered_transactions.length) {
+        log.error(
+            "[fastSync] No transactions received for block: " + block.hash,
+        )
+        log.debug("Trying to get transaction from signers")
+
+        const masterSet = new Set(block.content.ordered_transactions)
+        const missingTxs = masterSet.difference(new Set(txs.map(tx => tx.hash)))
+
+        // get signers for block
+        const signers = Object.keys(block.validation_data?.signatures || {})
+        for (const signer of signers) {
+            const peer = peerManager.getPeer(signer)
+
+            if (!peer) continue
+
+            const res = await askTxsForBlock(block, peer)
+
+            for (const tx of res) {
+                if (missingTxs.has(tx.hash)) {
+                    txs.push(tx)
+                    missingTxs.delete(tx.hash)
+                }
+            }
+
+            if (missingTxs.size === 0) break
+        }
+
+        if (missingTxs.size > 0) {
+            log.error(
+                `[fastSync] Still missing ${missingTxs.size} transactions even after asking from signers`,
+            )
+            log.error(
+                "Missing transactions: " +
+                    JSON.stringify(Array.from(missingTxs), null, 2),
+            )
+            process.exit(1)
+        }
+    }
+
+    for (const tx of txs) {
+        if (tx.blockNumber !== block.number) {
+            log.error(
+                "Transaction block number mismatch: " +
+                    tx.hash +
+                    ", expected: " +
+                    block.number +
+                    ", got: " +
+                    tx.blockNumber,
+            )
+            process.exit(1)
+        }
+    }
+
+    const sorted = orderDeterministically(txs)
+
+    // confirm sorted txs are in the same order as block ordered transactions
+    const inputHash = Hashing.sha256(
+        JSON.stringify(block.content.ordered_transactions),
+    )
+    const sortedHash = Hashing.sha256(JSON.stringify(sorted.map(tx => tx.hash)))
+    if (inputHash !== sortedHash) {
+        log.error(
+            "Deterministic order does not match block ordered transactions",
+        )
+        log.error(
+            "Block ordered transactions: " +
+                JSON.stringify(block.content.ordered_transactions, null, 2),
+        )
+        log.error(
+            "Sorted transactions: " +
+                JSON.stringify(
+                    sorted.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
+        process.exit(1)
+    }
+
+    const applied = sorted.filter(
+        tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
+    )
+
+    // Migration AddAttrsToBlocks adds `attrs` as nullable and mandates that
+    // readers treat a missing/NULL `attrs` as "no metadata". Blocks stored
+    // before this PR (or broadcast by older binaries) arrive with attrs === null;
+    // skip the gcrAppliedTx* checks for them rather than dereferencing null.
+    if (block.attrs == null) {
+        return applied
+    }
+
+    if (block.attrs["gcrAppliedTxCount"] !== applied.length) {
+        log.error(
+            "[fastSync] Block attrs gcrAppliedTxCount mismatch: " +
+                applied.length +
+                ", expected: " +
+                block.attrs["gcrAppliedTxCount"],
+        )
+
+        if (block.attrs["gcrAppliedTxCount"] > applied.length) {
+            // find the missing txs in the original txs list and log them
+            const appliedTxSet = new Set(block.attrs["gcrAppliedTxs"])
+            const confirmedAppliedTxSet = new Set(applied.map(tx => tx.hash))
+
+            const diff = appliedTxSet.difference(confirmedAppliedTxSet)
+
+            for (const tx of diff) {
+                const resolved = sorted.find(t => t.hash === tx)
+                if (resolved) {
+                    log.error(
+                        "[fastSync] Applied by forger, but not US: " +
+                            resolved.hash,
+                    )
+                    log.error(
+                        "[fastSync] Transaction full: " +
+                            JSON.stringify(resolved, null, 2),
+                    )
+                } else {
+                    log.error(
+                        "[fastSync] Missing tx from original txs list: " + tx,
+                    )
+                }
+            }
+            process.exit(1)
+        }
+
+        process.exit(1)
+    }
+
+    if (
+        block.attrs["gcrAppliedTxsHash"] !==
+        Hashing.sha256(JSON.stringify(applied.map(tx => tx.hash)))
+    ) {
+        log.error(
+            "[fastSync] Block attrs gcrAppliedTxsHash mismatch: " +
+                block.attrs["gcrAppliedTxsHash"] +
+                ", expected: " +
+                Hashing.sha256(JSON.stringify(applied.map(tx => tx.hash))),
+        )
+        log.error(
+            "Resolved applied txs: " +
+                JSON.stringify(
+                    applied.map(tx => tx.hash),
+                    null,
+                    2,
+                ),
+        )
+        log.error(
+            "Fetched Applied txs: " +
+                JSON.stringify(block.attrs["gcrAppliedTxs"], null, 2),
+        )
+        log.error("Full applied txs: " + JSON.stringify(applied, null, 2))
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        process.exit(1)
+    }
+
+    return applied
+}
+
 /**
  * Given a block and a peer, saves the block into the database, downloads the transactions
  * from the peer and updates the GCR and transaction tables.
@@ -317,18 +490,12 @@ async function verifyLastBlockIntegrity(
  * @returns True if the block was synced successfully, false otherwise
  */
 export async function syncBlock(block: Block, peer: Peer) {
-    const exists = await Chain.getBlockByNumber(block.number)
+    let exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.debug("Block already exists, skipping ...")
         return true
     }
 
-    // AUDIT C2 — verify a synced block's hash + signature quorum before insert.
-    // Without this, an unauthenticated peer could push a forged block and
-    // poison the chain. The eligible signer set is resolved height-stably
-    // (validators valid as of block.number-1), so this is correct at the tip
-    // AND during deep/batch catch-up sync (audit C2-deep). Fork-gated on
-    // nonceEnforcement (active @0) so pre-fork re-sync is byte-identical.
     if (isForkActive("nonceEnforcement", getSharedState.lastBlockNumber ?? 0)) {
         const verdict = await verifyBlock(block as never)
         if (!verdict.valid) {
@@ -342,7 +509,14 @@ export async function syncBlock(block: Block, peer: Peer) {
         )
     }
 
-    await Chain.insertBlock(block, [], null, false)
+    // check exists again
+    exists = await Chain.getBlockByNumber(block.number)
+    if (exists) {
+        log.error("Block already exists, skipping ...")
+        return false
+    }
+
+    await Chain.insertBlock(block, [])
     log.debug("Block inserted successfully")
     log.debug(
         `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
@@ -358,8 +532,10 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
+    const applied = await verifyBlockAttrs(block, txs)
+
     // ! Sync the native tables
-    await syncGCRTables(txs)
+    await syncGCRTables(applied)
 
     // REVIEW Insert the txs into the transactions database table
     if (txs.length > 0) {
@@ -367,6 +543,19 @@ export async function syncBlock(block: Block, peer: Peer) {
         const success = await Chain.insertTransactionsFromSync(txs)
         if (success) {
             log.info("[fastSync] Transactions inserted successfully")
+
+            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+            // confirm all txs are inserted
+            for (const tx of txs) {
+                const res = await Chain.checkTxExists(tx.hash)
+                if (!res) {
+                    log.error(
+                        "[syncGCRTables] Transaction not found: " + tx.hash,
+                    )
+                    process.exit(1)
+                }
+            }
+            log.debug("[syncGCRTables] All transactions are inserted")
             return true
         }
 
@@ -583,17 +772,25 @@ async function batchDownloadBlocks(
             }
         }
 
+        // check exists again
+        const exists = await Chain.getBlockByNumber(block.number)
+        if (exists) {
+            log.error("Block already exists, skipping ...")
+            return false
+        }
+
         // Insert block
-        await Chain.insertBlock(block, [], null, false)
+        await Chain.insertBlock(block, [])
         log.info(
             `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
         )
 
         // Merge peerlist
         await mergePeerlist(block)
+        const applied = await verifyBlockAttrs(block, blockTxs)
 
         // Sync GCR tables
-        await syncGCRTables(blockTxs)
+        await syncGCRTables(applied)
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -785,7 +982,14 @@ async function requestBlocks(): Promise<boolean> {
 
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]) {
-    return await HandleGCR.applyTransactions(txs, false)
+    // apply only transaction with confirmed status
+    const confirmedTxs = txs.filter(
+        tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
+    )
+
+    // sort transactions deterministic
+    const sortedTxs = orderDeterministically(confirmedTxs)
+    await HandleGCR.applyTransactions(sortedTxs, false)
 }
 
 // Helper function to ask for the transactions in a block
@@ -816,7 +1020,11 @@ export async function askTxsForBlock(
         retries: 3,
     })
 
-    if (res.result === 200) {
+    if (
+        res.result === 200 &&
+        Array.isArray(res.response) &&
+        res.response.length > 0
+    ) {
         return res.response as Transaction[]
     }
 
@@ -943,14 +1151,14 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<{ latestChainBlock: number; ourLatestBlock: number }> {
-    // if (getSharedState.inSyncLoop) {
-    //     log.debug("[fastSync] Sync loop already running, skipping")
+    if (getSharedState.inSyncLoop) {
+        log.debug("[fastSync] Sync loop already running, skipping")
 
-    //     return {
-    //         latestChainBlock: latestBlock(),
-    //         ourLatestBlock: getSharedState.lastBlockNumber,
-    //     }
-    // }
+        return {
+            latestChainBlock: latestBlock(),
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
+    }
 
     log.debug("[fastSync] Starting sync loop")
     try {
@@ -975,10 +1183,12 @@ export async function fastSync(
         let synced: boolean
         if (getSharedState.fastSyncCount > 0) {
             const result = await Promise.race([
-                fastSyncRoutine(peers).then(v => ({
-                    kind: "done" as const,
-                    value: v,
-                })),
+                syncLock
+                    .runExclusive(async () => fastSyncRoutine(peers))
+                    .then(v => ({
+                        kind: "done" as const,
+                        value: v,
+                    })),
                 sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
                     kind: "timeout" as const,
                     value: false,
@@ -1073,7 +1283,12 @@ export async function waitForPeerStatus(
         }
 
         const waitFor = signerIds
-            ? onlinePeers.filter(p => signerIds.has(p.identity))
+            ? onlinePeers.filter(
+                  p =>
+                      signerIds.has(p.identity) &&
+                      // only wait for peers that are upto 2 blocks behind us
+                      getSharedState.lastBlockNumber - p.sync.block <= 2,
+              )
             : onlinePeers.filter(p => p.sync.block >= ourBlock - 2)
 
         if (waitFor.length === 0) {

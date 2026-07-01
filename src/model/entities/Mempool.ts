@@ -1,3 +1,4 @@
+import type { TransactionStatus } from "@/utilities/constants"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
@@ -24,7 +25,7 @@ export class MempoolTx implements Transaction {
     ed25519_signature: string
 
     @Column("text", { name: "status" })
-    status: string
+    status: string | TransactionStatus
 
     @Column("integer", { name: "blockNumber" })
     blockNumber: number

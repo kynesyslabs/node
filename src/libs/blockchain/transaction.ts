@@ -21,24 +21,19 @@ import {
     RawTransaction,
     Transaction as ITransaction,
 } from "@kynesyslabs/demosdk/types"
-import type { ISignature, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import type { ISignature } from "@kynesyslabs/demosdk/types"
 import type { TransactionContent } from "@kynesyslabs/demosdk/types"
 import Hashing from "../crypto/hashing"
 import Confirmation from "./types/confirmation"
-import {
-    hexToUint8Array,
-    ucrypto,
-    uint8ArrayToHex,
-} from "@kynesyslabs/demosdk/encryption"
+import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import { getSharedState } from "@/utilities/sharedState"
-import IdentityManager from "./gcr/gcr_routines/identityManager"
-import { SavedPqcIdentity } from "@/model/entities/types/IdentityTypes"
 import log from "src/utilities/logger"
 import prefetchIdentities from "./validation/prefetchIdentities"
 import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { serializeTransactionContent } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
+import type { TransactionStatus } from "@/utilities/constants"
 
 interface TransactionResponse {
     status: string
@@ -53,8 +48,9 @@ export default class Transaction implements ITransaction {
     signature: ISignature | null = null
     ed25519_signature: string | null = null
     hash: string | null = null
-    status: string | null = null
+    status: string | TransactionStatus | null = null
     blockNumber: number | null = null
+    attrs: Record<string, any> | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data
@@ -147,7 +143,11 @@ export default class Transaction implements ITransaction {
     ) {
         const structured = this.structured(tx)
         if (!structured.valid) {
-            return null // TODO Improve return type
+            return {
+                success: false,
+                message: structured.message,
+                confirmation: null,
+            }
         }
 
         const { success, message } = await this.validateSignature(tx, sender)
@@ -232,22 +232,8 @@ export default class Transaction implements ITransaction {
         // owning block context, it should pass `block.number`; otherwise
         // we fall back to the chain head.
         const height = blockHeight ?? getSharedState.lastBlockNumber ?? 0
-        let content = tx.content
-        if (Array.isArray(content?.gcr_edits)) {
-            const strippedEdits = content.gcr_edits.map(edit => {
-                if (!("expectedPrior" in edit)) {
-                    return edit
-                }
-
-                const stripped = { ...edit }
-                delete (stripped as { expectedPrior?: number }).expectedPrior
-                return stripped
-            })
-            content = { ...content, gcr_edits: strippedEdits }
-        }
-
         const derivedHash = Hashing.sha256(
-            serializeTransactionContent(content, height),
+            serializeTransactionContent(tx.content, height),
         )
 
         return derivedHash === tx.hash
@@ -464,10 +450,7 @@ export default class Transaction implements ITransaction {
         }
     }
 
-    public static toRawTransaction(
-        tx: Transaction,
-        status = "confirmed",
-    ): RawTransaction {
+    public static toRawTransaction(tx: Transaction): RawTransaction {
         // NOTE From and To can be either a string or a Buffer
         if (tx.content.to["data"]?.toString("hex")) {
             tx.content.to = tx.content.to["data"]?.toString("hex")
@@ -488,7 +471,7 @@ export default class Transaction implements ITransaction {
             blockNumber: tx.blockNumber,
             signature: JSON.stringify(tx.signature), // REVIEW This is a horrible thing, if it even works
             ed25519_signature: tx.ed25519_signature,
-            status: status,
+            status: tx.status,
             hash: tx.hash,
             content: JSON.stringify(tx.content),
             type: tx.content.type,
@@ -507,6 +490,7 @@ export default class Transaction implements ITransaction {
             // runs (P6). The DB column is nullable.
             rpcAddress: tx.content.transaction_fee.rpc_address ?? null,
             id: 0, // ? What is this?
+            attrs: tx.attrs,
         }
 
         return rawTx
@@ -568,6 +552,7 @@ export default class Transaction implements ITransaction {
             gcr_edits: JSON.parse(rawTx.content).gcr_edits,
         }
         tx.ed25519_signature = rawTx.ed25519_signature
+        tx.attrs = typeof rawTx.attrs === "string" ? JSON.parse(rawTx.attrs) : rawTx.attrs
 
         return tx
     }

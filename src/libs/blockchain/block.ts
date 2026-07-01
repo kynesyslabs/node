@@ -24,6 +24,7 @@ export default class Block implements BlockType {
     proposer: pki.PublicKey | pki.ed25519.BinaryBuffer
     next_proposer: string
     validation_data: { signatures: { [key: string]: string } }
+    attrs: Record<string, any> | null
 
     constructor() {
         this.number = null

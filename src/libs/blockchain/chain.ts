@@ -71,6 +71,10 @@ export default class Chain {
         return blockOps.getLastBlockHash()
     }
 
+    static async getBlockHash(number: number): Promise<string | null> {
+        return blockOps.getBlockHash(number)
+    }
+
     static async getLastBlockTransactionSet(): Promise<Set<string>> {
         return blockOps.getLastBlockTransactionSet()
     }
@@ -144,15 +148,14 @@ export default class Chain {
     // ── Mutations ─────────────────────────────────────────────
     static async insertBlock(
         block: Block,
-        operations: Operation[] = [],
+        blockTxs: Transaction[],
         position?: number,
-        cleanMempool = true,
     ): Promise<Blocks> {
-        return blockOps.insertBlock(block, operations, position, cleanMempool)
+        return blockOps.insertBlock(block, blockTxs, position)
     }
 
-    static async insertTransaction(transaction: Transaction, status = "confirmed"): Promise<boolean> {
-        return txOps.insertTransaction(transaction, status)
+    static async insertTransaction(transaction: Transaction): Promise<boolean> {
+        return txOps.insertTransaction(transaction)
     }
 
     static async insertTransactionsFromSync(transactions: Transaction[]): Promise<boolean> {

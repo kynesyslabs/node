@@ -156,6 +156,19 @@ export class DTRManager {
         blockNumber: number
         blockRef: string
     }): Promise<RPCResponse> {
+        log.debug(
+            "[receiveRelayedTransactions] Receiving relayed transactions: " +
+                data.payload.length,
+        )
+        log.debug(
+            "[receiveRelayedTransactions] Receiving relayed transactions: " +
+                JSON.stringify(
+                    data.payload.map(vd => vd.data.transaction.hash),
+                    null,
+                    2,
+                ),
+        )
+
         try {
             if (getSharedState.inConsensusLoop) {
                 if (
@@ -301,6 +314,11 @@ export class DTRManager {
             require_reply: false,
         }
 
+        log.debug(
+            "[receiveRelayedTransaction] Receiving relayed transaction: " +
+                validityData.data.transaction.hash,
+        )
+
         try {
             // Make sure we're using the same signing algorithm
             const isSameSigningAlgorithm =
@@ -390,13 +408,6 @@ export class DTRManager {
                 }
             }
 
-            // Note: staking/governance type dispatcher runs in
-            // confirmTransaction() before validityData is signed, so by
-            // the time we reach this point on the relay receiver, the tx
-            // already carries any synthesized gcr_edit and signature
-            // verification above attests to it. No additional dispatcher
-            // call is needed here.
-
             // Add validated transaction to mempool
             const { confirmationBlock, error } = await Mempool.addTransaction(
                 {
@@ -404,6 +415,16 @@ export class DTRManager {
                     reference_block: validityData.data.reference_block,
                 },
                 blockNumber,
+            )
+
+            log.debug(
+                "[receiveRelayedTransaction] Added relayed transaction to mempool: " +
+                    tx.hash,
+            )
+            log.debug("Block Number: " + blockNumber)
+            log.debug("Confirmation Block: " + confirmationBlock)
+            log.debug(
+                "Tx reference block: " + validityData.data.reference_block,
             )
 
             if (error) {
@@ -479,11 +500,14 @@ export class DTRManager {
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
-            const res = await this.receiveRelayedTransactions({
-                payload: txsToRelay,
-                blockRef: getSharedState.lastBlockHash,
-                blockNumber: getSharedState.lastBlockNumber + 1,
-            })
+            const res = await Mempool.lock.runExclusive(
+                async () =>
+                    await this.receiveRelayedTransactions({
+                        payload: txsToRelay,
+                        blockRef: getSharedState.lastBlockHash,
+                        blockNumber: getSharedState.lastBlockNumber + 1,
+                    }),
+            )
 
             for (const tx of txsToRelay) {
                 DTRManager.validityDataCache.delete(tx.data.transaction.hash)

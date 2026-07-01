@@ -31,7 +31,7 @@ import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
-function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
+export function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
     return (
         referenceBlock >= lastBlock - getSharedState.referenceBlockRoom &&
         referenceBlock <= lastBlock
@@ -379,7 +379,7 @@ export async function handleExecuteTransaction(
         }
 
         try {
-            const { confirmationBlock, error } = await Mempool.addTransaction({
+            const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
                 ...queriedTx,
                 reference_block: validatedData.data.reference_block,
             })

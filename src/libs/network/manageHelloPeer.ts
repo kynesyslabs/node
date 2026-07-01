@@ -98,15 +98,15 @@ export async function manageHelloPeer(
         syncData: peerManager.ourSyncData,
         peerlist: peerManager
             .getPeers()
+            .filter(
+                peer =>
+                    peer.identity !== getSharedState.publicKeyHex &&
+                    peer.identity !== content.publicKey,
+            )
             .map(peer => ({
                 url: peer.connection.string,
                 publicKey: peer.identity,
-            }))
-            .filter(
-                peer =>
-                    peer.publicKey !== getSharedState.publicKeyHex &&
-                    peer.publicKey !== content.publicKey,
-            ),
+            })),
     }
 
     if (Waiter.isWaiting(Waiter.keys.STARTUP_HELLO_PEER)) {

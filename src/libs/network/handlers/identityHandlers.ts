@@ -1,6 +1,9 @@
 import { Twitter } from "../../identity/tools/twitter"
 import { Discord } from "../../identity/tools/discord"
-import { fetchDomainProof, DOMAIN_PROOF_PATH } from "../../abstraction/web2/domain"
+import {
+    fetchDomainProof,
+    DOMAIN_PROOF_PATH,
+} from "../../abstraction/web2/domain"
 import { UDIdentityManager } from "../../blockchain/gcr/gcr_routines/udIdentityManager"
 import ensureGCRForUser from "../../blockchain/gcr/gcr_routines/ensureGCRForUser"
 import type { Tweet } from "@kynesyslabs/demosdk/types"
@@ -22,7 +25,9 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
         } catch (error) {
             response.result = 400
             response.response = "error"
-            response.extra = { message: error instanceof Error ? error.message : String(error) }
+            response.extra = {
+                message: error instanceof Error ? error.message : String(error),
+            }
         }
         return response
     },
@@ -33,8 +38,7 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             response.response = "No address specified"
             return response
         }
-        const nStat = await ensureGCRForUser(data.address)
-        response.response = nStat.nonce
+        response.response = await GCR.getAccountNonce(data.address)
         return response
     },
 
@@ -127,9 +131,7 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             let messageIdFromUrl: string | undefined
 
             try {
-                const details = discord.extractMessageDetails(
-                    data.discordUrl,
-                )
+                const details = discord.extractMessageDetails(data.discordUrl)
                 guildIdFromUrl = details.guildId
                 channelIdFromUrl = details.channelId
                 messageIdFromUrl = details.messageId
@@ -143,8 +145,7 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
                 authorUsername: message.author?.username ?? null,
                 authorId: message.author?.id ?? null,
                 channelId: message.channel_id ?? channelIdFromUrl ?? null,
-                guildId:
-                    (message as any).guild_id ?? guildIdFromUrl ?? null,
+                guildId: (message as any).guild_id ?? guildIdFromUrl ?? null,
             }
 
             response.response = {
