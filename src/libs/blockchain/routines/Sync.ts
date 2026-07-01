@@ -404,6 +404,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
     const applied = sorted.filter(
         tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
     )
+
+    // Migration AddAttrsToBlocks adds `attrs` as nullable and mandates that
+    // readers treat a missing/NULL `attrs` as "no metadata". Blocks stored
+    // before this PR (or broadcast by older binaries) arrive with attrs === null;
+    // skip the gcrAppliedTx* checks for them rather than dereferencing null.
+    if (block.attrs == null) {
+        return applied
+    }
+
     if (block.attrs["gcrAppliedTxCount"] !== applied.length) {
         log.error(
             "[fastSync] Block attrs gcrAppliedTxCount mismatch: " +
