@@ -440,6 +440,10 @@ services:
       # Epic 12 T14 — selects which tlsnotary-modes/*.caddy snippet
       # is imported. Allowed: subpath (default), subdomain, direct.
       TLSNOTARY_PROXY_MODE: ${TLSNOTARY_PROXY_MODE:-subpath}
+      # The subpath snippet routes /tlsn/<notary-port>/ via {$TLSNOTARY_PORT},
+      # which Caddy reads from its OWN env — so it must be set here, or the
+      # notary leg falls back to 7047 and 502s on port-remapped stacks (devnet).
+      TLSNOTARY_PORT: ${TLSNOTARY_PORT:-7047}
     volumes:
       - ./monitoring/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./monitoring/caddy/tlsnotary-modes:/etc/caddy/tlsnotary-modes:ro

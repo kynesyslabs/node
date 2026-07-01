@@ -111,6 +111,11 @@ services:
 
   caddy:
     container_name: demos-caddy-devnet
+    environment:
+      # Devnet remaps the notary to 7147; Caddy must see the same value or its
+      # /tlsn/<notary-port>/ route falls back to 7047 → 502. Merges with (and
+      # overrides) the base caddy environment.
+      TLSNOTARY_PORT: 7147
     networks: !override
       - demos-network-devnet
     ports: !override

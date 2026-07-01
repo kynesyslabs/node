@@ -79,7 +79,6 @@ curl -s -o /dev/null -w '%{http_code}\n' -k \
 
 `101` → routing + upgrade are correct. `502` → the location is missing, the port
 isn't published/reachable, or `Connection` is lowercase.
-```
 
 ## Note: HTTPS RPC
 
