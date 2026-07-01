@@ -394,6 +394,9 @@ export async function consensusRoutine(): Promise<void> {
             error instanceof NotInShardError ||
             error instanceof ForgingEndedError
         ) {
+            // Graceful abort: no block was finalized, so skip the finalized-tx
+            // assertion in `finally` (which would otherwise process.exit(1)).
+            exitReason = "consensusAborted"
             log.error(error)
             log.error("[consensusRoutine] Exiting consensus routine")
             return
@@ -472,9 +475,12 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         if (
-            !new Set(["blockTimestampNotReceived", "voteError", "abortConsensus"]).has(
-                exitReason,
-            ) &&
+            !new Set([
+                "blockTimestampNotReceived",
+                "voteError",
+                "abortConsensus",
+                "consensusAborted",
+            ]).has(exitReason) &&
             txs.length !== blockTxs.length
         ) {
             const diff = blockTxs.filter(
