@@ -1,10 +1,33 @@
-# TLSNotary route — subpath mode (default).
-# Mount at https://${PROXY_DOMAIN}/tlsnotary/. Caddy strips the prefix
-# before forwarding so the notary container stays at root. Works when
-# upstream notary has no sub-path assumptions in its WS framing.
+# TLSNotary routes — subpath mode (default).
+#
+# The node advertises EVERY TLSN endpoint under /tlsn/<port>/ (buildWsUrl's
+# default path), and two upstreams live behind that prefix:
+#   - the notary websocket — `tlsnotary` container on $TLSNOTARY_PORT
+#   - the per-target wstcp proxies — spawned in the `node` container on a
+#     dynamic port in TLSNOTARY_PROXY_PORT_MIN..MAX (wstcp binds 0.0.0.0,
+#     so it's reachable by service name on the compose network)
+# Both must be routed or the SDK's attest() websocket closes with 1006.
+# Caddy upgrades the websocket automatically; no extra headers needed.
 #
 # Selected when TLSNOTARY_PROXY_MODE=subpath (or unset).
 
+# Notary — legacy /tlsnotary/* and the advertised /tlsn/<notary-port>/.
+# Honour $TLSNOTARY_PORT: the dev stack remaps it (e.g. 7147), so the
+# hard-coded 7047 here is what made the notary leg 502 on remapped hosts.
 handle_path /tlsnotary/* {
-	reverse_proxy tlsnotary:7047
+	reverse_proxy tlsnotary:{$TLSNOTARY_PORT:7047}
+}
+handle_path /tlsn/{$TLSNOTARY_PORT:7047}/* {
+	reverse_proxy tlsnotary:{$TLSNOTARY_PORT:7047}
+}
+
+# Dynamic per-target wstcp proxies: /tlsn/<port>/ -> node:<port>.
+# The literal notary path above is more specific, so it wins for the
+# notary port; everything else under /tlsn/<digits>/ lands here.
+# Restrict to the 55000-57999 wstcp allocation window so this can't proxy
+# arbitrary node ports (RPC 53550, MCP 3001, metrics 9090, ...) publicly.
+@tlsnproxy path_regexp tlsnport ^/tlsn/(5[567]\d{3})(/.*)?$
+handle @tlsnproxy {
+	uri strip_prefix /tlsn/{re.tlsnport.1}
+	reverse_proxy node:{re.tlsnport.1}
 }

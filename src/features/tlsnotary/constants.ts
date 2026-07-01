@@ -49,10 +49,16 @@ export const SIGNING_KEY_FILE_MODE = 0o600
  * Configuration constants for port allocation and proxy lifecycle
  */
 export const PORT_CONFIG = {
-  /** Minimum port number in the allocation range */
-  PORT_MIN: 55000,
-  /** Maximum port number in the allocation range */
-  PORT_MAX: 57000,
+  /**
+   * Minimum/maximum port for wstcp proxy allocation. Overridable via env so
+   * the published host range (docker-compose `ports:`) can be narrowed to a
+   * window the reverse proxy can actually reach — the proxies bind dynamic
+   * ports in this range and nginx forwards `/tlsn/<port>/` to them, so the
+   * range MUST be host-reachable or every verification 502s. Defaults keep
+   * the historical 55000-57000 behaviour.
+   */
+  PORT_MIN: Number(process.env.TLSNOTARY_PROXY_PORT_MIN) || 55000,
+  PORT_MAX: Number(process.env.TLSNOTARY_PROXY_PORT_MAX) || 57000,
   /** Idle timeout before a proxy is considered stale (30 seconds) */
   IDLE_TIMEOUT_MS: 30000,
   /** Maximum number of spawn retry attempts */
