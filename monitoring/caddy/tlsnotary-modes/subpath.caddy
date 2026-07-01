@@ -24,7 +24,9 @@ handle_path /tlsn/{$TLSNOTARY_PORT:7047}/* {
 # Dynamic per-target wstcp proxies: /tlsn/<port>/ -> node:<port>.
 # The literal notary path above is more specific, so it wins for the
 # notary port; everything else under /tlsn/<digits>/ lands here.
-@tlsnproxy path_regexp tlsnport ^/tlsn/(\d+)(/.*)?$
+# Restrict to the 55000-57999 wstcp allocation window so this can't proxy
+# arbitrary node ports (RPC 53550, MCP 3001, metrics 9090, ...) publicly.
+@tlsnproxy path_regexp tlsnport ^/tlsn/(5[567]\d{3})(/.*)?$
 handle @tlsnproxy {
 	uri strip_prefix /tlsn/{re.tlsnport.1}
 	reverse_proxy node:{re.tlsnport.1}

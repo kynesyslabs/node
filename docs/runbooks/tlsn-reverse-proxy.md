@@ -42,8 +42,10 @@ Add this `location` inside the node's `listen 443 ssl; server_name <domain>;`
 block, then `sudo nginx -t && sudo systemctl reload nginx`:
 
 ```nginx
-# Dynamic wstcp TLSNotary proxies + notary: /tlsn/<port>/ -> 127.0.0.1:<port>
-location ~ ^/tlsn/(\d+)/?(.*)$ {
+# Dynamic wstcp TLSNotary proxies: /tlsn/<port>/ -> 127.0.0.1:<port>
+# The 5[567]\d{3} class restricts to the 55000-57999 allocation window so this
+# can't be used to reach arbitrary node ports (RPC 53550, MCP 3001, ...).
+location ~ ^/tlsn/(5[567]\d{3})/?(.*)$ {
     proxy_pass http://127.0.0.1:$1/$2$is_args$args;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
@@ -52,6 +54,9 @@ location ~ ^/tlsn/(\d+)/?(.*)$ {
     proxy_read_timeout 120s;
 }
 ```
+
+If the notary port is outside `55000-57999` (e.g. `7047`/`7147`), give it its own
+`location = /tlsn/<notary-port>/ { ... }` block, or widen the class accordingly.
 
 Prerequisites (both already handled by deploying this branch):
 
