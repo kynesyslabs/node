@@ -93,6 +93,8 @@ export async function serverRpcBun() {
         return jsonResponse({
             version: getSharedState.version,
             version_name: getSharedState.version_name,
+            commitMessage: getSharedState.commitMessage,
+            commitHash: getSharedState.commitHash,
             ...info,
         })
     })

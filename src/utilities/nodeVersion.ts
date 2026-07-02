@@ -52,6 +52,8 @@ export interface NodeVersionInfo {
     commit: string | null
     /** First 7 chars of `commit`, or `null` if `commit` is `null`. */
     commitShort: string | null
+    /** First line of the HEAD commit message, or `null` if not resolvable. */
+    commitMessage: string | null
     /** Human-readable branch label, or `null` if not resolvable. */
     branch: string | null
     /** `true` iff the working tree had uncommitted edits at boot. */
@@ -148,6 +150,7 @@ function readGitInfo(): {
     commit: string | null
     branch: string | null
     dirty: boolean
+    message: string | null
 } {
     // 1) Env-var overrides take priority. Useful for `git clone --depth 0`
     //    images or Docker stages that don't ship `.git/` but do receive
@@ -159,13 +162,14 @@ function readGitInfo(): {
             branch: process.env.GIT_BRANCH?.trim() || null,
             dirty:
                 (process.env.GIT_DIRTY?.trim().toLowerCase() ?? "") === "true",
+            message: process.env.GIT_COMMIT_MESSAGE?.trim() || null,
         }
     }
 
     // 2) Otherwise resolve from `.git/` in the runtime tree.
     const repoRoot = findRepoRoot(process.cwd())
     if (!repoRoot) {
-        return { commit: null, branch: null, dirty: false }
+        return { commit: null, branch: null, dirty: false, message: null }
     }
 
     // 2a) Commit + branch from `.git/HEAD`. If HEAD points at a ref
@@ -228,7 +232,20 @@ function readGitInfo(): {
         dirty = code === 1
     }
 
-    return { commit: commit?.toLowerCase() ?? null, branch, dirty }
+    let message: string | null = null
+    try {
+        message =
+            execFileSync("git", ["log", "-1", "--format=%s"], {
+                cwd: repoRoot,
+                stdio: ["ignore", "pipe", "ignore"],
+            })
+                .toString("utf8")
+                .trim() || null
+    } catch {
+        /* message stays null */
+    }
+
+    return { commit: commit?.toLowerCase() ?? null, branch, dirty, message }
 }
 
 // =============================================================================
@@ -243,6 +260,7 @@ export const NODE_VERSION: NodeVersionInfo = {
     version: PKG.version,
     commit: GIT.commit,
     commitShort: GIT.commit?.slice(0, 7) ?? null,
+    commitMessage: GIT.message,
     branch: GIT.branch,
     dirty: GIT.dirty,
     builtAt: process.env.BUILT_AT?.trim() || null,

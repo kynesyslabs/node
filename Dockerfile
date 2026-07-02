@@ -187,6 +187,7 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
 # node never panics on absence.
 ARG GIT_COMMIT=
 ARG GIT_BRANCH=
+ARG GIT_COMMIT_MESSAGE=
 ARG GIT_DIRTY=false
 ARG BUILT_AT=
 
@@ -197,6 +198,7 @@ ENV NODE_ENV=production \
     METRICS_HOST=0.0.0.0 \
     GIT_COMMIT=$GIT_COMMIT \
     GIT_BRANCH=$GIT_BRANCH \
+    GIT_COMMIT_MESSAGE=$GIT_COMMIT_MESSAGE \
     GIT_DIRTY=$GIT_DIRTY \
     BUILT_AT=$BUILT_AT
 

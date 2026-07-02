@@ -326,6 +326,7 @@ if git -C "$(dirname "${BASH_SOURCE[0]}")/.." rev-parse --git-dir >/dev/null 2>&
     GIT_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     export GIT_COMMIT="$(git -C "$GIT_REPO_DIR" rev-parse HEAD 2>/dev/null || true)"
     export GIT_BRANCH="$(git -C "$GIT_REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    export GIT_COMMIT_MESSAGE="$(git -C "$GIT_REPO_DIR" log -1 --format=%s 2>/dev/null || true)"
     # Refresh the index first so stat-cache drift (mtime/ctime updated by
     # an editor that wrote a file back identically, or by file-mode bits
     # touched on checkout) doesn't lie about dirty. After

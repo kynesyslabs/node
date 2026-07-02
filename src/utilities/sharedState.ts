@@ -91,6 +91,9 @@ export default class SharedState {
     // the commit can't be resolved (e.g. a stripped Docker image without
     // .git/ and no GIT_COMMIT build arg).
     commitHash = NODE_VERSION.commit
+        ? `<${NODE_VERSION.branch ?? "unknown"}>${NODE_VERSION.commit}`
+        : null
+    commitMessage = NODE_VERSION.commitMessage
     signingAlgorithm = DEFAULT_SIGNING_ALGORITHM as SigningAlgorithm
 
     // Node start time in milliseconds since epoch — set when this singleton
