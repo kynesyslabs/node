@@ -10,17 +10,10 @@
 // REVIEW: TLSNotary port pool management for wstcp proxy instances
 import * as net from "net"
 import log from "@/utilities/logger"
-
-/**
- * Configuration constants for port allocation
- */
-export const PORT_CONFIG = {
-    PORT_MIN: 55000,
-    PORT_MAX: 57000,
-    IDLE_TIMEOUT_MS: 30000, // 30 seconds
-    MAX_SPAWN_RETRIES: 3,
-    SPAWN_TIMEOUT_MS: 5000, // 5 seconds to wait for wstcp to start
-}
+// Single source of truth for the proxy port window, so the env-overridable
+// range (TLSNOTARY_PROXY_PORT_MIN/MAX) actually drives allocation — a local
+// hardcoded copy here would silently ignore the published host range.
+import { PORT_CONFIG } from "./constants"
 
 /**
  * Port pool state interface

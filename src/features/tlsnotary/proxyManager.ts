@@ -36,12 +36,12 @@ import { promisify } from "util"
 import log from "@/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 import {
-    PORT_CONFIG,
     initPortPool,
     allocatePort,
     releasePort,
     type PortPoolState,
 } from "./portAllocator"
+import { PORT_CONFIG } from "./constants"
 
 const execAsync = promisify(exec)
 

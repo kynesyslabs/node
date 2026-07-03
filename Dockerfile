@@ -140,6 +140,21 @@ RUN if [ "$PRUNE_MODULES" = "true" ]; then \
 # Stage 2: runtime
 # Minimal image with only what the node needs at run time. Runs as non-root.
 # =============================================================================
+# ── wstcp (TLSNotary websocket↔TCP proxy) ─────────────────────────────
+# The TLSNotary flow spawns `wstcp` on demand to relay the browser's
+# WebSocket to the target TLS server (see proxyManager.ts). The runtime
+# image ships no Rust toolchain, so the on-demand `cargo install wstcp`
+# fallback in ensureWstcp() cannot run — bake the binary in instead.
+# Without it the proxy never binds its port and every verification fails
+# with an nginx 502 / CloseEvent 1006 on the prover.
+FROM rust:1-slim AS wstcp
+# Pin the version so an upstream wstcp release can't silently change
+# behaviour or break the build. `--locked` is intentionally omitted: the
+# crate's bundled Cargo.lock pins dependency versions that no longer
+# compile on the current toolchain, so we let cargo resolve compatible
+# deps for this exact wstcp version.
+RUN cargo install wstcp --version 0.2.1 --root /wstcp
+
 FROM oven/bun:1.3-debian AS runtime
 
 # OCI image metadata.
@@ -177,6 +192,11 @@ RUN chmod 0755 /app/scripts/docker-entrypoint.sh \
     && mkdir -p /app/data /app/logs /app/state \
     && chown demos:demos /app /app/data /app/logs /app/state \
     && chmod 0755 /app /app/data /app/logs /app/state
+
+# TLSNotary proxy binary, baked in so the on-demand proxy can spawn
+# without a Rust toolchain. Lands at $HOME/.cargo/bin/wstcp (HOME=/app) —
+# the exact path proxyManager.ts::ensureWstcp() probes via `test -x`.
+COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
 
 # Build-time provenance. These ARGs are populated by the build driver
 # (compose passes `git rev-parse HEAD` + `git rev-parse --abbrev-ref HEAD`
