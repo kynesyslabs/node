@@ -11,6 +11,7 @@ import type { DiscordMessage } from "../../identity/tools/discord"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 import GCR from "@/libs/blockchain/gcr/gcr"
+import Mempool from "@/libs/blockchain/mempool"
 
 export const identityHandlers: Record<string, NodeCallHandler> = {
     getAddressInfo: async (data, response) => {
@@ -39,6 +40,35 @@ export const identityHandlers: Record<string, NodeCallHandler> = {
             return response
         }
         response.response = await GCR.getAccountNonce(data.address)
+        return response
+    },
+
+    // Mempool-aware next nonce: the value a client should place directly in
+    // `tx.content.nonce`. `getAddressNonce` returns only the confirmed nonce,
+    // which lags inclusion — so rapid/batch sends from one address all read
+    // the same value and collide (assignNonce hard-rejects the duplicates).
+    // This returns exactly what assignNonce expects:
+    //     account.nonce + 1 + pendingMempoolCount
+    // (see validateTransaction.assignNonce). Address is lowercased to match
+    // the canonicalisation there. Pure read — no account provisioning.
+    getAddressPendingNonce: async (data, response) => {
+        if (!data.address) {
+            response.result = 400
+            response.response = "No address specified"
+            return response
+        }
+        try {
+            const address = String(data.address).toLowerCase()
+            const confirmedNonce = await GCR.getAccountNonce(address)
+            const pendingCount = await Mempool.countPendingByAddress(address)
+            response.response = confirmedNonce + 1 + pendingCount
+        } catch (error) {
+            response.result = 400
+            response.response = "error"
+            response.extra = {
+                message: error instanceof Error ? error.message : String(error),
+            }
+        }
         return response
     },
 
