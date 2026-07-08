@@ -3,6 +3,8 @@
 Pull the latest changes by running the following commands in the node source directory:
 
 ```sh
+git restore .
+
 git checkout stabilisation
 
 git pull
