@@ -10,7 +10,7 @@ import {
 interface HasStorageProgramFieldData {
     storageAddress?: unknown
     field?: unknown
-    requesterAddress?: unknown
+    auth?: unknown
 }
 
 /**
@@ -31,14 +31,9 @@ export default async function hasStorageProgramField(
         }
         const field = data.field
 
-        const requesterAddress =
-            typeof data?.requesterAddress === "string"
-                ? data.requesterAddress
-                : undefined
-
         const result = await getAccessibleProgram(
             data?.storageAddress,
-            requesterAddress,
+            data?.auth,
         )
         if (result.error) return result.error
 

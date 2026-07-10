@@ -3,6 +3,7 @@ import Datasource from "src/model/datasource"
 import { GCRStorageProgram } from "src/model/entities/GCRv2/GCR_StorageProgram"
 import { GCRStorageProgramRoutines } from "src/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
 import log from "src/utilities/logger"
+import { readAuthScope, resolveReadRequester } from "./storageReadAuth"
 
 export type StorageFieldType =
     | "string"
@@ -93,6 +94,13 @@ export async function getStorageProgramRepository() {
 /**
  * Validate a storageAddress and fetch the program with ACL enforcement.
  *
+ * The requester is derived from an optional signed `auth` envelope only —
+ * never from a caller-supplied address string. Public programs stay readable
+ * anonymously; restricted/owner programs require a fresh, valid signature
+ * proving control of the address (see {@link resolveReadRequester}). Missing
+ * or invalid auth resolves to anonymous, so non-public reads fail closed with
+ * the same 403 as an unmatched ACL.
+ *
  * Returns either:
  *   - { program } on success, or
  *   - { error: RPCResponse } when the address is invalid, the program is missing
@@ -101,7 +109,7 @@ export async function getStorageProgramRepository() {
  */
 export async function getAccessibleProgram(
     storageAddress: unknown,
-    requesterAddress?: string,
+    auth?: unknown,
 ): Promise<{ program?: GCRStorageProgram; error?: RPCResponse }> {
     if (typeof storageAddress !== "string" || storageAddress.length === 0) {
         return {
@@ -125,6 +133,14 @@ export async function getAccessibleProgram(
         // Not-found / soft-deleted -> SDK contract: return 200 + null.
         return { error: rpcNull() }
     }
+
+    // Bind the ACL check to a verified signature over this storageAddress;
+    // undefined (anonymous) when auth is absent/invalid so non-public reads
+    // fail closed.
+    const requesterAddress = await resolveReadRequester(
+        readAuthScope.program(storageAddress),
+        auth,
+    )
 
     const hasReadAccess = GCRStorageProgramRoutines.checkReadPermission(
         program,
@@ -208,7 +224,7 @@ export function requireJsonObject(
 export interface FieldReadInput {
     storageAddress?: unknown
     field?: unknown
-    requesterAddress?: unknown
+    auth?: unknown
 }
 
 /**
@@ -227,14 +243,14 @@ export interface FieldReadContext {
  *
  * The envelope is identical across these handlers:
  *   1. validate `field` arg (non-empty string) -> 400 / INVALID_REQUEST
- *   2. coerce `requesterAddress` to string|undefined
- *   3. resolve the program with ACL enforcement (404/403/null already
- *      handled inside getAccessibleProgram)
- *   4. require JSON object data -> 400 / INVALID_FIELD_TYPE
- *   5. confirm the requested field exists on the object -> 404 /
+ *   2. resolve the program with ACL enforcement (404/403/null already
+ *      handled inside getAccessibleProgram; the requester is derived from
+ *      the optional signed `auth` envelope, not a plain address string)
+ *   3. require JSON object data -> 400 / INVALID_FIELD_TYPE
+ *   4. confirm the requested field exists on the object -> 404 /
  *      FIELD_NOT_FOUND
- *   6. delegate the response shape to the reducer
- *   7. catch + log + 500 / INTERNAL_ERROR
+ *   5. delegate the response shape to the reducer
+ *   6. catch + log + 500 / INTERNAL_ERROR
  *
  * The reducer is the only thing that varies between handlers, so we keep
  * it tiny: it receives the resolved {field, value, program} and returns
@@ -256,15 +272,9 @@ export function withFieldRead(
             }
             const field = data.field
 
-            const requesterAddress =
-                typeof data?.requesterAddress === "string" &&
-                data.requesterAddress.length > 0
-                    ? data.requesterAddress
-                    : undefined
-
             const result = await getAccessibleProgram(
                 data?.storageAddress,
-                requesterAddress,
+                data?.auth,
             )
             if (result.error) return result.error
 
