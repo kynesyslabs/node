@@ -135,6 +135,85 @@ export async function verifySignature(
 }
 
 /**
+ * Verify a signature over an explicit, caller-supplied message.
+ *
+ * Unlike {@link verifySignature} (whose signed message is fixed to the
+ * identity / public-key form), this verifies a signature over an arbitrary
+ * canonical message. Used for replay-resistant request authentication where
+ * the message binds the signer to a specific request.
+ *
+ * `identity` must be in "algorithm:publicKeyHex" form. The recovered public
+ * key (raw hex, no prefix) is returned so callers can match it against stored
+ * addresses (which use the same raw public-key form as `tx.content.from`).
+ *
+ * @param identity - Signer identity, "algorithm:publicKeyHex"
+ * @param signature - Hex-encoded signature over `message`
+ * @param message - The exact canonical message that was signed
+ */
+export async function verifySignatureOverMessage(
+    identity: string,
+    signature: string,
+    message: string,
+): Promise<VerificationResult> {
+    if (!identity || !signature || !message) {
+        return {
+            valid: false,
+            identity: identity || null,
+            publicKey: null,
+            algorithm: null,
+            error: "Missing identity, signature, or message",
+        }
+    }
+
+    const splits = identity.split(":")
+    if (splits.length < 2 || !SUPPORTED_ALGORITHMS.includes(splits[0])) {
+        return {
+            valid: false,
+            identity,
+            publicKey: null,
+            algorithm: null,
+            error: "Unsupported or malformed identity",
+        }
+    }
+
+    const algorithm = splits[0]
+    const publicKeyHex = splits[1]
+
+    try {
+        const signatureObj = {
+            algorithm,
+            signature: hexToUint8Array(signature),
+            message: new TextEncoder().encode(message),
+            publicKey: hexToUint8Array(publicKeyHex),
+        } as Ed25519SignedObject
+
+        const isValid = await ucrypto.verify(signatureObj)
+        if (isValid) {
+            return { valid: true, identity, publicKey: publicKeyHex, algorithm }
+        }
+
+        return {
+            valid: false,
+            identity,
+            publicKey: publicKeyHex,
+            algorithm,
+            error: "Invalid signature",
+        }
+    } catch (error) {
+        log.error(
+            `[verifySignatureOverMessage] Error verifying signature: ${error}`,
+        )
+        return {
+            valid: false,
+            identity,
+            publicKey: null,
+            algorithm,
+            error: `Verification error: ${error}`,
+        }
+    }
+}
+
+/**
  * Check if a public key is in the whitelist
  *
  * @param publicKey - The public key to check (hex string)

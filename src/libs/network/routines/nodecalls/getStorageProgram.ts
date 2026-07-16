@@ -9,7 +9,7 @@ import {
 
 interface GetStorageProgramData {
     storageAddress?: unknown
-    requesterAddress?: unknown
+    auth?: unknown
 }
 
 /**
@@ -20,20 +20,16 @@ interface GetStorageProgramData {
  * cross-repo contract).
  *
  * Enforces ACL via checkReadPermission. Anonymous callers can read public
- * programs; restricted/owner programs require requesterAddress.
+ * programs; restricted/owner programs require a signed `auth` envelope
+ * proving control of an allowlisted address.
  */
 export default async function getStorageProgram(
     data: GetStorageProgramData,
 ): Promise<RPCResponse> {
     try {
-        const requesterAddress =
-            typeof data?.requesterAddress === "string"
-                ? data.requesterAddress
-                : undefined
-
         const result = await getAccessibleProgram(
             data?.storageAddress,
-            requesterAddress,
+            data?.auth,
         )
         if (result.error) {
             return result.error

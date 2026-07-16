@@ -12,7 +12,7 @@ interface GetStorageProgramItemData {
     storageAddress?: unknown
     field?: unknown
     index?: unknown
-    requesterAddress?: unknown
+    auth?: unknown
 }
 
 /**
@@ -35,14 +35,9 @@ export default async function getStorageProgramItem(
         }
         const rawIndex = Math.trunc(data.index)
 
-        const requesterAddress =
-            typeof data?.requesterAddress === "string"
-                ? data.requesterAddress
-                : undefined
-
         const result = await getAccessibleProgram(
             data?.storageAddress,
-            requesterAddress,
+            data?.auth,
         )
         if (result.error) return result.error
 

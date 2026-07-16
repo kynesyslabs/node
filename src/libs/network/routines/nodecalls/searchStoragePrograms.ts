@@ -8,6 +8,7 @@ import {
     rpcInternalError,
     toStorageProgramListItem,
 } from "./storageProgramShared"
+import { readAuthScope, resolveReadRequester } from "./storageReadAuth"
 
 interface SearchStorageProgramsOptions {
     limit?: unknown
@@ -19,7 +20,7 @@ interface SearchStorageProgramsOptions {
 interface SearchStorageProgramsData {
     query?: unknown
     options?: SearchStorageProgramsOptions
-    requesterAddress?: unknown
+    auth?: unknown
 }
 
 /**
@@ -46,11 +47,13 @@ export default async function searchStoragePrograms(
         }
         const query = data.query.trim()
 
-        const requesterAddress =
-            typeof data?.requesterAddress === "string" &&
-            data.requesterAddress.length > 0
-                ? data.requesterAddress
-                : undefined
+        // Requester derived from a verified signature only — a plain address
+        // string is never trusted, so restricted programs stay hidden from
+        // anonymous callers (only public rows survive the SQL ACL filter).
+        const requesterAddress = await resolveReadRequester(
+            readAuthScope.search(query),
+            data?.auth,
+        )
 
         const opts = data?.options ?? {}
         const rawLimit = typeof opts.limit === "number" ? opts.limit : 100
