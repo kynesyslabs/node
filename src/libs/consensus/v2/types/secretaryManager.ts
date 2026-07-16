@@ -10,6 +10,7 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -36,13 +37,18 @@ export default class SecretaryManager {
     // Internal variables
     public shard: Shard
     public get secretary() {
-        return this.shard.members[0]
+        return (
+            this.shard.members.find(
+                m => m.identity === this.shard.secretaryKey,
+            ) ?? this.shard.members[0]
+        )
     }
 
     public ourValidatorPhase: ValidationPhase
     public ourKey: string
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
+    public unresponsiveMembers = new Set<string>()
 
     constructor() {}
 
@@ -61,6 +67,7 @@ export default class SecretaryManager {
             secretaryKey: "",
             blockRef: lastBlockNumber + 1,
         }
+        this.unresponsiveMembers = new Set<string>()
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
@@ -165,7 +172,7 @@ export default class SecretaryManager {
             log.debug(
                 "[SECRETARY ROUTINE] Initializing the block timestamp FOR THE FIRST TIME",
             )
-            this.blockTimestamp = Math.floor(Date.now() / 1000)
+            this.blockTimestamp = getNetworkTimestamp()
             log.debug(
                 `[SECRETARY ROUTINE] Block timestamp: ${this.blockTimestamp}`,
             )
@@ -242,7 +249,8 @@ export default class SecretaryManager {
      * INFO: Receives a list of known waiting members
      * We filter the shard members to get the ones that are not in the waiting list
      * We then ping them to check if they are still online
-     * If they are not, we remove them from the shard
+     * If they are not, we mark them unresponsive so the routine stops waiting
+     * on them. Shard membership itself is immutable for the round.
      * @param waitingMembers The list of known waiting members
      */
     public async handleNodesGoneOffline(waitingMembers: string[]) {
@@ -268,13 +276,10 @@ export default class SecretaryManager {
                 )
             } else {
                 log.debug(
-                    `[SECRETARY ROUTINE] ${member.identity} is offline, removing from the shard`,
+                    `[SECRETARY ROUTINE] ${member.identity} is offline, marking as unresponsive`,
                 )
 
-                this.shard.members = this.shard.members.filter(
-                    m => m.identity !== member.identity,
-                )
-                delete this.shard.validationPhases[member.identity]
+                this.unresponsiveMembers.add(member.identity)
             }
         }
 
@@ -315,16 +320,21 @@ export default class SecretaryManager {
         }
 
         log.debug(
-            "Secretary is offline, electing the second node as the new secretary",
+            "Secretary is offline, electing the next responsive node as the new secretary",
         )
 
         const exSecretary = this.secretary.identity
-        this.shard.secretaryKey = this.shard.members[1].identity
-        // remove secretary from the list of members
-        this.shard.members = this.shard.members.filter(
-            m => m.identity !== exSecretary,
+        this.unresponsiveMembers.add(exSecretary)
+
+        const nextSecretary = this.shard.members.find(
+            m => !this.unresponsiveMembers.has(m.identity),
         )
-        delete this.shard.validationPhases[exSecretary]
+        if (!nextSecretary) {
+            throw new AbortConsensusError(
+                "All shard members are unresponsive, exiting consensus routine",
+            )
+        }
+        this.shard.secretaryKey = nextSecretary.identity
 
         if (this.checkIfWeAreSecretary()) {
             // Start the secretary routine
@@ -340,12 +350,14 @@ export default class SecretaryManager {
                 ],
             }
 
-            const memberCalls = this.shard.members.map(member =>
-                member
-                    .call(request)
-                    .then(res => ({ member, res }))
-                    .catch(error => ({ member, error })),
-            )
+            const memberCalls = this.shard.members
+                .filter(member => !this.unresponsiveMembers.has(member.identity))
+                .map(member =>
+                    member
+                        .call(request)
+                        .then(res => ({ member, res }))
+                        .catch(error => ({ member, error })),
+                )
 
             const results = await Promise.all(memberCalls)
 
@@ -447,6 +459,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].currentPhase = theirPhase
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
+        this.unresponsiveMembers.delete(memberKey)
 
         if (!this.checkIfWeAreSecretary()) {
             log.debug(
@@ -528,6 +541,9 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
+            if (this.unresponsiveMembers.has(pubKey)) {
+                continue
+            }
             if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
                 return false
             }
@@ -721,6 +737,9 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
+            if (this.unresponsiveMembers.has(pubKey)) {
+                continue
+            }
             if (phase.currentPhase === ourPhase && phase.waitStatus) {
                 waitingMembers.push(pubKey)
             }

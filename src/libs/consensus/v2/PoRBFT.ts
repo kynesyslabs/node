@@ -217,7 +217,10 @@ export async function consensusRoutine(): Promise<void> {
         getSharedState.lastConsensusTime = block.content.timestamp
 
         // INFO: CONSENSUS ACTION 6: Vote on the block
-        const [pro, con] = await voteOnBlock(block, manager.shard.members)
+        const responsiveMembers = manager.shard.members.filter(
+            m => !manager.unresponsiveMembers.has(m.identity),
+        )
+        const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {

@@ -32,7 +32,10 @@ import {
 } from "./utilities/subsystemRegistry"
 import { fastSync } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
+import {
+    getNetworkTimestamp,
+    startTimestampRecalibration,
+} from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -219,6 +222,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 // ANCHOR Calibrating the time
 async function calibrateTime() {
     await getTimestampCorrection()
+    startTimestampRecalibration()
     log.info(
         "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
     )
@@ -464,7 +468,7 @@ async function preMainLoop() {
                     "     Other peers cannot reach this node at this address.\n" +
                     "     For real network participation, set EXPOSED_URL in .env\n" +
                     "     to your public IP or DNS name (e.g. http://YOUR_IP:53550).\n" +
-                    '     See INSTALL.md → "Joining the network".\n' +
+                    "     See INSTALL.md → \"Joining the network\".\n" +
                     "============================================================",
             )
         }
