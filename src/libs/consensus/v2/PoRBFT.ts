@@ -413,12 +413,15 @@ export async function consensusRoutine(): Promise<void> {
         ) {
             exitReason = "abortConsensus"
             // INFO: If we're past merge mempools phase
-            log.warn(
-                "[consensusRoutine] Aborted consensus routine at phase: " +
-                    manager.ourValidatorPhase.currentPhase,
-            )
-            if (manager.ourValidatorPhase.currentPhase <= 3) {
-                return
+
+            if (manager && manager.ourValidatorPhase) {
+                log.warn(
+                    "[consensusRoutine] Aborted consensus routine at phase: " +
+                        manager.ourValidatorPhase.currentPhase,
+                )
+                if (manager.ourValidatorPhase.currentPhase <= 3) {
+                    return
+                }
             }
 
             log.warn(

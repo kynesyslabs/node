@@ -12,10 +12,7 @@ import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getCommitteeFloor } from "../routines/getShard"
-import {
-    computeCurrentSlot,
-    pickSlotLeader,
-} from "../routines/slotRotation"
+import { computeCurrentSlot, pickSlotLeader } from "../routines/slotRotation"
 import Chain from "src/libs/blockchain/chain"
 
 export class AbortConsensusError extends Error {
@@ -95,6 +92,16 @@ export default class SecretaryManager {
             log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
+
+        const validMembers = this.shard.members.filter(member =>
+            Boolean(member.connection.string),
+        )
+        if (validMembers.length < Math.floor((this.shard.members.length * 2) / 3) + 1) {
+            throw new AbortConsensusError(
+                "Not enough valid members to forge the block",
+            )
+        }
+
         // Assigning the secretary via slot-based rotation
         const lastBlock = await Chain.getLastBlock()
         const slot = computeCurrentSlot(lastBlock.content.timestamp)
@@ -370,8 +377,7 @@ export default class SecretaryManager {
                 .filter(
                     member =>
                         !this.unresponsiveMembers.has(member.identity) &&
-                        (member.connection.string !== "" ||
-                            member.isLocalNode),
+                        (member.connection.string !== "" || member.isLocalNode),
                 )
                 .map(member =>
                     member
@@ -839,7 +845,7 @@ export default class SecretaryManager {
             }
 
             log.debug("Sending setValidatorPhase request to the secretary")
-            log.debug(`Secretary is: ${this.secretary.identity}`)
+            log.debug(`Secretary is: ${this.secretary.connection.string}`)
             return await this.secretary.longCall(request, true, {
                 retries,
                 sleepTime: 250,
@@ -864,8 +870,7 @@ export default class SecretaryManager {
 
             if ([400, 500].includes(res.result)) {
                 const secretaryUnreachable =
-                    res.result === 500 ||
-                    res.response === "Max retries reached"
+                    res.result === 500 || res.response === "Max retries reached"
 
                 if (!secretaryUnreachable) {
                     // NOTE: A 400 is returned if the block reference is

@@ -51,7 +51,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         maxMessageSize: 0,
         consensusCheckInterval: 0,
         consensusTime: 0,
-        slotDuration: 30,
+        slotDuration: 45,
         blockTimestampMinDelta: 1,
         blockTimestampTolerance: 60,
         logLevel: "info",
