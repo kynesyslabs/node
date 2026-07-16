@@ -162,8 +162,10 @@ export async function consensusRoutine(): Promise<void> {
             )
 
         // filter txs by reference block
-        // const res = filterMempoolByRefBlock(initialMempool)
-        const resNonce = await filterMempoolByNonce(initialMempool)
+        const resRef = filterMempoolByRefBlock(initialMempool)
+        failedTxs.push(...resRef.failedTxs)
+
+        const resNonce = await filterMempoolByNonce(resRef.validTxs)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block

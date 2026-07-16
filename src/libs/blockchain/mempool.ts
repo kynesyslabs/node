@@ -21,6 +21,7 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
+import { isReferenceBlockAllowed } from "../network/endpointExecution"
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -409,9 +410,26 @@ export default class Mempool {
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
-        const unseenTransactions = incoming.filter(
-            tx => !existingHashes[tx.hash],
-        )
+        const lastBlock = await Chain.getLastBlockNumber()
+        const unseenTransactions = incoming.filter(tx => {
+            if (existingHashes[tx.hash]) {
+                return false
+            }
+
+            const refBlock = (tx as Transaction & { reference_block?: number })
+                .reference_block
+            if (
+                typeof refBlock === "number" &&
+                !isReferenceBlockAllowed(refBlock, lastBlock)
+            ) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${tx.hash}: reference_block ${refBlock} outside allowed window (lastBlock ${lastBlock})`,
+                )
+                return false
+            }
+
+            return true
+        })
 
         log.only(
             "[Mempool.receive] Unseen transcations: " +
