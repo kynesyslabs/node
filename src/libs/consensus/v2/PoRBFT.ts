@@ -220,7 +220,9 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 6: Vote on the block
         const responsiveMembers = manager.shard.members.filter(
-            m => !manager.unresponsiveMembers.has(m.identity),
+            m =>
+                !manager.unresponsiveMembers.has(m.identity) &&
+                (m.connection.string !== "" || m.isLocalNode),
         )
         const [pro, con] = await voteOnBlock(block, responsiveMembers)
 

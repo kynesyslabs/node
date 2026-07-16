@@ -283,7 +283,11 @@ export default class SecretaryManager {
             `Maybe offline members: ${maybeOfflineMembers.map(m => m.identity)}`,
         )
 
-        const promises = maybeOfflineMembers.map(member => member.connect())
+        const promises = maybeOfflineMembers.map(member =>
+            member.connection.string || member.isLocalNode
+                ? member.connect()
+                : Promise.resolve(false),
+        )
         const results = await Promise.all(promises)
 
         const onlineMembers: string[] = []
@@ -363,7 +367,12 @@ export default class SecretaryManager {
             }
 
             const memberCalls = this.shard.members
-                .filter(member => !this.unresponsiveMembers.has(member.identity))
+                .filter(
+                    member =>
+                        !this.unresponsiveMembers.has(member.identity) &&
+                        (member.connection.string !== "" ||
+                            member.isLocalNode),
+                )
                 .map(member =>
                     member
                         .call(request)
@@ -588,6 +597,7 @@ export default class SecretaryManager {
         }
 
         const promises = []
+        const contactedMembers: string[] = []
 
         for (const pubKey of waitingMembers) {
             const request: RPCRequest = {
@@ -607,6 +617,13 @@ export default class SecretaryManager {
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
             const member = this.shard.members.find(m => m.identity === pubKey)
+            if (!member || (!member.connection.string && !member.isLocalNode)) {
+                log.debug(
+                    `[SECRETARY ROUTINE] Skipping greenlight to unreachable member ${pubKey}`,
+                )
+                continue
+            }
+            contactedMembers.push(pubKey)
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
@@ -622,8 +639,7 @@ export default class SecretaryManager {
         const results = await Promise.all(promises)
 
         for (const [index, result] of results.entries()) {
-            const pubKey = waitingMembers[index]
-            const member = this.shard.members.find(m => m.identity === pubKey)
+            const pubKey = contactedMembers[index]
 
             if (result.result === 400) {
                 log.debug(
@@ -832,18 +848,44 @@ export default class SecretaryManager {
             }
 
             if ([400, 500].includes(res.result)) {
+                const secretaryUnreachable =
+                    res.result === 500 ||
+                    res.response === "Max retries reached"
+
+                if (!secretaryUnreachable) {
+                    // NOTE: A 400 is returned if the block reference is
+                    // lower than the secretary's block reference
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] Secretary rejected the setValidatorPhase request",
+                    )
+                    Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                    return null
+                }
+
                 log.debug(
-                    "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
+                    "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking for a slot rotation",
                 )
+                const previousSecretary = this.shard.secretaryKey
+                await this.handleSecretaryGoneOffline()
 
-                // REVIEW: How should we handle this?
-                // NOTE: A 400 is returned if the block reference is
-                // lower than the secretary's block reference
-                // await this.handleSecretaryGoneOffline()
-                // await sendStatus()
+                if (
+                    this.shard.secretaryKey !== previousSecretary &&
+                    Waiter.isWaiting(waiterKey)
+                ) {
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] Resending our phase to the new slot leader",
+                    )
+                    const retryRes = await sendStatus()
+                    return await handleSendStatusRes(retryRes)
+                }
 
-                // INFO: EXIT CONSENSUS ROUTINE
-                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                if (Waiter.isWaiting(waiterKey)) {
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] No new slot leader yet, aborting this round",
+                    )
+                    Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                }
+                return null
             }
 
             log.debug(

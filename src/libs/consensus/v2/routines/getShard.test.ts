@@ -9,6 +9,7 @@ const V = (n: number) => n.toString(16).padStart(2, "0").repeat(32)
 
 let committedPeerlist: string[] = []
 let validatorAddresses: (string | null)[] = []
+let validatorUrls: Record<string, string> = {}
 let networkNow = 1_000_000
 
 jest.mock("src/utilities/logger", () => ({
@@ -86,7 +87,10 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
     __esModule: true,
     default: {
         getGCRValidatorsAtBlock: jest.fn(async () =>
-            validatorAddresses.map(address => ({ address })),
+            validatorAddresses.map(address => ({
+                address,
+                connection_url: validatorUrls[address] ?? null,
+            })),
         ),
     },
 }))
@@ -95,6 +99,7 @@ beforeEach(() => {
     __resetValidatorCache()
     committedPeerlist = [V(1), V(2), V(3), V(4), V(5), V(6)]
     validatorAddresses = [V(1), V(2), V(3), V(4), V(5), V(6)]
+    validatorUrls = {}
     networkNow = 1_000_000
 })
 
@@ -150,6 +155,28 @@ describe("getShard", () => {
         const unknown = shard.find(p => p.identity === "cc".repeat(32))
         expect(unknown).toBeDefined()
         expect(unknown.connection.string).toBe("")
+        const known = shard.find(p => p.identity === "bb".repeat(32))
+        expect(known.connection.string).toBe("http://known")
+    })
+
+    it("resolves unknown identities via the validator connection_url before falling back", async () => {
+        committedPeerlist = ["cc".repeat(32), "dd".repeat(32)]
+        validatorAddresses = ["cc".repeat(32), "dd".repeat(32)]
+        validatorUrls = { ["cc".repeat(32)]: "http://validator-c" }
+        const shard = await getShard("seed", 100)
+        const fromValidatorTable = shard.find(
+            p => p.identity === "cc".repeat(32),
+        )
+        expect(fromValidatorTable.connection.string).toBe("http://validator-c")
+        const placeholder = shard.find(p => p.identity === "dd".repeat(32))
+        expect(placeholder.connection.string).toBe("")
+    })
+
+    it("prefers the local peer table over the validator connection_url", async () => {
+        committedPeerlist = ["bb".repeat(32), "cc".repeat(32)]
+        validatorAddresses = ["bb".repeat(32), "cc".repeat(32)]
+        validatorUrls = { ["bb".repeat(32)]: "http://stale-validator-url" }
+        const shard = await getShard("seed", 100)
         const known = shard.find(p => p.identity === "bb".repeat(32))
         expect(known.connection.string).toBe("http://known")
     })

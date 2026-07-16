@@ -161,9 +161,12 @@ export async function getShardIdentities(
 /**
  * Committee for the next block, resolved to Peer objects for the
  * consensus networking paths. Identities unknown to the local
- * PeerManager become placeholder peers with an empty connection string
- * rather than being dropped — shard membership must not depend on the
- * local peer table. Placeholders are never added to the PeerManager.
+ * PeerManager are resolved through the validator table's
+ * connection_url, and become placeholder peers with an empty
+ * connection string as a last resort rather than being dropped —
+ * shard membership must not depend on the local peer table.
+ * Resolved fallbacks and placeholders are never added to the
+ * PeerManager.
  */
 export default async function getShard(
     seed: string,
@@ -176,11 +179,40 @@ export default async function getShard(
     const identities = await getShardIdentities(seed, lastBlockNumber)
     const peerman = PeerManager.getInstance()
 
-    return identities.map(identity => {
+    let validatorUrls: Map<string, string> | null = null
+    const getValidatorUrl = async (identity: string): Promise<string> => {
+        if (!validatorUrls) {
+            const validators = (await GCR.getGCRValidatorsAtBlock(
+                lastBlockNumber,
+            )) as Validators[]
+            validatorUrls = new Map()
+            for (const validator of validators) {
+                if (validator.address && validator.connection_url) {
+                    validatorUrls.set(
+                        validator.address,
+                        validator.connection_url,
+                    )
+                }
+            }
+        }
+        return validatorUrls.get(identity) ?? ""
+    }
+
+    const shard: Peer[] = []
+    for (const identity of identities) {
         const known = peerman.getPeer(identity)
         if (known) {
-            return known
+            shard.push(known)
+            continue
         }
-        return new Peer("", identity)
-    })
+        const fallbackUrl = await getValidatorUrl(identity)
+        if (fallbackUrl) {
+            log.debug(
+                `[getShard] Resolved ${identity} via validator connection_url: ${fallbackUrl}`,
+            )
+        }
+        shard.push(new Peer(fallbackUrl, identity))
+    }
+
+    return shard
 }
