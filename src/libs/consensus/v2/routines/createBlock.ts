@@ -4,7 +4,6 @@ import { getSharedState } from "src/utilities/sharedState"
 import Hashing from "src/libs/crypto/hashing"
 import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
-import Peer from "src/libs/peer/Peer"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -16,7 +15,7 @@ export async function createBlock(
     commonValidatorSeed: string,
     previousBlockHash: string,
     blockNumber: number,
-    peerlist: Peer[],
+    peerlist: string[],
 ): Promise<Block> {
     if (getSharedState.candidateBlock) {
         log.warning(
@@ -31,7 +30,8 @@ export async function createBlock(
         transaction => transaction.hash,
     )
     block.content.previousHash = previousBlockHash
-    block.content.peerlist = peerlist
+    block.content.peerlist =
+        peerlist as unknown as typeof block.content.peerlist
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.content.native_tables_hashes = await hashNativeTables()

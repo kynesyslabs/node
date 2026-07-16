@@ -87,9 +87,11 @@ export const handleNodeCall: OmniHandler<Buffer> = async ({
             await import("src/libs/network/endpointHandlers")
         const log = await import("src/utilities/logger").then(m => m.default)
 
-        // ServerHandlers.handleMempool expects content with .data property
         const content = request.params ?? []
-        const response = await serverHandlers.handleMempool(content)
+        const response = await serverHandlers.handleMempool(
+            content,
+            context.peerIdentity ?? "",
+        )
 
         return encodeNodeCallResponse({
             status: response.result ?? 200,

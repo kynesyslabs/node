@@ -1058,6 +1058,9 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
     const ourPeerIdentities = new Set(ourPeerlist.map(peer => peer.identity))
 
     for (const peer of blockPeerlist) {
+        if (typeof peer === "string") {
+            continue
+        }
         const peerObject = Peer.fromIPeer(peer)
 
         if (ourPeerIdentities.has(peerObject.identity)) {

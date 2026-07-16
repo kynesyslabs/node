@@ -29,6 +29,7 @@ import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
+import { computeMergedPeerlist } from "./routines/peerlistMerge"
 
 export interface FailedTranscation {
     txhash: string
@@ -154,10 +155,11 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        const initialMempool = await mergeAndOrderMempools(
-            manager.shard.members,
-            manager.shard.blockRef,
-        )
+        const { txs: initialMempool, peerlist: mergedPeerlist } =
+            await mergeAndOrderMempools(
+                manager.shard.members,
+                manager.shard.blockRef,
+            )
 
         // filter txs by reference block
         // const res = filterMempoolByRefBlock(initialMempool)
@@ -211,7 +213,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(blockTxs, []) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(blockTxs, mergedPeerlist) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
@@ -578,7 +580,7 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
 async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
-): Promise<MempoolTransaction[]> {
+): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.lock.runExclusive(
         async () => await Mempool.getMempool(blockRef),
@@ -603,8 +605,13 @@ async function mergeAndOrderMempools(
     )
 
     // Merge with peers
-    await mergeMempools(outboundPool, shard)
+    await mergeMempools(outboundPool, shard, blockRef)
     await updateValidatorPhase(3, blockRef)
+
+    const mergedPeerlist = await computeMergedPeerlist(blockRef)
+    log.only(
+        `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
+    )
 
     const postMempool = await Mempool.getMempool(blockRef)
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
@@ -647,7 +654,10 @@ async function mergeAndOrderMempools(
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
-    return orderDeterministically<MempoolTransaction>(finalMempool)
+    return {
+        txs: orderDeterministically<MempoolTransaction>(finalMempool),
+        peerlist: mergedPeerlist,
+    }
 }
 
 /**
@@ -905,7 +915,7 @@ async function applyGCREditsFromMergedMempool(
  */
 async function forgeBlock(
     orderedTransactions: Transaction[],
-    peerlist: Peer[] = [],
+    peerlist: string[] = [],
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()
