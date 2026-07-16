@@ -93,10 +93,16 @@ export default class SecretaryManager {
             throw new NotInShardError("We are not in the shard")
         }
 
-        const validMembers = this.shard.members.filter(member =>
-            Boolean(member.connection.string),
+        const validMembers = this.shard.members.filter(
+            member =>
+                Boolean(member.connection.string) &&
+                member.sync.block === getSharedState.lastBlockNumber &&
+                member.sync.block_hash === getSharedState.lastBlockHash,
         )
-        if (validMembers.length < Math.floor((this.shard.members.length * 2) / 3) + 1) {
+        if (
+            validMembers.length <
+            Math.floor((this.shard.members.length * 2) / 3) + 1
+        ) {
             throw new AbortConsensusError(
                 "Not enough valid members to forge the block",
             )
