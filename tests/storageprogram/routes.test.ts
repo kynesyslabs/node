@@ -1,6 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, jest } from "@jest/globals"
 import { readFileSync } from "fs"
 import path from "path"
+import { setAuthContext } from "@/libs/network/authContext"
 
 // Mock logger
 jest.mock("@/utilities/logger", () => ({
@@ -119,22 +120,37 @@ beforeEach(() => {
 function makeRequest(
     urlPath: string,
     headers: Record<string, string> = {},
+    authenticatedAs?: string,
 ): Request {
-    return new Request(`http://localhost:53550${urlPath}`, {
+    const req = new Request(`http://localhost:53550${urlPath}`, {
         headers: new Headers(headers),
     })
+    if (authenticatedAs) {
+        // Simulate the auth middleware after a VERIFIED signature: only then is
+        // the verified key placed in the request's auth context. A raw
+        // `identity` header on its own sets nothing and grants nothing — that
+        // was the read-ACL bypass.
+        setAuthContext(req, {
+            verified: true,
+            identity: `ed25519:${authenticatedAs}`,
+            publicKey: authenticatedAs,
+            algorithm: "ed25519",
+        })
+    }
+    return req
 }
 
 async function callRoute(
     pattern: string,
     urlPath: string,
     headers: Record<string, string> = {},
+    authenticatedAs?: string,
 ): Promise<{ status: number; body: any }> {
     const handler = capturedRoutes.get(pattern)
     if (!handler) {
         throw new Error(`Route not found: ${pattern}. Available: ${Array.from(capturedRoutes.keys()).join(", ")}`)
     }
-    const response = await handler(makeRequest(urlPath, headers))
+    const response = await handler(makeRequest(urlPath, headers, authenticatedAs))
     const body = await response.json()
     return { status: response.status, body }
 }
@@ -214,7 +230,7 @@ describe("StorageProgram HTTP Routes", () => {
             expect(body.errorCode).toBe("PERMISSION_DENIED")
         })
 
-        it("200: owner-mode program with owner identity", async () => {
+        it("200: owner-mode program with a verified owner", async () => {
             mockRepository.findOneBy.mockResolvedValue(
                 entityFixtures.owner_json_program,
             )
@@ -222,10 +238,27 @@ describe("StorageProgram HTTP Routes", () => {
             const { status, body } = await callRoute(
                 "/storage-program/*",
                 "/storage-program/stor-owner-only-789",
-                { identity: "owner_addr_1" },
+                {},
+                "owner_addr_1", // verified by the middleware, not a raw header
             )
             expect(status).toBe(200)
             expect(body.success).toBe(true)
+        })
+
+        it("403: owner-mode named via an unverified raw identity header (bypass closed)", async () => {
+            mockRepository.findOneBy.mockResolvedValue(
+                entityFixtures.owner_json_program,
+            )
+
+            // The old bypass: name the owner in the `identity` header, no
+            // signature. With no verified auth context it is anonymous → 403.
+            const { status, body } = await callRoute(
+                "/storage-program/*",
+                "/storage-program/stor-owner-only-789",
+                { identity: "owner_addr_1" },
+            )
+            expect(status).toBe(403)
+            expect(body.errorCode).toBe("PERMISSION_DENIED")
         })
     })
 

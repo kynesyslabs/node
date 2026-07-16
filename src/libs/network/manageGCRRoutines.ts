@@ -28,6 +28,14 @@ export default async function manageGCRRoutines(
     // Handle the payload
     const { method, params } = payload
 
+    // The requester for every storage-program read ACL check is the key the RPC
+    // layer VERIFIED for this call (`sender`), never a caller-supplied params
+    // value: naming an allowlisted address without proving key ownership was the
+    // storage read-ACL bypass. Empty sender (anonymous) resolves to undefined,
+    // so restricted programs stay hidden unless the caller signed the request.
+    const verifiedRequester =
+        typeof sender === "string" && sender.length > 0 ? sender : undefined
+
     switch (method) {
         // SECTION XM Identity Management
 
@@ -290,7 +298,7 @@ export default async function manageGCRRoutines(
         // REVIEW: Get storage program by address
         case "getStorageProgram": {
             const storageAddress = params[0]
-            const requesterAddress = params[1] // Optional identity for ACL check
+            const requesterAddress = verifiedRequester // verified signer, not caller-supplied
 
             if (!storageAddress) {
                 response.result = 400
@@ -362,7 +370,7 @@ export default async function manageGCRRoutines(
         // REVIEW: Get storage programs by owner
         case "getStorageProgramsByOwner": {
             const owner = params[0]
-            const requesterAddress = params[1] // Optional identity for ACL filtering
+            const requesterAddress = verifiedRequester // verified signer, not caller-supplied
             const options = params[2] || {} // Optional { limit, offset }
 
             if (!owner) {
@@ -425,7 +433,7 @@ export default async function manageGCRRoutines(
         case "searchStoragePrograms": {
             const query = params[0]
             const options = params[1] || {} // { limit, offset, exactMatch }
-            const requesterAddress = params[2] // Optional identity for ACL filtering
+            const requesterAddress = verifiedRequester // verified signer, not caller-supplied
 
             if (!query || (typeof query === "string" && query.trim() === "")) {
                 response.result = 400

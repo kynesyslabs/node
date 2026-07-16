@@ -18,6 +18,7 @@ import log from "@/utilities/logger"
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
 import { GCRStorageProgramRoutines } from "@/libs/blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
+import { getAuthContext } from "@/libs/network/authContext"
 
 // ============================================================================
 // Response Types
@@ -114,14 +115,15 @@ interface StorageProgramGranularResponse {
  * behaviour with the SQL ACL filter and other call sites that distinguish
  * `""` from `undefined`.
  */
-function getRequesterAddress(req: Request): string | undefined {
-    const identity = req.headers.get("identity")
-    if (!identity || identity.length === 0) {
-        return undefined
-    }
-    const splits = identity.split(":")
-    const candidate = splits.length > 1 ? splits[1] : identity
-    return candidate && candidate.length > 0 ? candidate : undefined
+// Exported for tests.
+export function getRequesterAddress(req: Request): string | undefined {
+    // The requester is the key the auth middleware VERIFIED for this request —
+    // never the raw `identity` header. The middleware only populates the auth
+    // context after checking the request signature (and 401s on a bad one), so
+    // a caller who merely names an allowlisted address in the header, with no
+    // signature, has no auth context and reads as anonymous. Trusting the raw
+    // header here was the storage read-ACL bypass.
+    return getAuthContext(req).publicKey ?? undefined
 }
 
 function getValueType(
