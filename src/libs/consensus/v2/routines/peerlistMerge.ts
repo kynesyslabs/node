@@ -7,7 +7,7 @@ import type { Validators } from "src/model/entities/Validators"
 export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
 
 const MAX_IDENTITY_LENGTH = 20000
-const HEX_IDENTITY_REGEX = /^[0-9a-f]+$/
+const HEX_IDENTITY_REGEX = /^(0x)?[0-9a-f]+$/
 
 let contributionsBlockRef: number | null = null
 let contributions = new Map<string, string[]>()

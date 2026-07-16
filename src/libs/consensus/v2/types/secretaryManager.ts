@@ -823,6 +823,21 @@ export default class SecretaryManager {
                 } as RPCResponse
             }
 
+            if (
+                !this.secretary.connection.string &&
+                !this.secretary.isLocalNode
+            ) {
+                log.debug(
+                    `Secretary ${this.secretary.identity} has no connection string, skipping the call`,
+                )
+                return {
+                    result: 500,
+                    response: "Secretary unreachable (no connection string)",
+                    require_reply: false,
+                    extra: null,
+                } as RPCResponse
+            }
+
             log.debug("Sending setValidatorPhase request to the secretary")
             log.debug(`Secretary is: ${this.secretary.identity}`)
             return await this.secretary.longCall(request, true, {

@@ -116,6 +116,22 @@ describe("computeMergedPeerlist", () => {
 })
 
 describe("contributePeerlist", () => {
+    it("accepts 0x-prefixed identities", async () => {
+        const prefixed = "0x" + REPORTED_PEER
+        validatorAddresses = [OUR_KEY, SYNCED_PEER, prefixed]
+        contributePeerlist(101, "c1", [prefixed])
+        const merged = await computeMergedPeerlist(101)
+        expect(merged).toContain(prefixed)
+    })
+
+    it("normalises 0x-prefixed identity case", async () => {
+        const prefixed = "0x" + REPORTED_PEER
+        validatorAddresses = [OUR_KEY, SYNCED_PEER, prefixed]
+        contributePeerlist(101, "c1", ["0X" + REPORTED_PEER.toUpperCase()])
+        const merged = await computeMergedPeerlist(101)
+        expect(merged).toContain(prefixed)
+    })
+
     it("drops malformed entries and normalises case", async () => {
         contributePeerlist(101, "c1", [
             REPORTED_PEER.toUpperCase(),
