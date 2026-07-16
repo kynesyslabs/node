@@ -45,6 +45,7 @@
         "snapshot:cron": "bun scripts/state-snapshot/cron.ts",
         "snapshot:transform": "bun scripts/state-snapshot/transform.ts",
         "snapshot:verify": "bun scripts/state-snapshot/verify-snapshot.ts",
+        "snapshot:rehash": "bun scripts/state-snapshot/rehash.ts",
         "snapshot:dry-run": "bun scripts/state-snapshot/dry-run-restore.ts",
         "typeorm": "typeorm-ts-node-esm",
         "migration:run": "NODE_OPTIONS='--loader ts-node/esm' typeorm-ts-node-esm migration:run -d ./src/model/datasource.ts",
