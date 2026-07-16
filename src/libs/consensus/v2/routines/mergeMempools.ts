@@ -48,6 +48,15 @@ export async function mergeMempools(
     const now = Date.now()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
+    // INFO: committee members we cannot resolve locally have no connection
+    // string; they stay in the shard for quorum purposes but cannot be called
+    const unreachable = shard.filter(peer => !peer.connection.string)
+    if (unreachable.length > 0) {
+        log.warning(
+            `[mergeMempools] ${unreachable.length} committee member(s) not in the local peer table, skipping calls to them`,
+        )
+    }
+    shard = shard.filter(peer => peer.connection.string)
     if (shard.length === 0) {
         return
     }

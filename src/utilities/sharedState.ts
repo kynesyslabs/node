@@ -449,6 +449,27 @@ export default class SharedState {
         return Config.getInstance().core.consensusTime || this.block_time
     }
 
+    /**
+     * @returns The leader-rotation slot duration in seconds
+     */
+    public getSlotDuration(): number {
+        return Config.getInstance().core.slotDuration
+    }
+
+    /**
+     * @returns Minimum seconds a block timestamp must exceed its parent's
+     */
+    public getBlockTimestampMinDelta(): number {
+        return Config.getInstance().core.blockTimestampMinDelta
+    }
+
+    /**
+     * @returns Max seconds a block timestamp may lead the verifier's clock
+     */
+    public getBlockTimestampTolerance(): number {
+        return Config.getInstance().core.blockTimestampTolerance
+    }
+
     public async getConnectionString(): Promise<string> {
         // Getting our public ip
         return this.exposedUrl

@@ -13,11 +13,16 @@ import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 import Chain from "../chain"
 import log from "src/utilities/logger"
-import GCR from "src/libs/blockchain/gcr/gcr"
 import Hashing from "src/libs/crypto/hashing"
 import { serializeBlockContent } from "@/forks"
 import TxValidatorPool from "./txValidatorPool"
 import { getSharedState } from "@/utilities/sharedState"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
+import {
+    getCommitteeFloor,
+    getShardIdentities,
+} from "src/libs/consensus/v2/routines/getShard"
 
 export interface BlockVerification {
     valid: boolean
@@ -44,8 +49,16 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }
     }
 
+    const prevBlock = await Chain.getBlockByNumber(block.number - 1)
+    if (!prevBlock) {
+        return {
+            valid: false,
+            reason: `previous block ${block.number - 1} not found`,
+        }
+    }
+
     // Verify last block hash is the same as this block's previous hash
-    const lastBlockHash = await Chain.getBlockHash(block.number - 1)
+    const lastBlockHash = prevBlock.hash
     if (lastBlockHash !== block.content.previousHash) {
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
         log.error(
@@ -59,27 +72,51 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }
     }
 
-    // Retrieve eligible signer set for previous block
-    let validatorIdentities: Set<string>
+    const blockTimestamp = block.content.timestamp
+    const prevTimestamp = prevBlock.content?.timestamp
+    if (typeof blockTimestamp !== "number") {
+        return { valid: false, reason: "block has no timestamp" }
+    }
+    if (typeof prevTimestamp === "number") {
+        const minDelta = getSharedState.getBlockTimestampMinDelta()
+        if (blockTimestamp < prevTimestamp + minDelta) {
+            return {
+                valid: false,
+                reason: `block timestamp ${blockTimestamp} is not after parent timestamp ${prevTimestamp} (+${minDelta}s)`,
+            }
+        }
+    }
+    const tolerance = getSharedState.getBlockTimestampTolerance()
+    const verifierNow = getNetworkTimestamp()
+    if (blockTimestamp > verifierNow + tolerance) {
+        return {
+            valid: false,
+            reason: `block timestamp ${blockTimestamp} is ${blockTimestamp - verifierNow}s in the verifier's future (tolerance ${tolerance}s)`,
+        }
+    }
+
+    // Recompute the deterministic committee for this height
+    let committee: string[]
     try {
-        const validators = (await GCR.getGCRValidatorsAtBlock(
+        const { commonValidatorSeed } = await getCommonValidatorSeed(prevBlock)
+        committee = await getShardIdentities(
+            commonValidatorSeed,
             block.number - 1,
-        )) as Array<{ address: string | null }>
-        validatorIdentities = new Set(
-            validators
-                .map(v => v.address)
-                .filter((a): a is string => typeof a === "string"),
         )
     } catch (e) {
         return {
             valid: false,
-            reason: `could not resolve validator set: ${e instanceof Error ? e.message : String(e)}`,
+            reason: `could not resolve committee: ${e instanceof Error ? e.message : String(e)}`,
         }
     }
 
-    if (validatorIdentities.size === 0) {
-        return { valid: false, reason: "empty validator set for block" }
+    if (committee.length < getCommitteeFloor()) {
+        return {
+            valid: false,
+            reason: `committee of ${committee.length} is below the floor of ${getCommitteeFloor()}`,
+        }
     }
+    const committeeIdentities = new Set(committee)
 
     // Resolve eligible signer set for this block.
     const signatures = block.validation_data?.signatures
@@ -95,7 +132,7 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
     const verifiedSigners = new Set<string>()
     await Promise.all(
         Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!validatorIdentities.has(identity)) return
+            if (!committeeIdentities.has(identity)) return
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
@@ -112,12 +149,12 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }),
     )
 
-    // Verify block was signed by 2/3 + 1 of the validator set
-    const threshold = Math.floor((getSharedState.shardSize * 2) / 3) + 1
+    // Verify block was signed by 2/3 + 1 of its deterministic committee
+    const threshold = Math.floor((committee.length * 2) / 3) + 1
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
-            reason: `insufficient verified signatures: ${verifiedSigners.size}/${getSharedState.shardSize} (need ${threshold})`,
+            reason: `insufficient verified committee signatures: ${verifiedSigners.size}/${committee.length} (need ${threshold})`,
         }
     }
 

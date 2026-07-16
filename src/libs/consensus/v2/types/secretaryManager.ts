@@ -11,6 +11,12 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { getCommitteeFloor } from "../routines/getShard"
+import {
+    computeCurrentSlot,
+    pickSlotLeader,
+} from "../routines/slotRotation"
+import Chain from "src/libs/blockchain/chain"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -74,14 +80,29 @@ export default class SecretaryManager {
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
 
+        if (this.shard.members.length < getCommitteeFloor()) {
+            log.error(
+                `Committee of ${this.shard.members.length} is below the floor of ${getCommitteeFloor()}: refusing to forge`,
+            )
+            throw new NotInShardError(
+                "Committee below minimum size: refusing to forge",
+            )
+        }
+
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
         ) {
             log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
-        // Assigning the secretary and its key
-        this.shard.secretaryKey = this.secretary.identity
+        // Assigning the secretary via slot-based rotation
+        const lastBlock = await Chain.getLastBlock()
+        const slot = computeCurrentSlot(lastBlock.content.timestamp)
+        const slotLeader = pickSlotLeader(this.shard.members, slot)
+        this.shard.secretaryKey = slotLeader.identity
+        log.debug(
+            `[initializeShard] Slot ${slot} leader: ${slotLeader.identity}`,
+        )
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
@@ -289,8 +310,10 @@ export default class SecretaryManager {
     /**
      * Handles the secretary going offline
      *
-     * Ping the secretary to check if it's still online
-     * If it's not, we elect the second node as the new secretary
+     * The expected leader is a pure function of the slot clock, so no
+     * probing is involved: if the slot has advanced past the current
+     * secretary's, every waiting member independently rotates to the
+     * same new leader.
      */
     public async handleSecretaryGoneOffline() {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
@@ -303,38 +326,27 @@ export default class SecretaryManager {
             )
         }
 
-        const isOnline = await this.secretary.connect()
-        log.debug(`Secretary is online: ${isOnline}`)
+        const lastBlock = await Chain.getLastBlock()
+        const slot = computeCurrentSlot(lastBlock.content.timestamp)
+        const slotLeader = pickSlotLeader(this.shard.members, slot)
 
-        if (isOnline) {
-            // REVIEW: Is that it?
-            log.debug("Secretary is online, nothing to do")
-            return
+        if (!slotLeader) {
+            throw new AbortConsensusError(
+                "No committee members available for leader rotation",
+            )
         }
 
-        // INFO: ping for false negatives
-        const isStillOnline = await this.secretary.connect()
-        if (isStillOnline) {
-            log.debug("Secretary is still online, nothing to do")
+        if (slotLeader.identity === this.shard.secretaryKey) {
+            log.debug(
+                `[SECRETARY ROUTINE] Slot ${slot} leader unchanged; waiting for the slot to advance`,
+            )
             return
         }
 
         log.debug(
-            "Secretary is offline, electing the next responsive node as the new secretary",
+            `[SECRETARY ROUTINE] Rotating secretary to slot ${slot} leader ${slotLeader.identity}`,
         )
-
-        const exSecretary = this.secretary.identity
-        this.unresponsiveMembers.add(exSecretary)
-
-        const nextSecretary = this.shard.members.find(
-            m => !this.unresponsiveMembers.has(m.identity),
-        )
-        if (!nextSecretary) {
-            throw new AbortConsensusError(
-                "All shard members are unresponsive, exiting consensus routine",
-            )
-        }
-        this.shard.secretaryKey = nextSecretary.identity
+        this.shard.secretaryKey = slotLeader.identity
 
         if (this.checkIfWeAreSecretary()) {
             // Start the secretary routine
