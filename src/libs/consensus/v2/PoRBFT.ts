@@ -22,6 +22,7 @@ import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import { isNetworkAhead } from "./routines/networkAheadVeto"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import { MempoolTx } from "@/model/entities/Mempool"
@@ -213,6 +214,12 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: CONSENSUS ACTION 5: Forge the block
         const block = await forgeBlock(blockTxs, []) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
+        if (await isNetworkAhead("preVote")) {
+            throw new AbortConsensusError(
+                "Network is ahead of us, aborting before voting on the block",
+            )
+        }
+
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 

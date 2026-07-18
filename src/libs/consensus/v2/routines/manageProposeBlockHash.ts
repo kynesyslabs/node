@@ -9,6 +9,7 @@ import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import getShard from "./getShard"
+import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 
 export default async function manageProposeBlockHash(
@@ -18,6 +19,13 @@ export default async function manageProposeBlockHash(
 ): Promise<RPCResponse> {
     log.debug("Received manageProposeBlockHash, block hash: " + blockHash)
     const response = _.cloneDeep(emptyResponse)
+
+    if (await isNetworkAhead("proposeBlockHash")) {
+        response.result = 400
+        response.response = getSharedState.publicKeyHex
+        response.extra = "Node is behind the network, syncing"
+        return response
+    }
 
     // Checking if the validator that sent us the block hash is in the shard
     // const shard = getSharedState.lastShard

@@ -9,6 +9,7 @@ import Diagnostic, {
 } from "src/utilities/Diagnostic"
 import log from "src/utilities/logger"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
+import { isNetworkAhead } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { getSharedState } from "./sharedState"
 import { peerGossip } from "src/libs/peer/routines/peerGossip"
 import { handleError } from "src/errors/handleError"
@@ -108,6 +109,12 @@ async function mainLoopCycle() {
         getSharedState.syncStatus &&
         !getSharedState.startingConsensus
     ) {
+        if (await isNetworkAhead("mainLoop")) {
+            fastSync([], "networkAheadVeto").catch(e =>
+                handleError(e, "SYNC", { source: "networkAheadVeto" }),
+            )
+            return
+        }
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
         log.debug("[MAIN LOOP] Consensus time reached and sync status is true")
