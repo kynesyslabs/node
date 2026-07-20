@@ -1281,7 +1281,7 @@ main().catch((error: Error) => {
     })
 })
 // Graceful shutdown handler
-async function gracefulShutdown(signal: string) {
+export async function gracefulShutdown(signal: string, exitCode = 0) {
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (getSharedState.isShuttingDown) {
         return
@@ -1294,7 +1294,7 @@ async function gracefulShutdown(signal: string) {
     // Force exit after 10 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
-        process.exit(0)
+        process.exit(exitCode)
     }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
@@ -1428,14 +1428,14 @@ async function gracefulShutdown(signal: string) {
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
-        process.exit(0)
+        process.exit(exitCode)
     } catch (error) {
         handleError(error, "CORE", {
             source: ErrorSource.GRACEFUL_SHUTDOWN,
             fatal: true,
         })
         clearTimeout(forceExitTimeout)
-        process.exit(1)
+        process.exit(exitCode === 0 ? 1 : exitCode)
     }
 }
 

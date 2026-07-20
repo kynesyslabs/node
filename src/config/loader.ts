@@ -111,6 +111,8 @@ export function loadConfig(): Readonly<AppConfig> {
             xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
+            blockWatchdogEnabled: envBool(EnvKey.BLOCK_WATCHDOG_ENABLED, d.core.blockWatchdogEnabled),
+            blockWatchdogTimeoutSeconds: envInt(EnvKey.BLOCK_WATCHDOG_TIMEOUT_SECONDS, d.core.blockWatchdogTimeoutSeconds),
         },
 
         tlsnotary: {

@@ -13,6 +13,7 @@ import { isNetworkAhead } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { getSharedState } from "./sharedState"
 import { peerGossip } from "src/libs/peer/routines/peerGossip"
 import { handleError } from "src/errors/handleError"
+import { Config } from "src/config"
 
 // INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
@@ -71,6 +72,10 @@ async function mainLoopCycle() {
 
     // Check if the main loop is paused
     if (getSharedState.mainLoopPaused) {
+        return
+    }
+
+    if (await checkBlockWatchdog()) {
         return
     }
 
@@ -141,6 +146,31 @@ async function mainLoopCycle() {
             true,
         )
     }
+}
+
+async function checkBlockWatchdog(): Promise<boolean> {
+    const core = Config.getInstance().core
+    if (
+        !core.blockWatchdogEnabled ||
+        getSharedState.lastBlockInsertedAt === null ||
+        getSharedState.isShuttingDown
+    ) {
+        return false
+    }
+
+    const staleSeconds = Math.round(
+        (Date.now() - getSharedState.lastBlockInsertedAt) / 1000,
+    )
+    if (staleSeconds <= core.blockWatchdogTimeoutSeconds) {
+        return false
+    }
+
+    log.error(
+        `[BLOCK WATCHDOG] No block accepted for ${staleSeconds}s (threshold ${core.blockWatchdogTimeoutSeconds}s), last block ${getSharedState.lastBlockNumber} — shutting down for operator inspection`,
+    )
+    const { gracefulShutdown } = await import("src/index")
+    await gracefulShutdown("block_watchdog", 42)
+    return true
 }
 
 // ANCHOR Unified peer routine

@@ -296,6 +296,7 @@ export default class SharedState {
     // SECTION Consensus states
     candidateBlock: Block
     lastBlockNumber = 0
+    lastBlockInsertedAt: number | null = null
     _lastBlockHash = ""
     genesisIdentities = new Set<string>()
 

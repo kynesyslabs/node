@@ -60,6 +60,8 @@ export interface CoreConfig {
     xffMode: string
     mcpEnabled: boolean
     restore: boolean
+    blockWatchdogEnabled: boolean
+    blockWatchdogTimeoutSeconds: number
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

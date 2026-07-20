@@ -380,6 +380,7 @@ export async function insertBlock(
                 if (block.number > getSharedState.lastBlockNumber) {
                     getSharedState.lastBlockNumber = block.number
                     getSharedState.lastBlockHash = block.hash
+                    getSharedState.lastBlockInsertedAt = Date.now()
                 }
 
                 const saveBlockEnd = Date.now()
