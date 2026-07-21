@@ -289,7 +289,7 @@ export async function consensusRoutine(): Promise<void> {
                 )
                 blockAttrs[NONCE_TRACE_ATTR_KEY] = nonceTrace
 
-                const appliedHashes = new Set(applyRes.successfulTxs)
+                const appliedHashes = new Set(applyRes.appliedTxs)
                 assertForgedNonceTrace(
                     blockRef,
                     nonceTrace,
@@ -845,11 +845,15 @@ async function rollbackGCREditsFromTxs(txs: Transaction[]) {
  */
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
-): Promise<{ successfulTxs: string[]; failedTxs: FailedTranscation[] }> {
+): Promise<{
+    successfulTxs: string[]
+    appliedTxs: string[]
+    failedTxs: FailedTranscation[]
+}> {
     let failedTxs: FailedTranscation[] = []
 
     if (mempool.length === 0) {
-        return { successfulTxs: [], failedTxs: [] }
+        return { successfulTxs: [], appliedTxs: [], failedTxs: [] }
     }
 
     // Filter already-executed txs in single batch query
@@ -871,7 +875,7 @@ async function applyGCREditsFromMergedMempool(
     })
 
     if (pendingTxs.length === 0) {
-        return { successfulTxs: [], failedTxs }
+        return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
     const res = await HandleGCR.applyTransactions(pendingTxs, false)
@@ -893,7 +897,7 @@ async function applyGCREditsFromMergedMempool(
         }
     }
 
-    return { successfulTxs, failedTxs }
+    return { successfulTxs, appliedTxs: res.successfulTxs, failedTxs }
 }
 
 // /**
