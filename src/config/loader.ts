@@ -189,6 +189,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 || envFloat(EnvKey.MIN_NETWORK_UPLOAD_SPEED, d.diagnostics.suggestedNetworkUploadSpeed),
         },
 
+        debug: {
+            assertionsEnabled: envBool(EnvKey.DEBUG_ASSERTIONS_ENABLED, d.debug.assertionsEnabled),
+        },
+
         identity: {
             githubToken: envStr(EnvKey.GITHUB_TOKEN, d.identity.githubToken),
             discordApiUrl: envStr(EnvKey.DISCORD_API_URL, d.identity.discordApiUrl),

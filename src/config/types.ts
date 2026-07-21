@@ -151,6 +151,12 @@ export interface DiagnosticsConfig {
     suggestedNetworkUploadSpeed: number
 }
 
+// --- Debug ---
+
+export interface DebugConfig {
+    assertionsEnabled: boolean
+}
+
 // --- Identity & Web2 Services ---
 
 export interface IdentityConfig {
@@ -199,6 +205,7 @@ export interface AppConfig {
     l2ps: L2PSConfig
     metrics: MetricsConfig
     diagnostics: DiagnosticsConfig
+    debug: DebugConfig
     identity: IdentityConfig
     bridges: BridgesConfig
     ipfs: IPFSConfig

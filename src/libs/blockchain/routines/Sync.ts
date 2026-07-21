@@ -44,6 +44,12 @@ import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
+import {
+    assertSyncedNonceTrace,
+    debugAssertionsEnabled,
+    readNonceTrace,
+    readNonces,
+} from "@/libs/debug/nonceTrace"
 
 /**
  * Used to prevent block insert operations from happening concurrently.
@@ -531,7 +537,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     const applied = await verifyBlockAttrs(block, txs)
 
     // ! Sync the native tables
-    await syncGCRTables(applied)
+    await syncGCRTables(applied, block)
 
     // REVIEW Insert the txs into the transactions database table
     if (txs.length > 0) {
@@ -786,7 +792,7 @@ async function batchDownloadBlocks(
         const applied = await verifyBlockAttrs(block, blockTxs)
 
         // Sync GCR tables
-        await syncGCRTables(applied)
+        await syncGCRTables(applied, block)
 
         // Insert transactions
         if (blockTxs.length > 0) {
@@ -977,7 +983,7 @@ async function requestBlocks(): Promise<boolean> {
 }
 
 // REVIEW Applying GCREdits to the tables
-export async function syncGCRTables(txs: Transaction[]) {
+export async function syncGCRTables(txs: Transaction[], block?: Block) {
     // apply only transaction with confirmed status
     const confirmedTxs = txs.filter(
         tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
@@ -985,7 +991,22 @@ export async function syncGCRTables(txs: Transaction[]) {
 
     // sort transactions deterministic
     const sortedTxs = orderDeterministically(confirmedTxs)
+
+    const nonceTrace = debugAssertionsEnabled()
+        ? readNonceTrace(block?.attrs)
+        : null
+
+    if (!nonceTrace) {
+        await HandleGCR.applyTransactions(sortedTxs, false)
+        return
+    }
+
+    const traceAccounts = Object.keys(nonceTrace)
+    const localBefore = await readNonces(traceAccounts)
     await HandleGCR.applyTransactions(sortedTxs, false)
+    const localAfter = await readNonces(traceAccounts)
+
+    assertSyncedNonceTrace(block.number, nonceTrace, localBefore, localAfter)
 }
 
 // Helper function to ask for the transactions in a block

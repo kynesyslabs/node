@@ -30,6 +30,13 @@ import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
+import {
+    NONCE_TRACE_ATTR_KEY,
+    assertForgedNonceTrace,
+    buildNonceTrace,
+    debugAssertionsEnabled,
+    readNonces,
+} from "@/libs/debug/nonceTrace"
 
 export interface FailedTranscation {
     txhash: string
@@ -91,6 +98,7 @@ export async function consensusRoutine(): Promise<void> {
 
     const blockTxs: MempoolTransaction[] = []
     const blockAttrs: Record<string, any> = {}
+    const traceEnabled = debugAssertionsEnabled()
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -261,9 +269,33 @@ export async function consensusRoutine(): Promise<void> {
                 process.exit(1)
             }
 
+            const traceAccounts = Array.from(resNonce.nonceAccounts)
+            const startApplyNonces = traceEnabled
+                ? await readNonces(traceAccounts)
+                : {}
+
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
             )
+
+            if (traceEnabled) {
+                const endApplyNonces = await readNonces(traceAccounts)
+                const nonceTrace = buildNonceTrace(
+                    traceAccounts,
+                    resNonce.startFilterNonces,
+                    resNonce.projectedEndNonces,
+                    startApplyNonces,
+                    endApplyNonces,
+                )
+                blockAttrs[NONCE_TRACE_ATTR_KEY] = nonceTrace
+
+                const appliedHashes = new Set(applyRes.successfulTxs)
+                assertForgedNonceTrace(
+                    blockRef,
+                    nonceTrace,
+                    refRes.validTxs.filter(tx => appliedHashes.has(tx.hash)),
+                )
+            }
 
             blockAttrs["gcrAppliedTxCount"] = applyRes.successfulTxs.length
             blockAttrs["gcrAppliedTxsHash"] = Hashing.sha256(
@@ -719,6 +751,7 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
 
     // fetch all nonce counts from the db
     const nonces = await GCR.getAccountNonces(Array.from(nonceAccounts))
+    const startFilterNonces = { ...nonces }
 
     txLoop: for (const tx of mempool) {
         const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
@@ -779,7 +812,13 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
         "[filterMempoolByValidNonce] Final mempool length: " + validTxs.length,
     )
 
-    return { validTxs, failedTxs }
+    return {
+        validTxs,
+        failedTxs,
+        nonceAccounts,
+        startFilterNonces,
+        projectedEndNonces: nonces,
+    }
 }
 
 /**

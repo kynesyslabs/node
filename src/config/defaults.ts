@@ -134,6 +134,10 @@ export const DEFAULT_CONFIG: AppConfig = {
         suggestedNetworkUploadSpeed: 0,
     },
 
+    debug: {
+        assertionsEnabled: true,
+    },
+
     identity: {
         githubToken: "",
         discordApiUrl: "https://discord.com/api/v10",
