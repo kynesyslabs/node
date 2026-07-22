@@ -518,13 +518,6 @@ export async function syncBlock(block: Block, peer: Peer) {
         return false
     }
 
-    await Chain.insertBlock(block, [])
-    log.debug("Block inserted successfully")
-    log.debug(
-        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
-    )
-    log.info("[fastSync] Block inserted successfully at the head of the chain!")
-
     // REVIEW Merge the peerlist
     log.info(`[fastSync] Merging peers from block: ${block.hash}`)
     const mergedPeerlist = await mergePeerlist(block)
@@ -539,30 +532,25 @@ export async function syncBlock(block: Block, peer: Peer) {
     // ! Sync the native tables
     await syncGCRTables(applied, block)
 
-    // REVIEW Insert the txs into the transactions database table
+    await Chain.insertBlock(block, txs)
+    log.debug("Block inserted successfully")
+    log.debug(
+        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
+    )
+    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+
     if (txs.length > 0) {
-        log.info("[fastSync] Inserting transactions into the database", true)
-        const success = await Chain.insertTransactionsFromSync(txs)
-        if (success) {
-            log.info("[fastSync] Transactions inserted successfully")
-
-            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-            // confirm all txs are inserted
-            for (const tx of txs) {
-                const res = await Chain.checkTxExists(tx.hash)
-                if (!res) {
-                    log.error(
-                        "[syncGCRTables] Transaction not found: " + tx.hash,
-                    )
-                    process.exit(1)
-                }
+        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+        // confirm all txs are inserted
+        for (const tx of txs) {
+            const res = await Chain.checkTxExists(tx.hash)
+            if (!res) {
+                log.error("[syncGCRTables] Transaction not found: " + tx.hash)
+                process.exit(1)
             }
-            log.debug("[syncGCRTables] All transactions are inserted")
-            return true
         }
-
-        log.error("[fastSync] Transactions insertion failed")
-        return false
+        log.debug("[syncGCRTables] All transactions are inserted")
+        return true
     }
 
     log.info("[fastSync] No transactions in the block")
@@ -781,12 +769,6 @@ async function batchDownloadBlocks(
             return false
         }
 
-        // Insert block
-        await Chain.insertBlock(block, [])
-        log.info(
-            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
-        )
-
         // Merge peerlist
         await mergePeerlist(block)
         const applied = await verifyBlockAttrs(block, blockTxs)
@@ -794,16 +776,11 @@ async function batchDownloadBlocks(
         // Sync GCR tables
         await syncGCRTables(applied, block)
 
-        // Insert transactions
-        if (blockTxs.length > 0) {
-            const success = await Chain.insertTransactionsFromSync(blockTxs)
-            if (!success) {
-                log.error(
-                    `[batchDownloadBlocks] Failed to insert transactions for block ${block.number}`,
-                )
-                return false
-            }
-        }
+        // Insert block
+        await Chain.insertBlock(block, blockTxs)
+        log.info(
+            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
+        )
     }
 
     log.debug(

@@ -140,10 +140,9 @@ async function mainLoopCycle() {
         // ANCHOR Calling the consensus routine if is time for it
         consensusRoutine()
     } else if (!getSharedState.syncStatus) {
-        // ? This is a bit redundant, isn't it?
-        log.warning(
-            "[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically",
-            true,
+        log.warning("[MAIN LOOP] Not in sync, starting sync loop", true)
+        fastSync([], "syncRecovery").catch(e =>
+            handleError(e, "SYNC", { source: "syncRecovery" }),
         )
     }
 }
