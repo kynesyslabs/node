@@ -21,7 +21,11 @@ import HandleGCR, { normalizePubkey } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import {
+    fastSync,
+    syncLock,
+    waitForPeerStatus,
+} from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
@@ -93,6 +97,7 @@ export async function consensusRoutine(): Promise<void> {
 
     // Defining the variables needed for rolling back the GCREdits
     let exitReason = ""
+    let releaseSyncLock: (() => void) | null = null
     const successfulTxs: TxHash[] = []
     const failedTxs: FailedTranscation[] = []
 
@@ -236,6 +241,15 @@ export async function consensusRoutine(): Promise<void> {
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
+            releaseSyncLock = await syncLock.acquire()
+
+            const existingBlock = await Chain.getBlockByNumber(blockRef)
+            if (existingBlock) {
+                throw new ForgingEndedError(
+                    `[consensusRoutine] Block ${blockRef} was already applied via sync, exiting`,
+                )
+            }
+
             // Filter out failed txs (from the nonce filter)
             const toApplyTxs = blockTxs.filter(
                 tx => tx.status !== TRANSACTION_STATUS.FAILED,
@@ -482,6 +496,8 @@ export async function consensusRoutine(): Promise<void> {
         log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
+        releaseSyncLock?.()
+
         // INFO: If there was a relayed tx past finalize block step, release
         if (DTRManager.poolSize > 0) {
             DTRManager.releaseDTRWaiter()
