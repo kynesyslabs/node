@@ -377,12 +377,6 @@ export async function insertBlock(
                     newBlock,
                 )
 
-                if (block.number > getSharedState.lastBlockNumber) {
-                    getSharedState.lastBlockNumber = block.number
-                    getSharedState.lastBlockHash = block.hash
-                    getSharedState.lastBlockInsertedAt = Date.now()
-                }
-
                 const saveBlockEnd = Date.now()
                 log.only(
                     `[insertBlock] Save block took ${saveBlockEnd - saveBlockStart}ms`,
@@ -476,6 +470,12 @@ export async function insertBlock(
                 return savedBlock
             },
         )
+
+        if (block.number > getSharedState.lastBlockNumber) {
+            getSharedState.lastBlockNumber = block.number
+            getSharedState.lastBlockHash = block.hash
+            getSharedState.lastBlockInsertedAt = Date.now()
+        }
 
         // Post-commit refresh: rolled-back tx → no-op; committed tx →
         // picks up newly-active proposals. Failure is non-fatal — next
