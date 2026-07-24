@@ -128,15 +128,7 @@ export default class Peer {
         log.debug(
             "[PEER] Testing connection to peer: " + this.connection.string,
         )
-        const call: NodeCall = {
-            message: "ping",
-            data: null,
-            muid: "",
-        }
-        const response = await this.call({
-            method: "nodeCall",
-            params: [call],
-        })
+        const response = await this.call({ method: "ping", params: [] })
         log.debug(
             "[PEER] [PING] Response: " +
                 response.result +
