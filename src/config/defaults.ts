@@ -64,7 +64,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         mcpEnabled: false,
         restore: false,
         blockWatchdogEnabled: true,
-        blockWatchdogTimeoutSeconds: 240,
+        blockWatchdogTimeoutSeconds: 600,
     },
 
     tlsnotary: {
