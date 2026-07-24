@@ -23,6 +23,7 @@ async function sleep(time: number) {
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
     // return await consensusRoutine()
+    startBlockWatchdog()
     while (getSharedState.runMainLoop) {
         try {
             log.debug("Mainloop cycle started!")
@@ -72,10 +73,6 @@ async function mainLoopCycle() {
 
     // Check if the main loop is paused
     if (getSharedState.mainLoopPaused) {
-        return
-    }
-
-    if (await checkBlockWatchdog()) {
         return
     }
 
@@ -145,6 +142,31 @@ async function mainLoopCycle() {
             handleError(e, "SYNC", { source: "syncRecovery" }),
         )
     }
+}
+
+const BLOCK_WATCHDOG_INTERVAL_MS = 10_000
+let blockWatchdogTimer: ReturnType<typeof setInterval> | null = null
+
+function startBlockWatchdog(): void {
+    if (blockWatchdogTimer !== null) {
+        return
+    }
+    if (!Config.getInstance().core.blockWatchdogEnabled) {
+        return
+    }
+
+    blockWatchdogTimer = setInterval(() => {
+        if (getSharedState.isShuttingDown) {
+            if (blockWatchdogTimer !== null) {
+                clearInterval(blockWatchdogTimer)
+                blockWatchdogTimer = null
+            }
+            return
+        }
+        checkBlockWatchdog().catch(e =>
+            handleError(e, "CORE", { source: "blockWatchdog" }),
+        )
+    }, BLOCK_WATCHDOG_INTERVAL_MS)
 }
 
 async function checkBlockWatchdog(): Promise<boolean> {

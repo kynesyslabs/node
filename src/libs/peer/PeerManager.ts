@@ -18,6 +18,23 @@ import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
+const HELLO_TIMEOUT_MS = 5000
+
+function withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+): Promise<T> {
+    let timer: ReturnType<typeof setTimeout>
+    const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+            () => reject(new Error(`${label} timed out after ${ms}ms`)),
+            ms,
+        )
+    })
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
@@ -188,13 +205,17 @@ export default class PeerManager {
 
     async getOnlinePeers(): Promise<Peer[]> {
         //const onlinePeers: Peer[] = []
-        await Promise.all(
+        await Promise.allSettled(
             Object.values(this.peerList).map(async peerInstance => {
                 if (peerInstance.identity == getSharedState.publicKeyHex) {
                     return
                 }
 
-                await PeerManager.sayHelloToPeer(peerInstance)
+                await withTimeout(
+                    PeerManager.sayHelloToPeer(peerInstance),
+                    HELLO_TIMEOUT_MS,
+                    `sayHelloToPeer(${peerInstance.identity})`,
+                )
             }),
         )
 
