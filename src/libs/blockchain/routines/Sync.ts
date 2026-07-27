@@ -67,6 +67,16 @@ class SyncAssertionError extends Error {
     }
 }
 
+class ForkedPeerError extends Error {
+    constructor(
+        message: string,
+        public readonly validSource: Peer | null,
+    ) {
+        super(message)
+        this.name = "ForkedPeerError"
+    }
+}
+
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
@@ -702,6 +712,154 @@ export async function askTxsForBlocksBatch(
     return txMap
 }
 
+const FORK_RECOVERY_MAX_PEERS = 5
+
+interface ForkRecoveryResult {
+    block: Block
+    txs: Transaction[]
+    peer: Peer
+}
+
+/**
+ * Ask other peers for their variant of a block we rejected, and return
+ * the first variant that passes verifyBlock. Variants are deduplicated
+ * by hash and tried most-served first; the rejected hash is skipped.
+ * Returns null when no candidate serves a valid alternative — which
+ * usually means the network agrees on the hash we rejected and we are
+ * the forked node.
+ */
+async function resolveForkedBlock(
+    blockNumber: number,
+    rejectedHash: string,
+    excludeIdentities: Set<string>,
+): Promise<ForkRecoveryResult | null> {
+    const selfId = getSharedState.publicKeyHex
+    const candidates = peerManager
+        .getAll()
+        .filter(
+            p =>
+                p.sync.block >= blockNumber &&
+                p.identity !== selfId &&
+                !excludeIdentities.has(p.identity),
+        )
+        .slice(0, FORK_RECOVERY_MAX_PEERS)
+
+    if (candidates.length === 0) {
+        log.error(
+            `[forkRecovery] No candidate peers to resolve block ${blockNumber}`,
+        )
+        return null
+    }
+
+    const request: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlocks",
+                data: { start: blockNumber, limit: 1 },
+                muid: null,
+            },
+        ],
+    }
+
+    const settled = await Promise.allSettled(
+        candidates.map(async candidate => {
+            const res = await candidate.call(request, false)
+            if (res.result !== 200) {
+                throw new Error(`getBlocks returned ${res.result}`)
+            }
+            const blocks = res.response as Block[]
+            const block = blocks?.find(b => b.number === blockNumber)
+            if (!block) {
+                throw new Error(`no block ${blockNumber} in response`)
+            }
+            return { block, candidate }
+        }),
+    )
+
+    const variants = new Map<string, { block: Block; peers: Peer[] }>()
+    for (const result of settled) {
+        if (result.status !== "fulfilled") continue
+        const { block, candidate } = result.value
+        if (block.hash === rejectedHash) continue
+        const variant = variants.get(block.hash)
+        if (variant) {
+            variant.peers.push(candidate)
+        } else {
+            variants.set(block.hash, { block, peers: [candidate] })
+        }
+    }
+
+    if (variants.size === 0) {
+        log.error(
+            `[forkRecovery] No alternative variant for block ${blockNumber}: ` +
+                "polled peers agree with the hash we rejected",
+        )
+        return null
+    }
+
+    const ordered = [...variants.values()].sort(
+        (a, b) => b.peers.length - a.peers.length,
+    )
+
+    for (const variant of ordered) {
+        const verdict = await verifyBlock(variant.block as never)
+        if (!verdict.valid) {
+            log.error(
+                `[forkRecovery] Variant ${variant.block.hash} of block ${blockNumber} is invalid: ${verdict.reason}`,
+            )
+            continue
+        }
+
+        for (const source of variant.peers) {
+            try {
+                const txs = await askTxsForBlock(variant.block, source)
+                log.info(
+                    `[forkRecovery] Recovered block ${blockNumber} (${variant.block.hash}) from ${source.identity}`,
+                )
+                return { block: variant.block, txs, peer: source }
+            } catch (e) {
+                log.error(
+                    `[forkRecovery] Failed to fetch txs from ${source.identity}: ${e instanceof Error ? e.message : String(e)}`,
+                )
+            }
+        }
+    }
+
+    return null
+}
+
+/**
+ * Verify attrs, apply GCR edits and insert a synced block. Shared by
+ * the batch loop and the fork-recovery path.
+ *
+ * @returns False if the block was already inserted concurrently
+ */
+async function applySyncedBlock(
+    block: Block,
+    blockTxs: Transaction[],
+): Promise<boolean> {
+    const exists = await Chain.getBlockByNumber(block.number)
+    if (exists) {
+        log.error("Block already exists, skipping ...")
+        return false
+    }
+
+    // Merge peerlist
+    await mergePeerlist(block)
+    const applied = await verifyBlockAttrs(block, blockTxs)
+
+    // Sync GCR tables
+    await syncGCRTables(applied, block)
+
+    // Insert block
+    await Chain.insertBlock(block, blockTxs)
+    log.info(
+        `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
+    )
+    return true
+}
+
 /**
  * Download and process a batch of blocks from a peer
  *
@@ -797,29 +955,34 @@ async function batchDownloadBlocks(
                 log.error(
                     `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
                 )
-                return false
+
+                const recovered = await resolveForkedBlock(
+                    block.number,
+                    block.hash,
+                    new Set([peer.identity]),
+                )
+
+                if (!recovered) {
+                    throw new ForkedPeerError(
+                        `No valid variant found for forked block ${block.number}`,
+                        null,
+                    )
+                }
+
+                await applySyncedBlock(recovered.block, recovered.txs)
+
+                // The rest of this batch builds on the rejected hash;
+                // abandon it and continue from the recovery source
+                throw new ForkedPeerError(
+                    `Recovered forked block ${block.number} from ${recovered.peer.identity}`,
+                    recovered.peer,
+                )
             }
         }
 
-        // check exists again
-        const exists = await Chain.getBlockByNumber(block.number)
-        if (exists) {
-            log.error("Block already exists, skipping ...")
+        if (!(await applySyncedBlock(block, blockTxs))) {
             return false
         }
-
-        // Merge peerlist
-        await mergePeerlist(block)
-        const applied = await verifyBlockAttrs(block, blockTxs)
-
-        // Sync GCR tables
-        await syncGCRTables(applied, block)
-
-        // Insert block
-        await Chain.insertBlock(block, blockTxs)
-        log.info(
-            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
-        )
     }
 
     log.debug(
@@ -934,7 +1097,17 @@ async function requestBlocks(): Promise<boolean> {
 
         try {
             // Download batch of blocks
-            await batchDownloadBlocks(peer, startBlock, endBlock)
+            const ok = await batchDownloadBlocks(peer, startBlock, endBlock)
+            if (!ok) {
+                seenPeers.add(peer.identity)
+                const next = findNextAvailablePeer(seenPeers)
+                if (!next) {
+                    log.error("[requestBlocks] No more peers available to sync")
+                    return false
+                }
+                peer = next
+                continue
+            }
             await BroadcastManager.broadcastOurSyncData()
 
             // Trigger L2PS sync
@@ -951,6 +1124,25 @@ async function requestBlocks(): Promise<boolean> {
                     "[requestBlocks] Reached end of available blocks on peer",
                 )
                 break
+            }
+
+            // Handle a forked peer: continue from the recovery source,
+            // or abort the round safely when no valid variant exists
+            if (error instanceof ForkedPeerError) {
+                seenPeers.add(peer.identity)
+
+                if (error.validSource) {
+                    peer = error.validSource
+                    log.info(
+                        `[requestBlocks] Switched to fork-recovery source: ${peer.connection.string}`,
+                    )
+                    continue
+                }
+
+                log.error(
+                    "[requestBlocks] No valid variant for forked block; aborting this sync round",
+                )
+                return false
             }
 
             // Handle peer unreachable - switch to next peer
