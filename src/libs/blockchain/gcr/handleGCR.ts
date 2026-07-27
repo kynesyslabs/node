@@ -749,6 +749,28 @@ export default class HandleGCR {
 
         for (const tx of txs) {
             if (toFilter.has(tx.content.type)) {
+                // These types don't mutate GCR entities, but their universal
+                // edits (nonce increment + gas) must still apply; only the
+                // type-specific edits are skipped
+                const universalEdits = (tx.content.gcr_edits ?? []).filter(
+                    edit => edit.type === "nonce" || edit.type === "balance",
+                )
+
+                if (universalEdits.length > 0) {
+                    const reduced = Object.assign(
+                        Object.create(Object.getPrototypeOf(tx)),
+                        tx,
+                        {
+                            content: {
+                                ...tx.content,
+                                gcr_edits: universalEdits,
+                            },
+                        },
+                    ) as Transaction
+                    finalTxs.push(reduced)
+                    continue
+                }
+
                 skippedTxs.push(tx.hash)
 
                 // add the tx to the assignedTxsUpdates map
