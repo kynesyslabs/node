@@ -409,6 +409,8 @@ export default class Mempool {
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
+        const lastBlock = await Chain.getLastBlockNumber()
+        const staleCutoff = lastBlock - getSharedState.referenceBlockRoom
         const unseenTransactions = incoming.filter(
             tx => !existingHashes[tx.hash],
         )

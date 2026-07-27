@@ -41,6 +41,7 @@ import {
     debugAssertionsEnabled,
     readNonces,
 } from "@/libs/debug/nonceTrace"
+import { computeMergedPeerlist } from "./routines/peerlistMerge"
 
 export interface FailedTranscation {
     txhash: string
@@ -168,14 +169,17 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        const initialMempool = await mergeAndOrderMempools(
-            manager.shard.members,
-            manager.shard.blockRef,
-        )
+        const { txs: initialMempool, peerlist: mergedPeerlist } =
+            await mergeAndOrderMempools(
+                manager.shard.members,
+                manager.shard.blockRef,
+            )
 
         // filter txs by reference block
-        // const res = filterMempoolByRefBlock(initialMempool)
-        const resNonce = await filterMempoolByNonce(initialMempool)
+        const resRef = filterMempoolByRefBlock(initialMempool)
+        failedTxs.push(...resRef.failedTxs)
+
+        const resNonce = await filterMempoolByNonce(resRef.validTxs)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block
@@ -225,7 +229,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(blockTxs, []) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(blockTxs, mergedPeerlist) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
         if (await isNetworkAhead("preVote")) {
             throw new AbortConsensusError(
@@ -237,7 +241,12 @@ export async function consensusRoutine(): Promise<void> {
         getSharedState.lastConsensusTime = block.content.timestamp
 
         // INFO: CONSENSUS ACTION 6: Vote on the block
-        const [pro, con] = await voteOnBlock(block, manager.shard.members)
+        const responsiveMembers = manager.shard.members.filter(
+            m =>
+                !manager.unresponsiveMembers.has(m.identity) &&
+                (m.connection.string !== "" || m.isLocalNode),
+        )
+        const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
@@ -459,12 +468,15 @@ export async function consensusRoutine(): Promise<void> {
         ) {
             exitReason = "abortConsensus"
             // INFO: If we're past merge mempools phase
-            log.warn(
-                "[consensusRoutine] Aborted consensus routine at phase: " +
-                    manager.ourValidatorPhase.currentPhase,
-            )
-            if (manager.ourValidatorPhase.currentPhase <= 3) {
-                return
+
+            if (manager && manager.ourValidatorPhase) {
+                log.warn(
+                    "[consensusRoutine] Aborted consensus routine at phase: " +
+                        manager.ourValidatorPhase.currentPhase,
+                )
+                if (manager.ourValidatorPhase.currentPhase <= 3) {
+                    return
+                }
             }
 
             log.warn(
@@ -630,7 +642,7 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
 async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
-): Promise<MempoolTransaction[]> {
+): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.lock.runExclusive(
         async () => await Mempool.getMempool(blockRef),
@@ -655,8 +667,13 @@ async function mergeAndOrderMempools(
     )
 
     // Merge with peers
-    await mergeMempools(outboundPool, shard)
+    await mergeMempools(outboundPool, shard, blockRef)
     await updateValidatorPhase(3, blockRef)
+
+    const mergedPeerlist = await computeMergedPeerlist(blockRef)
+    log.only(
+        `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
+    )
 
     const postMempool = await Mempool.getMempool(blockRef)
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
@@ -699,7 +716,10 @@ async function mergeAndOrderMempools(
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
-    return orderDeterministically<MempoolTransaction>(finalMempool)
+    return {
+        txs: orderDeterministically<MempoolTransaction>(finalMempool),
+        peerlist: mergedPeerlist,
+    }
 }
 
 /**
@@ -968,7 +988,7 @@ async function applyGCREditsFromMergedMempool(
  */
 async function forgeBlock(
     orderedTransactions: Transaction[],
-    peerlist: Peer[] = [],
+    peerlist: string[] = [],
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()

@@ -38,7 +38,7 @@ export default async function manageProposeBlockHash(
     if (!validator) {
         log.error(
             "[manageProposeBlockHash] Validator (" +
-                peer.connection.string +
+                (peer?.connection?.string ?? peerId) +
                 ") is not in the shard: refusing the block hash",
         )
         response.result = 401

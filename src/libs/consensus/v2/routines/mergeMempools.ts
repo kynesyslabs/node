@@ -8,6 +8,10 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
+import {
+    contributePeerlist,
+    getLocalPeerlistView,
+} from "./peerlistMerge"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
 
@@ -36,17 +40,36 @@ function withTimeout(
     ])
 }
 
-export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
+export async function mergeMempools(
+    mempool: Transaction[],
+    shard: Peer[],
+    blockRef: number,
+) {
     const now = Date.now()
     // INFO: if shard only contains us, skip network requests
     shard = shard.filter(peer => peer.identity !== getSharedState.publicKeyHex)
+    // INFO: committee members we cannot resolve locally have no connection
+    // string; they stay in the shard for quorum purposes but cannot be called
+    const unreachable = shard.filter(peer => !peer.connection.string)
+    if (unreachable.length > 0) {
+        log.warning(
+            `[mergeMempools] ${unreachable.length} committee member(s) not in the local peer table, skipping calls to them`,
+        )
+    }
+    shard = shard.filter(peer => peer.connection.string)
     if (shard.length === 0) {
         return
     }
 
     const request: RPCRequest = {
         method: "mempool",
-        params: mempool,
+        params: [
+            {
+                txs: mempool,
+                peerlist: getLocalPeerlistView(),
+                blockRef,
+            },
+        ],
     }
 
     const promises = shard.map(peer => {
@@ -79,6 +102,12 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
         }
 
         const response = result.value
+        const payload = response.response as {
+            txs: Transaction[]
+            peerlist: string[]
+        }
+        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
+
         if (response.result !== 200) {
             log.error(
                 `[mergeMempools] Non-200 from ${peer.connection.string}: ${JSON.stringify(response, null, 2)}`,
@@ -86,8 +115,8 @@ export async function mergeMempools(mempool: Transaction[], shard: Peer[]) {
             continue
         }
 
-        const rawTxs = response.response as Transaction[]
-        // Defensive: a peer's response must be an array. A malformed/hostile
+        const rawTxs = payload?.txs
+        // Defensive: a peer's response must carry a tx array. A malformed/hostile
         // peer returning a non-array would otherwise throw on iteration and
         // abort the whole merge round.
         if (!Array.isArray(rawTxs)) {

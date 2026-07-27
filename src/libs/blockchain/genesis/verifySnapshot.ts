@@ -171,7 +171,7 @@ function parseManifest(raw: string): SnapshotManifest {
     return parsed as unknown as SnapshotManifest
 }
 
-type FileStats = {
+export type FileStats = {
     sha256: string
     rows: number
     balanceSum?: bigint
@@ -198,7 +198,7 @@ type FileStats = {
  *                  each non-empty line ("balance" uses bigint arithmetic;
  *                  "sizeBytes" uses number arithmetic)
  */
-async function readFileSinglePass(
+export async function readFileSinglePass(
     path: string,
     sumField?: "balance" | "sizeBytes",
 ): Promise<FileStats> {
