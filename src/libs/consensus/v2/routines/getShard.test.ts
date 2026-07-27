@@ -1,16 +1,20 @@
 import getShard, {
     __resetValidatorCache,
     getCommitteeFloor,
-    getShardIdentities,
+    getEligiblePool,
 } from "./getShard"
-import { computeCurrentSlot, pickSlotLeader } from "./slotRotation"
 
 const V = (n: number) => n.toString(16).padStart(2, "0").repeat(32)
+const SELF = "aa".repeat(32)
+
+interface FakePeerShape {
+    identity: string
+    connection: { string: string }
+}
 
 let committedPeerlist: string[] = []
 let validatorAddresses: (string | null)[] = []
-let validatorUrls: Record<string, string> = {}
-let networkNow = 1_000_000
+let onlinePeers: FakePeerShape[] = []
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -30,13 +34,7 @@ jest.mock("src/utilities/sharedState", () => ({
         lastBlockNumber: 100,
         lastBlockHash: "tiphash",
         shardSize: 4,
-        getSlotDuration: () => 30,
-        getConsensusTime: () => 10,
     },
-}))
-
-jest.mock("src/libs/utils/calibrateTime", () => ({
-    getNetworkTimestamp: () => networkNow,
 }))
 
 jest.mock("src/libs/peer/PeerManager", () => {
@@ -44,14 +42,14 @@ jest.mock("src/libs/peer/PeerManager", () => {
         static getInstance() {
             return new FakePeerManager()
         }
+        async getOnlinePeers() {
+            return onlinePeers
+        }
         getPeers() {
-            return []
+            return onlinePeers
         }
         getPeer(identity: string) {
-            if (identity === "bb".repeat(32)) {
-                return { identity, connection: { string: "http://known" } }
-            }
-            return undefined
+            return onlinePeers.find(p => p.identity === identity)
         }
     }
     return { __esModule: true, default: FakePeerManager }
@@ -89,121 +87,100 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
         getGCRValidatorsAtBlock: jest.fn(async () =>
             validatorAddresses.map(address => ({
                 address,
-                connection_url: validatorUrls[address] ?? null,
+                connection_url: null,
             })),
         ),
     },
 }))
 
+const onlinePeer = (identity: string): FakePeerShape => ({
+    identity,
+    connection: { string: `http://${identity.slice(0, 6)}` },
+})
+
 beforeEach(() => {
     __resetValidatorCache()
     committedPeerlist = [V(1), V(2), V(3), V(4), V(5), V(6)]
     validatorAddresses = [V(1), V(2), V(3), V(4), V(5), V(6)]
-    validatorUrls = {}
-    networkNow = 1_000_000
+    onlinePeers = committedPeerlist.map(onlinePeer)
 })
 
-describe("getShardIdentities", () => {
-    it("is deterministic for the same seed and block", async () => {
-        const first = await getShardIdentities("seed-1", 100)
+describe("getEligiblePool", () => {
+    it("is deterministic for the same block", async () => {
+        const first = await getEligiblePool(100)
         __resetValidatorCache()
-        const second = await getShardIdentities("seed-1", 100)
+        const second = await getEligiblePool(100)
         expect(first).toEqual(second)
-        expect(first).toHaveLength(4)
+        expect(first).toHaveLength(6)
     })
 
-    it("selects different committees for different seeds", async () => {
-        const a = await getShardIdentities("seed-a", 100)
-        const b = await getShardIdentities("seed-b", 100)
-        expect(a).not.toEqual(b)
-    })
-
-    it("only selects members from the committed peerlist ∩ validators", async () => {
+    it("only contains the committed peerlist ∩ validators", async () => {
         validatorAddresses = [V(1), V(2), V(9)]
-        const committee = await getShardIdentities("seed", 100)
-        expect(committee.sort()).toEqual([V(1), V(2)])
+        const pool = await getEligiblePool(100)
+        expect(pool).toEqual([V(1), V(2)])
     })
 
     it("bootstraps from the validator set when the peerlist is empty", async () => {
         committedPeerlist = []
-        const committee = await getShardIdentities("seed", 100)
-        expect(committee).toHaveLength(4)
-        for (const member of committee) {
+        const pool = await getEligiblePool(100)
+        expect(pool).toHaveLength(6)
+        for (const member of pool) {
             expect(validatorAddresses).toContain(member)
         }
     })
 
-    it("returns the whole pool when it is smaller than shardSize", async () => {
-        committedPeerlist = [V(1), V(2)]
-        const committee = await getShardIdentities("seed", 100)
-        expect(committee.sort()).toEqual([V(1), V(2)])
-    })
-
     it("normalises case from the committed peerlist", async () => {
         committedPeerlist = [V(1).toUpperCase(), V(2)]
-        const committee = await getShardIdentities("seed", 100)
-        expect(committee).toContain(V(1))
+        const pool = await getEligiblePool(100)
+        expect(pool).toContain(V(1))
     })
 })
 
 describe("getShard", () => {
-    it("resolves unknown identities to placeholder peers instead of dropping them", async () => {
-        committedPeerlist = ["bb".repeat(32), "cc".repeat(32)]
-        validatorAddresses = ["bb".repeat(32), "cc".repeat(32)]
+    it("selects only pool members indexed in the online list", async () => {
+        onlinePeers = [onlinePeer(V(1)), onlinePeer(V(2))]
         const shard = await getShard("seed", 100)
-        expect(shard).toHaveLength(2)
-        const unknown = shard.find(p => p.identity === "cc".repeat(32))
-        expect(unknown).toBeDefined()
-        expect(unknown.connection.string).toBe("")
-        const known = shard.find(p => p.identity === "bb".repeat(32))
-        expect(known.connection.string).toBe("http://known")
+        expect(shard.map(p => p.identity).sort()).toEqual([V(1), V(2)])
     })
 
-    it("resolves unknown identities via the validator connection_url before falling back", async () => {
-        committedPeerlist = ["cc".repeat(32), "dd".repeat(32)]
-        validatorAddresses = ["cc".repeat(32), "dd".repeat(32)]
-        validatorUrls = { ["cc".repeat(32)]: "http://validator-c" }
+    it("excludes pool members that are offline", async () => {
+        onlinePeers = onlinePeers.filter(p => p.identity !== V(3))
         const shard = await getShard("seed", 100)
-        const fromValidatorTable = shard.find(
-            p => p.identity === "cc".repeat(32),
+        expect(shard.map(p => p.identity)).not.toContain(V(3))
+    })
+
+    it("always includes ourselves even when not indexed online", async () => {
+        committedPeerlist = [SELF, V(2)]
+        validatorAddresses = [SELF, V(2)]
+        onlinePeers = []
+        const shard = await getShard("seed", 100)
+        expect(shard.map(p => p.identity)).toEqual([SELF])
+        expect(shard[0].connection.string).toBe("")
+    })
+
+    it("is deterministic for the same seed and online set", async () => {
+        const first = await getShard("seed-1", 100)
+        __resetValidatorCache()
+        const second = await getShard("seed-1", 100)
+        expect(first.map(p => p.identity)).toEqual(
+            second.map(p => p.identity),
         )
-        expect(fromValidatorTable.connection.string).toBe("http://validator-c")
-        const placeholder = shard.find(p => p.identity === "dd".repeat(32))
-        expect(placeholder.connection.string).toBe("")
     })
 
-    it("prefers the local peer table over the validator connection_url", async () => {
-        committedPeerlist = ["bb".repeat(32), "cc".repeat(32)]
-        validatorAddresses = ["bb".repeat(32), "cc".repeat(32)]
-        validatorUrls = { ["bb".repeat(32)]: "http://stale-validator-url" }
+    it("draws at most shardSize members", async () => {
         const shard = await getShard("seed", 100)
-        const known = shard.find(p => p.identity === "bb".repeat(32))
-        expect(known.connection.string).toBe("http://known")
+        expect(shard).toHaveLength(4)
+    })
+
+    it("selects different committees for different seeds", async () => {
+        const a = await getShard("seed-a", 100)
+        const b = await getShard("seed-b", 100)
+        expect(a.map(p => p.identity)).not.toEqual(b.map(p => p.identity))
     })
 })
 
 describe("getCommitteeFloor", () => {
     it("equals floor(shardSize * 2/3) + 1", () => {
         expect(getCommitteeFloor()).toBe(3)
-    })
-})
-
-describe("slotRotation", () => {
-    it("is slot 0 before the origin has elapsed", () => {
-        networkNow = 999_000 + 10
-        expect(computeCurrentSlot(999_000)).toBe(0)
-    })
-
-    it("advances one slot per slotDuration after the origin", () => {
-        networkNow = 999_000 + 10 + 65
-        expect(computeCurrentSlot(999_000)).toBe(2)
-    })
-
-    it("rotates the leader deterministically with wraparound", () => {
-        const committee = ["a", "b", "c"]
-        expect(pickSlotLeader(committee, 0)).toBe("a")
-        expect(pickSlotLeader(committee, 2)).toBe("c")
-        expect(pickSlotLeader(committee, 3)).toBe("a")
-        expect(pickSlotLeader([], 5)).toBeNull()
     })
 })

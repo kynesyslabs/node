@@ -104,7 +104,6 @@ export function loadConfig(): Readonly<AppConfig> {
             maxMessageSize: envInt(EnvKey.MAX_MESSAGE_SIZE, d.core.maxMessageSize),
             consensusCheckInterval: envInt(EnvKey.CONSENSUS_CHECK_INTERVAL, d.core.consensusCheckInterval),
             consensusTime: envInt(EnvKey.CONSENSUS_TIME, d.core.consensusTime),
-            slotDuration: envInt(EnvKey.SLOT_DURATION, d.core.slotDuration),
             blockTimestampMinDelta: envInt(
                 EnvKey.BLOCK_TIMESTAMP_MIN_DELTA,
                 d.core.blockTimestampMinDelta,

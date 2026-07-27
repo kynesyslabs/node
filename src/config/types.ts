@@ -40,8 +40,6 @@ export interface CoreConfig {
     maxMessageSize: number
     consensusCheckInterval: number
     consensusTime: number
-    /** Leader-rotation slot duration in seconds. All nodes must agree. */
-    slotDuration: number
     /** Minimum seconds a block's timestamp must exceed its parent's. */
     blockTimestampMinDelta: number
     /** Max seconds a block's timestamp may lead the verifier's clock. */

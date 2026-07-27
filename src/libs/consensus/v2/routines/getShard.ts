@@ -32,22 +32,25 @@ export function getCommitteeFloor(): number {
  * The eligible validator pool at a given block:
  * - the peerlist committed in that block (validators seen online by the
  *   shard that forged it), intersected with the active validator set;
- * - if the committed peerlist is empty (genesis, bootstrap), the full
- *   active validator set at that block;
+ * - at block 0 (genesis commits no peerlist), or if the committed
+ *   peerlist is empty (bootstrap), the full staked validator set at
+ *   that block;
  * - if there are no validators either, a local-view fallback for bare
  *   development networks (view-dependent, guarded by
- *   DEMOS_REQUIRE_VALIDATORS).
+ *   DEMOS_REQUIRE_VALIDATORS, never memoised).
  *
  * Deduplicated and sorted ascending, so every synced node computes the
  * identical pool.
  */
-async function getEligiblePool(lastBlockNumber: number): Promise<string[]> {
+export async function getEligiblePool(
+    lastBlockNumber: number,
+): Promise<string[]> {
     if (poolCache.has(lastBlockNumber)) {
         return poolCache.get(lastBlockNumber)
     }
 
     const committed: string[] = []
-    if (lastBlockNumber >= 0) {
+    if (lastBlockNumber >= 1) {
         const block = await Chain.getBlockByNumber(lastBlockNumber)
         const rawPeerlist = block?.content?.peerlist as unknown as unknown[]
         if (Array.isArray(rawPeerlist)) {
@@ -102,7 +105,7 @@ async function getEligiblePool(lastBlockNumber: number): Promise<string[]> {
                 localView.add(peer.identity)
             }
         }
-        pool = [...localView]
+        return [...localView].sort()
     }
 
     const result = [...new Set(pool)].sort()
@@ -116,57 +119,12 @@ async function getEligiblePool(lastBlockNumber: number): Promise<string[]> {
 }
 
 /**
- * Deterministically selects the committee for the block after
- * `lastBlockNumber`. Pure function of the seed and on-chain state at
- * that block — no liveness checks, no local peer view. This is the
- * only selection function verifyBlock may use.
- */
-export async function getShardIdentities(
-    seed: string,
-    lastBlockNumber: number,
-): Promise<string[]> {
-    const pool = await getEligiblePool(lastBlockNumber)
-
-    let committeeSize = getSharedState.shardSize
-    if (pool.length < committeeSize) {
-        committeeSize = pool.length
-    }
-
-    const deterministicRandomness = Alea(seed)
-    const availableIdentities = [...pool]
-    const committee: string[] = []
-
-    for (let i = 0; i < committeeSize && availableIdentities.length > 0; i++) {
-        const index = Math.floor(
-            deterministicRandomness() * availableIdentities.length,
-        )
-        committee.push(availableIdentities[index])
-        availableIdentities.splice(index, 1)
-    }
-
-    log.debug(
-        `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; committee: ${committee.length}`,
-    )
-
-    if (committee.length < getCommitteeFloor()) {
-        log.warning(
-            `[getShard] Committee of ${committee.length} is below the floor of ${getCommitteeFloor()}: ` +
-                "the network cannot forge until more validators are online",
-        )
-    }
-
-    return committee
-}
-
-/**
- * Committee for the next block, resolved to Peer objects for the
- * consensus networking paths. Identities unknown to the local
- * PeerManager are resolved through the validator table's
- * connection_url, and become placeholder peers with an empty
- * connection string as a last resort rather than being dropped —
- * shard membership must not depend on the local peer table.
- * Resolved fallbacks and placeholders are never added to the
- * PeerManager.
+ * Committee for the next block: the deterministic eligible pool at
+ * `lastBlockNumber`, filtered to peers currently indexed in the
+ * PeerManager online list (ourselves always included), drawn with
+ * Alea(seed). Liveness-filtered and therefore view-dependent —
+ * verifyBlock must validate signers against getEligiblePool, never
+ * against this selection.
  */
 export default async function getShard(
     seed: string,
@@ -176,42 +134,54 @@ export default async function getShard(
         lastBlockNumber = getSharedState.lastBlockNumber
     }
 
-    const identities = await getShardIdentities(seed, lastBlockNumber)
+    const pool = await getEligiblePool(lastBlockNumber)
     const peerman = PeerManager.getInstance()
 
-    let validatorUrls: Map<string, string> | null = null
-    const getValidatorUrl = async (identity: string): Promise<string> => {
-        if (!validatorUrls) {
-            const validators = (await GCR.getGCRValidatorsAtBlock(
-                lastBlockNumber,
-            )) as Validators[]
-            validatorUrls = new Map()
-            for (const validator of validators) {
-                if (validator.address && validator.connection_url) {
-                    validatorUrls.set(
-                        validator.address,
-                        validator.connection_url,
-                    )
-                }
-            }
-        }
-        return validatorUrls.get(identity) ?? ""
+    const onlineByIdentity = new Map<string, Peer>()
+    for (const peer of await peerman.getOnlinePeers()) {
+        onlineByIdentity.set(peer.identity.toLowerCase(), peer)
     }
 
-    const shard: Peer[] = []
-    for (const identity of identities) {
-        const known = peerman.getPeer(identity)
-        if (known) {
-            shard.push(known)
+    const selfId = getSharedState.publicKeyHex
+    const candidates: Peer[] = []
+    for (const identity of pool) {
+        if (identity === selfId) {
+            candidates.push(
+                peerman.getPeer(identity) ?? new Peer("", identity),
+            )
             continue
         }
-        const fallbackUrl = await getValidatorUrl(identity)
-        if (fallbackUrl) {
-            log.debug(
-                `[getShard] Resolved ${identity} via validator connection_url: ${fallbackUrl}`,
-            )
+        const online = onlineByIdentity.get(identity)
+        if (online) {
+            candidates.push(online)
         }
-        shard.push(new Peer(fallbackUrl, identity))
+    }
+
+    let committeeSize = getSharedState.shardSize
+    if (candidates.length < committeeSize) {
+        committeeSize = candidates.length
+    }
+
+    const deterministicRandomness = Alea(seed)
+    const available = [...candidates]
+    const shard: Peer[] = []
+
+    for (let i = 0; i < committeeSize && available.length > 0; i++) {
+        const index = Math.floor(deterministicRandomness() * available.length)
+        shard.push(available[index])
+        available.splice(index, 1)
+    }
+
+    log.debug(
+        `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
+            `online candidates: ${candidates.length}; shard: ${shard.length}`,
+    )
+
+    if (shard.length < getCommitteeFloor()) {
+        log.warning(
+            `[getShard] Shard of ${shard.length} is below the floor of ${getCommitteeFloor()}: ` +
+                "the network cannot forge until more validators are online",
+        )
     }
 
     return shard

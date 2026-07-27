@@ -451,13 +451,6 @@ export default class SharedState {
     }
 
     /**
-     * @returns The leader-rotation slot duration in seconds
-     */
-    public getSlotDuration(): number {
-        return Config.getInstance().core.slotDuration
-    }
-
-    /**
      * @returns Minimum seconds a block timestamp must exceed its parent's
      */
     public getBlockTimestampMinDelta(): number {

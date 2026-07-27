@@ -6,7 +6,7 @@ const C = "cc".repeat(32)
 const D = "dd".repeat(32)
 const OUTSIDER = "ee".repeat(32)
 
-let committee: string[] = []
+let pool: string[] = []
 let networkNow = 2000
 let verifyingSigners: Set<string> = new Set()
 
@@ -54,21 +54,14 @@ jest.mock("../chain", () => ({
     },
 }))
 
-jest.mock(
-    "src/libs/consensus/v2/routines/getCommonValidatorSeed",
-    () => ({
-        __esModule: true,
-        default: async () => ({
-            commonValidatorSeed: "cvsa-seed",
-            lastBlockNumber: 9,
-        }),
-    }),
-)
-
 jest.mock("src/libs/consensus/v2/routines/getShard", () => ({
     __esModule: true,
-    getShardIdentities: async () => committee,
-    getCommitteeFloor: () => 3,
+    getEligiblePool: async () => pool,
+}))
+
+jest.mock("src/libs/debug/nonceTrace", () => ({
+    __esModule: true,
+    debugAssertionsEnabled: () => false,
 }))
 
 jest.mock("./txValidatorPool", () => ({
@@ -104,18 +97,18 @@ function makeBlock(overrides: Record<string, any> = {}) {
 }
 
 beforeEach(() => {
-    committee = [A, B, C, D]
+    pool = [A, B, C, D]
     networkNow = 2000
     verifyingSigners = new Set([A, B, C, D])
 })
 
 describe("verifyBlock", () => {
-    it("accepts a block signed by 2/3+1 of its deterministic committee", async () => {
+    it("accepts a block signed by 2/3+1 of the eligible pool", async () => {
         const result = await verifyBlock(makeBlock())
         expect(result.valid).toBe(true)
     })
 
-    it("does not count signatures from outside the committee", async () => {
+    it("does not count signatures from outside the pool", async () => {
         const block = makeBlock({
             validation_data: {
                 signatures: { [A]: "s1", [B]: "s2", [OUTSIDER]: "s3" },
@@ -124,7 +117,7 @@ describe("verifyBlock", () => {
         verifyingSigners = new Set([A, B, OUTSIDER])
         const result = await verifyBlock(block)
         expect(result.valid).toBe(false)
-        expect(result.reason).toContain("insufficient verified committee")
+        expect(result.reason).toContain("insufficient verified pool")
     })
 
     it("rejects a back-dated block", async () => {
@@ -154,8 +147,8 @@ describe("verifyBlock", () => {
         expect(result.valid).toBe(true)
     })
 
-    it("counts quorum against the committee size, not shardSize", async () => {
-        committee = [A, B, C]
+    it("counts quorum against min(shardSize, pool size)", async () => {
+        pool = [A, B, C]
         const block = makeBlock({
             validation_data: {
                 signatures: { [A]: "s1", [B]: "s2", [C]: "s3" },
@@ -165,11 +158,20 @@ describe("verifyBlock", () => {
         expect(result.valid).toBe(true)
     })
 
-    it("rejects when the committee is below the floor", async () => {
-        committee = [A, B]
+    it("accepts a small network reaching quorum of its pool", async () => {
+        pool = [A, B]
+        const block = makeBlock({
+            validation_data: { signatures: { [A]: "s1", [B]: "s2" } },
+        })
+        const result = await verifyBlock(block)
+        expect(result.valid).toBe(true)
+    })
+
+    it("rejects when the eligible pool is empty", async () => {
+        pool = []
         const result = await verifyBlock(makeBlock())
         expect(result.valid).toBe(false)
-        expect(result.reason).toContain("below the floor")
+        expect(result.reason).toContain("eligible signer pool is empty")
     })
 
     it("rejects when quorum is not met", async () => {

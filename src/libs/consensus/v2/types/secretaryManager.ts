@@ -12,8 +12,6 @@ import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getCommitteeFloor } from "../routines/getShard"
-import { computeCurrentSlot, pickSlotLeader } from "../routines/slotRotation"
-import Chain from "src/libs/blockchain/chain"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -108,14 +106,8 @@ export default class SecretaryManager {
             )
         }
 
-        // Assigning the secretary via slot-based rotation
-        const lastBlock = await Chain.getLastBlock()
-        const slot = computeCurrentSlot(lastBlock.content.timestamp)
-        const slotLeader = pickSlotLeader(this.shard.members, slot)
-        this.shard.secretaryKey = slotLeader.identity
-        log.debug(
-            `[initializeShard] Slot ${slot} leader: ${slotLeader.identity}`,
-        )
+        // The secretary is the first member of the deterministic draw
+        this.shard.secretaryKey = this.shard.members[0].identity
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
@@ -327,10 +319,9 @@ export default class SecretaryManager {
     /**
      * Handles the secretary going offline
      *
-     * The expected leader is a pure function of the slot clock, so no
-     * probing is involved: if the slot has advanced past the current
-     * secretary's, every waiting member independently rotates to the
-     * same new leader.
+     * Ping the secretary to check if it's still online
+     * If it's not, we elect the next member as the new secretary and
+     * drop the dead one from the shard for this round.
      */
     public async handleSecretaryGoneOffline() {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
@@ -343,27 +334,38 @@ export default class SecretaryManager {
             )
         }
 
-        const lastBlock = await Chain.getLastBlock()
-        const slot = computeCurrentSlot(lastBlock.content.timestamp)
-        const slotLeader = pickSlotLeader(this.shard.members, slot)
+        const isOnline = await this.secretary.connect()
+        log.debug(`Secretary is online: ${isOnline}`)
 
-        if (!slotLeader) {
-            throw new AbortConsensusError(
-                "No committee members available for leader rotation",
-            )
-        }
-
-        if (slotLeader.identity === this.shard.secretaryKey) {
-            log.debug(
-                `[SECRETARY ROUTINE] Slot ${slot} leader unchanged; waiting for the slot to advance`,
-            )
+        if (isOnline) {
+            log.debug("Secretary is online, nothing to do")
             return
         }
 
+        // INFO: ping for false negatives
+        const isStillOnline = await this.secretary.connect()
+        if (isStillOnline) {
+            log.debug("Secretary is still online, nothing to do")
+            return
+        }
+
+        if (this.shard.members.length < 2) {
+            throw new AbortConsensusError(
+                "No committee members available to replace the secretary",
+            )
+        }
+
         log.debug(
-            `[SECRETARY ROUTINE] Rotating secretary to slot ${slot} leader ${slotLeader.identity}`,
+            "Secretary is offline, electing the second node as the new secretary",
         )
-        this.shard.secretaryKey = slotLeader.identity
+
+        const exSecretary = this.secretary.identity
+        this.shard.secretaryKey = this.shard.members[1].identity
+        // remove secretary from the list of members
+        this.shard.members = this.shard.members.filter(
+            m => m.identity !== exSecretary,
+        )
+        delete this.shard.validationPhases[exSecretary]
 
         if (this.checkIfWeAreSecretary()) {
             // Start the secretary routine
@@ -889,7 +891,7 @@ export default class SecretaryManager {
                 }
 
                 log.debug(
-                    "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking for a slot rotation",
+                    "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking if it went offline",
                 )
                 const previousSecretary = this.shard.secretaryKey
                 await this.handleSecretaryGoneOffline()
@@ -899,7 +901,7 @@ export default class SecretaryManager {
                     Waiter.isWaiting(waiterKey)
                 ) {
                     log.debug(
-                        "[SEND OUR VALIDATOR PHASE] Resending our phase to the new slot leader",
+                        "[SEND OUR VALIDATOR PHASE] Resending our phase to the new secretary",
                     )
                     const retryRes = await sendStatus()
                     return await handleSendStatusRes(retryRes)
@@ -907,7 +909,7 @@ export default class SecretaryManager {
 
                 if (Waiter.isWaiting(waiterKey)) {
                     log.debug(
-                        "[SEND OUR VALIDATOR PHASE] No new slot leader yet, aborting this round",
+                        "[SEND OUR VALIDATOR PHASE] Secretary unchanged, aborting this round",
                     )
                     Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
                 }

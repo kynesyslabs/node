@@ -18,11 +18,7 @@ import { serializeBlockContent } from "@/forks"
 import TxValidatorPool from "./txValidatorPool"
 import { getSharedState } from "@/utilities/sharedState"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import getCommonValidatorSeed from "src/libs/consensus/v2/routines/getCommonValidatorSeed"
-import {
-    getCommitteeFloor,
-    getShardIdentities,
-} from "src/libs/consensus/v2/routines/getShard"
+import { getEligiblePool } from "src/libs/consensus/v2/routines/getShard"
 import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 
 export interface BlockVerification {
@@ -98,28 +94,26 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }
     }
 
-    // Recompute the deterministic committee for this height
-    let committee: string[]
+    // Recompute the deterministic eligible signer pool for this height.
+    // The forged shard is liveness-filtered and not reproducible here,
+    // so signatures are validated against the pool it was drawn from.
+    let pool: string[]
     try {
-        const { commonValidatorSeed } = await getCommonValidatorSeed(prevBlock)
-        committee = await getShardIdentities(
-            commonValidatorSeed,
-            block.number - 1,
-        )
+        pool = await getEligiblePool(block.number - 1)
     } catch (e) {
         return {
             valid: false,
-            reason: `could not resolve committee: ${e instanceof Error ? e.message : String(e)}`,
+            reason: `could not resolve eligible signer pool: ${e instanceof Error ? e.message : String(e)}`,
         }
     }
 
-    if (committee.length < getCommitteeFloor()) {
+    if (pool.length === 0) {
         return {
             valid: false,
-            reason: `committee of ${committee.length} is below the floor of ${getCommitteeFloor()}`,
+            reason: "eligible signer pool is empty",
         }
     }
-    const committeeIdentities = new Set(committee)
+    const poolIdentities = new Set(pool)
 
     // Resolve eligible signer set for this block.
     const signatures = block.validation_data?.signatures
@@ -135,7 +129,7 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
     const verifiedSigners = new Set<string>()
     await Promise.all(
         Object.entries(signatures).map(async ([identity, signature]) => {
-            if (!committeeIdentities.has(identity)) return
+            if (!poolIdentities.has(identity)) return
             try {
                 const ok = await TxValidatorPool.getInstance().verify({
                     algorithm: getSharedState.signingAlgorithm,
@@ -152,12 +146,15 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         }),
     )
 
-    // Verify block was signed by 2/3 + 1 of its deterministic committee
-    const threshold = Math.floor((committee.length * 2) / 3) + 1
+    // Verify block was signed by 2/3 + 1 of min(shardSize, pool): the
+    // denominator is pinned so a forger's liveness view cannot shrink
+    // the quorum
+    const denominator = Math.min(getSharedState.shardSize, pool.length)
+    const threshold = Math.floor((denominator * 2) / 3) + 1
     if (verifiedSigners.size < threshold) {
         return {
             valid: false,
-            reason: `insufficient verified committee signatures: ${verifiedSigners.size}/${committee.length} (need ${threshold})`,
+            reason: `insufficient verified pool signatures: ${verifiedSigners.size}/${denominator} (need ${threshold})`,
         }
     }
 
