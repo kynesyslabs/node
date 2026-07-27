@@ -30,7 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     core: {
         prod: false,
-        shardSize: 2,
+        shardSize: 4,
         mainLoopSleepTime: 1000,
         rpcFeePercent: 10,
         // Flat per-tx fee components. Total cost of a tx today is the sum
@@ -65,7 +65,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
         restore: false,
-        blockWatchdogEnabled: true,
+        blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
     },
 
@@ -137,7 +137,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     debug: {
-        assertionsEnabled: true,
+        assertionsEnabled: false,
     },
 
     identity: {
