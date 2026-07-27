@@ -23,6 +23,7 @@ import {
     getCommitteeFloor,
     getShardIdentities,
 } from "src/libs/consensus/v2/routines/getShard"
+import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 
 export interface BlockVerification {
     valid: boolean
@@ -64,7 +65,9 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
         log.error(
             `last block hash mismatch: last block hash ${lastBlockHash}, block ${block.number}'s previous hash ${block.content.previousHash}`,
         )
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
 
         return {
             valid: false,

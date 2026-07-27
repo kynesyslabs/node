@@ -289,7 +289,12 @@ export async function consensusRoutine(): Promise<void> {
             if (uncleanTxs.length > 0) {
                 log.error("Block trying to apply failed transactions")
                 log.error("Unclean txs: " + JSON.stringify(uncleanTxs, null, 2))
-                process.exit(1)
+                if (debugAssertionsEnabled()) {
+                    process.exit(1)
+                }
+                throw new AbortConsensusError(
+                    "Block trying to apply failed transactions",
+                )
             }
 
             const traceAccounts = Array.from(resNonce.nonceAccounts)
@@ -382,7 +387,12 @@ export async function consensusRoutine(): Promise<void> {
                 log.error(
                     "Untouched txs: " + JSON.stringify(untouchedTxs, null, 2),
                 )
-                process.exit(1)
+                if (debugAssertionsEnabled()) {
+                    process.exit(1)
+                }
+                throw new AbortConsensusError(
+                    "Block contains transactions that are not confirmed or failed",
+                )
             }
 
             BroadcastManager.broadcastNewBlock(block)
@@ -520,45 +530,47 @@ export async function consensusRoutine(): Promise<void> {
 
         log.only("[consensusRoutine] Consensus routine ended")
 
-        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        // Confirm all transactions in the block, were inserted in the transaction table
-        const txs = await Chain.getTransactionsFromHashes(
-            blockTxs.map(tx => tx.hash),
-        )
-        for (const tx of txs) {
-            if (tx.blockNumber !== blockRef) {
+        if (debugAssertionsEnabled()) {
+            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+            // Confirm all transactions in the block, were inserted in the transaction table
+            const txs = await Chain.getTransactionsFromHashes(
+                blockTxs.map(tx => tx.hash),
+            )
+            for (const tx of txs) {
+                if (tx.blockNumber !== blockRef) {
+                    log.error(
+                        "Transaction block number mismatch: " +
+                            tx.hash +
+                            ", expected: " +
+                            blockRef +
+                            ", got: " +
+                            tx.blockNumber,
+                    )
+                    process.exit(1)
+                }
+            }
+
+            if (
+                !new Set([
+                    "blockTimestampNotReceived",
+                    "voteError",
+                    "abortConsensus",
+                ]).has(exitReason) &&
+                txs.length !== blockTxs.length
+            ) {
+                const diff = blockTxs.filter(
+                    tx => !txs.some(t => t.hash === tx.hash),
+                )
                 log.error(
-                    "Transaction block number mismatch: " +
-                        tx.hash +
-                        ", expected: " +
-                        blockRef +
-                        ", got: " +
-                        tx.blockNumber,
+                    "Transactions not inserted: " +
+                        JSON.stringify(
+                            diff.map(tx => tx.hash),
+                            null,
+                            2,
+                        ),
                 )
                 process.exit(1)
             }
-        }
-
-        if (
-            !new Set([
-                "blockTimestampNotReceived",
-                "voteError",
-                "abortConsensus",
-            ]).has(exitReason) &&
-            txs.length !== blockTxs.length
-        ) {
-            const diff = blockTxs.filter(
-                tx => !txs.some(t => t.hash === tx.hash),
-            )
-            log.error(
-                "Transactions not inserted: " +
-                    JSON.stringify(
-                        diff.map(tx => tx.hash),
-                        null,
-                        2,
-                    ),
-            )
-            process.exit(1)
         }
     }
 }

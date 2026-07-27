@@ -11,6 +11,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import { getBlockByHash } from "./chainBlocks"
 import { txMap as consensusTxMap } from "../consensus/v2/PoRBFT"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
+import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 
 export function getL2PSHashUpdatePayload(
     tx: Transaction,
@@ -165,7 +166,9 @@ export async function getBlockTransactions(
                             " " +
                             tx.status,
                     )
-                    process.exit(1)
+                    if (debugAssertionsEnabled()) {
+                        process.exit(1)
+                    }
                 }
             }
         }

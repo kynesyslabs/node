@@ -26,6 +26,7 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import {
+    BlockInvalidError,
     BlockNotFoundError,
     PeerUnreachableError,
     TimeoutError,
@@ -58,6 +59,13 @@ import {
  * 2. Via the new block broadcast routine
  */
 export const syncLock = new Mutex()
+
+class SyncAssertionError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "SyncAssertionError"
+    }
+}
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -363,7 +371,12 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                 "Missing transactions: " +
                     JSON.stringify(Array.from(missingTxs), null, 2),
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new SyncAssertionError(
+                `[fastSync] Still missing ${missingTxs.size} transactions after asking signers for block ${block.number}`,
+            )
         }
     }
 
@@ -377,7 +390,12 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     ", got: " +
                     tx.blockNumber,
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new SyncAssertionError(
+                "Transaction block number mismatch for " + tx.hash,
+            )
         }
     }
 
@@ -404,7 +422,13 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     2,
                 ),
         )
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "Deterministic order does not match block ordered transactions for block " +
+                block.number,
+        )
     }
 
     const applied = sorted.filter(
@@ -447,10 +471,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     )
                 }
             }
-            process.exit(1)
         }
 
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "[fastSync] Block attrs gcrAppliedTxCount mismatch for block " +
+                block.number,
+        )
     }
 
     if (
@@ -477,7 +506,13 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
         )
         log.error("Full applied txs: " + JSON.stringify(applied, null, 2))
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "[fastSync] Block attrs gcrAppliedTxsHash mismatch for block " +
+                block.number,
+        )
     }
 
     return applied
@@ -540,16 +575,20 @@ export async function syncBlock(block: Block, peer: Peer) {
     log.info("[fastSync] Block inserted successfully at the head of the chain!")
 
     if (txs.length > 0) {
-        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        // confirm all txs are inserted
-        for (const tx of txs) {
-            const res = await Chain.checkTxExists(tx.hash)
-            if (!res) {
-                log.error("[syncGCRTables] Transaction not found: " + tx.hash)
-                process.exit(1)
+        if (debugAssertionsEnabled()) {
+            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+            // confirm all txs are inserted
+            for (const tx of txs) {
+                const res = await Chain.checkTxExists(tx.hash)
+                if (!res) {
+                    log.error(
+                        "[syncGCRTables] Transaction not found: " + tx.hash,
+                    )
+                    process.exit(1)
+                }
             }
+            log.debug("[syncGCRTables] All transactions are inserted")
         }
-        log.debug("[syncGCRTables] All transactions are inserted")
         return true
     }
 
@@ -1178,32 +1217,46 @@ export async function fastSync(
         }
 
         let synced: boolean
-        if (getSharedState.fastSyncCount > 0) {
-            const result = await Promise.race([
-                syncLock
-                    .runExclusive(async () => fastSyncRoutine(peers))
-                    .then(v => ({
-                        kind: "done" as const,
-                        value: v,
+        try {
+            if (getSharedState.fastSyncCount > 0) {
+                const result = await Promise.race([
+                    syncLock
+                        .runExclusive(async () => fastSyncRoutine(peers))
+                        .then(v => ({
+                            kind: "done" as const,
+                            value: v,
+                        })),
+                    sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
+                        kind: "timeout" as const,
+                        value: false,
                     })),
-                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
-                    kind: "timeout" as const,
-                    value: false,
-                })),
-            ])
+                ])
 
-            if (result.kind === "timeout") {
-                getSharedState.fastSyncAborted = true
-                log.warn("[fastSync] Timed out after 30s, aborting")
-                return {
-                    latestChainBlock: latestBlock(),
-                    ourLatestBlock: getSharedState.lastBlockNumber,
+                if (result.kind === "timeout") {
+                    getSharedState.fastSyncAborted = true
+                    log.warn("[fastSync] Timed out after 30s, aborting")
+                    return {
+                        latestChainBlock: latestBlock(),
+                        ourLatestBlock: getSharedState.lastBlockNumber,
+                    }
                 }
-            }
 
-            synced = result.value
-        } else {
-            synced = await fastSyncRoutine(peers)
+                synced = result.value
+            } else {
+                synced = await fastSyncRoutine(peers)
+            }
+        } catch (error) {
+            if (
+                !(error instanceof SyncAssertionError) &&
+                !(error instanceof BlockInvalidError)
+            ) {
+                throw error
+            }
+            log.error(
+                "[fastSync] Sync assertion failed, aborting this sync round: " +
+                    (error as Error).message,
+            )
+            synced = latestBlock() === getSharedState.lastBlockNumber
         }
 
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")

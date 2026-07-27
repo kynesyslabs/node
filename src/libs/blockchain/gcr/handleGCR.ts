@@ -41,6 +41,7 @@ import Chain from "src/libs/blockchain/chain"
 import { isForkActive } from "@/forks"
 import { getSharedState } from "@/utilities/sharedState"
 import { verifyGcrEditsMatch } from "src/libs/blockchain/validation/verifyGcrEdits"
+import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import { generateFeeDistributionEdits } from "src/libs/blockchain/gcr/gcr_routines/feeDistribution"
 import GCRBalanceRoutines from "./gcr_routines/GCRBalanceRoutines"
 import GCRNonceRoutines from "./gcr_routines/GCRNonceRoutines"
@@ -793,12 +794,14 @@ export default class HandleGCR {
 
             if (confirmed.size > 0) {
                 log.error("Found confirmed txs during tx application")
-                // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-                // fetch confirmed txs from db
-                const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
                 log.error("Confirmed txs: " + JSON.stringify(Array.from(confirmed), null, 2))
-                log.error("Confirmed txs full: " + JSON.stringify(confirmedTxs.map(t => t.hash), null, 2))
-                process.exit(1)
+                if (debugAssertionsEnabled()) {
+                    // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+                    // fetch confirmed txs from db
+                    const confirmedTxs = await Chain.getTransactionsFromHashes(Array.from(confirmed))
+                    log.error("Confirmed txs full: " + JSON.stringify(confirmedTxs.map(t => t.hash), null, 2))
+                    process.exit(1)
+                }
 
                 const before = finalTxs.length
                 finalTxs = finalTxs.filter(t => {

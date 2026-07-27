@@ -26,6 +26,8 @@ import {
 } from "@/forks/migrations/gasFeeSeparation"
 import { isForkActive } from "@/forks/forkGates"
 import { isForkMachineryDisabled } from "@/forks/loadForkConfig"
+import { BlockInvalidError } from "@/errors"
+import { debugAssertionsEnabled } from "src/libs/debug/nonceTrace"
 import type { FindManyOptions } from "typeorm"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 
@@ -273,7 +275,13 @@ export async function insertBlock(
             log.error(
                 "Block transactions mismatch with block ordered transactions",
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new BlockInvalidError(
+                "Block transactions mismatch with block ordered transactions for block " +
+                    block.number,
+            )
         }
 
         const status = new Set([
@@ -290,7 +298,13 @@ export async function insertBlock(
                 "Transactions without status: " +
                     JSON.stringify(txsWithoutStatus, null, 2),
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new BlockInvalidError(
+                "Block contains transactions without a final status for block " +
+                    block.number,
+            )
         }
 
         transactionEntities = transactionEntities.map(tx => ({
