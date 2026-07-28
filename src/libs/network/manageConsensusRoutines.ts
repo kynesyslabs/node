@@ -7,6 +7,7 @@ import getShard from "../consensus/v2/routines/getShard"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
+import { isNetworkAhead } from "../consensus/v2/routines/networkAheadVeto"
 import {
     consensusRoutine,
     isConsensusAlreadyRunning,
@@ -74,16 +75,22 @@ export default async function manageConsensusRoutines(
         response.extra = "not in consensus"
         return response // ? Should we add some info about our delta time?
     } else {
-        if (!isConsensusAlreadyRunning()) {
-            //log.info("[manageConsensusRoutines] Starting the consensus routine as we are in consensus time window but not in consensus mode yet")
-            log.debug(
-                "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
-            )
-            consensusRoutine() // Asynchronous function     to avoid blocking the main thread
-        }
         log.info(
             "[manageConsensusRoutines] We are within the consensus time window",
         )
+    }
+
+    const isBehindNetwork = await isNetworkAhead("manageConsensusRoutines")
+    if (
+        isBehindNetwork &&
+        payload.method !== "greenlight" &&
+        payload.method !== "setValidatorPhase"
+    ) {
+        response.result = 400
+        response.response =
+            "Node is behind the network, syncing before consensus (checked by manageConsensusRoutines)"
+        response.extra = "syncing"
+        return response
     }
 
     // Also refuses the routine if we are not in the shard
@@ -162,6 +169,13 @@ export default async function manageConsensusRoutines(
         //     return response
         // }
         return response
+    }
+
+    if (isInShard && !isBehindNetwork && !isConsensusAlreadyRunning()) {
+        log.debug(
+            "[manageConsensusRoutines] STARTING COSENSUS FROM CONSENSUS HANDLER",
+        )
+        consensusRoutine() // Asynchronous function     to avoid blocking the main thread
     }
 
     // NOTE Each method has its own logic to be implemented

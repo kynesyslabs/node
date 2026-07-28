@@ -28,6 +28,7 @@ import type {
     L2PSConfig,
     MetricsConfig,
     DiagnosticsConfig,
+    DebugConfig,
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,
@@ -87,6 +88,10 @@ export class Config {
         return this.data.diagnostics
     }
 
+    get debug(): Readonly<DebugConfig> {
+        return this.data.debug
+    }
+
     get identity(): Readonly<IdentityConfig> {
         return this.data.identity
     }
@@ -123,6 +128,7 @@ export type {
     L2PSConfig,
     MetricsConfig,
     DiagnosticsConfig,
+    DebugConfig,
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,

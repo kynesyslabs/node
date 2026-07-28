@@ -26,6 +26,7 @@ import {
     Transaction,
 } from "@kynesyslabs/demosdk/types"
 import {
+    BlockInvalidError,
     BlockNotFoundError,
     PeerUnreachableError,
     TimeoutError,
@@ -40,10 +41,18 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import Datasource from "@/model/datasource"
+import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import Hashing from "@/libs/crypto/hashing"
+import {
+    assertSyncedNonceTrace,
+    debugAssertionsEnabled,
+    readNonceTrace,
+    readNonces,
+} from "@/libs/debug/nonceTrace"
 
 /**
  * Used to prevent block insert operations from happening concurrently.
@@ -52,6 +61,23 @@ import Hashing from "@/libs/crypto/hashing"
  * 2. Via the new block broadcast routine
  */
 export const syncLock = new Mutex()
+
+class SyncAssertionError extends Error {
+    constructor(message: string) {
+        super(message)
+        this.name = "SyncAssertionError"
+    }
+}
+
+class ForkedPeerError extends Error {
+    constructor(
+        message: string,
+        public readonly validSource: Peer | null,
+    ) {
+        super(message)
+        this.name = "ForkedPeerError"
+    }
+}
 
 const peerManager = PeerManager.getInstance()
 async function sleep(time: number) {
@@ -67,6 +93,13 @@ const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peer.sync.block === latestBlock())
 
 const FAST_SYNC_TIMEOUT_MS = 30_000
+
+/**
+ * Per-peer bound for fork-recovery polling. `Peer.call` has no timeout option,
+ * so without this one unresponsive candidate would hold the whole
+ * `Promise.allSettled` — and the sync round behind it — open indefinitely.
+ */
+const FORK_POLL_TIMEOUT_MS = 10_000
 
 /**
  * @deprecated
@@ -357,7 +390,12 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                 "Missing transactions: " +
                     JSON.stringify(Array.from(missingTxs), null, 2),
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new SyncAssertionError(
+                `[fastSync] Still missing ${missingTxs.size} transactions after asking signers for block ${block.number}`,
+            )
         }
     }
 
@@ -371,7 +409,12 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     ", got: " +
                     tx.blockNumber,
             )
-            process.exit(1)
+            if (debugAssertionsEnabled()) {
+                process.exit(1)
+            }
+            throw new SyncAssertionError(
+                "Transaction block number mismatch for " + tx.hash,
+            )
         }
     }
 
@@ -398,7 +441,13 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     2,
                 ),
         )
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "Deterministic order does not match block ordered transactions for block " +
+                block.number,
+        )
     }
 
     const applied = sorted.filter(
@@ -441,10 +490,15 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
                     )
                 }
             }
-            process.exit(1)
         }
 
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "[fastSync] Block attrs gcrAppliedTxCount mismatch for block " +
+                block.number,
+        )
     }
 
     if (
@@ -471,7 +525,13 @@ async function verifyBlockAttrs(block: Block, txs: Transaction[]) {
         )
         log.error("Full applied txs: " + JSON.stringify(applied, null, 2))
         // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        process.exit(1)
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+        throw new SyncAssertionError(
+            "[fastSync] Block attrs gcrAppliedTxsHash mismatch for block " +
+                block.number,
+        )
     }
 
     return applied
@@ -512,13 +572,6 @@ export async function syncBlock(block: Block, peer: Peer) {
         return false
     }
 
-    await Chain.insertBlock(block, [])
-    log.debug("Block inserted successfully")
-    log.debug(
-        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
-    )
-    log.info("[fastSync] Block inserted successfully at the head of the chain!")
-
     // REVIEW Merge the peerlist
     log.info(`[fastSync] Merging peers from block: ${block.hash}`)
     const mergedPeerlist = await mergePeerlist(block)
@@ -528,18 +581,22 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
+    await assertNoUnreconciledGcrState()
+
     const applied = await verifyBlockAttrs(block, txs)
 
     // ! Sync the native tables
-    await syncGCRTables(applied)
+    await syncGCRTables(applied, block)
 
-    // REVIEW Insert the txs into the transactions database table
+    await insertBlockOrHalt(block, txs)
+    log.debug("Block inserted successfully")
+    log.debug(
+        `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
+    )
+    log.info("[fastSync] Block inserted successfully at the head of the chain!")
+
     if (txs.length > 0) {
-        log.info("[fastSync] Inserting transactions into the database", true)
-        const success = await Chain.insertTransactionsFromSync(txs)
-        if (success) {
-            log.info("[fastSync] Transactions inserted successfully")
-
+        if (debugAssertionsEnabled()) {
             // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
             // confirm all txs are inserted
             for (const tx of txs) {
@@ -552,11 +609,8 @@ export async function syncBlock(block: Block, peer: Peer) {
                 }
             }
             log.debug("[syncGCRTables] All transactions are inserted")
-            return true
         }
-
-        log.error("[fastSync] Transactions insertion failed")
-        return false
+        return true
     }
 
     log.info("[fastSync] No transactions in the block")
@@ -669,6 +723,267 @@ export async function askTxsForBlocksBatch(
     return txMap
 }
 
+const FORK_RECOVERY_MAX_PEERS = 5
+
+interface ForkRecoveryResult {
+    block: Block
+    txs: Transaction[]
+    peer: Peer
+}
+
+/**
+ * Ask other peers for their variant of a block we rejected, and return
+ * the first variant that passes verifyBlock. Variants are deduplicated
+ * by hash and tried most-served first; the rejected hash is skipped.
+ * Returns null when no candidate serves a valid alternative — which
+ * usually means the network agrees on the hash we rejected and we are
+ * the forked node.
+ */
+async function resolveForkedBlock(
+    blockNumber: number,
+    rejectedHash: string,
+    excludeIdentities: Set<string>,
+): Promise<ForkRecoveryResult | null> {
+    const selfId = getSharedState.publicKeyHex
+    const candidates = peerManager
+        .getAll()
+        .filter(
+            p =>
+                p.sync.block >= blockNumber &&
+                p.identity !== selfId &&
+                !excludeIdentities.has(p.identity),
+        )
+        .slice(0, FORK_RECOVERY_MAX_PEERS)
+
+    if (candidates.length === 0) {
+        log.error(
+            `[forkRecovery] No candidate peers to resolve block ${blockNumber}`,
+        )
+        return null
+    }
+
+    const request: RPCRequest = {
+        method: "nodeCall",
+        params: [
+            {
+                message: "getBlocks",
+                data: { start: blockNumber, limit: 1 },
+                muid: null,
+            },
+        ],
+    }
+
+    const settled = await Promise.allSettled(
+        candidates.map(async candidate => {
+            const res = await Promise.race([
+                candidate.call(request, false),
+                sleep(FORK_POLL_TIMEOUT_MS).then(() => {
+                    throw new Error(
+                        `fork poll timed out after ${FORK_POLL_TIMEOUT_MS}ms`,
+                    )
+                }),
+            ])
+            if (res.result !== 200) {
+                throw new Error(`getBlocks returned ${res.result}`)
+            }
+            const blocks = res.response as Block[]
+            const block = blocks?.find(b => b.number === blockNumber)
+            if (!block) {
+                throw new Error(`no block ${blockNumber} in response`)
+            }
+            return { block, candidate }
+        }),
+    )
+
+    const variants = new Map<string, { block: Block; peers: Peer[] }>()
+    for (const result of settled) {
+        if (result.status !== "fulfilled") continue
+        const { block, candidate } = result.value
+        if (block.hash === rejectedHash) continue
+        const variant = variants.get(block.hash)
+        if (variant) {
+            variant.peers.push(candidate)
+        } else {
+            variants.set(block.hash, { block, peers: [candidate] })
+        }
+    }
+
+    if (variants.size === 0) {
+        log.error(
+            `[forkRecovery] No alternative variant for block ${blockNumber}: ` +
+                "polled peers agree with the hash we rejected",
+        )
+        return null
+    }
+
+    const ordered = [...variants.values()].sort(
+        (a, b) => b.peers.length - a.peers.length,
+    )
+
+    for (const variant of ordered) {
+        const verdict = await verifyBlock(variant.block as never)
+        if (!verdict.valid) {
+            log.error(
+                `[forkRecovery] Variant ${variant.block.hash} of block ${blockNumber} is invalid: ${verdict.reason}`,
+            )
+            continue
+        }
+
+        for (const source of variant.peers) {
+            try {
+                const txs = await askTxsForBlock(variant.block, source)
+                log.info(
+                    `[forkRecovery] Recovered block ${blockNumber} (${variant.block.hash}) from ${source.identity}`,
+                )
+                return { block: variant.block, txs, peer: source }
+            } catch (e) {
+                log.error(
+                    `[forkRecovery] Failed to fetch txs from ${source.identity}: ${e instanceof Error ? e.message : String(e)}`,
+                )
+            }
+        }
+    }
+
+    return null
+}
+
+/**
+ * Verify attrs, apply GCR edits and insert a synced block. Shared by
+ * the batch loop and the fork-recovery path.
+ *
+ * @returns False if the block was already inserted concurrently
+ */
+async function applySyncedBlock(
+    block: Block,
+    blockTxs: Transaction[],
+): Promise<boolean> {
+    await assertNoUnreconciledGcrState()
+
+    const exists = await Chain.getBlockByNumber(block.number)
+    if (exists) {
+        log.error("Block already exists, skipping ...")
+        return false
+    }
+
+    // Merge peerlist
+    await mergePeerlist(block)
+    const applied = await verifyBlockAttrs(block, blockTxs)
+
+    // Sync GCR tables
+    await syncGCRTables(applied, block)
+
+    await insertBlockOrHalt(block, blockTxs)
+
+    log.info(
+        `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
+    )
+    return true
+}
+
+/**
+ * Set once GCR edits have been persisted for a block that then failed to
+ * insert. Local state is ahead of the chain from that moment on and nothing
+ * in this process can reconcile it.
+ */
+let unreconciledGcrBlock: number | null = null
+
+/**
+ * Refuse to apply another synced block once state has drifted.
+ *
+ * The block-exists guard cannot catch this case: the failed block was never
+ * inserted, so a retry would sail straight past it and apply the very same
+ * GCR edits a second time, double-advancing nonces and balances. Fail fast
+ * instead — every subsequent apply attempt would compound the corruption.
+ *
+ * The in-process latch alone is not enough: a restart clears it while the DB
+ * still holds the orphaned edits. So we also check durable state — GCR edits
+ * are stamped with the block that produced them, and an assignment above the
+ * chain tip can only mean its block never landed.
+ */
+async function assertNoUnreconciledGcrState(): Promise<void> {
+    if (unreconciledGcrBlock !== null) {
+        throw new Error(
+            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+                `${unreconciledGcrBlock} was applied without its block and local state has ` +
+                `drifted from the chain. The node must be resynced from scratch.`,
+        )
+    }
+
+    const orphanedBlock = await findOrphanedGcrBlock()
+    if (orphanedBlock !== null) {
+        unreconciledGcrBlock = orphanedBlock
+        getSharedState.syncStatus = false
+        throw new Error(
+            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+                `${orphanedBlock} exists but the block does not (chain tip is ` +
+                `${await Chain.getLastBlockNumber()}). Local state has drifted from the ` +
+                `chain — the node must be resynced from scratch.`,
+        )
+    }
+}
+
+/**
+ * Highest block stamped on a GCR assignment that sits above the chain tip,
+ * or null when GCR state and chain history agree.
+ */
+async function findOrphanedGcrBlock(): Promise<number | null> {
+    try {
+        const tip = await Chain.getLastBlockNumber()
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRAssignedTx)
+        const highest = await repo
+            .createQueryBuilder("a")
+            .select("MAX(a.block_number)", "max")
+            .getRawOne<{ max: number | string | null }>()
+
+        const highestAssigned = Number(highest?.max ?? 0)
+        if (!Number.isFinite(highestAssigned) || highestAssigned <= tip) {
+            return null
+        }
+        return highestAssigned
+    } catch (e) {
+        // Never let the drift probe itself block syncing — on a fresh node the
+        // table may not exist yet.
+        log.debug(
+            `[applySyncedBlock] could not check for orphaned GCR state: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return null
+    }
+}
+
+/**
+ * Insert a block whose GCR edits have ALREADY been applied.
+ *
+ * syncGCRTables persists GCR edits and neither it nor insertBlock accepts a
+ * shared transaction manager, so an insert failure here leaves nonce/balance/
+ * validator state ahead of the chain with no block authorizing it. Rethrowing
+ * alone is not enough on either axis: callers up the fastSync chain swallow
+ * errors, and the block-exists guard does not stop a retry from re-applying
+ * the same edits. So mark the node unsynced AND latch the drift, which stops
+ * it participating and blocks any further apply until an operator resyncs.
+ */
+async function insertBlockOrHalt(
+    block: Block,
+    blockTxs: Transaction[],
+): Promise<void> {
+    try {
+        await Chain.insertBlock(block, blockTxs)
+    } catch (e) {
+        unreconciledGcrBlock = block.number
+        getSharedState.syncStatus = false
+        log.error(
+            `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
+                `but the block failed to insert; local state has drifted from the chain. ` +
+                `Marking the node unsynced and refusing further block application — ` +
+                `it must be resynced from scratch: ` +
+                `${e instanceof Error ? e.message : String(e)}`,
+        )
+        throw e
+    }
+}
+
 /**
  * Download and process a batch of blocks from a peer
  *
@@ -764,39 +1079,33 @@ async function batchDownloadBlocks(
                 log.error(
                     `[batchDownloadBlocks] Rejecting block ${block.number} (${block.hash}): ${verdict.reason}`,
                 )
-                return false
-            }
-        }
 
-        // check exists again
-        const exists = await Chain.getBlockByNumber(block.number)
-        if (exists) {
-            log.error("Block already exists, skipping ...")
-            return false
-        }
-
-        // Insert block
-        await Chain.insertBlock(block, [])
-        log.info(
-            `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
-        )
-
-        // Merge peerlist
-        await mergePeerlist(block)
-        const applied = await verifyBlockAttrs(block, blockTxs)
-
-        // Sync GCR tables
-        await syncGCRTables(applied)
-
-        // Insert transactions
-        if (blockTxs.length > 0) {
-            const success = await Chain.insertTransactionsFromSync(blockTxs)
-            if (!success) {
-                log.error(
-                    `[batchDownloadBlocks] Failed to insert transactions for block ${block.number}`,
+                const recovered = await resolveForkedBlock(
+                    block.number,
+                    block.hash,
+                    new Set([peer.identity]),
                 )
-                return false
+
+                if (!recovered) {
+                    throw new ForkedPeerError(
+                        `No valid variant found for forked block ${block.number}`,
+                        null,
+                    )
+                }
+
+                await applySyncedBlock(recovered.block, recovered.txs)
+
+                // The rest of this batch builds on the rejected hash;
+                // abandon it and continue from the recovery source
+                throw new ForkedPeerError(
+                    `Recovered forked block ${block.number} from ${recovered.peer.identity}`,
+                    recovered.peer,
+                )
             }
+        }
+
+        if (!(await applySyncedBlock(block, blockTxs))) {
+            return false
         }
     }
 
@@ -912,7 +1221,17 @@ async function requestBlocks(): Promise<boolean> {
 
         try {
             // Download batch of blocks
-            await batchDownloadBlocks(peer, startBlock, endBlock)
+            const ok = await batchDownloadBlocks(peer, startBlock, endBlock)
+            if (!ok) {
+                seenPeers.add(peer.identity)
+                const next = findNextAvailablePeer(seenPeers)
+                if (!next) {
+                    log.error("[requestBlocks] No more peers available to sync")
+                    return false
+                }
+                peer = next
+                continue
+            }
             await BroadcastManager.broadcastOurSyncData()
 
             // Trigger L2PS sync
@@ -929,6 +1248,25 @@ async function requestBlocks(): Promise<boolean> {
                     "[requestBlocks] Reached end of available blocks on peer",
                 )
                 break
+            }
+
+            // Handle a forked peer: continue from the recovery source,
+            // or abort the round safely when no valid variant exists
+            if (error instanceof ForkedPeerError) {
+                seenPeers.add(peer.identity)
+
+                if (error.validSource) {
+                    peer = error.validSource
+                    log.info(
+                        `[requestBlocks] Switched to fork-recovery source: ${peer.connection.string}`,
+                    )
+                    continue
+                }
+
+                log.error(
+                    "[requestBlocks] No valid variant for forked block; aborting this sync round",
+                )
+                return false
             }
 
             // Handle peer unreachable - switch to next peer
@@ -977,7 +1315,7 @@ async function requestBlocks(): Promise<boolean> {
 }
 
 // REVIEW Applying GCREdits to the tables
-export async function syncGCRTables(txs: Transaction[]) {
+export async function syncGCRTables(txs: Transaction[], block?: Block) {
     // apply only transaction with confirmed status
     const confirmedTxs = txs.filter(
         tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
@@ -985,7 +1323,22 @@ export async function syncGCRTables(txs: Transaction[]) {
 
     // sort transactions deterministic
     const sortedTxs = orderDeterministically(confirmedTxs)
+
+    const nonceTrace = debugAssertionsEnabled()
+        ? readNonceTrace(block?.attrs)
+        : null
+
+    if (!nonceTrace) {
+        await HandleGCR.applyTransactions(sortedTxs, false)
+        return
+    }
+
+    const traceAccounts = Object.keys(nonceTrace)
+    const localBefore = await readNonces(traceAccounts)
     await HandleGCR.applyTransactions(sortedTxs, false)
+    const localAfter = await readNonces(traceAccounts)
+
+    assertSyncedNonceTrace(block.number, nonceTrace, localBefore, localAfter)
 }
 
 // Helper function to ask for the transactions in a block
@@ -1058,6 +1411,9 @@ export async function mergePeerlist(block: Block): Promise<string[]> {
     const ourPeerIdentities = new Set(ourPeerlist.map(peer => peer.identity))
 
     for (const peer of blockPeerlist) {
+        if (typeof peer === "string") {
+            continue
+        }
         const peerObject = Peer.fromIPeer(peer)
 
         if (ourPeerIdentities.has(peerObject.identity)) {
@@ -1157,6 +1513,9 @@ export async function fastSync(
     }
 
     log.debug("[fastSync] Starting sync loop")
+    // Set when we bail on a timeout while a detached fastSyncRoutine is still
+    // running, so the finally below does not clear the abort out from under it.
+    let abortedRunPending = false
     try {
         getSharedState.inSyncLoop = true
         getSharedState.fastSyncAborted = false
@@ -1177,32 +1536,56 @@ export async function fastSync(
         }
 
         let synced: boolean
-        if (getSharedState.fastSyncCount > 0) {
-            const result = await Promise.race([
-                syncLock
-                    .runExclusive(async () => fastSyncRoutine(peers))
-                    .then(v => ({
-                        kind: "done" as const,
-                        value: v,
+        try {
+            if (getSharedState.fastSyncCount > 0) {
+                const result = await Promise.race([
+                    syncLock
+                        .runExclusive(async () => fastSyncRoutine(peers))
+                        .then(v => ({
+                            kind: "done" as const,
+                            value: v,
+                        })),
+                    sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
+                        kind: "timeout" as const,
+                        value: false,
                     })),
-                sleep(FAST_SYNC_TIMEOUT_MS).then(() => ({
-                    kind: "timeout" as const,
-                    value: false,
-                })),
-            ])
+                ])
 
-            if (result.kind === "timeout") {
-                getSharedState.fastSyncAborted = true
-                log.warn("[fastSync] Timed out after 30s, aborting")
-                return {
-                    latestChainBlock: latestBlock(),
-                    ourLatestBlock: getSharedState.lastBlockNumber,
+                if (result.kind === "timeout") {
+                    getSharedState.fastSyncAborted = true
+                    abortedRunPending = true
+                    log.warn(
+                        `[fastSync] Timed out after ${FAST_SYNC_TIMEOUT_MS}ms, aborting`,
+                    )
+                    // Clear the abort flag only once the detached routine
+                    // actually settles. Clearing it in the finally below
+                    // would reset it before that routine reaches its next
+                    // fastSyncAborted check, making the abort a no-op.
+                    void syncLock.runExclusive(async () => {
+                        getSharedState.fastSyncAborted = false
+                    })
+                    return {
+                        latestChainBlock: latestBlock(),
+                        ourLatestBlock: getSharedState.lastBlockNumber,
+                    }
                 }
-            }
 
-            synced = result.value
-        } else {
-            synced = await fastSyncRoutine(peers)
+                synced = result.value
+            } else {
+                synced = await fastSyncRoutine(peers)
+            }
+        } catch (error) {
+            if (
+                !(error instanceof SyncAssertionError) &&
+                !(error instanceof BlockInvalidError)
+            ) {
+                throw error
+            }
+            log.error(
+                "[fastSync] Sync assertion failed, aborting this sync round: " +
+                    (error as Error).message,
+            )
+            synced = latestBlock() === getSharedState.lastBlockNumber
         }
 
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
@@ -1224,7 +1607,12 @@ export async function fastSync(
             ourLatestBlock: getSharedState.lastBlockNumber,
         }
     } finally {
-        getSharedState.fastSyncAborted = false
+        // On the timeout path the detached routine still holds syncLock and
+        // has not yet observed the abort, so ownership of the flag passes to
+        // the queued reset above.
+        if (!abortedRunPending) {
+            getSharedState.fastSyncAborted = false
+        }
         getSharedState.inSyncLoop = false
         log.debug("[fastSync] Sync loop ended")
     }

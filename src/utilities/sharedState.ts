@@ -296,6 +296,7 @@ export default class SharedState {
     // SECTION Consensus states
     candidateBlock: Block
     lastBlockNumber = 0
+    lastBlockInsertedAt: number | null = null
     _lastBlockHash = ""
     genesisIdentities = new Set<string>()
 
@@ -447,6 +448,20 @@ export default class SharedState {
      */
     public getConsensusTime(): number {
         return Config.getInstance().core.consensusTime || this.block_time
+    }
+
+    /**
+     * @returns Minimum seconds a block timestamp must exceed its parent's
+     */
+    public getBlockTimestampMinDelta(): number {
+        return Config.getInstance().core.blockTimestampMinDelta
+    }
+
+    /**
+     * @returns Max seconds a block timestamp may lead the verifier's clock
+     */
+    public getBlockTimestampTolerance(): number {
+        return Config.getInstance().core.blockTimestampTolerance
     }
 
     public async getConnectionString(): Promise<string> {

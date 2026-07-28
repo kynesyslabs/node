@@ -4,10 +4,11 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
+import { getEligiblePool } from "./routines/getShard"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
@@ -21,7 +22,12 @@ import HandleGCR, { normalizePubkey } from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
-import { fastSync, waitForPeerStatus } from "@/libs/blockchain/routines/Sync"
+import {
+    fastSync,
+    syncLock,
+    waitForPeerStatus,
+} from "@/libs/blockchain/routines/Sync"
+import { isNetworkAhead } from "./routines/networkAheadVeto"
 import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import { MempoolTx } from "@/model/entities/Mempool"
@@ -29,6 +35,14 @@ import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
+import {
+    NONCE_TRACE_ATTR_KEY,
+    assertForgedNonceTrace,
+    buildNonceTrace,
+    debugAssertionsEnabled,
+    readNonces,
+} from "@/libs/debug/nonceTrace"
+import { computeMergedPeerlist } from "./routines/peerlistMerge"
 
 export interface FailedTranscation {
     txhash: string
@@ -85,11 +99,13 @@ export async function consensusRoutine(): Promise<void> {
 
     // Defining the variables needed for rolling back the GCREdits
     let exitReason = ""
+    let releaseSyncLock: (() => void) | null = null
     const successfulTxs: TxHash[] = []
     const failedTxs: FailedTranscation[] = []
 
     const blockTxs: MempoolTransaction[] = []
     const blockAttrs: Record<string, any> = {}
+    const traceEnabled = debugAssertionsEnabled()
 
     try {
         log.only("[consensusRoutine] Initializing the consensus state")
@@ -154,14 +170,17 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
-        const initialMempool = await mergeAndOrderMempools(
-            manager.shard.members,
-            manager.shard.blockRef,
-        )
+        const { txs: initialMempool, peerlist: mergedPeerlist } =
+            await mergeAndOrderMempools(
+                manager.shard.members,
+                manager.shard.blockRef,
+            )
 
         // filter txs by reference block
-        // const res = filterMempoolByRefBlock(initialMempool)
-        const resNonce = await filterMempoolByNonce(initialMempool)
+        const resRef = filterMempoolByRefBlock(initialMempool)
+        failedTxs.push(...resRef.failedTxs)
+
+        const resNonce = await filterMempoolByNonce(resRef.validTxs)
         failedTxs.push(...resNonce.failedTxs)
 
         // Write final mempool used to forge the block
@@ -211,16 +230,54 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(blockTxs, []) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(blockTxs, mergedPeerlist) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
+        if (await isNetworkAhead("preVote")) {
+            throw new AbortConsensusError(
+                "Network is ahead of us, aborting before voting on the block",
+            )
+        }
+
         // REVIEW Set last consensus time to the current block timestamp
         getSharedState.lastConsensusTime = block.content.timestamp
 
         // INFO: CONSENSUS ACTION 6: Vote on the block
-        const [pro, con] = await voteOnBlock(block, manager.shard.members)
+        const responsiveMembers = manager.shard.members.filter(
+            m =>
+                !manager.unresponsiveMembers.has(m.identity) &&
+                (m.connection.string !== "" || m.isLocalNode),
+        )
+        const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
+            releaseSyncLock = await syncLock.acquire()
+
+            const existingBlock = await Chain.getBlockByNumber(blockRef)
+            if (existingBlock) {
+                throw new ForgingEndedError(
+                    `[consensusRoutine] Block ${blockRef} was already applied via sync, exiting`,
+                )
+            }
+
+            // A pool validator already reporting a different block at this
+            // height means a competing variant is on the network; abort
+            // before committing ours
+            const conflictingPeers =
+                PeerManager.getInstance().getConflictingBlockPeers(
+                    blockRef,
+                    block.hash,
+                    new Set(await getEligiblePool(blockRef - 1)),
+                )
+            if (conflictingPeers.length > 0) {
+                log.error(
+                    `[consensusRoutine] ${conflictingPeers.length} pool peer(s) already report block ${blockRef} with a different hash`,
+                )
+                throw new ForgingEndedError(
+                    `[consensusRoutine] Block ${blockRef} already exists on the network, exiting`,
+                )
+            }
+
             // Filter out failed txs (from the nonce filter)
             const toApplyTxs = blockTxs.filter(
                 tx => tx.status !== TRANSACTION_STATUS.FAILED,
@@ -251,12 +308,41 @@ export async function consensusRoutine(): Promise<void> {
             if (uncleanTxs.length > 0) {
                 log.error("Block trying to apply failed transactions")
                 log.error("Unclean txs: " + JSON.stringify(uncleanTxs, null, 2))
-                process.exit(1)
+                if (debugAssertionsEnabled()) {
+                    process.exit(1)
+                }
+                throw new AbortConsensusError(
+                    "Block trying to apply failed transactions",
+                )
             }
+
+            const traceAccounts = Array.from(resNonce.nonceAccounts)
+            const startApplyNonces = traceEnabled
+                ? await readNonces(traceAccounts)
+                : {}
 
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
             )
+
+            if (traceEnabled) {
+                const endApplyNonces = await readNonces(traceAccounts)
+                const nonceTrace = buildNonceTrace(
+                    traceAccounts,
+                    resNonce.startFilterNonces,
+                    resNonce.projectedEndNonces,
+                    startApplyNonces,
+                    endApplyNonces,
+                )
+                blockAttrs[NONCE_TRACE_ATTR_KEY] = nonceTrace
+
+                const appliedHashes = new Set(applyRes.appliedTxs)
+                assertForgedNonceTrace(
+                    blockRef,
+                    nonceTrace,
+                    refRes.validTxs.filter(tx => appliedHashes.has(tx.hash)),
+                )
+            }
 
             blockAttrs["gcrAppliedTxCount"] = applyRes.successfulTxs.length
             blockAttrs["gcrAppliedTxsHash"] = Hashing.sha256(
@@ -320,7 +406,12 @@ export async function consensusRoutine(): Promise<void> {
                 log.error(
                     "Untouched txs: " + JSON.stringify(untouchedTxs, null, 2),
                 )
-                process.exit(1)
+                if (debugAssertionsEnabled()) {
+                    process.exit(1)
+                }
+                throw new AbortConsensusError(
+                    "Block contains transactions that are not confirmed or failed",
+                )
             }
 
             BroadcastManager.broadcastNewBlock(block)
@@ -406,12 +497,15 @@ export async function consensusRoutine(): Promise<void> {
         ) {
             exitReason = "abortConsensus"
             // INFO: If we're past merge mempools phase
-            log.warn(
-                "[consensusRoutine] Aborted consensus routine at phase: " +
-                    manager.ourValidatorPhase.currentPhase,
-            )
-            if (manager.ourValidatorPhase.currentPhase <= 3) {
-                return
+
+            if (manager && manager.ourValidatorPhase) {
+                log.warn(
+                    "[consensusRoutine] Aborted consensus routine at phase: " +
+                        manager.ourValidatorPhase.currentPhase,
+                )
+                if (manager.ourValidatorPhase.currentPhase <= 3) {
+                    return
+                }
             }
 
             log.warn(
@@ -443,6 +537,8 @@ export async function consensusRoutine(): Promise<void> {
         log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
+        releaseSyncLock?.()
+
         // INFO: If there was a relayed tx past finalize block step, release
         if (DTRManager.poolSize > 0) {
             DTRManager.releaseDTRWaiter()
@@ -453,45 +549,47 @@ export async function consensusRoutine(): Promise<void> {
 
         log.only("[consensusRoutine] Consensus routine ended")
 
-        // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
-        // Confirm all transactions in the block, were inserted in the transaction table
-        const txs = await Chain.getTransactionsFromHashes(
-            blockTxs.map(tx => tx.hash),
-        )
-        for (const tx of txs) {
-            if (tx.blockNumber !== blockRef) {
+        if (debugAssertionsEnabled()) {
+            // NODE_CRITICAL_DEBUG (DO NOT REMOVE COMMENTED OUT CODE):
+            // Confirm all transactions in the block, were inserted in the transaction table
+            const txs = await Chain.getTransactionsFromHashes(
+                blockTxs.map(tx => tx.hash),
+            )
+            for (const tx of txs) {
+                if (tx.blockNumber !== blockRef) {
+                    log.error(
+                        "Transaction block number mismatch: " +
+                            tx.hash +
+                            ", expected: " +
+                            blockRef +
+                            ", got: " +
+                            tx.blockNumber,
+                    )
+                    process.exit(1)
+                }
+            }
+
+            if (
+                !new Set([
+                    "blockTimestampNotReceived",
+                    "voteError",
+                    "abortConsensus",
+                ]).has(exitReason) &&
+                txs.length !== blockTxs.length
+            ) {
+                const diff = blockTxs.filter(
+                    tx => !txs.some(t => t.hash === tx.hash),
+                )
                 log.error(
-                    "Transaction block number mismatch: " +
-                        tx.hash +
-                        ", expected: " +
-                        blockRef +
-                        ", got: " +
-                        tx.blockNumber,
+                    "Transactions not inserted: " +
+                        JSON.stringify(
+                            diff.map(tx => tx.hash),
+                            null,
+                            2,
+                        ),
                 )
                 process.exit(1)
             }
-        }
-
-        if (
-            !new Set([
-                "blockTimestampNotReceived",
-                "voteError",
-                "abortConsensus",
-            ]).has(exitReason) &&
-            txs.length !== blockTxs.length
-        ) {
-            const diff = blockTxs.filter(
-                tx => !txs.some(t => t.hash === tx.hash),
-            )
-            log.error(
-                "Transactions not inserted: " +
-                    JSON.stringify(
-                        diff.map(tx => tx.hash),
-                        null,
-                        2,
-                    ),
-            )
-            process.exit(1)
         }
     }
 }
@@ -575,7 +673,7 @@ async function initializeShard(blockRef: number): Promise<Peer[]> {
 async function mergeAndOrderMempools(
     shard: Peer[],
     blockRef: number,
-): Promise<MempoolTransaction[]> {
+): Promise<{ txs: MempoolTransaction[]; peerlist: string[] }> {
     // Fetch mempool, check chain for executed txs.
     const preMempool = await Mempool.lock.runExclusive(
         async () => await Mempool.getMempool(blockRef),
@@ -600,8 +698,13 @@ async function mergeAndOrderMempools(
     )
 
     // Merge with peers
-    await mergeMempools(outboundPool, shard)
+    await mergeMempools(outboundPool, shard, blockRef)
     await updateValidatorPhase(3, blockRef)
+
+    const mergedPeerlist = await computeMergedPeerlist(blockRef)
+    log.only(
+        `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
+    )
 
     const postMempool = await Mempool.getMempool(blockRef)
     log.only(`[mergeAndOrderMempools] Post mempool: ${postMempool.length} txs`)
@@ -644,7 +747,10 @@ async function mergeAndOrderMempools(
         log.only(`[mergeAndOrderMempools]   ${type}: ${count}`)
     }
 
-    return orderDeterministically<MempoolTransaction>(finalMempool)
+    return {
+        txs: orderDeterministically<MempoolTransaction>(finalMempool),
+        peerlist: mergedPeerlist,
+    }
 }
 
 /**
@@ -712,6 +818,7 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
 
     // fetch all nonce counts from the db
     const nonces = await GCR.getAccountNonces(Array.from(nonceAccounts))
+    const startFilterNonces = { ...nonces }
 
     txLoop: for (const tx of mempool) {
         const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
@@ -772,7 +879,13 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
         "[filterMempoolByValidNonce] Final mempool length: " + validTxs.length,
     )
 
-    return { validTxs, failedTxs }
+    return {
+        validTxs,
+        failedTxs,
+        nonceAccounts,
+        startFilterNonces,
+        projectedEndNonces: nonces,
+    }
 }
 
 /**
@@ -799,11 +912,15 @@ async function rollbackGCREditsFromTxs(txs: Transaction[]) {
  */
 async function applyGCREditsFromMergedMempool(
     mempool: MempoolTransaction[],
-): Promise<{ successfulTxs: string[]; failedTxs: FailedTranscation[] }> {
+): Promise<{
+    successfulTxs: string[]
+    appliedTxs: string[]
+    failedTxs: FailedTranscation[]
+}> {
     let failedTxs: FailedTranscation[] = []
 
     if (mempool.length === 0) {
-        return { successfulTxs: [], failedTxs: [] }
+        return { successfulTxs: [], appliedTxs: [], failedTxs: [] }
     }
 
     // Filter already-executed txs in single batch query
@@ -825,7 +942,7 @@ async function applyGCREditsFromMergedMempool(
     })
 
     if (pendingTxs.length === 0) {
-        return { successfulTxs: [], failedTxs }
+        return { successfulTxs: [], appliedTxs: [], failedTxs }
     }
 
     const res = await HandleGCR.applyTransactions(pendingTxs, false)
@@ -847,7 +964,7 @@ async function applyGCREditsFromMergedMempool(
         }
     }
 
-    return { successfulTxs, failedTxs }
+    return { successfulTxs, appliedTxs: res.successfulTxs, failedTxs }
 }
 
 // /**
@@ -902,7 +1019,7 @@ async function applyGCREditsFromMergedMempool(
  */
 async function forgeBlock(
     orderedTransactions: Transaction[],
-    peerlist: Peer[] = [],
+    peerlist: string[] = [],
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
     // const lastBlockNumber = await Chain.getLastBlockNumber()

@@ -3,164 +3,219 @@ import { Peer } from "src/libs/peer"
 import Alea from "alea"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
-import { getLastBlockSigners } from "@/libs/blockchain/chainBlocks"
+import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
+import { compareIdentities } from "./peerlistMerge"
 
-// Per-block cache of the active-validator query. getShard runs on every
-// consensus tick (multiple times per block), but the validator set only
-// changes via stake/unstake/exit txs which land at block boundaries.
-// Caching keyed by `lastBlockNumber` collapses N round-trips per block
-// into one. Exported for tests via `__resetValidatorCache`.
-let cachedBlock: number | null = null
-let cachedValidators: Validators[] | null = null
+// The eligible pool is a pure function of on-chain state at a given
+// block, so it is memoised per block number. Sync verification walks
+// blocks sequentially while consensus reads the tip, hence a small
+// multi-entry cache instead of a single slot.
+const POOL_CACHE_MAX_ENTRIES = 8
+const poolCache = new Map<number, string[]>()
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetValidatorCache(): void {
-    cachedBlock = null
-    cachedValidators = null
+    poolCache.clear()
 }
 
 /**
- * Retrieve the current list of online peers, filtered to active validators.
- *
- * @param seed - Seed intended for deterministic shard selection; currently not used and has no effect
- * @returns An array of peers that are currently considered online and are active validators
+ * Minimum committee size below which the network does not forge or
+ * accept blocks. Equal to the quorum a full-size shard would need, so
+ * a committee that cannot possibly meet quorum never forms at all.
  */
-export default async function getShard(seed: string): Promise<Peer[]> {
-    log.debug("================================================")
-    log.debug("Getting shard with seed: " + seed)
-    log.debug("================================================")
-    // ! we need to get the peers from the last 3 blocks too
-    const peerman = PeerManager.getInstance()
-    const allPeers = await peerman.getOnlinePeers()
-    const peers = allPeers.filter(
-        peer =>
-            // peer.status.online &&
-            // peer.sync.status &&
-            peer.sync.block === getSharedState.lastBlockNumber &&
-            peer.sync.block_hash === getSharedState.lastBlockHash,
+export function getCommitteeFloor(): number {
+    return Math.floor((getSharedState.shardSize * 2) / 3) + 1
+}
+
+/** Identities committed in a block's peerlist, normalised to lowercase. */
+async function readCommittedPeerlist(
+    lastBlockNumber: number,
+): Promise<string[]> {
+    if (lastBlockNumber < 1) {
+        return []
+    }
+
+    const committed: string[] = []
+    const block = await Chain.getBlockByNumber(lastBlockNumber)
+    const rawPeerlist = block?.content?.peerlist as unknown as unknown[]
+    if (Array.isArray(rawPeerlist)) {
+        for (const entry of rawPeerlist) {
+            if (typeof entry === "string" && entry.length > 0) {
+                committed.push(entry.toLowerCase())
+            }
+        }
+    }
+    return committed
+}
+
+/** Addresses of the active (staked) validator set at a block. */
+async function readActiveValidatorAddresses(
+    lastBlockNumber: number,
+): Promise<Set<string>> {
+    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
+        lastBlockNumber,
+    )) as Validators[]
+    return new Set<string>(
+        activeValidators
+            .map(v => v.address)
+            .filter((a): a is string => a !== null),
     )
+}
 
-    const lastBlockSigners = await getLastBlockSigners()
-
-    const initialPeers = new Set(peers.map(peer => peer.identity))
-    for (const signer of lastBlockSigners) {
-        const peer = peerman.getPeer(signer)
-
+/**
+ * Last-resort pool for bare development networks: peers synced to our tip,
+ * plus ourselves. View-dependent, so it is never memoised.
+ */
+function localViewFallback(): string[] {
+    const localView = new Set<string>([getSharedState.publicKeyHex])
+    for (const peer of PeerManager.getInstance().getPeers()) {
         if (
-            peer &&
-            !initialPeers.has(signer) &&
-            getSharedState.lastBlockNumber - peer.sync.block <= 1
+            peer.sync.block === getSharedState.lastBlockNumber &&
+            peer.sync.block_hash === getSharedState.lastBlockHash
         ) {
-            peers.push(peer)
+            localView.add(peer.identity)
         }
     }
+    return [...localView].sort(compareIdentities)
+}
 
-    // Fetch active validators from DB at the current block, with a
-    // per-block memoisation to avoid one DB round-trip per consensus tick.
-    const lastBlock = getSharedState.lastBlockNumber
-    let activeValidators: Validators[]
-    if (cachedBlock === lastBlock && cachedValidators !== null) {
-        activeValidators = cachedValidators
-    } else {
-        activeValidators = (await GCR.getGCRValidatorsAtBlock(
-            lastBlock,
-        )) as Validators[]
-        cachedBlock = lastBlock
-        cachedValidators = activeValidators
+/** Throw when strict mode forbids operating without an active validator set. */
+function assertValidatorsNotRequired(reason: string): void {
+    if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+        throw new Error(
+            `[getShard] ${reason} AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate`,
+        )
+    }
+}
+
+/**
+ * The eligible validator pool at a given block:
+ * - the peerlist committed in that block (validators seen online by the
+ *   shard that forged it), intersected with the active validator set;
+ * - at block 0 (genesis commits no peerlist), or if the committed
+ *   peerlist is empty (bootstrap), the full staked validator set at
+ *   that block;
+ * - if there are no validators either, a local-view fallback for bare
+ *   development networks (view-dependent, guarded by
+ *   DEMOS_REQUIRE_VALIDATORS, never memoised).
+ *
+ * Deduplicated and sorted ascending, so every synced node computes the
+ * identical pool.
+ */
+export async function getEligiblePool(
+    lastBlockNumber: number,
+): Promise<string[]> {
+    if (poolCache.has(lastBlockNumber)) {
+        return poolCache.get(lastBlockNumber)
     }
 
-    let validatedPeers: Peer[]
+    const committed = await readCommittedPeerlist(lastBlockNumber)
+    const validatorAddresses =
+        await readActiveValidatorAddresses(lastBlockNumber)
 
-    if (activeValidators.length === 0) {
-        if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
-            throw new Error(
-                "[getShard] no active validators in DB AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
-            )
-        }
+    let pool: string[]
+    if (committed.length > 0 && validatorAddresses.size > 0) {
+        pool = committed.filter(id => validatorAddresses.has(id))
+    } else if (committed.length > 0) {
+        assertValidatorsNotRequired(
+            "committed peerlist but no active validators",
+        )
         log.warning(
-            "[getShard] SECURITY: no active validators in DB; falling back to online-peer-only shard selection. Set DEMOS_REQUIRE_VALIDATORS=true to enforce.",
+            "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
+                "This is only acceptable on development networks.",
         )
-        validatedPeers = peers
+        pool = committed
+    } else if (validatorAddresses.size > 0) {
+        log.info(
+            `[getShard] Block ${lastBlockNumber} has no committed peerlist; bootstrapping pool from ${validatorAddresses.size} active validators`,
+        )
+        pool = [...validatorAddresses]
     } else {
-        // Validators.address is typed `string | null` (PrimaryColumn but
-        // TypeORM widens to null); filter defensively so a NULL row can't
-        // accidentally land in the set as a string and corrupt the filter.
-        const validatorAddressSet = new Set<string>(
-            activeValidators
-                .map(v => v.address)
-                .filter((a): a is string => a !== null),
+        assertValidatorsNotRequired(
+            "no committed peerlist AND no active validators",
         )
-        validatedPeers = peers.filter(peer =>
-            validatorAddressSet.has(peer.identity),
+        log.warning(
+            "[getShard] SECURITY: no committed peerlist and no active validators; " +
+                "falling back to local peer view. This is only acceptable on development networks.",
         )
+        return localViewFallback()
     }
 
-    // Select up to 10 peers from the list using the seed as a source of randomness
-    let maxShardSize = getSharedState.shardSize
-    if (validatedPeers.length < maxShardSize) {
-        maxShardSize = validatedPeers.length
+    const result = [...new Set(pool)].sort(compareIdentities)
+
+    poolCache.set(lastBlockNumber, result)
+    if (poolCache.size > POOL_CACHE_MAX_ENTRIES) {
+        poolCache.delete(poolCache.keys().next().value)
     }
-    log.debug(`[getShard] maxShardSize: ${maxShardSize}`)
-    const shard: Peer[] = []
-    log.custom("last_shard", "Shard seed is: " + seed)
-    // getSharedState.lastShardSeed = seed
+
+    return result
+}
+
+/**
+ * Committee for the next block: the deterministic eligible pool at
+ * `lastBlockNumber`, filtered to peers currently indexed in the
+ * PeerManager online list (ourselves always included), drawn with
+ * Alea(seed). Liveness-filtered and therefore view-dependent —
+ * verifyBlock must validate signers against getEligiblePool, never
+ * against this selection.
+ */
+export default async function getShard(
+    seed: string,
+    lastBlockNumber: number = undefined,
+): Promise<Peer[]> {
+    if (lastBlockNumber === undefined || lastBlockNumber === null) {
+        lastBlockNumber = getSharedState.lastBlockNumber
+    }
+
+    const pool = await getEligiblePool(lastBlockNumber)
+    const peerman = PeerManager.getInstance()
+
+    const onlineByIdentity = new Map<string, Peer>()
+    for (const peer of await peerman.getOnlinePeers()) {
+        onlineByIdentity.set(peer.identity.toLowerCase(), peer)
+    }
+
+    const selfId = getSharedState.publicKeyHex
+    const candidates: Peer[] = []
+    for (const identity of pool) {
+        if (identity === selfId) {
+            candidates.push(peerman.getPeer(identity) ?? new Peer("", identity))
+            continue
+        }
+        const online = onlineByIdentity.get(identity)
+        if (online) {
+            candidates.push(online)
+        }
+    }
+
+    let committeeSize = getSharedState.shardSize
+    if (candidates.length < committeeSize) {
+        committeeSize = candidates.length
+    }
+
     const deterministicRandomness = Alea(seed)
-    const availablePeers = [...validatedPeers]
+    const available = [...candidates]
+    const shard: Peer[] = []
 
-    availablePeers.sort((a, b) =>
-        a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
-    )
-    log.debug(
-        "Available peers: " +
-            JSON.stringify(
-                availablePeers.map(p => p.connection.string),
-                null,
-                2,
-            ),
-    )
-
-    // REVIEW: check if this is the right way to do it
-    // NOTE Choosing the secretary by randomly ordering the list: the first one is the secretary
-    for (let i = 0; i < maxShardSize && availablePeers.length > 0; i++) {
-        const index = Math.floor(
-            deterministicRandomness() * availablePeers.length,
-        )
-        shard.push(availablePeers[index])
-        availablePeers.splice(index, 1)
+    for (let i = 0; i < committeeSize && available.length > 0; i++) {
+        const index = Math.floor(deterministicRandomness() * available.length)
+        shard.push(available[index])
+        available.splice(index, 1)
     }
 
     log.debug(
-        "Shard: " +
-            JSON.stringify(
-                shard.map(p => p.connection.string),
-                null,
-                2,
-            ),
+        `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
+            `online candidates: ${candidates.length}; shard: ${shard.length}`,
     )
 
-    log.info(
-        `[getShard] active validators in DB: ${activeValidators.length}; online+validator peers: ${validatedPeers.length}; shard size: ${shard.length}`,
-    )
-
-    // Setting the last shard
-    // getSharedState.lastShard = shard.map(peer => peer.identity)
-    if (shard.length < 3) {
+    if (shard.length < getCommitteeFloor()) {
         log.warning(
-            "There are less than 3 peers in the last shard: this could be a security issue",
+            `[getShard] Shard of ${shard.length} is below the floor of ${getCommitteeFloor()}: ` +
+                "the network cannot forge until more validators are online",
         )
     }
 
-    log.custom(
-        "last_shard",
-        JSON.stringify(
-            shard.map(peer => peer.identity),
-            null,
-            2,
-        ),
-        false,
-        true,
-    )
     return shard
 }

@@ -10,6 +10,8 @@ import { RPCRequest, RPCResponse } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
+import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
+import { getCommitteeFloor } from "../routines/getShard"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
@@ -36,13 +38,18 @@ export default class SecretaryManager {
     // Internal variables
     public shard: Shard
     public get secretary() {
-        return this.shard.members[0]
+        return (
+            this.shard.members.find(
+                m => m.identity === this.shard.secretaryKey,
+            ) ?? this.shard.members[0]
+        )
     }
 
     public ourValidatorPhase: ValidationPhase
     public ourKey: string
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
+    public unresponsiveMembers = new Set<string>()
 
     constructor() {}
 
@@ -61,11 +68,21 @@ export default class SecretaryManager {
             secretaryKey: "",
             blockRef: lastBlockNumber + 1,
         }
+        this.unresponsiveMembers = new Set<string>()
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
         // this.ourKey = getSharedState.identity.ed25519.publicKey.toString("hex")
         this.ourKey = getSharedState.publicKeyHex
+
+        if (this.shard.members.length < getCommitteeFloor()) {
+            log.error(
+                `Committee of ${this.shard.members.length} is below the floor of ${getCommitteeFloor()}: refusing to forge`,
+            )
+            throw new NotInShardError(
+                "Committee below minimum size: refusing to forge",
+            )
+        }
 
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
@@ -73,8 +90,24 @@ export default class SecretaryManager {
             log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
-        // Assigning the secretary and its key
-        this.shard.secretaryKey = this.secretary.identity
+
+        const validMembers = this.shard.members.filter(
+            member =>
+                Boolean(member.connection.string) &&
+                member.sync.block === getSharedState.lastBlockNumber &&
+                member.sync.block_hash === getSharedState.lastBlockHash,
+        )
+        if (
+            validMembers.length <
+            Math.floor((this.shard.members.length * 2) / 3) + 1
+        ) {
+            throw new AbortConsensusError(
+                "Not enough valid members to forge the block",
+            )
+        }
+
+        // The secretary is the first member of the deterministic draw
+        this.shard.secretaryKey = this.shard.members[0].identity
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
@@ -165,7 +198,7 @@ export default class SecretaryManager {
             log.debug(
                 "[SECRETARY ROUTINE] Initializing the block timestamp FOR THE FIRST TIME",
             )
-            this.blockTimestamp = Math.floor(Date.now() / 1000)
+            this.blockTimestamp = getNetworkTimestamp()
             log.debug(
                 `[SECRETARY ROUTINE] Block timestamp: ${this.blockTimestamp}`,
             )
@@ -242,7 +275,8 @@ export default class SecretaryManager {
      * INFO: Receives a list of known waiting members
      * We filter the shard members to get the ones that are not in the waiting list
      * We then ping them to check if they are still online
-     * If they are not, we remove them from the shard
+     * If they are not, we mark them unresponsive so the routine stops waiting
+     * on them. Shard membership itself is immutable for the round.
      * @param waitingMembers The list of known waiting members
      */
     public async handleNodesGoneOffline(waitingMembers: string[]) {
@@ -254,7 +288,11 @@ export default class SecretaryManager {
             `Maybe offline members: ${maybeOfflineMembers.map(m => m.identity)}`,
         )
 
-        const promises = maybeOfflineMembers.map(member => member.connect())
+        const promises = maybeOfflineMembers.map(member =>
+            member.connection.string || member.isLocalNode
+                ? member.connect()
+                : Promise.resolve(false),
+        )
         const results = await Promise.all(promises)
 
         const onlineMembers: string[] = []
@@ -268,13 +306,10 @@ export default class SecretaryManager {
                 )
             } else {
                 log.debug(
-                    `[SECRETARY ROUTINE] ${member.identity} is offline, removing from the shard`,
+                    `[SECRETARY ROUTINE] ${member.identity} is offline, marking as unresponsive`,
                 )
 
-                this.shard.members = this.shard.members.filter(
-                    m => m.identity !== member.identity,
-                )
-                delete this.shard.validationPhases[member.identity]
+                this.unresponsiveMembers.add(member.identity)
             }
         }
 
@@ -285,7 +320,8 @@ export default class SecretaryManager {
      * Handles the secretary going offline
      *
      * Ping the secretary to check if it's still online
-     * If it's not, we elect the second node as the new secretary
+     * If it's not, we elect the next member as the new secretary and
+     * drop the dead one from the shard for this round.
      */
     public async handleSecretaryGoneOffline() {
         log.debug("[SECRETARY ROUTINE] Handling secretary going offline")
@@ -302,7 +338,6 @@ export default class SecretaryManager {
         log.debug(`Secretary is online: ${isOnline}`)
 
         if (isOnline) {
-            // REVIEW: Is that it?
             log.debug("Secretary is online, nothing to do")
             return
         }
@@ -312,6 +347,12 @@ export default class SecretaryManager {
         if (isStillOnline) {
             log.debug("Secretary is still online, nothing to do")
             return
+        }
+
+        if (this.shard.members.length < 2) {
+            throw new AbortConsensusError(
+                "No committee members available to replace the secretary",
+            )
         }
 
         log.debug(
@@ -340,12 +381,18 @@ export default class SecretaryManager {
                 ],
             }
 
-            const memberCalls = this.shard.members.map(member =>
-                member
-                    .call(request)
-                    .then(res => ({ member, res }))
-                    .catch(error => ({ member, error })),
-            )
+            const memberCalls = this.shard.members
+                .filter(
+                    member =>
+                        !this.unresponsiveMembers.has(member.identity) &&
+                        (member.connection.string !== "" || member.isLocalNode),
+                )
+                .map(member =>
+                    member
+                        .call(request)
+                        .then(res => ({ member, res }))
+                        .catch(error => ({ member, error })),
+                )
 
             const results = await Promise.all(memberCalls)
 
@@ -447,6 +494,7 @@ export default class SecretaryManager {
         this.shard.validationPhases[memberKey].currentPhase = theirPhase
         this.shard.validationPhases[memberKey].phases[theirPhase][1] = true
         this.shard.validationPhases[memberKey].waitStatus = true
+        this.unresponsiveMembers.delete(memberKey)
 
         if (!this.checkIfWeAreSecretary()) {
             log.debug(
@@ -528,6 +576,9 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
+            if (this.unresponsiveMembers.has(pubKey)) {
+                continue
+            }
             if (phase.currentPhase !== ourPhase || !phase.waitStatus) {
                 return false
             }
@@ -560,6 +611,7 @@ export default class SecretaryManager {
         }
 
         const promises = []
+        const contactedMembers: string[] = []
 
         for (const pubKey of waitingMembers) {
             const request: RPCRequest = {
@@ -579,6 +631,13 @@ export default class SecretaryManager {
             // INFO: Update the wait status of the member to false
             this.shard.validationPhases[pubKey].waitStatus = false
             const member = this.shard.members.find(m => m.identity === pubKey)
+            if (!member || (!member.connection.string && !member.isLocalNode)) {
+                log.debug(
+                    `[SECRETARY ROUTINE] Skipping greenlight to unreachable member ${pubKey}`,
+                )
+                continue
+            }
+            contactedMembers.push(pubKey)
             log.debug(
                 `[SECRETARY ROUTINE] Sending greenlight to ${member.identity} with timestamp ${this.blockTimestamp} and phase ${phase}`,
             )
@@ -594,8 +653,7 @@ export default class SecretaryManager {
         const results = await Promise.all(promises)
 
         for (const [index, result] of results.entries()) {
-            const pubKey = waitingMembers[index]
-            const member = this.shard.members.find(m => m.identity === pubKey)
+            const pubKey = contactedMembers[index]
 
             if (result.result === 400) {
                 log.debug(
@@ -721,6 +779,9 @@ export default class SecretaryManager {
         for (const [pubKey, phase] of Object.entries(
             this.shard.validationPhases,
         )) {
+            if (this.unresponsiveMembers.has(pubKey)) {
+                continue
+            }
             if (phase.currentPhase === ourPhase && phase.waitStatus) {
                 waitingMembers.push(pubKey)
             }
@@ -776,8 +837,23 @@ export default class SecretaryManager {
                 } as RPCResponse
             }
 
+            if (
+                !this.secretary.connection.string &&
+                !this.secretary.isLocalNode
+            ) {
+                log.debug(
+                    `Secretary ${this.secretary.identity} has no connection string, skipping the call`,
+                )
+                return {
+                    result: 500,
+                    response: "Secretary unreachable (no connection string)",
+                    require_reply: false,
+                    extra: null,
+                } as RPCResponse
+            }
+
             log.debug("Sending setValidatorPhase request to the secretary")
-            log.debug(`Secretary is: ${this.secretary.identity}`)
+            log.debug(`Secretary is: ${this.secretary.connection.string}`)
             return await this.secretary.longCall(request, true, {
                 retries,
                 sleepTime: 250,
@@ -801,18 +877,43 @@ export default class SecretaryManager {
             }
 
             if ([400, 500].includes(res.result)) {
+                const secretaryUnreachable =
+                    res.result === 500 || res.response === "Max retries reached"
+
+                if (!secretaryUnreachable) {
+                    // NOTE: A 400 is returned if the block reference is
+                    // lower than the secretary's block reference
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] Secretary rejected the setValidatorPhase request",
+                    )
+                    Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                    return null
+                }
+
                 log.debug(
-                    "[SEND OUR VALIDATOR PHASE] Error sending the setValidatorPhase request",
+                    "[SEND OUR VALIDATOR PHASE] Secretary unreachable, checking if it went offline",
                 )
+                const previousSecretary = this.shard.secretaryKey
+                await this.handleSecretaryGoneOffline()
 
-                // REVIEW: How should we handle this?
-                // NOTE: A 400 is returned if the block reference is
-                // lower than the secretary's block reference
-                // await this.handleSecretaryGoneOffline()
-                // await sendStatus()
+                if (
+                    this.shard.secretaryKey !== previousSecretary &&
+                    Waiter.isWaiting(waiterKey)
+                ) {
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] Resending our phase to the new secretary",
+                    )
+                    const retryRes = await sendStatus()
+                    return await handleSendStatusRes(retryRes)
+                }
 
-                // INFO: EXIT CONSENSUS ROUTINE
-                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                if (Waiter.isWaiting(waiterKey)) {
+                    log.debug(
+                        "[SEND OUR VALIDATOR PHASE] Secretary unchanged, aborting this round",
+                    )
+                    Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
+                }
+                return null
             }
 
             log.debug(

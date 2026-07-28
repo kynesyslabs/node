@@ -210,3 +210,8 @@ docs/discoveries/security-scan-2026-06-02/artifacts/gitleaks.sarif
 
 # Deep-audit reports contain confirmed open exploit chains. NEVER commit.
 docs/audits/
+.incentives_id
+src/graphify-out/
+graphify-out/
+.token-savior-cache.json
+HANDOFF.md

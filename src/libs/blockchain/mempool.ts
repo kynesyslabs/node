@@ -409,9 +409,30 @@ export default class Mempool {
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
-        const unseenTransactions = incoming.filter(
-            tx => !existingHashes[tx.hash],
-        )
+        // Drop gossiped txs whose reference block has aged out of the
+        // allowed window before they reach validation: they can never be
+        // included, so admitting them only grows the mempool and wastes
+        // validator-pool work. Same bound isReferenceBlockAllowed applies
+        // on the endpoint admission path — inlined rather than imported
+        // because endpointExecution already imports this module.
+        const lastBlock = await Chain.getLastBlockNumber()
+        const staleCutoff = lastBlock - getSharedState.referenceBlockRoom
+        const unseenTransactions = incoming.filter(tx => {
+            if (existingHashes[tx.hash]) {
+                return false
+            }
+            if (
+                tx.reference_block < staleCutoff ||
+                tx.reference_block > lastBlock
+            ) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
+                        `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
+                )
+                return false
+            }
+            return true
+        })
 
         log.only(
             "[Mempool.receive] Unseen transcations: " +

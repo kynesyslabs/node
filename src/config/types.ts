@@ -40,6 +40,10 @@ export interface CoreConfig {
     maxMessageSize: number
     consensusCheckInterval: number
     consensusTime: number
+    /** Minimum seconds a block's timestamp must exceed its parent's. */
+    blockTimestampMinDelta: number
+    /** Max seconds a block's timestamp may lead the verifier's clock. */
+    blockTimestampTolerance: number
     logLevel: string
     whitelistedIPs: string[]
     whitelistedKeys: string[]
@@ -60,6 +64,8 @@ export interface CoreConfig {
     xffMode: string
     mcpEnabled: boolean
     restore: boolean
+    blockWatchdogEnabled: boolean
+    blockWatchdogTimeoutSeconds: number
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.
@@ -149,6 +155,12 @@ export interface DiagnosticsConfig {
     suggestedNetworkUploadSpeed: number
 }
 
+// --- Debug ---
+
+export interface DebugConfig {
+    assertionsEnabled: boolean
+}
+
 // --- Identity & Web2 Services ---
 
 export interface IdentityConfig {
@@ -197,6 +209,7 @@ export interface AppConfig {
     l2ps: L2PSConfig
     metrics: MetricsConfig
     diagnostics: DiagnosticsConfig
+    debug: DebugConfig
     identity: IdentityConfig
     bridges: BridgesConfig
     ipfs: IPFSConfig

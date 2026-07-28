@@ -51,6 +51,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         maxMessageSize: 0,
         consensusCheckInterval: 0,
         consensusTime: 0,
+        blockTimestampMinDelta: 1,
+        blockTimestampTolerance: 60,
         logLevel: "info",
         whitelistedIPs: [],
         whitelistedKeys: [],
@@ -63,6 +65,8 @@ export const DEFAULT_CONFIG: AppConfig = {
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
         restore: false,
+        blockWatchdogEnabled: false,
+        blockWatchdogTimeoutSeconds: 600,
     },
 
     tlsnotary: {
@@ -130,6 +134,10 @@ export const DEFAULT_CONFIG: AppConfig = {
         suggestedDiskSpace: 0,
         suggestedNetworkDownloadSpeed: 0,
         suggestedNetworkUploadSpeed: 0,
+    },
+
+    debug: {
+        assertionsEnabled: false,
     },
 
     identity: {

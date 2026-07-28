@@ -26,13 +26,13 @@ import {
 } from "./libs/omniprotocol/integration/startup"
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
-import {
-    markSubsystem,
-    subsystemError,
-} from "./utilities/subsystemRegistry"
+import { markSubsystem, subsystemError } from "./utilities/subsystemRegistry"
 import { fastSync } from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
-import { getNetworkTimestamp } from "./libs/utils/calibrateTime"
+import {
+    getNetworkTimestamp,
+    startTimestampRecalibration,
+} from "./libs/utils/calibrateTime"
 import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
@@ -194,8 +194,11 @@ const indexState: {
     // a negative/over-range value (which would fail at server-bind time
     // with an opaque error instead of telling the operator the env was
     // malformed).
-    L2PS_MESSAGING_ENABLED: process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true",
-    L2PS_MESSAGING_PORT: parseL2PSMessagingPort(process.env.L2PS_MESSAGING_PORT),
+    L2PS_MESSAGING_ENABLED:
+        process.env.L2PS_MESSAGING_ENABLED?.toLowerCase() === "true",
+    L2PS_MESSAGING_PORT: parseL2PSMessagingPort(
+        process.env.L2PS_MESSAGING_PORT,
+    ),
     l2psMessagingServer: null as any,
 }
 
@@ -219,6 +222,7 @@ function parseL2PSMessagingPort(raw: string | undefined): number {
 // ANCHOR Calibrating the time
 async function calibrateTime() {
     await getTimestampCorrection()
+    startTimestampRecalibration()
     log.info(
         "[SYNC] Timestamp correction: " + getSharedState.timestampCorrection,
     )
@@ -322,10 +326,7 @@ async function isPortAvailable(port: number): Promise<boolean> {
  * 3007" without packet capture. The `reason` arg is included in the log
  * so multiple callers in this file remain distinguishable. Epic 13 T4.
  */
-async function getNextAvailablePort(
-    startFrom: number,
-    reason = "unspecified",
-) {
+async function getNextAvailablePort(startFrom: number, reason = "unspecified") {
     const originalStartFrom = startFrom
     let availablePort: number = null
     while (startFrom < 65535 || !!availablePort) {
@@ -569,6 +570,11 @@ async function preMainLoop() {
     const lastBlock = await Chain.getLastBlock()
     getSharedState.lastBlockNumber = lastBlock.number
     getSharedState.lastBlockHash = lastBlock.hash
+    // Arm the block watchdog at boot. It only ever gets set when a HIGHER
+    // block is inserted, so a node starting on an already-stalled chain
+    // would leave it null and skip the watchdog forever. Stamp it now so
+    // the staleness clock runs from boot.
+    getSharedState.lastBlockInsertedAt = Date.now()
 }
 
 /**
@@ -880,14 +886,21 @@ async function main() {
         // Start L2PS Messaging server (failsafe)
         if (indexState.L2PS_MESSAGING_ENABLED) {
             try {
-                const { startL2PSMessaging } = await import("./features/l2ps-messaging")
+                const { startL2PSMessaging } =
+                    await import("./features/l2ps-messaging")
                 indexState.L2PS_MESSAGING_PORT = await getNextAvailablePort(
                     indexState.L2PS_MESSAGING_PORT,
                 )
-                indexState.l2psMessagingServer = startL2PSMessaging(indexState.L2PS_MESSAGING_PORT)
-                log.info(`[L2PS-IM] Messaging server started on port ${indexState.L2PS_MESSAGING_PORT}`)
+                indexState.l2psMessagingServer = startL2PSMessaging(
+                    indexState.L2PS_MESSAGING_PORT,
+                )
+                log.info(
+                    `[L2PS-IM] Messaging server started on port ${indexState.L2PS_MESSAGING_PORT}`,
+                )
             } catch (error) {
-                log.error("[L2PS-IM] Failed to start messaging server: " + error)
+                log.error(
+                    "[L2PS-IM] Failed to start messaging server: " + error,
+                )
             }
         }
 
@@ -1023,11 +1036,7 @@ async function main() {
                     "[TLSNotary] Failed to start TLSNotary service: " + error,
                 )
                 bootTracker.fail("tlsnotary", error)
-                subsystemError(
-                    getSharedState.subsystems,
-                    "tlsnotary",
-                    error,
-                )
+                subsystemError(getSharedState.subsystems, "tlsnotary", error)
                 const { isTLSNotaryFatal } =
                     await import("./features/tlsnotary")
                 if (isTLSNotaryFatal()) {
@@ -1175,9 +1184,7 @@ async function main() {
                 getSharedState.mainLoopExited = true
                 getSharedState.mainLoopExitedAt = Date.now()
                 if (getSharedState.isShuttingDown) {
-                    log.info(
-                        "[CORE] Main loop stopped (graceful shutdown)",
-                    )
+                    log.info("[CORE] Main loop stopped (graceful shutdown)")
                 } else {
                     log.error(
                         "[CORE] Main loop terminated unexpectedly. " +
@@ -1206,7 +1213,6 @@ async function main() {
         bootTracker.start("main_loop")
         bootTracker.ready("main_loop")
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
-
 
         // Load L2PS networks configuration
         bootTracker.start("l2ps.networks")
@@ -1280,8 +1286,31 @@ main().catch((error: Error) => {
         process.exit(1)
     })
 })
+/**
+ * Run one shutdown step, swallowing its failure so a single misbehaving
+ * subsystem cannot abort the rest of the teardown.
+ *
+ * @param active - Skip the step entirely when the subsystem never started.
+ */
+async function shutdownStep(
+    active: boolean,
+    label: string,
+    stop: () => unknown | Promise<unknown>,
+    onError: (error: unknown) => void,
+): Promise<void> {
+    if (!active) {
+        return
+    }
+    log.info(`[CORE] ${label}...`)
+    try {
+        await stop()
+    } catch (error) {
+        onError(error)
+    }
+}
+
 // Graceful shutdown handler
-async function gracefulShutdown(signal: string) {
+export async function gracefulShutdown(signal: string, exitCode = 0) {
     // Prevent re-entrant shutdown (e.g. second CTRL+C while already shutting down)
     if (getSharedState.isShuttingDown) {
         return
@@ -1294,7 +1323,7 @@ async function gracefulShutdown(signal: string) {
     // Force exit after 10 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {
         log.warning("[CORE] Shutdown timeout exceeded, forcing exit...")
-        process.exit(0)
+        process.exit(exitCode)
     }, 3_000)
     // Don't let this timer itself keep the process alive
     if (forceExitTimeout.unref) forceExitTimeout.unref()
@@ -1310,132 +1339,135 @@ async function gracefulShutdown(signal: string) {
         }
 
         // Stop L2PS services if running (await so their intervals are cleared)
-        try {
-            log.info("[CORE] Stopping L2PS services...")
-            await Promise.allSettled([
-                L2PSHashService.getInstance().stop(3000),
-                L2PSBatchAggregator.getInstance().stop(3000),
-            ])
-        } catch (error) {
-            handleError(error, "CORE", { source: ErrorSource.L2PS_SHUTDOWN })
-        }
+        await shutdownStep(
+            true,
+            "Stopping L2PS services",
+            () =>
+                Promise.allSettled([
+                    L2PSHashService.getInstance().stop(3000),
+                    L2PSBatchAggregator.getInstance().stop(3000),
+                ]),
+            error =>
+                handleError(error, "CORE", {
+                    source: ErrorSource.L2PS_SHUTDOWN,
+                }),
+        )
 
-        // Stop TxValidatorPool workers
-        try {
-            log.info("[CORE] Stopping TxValidatorPool...")
-            await TxValidatorPool.getInstance().stop(2_000)
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.WORKER_POOL_SHUTDOWN,
-            })
-        }
+        await shutdownStep(
+            true,
+            "Stopping TxValidatorPool",
+            () => TxValidatorPool.getInstance().stop(2_000),
+            error =>
+                handleError(error, "CORE", {
+                    source: ErrorSource.WORKER_POOL_SHUTDOWN,
+                }),
+        )
 
-        // Stop OmniProtocol server if running
-        if (indexState.omniServer) {
-            log.info("[CORE] Stopping OmniProtocol server...")
-            try {
-                await stopOmniProtocolServer()
-            } catch (error) {
+        await shutdownStep(
+            !!indexState.omniServer,
+            "Stopping OmniProtocol server",
+            () => stopOmniProtocolServer(),
+            error =>
                 handleError(error, "NETWORK", {
                     source: ErrorSource.OMNI_SHUTDOWN,
-                })
-            }
-        }
+                }),
+        )
 
-        // Stop MCP server if running
-        if (indexState.mcpServer) {
-            log.info("[CORE] Stopping MCP server...")
-            try {
-                await indexState.mcpServer.stop()
-            } catch (error) {
-                handleError(error, "MCP", { source: ErrorSource.MCP_SHUTDOWN })
-            }
-        }
+        await shutdownStep(
+            !!indexState.mcpServer,
+            "Stopping MCP server",
+            () => indexState.mcpServer.stop(),
+            error =>
+                handleError(error, "MCP", { source: ErrorSource.MCP_SHUTDOWN }),
+        )
 
-        // Stop TLSNotary service if running
-        if (indexState.tlsnotaryService) {
-            log.info("[CORE] Stopping TLSNotary service...")
-            try {
+        await shutdownStep(
+            !!indexState.tlsnotaryService,
+            "Stopping TLSNotary service",
+            async () => {
                 const { shutdownTLSNotary } =
                     await import("./features/tlsnotary")
                 await shutdownTLSNotary()
-            } catch (error) {
+            },
+            error =>
                 handleError(error, "TLSN", {
                     source: ErrorSource.TLSN_SHUTDOWN,
-                })
-            }
-        }
+                }),
+        )
 
-        // Stop Metrics collector and server if running
-        if (indexState.metricsServer) {
-            log.info("[CORE] Stopping Metrics collector and server...")
-            try {
+        await shutdownStep(
+            !!indexState.metricsServer,
+            "Stopping Metrics collector and server",
+            async () => {
                 const { getMetricsCollector } =
                     await import("./features/metrics")
                 getMetricsCollector().stop()
                 indexState.metricsServer.stop()
-            } catch (error) {
+            },
+            error =>
                 handleError(error, "CORE", {
                     source: ErrorSource.METRICS_SHUTDOWN,
-                })
-            }
-        }
+                }),
+        )
 
-        // Stop HTTP RPC server
-        if (indexState.rpcServer) {
-            log.info("[CORE] Stopping RPC server...")
-            try {
-                indexState.rpcServer.stop()
-            } catch (error) {
+        await shutdownStep(
+            !!indexState.rpcServer,
+            "Stopping RPC server",
+            () => indexState.rpcServer.stop(),
+            error =>
                 handleError(error, "NETWORK", {
                     source: ErrorSource.RPC_SHUTDOWN,
-                })
-            }
-        }
+                }),
+        )
 
-        // Stop Signaling server
-        if (indexState.signalingServer) {
-            log.info("[CORE] Stopping Signaling server...")
-            try {
-                indexState.signalingServer.disconnect()
-            } catch (error) {
+        await shutdownStep(
+            !!indexState.signalingServer,
+            "Stopping Signaling server",
+            () => indexState.signalingServer.disconnect(),
+            error =>
                 handleError(error, "NETWORK", {
                     source: ErrorSource.SIGNALING_SHUTDOWN,
-                })
-            }
-        }
+                }),
+        )
 
-        // Stop HTTP rate limiter cleanup interval
-        try {
-            // eslint-disable-next-line @typescript-eslint/naming-convention
-            const { RateLimiter: HttpRateLimiter } =
-                await import("./libs/network/middleware/rateLimiter")
-            HttpRateLimiter.getInstance().destroy()
-        } catch (_) {
-            /* may not be initialized */
-        }
+        // Stop HTTP rate limiter cleanup interval. May never have been
+        // initialized, so failures here are expected and ignored.
+        await shutdownStep(
+            true,
+            "Stopping HTTP rate limiter",
+            async () => {
+                // eslint-disable-next-line @typescript-eslint/naming-convention
+                const { RateLimiter: HttpRateLimiter } =
+                    await import("./libs/network/middleware/rateLimiter")
+                HttpRateLimiter.getInstance().destroy()
+            },
+            () => {
+                /* may not be initialized */
+            },
+        )
 
-        // Stop L2PS Messaging server if running
-        if (indexState.l2psMessagingServer) {
-            log.info("[SHUTDOWN] Stopping L2PS Messaging server...")
-            try {
-                const { stopL2PSMessaging } = await import("./features/l2ps-messaging")
+        await shutdownStep(
+            !!indexState.l2psMessagingServer,
+            "Stopping L2PS Messaging server",
+            async () => {
+                const { stopL2PSMessaging } =
+                    await import("./features/l2ps-messaging")
                 stopL2PSMessaging()
-            } catch (error) {
-                log.error(`[SHUTDOWN] Error stopping L2PS Messaging: ${error}`)
-            }
-        }
+            },
+            error =>
+                log.error(`[SHUTDOWN] Error stopping L2PS Messaging: ${error}`),
+        )
 
         log.info("[CORE] Cleanup complete, exiting...")
         clearTimeout(forceExitTimeout)
-        process.exit(0)
+        process.exit(exitCode)
     } catch (error) {
         handleError(error, "CORE", {
             source: ErrorSource.GRACEFUL_SHUTDOWN,
             fatal: true,
         })
         clearTimeout(forceExitTimeout)
-        process.exit(1)
+        process.exit(exitCode === 0 ? 1 : exitCode)
     }
 }
 

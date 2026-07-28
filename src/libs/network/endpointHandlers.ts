@@ -33,6 +33,10 @@ import { DemoScript } from "@kynesyslabs/demosdk/types"
 import { Peer } from "../peer"
 import { emptyResponse } from "./rpcDispatch"
 
+import {
+    contributePeerlist,
+    getLocalPeerlistView,
+} from "src/libs/consensus/v2/routines/peerlistMerge"
 import { handleValidateTransaction } from "./endpointValidation"
 import { handleExecuteTransaction } from "./endpointExecution"
 import { handleConsensusRequest } from "./endpointConsensus"
@@ -118,7 +122,16 @@ export default class ServerHandlers {
         return { extra, requireReply, response }
     }
 
-    static async handleMempool(txs: Transaction[]): Promise<any> {
+    static async handleMempool(content: any, sender = ""): Promise<any> {
+        const envelope =
+            Array.isArray(content) &&
+            content.length === 1 &&
+            content[0] &&
+            Array.isArray(content[0].txs)
+                ? content[0]
+                : null
+        const txs: Transaction[] = envelope ? envelope.txs : content
+
         let response = {
             success: false,
             mempool: [],
@@ -130,12 +143,25 @@ export default class ServerHandlers {
             log.error("[handleMempool] Error receiving mempool: " + error)
         }
 
+        // Receiver-side mirror of the guard in mergeMempools: a failed
+        // exchange must not influence block content. The caller discards
+        // its reciprocal contribution on a non-200, so recording ours here
+        // would leave the two ends with different peerlists and therefore
+        // different candidate block hashes.
+        if (envelope && sender && response.success) {
+            contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
+        }
+
+        const responsePayload = envelope
+            ? { txs: response.mempool, peerlist: getLocalPeerlistView() }
+            : response.mempool
+
         const ourId = getSharedState.publicKeyHex
         const ourDate = new Date().toISOString()
 
         return {
             result: response.success ? 200 : 400,
-            response: response.mempool,
+            response: responsePayload,
             extra:
                 (response.success ? "Mempool received" : "Mempool not merged") +
                 ` by: ${ourId} at ${ourDate}`,

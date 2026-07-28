@@ -222,7 +222,7 @@ export default class GCR {
             .getDataSource()
             .getRepository(Validators)
 
-        if (!blockNumber) {
+        if (blockNumber === null || blockNumber === undefined) {
             log.debug("No block number provided, getting the last one")
             blockNumber = (await Chain.getLastBlock()).number // Ensure getLastBlock is also ported to TypeORM
         }

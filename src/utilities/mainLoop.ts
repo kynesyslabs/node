@@ -9,9 +9,11 @@ import Diagnostic, {
 } from "src/utilities/Diagnostic"
 import log from "src/utilities/logger"
 import * as consensusTime from "../libs/consensus/routines/consensusTime"
+import { isNetworkAhead } from "src/libs/consensus/v2/routines/networkAheadVeto"
 import { getSharedState } from "./sharedState"
 import { peerGossip } from "src/libs/peer/routines/peerGossip"
 import { handleError } from "src/errors/handleError"
+import { Config } from "src/config"
 
 // INFO The main loop executed in background by index.ts
 async function sleep(time: number) {
@@ -73,6 +75,10 @@ async function mainLoopCycle() {
         return
     }
 
+    if (await checkBlockWatchdog()) {
+        return
+    }
+
     // If it is not in pause, we set (or force set) the mainLoop flag to be on
     getSharedState.inMainLoop = true
 
@@ -108,6 +114,12 @@ async function mainLoopCycle() {
         getSharedState.syncStatus &&
         !getSharedState.startingConsensus
     ) {
+        if (await isNetworkAhead("mainLoop")) {
+            fastSync([], "networkAheadVeto").catch(e =>
+                handleError(e, "SYNC", { source: "networkAheadVeto" }),
+            )
+            return
+        }
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
         log.debug("[MAIN LOOP] Consensus time reached and sync status is true")
@@ -128,12 +140,36 @@ async function mainLoopCycle() {
         // ANCHOR Calling the consensus routine if is time for it
         consensusRoutine()
     } else if (!getSharedState.syncStatus) {
-        // ? This is a bit redundant, isn't it?
-        log.warning(
-            "[MAIN LOOP] Cannot start consensus, not in sync. Sync loop should start automatically",
-            true,
+        log.warning("[MAIN LOOP] Not in sync, starting sync loop", true)
+        fastSync([], "syncRecovery").catch(e =>
+            handleError(e, "SYNC", { source: "syncRecovery" }),
         )
     }
+}
+
+async function checkBlockWatchdog(): Promise<boolean> {
+    const core = Config.getInstance().core
+    if (
+        !core.blockWatchdogEnabled ||
+        getSharedState.lastBlockInsertedAt === null ||
+        getSharedState.isShuttingDown
+    ) {
+        return false
+    }
+
+    const staleSeconds = Math.round(
+        (Date.now() - getSharedState.lastBlockInsertedAt) / 1000,
+    )
+    if (staleSeconds <= core.blockWatchdogTimeoutSeconds) {
+        return false
+    }
+
+    log.error(
+        `[BLOCK WATCHDOG] No block accepted for ${staleSeconds}s (threshold ${core.blockWatchdogTimeoutSeconds}s), last block ${getSharedState.lastBlockNumber} — shutting down for operator inspection`,
+    )
+    const { gracefulShutdown } = await import("src/index")
+    await gracefulShutdown("block_watchdog", 42)
+    return true
 }
 
 // ANCHOR Unified peer routine
