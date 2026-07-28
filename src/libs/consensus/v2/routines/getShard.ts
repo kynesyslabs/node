@@ -6,6 +6,7 @@ import log from "src/utilities/logger"
 import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
+import { compareIdentities } from "./peerlistMerge"
 
 // The eligible pool is a pure function of on-chain state at a given
 // block, so it is memoised per block number. Sync verification walks
@@ -111,10 +112,10 @@ export async function getEligiblePool(
                 localView.add(peer.identity)
             }
         }
-        return [...localView].sort()
+        return [...localView].sort(compareIdentities)
     }
 
-    const result = [...new Set(pool)].sort()
+    const result = [...new Set(pool)].sort(compareIdentities)
 
     poolCache.set(lastBlockNumber, result)
     if (poolCache.size > POOL_CACHE_MAX_ENTRIES) {

@@ -577,7 +577,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     // ! Sync the native tables
     await syncGCRTables(applied, block)
 
-    await Chain.insertBlock(block, txs)
+    await insertBlockOrHalt(block, txs)
     log.debug("Block inserted successfully")
     log.debug(
         `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
@@ -852,27 +852,42 @@ async function applySyncedBlock(
     // Sync GCR tables
     await syncGCRTables(applied, block)
 
-    // GCR mutations above are already persisted and neither syncGCRTables
-    // nor insertBlock accepts a shared transaction manager, so a failure
-    // here leaves nonce/balance/validator state ahead of the chain with no
-    // block authorizing it. Worse, the block-exists guard above makes the
-    // drift invisible to a retry. Nothing local can reconcile that, so
-    // surface it as fatal instead of syncing on top of corrupt state.
-    try {
-        await Chain.insertBlock(block, blockTxs)
-    } catch (e) {
-        log.error(
-            `[batchDownloadBlocks] FATAL: GCR state for block ${block.number} was applied ` +
-                `but the block failed to insert; local state has drifted from the chain and ` +
-                `must be resynced from scratch: ${e instanceof Error ? e.message : String(e)}`,
-        )
-        throw e
-    }
+    await insertBlockOrHalt(block, blockTxs)
 
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
     )
     return true
+}
+
+/**
+ * Insert a block whose GCR edits have ALREADY been applied.
+ *
+ * syncGCRTables persists GCR edits and neither it nor insertBlock accepts a
+ * shared transaction manager, so an insert failure here leaves nonce/balance/
+ * validator state ahead of the chain with no block authorizing it — and the
+ * block-exists guard on the retry path hides that drift rather than repairing
+ * it. Rethrowing alone is not enough: callers up the fastSync chain swallow
+ * errors and the node would keep forging on corrupt state. So mark the node
+ * unsynced before rethrowing, which stops it participating until an operator
+ * resyncs it.
+ */
+async function insertBlockOrHalt(
+    block: Block,
+    blockTxs: Transaction[],
+): Promise<void> {
+    try {
+        await Chain.insertBlock(block, blockTxs)
+    } catch (e) {
+        getSharedState.syncStatus = false
+        log.error(
+            `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
+                `but the block failed to insert; local state has drifted from the chain. ` +
+                `Marking the node unsynced — it must be resynced from scratch: ` +
+                `${e instanceof Error ? e.message : String(e)}`,
+        )
+        throw e
+    }
 }
 
 /**

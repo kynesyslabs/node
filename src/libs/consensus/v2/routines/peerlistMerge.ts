@@ -9,6 +9,17 @@ export const MERGE_PEERLIST_MAX_ENTRIES_PER_PEER = 1000
 const MAX_IDENTITY_LENGTH = 20000
 const HEX_IDENTITY_REGEX = /^(0x)?[0-9a-f]+$/
 
+/**
+ * Explicit lexicographic comparator for identity strings. Behaviourally
+ * identical to a bare `.sort()` on strings, but stated outright because
+ * peerlist ordering is consensus-relevant and the default comparator's
+ * implicit stringification is a Sonar CI gate failure.
+ */
+export function compareIdentities(a: string, b: string): number {
+    if (a === b) return 0
+    return a < b ? -1 : 1
+}
+
 let contributionsBlockRef: number | null = null
 let contributions = new Map<string, string[]>()
 
@@ -36,7 +47,7 @@ export function getLocalPeerlistView(): string[] {
         }
     }
 
-    return [...view].sort()
+    return [...view].sort(compareIdentities)
 }
 
 /**
@@ -64,7 +75,20 @@ export function contributePeerlist(
         contributionsBlockRef = blockRef
     }
 
-    let entries = peerlist
+    // Cap BEFORE validating: lowercasing and regex-testing every element of
+    // an attacker-supplied array first would let a hostile contributor push
+    // unbounded work onto the consensus tick regardless of the cap. Slice to
+    // the cap up front so validation cost is bounded by the cap, not by the
+    // reported length.
+    if (peerlist.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) {
+        log.warning(
+            `[peerlistMerge] Contributor ${contributor} reported ${peerlist.length} peers; ` +
+                `capping at ${MERGE_PEERLIST_MAX_ENTRIES_PER_PEER} for this round`,
+        )
+    }
+
+    const entries = peerlist
+        .slice(0, MERGE_PEERLIST_MAX_ENTRIES_PER_PEER)
         .filter(
             (entry): entry is string =>
                 typeof entry === "string" &&
@@ -73,14 +97,6 @@ export function contributePeerlist(
         )
         .map(entry => entry.toLowerCase())
         .filter(entry => HEX_IDENTITY_REGEX.test(entry))
-
-    if (entries.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) {
-        log.warning(
-            `[peerlistMerge] Contributor ${contributor} reported ${entries.length} peers; ` +
-                `capping at ${MERGE_PEERLIST_MAX_ENTRIES_PER_PEER} for this round`,
-        )
-        entries = entries.slice(0, MERGE_PEERLIST_MAX_ENTRIES_PER_PEER)
-    }
 
     contributions.set(contributor, entries)
 }
@@ -128,7 +144,7 @@ export async function computeMergedPeerlist(
             "[peerlistMerge] SECURITY: no active validators in DB; committing unfiltered peerlist. " +
                 "This is only acceptable on development networks.",
         )
-        return [...merged].sort()
+        return [...merged].sort(compareIdentities)
     }
 
     const validatorAddresses = new Set<string>(
