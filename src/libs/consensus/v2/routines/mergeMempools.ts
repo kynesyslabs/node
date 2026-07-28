@@ -8,10 +8,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
-import {
-    contributePeerlist,
-    getLocalPeerlistView,
-} from "./peerlistMerge"
+import { contributePeerlist, getLocalPeerlistView } from "./peerlistMerge"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
 
@@ -91,6 +88,12 @@ export async function mergeMempools(
     // INFO: collect txs from successful responses, deduped by hash,
     // so we make a single Mempool.receive call instead of one per peer.
     const merged = new Map<string, Transaction>()
+    // Peerlist contributions from exchanges that parsed cleanly, held back
+    // until their transactions are actually admitted (see below).
+    const pendingContributions: Array<{
+        identity: string
+        peerlist: unknown
+    }> = []
     for (const [i, result] of settled.entries()) {
         const peer = shard[i]
 
@@ -128,11 +131,14 @@ export async function mergeMempools(
             continue
         }
 
-        // Only a fully usable exchange may influence block content — a 200
-        // carrying a malformed tx payload is still a failed exchange, and
-        // recording its peerlist would let peers that parsed it differently
-        // derive divergent candidate blocks.
-        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
+        // Stage the contribution rather than recording it now: the exchange
+        // is not complete until the txs it carried are admitted locally
+        // below. Recording here would let a failed Mempool.receive leave us
+        // holding peerlists whose transactions we never took.
+        pendingContributions.push({
+            identity: peer.identity,
+            peerlist: payload?.peerlist,
+        })
         // Cap per-peer ingestion so one peer cannot push unbounded validation
         // work onto the consensus tick (audit H4). Truncation is logged — never
         // silently dropped — so an operator can see a peer hitting the cap.
@@ -154,16 +160,43 @@ export async function mergeMempools(
         }
     }
 
+    // Commit the staged peerlist contributions. Nothing was ingested, so
+    // there is no admission step that can still fail these exchanges.
     if (merged.size === 0) {
+        commitPendingContributions(blockRef, pendingContributions)
         return
     }
 
     log.only(
         `[mergeMempools] Forwarding ${merged.size} unique txs to Mempool.receive`,
     )
+    // Only once the txs are admitted locally is the exchange complete. If
+    // this throws, the contributions are dropped with them, so we never
+    // commit a peerlist for an exchange whose transactions we didn't take.
     await Mempool.receive(Array.from(merged.values()))
+    commitPendingContributions(blockRef, pendingContributions)
     const end = Date.now()
     log.only(
         `[mergeMempools] Time taken: ${(end - now) / 1000}s with ${shard.length} peers`,
     )
+}
+
+/**
+ * Record peerlist contributions for exchanges that completed end to end.
+ * Deferred to a single point so a partially-failed round commits none of
+ * them: peerlist feeds the hash-sensitive block.content.peerlist, and a
+ * node that kept contributions its peers dropped would derive a different
+ * candidate block.
+ */
+function commitPendingContributions(
+    blockRef: number,
+    pending: Array<{ identity: string; peerlist: unknown }>,
+): void {
+    for (const contribution of pending) {
+        contributePeerlist(
+            blockRef,
+            contribution.identity,
+            contribution.peerlist,
+        )
+    }
 }

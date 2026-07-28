@@ -572,6 +572,8 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
+    assertNoUnreconciledGcrState()
+
     const applied = await verifyBlockAttrs(block, txs)
 
     // ! Sync the native tables
@@ -839,6 +841,8 @@ async function applySyncedBlock(
     block: Block,
     blockTxs: Transaction[],
 ): Promise<boolean> {
+    assertNoUnreconciledGcrState()
+
     const exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
         log.error("Block already exists, skipping ...")
@@ -861,16 +865,40 @@ async function applySyncedBlock(
 }
 
 /**
+ * Set once GCR edits have been persisted for a block that then failed to
+ * insert. Local state is ahead of the chain from that moment on and nothing
+ * in this process can reconcile it.
+ */
+let unreconciledGcrBlock: number | null = null
+
+/**
+ * Refuse to apply another synced block once state has drifted.
+ *
+ * The block-exists guard cannot catch this case: the failed block was never
+ * inserted, so a retry would sail straight past it and apply the very same
+ * GCR edits a second time, double-advancing nonces and balances. Fail fast
+ * instead — every subsequent apply attempt would compound the corruption.
+ */
+function assertNoUnreconciledGcrState(): void {
+    if (unreconciledGcrBlock !== null) {
+        throw new Error(
+            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+                `${unreconciledGcrBlock} was applied without its block and local state has ` +
+                `drifted from the chain. The node must be resynced from scratch.`,
+        )
+    }
+}
+
+/**
  * Insert a block whose GCR edits have ALREADY been applied.
  *
  * syncGCRTables persists GCR edits and neither it nor insertBlock accepts a
  * shared transaction manager, so an insert failure here leaves nonce/balance/
- * validator state ahead of the chain with no block authorizing it — and the
- * block-exists guard on the retry path hides that drift rather than repairing
- * it. Rethrowing alone is not enough: callers up the fastSync chain swallow
- * errors and the node would keep forging on corrupt state. So mark the node
- * unsynced before rethrowing, which stops it participating until an operator
- * resyncs it.
+ * validator state ahead of the chain with no block authorizing it. Rethrowing
+ * alone is not enough on either axis: callers up the fastSync chain swallow
+ * errors, and the block-exists guard does not stop a retry from re-applying
+ * the same edits. So mark the node unsynced AND latch the drift, which stops
+ * it participating and blocks any further apply until an operator resyncs.
  */
 async function insertBlockOrHalt(
     block: Block,
@@ -879,11 +907,13 @@ async function insertBlockOrHalt(
     try {
         await Chain.insertBlock(block, blockTxs)
     } catch (e) {
+        unreconciledGcrBlock = block.number
         getSharedState.syncStatus = false
         log.error(
             `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
                 `but the block failed to insert; local state has drifted from the chain. ` +
-                `Marking the node unsynced — it must be resynced from scratch: ` +
+                `Marking the node unsynced and refusing further block application — ` +
+                `it must be resynced from scratch: ` +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
         throw e
