@@ -117,8 +117,6 @@ export async function mergeMempools(
             continue
         }
 
-        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
-
         const rawTxs = payload?.txs
         // Defensive: a peer's response must carry a tx array. A malformed/hostile
         // peer returning a non-array would otherwise throw on iteration and
@@ -129,6 +127,12 @@ export async function mergeMempools(
             )
             continue
         }
+
+        // Only a fully usable exchange may influence block content — a 200
+        // carrying a malformed tx payload is still a failed exchange, and
+        // recording its peerlist would let peers that parsed it differently
+        // derive divergent candidate blocks.
+        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
         // Cap per-peer ingestion so one peer cannot push unbounded validation
         // work onto the consensus tick (audit H4). Truncation is logged — never
         // silently dropped — so an operator can see a peer hitting the cap.
