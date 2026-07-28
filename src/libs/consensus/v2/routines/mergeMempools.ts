@@ -1,6 +1,7 @@
 import { Peer } from "@/libs/peer"
 import log from "@/utilities/logger"
 import Mempool from "@/libs/blockchain/mempool"
+import Chain from "@/libs/blockchain/chain"
 import {
     RPCRequest,
     RPCResponse,
@@ -93,6 +94,7 @@ export async function mergeMempools(
     const pendingContributions: Array<{
         identity: string
         peerlist: unknown
+        carried: string[]
     }> = []
     for (const [i, result] of settled.entries()) {
         const peer = shard[i]
@@ -131,14 +133,6 @@ export async function mergeMempools(
             continue
         }
 
-        // Stage the contribution rather than recording it now: the exchange
-        // is not complete until the txs it carried are admitted locally
-        // below. Recording here would let a failed Mempool.receive leave us
-        // holding peerlists whose transactions we never took.
-        pendingContributions.push({
-            identity: peer.identity,
-            peerlist: payload?.peerlist,
-        })
         // Cap per-peer ingestion so one peer cannot push unbounded validation
         // work onto the consensus tick (audit H4). Truncation is logged — never
         // silently dropped — so an operator can see a peer hitting the cap.
@@ -153,15 +147,31 @@ export async function mergeMempools(
         log.only(
             `[mergeMempools] Received ${txs.length} transactions from ${peer.connection.string}`,
         )
+        // Track which hashes this peer carried so its contribution can be
+        // judged on its OWN admission outcome, not the round's aggregate.
+        const carried: string[] = []
         for (const tx of txs) {
-            if (tx && typeof tx.hash === "string" && !merged.has(tx.hash)) {
-                merged.set(tx.hash, tx)
+            if (tx && typeof tx.hash === "string") {
+                carried.push(tx.hash)
+                if (!merged.has(tx.hash)) {
+                    merged.set(tx.hash, tx)
+                }
             }
         }
+
+        // Stage the contribution rather than recording it now: the exchange
+        // is not complete until the txs it carried are admitted locally
+        // below. Recording here would let a failed Mempool.receive leave us
+        // holding peerlists whose transactions we never took.
+        pendingContributions.push({
+            identity: peer.identity,
+            peerlist: payload?.peerlist,
+            carried,
+        })
     }
 
-    // Commit the staged peerlist contributions. Nothing was ingested, so
-    // there is no admission step that can still fail these exchanges.
+    // An exchange that carried no transactions has nothing left to admit, so
+    // it is already complete and its peerlist can be committed as-is.
     if (merged.size === 0) {
         commitPendingContributions(blockRef, pendingContributions)
         return
@@ -174,11 +184,74 @@ export async function mergeMempools(
     // this throws, the contributions are dropped with them, so we never
     // commit a peerlist for an exchange whose transactions we didn't take.
     await Mempool.receive(Array.from(merged.values()))
-    commitPendingContributions(blockRef, pendingContributions)
+
+    // Mempool.receive reports success even when it silently drops invalid
+    // txs or swallows an insert failure, so its return value cannot stand in
+    // for per-peer admission. Read back what actually landed and hold each
+    // contributor to its own transactions.
+    const admitted = await getAdmittedHashes(blockRef, merged)
+    commitPendingContributions(
+        blockRef,
+        pendingContributions.filter(contribution => {
+            if (contribution.carried.length === 0) {
+                return true
+            }
+            const landed = contribution.carried.some(hash => admitted.has(hash))
+            if (!landed) {
+                log.warning(
+                    `[mergeMempools] Dropping peerlist contribution from ${contribution.identity}: ` +
+                        `none of its ${contribution.carried.length} tx(s) were admitted locally`,
+                )
+            }
+            return landed
+        }),
+    )
     const end = Date.now()
     log.only(
         `[mergeMempools] Time taken: ${(end - now) / 1000}s with ${shard.length} peers`,
     )
+}
+
+/**
+ * Hashes from this round that are now genuinely held locally — either sitting
+ * in the mempool or already recorded on chain.
+ *
+ * A tx that a peer sent us can legitimately be absent from the mempool because
+ * it was already included in a block, so mempool presence alone would
+ * under-report admission and wrongly drop honest contributors.
+ */
+async function getAdmittedHashes(
+    blockRef: number,
+    merged: Map<string, Transaction>,
+): Promise<Set<string>> {
+    const admitted = new Set<string>()
+    try {
+        const inMempool = await Mempool.getMempoolHashMap(blockRef)
+        for (const hash of merged.keys()) {
+            if (inMempool[hash]) {
+                admitted.add(hash)
+            }
+        }
+
+        const remaining = [...merged.keys()].filter(h => !admitted.has(h))
+        if (remaining.length > 0) {
+            const onChain = await Chain.getExistingTransactionHashes(remaining)
+            for (const hash of onChain) {
+                admitted.add(hash)
+            }
+        }
+    } catch (e) {
+        // If we cannot determine admission, fall back to treating the round as
+        // admitted rather than dropping every contribution — losing the whole
+        // peerlist would itself diverge us from peers that read it fine.
+        log.error(
+            `[mergeMempools] Could not verify tx admission, committing all contributions: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return new Set(merged.keys())
+    }
+    return admitted
 }
 
 /**
@@ -190,7 +263,7 @@ export async function mergeMempools(
  */
 function commitPendingContributions(
     blockRef: number,
-    pending: Array<{ identity: string; peerlist: unknown }>,
+    pending: Array<{ identity: string; peerlist: unknown; carried: string[] }>,
 ): void {
     for (const contribution of pending) {
         contributePeerlist(

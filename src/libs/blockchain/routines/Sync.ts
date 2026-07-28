@@ -41,6 +41,8 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import Datasource from "@/model/datasource"
+import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
@@ -579,7 +581,7 @@ export async function syncBlock(block: Block, peer: Peer) {
     const txs = await askTxsForBlock(block, peer)
     log.info(`[fastSync] Transactions received: ${txs.length}`, true)
 
-    assertNoUnreconciledGcrState()
+    await assertNoUnreconciledGcrState()
 
     const applied = await verifyBlockAttrs(block, txs)
 
@@ -855,7 +857,7 @@ async function applySyncedBlock(
     block: Block,
     blockTxs: Transaction[],
 ): Promise<boolean> {
-    assertNoUnreconciledGcrState()
+    await assertNoUnreconciledGcrState()
 
     const exists = await Chain.getBlockByNumber(block.number)
     if (exists) {
@@ -892,14 +894,62 @@ let unreconciledGcrBlock: number | null = null
  * inserted, so a retry would sail straight past it and apply the very same
  * GCR edits a second time, double-advancing nonces and balances. Fail fast
  * instead — every subsequent apply attempt would compound the corruption.
+ *
+ * The in-process latch alone is not enough: a restart clears it while the DB
+ * still holds the orphaned edits. So we also check durable state — GCR edits
+ * are stamped with the block that produced them, and an assignment above the
+ * chain tip can only mean its block never landed.
  */
-function assertNoUnreconciledGcrState(): void {
+async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
         throw new Error(
             `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
                 `${unreconciledGcrBlock} was applied without its block and local state has ` +
                 `drifted from the chain. The node must be resynced from scratch.`,
         )
+    }
+
+    const orphanedBlock = await findOrphanedGcrBlock()
+    if (orphanedBlock !== null) {
+        unreconciledGcrBlock = orphanedBlock
+        getSharedState.syncStatus = false
+        throw new Error(
+            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+                `${orphanedBlock} exists but the block does not (chain tip is ` +
+                `${await Chain.getLastBlockNumber()}). Local state has drifted from the ` +
+                `chain — the node must be resynced from scratch.`,
+        )
+    }
+}
+
+/**
+ * Highest block stamped on a GCR assignment that sits above the chain tip,
+ * or null when GCR state and chain history agree.
+ */
+async function findOrphanedGcrBlock(): Promise<number | null> {
+    try {
+        const tip = await Chain.getLastBlockNumber()
+        const db = await Datasource.getInstance()
+        const repo = db.getDataSource().getRepository(GCRAssignedTx)
+        const highest = await repo
+            .createQueryBuilder("a")
+            .select("MAX(a.block_number)", "max")
+            .getRawOne<{ max: number | string | null }>()
+
+        const highestAssigned = Number(highest?.max ?? 0)
+        if (!Number.isFinite(highestAssigned) || highestAssigned <= tip) {
+            return null
+        }
+        return highestAssigned
+    } catch (e) {
+        // Never let the drift probe itself block syncing — on a fresh node the
+        // table may not exist yet.
+        log.debug(
+            `[applySyncedBlock] could not check for orphaned GCR state: ${
+                e instanceof Error ? e.message : String(e)
+            }`,
+        )
+        return null
     }
 }
 
