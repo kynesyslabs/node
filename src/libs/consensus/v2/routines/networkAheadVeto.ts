@@ -34,6 +34,19 @@ export async function getAheadValidatorPeers(): Promise<Peer[]> {
 
     const validatorAddresses = await getValidatorAddresses(ourBlock)
     if (validatorAddresses.size === 0) {
+        // Same bootstrap edge case guarded in peerlistMerge/getShard: with no
+        // validator set to filter against, ANY peer claiming a higher block
+        // can veto forging or abort a round before voting. Surface it rather
+        // than falling back silently.
+        if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+            throw new Error(
+                "[networkAheadVeto] no active validators AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
+            )
+        }
+        log.warning(
+            "[networkAheadVeto] SECURITY: no active validators in DB; vetoing on unfiltered " +
+                "ahead-peers. This is only acceptable on development networks.",
+        )
         return aheadPeers
     }
 

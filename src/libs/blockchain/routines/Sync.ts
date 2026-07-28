@@ -93,6 +93,13 @@ const highestBlockPeer = () =>
 const FAST_SYNC_TIMEOUT_MS = 30_000
 
 /**
+ * Per-peer bound for fork-recovery polling. `Peer.call` has no timeout option,
+ * so without this one unresponsive candidate would hold the whole
+ * `Promise.allSettled` — and the sync round behind it — open indefinitely.
+ */
+const FORK_POLL_TIMEOUT_MS = 10_000
+
+/**
  * @deprecated
  * Get the highest block number and peer from the network. If we're synced
  * we return null for the peer.
@@ -766,7 +773,14 @@ async function resolveForkedBlock(
 
     const settled = await Promise.allSettled(
         candidates.map(async candidate => {
-            const res = await candidate.call(request, false)
+            const res = await Promise.race([
+                candidate.call(request, false),
+                sleep(FORK_POLL_TIMEOUT_MS).then(() => {
+                    throw new Error(
+                        `fork poll timed out after ${FORK_POLL_TIMEOUT_MS}ms`,
+                    )
+                }),
+            ])
             if (res.result !== 200) {
                 throw new Error(`getBlocks returned ${res.result}`)
             }
@@ -1449,6 +1463,9 @@ export async function fastSync(
     }
 
     log.debug("[fastSync] Starting sync loop")
+    // Set when we bail on a timeout while a detached fastSyncRoutine is still
+    // running, so the finally below does not clear the abort out from under it.
+    let abortedRunPending = false
     try {
         getSharedState.inSyncLoop = true
         getSharedState.fastSyncAborted = false
@@ -1486,7 +1503,17 @@ export async function fastSync(
 
                 if (result.kind === "timeout") {
                     getSharedState.fastSyncAborted = true
-                    log.warn("[fastSync] Timed out after 30s, aborting")
+                    abortedRunPending = true
+                    log.warn(
+                        `[fastSync] Timed out after ${FAST_SYNC_TIMEOUT_MS}ms, aborting`,
+                    )
+                    // Clear the abort flag only once the detached routine
+                    // actually settles. Clearing it in the finally below
+                    // would reset it before that routine reaches its next
+                    // fastSyncAborted check, making the abort a no-op.
+                    void syncLock.runExclusive(async () => {
+                        getSharedState.fastSyncAborted = false
+                    })
                     return {
                         latestChainBlock: latestBlock(),
                         ourLatestBlock: getSharedState.lastBlockNumber,
@@ -1530,7 +1557,12 @@ export async function fastSync(
             ourLatestBlock: getSharedState.lastBlockNumber,
         }
     } finally {
-        getSharedState.fastSyncAborted = false
+        // On the timeout path the detached routine still holds syncLock and
+        // has not yet observed the abort, so ownership of the flag passes to
+        // the queued reset above.
+        if (!abortedRunPending) {
+            getSharedState.fastSyncAborted = false
+        }
         getSharedState.inSyncLoop = false
         log.debug("[fastSync] Sync loop ended")
     }

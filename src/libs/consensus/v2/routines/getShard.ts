@@ -29,6 +29,67 @@ export function getCommitteeFloor(): number {
     return Math.floor((getSharedState.shardSize * 2) / 3) + 1
 }
 
+/** Identities committed in a block's peerlist, normalised to lowercase. */
+async function readCommittedPeerlist(
+    lastBlockNumber: number,
+): Promise<string[]> {
+    if (lastBlockNumber < 1) {
+        return []
+    }
+
+    const committed: string[] = []
+    const block = await Chain.getBlockByNumber(lastBlockNumber)
+    const rawPeerlist = block?.content?.peerlist as unknown as unknown[]
+    if (Array.isArray(rawPeerlist)) {
+        for (const entry of rawPeerlist) {
+            if (typeof entry === "string" && entry.length > 0) {
+                committed.push(entry.toLowerCase())
+            }
+        }
+    }
+    return committed
+}
+
+/** Addresses of the active (staked) validator set at a block. */
+async function readActiveValidatorAddresses(
+    lastBlockNumber: number,
+): Promise<Set<string>> {
+    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
+        lastBlockNumber,
+    )) as Validators[]
+    return new Set<string>(
+        activeValidators
+            .map(v => v.address)
+            .filter((a): a is string => a !== null),
+    )
+}
+
+/**
+ * Last-resort pool for bare development networks: peers synced to our tip,
+ * plus ourselves. View-dependent, so it is never memoised.
+ */
+function localViewFallback(): string[] {
+    const localView = new Set<string>([getSharedState.publicKeyHex])
+    for (const peer of PeerManager.getInstance().getPeers()) {
+        if (
+            peer.sync.block === getSharedState.lastBlockNumber &&
+            peer.sync.block_hash === getSharedState.lastBlockHash
+        ) {
+            localView.add(peer.identity)
+        }
+    }
+    return [...localView].sort(compareIdentities)
+}
+
+/** Throw when strict mode forbids operating without an active validator set. */
+function assertValidatorsNotRequired(reason: string): void {
+    if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+        throw new Error(
+            `[getShard] ${reason} AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate`,
+        )
+    }
+}
+
 /**
  * The eligible validator pool at a given block:
  * - the peerlist committed in that block (validators seen online by the
@@ -50,69 +111,36 @@ export async function getEligiblePool(
         return poolCache.get(lastBlockNumber)
     }
 
-    const committed: string[] = []
-    if (lastBlockNumber >= 1) {
-        const block = await Chain.getBlockByNumber(lastBlockNumber)
-        const rawPeerlist = block?.content?.peerlist as unknown as unknown[]
-        if (Array.isArray(rawPeerlist)) {
-            for (const entry of rawPeerlist) {
-                if (typeof entry === "string" && entry.length > 0) {
-                    committed.push(entry.toLowerCase())
-                }
-            }
-        }
-    }
-
-    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
-        lastBlockNumber,
-    )) as Validators[]
-    const validatorAddresses = new Set<string>(
-        activeValidators
-            .map(v => v.address)
-            .filter((a): a is string => a !== null),
-    )
+    const committed = await readCommittedPeerlist(lastBlockNumber)
+    const validatorAddresses =
+        await readActiveValidatorAddresses(lastBlockNumber)
 
     let pool: string[]
-    if (committed.length > 0) {
-        if (validatorAddresses.size > 0) {
-            pool = committed.filter(id => validatorAddresses.has(id))
-        } else {
-            if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
-                throw new Error(
-                    "[getShard] committed peerlist but no active validators AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
-                )
-            }
-            log.warning(
-                "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
-                    "This is only acceptable on development networks.",
-            )
-            pool = committed
-        }
+    if (committed.length > 0 && validatorAddresses.size > 0) {
+        pool = committed.filter(id => validatorAddresses.has(id))
+    } else if (committed.length > 0) {
+        assertValidatorsNotRequired(
+            "committed peerlist but no active validators",
+        )
+        log.warning(
+            "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
+                "This is only acceptable on development networks.",
+        )
+        pool = committed
     } else if (validatorAddresses.size > 0) {
         log.info(
             `[getShard] Block ${lastBlockNumber} has no committed peerlist; bootstrapping pool from ${validatorAddresses.size} active validators`,
         )
         pool = [...validatorAddresses]
     } else {
-        if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
-            throw new Error(
-                "[getShard] no committed peerlist AND no active validators AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
-            )
-        }
+        assertValidatorsNotRequired(
+            "no committed peerlist AND no active validators",
+        )
         log.warning(
             "[getShard] SECURITY: no committed peerlist and no active validators; " +
                 "falling back to local peer view. This is only acceptable on development networks.",
         )
-        const localView = new Set<string>([getSharedState.publicKeyHex])
-        for (const peer of PeerManager.getInstance().getPeers()) {
-            if (
-                peer.sync.block === getSharedState.lastBlockNumber &&
-                peer.sync.block_hash === getSharedState.lastBlockHash
-            ) {
-                localView.add(peer.identity)
-            }
-        }
-        return [...localView].sort(compareIdentities)
+        return localViewFallback()
     }
 
     const result = [...new Set(pool)].sort(compareIdentities)
@@ -153,9 +181,7 @@ export default async function getShard(
     const candidates: Peer[] = []
     for (const identity of pool) {
         if (identity === selfId) {
-            candidates.push(
-                peerman.getPeer(identity) ?? new Peer("", identity),
-            )
+            candidates.push(peerman.getPeer(identity) ?? new Peer("", identity))
             continue
         }
         const online = onlineByIdentity.get(identity)

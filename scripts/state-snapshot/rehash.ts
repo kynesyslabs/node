@@ -25,7 +25,7 @@
  *   --outdir <dir>   snapshot directory. Default data/snapshot.
  */
 
-import { readFile, stat, writeFile } from "node:fs/promises"
+import { readFile, rename, stat, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { parseArgs, resolveOutDir } from "./export"
@@ -55,12 +55,8 @@ const FILE_SPECS: FileSpec[] = [
 
 const ENTRY_KEYS = ["sha256", "rows", "balance_sum", "size_bytes_sum"] as const
 
-async function main(): Promise<void> {
-    const { flags } = parseArgs(process.argv.slice(2))
-    const checkOnly = flags.check === "true"
-    const snapshotDir = resolveOutDir(flags)
-    const manifestPath = resolve(snapshotDir, "manifest.json")
-
+/** Read and validate the snapshot manifest, exiting on any problem. */
+async function loadManifest(manifestPath: string): Promise<SnapshotManifest> {
     let manifestRaw: string
     try {
         manifestRaw = await readFile(manifestPath, "utf8")
@@ -82,59 +78,102 @@ async function main(): Promise<void> {
             }`,
         )
     }
-    const files = manifest?.files as
-        | Record<string, SnapshotFileEntry | undefined>
-        | undefined
-    if (typeof files !== "object" || files === null) {
-        exitWith(`${manifestPath}: not a snapshot manifest (files section missing)`)
+
+    if (typeof manifest?.files !== "object" || manifest.files === null) {
+        exitWith(
+            `${manifestPath}: not a snapshot manifest (files section missing)`,
+        )
     }
 
-    const isV2 = typeof manifest.schemaVersion === "number" && manifest.schemaVersion >= 2
+    return manifest
+}
+
+/** Recompute one snapshot file's entry from disk. */
+async function computeEntry(
+    snapshotDir: string,
+    spec: FileSpec,
+): Promise<SnapshotFileEntry> {
+    const path = resolve(snapshotDir, spec.name)
+    try {
+        await stat(path)
+    } catch {
+        exitWith(`snapshot file missing: ${path}`)
+    }
+
+    const stats = await readFileSinglePass(path, spec.sumField)
+    if (stats.parseError) {
+        exitWith(`${stats.parseError.message} — manifest not written`)
+    }
+
+    const entry: SnapshotFileEntry = {
+        sha256: stats.sha256,
+        rows: stats.rows,
+    }
+    if (spec.sumField === "balance") {
+        entry.balance_sum = (stats.balanceSum ?? 0n).toString()
+    }
+    if (spec.sumField === "sizeBytes") {
+        entry.size_bytes_sum = stats.sizeBytesSum ?? 0
+    }
+    return entry
+}
+
+/**
+ * Merge a freshly computed entry into the manifest, reporting what moved.
+ *
+ * @returns True if the manifest was modified for this file.
+ */
+function applyEntry(
+    files: Record<string, SnapshotFileEntry | undefined>,
+    name: string,
+    entry: SnapshotFileEntry,
+): boolean {
+    const existing = files[name]
+    if (existing === undefined) {
+        files[name] = entry
+        console.log(`${name}: added (rows=${entry.rows})`)
+        return true
+    }
+
+    const diffs: string[] = []
+    for (const key of ENTRY_KEYS) {
+        if (entry[key] !== undefined && entry[key] !== existing[key]) {
+            diffs.push(`${key}: ${existing[key]} -> ${entry[key]}`)
+        }
+    }
+    if (diffs.length === 0) {
+        console.log(`${name}: unchanged`)
+        return false
+    }
+
+    files[name] = { ...existing, ...entry }
+    console.log(`${name}: changed (${diffs.join(", ")})`)
+    return true
+}
+
+async function main(): Promise<void> {
+    const { flags } = parseArgs(process.argv.slice(2))
+    const checkOnly = flags.check === "true"
+    const snapshotDir = resolveOutDir(flags)
+    const manifestPath = resolve(snapshotDir, "manifest.json")
+
+    const manifest = await loadManifest(manifestPath)
+    const files = manifest.files as Record<
+        string,
+        SnapshotFileEntry | undefined
+    >
+
+    const isV2 =
+        typeof manifest.schemaVersion === "number" &&
+        manifest.schemaVersion >= 2
     const changed: string[] = []
 
     for (const spec of FILE_SPECS) {
         if (spec.name === "validators.jsonl" && !isV2) continue
 
-        const path = resolve(snapshotDir, spec.name)
-        try {
-            await stat(path)
-        } catch {
-            exitWith(`snapshot file missing: ${path}`)
-        }
-
-        const stats = await readFileSinglePass(path, spec.sumField)
-        if (stats.parseError) {
-            exitWith(`${stats.parseError.message} — manifest not written`)
-        }
-
-        const entry: SnapshotFileEntry = { sha256: stats.sha256, rows: stats.rows }
-        if (spec.sumField === "balance") {
-            entry.balance_sum = (stats.balanceSum ?? 0n).toString()
-        }
-        if (spec.sumField === "sizeBytes") {
-            entry.size_bytes_sum = stats.sizeBytesSum ?? 0
-        }
-
-        const existing = files[spec.name]
-        if (existing === undefined) {
-            files[spec.name] = entry
+        const entry = await computeEntry(snapshotDir, spec)
+        if (applyEntry(files, spec.name, entry)) {
             changed.push(spec.name)
-            console.log(`${spec.name}: added (rows=${entry.rows})`)
-            continue
-        }
-
-        const diffs: string[] = []
-        for (const key of ENTRY_KEYS) {
-            if (entry[key] !== undefined && entry[key] !== existing[key]) {
-                diffs.push(`${key}: ${existing[key]} -> ${entry[key]}`)
-            }
-        }
-        if (diffs.length === 0) {
-            console.log(`${spec.name}: unchanged`)
-        } else {
-            files[spec.name] = { ...existing, ...entry }
-            changed.push(spec.name)
-            console.log(`${spec.name}: changed (${diffs.join(", ")})`)
         }
     }
 
@@ -149,7 +188,15 @@ async function main(): Promise<void> {
         )
     }
 
-    await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n")
+    // Write via a sibling temp file + rename so an interrupted or failed
+    // write cannot truncate the live manifest and leave the snapshot
+    // unloadable. Same directory keeps the rename atomic (same filesystem).
+    const temporaryManifestPath = `${manifestPath}.tmp`
+    await writeFile(
+        temporaryManifestPath,
+        JSON.stringify(manifest, null, 2) + "\n",
+    )
+    await rename(temporaryManifestPath, manifestPath)
 
     const verified = await verifySnapshot(snapshotDir)
     console.log(

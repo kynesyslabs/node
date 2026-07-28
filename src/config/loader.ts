@@ -47,7 +47,10 @@ function envBool(key: string, fallback: boolean): boolean {
 function envList(key: string, fallback: string[] = []): string[] {
     const raw = process.env[key]
     if (!raw) return fallback
-    return raw.split(",").map(s => s.trim()).filter(s => s.length > 0)
+    return raw
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => s.length > 0)
 }
 
 // --- Deep freeze utility ---
@@ -71,8 +74,14 @@ export function loadConfig(): Readonly<AppConfig> {
         serverPort,
         rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
         rpcPgPort: envInt(EnvKey.RPC_PG_PORT, d.server.rpcPgPort),
-        signalingServerPort: envInt(EnvKey.SIGNALING_SERVER_PORT, d.server.signalingServerPort),
-        rpcSignalingPort: envInt(EnvKey.RPC_SIGNALING_PORT, d.server.rpcSignalingPort),
+        signalingServerPort: envInt(
+            EnvKey.SIGNALING_SERVER_PORT,
+            d.server.signalingServerPort,
+        ),
+        rpcSignalingPort: envInt(
+            EnvKey.RPC_SIGNALING_PORT,
+            d.server.rpcSignalingPort,
+        ),
         mcpServerPort: envInt(EnvKey.MCP_SERVER_PORT, d.server.mcpServerPort),
         rpcMcpPort: envInt(EnvKey.RPC_MCP_PORT, d.server.rpcMcpPort),
         omniPort: envInt(EnvKey.OMNI_PORT, d.server.omniPort),
@@ -91,18 +100,32 @@ export function loadConfig(): Readonly<AppConfig> {
         core: {
             prod: envBool(EnvKey.PROD, d.core.prod),
             shardSize: envInt(EnvKey.SHARD_SIZE, d.core.shardSize),
-            mainLoopSleepTime: envInt(EnvKey.MAIN_LOOP_SLEEP_TIME, d.core.mainLoopSleepTime),
+            mainLoopSleepTime: envInt(
+                EnvKey.MAIN_LOOP_SLEEP_TIME,
+                d.core.mainLoopSleepTime,
+            ),
             rpcFeePercent: envInt(EnvKey.RPC_FEE_PERCENT, d.core.rpcFeePercent),
             rpcFee: envInt(EnvKey.RPC_FEE, d.core.rpcFee),
             networkFee: envInt(EnvKey.NETWORK_FEE, d.core.networkFee),
             burnFee: envInt(EnvKey.BURN_FEE, d.core.burnFee),
-            minValidatorStake: envStr(EnvKey.MIN_VALIDATOR_STAKE, d.core.minValidatorStake),
+            minValidatorStake: envStr(
+                EnvKey.MIN_VALIDATOR_STAKE,
+                d.core.minValidatorStake,
+            ),
             identityFile: envStr(EnvKey.IDENTITY_FILE, d.core.identityFile),
             peerListFile: envStr(EnvKey.PEER_LIST_FILE, d.core.peerListFile),
-            exposedUrl: envStr(EnvKey.EXPOSED_URL, d.core.exposedUrl) || `http://localhost:${serverPort}`,
+            exposedUrl:
+                envStr(EnvKey.EXPOSED_URL, d.core.exposedUrl) ||
+                `http://localhost:${serverPort}`,
             sudoPubkey: envStr(EnvKey.SUDO_PUBKEY, "") || null,
-            maxMessageSize: envInt(EnvKey.MAX_MESSAGE_SIZE, d.core.maxMessageSize),
-            consensusCheckInterval: envInt(EnvKey.CONSENSUS_CHECK_INTERVAL, d.core.consensusCheckInterval),
+            maxMessageSize: envInt(
+                EnvKey.MAX_MESSAGE_SIZE,
+                d.core.maxMessageSize,
+            ),
+            consensusCheckInterval: envInt(
+                EnvKey.CONSENSUS_CHECK_INTERVAL,
+                d.core.consensusCheckInterval,
+            ),
             consensusTime: envInt(EnvKey.CONSENSUS_TIME, d.core.consensusTime),
             blockTimestampMinDelta: envInt(
                 EnvKey.BLOCK_TIMESTAMP_MIN_DELTA,
@@ -113,37 +136,72 @@ export function loadConfig(): Readonly<AppConfig> {
                 d.core.blockTimestampTolerance,
             ),
             logLevel: envStr(EnvKey.LOG_LEVEL, d.core.logLevel),
-            whitelistedIPs: envList(EnvKey.WHITELISTED_IPS, d.core.whitelistedIPs),
-            whitelistedKeys: envList(EnvKey.WHITELISTED_KEYS, d.core.whitelistedKeys),
-            trustedProxies: envList(EnvKey.TRUSTED_PROXIES, d.core.trustedProxies),
+            whitelistedIPs: envList(
+                EnvKey.WHITELISTED_IPS,
+                d.core.whitelistedIPs,
+            ),
+            whitelistedKeys: envList(
+                EnvKey.WHITELISTED_KEYS,
+                d.core.whitelistedKeys,
+            ),
+            trustedProxies: envList(
+                EnvKey.TRUSTED_PROXIES,
+                d.core.trustedProxies,
+            ),
             xffMode: envStr(EnvKey.XFF_MODE, d.core.xffMode),
             mcpEnabled: envBool(EnvKey.MCP_ENABLED, d.core.mcpEnabled),
             restore: envBool(EnvKey.RESTORE, d.core.restore),
-            blockWatchdogEnabled: envBool(EnvKey.BLOCK_WATCHDOG_ENABLED, d.core.blockWatchdogEnabled),
-            blockWatchdogTimeoutSeconds: envInt(EnvKey.BLOCK_WATCHDOG_TIMEOUT_SECONDS, d.core.blockWatchdogTimeoutSeconds),
+            blockWatchdogEnabled: envBool(
+                EnvKey.BLOCK_WATCHDOG_ENABLED,
+                d.core.blockWatchdogEnabled,
+            ),
+            blockWatchdogTimeoutSeconds: envInt(
+                EnvKey.BLOCK_WATCHDOG_TIMEOUT_SECONDS,
+                d.core.blockWatchdogTimeoutSeconds,
+            ),
         },
 
         tlsnotary: {
             enabled: envBool(EnvKey.TLSNOTARY_ENABLED, d.tlsnotary.enabled),
             host: envStr(EnvKey.TLSNOTARY_HOST, d.tlsnotary.host),
-            exposedUrl: envStr(EnvKey.TLSNOTARY_EXPOSED_URL, d.tlsnotary.exposedUrl),
+            exposedUrl: envStr(
+                EnvKey.TLSNOTARY_EXPOSED_URL,
+                d.tlsnotary.exposedUrl,
+            ),
             proxyUrl: envStr(EnvKey.TLSNOTARY_PROXY_URL, d.tlsnotary.proxyUrl),
             port: envInt(EnvKey.TLSNOTARY_PORT, d.tlsnotary.port),
-            signingKey: envStr(EnvKey.TLSNOTARY_SIGNING_KEY, d.tlsnotary.signingKey),
+            signingKey: envStr(
+                EnvKey.TLSNOTARY_SIGNING_KEY,
+                d.tlsnotary.signingKey,
+            ),
             fatal: envBool(EnvKey.TLSNOTARY_FATAL, d.tlsnotary.fatal),
             debug: envBool(EnvKey.TLSNOTARY_DEBUG, d.tlsnotary.debug),
             proxy: envBool(EnvKey.TLSNOTARY_PROXY, d.tlsnotary.proxy),
             disabled: envBool(EnvKey.TLSNOTARY_DISABLED, d.tlsnotary.disabled),
             mode: envStr(EnvKey.TLSNOTARY_MODE, d.tlsnotary.mode),
-            maxSentData: envInt(EnvKey.TLSNOTARY_MAX_SENT_DATA, d.tlsnotary.maxSentData),
-            maxRecvData: envInt(EnvKey.TLSNOTARY_MAX_RECV_DATA, d.tlsnotary.maxRecvData),
-            autoStart: envBool(EnvKey.TLSNOTARY_AUTO_START, d.tlsnotary.autoStart),
-            proxyPort: envInt(EnvKey.TLSNOTARY_PROXY_PORT, d.tlsnotary.proxyPort),
+            maxSentData: envInt(
+                EnvKey.TLSNOTARY_MAX_SENT_DATA,
+                d.tlsnotary.maxSentData,
+            ),
+            maxRecvData: envInt(
+                EnvKey.TLSNOTARY_MAX_RECV_DATA,
+                d.tlsnotary.maxRecvData,
+            ),
+            autoStart: envBool(
+                EnvKey.TLSNOTARY_AUTO_START,
+                d.tlsnotary.autoStart,
+            ),
+            proxyPort: envInt(
+                EnvKey.TLSNOTARY_PROXY_PORT,
+                d.tlsnotary.proxyPort,
+            ),
         },
 
         omni: {
             enabled: envBool(EnvKey.OMNI_ENABLED, d.omni.enabled),
-            port: envInt(EnvKey.OMNI_PORT, d.omni.port) || serverConfig.rpcPort + 1,
+            port:
+                envInt(EnvKey.OMNI_PORT, d.omni.port) ||
+                serverConfig.rpcPort + 1,
             fatal: envBool(EnvKey.OMNI_FATAL, d.omni.fatal),
             mode: envStr(EnvKey.OMNI_MODE, d.omni.mode),
             tls: {
@@ -152,24 +210,57 @@ export function loadConfig(): Readonly<AppConfig> {
                 certPath: envStr(EnvKey.OMNI_CERT_PATH, d.omni.tls.certPath),
                 keyPath: envStr(EnvKey.OMNI_KEY_PATH, d.omni.tls.keyPath),
                 caPath: envStr(EnvKey.OMNI_CA_PATH, d.omni.tls.caPath),
-                minVersion: envStr(EnvKey.OMNI_TLS_MIN_VERSION, d.omni.tls.minVersion),
+                minVersion: envStr(
+                    EnvKey.OMNI_TLS_MIN_VERSION,
+                    d.omni.tls.minVersion,
+                ),
             },
             rateLimit: {
-                enabled: envBool(EnvKey.OMNI_RATE_LIMIT_ENABLED, d.omni.rateLimit.enabled),
-                maxConnectionsPerIp: envInt(EnvKey.OMNI_MAX_CONNECTIONS_PER_IP, d.omni.rateLimit.maxConnectionsPerIp),
-                maxRequestsPerSecondPerIp: envInt(EnvKey.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP, d.omni.rateLimit.maxRequestsPerSecondPerIp),
-                maxRequestsPerSecondPerIdentity: envInt(EnvKey.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY, d.omni.rateLimit.maxRequestsPerSecondPerIdentity),
+                enabled: envBool(
+                    EnvKey.OMNI_RATE_LIMIT_ENABLED,
+                    d.omni.rateLimit.enabled,
+                ),
+                maxConnectionsPerIp: envInt(
+                    EnvKey.OMNI_MAX_CONNECTIONS_PER_IP,
+                    d.omni.rateLimit.maxConnectionsPerIp,
+                ),
+                maxRequestsPerSecondPerIp: envInt(
+                    EnvKey.OMNI_MAX_REQUESTS_PER_SECOND_PER_IP,
+                    d.omni.rateLimit.maxRequestsPerSecondPerIp,
+                ),
+                maxRequestsPerSecondPerIdentity: envInt(
+                    EnvKey.OMNI_MAX_REQUESTS_PER_SECOND_PER_IDENTITY,
+                    d.omni.rateLimit.maxRequestsPerSecondPerIdentity,
+                ),
             },
         },
 
         l2ps: {
             zkEnabled: envBool(EnvKey.L2PS_ZK_ENABLED, d.l2ps.zkEnabled),
-            zkUseMainThread: envBool(EnvKey.L2PS_ZK_USE_MAIN_THREAD, d.l2ps.zkUseMainThread),
-            hashIntervalMs: envInt(EnvKey.L2PS_HASH_INTERVAL_MS, d.l2ps.hashIntervalMs),
-            aggregationIntervalMs: envInt(EnvKey.L2PS_AGGREGATION_INTERVAL_MS, d.l2ps.aggregationIntervalMs),
-            minBatchSize: envInt(EnvKey.L2PS_MIN_BATCH_SIZE, d.l2ps.minBatchSize),
-            maxBatchSize: envInt(EnvKey.L2PS_MAX_BATCH_SIZE, d.l2ps.maxBatchSize),
-            cleanupAgeMs: envInt(EnvKey.L2PS_CLEANUP_AGE_MS, d.l2ps.cleanupAgeMs),
+            zkUseMainThread: envBool(
+                EnvKey.L2PS_ZK_USE_MAIN_THREAD,
+                d.l2ps.zkUseMainThread,
+            ),
+            hashIntervalMs: envInt(
+                EnvKey.L2PS_HASH_INTERVAL_MS,
+                d.l2ps.hashIntervalMs,
+            ),
+            aggregationIntervalMs: envInt(
+                EnvKey.L2PS_AGGREGATION_INTERVAL_MS,
+                d.l2ps.aggregationIntervalMs,
+            ),
+            minBatchSize: envInt(
+                EnvKey.L2PS_MIN_BATCH_SIZE,
+                d.l2ps.minBatchSize,
+            ),
+            maxBatchSize: envInt(
+                EnvKey.L2PS_MAX_BATCH_SIZE,
+                d.l2ps.maxBatchSize,
+            ),
+            cleanupAgeMs: envInt(
+                EnvKey.L2PS_CLEANUP_AGE_MS,
+                d.l2ps.cleanupAgeMs,
+            ),
         },
 
         metrics: {
@@ -179,52 +270,144 @@ export function loadConfig(): Readonly<AppConfig> {
         },
 
         diagnostics: {
-            minCpuSpeed: envFloat(EnvKey.MIN_CPU_SPEED, d.diagnostics.minCpuSpeed),
+            minCpuSpeed: envFloat(
+                EnvKey.MIN_CPU_SPEED,
+                d.diagnostics.minCpuSpeed,
+            ),
             minRam: envFloat(EnvKey.MIN_RAM, d.diagnostics.minRam),
-            minDiskSpace: envFloat(EnvKey.MIN_DISK_SPACE, d.diagnostics.minDiskSpace),
-            minNetworkDownloadSpeed: envFloat(EnvKey.MIN_NETWORK_DOWNLOAD_SPEED, d.diagnostics.minNetworkDownloadSpeed),
-            minNetworkUploadSpeed: envFloat(EnvKey.MIN_NETWORK_UPLOAD_SPEED, d.diagnostics.minNetworkUploadSpeed),
-            networkTestFileSize: envFloat(EnvKey.NETWORK_TEST_FILE_SIZE, d.diagnostics.networkTestFileSize),
-            suggestedCpuSpeed: envFloat(EnvKey.SUGGESTED_CPU_SPEED, d.diagnostics.suggestedCpuSpeed)
-                || envFloat(EnvKey.MIN_CPU_SPEED, d.diagnostics.suggestedCpuSpeed),
-            suggestedRam: envFloat(EnvKey.SUGGESTED_RAM, d.diagnostics.suggestedRam)
-                || envFloat(EnvKey.MIN_RAM, d.diagnostics.suggestedRam),
-            suggestedDiskSpace: envFloat(EnvKey.SUGGESTED_DISK_SPACE, d.diagnostics.suggestedDiskSpace)
-                || envFloat(EnvKey.MIN_DISK_SPACE, d.diagnostics.suggestedDiskSpace),
-            suggestedNetworkDownloadSpeed: envFloat(EnvKey.SUGGESTED_NETWORK_DOWNLOAD_SPEED, d.diagnostics.suggestedNetworkDownloadSpeed)
-                || envFloat(EnvKey.MIN_NETWORK_DOWNLOAD_SPEED, d.diagnostics.suggestedNetworkDownloadSpeed),
-            suggestedNetworkUploadSpeed: envFloat(EnvKey.SUGGESTED_NETWORK_UPLOAD_SPEED, d.diagnostics.suggestedNetworkUploadSpeed)
-                || envFloat(EnvKey.MIN_NETWORK_UPLOAD_SPEED, d.diagnostics.suggestedNetworkUploadSpeed),
+            minDiskSpace: envFloat(
+                EnvKey.MIN_DISK_SPACE,
+                d.diagnostics.minDiskSpace,
+            ),
+            minNetworkDownloadSpeed: envFloat(
+                EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
+                d.diagnostics.minNetworkDownloadSpeed,
+            ),
+            minNetworkUploadSpeed: envFloat(
+                EnvKey.MIN_NETWORK_UPLOAD_SPEED,
+                d.diagnostics.minNetworkUploadSpeed,
+            ),
+            networkTestFileSize: envFloat(
+                EnvKey.NETWORK_TEST_FILE_SIZE,
+                d.diagnostics.networkTestFileSize,
+            ),
+            suggestedCpuSpeed:
+                envFloat(
+                    EnvKey.SUGGESTED_CPU_SPEED,
+                    d.diagnostics.suggestedCpuSpeed,
+                ) ||
+                envFloat(EnvKey.MIN_CPU_SPEED, d.diagnostics.suggestedCpuSpeed),
+            suggestedRam:
+                envFloat(EnvKey.SUGGESTED_RAM, d.diagnostics.suggestedRam) ||
+                envFloat(EnvKey.MIN_RAM, d.diagnostics.suggestedRam),
+            suggestedDiskSpace:
+                envFloat(
+                    EnvKey.SUGGESTED_DISK_SPACE,
+                    d.diagnostics.suggestedDiskSpace,
+                ) ||
+                envFloat(
+                    EnvKey.MIN_DISK_SPACE,
+                    d.diagnostics.suggestedDiskSpace,
+                ),
+            suggestedNetworkDownloadSpeed:
+                envFloat(
+                    EnvKey.SUGGESTED_NETWORK_DOWNLOAD_SPEED,
+                    d.diagnostics.suggestedNetworkDownloadSpeed,
+                ) ||
+                envFloat(
+                    EnvKey.MIN_NETWORK_DOWNLOAD_SPEED,
+                    d.diagnostics.suggestedNetworkDownloadSpeed,
+                ),
+            suggestedNetworkUploadSpeed:
+                envFloat(
+                    EnvKey.SUGGESTED_NETWORK_UPLOAD_SPEED,
+                    d.diagnostics.suggestedNetworkUploadSpeed,
+                ) ||
+                envFloat(
+                    EnvKey.MIN_NETWORK_UPLOAD_SPEED,
+                    d.diagnostics.suggestedNetworkUploadSpeed,
+                ),
         },
 
         debug: {
-            assertionsEnabled: envBool(EnvKey.DEBUG_ASSERTIONS_ENABLED, d.debug.assertionsEnabled),
+            assertionsEnabled: envBool(
+                EnvKey.DEBUG_ASSERTIONS_ENABLED,
+                d.debug.assertionsEnabled,
+            ),
         },
 
         identity: {
             githubToken: envStr(EnvKey.GITHUB_TOKEN, d.identity.githubToken),
-            discordApiUrl: envStr(EnvKey.DISCORD_API_URL, d.identity.discordApiUrl),
-            discordBotToken: envStr(EnvKey.DISCORD_BOT_TOKEN, d.identity.discordBotToken),
-            humanPassportApiUrl: envStr(EnvKey.HUMAN_PASSPORT_API_URL, d.identity.humanPassportApiUrl),
-            humanPassportScorerId: envStr(EnvKey.HUMAN_PASSPORT_SCORER_ID, d.identity.humanPassportScorerId),
-            humanPassportApiKey: envStr(EnvKey.HUMAN_PASSPORT_API_KEY, d.identity.humanPassportApiKey),
-            nomisApiBaseUrl: envStr(EnvKey.NOMIS_API_BASE_URL, d.identity.nomisApiBaseUrl),
-            nomisDefaultScoreType: envInt(EnvKey.NOMIS_DEFAULT_SCORE_TYPE, d.identity.nomisDefaultScoreType),
-            nomisDefaultDeadlineOffsetSeconds: envInt(EnvKey.NOMIS_DEFAULT_DEADLINE_OFFSET_SECONDS, d.identity.nomisDefaultDeadlineOffsetSeconds),
+            discordApiUrl: envStr(
+                EnvKey.DISCORD_API_URL,
+                d.identity.discordApiUrl,
+            ),
+            discordBotToken: envStr(
+                EnvKey.DISCORD_BOT_TOKEN,
+                d.identity.discordBotToken,
+            ),
+            humanPassportApiUrl: envStr(
+                EnvKey.HUMAN_PASSPORT_API_URL,
+                d.identity.humanPassportApiUrl,
+            ),
+            humanPassportScorerId: envStr(
+                EnvKey.HUMAN_PASSPORT_SCORER_ID,
+                d.identity.humanPassportScorerId,
+            ),
+            humanPassportApiKey: envStr(
+                EnvKey.HUMAN_PASSPORT_API_KEY,
+                d.identity.humanPassportApiKey,
+            ),
+            nomisApiBaseUrl: envStr(
+                EnvKey.NOMIS_API_BASE_URL,
+                d.identity.nomisApiBaseUrl,
+            ),
+            nomisDefaultScoreType: envInt(
+                EnvKey.NOMIS_DEFAULT_SCORE_TYPE,
+                d.identity.nomisDefaultScoreType,
+            ),
+            nomisDefaultDeadlineOffsetSeconds: envInt(
+                EnvKey.NOMIS_DEFAULT_DEADLINE_OFFSET_SECONDS,
+                d.identity.nomisDefaultDeadlineOffsetSeconds,
+            ),
             nomisApiKey: envStr(EnvKey.NOMIS_API_KEY, d.identity.nomisApiKey),
-            nomisClientId: envStr(EnvKey.NOMIS_CLIENT_ID, d.identity.nomisClientId),
-            nomisApiTimeoutMs: envInt(EnvKey.NOMIS_API_TIMEOUT_MS, d.identity.nomisApiTimeoutMs),
-            etherscanApiKey: envStr(EnvKey.ETHERSCAN_API_KEY, d.identity.etherscanApiKey),
-            heliusApiKey: envStr(EnvKey.HELIUS_API_KEY, d.identity.heliusApiKey),
+            nomisClientId: envStr(
+                EnvKey.NOMIS_CLIENT_ID,
+                d.identity.nomisClientId,
+            ),
+            nomisApiTimeoutMs: envInt(
+                EnvKey.NOMIS_API_TIMEOUT_MS,
+                d.identity.nomisApiTimeoutMs,
+            ),
+            etherscanApiKey: envStr(
+                EnvKey.ETHERSCAN_API_KEY,
+                d.identity.etherscanApiKey,
+            ),
+            heliusApiKey: envStr(
+                EnvKey.HELIUS_API_KEY,
+                d.identity.heliusApiKey,
+            ),
             rapidApiKey: envStr(EnvKey.RAPID_API_KEY, d.identity.rapidApiKey),
-            rapidApiHost: envStr(EnvKey.RAPID_API_HOST, d.identity.rapidApiHost),
+            rapidApiHost: envStr(
+                EnvKey.RAPID_API_HOST,
+                d.identity.rapidApiHost,
+            ),
             solanaRpc: envStr(EnvKey.SOLANA_RPC, d.identity.solanaRpc),
-            zkAttestationPoints: envInt(EnvKey.ZK_ATTESTATION_POINTS, d.identity.zkAttestationPoints),
+            zkAttestationPoints: envInt(
+                EnvKey.ZK_ATTESTATION_POINTS,
+                d.identity.zkAttestationPoints,
+            ),
         },
 
         bridges: {
-            rubicApiReferrerAddress: envStr(EnvKey.RUBIC_API_REFERRER_ADDRESS, d.bridges.rubicApiReferrerAddress),
-            rubicApiIntegratorAddress: envStr(EnvKey.RUBIC_API_INTEGRATOR_ADDRESS, d.bridges.rubicApiIntegratorAddress),
+            rubicApiReferrerAddress: envStr(
+                EnvKey.RUBIC_API_REFERRER_ADDRESS,
+                d.bridges.rubicApiReferrerAddress,
+            ),
+            rubicApiIntegratorAddress: envStr(
+                EnvKey.RUBIC_API_INTEGRATOR_ADDRESS,
+                d.bridges.rubicApiIntegratorAddress,
+            ),
         },
 
         ipfs: {
@@ -233,5 +416,57 @@ export function loadConfig(): Readonly<AppConfig> {
         },
     }
 
+    assertConsensusTimingSane(config)
+
     return deepFreeze(config)
+}
+
+/**
+ * Reject nonsensical block-timing configuration before the node starts.
+ *
+ * These values feed `verifyBlock` acceptance directly, so a node running with
+ * out-of-range settings silently disagrees with its peers on otherwise valid
+ * blocks. Failing at startup turns that into an obvious misconfiguration
+ * instead of an intermittent fork.
+ *
+ * Note this only bounds the values — it does not make them chain-defined.
+ * Timestamp policy still comes from node-local env rather than genesis, so
+ * operators must keep BLOCK_TIMESTAMP_* identical across validators.
+ */
+function assertConsensusTimingSane(config: AppConfig): void {
+    const { blockTimestampMinDelta, blockTimestampTolerance } = config.core
+    const { blockWatchdogEnabled, blockWatchdogTimeoutSeconds } = config.core
+    const problems: string[] = []
+
+    if (
+        !Number.isInteger(blockTimestampMinDelta) ||
+        blockTimestampMinDelta < 1
+    ) {
+        problems.push(
+            `BLOCK_TIMESTAMP_MIN_DELTA must be an integer >= 1 (got ${blockTimestampMinDelta})`,
+        )
+    }
+    if (
+        !Number.isInteger(blockTimestampTolerance) ||
+        blockTimestampTolerance < 0
+    ) {
+        problems.push(
+            `BLOCK_TIMESTAMP_TOLERANCE must be an integer >= 0 (got ${blockTimestampTolerance})`,
+        )
+    }
+    if (
+        blockWatchdogEnabled &&
+        (!Number.isInteger(blockWatchdogTimeoutSeconds) ||
+            blockWatchdogTimeoutSeconds <= 0)
+    ) {
+        problems.push(
+            `BLOCK_WATCHDOG_TIMEOUT_SECONDS must be an integer > 0 when the watchdog is enabled (got ${blockWatchdogTimeoutSeconds})`,
+        )
+    }
+
+    if (problems.length > 0) {
+        throw new Error(
+            `[config] invalid consensus timing configuration:\n  - ${problems.join("\n  - ")}`,
+        )
+    }
 }

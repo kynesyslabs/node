@@ -15,6 +15,11 @@ const MAX_CONSECUTIVE_REJECTIONS = 3
 
 let recalibrationTimer: NodeJS.Timeout | null = null
 let consecutiveRejections = 0
+// A measurement walks the primary server plus up to three fallbacks with no
+// per-request timeout, so a slow round can outlast the interval. Without this
+// guard the next tick starts a second measurement and whichever resolves LAST
+// wins — an older reading can clobber a newer correction.
+let recalibrationInFlight = false
 
 export default async function getTimestampCorrection(): Promise<number> {
     const timeDelta = await getMeasuredTimeDelta()
@@ -27,6 +32,13 @@ export function startTimestampRecalibration(): void {
         return
     }
     recalibrationTimer = setInterval(async () => {
+        if (recalibrationInFlight) {
+            log.warning(
+                "[calibrateTime] Previous NTP recalibration still in flight, skipping this round",
+            )
+            return
+        }
+        recalibrationInFlight = true
         try {
             const newDelta = await getMeasuredTimeDelta()
             const currentDelta = getSharedState.timestampCorrection
@@ -55,8 +67,11 @@ export function startTimestampRecalibration(): void {
             getSharedState.timestampCorrection = newDelta
         } catch (error) {
             log.warning(
-                `[calibrateTime] Periodic NTP recalibration failed, keeping current correction: ${error}`,
+                `[calibrateTime] Periodic NTP recalibration failed, keeping current correction: ` +
+                    `${error instanceof Error ? error.message : String(error)}`,
             )
+        } finally {
+            recalibrationInFlight = false
         }
     }, RECALIBRATION_INTERVAL_MS)
     recalibrationTimer.unref()
@@ -68,6 +83,9 @@ export function stopTimestampRecalibration(): void {
         recalibrationTimer = null
     }
     consecutiveRejections = 0
+    // Otherwise a stop during an in-flight measurement would leave the guard
+    // latched and permanently skip every round after the next start.
+    recalibrationInFlight = false
 }
 
 export function getNetworkTimestamp(): number {
