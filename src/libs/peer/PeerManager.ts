@@ -158,6 +158,35 @@ export default class PeerManager {
         return this.getActors(true, true)
     }
 
+    /**
+     * Peers among `eligibleIdentities` whose gossiped sync state already
+     * references a block at or past `blockNumber` that is not our
+     * candidate: their tip is beyond the height, or exactly at it with a
+     * different hash. Peers at the height with the candidate's own hash
+     * are applying the same block and do not count as conflicting.
+     */
+    getConflictingBlockPeers(
+        blockNumber: number,
+        candidateHash: string,
+        eligibleIdentities: Set<string>,
+    ): Peer[] {
+        return this.getAll().filter(peer => {
+            if (!peer.identity) {
+                return false
+            }
+            if (!eligibleIdentities.has(peer.identity.toLowerCase())) {
+                return false
+            }
+            if (peer.sync.block > blockNumber) {
+                return true
+            }
+            return (
+                peer.sync.block === blockNumber &&
+                peer.sync.block_hash !== candidateHash
+            )
+        })
+    }
+
     getOfflinePeers(): Record<string, Peer> {
         return this.offlinePeers
     }

@@ -4,10 +4,11 @@ import Mempool from "src/libs/blockchain/mempool"
 import Block from "src/libs/blockchain/block"
 import Chain from "src/libs/blockchain/chain"
 import { getSharedState } from "src/utilities/sharedState"
-import { Peer } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 import log from "src/utilities/logger"
 import { mergeMempools } from "./routines/mergeMempools"
 import { createBlock } from "./routines/createBlock"
+import { getEligiblePool } from "./routines/getShard"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
@@ -256,6 +257,24 @@ export async function consensusRoutine(): Promise<void> {
             if (existingBlock) {
                 throw new ForgingEndedError(
                     `[consensusRoutine] Block ${blockRef} was already applied via sync, exiting`,
+                )
+            }
+
+            // A pool validator already reporting a different block at this
+            // height means a competing variant is on the network; abort
+            // before committing ours
+            const conflictingPeers =
+                PeerManager.getInstance().getConflictingBlockPeers(
+                    blockRef,
+                    block.hash,
+                    new Set(await getEligiblePool(blockRef - 1)),
+                )
+            if (conflictingPeers.length > 0) {
+                log.error(
+                    `[consensusRoutine] ${conflictingPeers.length} pool peer(s) already report block ${blockRef} with a different hash`,
+                )
+                throw new ForgingEndedError(
+                    `[consensusRoutine] Block ${blockRef} already exists on the network, exiting`,
                 )
             }
 
