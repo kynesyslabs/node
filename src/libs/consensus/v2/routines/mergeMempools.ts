@@ -219,6 +219,8 @@ export async function mergeMempools(
  * A tx that a peer sent us can legitimately be absent from the mempool because
  * it was already included in a block, so mempool presence alone would
  * under-report admission and wrongly drop honest contributors.
+ *
+ * Fails closed: if admission cannot be determined, nothing counts as admitted.
  */
 async function getAdmittedHashes(
     blockRef: number,
@@ -241,15 +243,17 @@ async function getAdmittedHashes(
             }
         }
     } catch (e) {
-        // If we cannot determine admission, fall back to treating the round as
-        // admitted rather than dropping every contribution — losing the whole
-        // peerlist would itself diverge us from peers that read it fine.
+        // Fail closed. Treating the round as admitted would commit peerlists
+        // for transactions Mempool.receive may well have rejected, and peers
+        // whose lookup succeeded would commit a different set — divergent
+        // candidate block hashes. Dropping the contributions is the safe
+        // direction: it only costs us this round's peerlist additions.
         log.error(
-            `[mergeMempools] Could not verify tx admission, committing all contributions: ${
+            `[mergeMempools] Could not verify tx admission, dropping all contributions for this round: ${
                 e instanceof Error ? e.message : String(e)
             }`,
         )
-        return new Set(merged.keys())
+        return new Set<string>()
     }
     return admitted
 }
