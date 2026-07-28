@@ -103,8 +103,14 @@ export async function computeMergedPeerlist(
         }
     }
 
+    // Filter against the validator set at the round's own parent height,
+    // not the live tip: blockRef is lastBlockNumber + 1 when the round
+    // opens, but the tip can advance mid-round via sync. Reading the
+    // moving tip would let two nodes in the same round filter against
+    // different heights and commit divergent block.content.peerlist
+    // values, which then feeds committee selection.
     const activeValidators = (await GCR.getGCRValidatorsAtBlock(
-        getSharedState.lastBlockNumber,
+        blockRef - 1,
     )) as Validators[]
 
     if (activeValidators.length === 0) {
