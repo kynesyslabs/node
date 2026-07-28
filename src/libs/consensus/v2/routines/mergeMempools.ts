@@ -106,14 +106,18 @@ export async function mergeMempools(
             txs: Transaction[]
             peerlist: string[]
         }
-        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
-
+        // A failed exchange must not influence block content: peerlist
+        // enters the hash-sensitive block.content.peerlist, so recording
+        // it from a non-200 payload lets validators that saw different
+        // failure bodies derive different candidate blocks.
         if (response.result !== 200) {
             log.error(
                 `[mergeMempools] Non-200 from ${peer.connection.string}: ${JSON.stringify(response, null, 2)}`,
             )
             continue
         }
+
+        contributePeerlist(blockRef, peer.identity, payload?.peerlist)
 
         const rawTxs = payload?.txs
         // Defensive: a peer's response must carry a tx array. A malformed/hostile

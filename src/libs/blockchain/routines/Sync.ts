@@ -852,8 +852,23 @@ async function applySyncedBlock(
     // Sync GCR tables
     await syncGCRTables(applied, block)
 
-    // Insert block
-    await Chain.insertBlock(block, blockTxs)
+    // GCR mutations above are already persisted and neither syncGCRTables
+    // nor insertBlock accepts a shared transaction manager, so a failure
+    // here leaves nonce/balance/validator state ahead of the chain with no
+    // block authorizing it. Worse, the block-exists guard above makes the
+    // drift invisible to a retry. Nothing local can reconcile that, so
+    // surface it as fatal instead of syncing on top of corrupt state.
+    try {
+        await Chain.insertBlock(block, blockTxs)
+    } catch (e) {
+        log.error(
+            `[batchDownloadBlocks] FATAL: GCR state for block ${block.number} was applied ` +
+                `but the block failed to insert; local state has drifted from the chain and ` +
+                `must be resynced from scratch: ${e instanceof Error ? e.message : String(e)}`,
+        )
+        throw e
+    }
+
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
     )

@@ -113,6 +113,24 @@ describe("computeMergedPeerlist", () => {
         const merged = await computeMergedPeerlist(101)
         expect(merged).toContain(NON_VALIDATOR)
     })
+
+    it("refuses the unfiltered fallback when DEMOS_REQUIRE_VALIDATORS=true", async () => {
+        const previous = process.env.DEMOS_REQUIRE_VALIDATORS
+        process.env.DEMOS_REQUIRE_VALIDATORS = "true"
+        try {
+            validatorAddresses = []
+            contributePeerlist(101, "c1", [NON_VALIDATOR])
+            await expect(computeMergedPeerlist(101)).rejects.toThrow(
+                /DEMOS_REQUIRE_VALIDATORS/,
+            )
+        } finally {
+            if (previous === undefined) {
+                delete process.env.DEMOS_REQUIRE_VALIDATORS
+            } else {
+                process.env.DEMOS_REQUIRE_VALIDATORS = previous
+            }
+        }
+    })
 })
 
 describe("contributePeerlist", () => {

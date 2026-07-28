@@ -108,8 +108,19 @@ export async function computeMergedPeerlist(
     )) as Validators[]
 
     if (activeValidators.length === 0) {
+        // Contributions are only shape-validated, so an unfiltered commit
+        // lets any online identity reach block.content.peerlist and, via
+        // getEligiblePool, subsequent shard selection without a stake.
+        // Tolerated only for bootstrap/dev networks, where there is no
+        // validator set to filter against yet.
+        if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+            throw new Error(
+                "[peerlistMerge] no active validators AND DEMOS_REQUIRE_VALIDATORS=true; refusing to commit an unfiltered peerlist",
+            )
+        }
         log.warning(
-            "[peerlistMerge] SECURITY: no active validators in DB; committing unfiltered peerlist",
+            "[peerlistMerge] SECURITY: no active validators in DB; committing unfiltered peerlist. " +
+                "This is only acceptable on development networks.",
         )
         return [...merged].sort()
     }

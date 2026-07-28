@@ -76,8 +76,14 @@ export async function getEligiblePool(
         if (validatorAddresses.size > 0) {
             pool = committed.filter(id => validatorAddresses.has(id))
         } else {
+            if (process.env.DEMOS_REQUIRE_VALIDATORS === "true") {
+                throw new Error(
+                    "[getShard] committed peerlist but no active validators AND DEMOS_REQUIRE_VALIDATORS=true; refusing to operate",
+                )
+            }
             log.warning(
-                "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered",
+                "[getShard] SECURITY: no active validators in DB; using committed peerlist unfiltered. " +
+                    "This is only acceptable on development networks.",
             )
             pool = committed
         }
