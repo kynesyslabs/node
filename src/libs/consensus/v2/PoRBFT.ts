@@ -32,6 +32,7 @@ import GCR from "@/libs/blockchain/gcr/gcr"
 import { normalizeAccount } from "@/libs/l2ps/editConservation"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { isReferenceBlockAllowed } from "@/libs/network/endpointExecution"
+import { deepWindowCutoff } from "@/libs/blockchain/referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 import Hashing from "@/libs/crypto/hashing"
 import { orderDeterministically } from "./routines/deterministicOrder"
@@ -177,7 +178,7 @@ export async function consensusRoutine(): Promise<void> {
             )
 
         // filter txs by reference block
-        const resRef = filterMempoolByRefBlock(initialMempool)
+        const resRef = filterMempoolByRefBlock(initialMempool, true)
         failedTxs.push(...resRef.failedTxs)
 
         const resNonce = await filterMempoolByNonce(resRef.validTxs)
@@ -754,29 +755,52 @@ async function mergeAndOrderMempools(
 }
 
 /**
- * Filter mempool transactions by reference block. Removes transactions
- * that will fail because the reference block is out of range.
+ * Filter mempool transactions by reference block.
+ *
+ * When `includeExpiredAsFailed` is false: removes transactions that will
+ * fail because the reference block is out of range.
+ *
+ * With `includeExpiredAsFailed`: expired txs still inside the deep window
+ * (5x referenceBlockRoom) are marked FAILED and kept in `validTxs` so
+ * they enter the block as failed — mirroring the TX_NONCE_INVALID_LOW
+ * pattern. Txs older than the deep window are removed as before; the
+ * merge admission path applies the same bound, so every shard member
+ * sees an identical set.
  *
  * @param mempool - The mempool transactions
+ * @param includeExpiredAsFailed - Enable the include-as-failed path
  * @returns The valid and failed transactions
  */
-function filterMempoolByRefBlock(mempool: MempoolTransaction[]) {
+function filterMempoolByRefBlock(
+    mempool: MempoolTransaction[],
+    includeExpiredAsFailed = false,
+) {
     // map of failed tx hashes and their reason
     const failedTxs: Array<FailedTranscation> = []
     const validTxs: MempoolTransaction[] = []
+    const lastBlockNumber = getSharedState.lastBlockNumber
 
     for (const tx of mempool) {
-        if (
-            !isReferenceBlockAllowed(
-                tx.reference_block,
-                getSharedState.lastBlockNumber,
-            )
-        ) {
-            failedTxs.push({
-                txhash: tx.hash,
-                code: ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE,
-                message: `Reference block expired. Expected: ${getSharedState.lastBlockNumber - getSharedState.referenceBlockRoom + 1} - ${getSharedState.lastBlockNumber} got ${tx.reference_block}`,
-            })
+        if (!isReferenceBlockAllowed(tx.reference_block, lastBlockNumber)) {
+            const code = ErrorCode.TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE
+            const message = `Reference block expired. Expected: ${lastBlockNumber - getSharedState.referenceBlockRoom} - ${lastBlockNumber} got ${tx.reference_block}`
+            if (
+                includeExpiredAsFailed &&
+                tx.reference_block >= deepWindowCutoff(lastBlockNumber)
+            ) {
+                tx.status = TRANSACTION_STATUS.FAILED
+                tx.attrs = {
+                    code,
+                    message,
+                    reference_block: tx.reference_block,
+                }
+                validTxs.push(tx)
+                log.debug(
+                    `[TX_EXPIRED_REFERENCE_BLOCK_OUT_OF_RANGE] including tx as failed: ${tx.hash}`,
+                )
+            } else {
+                failedTxs.push({ txhash: tx.hash, code, message })
+            }
         } else {
             validTxs.push(tx)
         }
@@ -821,6 +845,14 @@ async function filterMempoolByNonce(mempool: MempoolTransaction[]) {
     const startFilterNonces = { ...nonces }
 
     txLoop: for (const tx of mempool) {
+        // Already marked failed upstream (expired ref block): keep it for
+        // block inclusion without letting it consume a nonce slot — its
+        // edits are never applied.
+        if (tx.status === TRANSACTION_STATUS.FAILED) {
+            validTxs.push(tx)
+            continue txLoop
+        }
+
         const nonceEdits = tx.content.gcr_edits.filter(e => e.type === "nonce")
 
         if (nonceEdits.length === 0) {

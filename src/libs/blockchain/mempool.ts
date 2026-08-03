@@ -21,6 +21,8 @@ import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
+import { deepWindowCutoff } from "./referenceBlockWindow"
+import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 /**
  * System relay transaction types: node-generated txs that carry no
@@ -409,16 +411,30 @@ export default class Mempool {
         const blockNumber = SecretaryManager.lastBlockRef
         const existingHashes = await this.getMempoolHashMap(blockNumber)
 
-        // Drop gossiped txs whose reference block has aged out of the
-        // allowed window before they reach validation: they can never be
-        // included, so admitting them only grows the mempool and wastes
-        // validator-pool work. Same bound isReferenceBlockAllowed applies
-        // on the endpoint admission path — inlined rather than imported
-        // because endpointExecution already imports this module.
+        // Drop gossiped txs whose reference block has aged out of the deep
+        // window (5x referenceBlockRoom) before they reach validation.
+        // Expired-but-recent txs — outside the inclusion window that
+        // isReferenceBlockAllowed enforces on the endpoint admission path,
+        // but inside the deep window — are admitted so consensus can
+        // include them in a block as failed.
         const lastBlock = await Chain.getLastBlockNumber()
-        const staleCutoff = lastBlock - getSharedState.referenceBlockRoom
-        const unseenTransactions = incoming.filter(tx => {
-            if (existingHashes[tx.hash]) {
+        const staleCutoff = deepWindowCutoff(lastBlock)
+
+        const unseenCandidates = incoming.filter(
+            tx => !existingHashes[tx.hash],
+        )
+        const onChain =
+            unseenCandidates.length > 0
+                ? await Chain.getExistingTransactionHashes(
+                      unseenCandidates.map(tx => tx.hash),
+                  )
+                : new Set<string>()
+
+        const unseenTransactions = unseenCandidates.filter(tx => {
+            if (onChain.has(tx.hash)) {
+                log.error(
+                    `[Mempool.receive] Rejecting tx ${tx.hash}: already recorded on chain`,
+                )
                 return false
             }
             if (
@@ -550,6 +566,7 @@ export default class Mempool {
 
         for (const tx of validTransactions) {
             noSendBackTxs.set(tx.hash, tx.hash)
+            tx.status = TRANSACTION_STATUS.PENDING
         }
 
         if (validTransactions.length > 0) {
@@ -637,9 +654,11 @@ export default class Mempool {
     /**
      * Removes old and executed transactions from the mempool.
      *
-     * Old: reference_block falls outside the allowed window
-     * (lastBlock - referenceBlockRoom ..= lastBlock) — same rule enforced by
-     * isReferenceBlockAllowed on inbound RPC.
+     * Old: reference_block falls outside the deep window
+     * (5x referenceBlockRoom). Rows in the expired-but-includable band —
+     * outside the inclusion window isReferenceBlockAllowed enforces on
+     * inbound RPC, but inside the deep window — are retained so consensus
+     * can include them as failed.
      *
      * Executed: already committed to the chain.
      */
@@ -656,7 +675,7 @@ export default class Mempool {
         }
 
         const lastBlock = await Chain.getLastBlockNumber()
-        const cutoff = lastBlock - getSharedState.referenceBlockRoom
+        const cutoff = deepWindowCutoff(lastBlock)
 
         const staleHashes: string[] = []
         const survivorHashes: string[] = []
