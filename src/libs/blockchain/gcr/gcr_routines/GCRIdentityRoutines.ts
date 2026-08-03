@@ -279,9 +279,9 @@ export default class GCRIdentityRoutines {
                     context === "telegram"
                         ? "Telegram attestation validation failed"
                         : "Sha256 proof mismatch: Expected " +
-                          data.proofHash +
-                          " but got " +
-                          Hashing.sha256(data.proof),
+                        data.proofHash +
+                        " but got " +
+                        Hashing.sha256(data.proof),
             }
         }
 
@@ -593,9 +593,8 @@ export default class GCRIdentityRoutines {
         if (!validNetworks.includes(payload.network)) {
             return {
                 success: false,
-                message: `Invalid network: ${
-                    payload.network
-                }. Must be one of: ${validNetworks.join(", ")}`,
+                message: `Invalid network: ${payload.network
+                    }. Must be one of: ${validNetworks.join(", ")}`,
             }
         }
         if (!validRegistryTypes.includes(payload.registryType)) {
@@ -1201,14 +1200,16 @@ export default class GCRIdentityRoutines {
                 )
                 break
             case "tlsnadd":
+            case "tlsn_identity_assign":
                 result = await this.applyTLSNIdentityAdd(
                     identityEdit,
                     gcrMainRepository,
                     simulate,
                 )
                 break
-            
+
             case "tlsnremove":
+            case "tlsn_identity_remove":
                 result = await this.applyTLSNIdentityRemove(
                     identityEdit,
                     gcrMainRepository,
@@ -1810,13 +1811,13 @@ export default class GCRIdentityRoutines {
         string,
         { server: string; pathPrefix: string }
     > = {
-        github: { server: "api.github.com", pathPrefix: "/user" },
-        discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
-        telegram: {
-            server: "telegram-backend",
-            pathPrefix: "/api/telegram/user",
-        },
-    }
+            github: { server: "api.github.com", pathPrefix: "/user" },
+            discord: { server: "discord.com", pathPrefix: "/api/users/@me" },
+            telegram: {
+                server: process.env.TLSN_TELEGRAM_BACKEND_HOST ?? "telegram-backend",
+                pathPrefix: "/api/telegram/user",
+            },
+        }
 
     /**
      * Add an identity via TLSNotary proof verification.
