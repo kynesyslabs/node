@@ -7,6 +7,7 @@ import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import type { Validators } from "src/model/entities/Validators"
 import { compareIdentities } from "./peerlistMerge"
+import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 
 // The eligible pool is a pure function of on-chain state at a given
 // block, so it is memoised per block number. Sync verification walks
@@ -154,6 +155,58 @@ export async function getEligiblePool(
 }
 
 /**
+ * Ensure every pinned identity that is an online-eligible candidate holds
+ * a committee slot, mutating `shard` in place.
+ *
+ * A pin missing from the draw replaces the last non-pinned member, walking
+ * backwards. Slot 0 is never displaced: the secretary is
+ * `shard.members[0]`, so rotation stays with the seeded draw. A pin that
+ * is offline, outside the eligible pool, or left without a replaceable
+ * slot is skipped — pinning is best-effort and never blocks a round.
+ * Deterministic given (seed, pool, online view): the same inputs the draw
+ * itself uses.
+ *
+ * @returns A per-pin outcome summary for the debug log.
+ */
+export function pinShardIdentities(shard: Peer[], candidates: Peer[]): string {
+    const pinnedSet = new Set(PINNED_SHARD_IDENTITIES)
+    const shardIds = new Set(shard.map(p => p.identity.toLowerCase()))
+    const outcomes: string[] = []
+
+    let replaceIndex = shard.length - 1
+    for (const pinned of PINNED_SHARD_IDENTITIES) {
+        const label = pinned.slice(0, 10)
+        if (shardIds.has(pinned)) {
+            outcomes.push(`${label}=drawn`)
+            continue
+        }
+        const candidate = candidates.find(
+            p => p.identity.toLowerCase() === pinned,
+        )
+        if (!candidate) {
+            outcomes.push(`${label}=absent`)
+            continue
+        }
+        while (
+            replaceIndex > 0 &&
+            pinnedSet.has(shard[replaceIndex].identity.toLowerCase())
+        ) {
+            replaceIndex--
+        }
+        if (replaceIndex <= 0) {
+            outcomes.push(`${label}=no-slot`)
+            continue
+        }
+        shard[replaceIndex] = candidate
+        shardIds.add(pinned)
+        outcomes.push(`${label}=swapped`)
+        replaceIndex--
+    }
+
+    return outcomes.join(",")
+}
+
+/**
  * Committee for the next block: the deterministic eligible pool at
  * `lastBlockNumber`, filtered to peers currently indexed in the
  * PeerManager online list (ourselves always included), drawn with
@@ -205,9 +258,12 @@ export default async function getShard(
         available.splice(index, 1)
     }
 
+    const pinOutcome = pinShardIdentities(shard, candidates)
+
     log.debug(
         `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
-            `online candidates: ${candidates.length}; shard: ${shard.length}`,
+            `online candidates: ${candidates.length}; shard: ${shard.length}; ` +
+            `pins: ${pinOutcome}`,
     )
 
     if (shard.length < getCommitteeFloor()) {

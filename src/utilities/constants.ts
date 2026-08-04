@@ -27,6 +27,15 @@ export const PEER_RECHECK_INTERVAL_MS = 10_000
  */
 export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 
+/**
+ * Validator identities guaranteed a committee slot whenever they are
+ * eligible and online (see getShard).
+ */
+export const PINNED_SHARD_IDENTITIES: readonly string[] = [
+    "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
+    "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
+]
+
 // --- Batch sync ---
 export const BATCH_SYNC_BLOCK_SIZE = 100
 export const BATCH_SYNC_TX_SIZE = 100
