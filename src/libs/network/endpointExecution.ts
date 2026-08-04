@@ -31,12 +31,7 @@ import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
-export function isReferenceBlockAllowed(referenceBlock: number, lastBlock: number) {
-    return (
-        referenceBlock >= lastBlock - getSharedState.referenceBlockRoom &&
-        referenceBlock <= lastBlock
-    )
-}
+import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
 
 export async function handleExecuteTransaction(
     validatedData: ValidityData,
