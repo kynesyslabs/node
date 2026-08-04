@@ -32,8 +32,8 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
  * eligible and online (see getShard).
  */
 export const PINNED_SHARD_IDENTITIES: readonly string[] = [
-    "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
-    "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
+    "0x556e3da072adfea631d39afdaf468d25ab48a7a568db9e9a84544ef37e50a3d8",
+    "0x77e5cff4c6b49286d2a4c711c0e2a3678cc1ffd9c5f47438116625a582c4d8c0",
 ]
 
 // --- Batch sync ---
