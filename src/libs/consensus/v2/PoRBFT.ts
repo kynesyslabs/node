@@ -567,10 +567,9 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             if (
-                !new Set([
-                    "blockTimestampNotReceived",
-                    "abortConsensus",
-                ]).has(exitReason) &&
+                !new Set(["blockTimestampNotReceived", "abortConsensus"]).has(
+                    exitReason,
+                ) &&
                 txs.length !== blockTxs.length
             ) {
                 const diff = blockTxs.filter(
@@ -943,8 +942,13 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
 
     // minimum validators threshold
     // attempts to fix forking bug
-    const isMinimumValidators =
-        pro >= Math.floor((getSharedState.shardSize * 2) / 3) + 1
+    const minValidators = Math.floor((getSharedState.shardSize * 2) / 3) + 1
+    const isMinimumValidators = pro >= minValidators
+
+    if (totalVotes >= minValidators && pro < threshold) {
+        log.error("[consensusRoutine] Block is not valid")
+        process.exit(0)
+    }
 
     return isMinimumValidators && pro >= threshold
 }

@@ -40,13 +40,12 @@ async function verifyIncomingSignatures(
     const checks = await Promise.all(
         entries.map(async ([identity, signature]) => {
             try {
-                const isValid =
-                    await TxValidatorPool.getInstance().verify({
-                        algorithm: getSharedState.signingAlgorithm,
-                        message: new TextEncoder().encode(candidateBlockHash),
-                        signature: hexToUint8Array(signature),
-                        publicKey: hexToUint8Array(identity),
-                    })
+                const isValid = await TxValidatorPool.getInstance().verify({
+                    algorithm: getSharedState.signingAlgorithm,
+                    message: new TextEncoder().encode(candidateBlockHash),
+                    signature: hexToUint8Array(signature),
+                    publicKey: hexToUint8Array(identity),
+                })
                 // `loggedFailure` marks whether the inner catch path
                 // already emitted an error for this entry — so the
                 // outer aggregator can skip its own "Invalid
@@ -145,7 +144,12 @@ async function proposeAndCollect(
         // is only present on the 401 branch from
         // `manageProposeBlockHash`; guard accordingly.
         const extra = response.extra as
-            | { ourBlock?: { txHashes?: string[]; ordered_transactions?: string[] } }
+            | {
+                  ourBlock?: {
+                      txHashes?: string[]
+                      ordered_transactions?: string[]
+                  }
+              }
             | undefined
         if (extra?.ourBlock) {
             const theirTxHashes: string[] =
@@ -157,39 +161,62 @@ async function proposeAndCollect(
             const theirSet = new Set(theirTxHashes)
             const ourSet = new Set(ourTxHashes)
             const missingFromUs = theirTxHashes.filter(h => !ourSet.has(h))
-            const missingFromThem = ourTxHashes.filter(
-                h => !theirSet.has(h),
-            )
+            const missingFromThem = ourTxHashes.filter(h => !theirSet.has(h))
             log.error(
                 `[broadcastBlockHash] tx-set diff with ${peerId}: ` +
                     `missingFromUs=${missingFromUs.length}, ` +
                     `missingFromThem=${missingFromThem.length}`,
             )
-            log.error("Missing from us: " + JSON.stringify(missingFromUs, null, 2))
+            log.error(
+                "Missing from us: " + JSON.stringify(missingFromUs, null, 2),
+            )
 
-            if (missingFromThem.length > 0){
+            if (missingFromThem.length > 0) {
                 // check if the missing transactions are in the mempool
-                const missing = await Mempool.getTransactionsByHashes(missingFromThem)
-                log.error("Missing from them, found in mempool: " + missing.length)
-                log.error("Missing from them, found in mempool: " + JSON.stringify(missing.map(tx => ({
-                    hash: tx.hash,
-                    blockNumber: tx.blockNumber,
-                    referenceBlock: tx.reference_block,
-                })), null, 2))
+                const missing =
+                    await Mempool.getTransactionsByHashes(missingFromThem)
+                log.error(
+                    "Missing from them, found in mempool: " + missing.length,
+                )
+                log.error(
+                    "Missing from them, found in mempool: " +
+                        JSON.stringify(
+                            missing.map(tx => ({
+                                hash: tx.hash,
+                                blockNumber: tx.blockNumber,
+                                referenceBlock: tx.reference_block,
+                            })),
+                            null,
+                            2,
+                        ),
+                )
             }
 
-            if (missingFromUs.length > 0){
+            if (missingFromUs.length > 0) {
                 // check if the missing transactions are in the mempool
-                const missing = await Mempool.getTransactionsByHashes(missingFromUs)
-                log.error("Missing from us, found in mempool: " + missing.length)
-                log.error("Missing from us, found in mempool: " + JSON.stringify(missing.map(tx => ({
-                    hash: tx.hash,
-                    blockNumber: tx.blockNumber,
-                    referenceBlock: tx.reference_block,
-                })), null, 2))
+                const missing =
+                    await Mempool.getTransactionsByHashes(missingFromUs)
+                log.error(
+                    "Missing from us, found in mempool: " + missing.length,
+                )
+                log.error(
+                    "Missing from us, found in mempool: " +
+                        JSON.stringify(
+                            missing.map(tx => ({
+                                hash: tx.hash,
+                                blockNumber: tx.blockNumber,
+                                referenceBlock: tx.reference_block,
+                            })),
+                            null,
+                            2,
+                        ),
+                )
             }
 
-            log.error("Missing from them: " + JSON.stringify(missingFromThem, null, 2))
+            log.error(
+                "Missing from them: " +
+                    JSON.stringify(missingFromThem, null, 2),
+            )
             log.debug(
                 `[broadcastBlockHash] Their block: ${JSON.stringify(
                     extra.ourBlock,
@@ -315,6 +342,12 @@ export async function broadcastBlockHash(
     shard: Peer[],
 ): Promise<[number, number]> {
     const ourId = getSharedState.publicKeyHex
+
+    log.debug(
+        "[broadcastBlockHash] Broadcasting block hash to the shard: " +
+            block.hash,
+    )
+    log.debug("Block Content: " + JSON.stringify(block.content, null, 2))
 
     // PR #888 Greptile P2: snapshot `validation_data` once before
     // fan-out. The receiver-side `manageProposeBlockHash` runs
