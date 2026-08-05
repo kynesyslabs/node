@@ -35,7 +35,7 @@ import { emptyResponse } from "./rpcDispatch"
 
 import {
     contributePeerlist,
-    getLocalPeerlistView,
+    getLocalSyncObservations,
 } from "src/libs/consensus/v2/routines/peerlistMerge"
 import { handleValidateTransaction } from "./endpointValidation"
 import { handleExecuteTransaction } from "./endpointExecution"
@@ -153,7 +153,7 @@ export default class ServerHandlers {
         }
 
         const responsePayload = envelope
-            ? { txs: response.mempool, peerlist: getLocalPeerlistView() }
+            ? { txs: response.mempool, peerlist: getLocalSyncObservations() }
             : response.mempool
 
         const ourId = getSharedState.publicKeyHex

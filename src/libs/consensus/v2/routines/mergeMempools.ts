@@ -9,7 +9,7 @@ import {
 } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { MERGE_MEMPOOL_MAX_TXS_PER_PEER } from "@/utilities/constants"
-import { contributePeerlist, getLocalPeerlistView } from "./peerlistMerge"
+import { contributePeerlist, getLocalSyncObservations } from "./peerlistMerge"
 
 const PEER_CALL_TIMEOUT_MS = 10_000
 
@@ -64,7 +64,7 @@ export async function mergeMempools(
         params: [
             {
                 txs: mempool,
-                peerlist: getLocalPeerlistView(),
+                peerlist: getLocalSyncObservations(),
                 blockRef,
             },
         ],
@@ -109,7 +109,7 @@ export async function mergeMempools(
         const response = result.value
         const payload = response.response as {
             txs: Transaction[]
-            peerlist: string[]
+            peerlist: unknown
         }
         // A failed exchange must not influence block content: peerlist
         // enters the hash-sensitive block.content.peerlist, so recording
