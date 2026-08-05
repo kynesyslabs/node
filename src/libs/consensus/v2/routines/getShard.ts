@@ -273,5 +273,13 @@ export default async function getShard(
         )
     }
 
+    log.debug(
+        "Shard members:",
+        JSON.stringify(
+            shard.map(m => m.connection.string),
+            null,
+            2,
+        ),
+    )
     return shard
 }
