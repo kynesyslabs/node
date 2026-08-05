@@ -12,6 +12,7 @@ import { PrimitiveDecoder, PrimitiveEncoder } from "../serialization/primitives"
 import { AuthBlockParser } from "../auth/parser"
 import type { AuthBlock } from "../auth/types"
 import { InvalidAuthBlockFormatError } from "../types/errors"
+import { traceFramerFailure } from "@/libs/debug/omniTrace"
 
 /**
  * MessageFramer handles parsing of TCP byte streams into complete OmniProtocol messages
@@ -87,6 +88,12 @@ export class MessageFramer {
                 log.error("OFFSET: " + offset)
                 log.error("HEADER: " + JSON.stringify(header, null, 2))
                 log.error("Failed to parse auth block: " + error)
+                traceFramerFailure(
+                    "auth-block",
+                    error instanceof Error ? error.message : String(error),
+                    header,
+                    this.buffer.length,
+                )
                 throw new InvalidAuthBlockFormatError(
                     "Failed to parse auth block",
                 )
@@ -116,6 +123,12 @@ export class MessageFramer {
 
         // Validate checksum (over everything except checksum itself)
         if (!this.validateChecksum(messageBuffer, checksum)) {
+            traceFramerFailure(
+                "checksum",
+                `received=${checksum}`,
+                header,
+                this.buffer.length,
+            )
             throw new Error(
                 "Message checksum validation failed - corrupted data",
             )
@@ -215,6 +228,12 @@ export class MessageFramer {
 
         // Validate payload size to prevent DoS attacks
         if (payloadLength > MessageFramer.MAX_PAYLOAD_SIZE) {
+            traceFramerFailure(
+                "oversize",
+                `payloadLength=${payloadLength} max=${MessageFramer.MAX_PAYLOAD_SIZE} opcode=0x${opcode.toString(16)}`,
+                null,
+                this.buffer.length,
+            )
             // Drop buffered data so we don't retain attacker-controlled bytes in memory
             this.buffer = Buffer.alloc(0)
             throw new Error(

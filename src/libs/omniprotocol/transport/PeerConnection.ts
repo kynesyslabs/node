@@ -30,6 +30,13 @@ import {
 import { dispatchOmniMessage } from "../protocol/dispatcher"
 import { RateLimiter } from "../ratelimit"
 import { ConnectionPool } from "./ConnectionPool"
+import {
+    traceExtractionAbort,
+    traceRequest,
+    traceResponseDrop,
+    traceUnmatchedResponse,
+    type TraceConnection,
+} from "@/libs/debug/omniTrace"
 
 /**
  * Global sequence ID manager for the node.
@@ -535,6 +542,7 @@ export class PeerConnection extends EventEmitter {
     async sendResponse(sequence: number, payload: Buffer): Promise<void> {
         let socketId: string | null = null
         let socket: Socket | null = null
+        let examined = 0
 
         if (this.socket?.writable) {
             socket = this.socket
@@ -543,6 +551,7 @@ export class PeerConnection extends EventEmitter {
             // TRY: Find other usable connection to peer
             const pool = ConnectionPool.getInstance()
             const connections = pool.getConnections(this._peerIdentity)
+            examined = connections.length
 
             for (const connection of connections) {
                 if (
@@ -557,6 +566,13 @@ export class PeerConnection extends EventEmitter {
         }
 
         if (!socket) {
+            traceResponseDrop(
+                this.traceConnection,
+                sequence,
+                payload.length,
+                examined,
+            )
+
             // INFO: We can't find a connection to peer,
             // RETURN!
             return
@@ -688,6 +704,29 @@ export class PeerConnection extends EventEmitter {
         }
     }
 
+    private siblingInFlightCount(): number {
+        const connections = ConnectionPool.getInstance().getConnections(
+            this._peerIdentity,
+        )
+
+        let count = 0
+        for (const connection of connections) {
+            if (connection === this) continue
+            count += connection.inFlightRequests.size
+        }
+
+        return count
+    }
+
+    private get traceConnection(): TraceConnection {
+        return {
+            peerIdentity: this._peerIdentity,
+            socketId: this.socketId,
+            origin: this.origin,
+            remoteAddress: this.socket?.remoteAddress,
+        }
+    }
+
     /**
      * Get last activity timestamp
      */
@@ -712,10 +751,13 @@ export class PeerConnection extends EventEmitter {
         // Add data to framer
         this.framer.addData(chunk)
 
+        let extracted = 0
+
         try {
             // Extract all complete messages
             let message = this.framer.extractMessage()
             while (message) {
+                extracted++
                 this.handleMessage(message).catch(error => {
                     handleError(error, "NETWORK", {
                         source: "OmniProtocol PeerConnection.handleMessage",
@@ -724,6 +766,12 @@ export class PeerConnection extends EventEmitter {
                 message = this.framer.extractMessage()
             }
         } catch (error) {
+            traceExtractionAbort(
+                this.traceConnection,
+                error,
+                this.framer.getBufferSize(),
+                extracted,
+            )
             handleError(error, "NETWORK", {
                 source: "OmniProtocol PeerConnection.handleIncomingData",
             })
@@ -772,6 +820,14 @@ export class PeerConnection extends EventEmitter {
                 return
             }
 
+            traceUnmatchedResponse(
+                this.traceConnection,
+                header,
+                payload as Buffer,
+                this.inFlightRequests.size,
+                this.siblingInFlightCount(),
+            )
+
             // INFO: We can't find a matching in-flight request,
             return
         }
@@ -789,11 +845,7 @@ export class PeerConnection extends EventEmitter {
         payload: Buffer,
         auth: AuthBlock | null,
     ): Promise<void> {
-        log.debug(
-            `[PeerConnection] ${
-                this._peerIdentity
-            } received request opcode 0x${header.opcode.toString(16)}`,
-        )
+        traceRequest(this.traceConnection, header, payload, auth)
 
         // Extract peer identity from auth block for ANY authenticated message
         if (

@@ -35,6 +35,7 @@ export const TAG_TO_CATEGORY: Record<string, LogCategory> = {
     NETWORK: "NETWORK",
     PING: "NETWORK",
     TRANSMISSION: "NETWORK",
+    OMNITRACE: "NETWORK",
 
     // PEER - Peer management, peer gossip, peer bootstrap
     PEER: "PEER",

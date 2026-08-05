@@ -294,6 +294,13 @@ export default async function manageConsensusRoutines(
                 }
 
                 const peerKey = sender
+                const peer = PeerManager.getInstance().getPeer(sender)
+                if (!peer) {
+                    response.result = 401
+                    response.response = "Peer not found"
+                    response.extra = "Peer not found"
+                    return response
+                }
 
                 // INFO: If we receive a setValidatorPhase request, and the
                 // secretary routine has not started, wait for it to start
@@ -337,7 +344,7 @@ export default async function manageConsensusRoutines(
                 const isUs = peerKey === getSharedState.publicKeyHex
                 log.debug(
                     "[Consensus Message Received] setValidatorPhase from: " +
-                        peerKey,
+                        peer.connection.string,
                 )
                 log.debug("Is us: " + isUs)
                 const data = await manager.receiveValidatorPhase(peerKey, phase)
