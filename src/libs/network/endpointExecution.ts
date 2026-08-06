@@ -9,6 +9,7 @@ import {
     ValidityData,
     XMScript,
     IWeb2Payload,
+    RPCResponse,
     SigningAlgorithm,
 } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
@@ -346,19 +347,34 @@ export async function handleExecuteTransaction(
                     lastBlockHash,
                 )
 
-                for (const result of results.response) {
-                    if (result.status === "fulfilled") {
-                        const response = result.value
-                        if (response.result === 200) {
-                            continue
-                        }
+                const accepted = (results.response as RPCResponse[]).filter(
+                    res => res.result === 200,
+                )
 
-                        DTRManager.validityDataCache.set(
+                if (accepted.length === 0) {
+                    log.warning(
+                        "[handleExecuteTransaction] No validator accepted the relay, holding for retry: " +
                             validatedData.data.transaction.hash,
-                            validatedData,
-                        )
+                    )
+                    DTRManager.cacheForRetry(validatedData)
+
+                    return {
+                        success: true,
+                        response: {
+                            message:
+                                "Transaction held for relay to the next shard",
+                        },
+                        extra: {
+                            confirmationBlock:
+                                DTRManager.parkedConfirmationBlock,
+                        },
+                        require_reply: false,
                     }
                 }
+
+                const confirmationBlocks = accepted
+                    .map(res => DTRManager.readConfirmationBlock(res))
+                    .filter((block): block is number => block !== null)
 
                 return {
                     success: true,
@@ -366,7 +382,10 @@ export async function handleExecuteTransaction(
                         message: "Transaction relayed to validators",
                     },
                     extra: {
-                        confirmationBlock: getSharedState.lastBlockNumber + 1,
+                        confirmationBlock:
+                            confirmationBlocks.length > 0
+                                ? Math.min(...confirmationBlocks)
+                                : getSharedState.lastBlockNumber + 1,
                     },
                     require_reply: false,
                 }

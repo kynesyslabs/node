@@ -22,6 +22,9 @@ import Block from "@/libs/blockchain/block"
 import Chain from "@/libs/blockchain/chain"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { handleError } from "@/errors"
+import { deepWindowCutoff } from "@/libs/blockchain/referenceBlockWindow"
+
+const MAX_CACHED_RELAY_TXS = 5_000
 
 /**
  * DTR (Distributed Transaction Routing) Relay Retry Service
@@ -56,6 +59,49 @@ export class DTRManager {
 
     static get isWaitingForBlock(): boolean {
         return Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)
+    }
+
+    static get parkedConfirmationBlock(): number {
+        return getSharedState.lastBlockNumber + 2
+    }
+
+    static cacheForRetry(validityData: ValidityData) {
+        const txhash = validityData.data.transaction.hash
+
+        if (
+            !DTRManager.validityDataCache.has(txhash) &&
+            DTRManager.validityDataCache.size >= MAX_CACHED_RELAY_TXS
+        ) {
+            const oldest = DTRManager.validityDataCache.keys().next()
+            if (!oldest.done) {
+                log.warning(
+                    `[DTR] Relay cache full (${MAX_CACHED_RELAY_TXS}), dropping ${oldest.value}`,
+                )
+                DTRManager.validityDataCache.delete(oldest.value)
+            }
+        }
+
+        DTRManager.validityDataCache.set(txhash, validityData)
+        DTRManager.ensureRelayScheduled()
+    }
+
+    static ensureRelayScheduled() {
+        if (!DTRManager.isWaitingForBlock) {
+            log.debug(
+                "[DTRManager] not waiting for block, starting relay waiter",
+            )
+            DTRManager.waitForBlockThenRelay()
+        }
+    }
+
+    static readConfirmationBlock(res: RPCResponse): number | null {
+        const fromResponse = (res.response as { confirmationBlock?: number })
+            ?.confirmationBlock
+        const fromExtra = (res.extra as { confirmationBlock?: number })
+            ?.confirmationBlock
+        const value = fromResponse ?? fromExtra
+
+        return typeof value === "number" ? value : null
     }
 
     /**
@@ -96,7 +142,7 @@ export class DTRManager {
             const res = await validator.longCall(request, true, {
                 sleepTime: 250,
                 retries: 4,
-                allowedCodes: [400, 403], // Allowed error response codes
+                allowedCodes: [400, 403, 409], // Allowed error response codes
             })
 
             return {
@@ -170,15 +216,31 @@ export class DTRManager {
         )
 
         try {
-            if (getSharedState.inConsensusLoop) {
-                if (
-                    !(
-                        getSharedState.candidateBlock &&
-                        getSharedState.candidateBlock.hash === data.blockRef
-                    )
-                ) {
-                    return await this.inConsensusHandler(data.payload)
+            if (
+                data.blockRef &&
+                data.blockRef !== getSharedState.lastBlockHash
+            ) {
+                log.warning(
+                    "[DTR] Relay drawn from a different tip: " +
+                        `sender blockRef ${data.blockRef}, ours ${getSharedState.lastBlockHash}`,
+                )
+
+                return {
+                    result: 409,
+                    response: {
+                        message:
+                            "REJECTED: relay drawn from a different chain tip",
+                    },
+                    require_reply: false,
+                    extra: {
+                        blockNumber: getSharedState.lastBlockNumber,
+                        blockHash: getSharedState.lastBlockHash,
+                    },
                 }
+            }
+
+            if (getSharedState.inConsensusLoop) {
+                return await this.inConsensusHandler(data.payload)
             }
 
             if (data.payload.length === 1) {
@@ -210,15 +272,17 @@ export class DTRManager {
                 })
             }
 
-            payload = payload.filter(async payload => {
-                return await verifyRPCSignature(payload)
-            })
+            const rpcSignatureValid = await Promise.all(
+                payload.map(entry => verifyRPCSignature(entry)),
+            )
+            payload = payload.filter((_, index) => rpcSignatureValid[index])
 
+            const targetBlock = getSharedState.lastBlockNumber + 1
             const txs = payload.map(vd => ({
                 ...vd.data.transaction,
                 timestamp: BigInt(vd.data.transaction.content.timestamp),
                 nonce: vd.data.transaction.content.nonce,
-                blockNumber: data.blockNumber,
+                blockNumber: targetBlock,
                 reference_block: vd.data.reference_block,
             }))
 
@@ -239,9 +303,12 @@ export class DTRManager {
                 result: 200,
                 response: {
                     message: "Relayed transactions received",
+                    confirmationBlock: targetBlock,
                 },
                 require_reply: false,
-                extra: null,
+                extra: {
+                    confirmationBlock: targetBlock,
+                },
             }
         } catch (error) {
             handleError(error)
@@ -265,19 +332,10 @@ export class DTRManager {
      * @returns RPCResponse
      */
     static async inConsensusHandler(payload: ValidityData[]) {
-        for (const validityData of payload) {
-            DTRManager.validityDataCache.set(
-                validityData.data.transaction.hash,
-                validityData,
-            )
-        }
+        const confirmationBlock = DTRManager.parkedConfirmationBlock
 
-        // INFO: Start the relay waiter
-        if (!DTRManager.isWaitingForBlock) {
-            log.debug(
-                "[inConsensusHandler] not waiting for block, starting relay",
-            )
-            DTRManager.waitForBlockThenRelay()
+        for (const validityData of payload) {
+            DTRManager.cacheForRetry(validityData)
         }
 
         return {
@@ -286,9 +344,10 @@ export class DTRManager {
             response: {
                 message:
                     "Transaction received during consensus, confirmation in next block",
+                confirmationBlock,
             },
             extra: {
-                confirmationBlock: getSharedState.lastBlockNumber + 1,
+                confirmationBlock,
             },
             require_reply: false,
         }
@@ -409,13 +468,10 @@ export class DTRManager {
             }
 
             // Add validated transaction to mempool
-            const { confirmationBlock, error } = await Mempool.addTransaction(
-                {
-                    ...tx,
-                    reference_block: validityData.data.reference_block,
-                },
-                blockNumber,
-            )
+            const { confirmationBlock, error } = await Mempool.addTransaction({
+                ...tx,
+                reference_block: validityData.data.reference_block,
+            })
 
             log.debug(
                 "[receiveRelayedTransaction] Added relayed transaction to mempool: " +
@@ -494,12 +550,44 @@ export class DTRManager {
 
         //INFO: Filter transactions applied in last block
         const lastBlockTxs = await Chain.getLastBlockTransactionSet()
-        const txsToRelay = txs.filter(
-            tx => !lastBlockTxs.has(tx.data.transaction.hash),
-        )
+        const staleCutoff = deepWindowCutoff(getSharedState.lastBlockNumber)
+        const txsToRelay: ValidityData[] = []
+
+        for (const tx of txs) {
+            const txhash = tx.data.transaction.hash
+
+            if (lastBlockTxs.has(txhash)) {
+                DTRManager.validityDataCache.delete(txhash)
+                continue
+            }
+
+            if (tx.data.reference_block < staleCutoff) {
+                log.warning(
+                    `[DTR] Dropping ${txhash}: reference block ` +
+                        `${tx.data.reference_block} is below the deep window cutoff ${staleCutoff}`,
+                )
+                DTRManager.validityDataCache.delete(txhash)
+                continue
+            }
+
+            txsToRelay.push(tx)
+        }
+
+        if (txsToRelay.length === 0) {
+            return
+        }
 
         // if we're up next, keep the transactions
         if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
+            if (getSharedState.inConsensusLoop) {
+                log.debug(
+                    "[waitForBlockThenRelay] still in the consensus loop, " +
+                        "holding transactions until the next block",
+                )
+                DTRManager.ensureRelayScheduled()
+                return
+            }
+
             const res = await Mempool.lock.runExclusive(
                 async () =>
                     await this.receiveRelayedTransactions({

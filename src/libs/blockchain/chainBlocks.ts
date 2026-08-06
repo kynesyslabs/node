@@ -489,6 +489,14 @@ export async function insertBlock(
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
             getSharedState.lastBlockInsertedAt = Date.now()
+
+            void import("@/libs/network/dtr/dtrmanager")
+                .then(dtr => dtr.DTRManager.releaseDTRWaiter(block))
+                .catch(e =>
+                    log.warning(
+                        `[insertBlock] DTR relay release after block ${block.number} failed: ${(e as Error).message}`,
+                    ),
+                )
         }
 
         // Post-commit refresh: rolled-back tx → no-op; committed tx →

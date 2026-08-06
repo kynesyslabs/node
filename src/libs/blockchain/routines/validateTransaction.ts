@@ -96,8 +96,7 @@ export async function confirmTransaction(
             "[Tx Validation] [NONCE ERROR] Transaction nonce error. Expected >=" +
             (currentNonce + 1) +
             ", got: " +
-            tx.content.nonce +
-            "\n"
+            tx.content.nonce
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
