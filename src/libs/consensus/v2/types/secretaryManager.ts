@@ -69,6 +69,7 @@ export default class SecretaryManager {
             blockRef: lastBlockNumber + 1,
         }
         this.unresponsiveMembers = new Set<string>()
+        this.registerUnderShardBlockRef()
 
         // Reusing the method to create the members
         this.shard.members = await getShard(cVSA)
@@ -1080,11 +1081,39 @@ export default class SecretaryManager {
             if (initialize) {
                 SecretaryManager.instances.set(blockRef, new SecretaryManager())
             } else {
+                log.debug(
+                    `[SECRETARY] No manager instance for block ${blockRef}. Known blocks: ${JSON.stringify(
+                        Array.from(SecretaryManager.instances.keys()),
+                    )}`,
+                )
                 return null
             }
         }
 
         return SecretaryManager.instances.get(blockRef)
+    }
+
+    /**
+     * Files this instance under `shard.blockRef`, dropping any stale key it was
+     * registered with.
+     *
+     * consensusRoutine registers the instance under the block ref it samples
+     * before syncing, but `shard.blockRef` is derived after the sync. If the
+     * node ingested a block in between, the two diverge — and every message on
+     * the wire (greenlight, setValidatorPhase) carries `shard.blockRef`, so
+     * lookups from the request handlers miss.
+     */
+    private registerUnderShardBlockRef() {
+        for (const [key, instance] of SecretaryManager.instances) {
+            if (instance === this && key !== this.shard.blockRef) {
+                SecretaryManager.instances.delete(key)
+                log.warning(
+                    `[SECRETARY] Re-keyed the manager instance from block ${key} to ${this.shard.blockRef}`,
+                )
+            }
+        }
+
+        SecretaryManager.instances.set(this.shard.blockRef, this)
     }
 
     /**
