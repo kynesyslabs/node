@@ -104,7 +104,9 @@ async function mainLoopCycle() {
 
     // ANCHOR Check if we have to forge the block now
     const isConsensusTimeReached = await consensusTime.checkConsensusTime()
-
+    log.debug("Is consensus time reached:", isConsensusTimeReached)
+    log.debug("Sync status:", getSharedState.syncStatus)
+    log.debug("Starting consensus:", getSharedState.startingConsensus)
     // ? Move this to a standalone method?
     // NOTE We need both the consensus time and the sync status to be true, to avoid
     // conflicts with the sync loop that would alead to a failure in the consensus mechanism.

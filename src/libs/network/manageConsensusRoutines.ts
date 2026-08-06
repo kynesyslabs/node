@@ -35,6 +35,73 @@ export interface ConsensusMethod {
     params: any[]
 }
 
+/**
+ * Delivers a greenlight to the SecretaryManager for the referenced block.
+ *
+ * Returns null (and leaves `response` untouched) when no manager exists for
+ * that blockRef, so the caller can decide how to answer a greenlight for a
+ * round we are not running.
+ */
+async function handleGreenlight(
+    sender: string,
+    params: ConsensusMethod["params"],
+    response: RPCResponse,
+): Promise<RPCResponse | null> {
+    try {
+        // TODO: Check if the sender is the secretary (without verifying the signature
+        // as we have already done that) in validateHeaders
+        const [blockRef, timestamp, validatorPhase] = params as [
+            number, // blockRef
+            number, // timestamp
+            number, // validatorPhase
+        ]
+
+        const manager = SecretaryManager.getInstance(blockRef)
+
+        if (!manager) {
+            return null
+        }
+
+        // INFO: Check if the sender is the secretary
+        if (sender !== manager.secretary.identity) {
+            log.debug("returning a 401")
+            response.result = 401
+            response.response = "Greenlight not accepted"
+            response.extra = "Secretary identity mismatch"
+            response.require_reply = false
+            return response
+        }
+
+        // INFO: Act on the greenlight
+        // Audit-sweep batch B (greploop iter 5): added missing
+        // `await`. receiveGreenLight is async, so the previous
+        // call site assigned a Promise<boolean> to
+        // `greenLightReceived` — which is always truthy, so the
+        // response.result was always 200 regardless of the
+        // actual return value. After the batch B change that
+        // converted an unreachable-state process.exit(1) inside
+        // receiveGreenLight to `return false`, the unawaited call
+        // was silently masking that 400-class failure as a 200.
+        const greenLightReceived = await manager.receiveGreenLight(
+            timestamp,
+            validatorPhase,
+        )
+        response.result = greenLightReceived ? 200 : 400
+        response.response = greenLightReceived
+            ? `Greenlight for phase: ${validatorPhase} received with block timestamp: ${timestamp}`
+            : "Error receiving greenlight"
+        return response
+    } catch (error) {
+        log.error(
+            "[manageConsensusRoutines] Error receiving the greenlight: " +
+                error,
+        )
+        response.result = 500
+        response.response = "Error receiving greenlight"
+        return response
+    }
+}
+
 export default async function manageConsensusRoutines(
     sender: string,
     payload: ConsensusMethod,
@@ -78,6 +145,24 @@ export default async function manageConsensusRoutines(
         log.info(
             "[manageConsensusRoutines] We are within the consensus time window",
         )
+    }
+
+    // INFO: A greenlight for a round we are already running is delivered before
+    // the checks below. It is exempt from both of them (the isBehindNetwork gate
+    // and the inShardCheck), so computing them first only adds latency and
+    // failure modes between the secretary and a validator blocked on the
+    // GREEN_LIGHT waiter. If we have no manager for that blockRef, we fall
+    // through to the full path and answer from the switch as before.
+    if (payload.method === "greenlight") {
+        const greenlightResponse = await handleGreenlight(
+            sender,
+            payload.params,
+            response,
+        )
+
+        if (greenlightResponse) {
+            return greenlightResponse
+        }
     }
 
     const isBehindNetwork = await isNetworkAhead("manageConsensusRoutines")
@@ -180,28 +265,6 @@ export default async function manageConsensusRoutines(
 
     // NOTE Each method has its own logic to be implemented
     switch (payload.method) {
-        /*
-        // ANCHOR Old methods for consensus v1
-        case "vote":
-            return await manageVote(
-                payload.params[0] as VoteRequest,
-                payload.params[1] as (response: RPCResponse) => void,
-            )
-        case "voteRequest":
-            return await ServerHandlers.handleVoteRequest(
-                payload.params[0].timestamp,
-            )
-        */
-
-        // ANCHOR New methods for consensus v2
-
-        // REVIEW Secretary system
-
-        /* SECTION Secretary communication methods */
-        // REVIEW The secretary should be able to communicate with the other shard members through these methods
-
-        /* SECTION Consensus methods */
-
         case "getValidatorTimestamp":
             response.result = 200
             // REVIEW Using the current UTC time as the validator timestamp (affect average time of the blocks)
@@ -253,13 +316,11 @@ export default async function manageConsensusRoutines(
                 const [phase, seed, blockRef] = payload.params
                 const manager = SecretaryManager.getInstance(blockRef)
 
-                //INFO: If the manager class for that block is not found, assume peer is behind on the consensus
-                // return a greenlight to unblock peer
                 if (!manager) {
-                    response.result = 200
+                    response.result = 400
                     response.response = "Secretary manager not found"
                     response.extra = {
-                        greenlight: true,
+                        greenlight: false,
                     }
 
                     return response
@@ -370,54 +431,22 @@ export default async function manageConsensusRoutines(
         }
 
         case "greenlight": {
-            // TODO: Check if the sender is the secretary (without verifying the signature
-            // as we have already done that) in validateHeaders
-            const [blockRef, timestamp, validatorPhase] = payload.params as [
-                number, // blockRef
-                number, // timestamp
-                number, // validatorPhase
-            ]
+            const greenlightResponse = await handleGreenlight(
+                sender,
+                payload.params,
+                response,
+            )
 
-            const manager = SecretaryManager.getInstance(blockRef)
+            if (greenlightResponse) {
+                return greenlightResponse
+            }
 
             // INFO: If the manager class for that block is not found, assume peer is behind on the consensus
             // return a 200 to unblock peer
-            if (!manager) {
-                log.debug("returning a fake 200")
-                response.result = 200
-                response.response = "Secretary manager not found"
-                return response
-            }
-
-            // INFO: Check if the sender is the secretary
-            if (sender !== manager.secretary.identity) {
-                log.debug("returning a 401")
-                response.result = 401
-                response.response = "Greenlight not accepted"
-                response.extra = "Secretary identity mismatch"
-                response.require_reply = false
-                return response
-            }
-
-            // INFO: Act on the greenlight
-            // Audit-sweep batch B (greploop iter 5): added missing
-            // `await`. receiveGreenLight is async, so the previous
-            // call site assigned a Promise<boolean> to
-            // `greenLightReceived` — which is always truthy, so the
-            // response.result was always 200 regardless of the
-            // actual return value. After the batch B change that
-            // converted an unreachable-state process.exit(1) inside
-            // receiveGreenLight to `return false`, the unawaited call
-            // was silently masking that 400-class failure as a 200.
-            const greenLightReceived = await manager.receiveGreenLight(
-                timestamp,
-                validatorPhase,
-            )
-            response.result = greenLightReceived ? 200 : 400
-            response.response = greenLightReceived
-                ? `Greenlight for phase: ${validatorPhase} received with block timestamp: ${timestamp}`
-                : "Error receiving greenlight"
-            break
+            log.debug("returning a fake 200")
+            response.result = 400
+            response.response = "Secretary manager not found"
+            return response
         }
 
         // SECTION: Getter handlers

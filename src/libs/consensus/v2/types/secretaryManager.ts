@@ -228,6 +228,7 @@ export default class SecretaryManager {
                 log.error(
                     "[SECRETARY ROUTINE] Error waiting for SET_WAIT_STATUS:",
                 )
+                process.exit(0)
 
                 log.error(error as string)
 
