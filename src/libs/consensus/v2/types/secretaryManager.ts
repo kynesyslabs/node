@@ -112,6 +112,8 @@ export default class SecretaryManager {
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
+        log.only(`Last block number: ${lastBlockNumber}`)
+        log.only(`We are forging block ${this.shard.blockRef}`)
         log.only(
             `SHARD: ${JSON.stringify(
                 this.shard.members.map(m => m.connection.string),
