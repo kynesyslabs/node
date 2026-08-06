@@ -91,7 +91,7 @@ export async function consensusRoutine(): Promise<void> {
         )
         return
     }
-    const blockRef = getSharedState.lastBlockNumber + 1
+    let blockRef = getSharedState.lastBlockNumber + 1
     const manager = SecretaryManager.getInstance(blockRef, true)
 
     // Defining the variables needed for rolling back the GCREdits
@@ -135,6 +135,8 @@ export async function consensusRoutine(): Promise<void> {
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
         await initializeShard(blockRef)
+        blockRef = manager.shard.blockRef
+
         preventForgingEnded(blockRef)
         log.only(`Forgin block: ${manager.shard.blockRef}`)
         log.only("[consensusRoutine] We are in the shard, creating the block")
