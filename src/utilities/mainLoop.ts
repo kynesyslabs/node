@@ -102,6 +102,13 @@ async function mainLoopCycle() {
     // await PeerManager.getInstance().sayHelloToAllPeers()
     // SECTION Todo list for a typical consensus operation
 
+    if (await isNetworkAhead("mainLoop")) {
+        fastSync([], "networkAheadVeto").catch(e =>
+            handleError(e, "SYNC", { source: "networkAheadVeto" }),
+        )
+        return
+    }
+
     // ANCHOR Check if we have to forge the block now
     const isConsensusTimeReached = await consensusTime.checkConsensusTime()
     log.debug("Is consensus time reached:", isConsensusTimeReached)
@@ -116,12 +123,6 @@ async function mainLoopCycle() {
         getSharedState.syncStatus &&
         !getSharedState.startingConsensus
     ) {
-        if (await isNetworkAhead("mainLoop")) {
-            fastSync([], "networkAheadVeto").catch(e =>
-                handleError(e, "SYNC", { source: "networkAheadVeto" }),
-            )
-            return
-        }
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
         log.debug("[MAIN LOOP] Consensus time reached and sync status is true")

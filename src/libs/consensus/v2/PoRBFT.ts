@@ -89,6 +89,7 @@ export async function consensusRoutine(): Promise<void> {
             "[consensusRoutine] Consensus loop already running: keeping it running (returning)",
             false,
         )
+        getSharedState.startingConsensus = false
         return
     }
     let blockRef = getSharedState.lastBlockNumber + 1

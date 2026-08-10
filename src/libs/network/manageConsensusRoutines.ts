@@ -13,11 +13,11 @@ import {
     isConsensusAlreadyRunning,
 } from "../consensus/v2/PoRBFT"
 import log from "src/utilities/logger"
-import Cryptography from "../crypto/cryptography"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Waiter } from "src/utilities/waiter"
 import { PeerManager } from "../peer"
-import Chain from "../blockchain/chain"
+import { fastSync } from "../blockchain/routines/Sync"
+import { handleError } from "src/errors/handleError"
 
 export interface ConsensusMethod {
     method:
@@ -166,6 +166,12 @@ export default async function manageConsensusRoutines(
     }
 
     const isBehindNetwork = await isNetworkAhead("manageConsensusRoutines")
+    if (isBehindNetwork) {
+        fastSync([], "manageConsensusRoutines").catch(e =>
+            handleError(e, "SYNC", { source: "manageConsensusRoutines" }),
+        )
+    }
+
     if (
         isBehindNetwork &&
         payload.method !== "greenlight" &&
