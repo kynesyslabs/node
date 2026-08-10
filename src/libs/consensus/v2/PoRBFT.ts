@@ -948,10 +948,11 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
     const minValidators = Math.floor((getSharedState.shardSize * 2) / 3) + 1
     const isMinimumValidators = pro >= minValidators
 
-    if (totalVotes >= minValidators && pro < threshold) {
-        log.error("[consensusRoutine] Block is not valid")
-        process.exit(0)
-    }
+    // DEBUG: DO NOT REMOVE COMMENTED CODE
+    // if (totalVotes >= minValidators && pro < threshold) {
+    //     log.error("[consensusRoutine] Block is not valid")
+    //     process.exit(0)
+    // }
 
     return isMinimumValidators && pro >= threshold
 }
