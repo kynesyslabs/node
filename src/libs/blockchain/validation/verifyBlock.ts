@@ -26,6 +26,28 @@ export interface BlockVerification {
     reason?: string
 }
 
+export function checkTimestampAgainstParent(
+    blockTimestamp: unknown,
+    parentTimestamp: unknown,
+): BlockVerification {
+    if (typeof blockTimestamp !== "number") {
+        return { valid: false, reason: "block has no timestamp" }
+    }
+    if (typeof parentTimestamp !== "number") {
+        return { valid: true }
+    }
+
+    const minDelta = getSharedState.getBlockTimestampMinDelta()
+    if (blockTimestamp < parentTimestamp + minDelta) {
+        return {
+            valid: false,
+            reason: `block timestamp ${blockTimestamp} is not after parent timestamp ${parentTimestamp} (+${minDelta}s)`,
+        }
+    }
+
+    return { valid: true }
+}
+
 /**
  * Verify a synced block's hash + signature quorum.
  */
@@ -73,17 +95,12 @@ export async function verifyBlock(block: Block): Promise<BlockVerification> {
 
     const blockTimestamp = block.content.timestamp
     const prevTimestamp = prevBlock.content?.timestamp
-    if (typeof blockTimestamp !== "number") {
-        return { valid: false, reason: "block has no timestamp" }
-    }
-    if (typeof prevTimestamp === "number") {
-        const minDelta = getSharedState.getBlockTimestampMinDelta()
-        if (blockTimestamp < prevTimestamp + minDelta) {
-            return {
-                valid: false,
-                reason: `block timestamp ${blockTimestamp} is not after parent timestamp ${prevTimestamp} (+${minDelta}s)`,
-            }
-        }
+    const parentVerdict = checkTimestampAgainstParent(
+        blockTimestamp,
+        prevTimestamp,
+    )
+    if (!parentVerdict.valid) {
+        return parentVerdict
     }
     const tolerance = getSharedState.getBlockTimestampTolerance()
     const verifierNow = getNetworkTimestamp()

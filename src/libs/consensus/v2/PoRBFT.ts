@@ -18,7 +18,7 @@ import {
     ForgingEndedError,
     NotInShardError,
 } from "@/errors"
-import HandleGCR, { normalizePubkey } from "src/libs/blockchain/gcr/handleGCR"
+import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
 import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
@@ -28,7 +28,6 @@ import {
     waitForPeerStatus,
 } from "@/libs/blockchain/routines/Sync"
 import { isNetworkAhead } from "./routines/networkAheadVeto"
-import { MempoolTx } from "@/model/entities/Mempool"
 import {
     filterMempoolByNonce,
     filterMempoolByRefBlock,
@@ -207,20 +206,14 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: At this point, we should have the secretary block timestamp
         // if we're connected to the secretary and recieved atleast one successful request from them
-        if (manager.blockTimestamp) {
-            getSharedState.lastConsensusTime = manager.blockTimestamp
-        } else {
-            // INFO: This should never happen
-            // If it does, request the block timestamp from the secretary
+        if (!manager.blockTimestamp) {
             log.error(
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
             preventForgingEnded(blockRef)
 
-            if (blockTimestamp) {
-                getSharedState.lastConsensusTime = blockTimestamp
-            } else {
+            if (!blockTimestamp) {
                 log.error(
                     "[CONSENSUS ROUTINE] Block timestamp could not be resolved, exiting the consensus routine",
                 )
@@ -230,16 +223,17 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
-        const block = await forgeBlock(blockTxs, mergedPeerlist) // NOTE The GCR hash is calculated here and added to the block
+        const block = await forgeBlock(
+            blockTxs,
+            manager.blockTimestamp,
+            mergedPeerlist,
+        ) // NOTE The GCR hash is calculated here and added to the block
         preventForgingEnded(blockRef)
         if (await isNetworkAhead("preVote")) {
             throw new AbortConsensusError(
                 "Network is ahead of us, aborting before voting on the block",
             )
         }
-
-        // REVIEW Set last consensus time to the current block timestamp
-        getSharedState.lastConsensusTime = block.content.timestamp
 
         // INFO: CONSENSUS ACTION 6: Vote on the block
         const responsiveMembers = manager.shard.members.filter(
@@ -882,6 +876,7 @@ async function applyGCREditsFromMergedMempool(
  */
 async function forgeBlock(
     orderedTransactions: Transaction[],
+    blockTimestamp: number,
     peerlist: string[] = [],
 ): Promise<Block> {
     const previousBlockHash = await Chain.getLastBlockHash()
@@ -896,6 +891,7 @@ async function forgeBlock(
         previousBlockHash,
         lastBlockNumber + 1,
         peerlist,
+        blockTimestamp,
     )
 
     // await updateValidatorStatus("forgedBlock", true, false, true)
@@ -1037,7 +1033,6 @@ async function updateValidatorPhase(
 function cleanupConsensusState(): void {
     txMap.clear()
     getSharedState.candidateBlock = null
-    getSharedState.lastConsensusTime = getSharedState.currentUTCTime // REVIEW Using the current UTC time as the last consensus time
     getSharedState.inConsensusLoop = false
     getSharedState.consensusMode = false
 

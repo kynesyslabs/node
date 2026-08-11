@@ -291,7 +291,6 @@ export default class SharedState {
                 .keypair.publicKey}`,
         )
     }
-    lastConsensusTime = 0
 
     // SECTION Consensus states
     candidateBlock: Block
@@ -427,13 +426,6 @@ export default class SharedState {
             ? Math.floor(this.currentTimestamp / 1000)
             : this.currentTimestamp
         return timestamp
-    }
-
-    public async getLastConsensusTime(): Promise<number> {
-        // Retrieve the last block and get the timestamp of it
-        const lastBlock = await chain.getLastBlock()
-        this.lastConsensusTime = lastBlock.content.timestamp
-        return this.lastConsensusTime
     }
 
     // ANCHOR Dynamic configurations (customizable in .commons)

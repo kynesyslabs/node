@@ -1,6 +1,7 @@
 import { getSharedState } from "src/utilities/sharedState"
 import { consensusRoutine } from "../PoRBFT"
 import log from "src/utilities/logger"
+import { checkConsensusTime } from "src/libs/consensus/routines/consensusTime"
 // import { getShardManager } from "./shardManager"
 
 export default async function ensureCandidateBlockFormed(): Promise<boolean> {
@@ -10,6 +11,12 @@ export default async function ensureCandidateBlockFormed(): Promise<boolean> {
             "Candidate block not formed yet, forcing the consensus routine...",
         )
         if (!getSharedState.inConsensusLoop) {
+            if (!(await checkConsensusTime(true, 2))) {
+                log.warning(
+                    "[ensureCandidateBlockFormed] Consensus time not reached: refusing to force a round",
+                )
+                return false
+            }
             await consensusRoutine()
         } else {
             log.info(

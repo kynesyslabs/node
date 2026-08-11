@@ -5,12 +5,14 @@ import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
-import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import getShard from "./getShard"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
+import Chain from "@/libs/blockchain/chain"
+import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -62,7 +64,26 @@ export default async function manageProposeBlockHash(
         return response
     }
 
-    const ourCandidateHash = getSharedState.candidateBlock.hash
+    const candidate = getSharedState.candidateBlock
+    const parentBlock = await Chain.getBlockByNumber(candidate.number - 1)
+    const timestampVerdict = checkTimestampAgainstParent(
+        candidate.content.timestamp,
+        parentBlock?.content?.timestamp,
+    )
+    if (!timestampVerdict.valid) {
+        log.error(
+            `[manageProposeBlockHash] Refusing to sign block ${candidate.number}: ${timestampVerdict.reason}`,
+        )
+        response.result = 409
+        response.response = getSharedState.publicKeyHex
+        response.extra = {
+            message: "Candidate block timestamp is invalid",
+            reason: timestampVerdict.reason,
+        }
+        return response
+    }
+
+    const ourCandidateHash = candidate.hash
     if (ourCandidateHash === blockHash) {
         log.info(
             "[manageProposeBlockHash] Hash corresponds to our candidate block",

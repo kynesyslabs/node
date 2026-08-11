@@ -6,9 +6,33 @@ import log from "src/utilities/logger"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import hashGCRTables from "src/libs/blockchain/gcr/gcr_routines/hashGCR"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { serializeBlockContent } from "@/forks"
+import Chain from "src/libs/blockchain/chain"
+
+export async function resolveBlockTimestamp(
+    secretaryTimestamp: number,
+    blockNumber: number,
+): Promise<number> {
+    const parentBlock = await Chain.getBlockByNumber(blockNumber - 1)
+    const parentTimestamp = parentBlock?.content?.timestamp
+
+    if (typeof parentTimestamp !== "number") {
+        return secretaryTimestamp
+    }
+
+    const floor = parentTimestamp + getSharedState.getConsensusTime()
+    if (secretaryTimestamp >= floor) {
+        return secretaryTimestamp
+    }
+
+    log.warning(
+        `[createBlock] Secretary timestamp ${secretaryTimestamp} for block ${blockNumber} ` +
+            `is below the floor of ${floor} (parent ${parentTimestamp} + ${getSharedState.getConsensusTime()}s): clamping`,
+    )
+    return floor
+}
 
 export async function createBlock(
     orderedTransactions: Transaction[],
@@ -16,6 +40,7 @@ export async function createBlock(
     previousBlockHash: string,
     blockNumber: number,
     peerlist: string[],
+    blockTimestamp: number,
 ): Promise<Block> {
     if (getSharedState.candidateBlock) {
         log.warning(
@@ -35,11 +60,15 @@ export async function createBlock(
     block.proposer = commonValidatorSeed // This is the shard identifier
     block.number = blockNumber
     block.content.native_tables_hashes = await hashNativeTables()
-    block.content.timestamp = getSharedState.lastConsensusTime
-    block.content.timestamp = getSharedState.lastConsensusTime
+    block.content.timestamp = await resolveBlockTimestamp(
+        blockTimestamp,
+        blockNumber,
+    )
     // REVIEW: P2 — route block hashing through the fork-aware serializer.
     // The block's own number is the correct height for gating.
-    block.hash = Hashing.sha256(serializeBlockContent(block.content, blockNumber))
+    block.hash = Hashing.sha256(
+        serializeBlockContent(block.content, blockNumber),
+    )
     // Signing the block and adding the signature to the block validation data
 
     const blockSignature = await TxValidatorPool.getInstance().sign(

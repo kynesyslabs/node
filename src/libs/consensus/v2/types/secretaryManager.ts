@@ -50,6 +50,7 @@ export default class SecretaryManager {
     public runSecretaryRoutine = false
     public blockTimestamp: number = null
     public unresponsiveMembers = new Set<string>()
+    public ended = false
 
     constructor() {}
 
@@ -69,6 +70,7 @@ export default class SecretaryManager {
             blockRef: lastBlockNumber + 1,
         }
         this.unresponsiveMembers = new Set<string>()
+        this.blockTimestamp = null
         this.registerUnderShardBlockRef()
 
         // Reusing the method to create the members
@@ -994,6 +996,7 @@ export default class SecretaryManager {
 
     public async endConsensusRoutine() {
         log.debug("Ending the consensus routine")
+        this.ended = true
         let manager: SecretaryManager = null
 
         if (this.shard) {
@@ -1077,7 +1080,9 @@ export default class SecretaryManager {
             blockRef = getSharedState.lastBlockNumber + 1
         }
 
-        if (!SecretaryManager.instances.get(blockRef)) {
+        const existing = SecretaryManager.instances.get(blockRef)
+
+        if (!existing || (existing.ended && initialize)) {
             if (initialize) {
                 SecretaryManager.instances.set(blockRef, new SecretaryManager())
             } else {
