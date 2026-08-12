@@ -13,6 +13,7 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { L2PSMessage } from "./entities/L2PSMessage"
+import { canonicalizeKey } from "./keys"
 import type { SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
@@ -118,8 +119,11 @@ export class L2PSMessagingService {
     ): Promise<string | null> {
         const msg = new L2PSMessage()
         msg.id = opts.messageId
-        msg.fromKey = opts.fromKey
-        msg.toKey = opts.toKey
+        // Canonicalise at the persistence boundary: every row lands under one
+        // identity regardless of how the caller formatted the key, so canonical
+        // reads (getQueuedMessages / getHistory) always match.
+        msg.fromKey = canonicalizeKey(opts.fromKey)
+        msg.toKey = canonicalizeKey(opts.toKey)
         msg.l2psUid = opts.l2psUid
         msg.messageHash = opts.messageHash
         msg.encrypted = opts.encrypted
@@ -275,8 +279,10 @@ export class L2PSMessagingService {
      */
     async getQueuedMessages(toKey: string, l2psUid: string): Promise<StoredMessage[]> {
         const repo = dataSource.getRepository(L2PSMessage)
+        // Rows are stored canonically (persist boundary + one-shot migration),
+        // so a single canonical lookup covers every key variant.
         const messages = await repo.find({
-            where: { toKey, l2psUid, status: "queued" },
+            where: { toKey: canonicalizeKey(toKey), l2psUid, status: "queued" },
             order: { timestamp: "ASC" },
         })
         return messages.map(m => ({
@@ -336,11 +342,15 @@ export class L2PSMessagingService {
         limit = 50,
     ): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
         const repo = dataSource.getRepository(L2PSMessage)
+        // Rows are stored canonically, so both sides of the pair must be
+        // canonicalised for the lookup to match.
+        const a = canonicalizeKey(peerA)
+        const b = canonicalizeKey(peerB)
         const qb = repo.createQueryBuilder("m")
             .where("m.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere(
                 "((m.from_key = :a AND m.to_key = :b) OR (m.from_key = :b AND m.to_key = :a))",
-                { a: peerA, b: peerB },
+                { a, b },
             )
             .orderBy("m.timestamp", "DESC")
             .take(limit + 1)

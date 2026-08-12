@@ -11,6 +11,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { L2PSMessagingService } from "./L2PSMessagingService"
+import { canonicalizeKey } from "./keys"
 import type {
     ConnectedPeer,
     ProtocolFrame,
@@ -31,6 +32,10 @@ interface WSData {
     publicKey: string | null
     l2psUid: string | null
 }
+
+// Re-exported from ./keys so external callers (and tests) keep importing it
+// from the server module; the service imports it from ./keys directly.
+export { canonicalizeKey }
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
@@ -129,9 +134,12 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Accept an optional 0x prefix; the SDK address/signature are 0x-prefixed.
-        const publicKeyHex = publicKey.startsWith("0x") ? publicKey.slice(2) : publicKey
-        if (publicKeyHex.length < MIN_PUBLIC_KEY_LENGTH || !/^[0-9a-fA-F]+$/.test(publicKeyHex)) {
+        // Canonicalise the key (strip 0x/0X, lowercase) so `0xABCD`, `0Xabcd` and
+        // `abcd` all resolve to one peer identity — otherwise the same key
+        // registers as two peers. The raw `publicKey` is kept only for the proof
+        // message below, which the client signed over its own representation.
+        const canonicalKey = canonicalizeKey(publicKey)
+        if (canonicalKey.length < MIN_PUBLIC_KEY_LENGTH || !/^[0-9a-f]+$/.test(canonicalKey)) {
             this.sendError(ws, "INVALID_MESSAGE", "Invalid publicKey format (expected hex)", msg.requestId)
             return
         }
@@ -161,17 +169,23 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Remove old connection if re-registering
-        const existing = this.peers.get(publicKey)
+        // Remove old connection if re-registering (canonical identity)
+        const existing = this.peers.get(canonicalKey)
         if (existing) {
-            try { (existing.ws as ServerWebSocket<WSData>).close() } catch {}
+            // Closing an already-dead socket can throw; we're replacing this
+            // connection regardless, so a close failure here is irrelevant.
+            try {
+                (existing.ws as ServerWebSocket<WSData>).close()
+            } catch {
+                /* replaced regardless — ignore */
+            }
         }
 
-        // Register peer
-        ws.data.publicKey = publicKey
+        // Register peer under the canonical identity
+        ws.data.publicKey = canonicalKey
         ws.data.l2psUid = l2psUid
-        this.peers.set(publicKey, {
-            publicKey,
+        this.peers.set(canonicalKey, {
+            publicKey: canonicalKey,
             l2psUid,
             ws,
             connectedAt: Date.now(),
@@ -179,13 +193,13 @@ export class L2PSMessagingServer {
 
         // Get online peers in the same L2PS network
         const onlinePeers = Array.from(this.peers.values())
-            .filter(p => p.l2psUid === l2psUid && p.publicKey !== publicKey)
+            .filter(p => p.l2psUid === l2psUid && p.publicKey !== canonicalKey)
             .map(p => p.publicKey)
 
         // Send registration confirmation
         this.send(ws, {
             type: "registered",
-            payload: { success: true, publicKey, l2psUid, onlinePeers },
+            payload: { success: true, publicKey: canonicalKey, l2psUid, onlinePeers },
             timestamp: Date.now(),
             requestId: msg.requestId,
         })
@@ -196,16 +210,17 @@ export class L2PSMessagingServer {
             if (peer) {
                 this.send(peer.ws as ServerWebSocket<WSData>, {
                     type: "peer_joined",
-                    payload: { publicKey },
+                    payload: { publicKey: canonicalKey },
                     timestamp: Date.now(),
                 })
             }
         }
 
-        // Deliver queued messages
-        await this.deliverQueuedMessages(ws, publicKey, l2psUid)
+        // Deliver queued messages. Rows are stored canonically (persist boundary
+        // + migration), so the canonical identity finds every queued message.
+        await this.deliverQueuedMessages(ws, canonicalKey, l2psUid)
 
-        log.info(`[L2PS-IM] Peer registered: ${publicKey.slice(0, 12)}... on ${l2psUid}`)
+        log.info(`[L2PS-IM] Peer registered: ${canonicalKey.slice(0, 12)}... on ${l2psUid}`)
     }
 
     // ─── Send Message ────────────────────────────────────────────
@@ -222,6 +237,7 @@ export class L2PSMessagingServer {
             this.sendError(ws, "INVALID_MESSAGE", "Missing to, encrypted, or messageHash", msg.requestId)
             return
         }
+        const toKey = canonicalizeKey(to) // canonical recipient identity for routing
 
         if (!encrypted.ciphertext || !encrypted.nonce) {
             this.sendError(ws, "INVALID_MESSAGE", "Encrypted payload must have ciphertext and nonce", msg.requestId)
@@ -233,19 +249,19 @@ export class L2PSMessagingServer {
             return
         }
 
-        if (to === senderKey) {
+        if (toKey === senderKey) {
             this.sendError(ws, "INVALID_MESSAGE", "Cannot send message to yourself", msg.requestId)
             return
         }
 
         const l2psUid = ws.data.l2psUid!
         const messageId = crypto.randomUUID()
-        const recipientPeer = this.peers.get(to)
+        const recipientPeer = this.peers.get(toKey)
         const recipientOnline = !!recipientPeer && recipientPeer.l2psUid === l2psUid
 
         // Process through service (DB + L2PS mempool) before delivering
         const result = await this.service.processMessage(
-            senderKey, to, l2psUid, messageId, messageHash, encrypted, recipientOnline,
+            senderKey, toKey, l2psUid, messageId, messageHash, encrypted, recipientOnline,
         )
 
         if (!result.success) {
@@ -318,6 +334,8 @@ export class L2PSMessagingServer {
             return
         }
 
+        // getHistory canonicalises both keys for the lookup; peerKey stays raw
+        // here because the proof above was signed over the client's own form.
         const l2psUid = ws.data.l2psUid!
         const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit ?? 50)
 
@@ -363,8 +381,8 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Only return peers in the same L2PS network
-        const peer = this.peers.get(targetId)
+        // Only return peers in the same L2PS network (canonical lookup)
+        const peer = this.peers.get(canonicalizeKey(targetId))
         const sameNetwork = peer && peer.l2psUid === ws.data.l2psUid
         this.send(ws, {
             type: "public_key_response",

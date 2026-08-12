@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from "bun:test"
-import { L2PSMessagingServer } from "../L2PSMessagingServer"
+import { L2PSMessagingServer, canonicalizeKey } from "../L2PSMessagingServer"
 import { L2PSMessagingService } from "../L2PSMessagingService"
 
 // ─── Test Helpers ────────────────────────────────────────────────
@@ -306,5 +306,30 @@ describe("Offline Message Rate Limiting", () => {
         counts.delete("sender1")
         expect(counts.has("sender1")).toBe(false)
         expect(counts.get("sender2")).toBe(100)
+    })
+})
+
+describe("Key canonicalisation (external client compatibility, DEM-778)", () => {
+    const KEY = "ab".repeat(32) // 64 lowercase hex chars
+
+    it("treats 0x-prefixed, 0X-prefixed and bare keys as one identity", () => {
+        const bare = canonicalizeKey(KEY)
+        expect(canonicalizeKey("0x" + KEY)).toBe(bare)
+        expect(canonicalizeKey("0X" + KEY)).toBe(bare)
+        expect(bare).toBe(KEY)
+    })
+
+    it("lowercases so casing never splits a peer", () => {
+        expect(canonicalizeKey("0xABCDEF")).toBe("abcdef")
+        expect(canonicalizeKey("ABCDEF")).toBe("abcdef")
+    })
+
+    it("only strips a leading prefix, not an interior 0x", () => {
+        expect(canonicalizeKey("a0xb")).toBe("a0xb")
+    })
+
+    it("is idempotent", () => {
+        const once = canonicalizeKey("0X" + KEY)
+        expect(canonicalizeKey(once)).toBe(once)
     })
 })
