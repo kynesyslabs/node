@@ -6,6 +6,7 @@
  * Also manages offline message storage and delivery.
  */
 
+import { In } from "typeorm"
 import { dataSource } from "@/model/datasource"
 import log from "@/utilities/logger"
 import Transaction from "@/libs/blockchain/transaction"
@@ -13,6 +14,7 @@ import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { L2PSMessage } from "./entities/L2PSMessage"
+import { canonicalizeKey } from "./keys"
 import type { SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
@@ -273,10 +275,15 @@ export class L2PSMessagingService {
     /**
      * Get queued messages for a peer (offline delivery).
      */
-    async getQueuedMessages(toKey: string, l2psUid: string): Promise<StoredMessage[]> {
+    async getQueuedMessages(toKey: string, l2psUid: string, rawKey?: string): Promise<StoredMessage[]> {
         const repo = dataSource.getRepository(L2PSMessage)
+        // New rows are keyed by the canonical identity. Rows queued by an earlier
+        // build under the client's raw key are recovered by also matching the raw
+        // registration form when it differs from the canonical one.
+        const canonical = canonicalizeKey(toKey)
+        const keys = rawKey && rawKey !== canonical ? [canonical, rawKey] : [canonical]
         const messages = await repo.find({
-            where: { toKey, l2psUid, status: "queued" },
+            where: { toKey: In(keys), l2psUid, status: "queued" },
             order: { timestamp: "ASC" },
         })
         return messages.map(m => ({

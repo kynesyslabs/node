@@ -11,6 +11,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { L2PSMessagingService } from "./L2PSMessagingService"
+import { canonicalizeKey } from "./keys"
 import type {
     ConnectedPeer,
     ProtocolFrame,
@@ -32,16 +33,9 @@ interface WSData {
     l2psUid: string | null
 }
 
-/**
- * Canonical peer identity: strip an optional 0x/0X prefix and lowercase, so the
- * same ed25519 key resolves to one identity regardless of how a client formats it.
- * Used for every identity/lookup — NOT for the signed proof, which the client
- * produced over its own representation of the key.
- */
-export function canonicalizeKey(key: string): string {
-    const stripped = key.startsWith("0x") || key.startsWith("0X") ? key.slice(2) : key
-    return stripped.toLowerCase()
-}
+// Re-exported from ./keys so external callers (and tests) keep importing it
+// from the server module; the service imports it from ./keys directly.
+export { canonicalizeKey }
 
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
@@ -216,8 +210,10 @@ export class L2PSMessagingServer {
             }
         }
 
-        // Deliver queued messages
-        await this.deliverQueuedMessages(ws, canonicalKey, l2psUid)
+        // Deliver queued messages. Pass the raw registration key too so rows
+        // queued by an earlier build under a non-canonical recipient key are
+        // still recovered on reconnect.
+        await this.deliverQueuedMessages(ws, canonicalKey, l2psUid, publicKey)
 
         log.info(`[L2PS-IM] Peer registered: ${canonicalKey.slice(0, 12)}... on ${l2psUid}`)
     }
@@ -333,8 +329,12 @@ export class L2PSMessagingServer {
             return
         }
 
+        // Query by the canonical peer identity. Messages are persisted under
+        // canonical keys, so the raw peerKey (kept above for the client's proof)
+        // would match nothing. myKey is already canonical (set at register).
+        const canonicalPeer = canonicalizeKey(peerKey)
         const l2psUid = ws.data.l2psUid!
-        const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit ?? 50)
+        const result = await this.service.getHistory(myKey, canonicalPeer, l2psUid, before, limit ?? 50)
 
         this.send(ws, {
             type: "history_response",
@@ -427,8 +427,9 @@ export class L2PSMessagingServer {
         ws: ServerWebSocket<WSData>,
         toKey: string,
         l2psUid: string,
+        rawKey?: string,
     ): Promise<void> {
-        const queued = await this.service.getQueuedMessages(toKey, l2psUid)
+        const queued = await this.service.getQueuedMessages(toKey, l2psUid, rawKey)
         if (queued.length === 0) return
 
         const deliveredIds: string[] = []
