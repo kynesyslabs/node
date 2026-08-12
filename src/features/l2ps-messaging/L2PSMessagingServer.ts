@@ -172,7 +172,13 @@ export class L2PSMessagingServer {
         // Remove old connection if re-registering (canonical identity)
         const existing = this.peers.get(canonicalKey)
         if (existing) {
-            try { (existing.ws as ServerWebSocket<WSData>).close() } catch {}
+            // Closing an already-dead socket can throw; we're replacing this
+            // connection regardless, so a close failure here is irrelevant.
+            try {
+                (existing.ws as ServerWebSocket<WSData>).close()
+            } catch {
+                /* replaced regardless — ignore */
+            }
         }
 
         // Register peer under the canonical identity
