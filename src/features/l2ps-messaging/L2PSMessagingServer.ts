@@ -210,10 +210,9 @@ export class L2PSMessagingServer {
             }
         }
 
-        // Deliver queued messages. Pass the raw registration key too so rows
-        // queued by an earlier build under a non-canonical recipient key are
-        // still recovered on reconnect.
-        await this.deliverQueuedMessages(ws, canonicalKey, l2psUid, publicKey)
+        // Deliver queued messages. Rows are stored canonically (persist boundary
+        // + migration), so the canonical identity finds every queued message.
+        await this.deliverQueuedMessages(ws, canonicalKey, l2psUid)
 
         log.info(`[L2PS-IM] Peer registered: ${canonicalKey.slice(0, 12)}... on ${l2psUid}`)
     }
@@ -329,12 +328,10 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Query by the canonical peer identity. Messages are persisted under
-        // canonical keys, so the raw peerKey (kept above for the client's proof)
-        // would match nothing. myKey is already canonical (set at register).
-        const canonicalPeer = canonicalizeKey(peerKey)
+        // getHistory canonicalises both keys for the lookup; peerKey stays raw
+        // here because the proof above was signed over the client's own form.
         const l2psUid = ws.data.l2psUid!
-        const result = await this.service.getHistory(myKey, canonicalPeer, l2psUid, before, limit ?? 50)
+        const result = await this.service.getHistory(myKey, peerKey, l2psUid, before, limit ?? 50)
 
         this.send(ws, {
             type: "history_response",
@@ -427,9 +424,8 @@ export class L2PSMessagingServer {
         ws: ServerWebSocket<WSData>,
         toKey: string,
         l2psUid: string,
-        rawKey?: string,
     ): Promise<void> {
-        const queued = await this.service.getQueuedMessages(toKey, l2psUid, rawKey)
+        const queued = await this.service.getQueuedMessages(toKey, l2psUid)
         if (queued.length === 0) return
 
         const deliveredIds: string[] = []

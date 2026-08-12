@@ -6,7 +6,6 @@
  * Also manages offline message storage and delivery.
  */
 
-import { In } from "typeorm"
 import { dataSource } from "@/model/datasource"
 import log from "@/utilities/logger"
 import Transaction from "@/libs/blockchain/transaction"
@@ -120,8 +119,11 @@ export class L2PSMessagingService {
     ): Promise<string | null> {
         const msg = new L2PSMessage()
         msg.id = opts.messageId
-        msg.fromKey = opts.fromKey
-        msg.toKey = opts.toKey
+        // Canonicalise at the persistence boundary: every row lands under one
+        // identity regardless of how the caller formatted the key, so canonical
+        // reads (getQueuedMessages / getHistory) always match.
+        msg.fromKey = canonicalizeKey(opts.fromKey)
+        msg.toKey = canonicalizeKey(opts.toKey)
         msg.l2psUid = opts.l2psUid
         msg.messageHash = opts.messageHash
         msg.encrypted = opts.encrypted
@@ -275,15 +277,12 @@ export class L2PSMessagingService {
     /**
      * Get queued messages for a peer (offline delivery).
      */
-    async getQueuedMessages(toKey: string, l2psUid: string, rawKey?: string): Promise<StoredMessage[]> {
+    async getQueuedMessages(toKey: string, l2psUid: string): Promise<StoredMessage[]> {
         const repo = dataSource.getRepository(L2PSMessage)
-        // New rows are keyed by the canonical identity. Rows queued by an earlier
-        // build under the client's raw key are recovered by also matching the raw
-        // registration form when it differs from the canonical one.
-        const canonical = canonicalizeKey(toKey)
-        const keys = rawKey && rawKey !== canonical ? [canonical, rawKey] : [canonical]
+        // Rows are stored canonically (persist boundary + one-shot migration),
+        // so a single canonical lookup covers every key variant.
         const messages = await repo.find({
-            where: { toKey: In(keys), l2psUid, status: "queued" },
+            where: { toKey: canonicalizeKey(toKey), l2psUid, status: "queued" },
             order: { timestamp: "ASC" },
         })
         return messages.map(m => ({
@@ -343,11 +342,15 @@ export class L2PSMessagingService {
         limit = 50,
     ): Promise<{ messages: StoredMessage[]; hasMore: boolean }> {
         const repo = dataSource.getRepository(L2PSMessage)
+        // Rows are stored canonically, so both sides of the pair must be
+        // canonicalised for the lookup to match.
+        const a = canonicalizeKey(peerA)
+        const b = canonicalizeKey(peerB)
         const qb = repo.createQueryBuilder("m")
             .where("m.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere(
                 "((m.from_key = :a AND m.to_key = :b) OR (m.from_key = :b AND m.to_key = :a))",
-                { a: peerA, b: peerB },
+                { a, b },
             )
             .orderBy("m.timestamp", "DESC")
             .take(limit + 1)
