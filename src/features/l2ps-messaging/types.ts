@@ -64,6 +64,10 @@ export interface ProtocolFrame<T extends string = string> {
     type: T
     payload: Record<string, unknown>
     timestamp: number
+    // Echoed back on the direct response to a request so the client can
+    // correlate it (the SDK peer resolves pending requests by requestId).
+    // Absent on unsolicited frames (incoming message, peer_joined/left).
+    requestId?: string
 }
 
 // ─── Client → Server Messages ────────────────────────────────────

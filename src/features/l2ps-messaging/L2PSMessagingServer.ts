@@ -89,7 +89,7 @@ export class L2PSMessagingServer {
         }
 
         if (!frame.type || typeof frame.type !== "string" || !frame.payload || typeof frame.payload !== "object") {
-            this.sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload")
+            this.sendError(ws, "INVALID_MESSAGE", "Missing or invalid type/payload", frame.requestId)
             return
         }
 
@@ -105,17 +105,17 @@ export class L2PSMessagingServer {
                     await this.handleHistory(ws, frame as HistoryMessage)
                     break
                 case "discover":
-                    this.handleDiscover(ws)
+                    this.handleDiscover(ws, frame.requestId)
                     break
                 case "request_public_key":
-                    this.handleRequestPublicKey(ws, frame.payload.targetId as string)
+                    this.handleRequestPublicKey(ws, frame.payload.targetId as string, frame.requestId)
                     break
                 default:
-                    this.sendError(ws, "INVALID_MESSAGE", `Unknown type: ${frame.type}`)
+                    this.sendError(ws, "INVALID_MESSAGE", `Unknown type: ${frame.type}`, frame.requestId)
             }
         } catch (error) {
             log.error(`[L2PS-IM] Handler error: ${error}`)
-            this.sendError(ws, "INTERNAL_ERROR", "Internal server error")
+            this.sendError(ws, "INTERNAL_ERROR", "Internal server error", frame.requestId)
         }
     }
 
@@ -125,19 +125,21 @@ export class L2PSMessagingServer {
         const { publicKey, l2psUid, proof } = msg.payload
 
         if (!publicKey || !l2psUid || !proof) {
-            this.sendError(ws, "INVALID_MESSAGE", "Missing publicKey, l2psUid, or proof")
+            this.sendError(ws, "INVALID_MESSAGE", "Missing publicKey, l2psUid, or proof", msg.requestId)
             return
         }
 
-        if (publicKey.length < MIN_PUBLIC_KEY_LENGTH || !/^[0-9a-fA-F]+$/.test(publicKey)) {
-            this.sendError(ws, "INVALID_MESSAGE", "Invalid publicKey format (expected hex)")
+        // Accept an optional 0x prefix; the SDK address/signature are 0x-prefixed.
+        const publicKeyHex = publicKey.startsWith("0x") ? publicKey.slice(2) : publicKey
+        if (publicKeyHex.length < MIN_PUBLIC_KEY_LENGTH || !/^[0-9a-fA-F]+$/.test(publicKeyHex)) {
+            this.sendError(ws, "INVALID_MESSAGE", "Invalid publicKey format (expected hex)", msg.requestId)
             return
         }
 
         // Verify L2PS network exists
         const l2ps = await ParallelNetworks.getInstance().getL2PS(l2psUid)
         if (!l2ps) {
-            this.sendError(ws, "L2PS_NOT_FOUND", `L2PS network ${l2psUid} not found`)
+            this.sendError(ws, "L2PS_NOT_FOUND", `L2PS network ${l2psUid} not found`, msg.requestId)
             return
         }
 
@@ -151,11 +153,11 @@ export class L2PSMessagingServer {
                 signature: this.hexToUint8Array(proof),
             })
             if (!valid) {
-                this.sendError(ws, "INVALID_PROOF", "Signature verification failed")
+                this.sendError(ws, "INVALID_PROOF", "Signature verification failed", msg.requestId)
                 return
             }
         } catch (error) {
-            this.sendError(ws, "INVALID_PROOF", `Proof verification error: ${error}`)
+            this.sendError(ws, "INVALID_PROOF", `Proof verification error: ${error}`, msg.requestId)
             return
         }
 
@@ -185,6 +187,7 @@ export class L2PSMessagingServer {
             type: "registered",
             payload: { success: true, publicKey, l2psUid, onlinePeers },
             timestamp: Date.now(),
+            requestId: msg.requestId,
         })
 
         // Notify others of new peer
@@ -210,28 +213,28 @@ export class L2PSMessagingServer {
     private async handleSend(ws: ServerWebSocket<WSData>, msg: SendMessage): Promise<void> {
         const senderKey = ws.data.publicKey
         if (!senderKey) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before sending")
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before sending", msg.requestId)
             return
         }
 
         const { to, encrypted, messageHash } = msg.payload
         if (!to || !encrypted || !messageHash) {
-            this.sendError(ws, "INVALID_MESSAGE", "Missing to, encrypted, or messageHash")
+            this.sendError(ws, "INVALID_MESSAGE", "Missing to, encrypted, or messageHash", msg.requestId)
             return
         }
 
         if (!encrypted.ciphertext || !encrypted.nonce) {
-            this.sendError(ws, "INVALID_MESSAGE", "Encrypted payload must have ciphertext and nonce")
+            this.sendError(ws, "INVALID_MESSAGE", "Encrypted payload must have ciphertext and nonce", msg.requestId)
             return
         }
 
         if (encrypted.ciphertext.length > MAX_CIPHERTEXT_SIZE) {
-            this.sendError(ws, "INVALID_MESSAGE", `Ciphertext too large (max ${MAX_CIPHERTEXT_SIZE} bytes)`)
+            this.sendError(ws, "INVALID_MESSAGE", `Ciphertext too large (max ${MAX_CIPHERTEXT_SIZE} bytes)`, msg.requestId)
             return
         }
 
         if (to === senderKey) {
-            this.sendError(ws, "INVALID_MESSAGE", "Cannot send message to yourself")
+            this.sendError(ws, "INVALID_MESSAGE", "Cannot send message to yourself", msg.requestId)
             return
         }
 
@@ -246,7 +249,7 @@ export class L2PSMessagingServer {
         )
 
         if (!result.success) {
-            this.sendError(ws, "L2PS_SUBMIT_FAILED", result.error)
+            this.sendError(ws, "L2PS_SUBMIT_FAILED", result.error, msg.requestId)
             return
         }
 
@@ -264,12 +267,14 @@ export class L2PSMessagingServer {
                     l2psStatus: result.l2psTxHash ? "submitted" : "failed",
                 },
                 timestamp: Date.now(),
+                requestId: msg.requestId,
             })
         } else {
             this.send(ws, {
                 type: "message_queued",
                 payload: { messageHash, status: "queued" },
                 timestamp: Date.now(),
+                requestId: msg.requestId,
             })
         }
     }
@@ -279,13 +284,13 @@ export class L2PSMessagingServer {
     private async handleHistory(ws: ServerWebSocket<WSData>, msg: HistoryMessage): Promise<void> {
         const myKey = ws.data.publicKey
         if (!myKey) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register first")
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register first", msg.requestId)
             return
         }
 
         const { peerKey, before, limit, proof } = msg.payload
         if (!peerKey || !proof) {
-            this.sendError(ws, "INVALID_MESSAGE", "Missing peerKey or proof")
+            this.sendError(ws, "INVALID_MESSAGE", "Missing peerKey or proof", msg.requestId)
             return
         }
 
@@ -299,7 +304,7 @@ export class L2PSMessagingServer {
                 signature: this.hexToUint8Array(proof),
             })
             if (!valid) {
-                this.sendError(ws, "INVALID_PROOF", "History proof failed")
+                this.sendError(ws, "INVALID_PROOF", "History proof failed", msg.requestId)
                 return
             }
         } catch (error) {
@@ -309,7 +314,7 @@ export class L2PSMessagingServer {
             // misconfigurations — and the silent catch left operators
             // blind to all of them.
             log.warn(`[L2PS-IM] History proof verification error: ${error}`)
-            this.sendError(ws, "INVALID_PROOF", "Proof verification error")
+            this.sendError(ws, "INVALID_PROOF", "Proof verification error", msg.requestId)
             return
         }
 
@@ -320,14 +325,15 @@ export class L2PSMessagingServer {
             type: "history_response",
             payload: { messages: result.messages, hasMore: result.hasMore },
             timestamp: Date.now(),
+            requestId: msg.requestId,
         })
     }
 
     // ─── Discover ────────────────────────────────────────────────
 
-    private handleDiscover(ws: ServerWebSocket<WSData>): void {
+    private handleDiscover(ws: ServerWebSocket<WSData>, requestId?: string): void {
         if (!ws.data.publicKey || !ws.data.l2psUid) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before discovering peers")
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before discovering peers", requestId)
             return
         }
 
@@ -340,19 +346,20 @@ export class L2PSMessagingServer {
             type: "discover_response",
             payload: { peers },
             timestamp: Date.now(),
+            requestId,
         })
     }
 
     // ─── Public Key Request ──────────────────────────────────────
 
-    private handleRequestPublicKey(ws: ServerWebSocket<WSData>, targetId: string): void {
+    private handleRequestPublicKey(ws: ServerWebSocket<WSData>, targetId: string, requestId?: string): void {
         if (!ws.data.publicKey) {
-            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before requesting public keys")
+            this.sendError(ws, "REGISTRATION_REQUIRED", "Register before requesting public keys", requestId)
             return
         }
 
         if (!targetId) {
-            this.sendError(ws, "INVALID_MESSAGE", "Missing targetId")
+            this.sendError(ws, "INVALID_MESSAGE", "Missing targetId", requestId)
             return
         }
 
@@ -366,6 +373,7 @@ export class L2PSMessagingServer {
                 publicKey: sameNetwork ? peer.publicKey : null,
             },
             timestamp: Date.now(),
+            requestId,
         })
     }
 
@@ -450,18 +458,28 @@ export class L2PSMessagingServer {
         }
     }
 
-    private sendError(ws: ServerWebSocket<WSData>, code: ErrorCode, message: string): void {
+    private sendError(
+        ws: ServerWebSocket<WSData>,
+        code: ErrorCode,
+        message: string,
+        requestId?: string,
+    ): void {
         this.send(ws, {
             type: "error",
             payload: { code, message },
             timestamp: Date.now(),
+            requestId,
         })
     }
 
     private hexToUint8Array(hex: string): Uint8Array {
-        const bytes = new Uint8Array(hex.length / 2)
-        for (let i = 0; i < hex.length; i += 2) {
-            bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
+        // Tolerate a leading 0x — the SDK emits 0x-prefixed hex for both
+        // addresses and signatures; without stripping it the bytes are
+        // shifted and every proof verification fails.
+        const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex
+        const bytes = new Uint8Array(clean.length / 2)
+        for (let i = 0; i < clean.length; i += 2) {
+            bytes[i / 2] = parseInt(clean.slice(i, i + 2), 16)
         }
         return bytes
     }
