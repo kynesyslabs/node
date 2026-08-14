@@ -19,7 +19,6 @@ let pool: string[] = []
 const peerMap = new Map<string, any>()
 let onlinePeers: Array<{ identity: string }> = []
 let lastBlockTxSet = new Set<string>()
-let isNextValidator = true
 
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
@@ -111,15 +110,6 @@ jest.mock("@/libs/consensus/v2/routines/getShard", () => ({
     getEligiblePool: async () => pool,
 }))
 
-jest.mock("@/libs/consensus/v2/routines/isValidator", () => ({
-    __esModule: true,
-    default: async () => ({
-        isValidator: isNextValidator,
-        validators: [],
-        lastBlockHash: "hash-100",
-    }),
-}))
-
 jest.mock("@/errors", () => ({
     __esModule: true,
     handleError: jest.fn(),
@@ -192,7 +182,6 @@ beforeEach(() => {
     peerMap.clear()
     onlinePeers = []
     lastBlockTxSet = new Set()
-    isNextValidator = true
     DTRManager.validityDataCache.clear()
 })
 
@@ -277,14 +266,26 @@ describe("aggregateConfirmationBlock", () => {
         } as any
     }
 
-    it("returns the earliest confirmation among accepted responses", () => {
+    it("returns the most common confirmation among accepted responses", () => {
         const results = [
             makeResponse(200, 103),
+            makeResponse(200, 101),
             makeResponse(200, 101),
             makeResponse(200, 102),
         ]
 
         expect(DTRManager.aggregateConfirmationBlock(results)).toBe(101)
+    })
+
+    it("breaks ties toward the later block", () => {
+        const results = [
+            makeResponse(200, 101),
+            makeResponse(200, 101),
+            makeResponse(200, 102),
+            makeResponse(200, 102),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
     })
 
     it("reads confirmations from extra when absent from the body", () => {
@@ -301,6 +302,16 @@ describe("aggregateConfirmationBlock", () => {
         ]
 
         expect(DTRManager.aggregateConfirmationBlock(results)).toBe(103)
+    })
+
+    it("outvotes a single outlier with the majority value", () => {
+        const results = [
+            makeResponse(200, 102, { staged: true }),
+            makeResponse(200, 102, { staged: true }),
+            makeResponse(200, 101),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
     })
 
     it("ignores confirmations at or below the local tip", () => {
@@ -323,34 +334,13 @@ describe("aggregateConfirmationBlock", () => {
         expect(DTRManager.aggregateConfirmationBlock(results)).toBeNull()
     })
 
-    it("prefers staged responses over lower direct-insert confirmations", () => {
-        const results = [
-            makeResponse(200, 101),
-            makeResponse(200, 102, { staged: true }),
-            makeResponse(200, 101),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-
-    it("returns the max among staged responses", () => {
-        const results = [
-            makeResponse(200, 102, { staged: true }),
-            makeResponse(200, 103, { staged: true }),
-            makeResponse(200, 101),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(103)
-        expect(DTRManager.aggregateStagedConfirmation(results)).toBe(103)
-    })
-
-    it("falls back to the direct minimum when staged responses are stale", () => {
+    it("discards stale confirmations before counting", () => {
         const results = [
             makeResponse(200, 99, { staged: true }),
+            makeResponse(200, 99),
             makeResponse(200, 102),
         ]
 
-        expect(DTRManager.aggregateStagedConfirmation(results)).toBeNull()
         expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
     })
 })
@@ -453,21 +443,8 @@ describe("flushStagedToMempool", () => {
         expect(DTRManager.poolSize).toBe(0)
     })
 
-    it("relays flushed transactions when not in the next shard", async () => {
+    it("does not broadcast during the flush", async () => {
         setupPool(12)
-        isNextValidator = false
-        DTRManager.stage(makeValidityData("tx-1"))
-        DTRManager.stage(makeValidityData("tx-2"))
-
-        await DTRManager.flushStagedToMempool()
-        await new Promise(resolve => setImmediate(resolve))
-
-        expect(totalCalls()).toBe(9)
-    })
-
-    it("does not relay flushed transactions when in the next shard", async () => {
-        setupPool(12)
-        isNextValidator = true
         DTRManager.stage(makeValidityData("tx-1"))
         DTRManager.stage(makeValidityData("tx-2"))
 
@@ -475,6 +452,7 @@ describe("flushStagedToMempool", () => {
         await new Promise(resolve => setImmediate(resolve))
 
         expect(totalCalls()).toBe(0)
+        expect(DTRManager.poolSize).toBe(0)
     })
 
     it("accepts self-originated validity data on the single-tx path", async () => {

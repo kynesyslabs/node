@@ -1,6 +1,5 @@
 import Mempool from "../../blockchain/mempool"
 import { getEligiblePool } from "../../consensus/v2/routines/getShard"
-import isValidatorForNextBlock from "../../consensus/v2/routines/isValidator"
 import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
 import { Peer, PeerManager } from "@/libs/peer"
@@ -82,46 +81,43 @@ export class DTRManager {
     }
 
     /**
-     * Max confirmation among validators that staged the broadcast because a
-     * consensus round was running. A staged response proves a round is in
-     * flight past its mempool snapshot, so the transaction cannot make that
-     * round anywhere. Confirmations at or below our own tip come from
-     * lagging peers and are ignored.
-     */
-    static aggregateStagedConfirmation(results: RPCResponse[]): number | null {
-        const floor = getSharedState.lastBlockNumber + 1
-        const candidates = results
-            .filter(
-                res =>
-                    res.result === 200 &&
-                    (res.extra as { staged?: boolean })?.staged === true,
-            )
-            .map(res => DTRManager.readConfirmationBlock(res))
-            .filter((block): block is number => block !== null && block >= floor)
-
-        return candidates.length > 0 ? Math.max(...candidates) : null
-    }
-
-    /**
-     * Confirmation block to advertise for a broadcast. Staged responses win
-     * because they carry the round-in-flight signal that direct inserters
-     * lack; with no staged response, inclusion is decided by the earliest
-     * merge-snapshot admission, so the minimum of the direct acceptances is
-     * the honest estimate.
+     * Confirmation block to advertise for a broadcast: the most common
+     * value among the accepted responses. The majority of the pool shares
+     * the true network view, so the mode discards both stale laggards and
+     * single ahead-of-tip outliers. Ties break to the later block — the
+     * benign error direction (a transaction confirms earlier than promised,
+     * never later). Confirmations at or below our own tip come from lagging
+     * peers and are ignored.
      */
     static aggregateConfirmationBlock(results: RPCResponse[]): number | null {
-        const staged = DTRManager.aggregateStagedConfirmation(results)
-        if (staged !== null) {
-            return staged
-        }
-
         const floor = getSharedState.lastBlockNumber + 1
         const candidates = results
             .filter(res => res.result === 200)
             .map(res => DTRManager.readConfirmationBlock(res))
             .filter((block): block is number => block !== null && block >= floor)
 
-        return candidates.length > 0 ? Math.min(...candidates) : null
+        if (candidates.length === 0) {
+            return null
+        }
+
+        const counts = new Map<number, number>()
+        for (const block of candidates) {
+            counts.set(block, (counts.get(block) ?? 0) + 1)
+        }
+
+        let best: number | null = null
+        let bestCount = 0
+        for (const [block, count] of counts) {
+            if (
+                count > bestCount ||
+                (count === bestCount && best !== null && block > best)
+            ) {
+                best = block
+                bestCount = count
+            }
+        }
+
+        return best
     }
 
     /**
@@ -654,35 +650,10 @@ export class DTRManager {
                         tx.data.transaction.hash,
                     )
                 }
-
-                void DTRManager.relayFlushedIfNotNextValidator(toFlush)
             }
         } catch (error) {
             log.error(
                 "[DTR] Error flushing staged transactions to mempool: " +
-                    (error instanceof Error ? error.message : String(error)),
-            )
-        }
-    }
-
-    /**
-     * Staged transactions only reach a block through this node's own merge
-     * participation. If this node is not in the next shard, relay them so
-     * the shard that will forge holds them.
-     */
-    static async relayFlushedIfNotNextValidator(
-        payload: ValidityData[],
-    ): Promise<void> {
-        try {
-            const { isValidator } = await isValidatorForNextBlock()
-            if (isValidator) {
-                return
-            }
-
-            await DTRManager.broadcastToPool(payload)
-        } catch (error) {
-            log.error(
-                "[DTR] Error relaying flushed transactions: " +
                     (error instanceof Error ? error.message : String(error)),
             )
         }

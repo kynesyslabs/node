@@ -332,13 +332,17 @@ export async function handleExecuteTransaction(
         let relayed = false
 
         if (getSharedState.PROD) {
-            if (getSharedState.inConsensusLoop) {
-                return await DTRManager.inConsensusHandler([validatedData])
+            const inRound = getSharedState.inConsensusLoop
+
+            // The only case that skips the broadcast: we are idle AND our
+            // own merge participation will carry the tx into the next block.
+            let skipBroadcast = false
+            if (!inRound) {
+                const { isValidator } = await isValidatorForNextBlock()
+                skipBroadcast = isValidator
             }
 
-            const { isValidator } = await isValidatorForNextBlock()
-
-            if (!isValidator) {
+            if (!skipBroadcast) {
                 const results = await DTRManager.broadcastToPool([
                     validatedData,
                 ])
@@ -355,6 +359,10 @@ export async function handleExecuteTransaction(
 
                 broadcastConfirmation =
                     DTRManager.aggregateConfirmationBlock(results)
+            }
+
+            if (inRound) {
+                return await DTRManager.inConsensusHandler([validatedData])
             }
         }
 
