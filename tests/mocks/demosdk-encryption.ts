@@ -35,3 +35,9 @@ export function hexToUint8Array(hex: string): Uint8Array {
     const normalized = hex.startsWith("0x") ? hex.slice(2) : hex
     return new Uint8Array(Buffer.from(normalized, "hex"))
 }
+
+export const Hashing = {
+    sha256(input: string): string {
+        return "sha256:" + input
+    },
+}

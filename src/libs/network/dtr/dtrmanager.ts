@@ -100,13 +100,11 @@ export class DTRManager {
             .filter(peer => peer && peer.connection.string)
             .sort(() => Math.random() - 0.5)
 
-        const target = Math.max(
+        const coverageTarget = Math.max(
             1,
-            Math.min(
-                candidates.length,
-                pool.length - getSharedState.shardSize + 1,
-            ),
+            pool.length - getSharedState.shardSize + 1,
         )
+        const target = Math.min(candidates.length, coverageTarget)
 
         const results: RPCResponse[] = []
         let successes = 0
@@ -137,9 +135,9 @@ export class DTRManager {
             }
         }
 
-        if (successes < target) {
+        if (successes < coverageTarget) {
             log.warning(
-                `[DTR] Broadcast reached ${successes}/${target} validators ` +
+                `[DTR] Broadcast reached ${successes}/${coverageTarget} validators ` +
                     `(pool ${pool.length}, reachable ${candidates.length}): ` +
                     "next-shard coverage is not guaranteed",
             )
