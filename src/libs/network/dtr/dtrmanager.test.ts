@@ -253,12 +253,15 @@ describe("aggregateConfirmationBlock", () => {
     function makeResponse(
         result: number,
         confirmationBlock?: number,
-        opts: { inExtra?: boolean } = {},
+        opts: { inExtra?: boolean; staged?: boolean } = {},
     ) {
         return {
             result,
             response: opts.inExtra ? {} : { confirmationBlock },
-            extra: opts.inExtra ? { confirmationBlock } : {},
+            extra: {
+                ...(opts.inExtra ? { confirmationBlock } : {}),
+                ...(opts.staged ? { staged: true } : {}),
+            },
             require_reply: false,
         } as any
     }
@@ -307,6 +310,37 @@ describe("aggregateConfirmationBlock", () => {
         ]
 
         expect(DTRManager.aggregateConfirmationBlock(results)).toBeNull()
+    })
+
+    it("prefers staged responses over lower direct-insert confirmations", () => {
+        const results = [
+            makeResponse(200, 101),
+            makeResponse(200, 102, { staged: true }),
+            makeResponse(200, 101),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
+    })
+
+    it("returns the max among staged responses", () => {
+        const results = [
+            makeResponse(200, 102, { staged: true }),
+            makeResponse(200, 103, { staged: true }),
+            makeResponse(200, 101),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(103)
+        expect(DTRManager.aggregateStagedConfirmation(results)).toBe(103)
+    })
+
+    it("falls back to the direct minimum when staged responses are stale", () => {
+        const results = [
+            makeResponse(200, 99, { staged: true }),
+            makeResponse(200, 102),
+        ]
+
+        expect(DTRManager.aggregateStagedConfirmation(results)).toBeNull()
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
     })
 })
 
@@ -424,6 +458,7 @@ describe("receiveRelayedTransactions", () => {
         expect(res.result).toBe(200)
         expect((res.extra as any).confirmationBlock).toBe(102)
         expect((res.extra as any).lastBlockNumber).toBe(100)
+        expect((res.extra as any).staged).toBe(true)
         expect(DTRManager.validityDataCache.has("tx-1")).toBe(true)
     })
 })

@@ -343,25 +343,33 @@ export async function handleExecuteTransaction(
                 )
             }
 
-            broadcastConfirmation =
-                DTRManager.aggregateConfirmationBlock(results)
-
             if (getSharedState.inConsensusLoop) {
                 const parked = await DTRManager.inConsensusHandler([
                     validatedData,
                 ])
 
-                if (broadcastConfirmation !== null) {
+                const remoteStaged =
+                    DTRManager.aggregateStagedConfirmation(results)
+
+                if (remoteStaged !== null) {
+                    const parkedExtra = parked.extra as {
+                        confirmationBlock: number
+                    }
+                    const confirmation = Math.max(
+                        parkedExtra.confirmationBlock,
+                        remoteStaged,
+                    )
                     ;(
                         parked.response as { confirmationBlock: number }
-                    ).confirmationBlock = broadcastConfirmation
-                    ;(
-                        parked.extra as { confirmationBlock: number }
-                    ).confirmationBlock = broadcastConfirmation
+                    ).confirmationBlock = confirmation
+                    parkedExtra.confirmationBlock = confirmation
                 }
 
                 return parked
             }
+
+            broadcastConfirmation =
+                DTRManager.aggregateConfirmationBlock(results)
         }
 
         try {

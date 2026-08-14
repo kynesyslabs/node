@@ -81,13 +81,39 @@ export class DTRManager {
     }
 
     /**
-     * Earliest confirmation block any validator that accepted the broadcast
-     * advertised. Inclusion is decided by the earliest merge-snapshot
-     * admission across the shard, so the minimum of the accepted responses
-     * models actual inclusion better than the local estimate. Confirmations
-     * at or below our own tip come from lagging peers and are ignored.
+     * Max confirmation among validators that staged the broadcast because a
+     * consensus round was running. A staged response proves a round is in
+     * flight past its mempool snapshot, so the transaction cannot make that
+     * round anywhere. Confirmations at or below our own tip come from
+     * lagging peers and are ignored.
+     */
+    static aggregateStagedConfirmation(results: RPCResponse[]): number | null {
+        const floor = getSharedState.lastBlockNumber + 1
+        const candidates = results
+            .filter(
+                res =>
+                    res.result === 200 &&
+                    (res.extra as { staged?: boolean })?.staged === true,
+            )
+            .map(res => DTRManager.readConfirmationBlock(res))
+            .filter((block): block is number => block !== null && block >= floor)
+
+        return candidates.length > 0 ? Math.max(...candidates) : null
+    }
+
+    /**
+     * Confirmation block to advertise for a broadcast. Staged responses win
+     * because they carry the round-in-flight signal that direct inserters
+     * lack; with no staged response, inclusion is decided by the earliest
+     * merge-snapshot admission, so the minimum of the direct acceptances is
+     * the honest estimate.
      */
     static aggregateConfirmationBlock(results: RPCResponse[]): number | null {
+        const staged = DTRManager.aggregateStagedConfirmation(results)
+        if (staged !== null) {
+            return staged
+        }
+
         const floor = getSharedState.lastBlockNumber + 1
         const candidates = results
             .filter(res => res.result === 200)
@@ -373,6 +399,7 @@ export class DTRManager {
             extra: {
                 confirmationBlock,
                 lastBlockNumber: getSharedState.lastBlockNumber,
+                staged: true,
             },
             require_reply: false,
         }
