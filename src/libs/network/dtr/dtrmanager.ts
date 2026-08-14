@@ -81,6 +81,23 @@ export class DTRManager {
     }
 
     /**
+     * Earliest confirmation block any validator that accepted the broadcast
+     * advertised. Inclusion is decided by the earliest merge-snapshot
+     * admission across the shard, so the minimum of the accepted responses
+     * models actual inclusion better than the local estimate. Confirmations
+     * at or below our own tip come from lagging peers and are ignored.
+     */
+    static aggregateConfirmationBlock(results: RPCResponse[]): number | null {
+        const floor = getSharedState.lastBlockNumber + 1
+        const candidates = results
+            .filter(res => res.result === 200)
+            .map(res => DTRManager.readConfirmationBlock(res))
+            .filter((block): block is number => block !== null && block >= floor)
+
+        return candidates.length > 0 ? Math.min(...candidates) : null
+    }
+
+    /**
      * Broadcasts the payload to eligible-pool validators that any
      * shard drawn from the pool must contain at least one recipient:
      * pool - shardSize + 1 successful deliveries. Failed deliveries are

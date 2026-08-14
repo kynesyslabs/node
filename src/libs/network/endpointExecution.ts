@@ -327,6 +327,8 @@ export async function handleExecuteTransaction(
             return result
         }
 
+        let broadcastConfirmation: number | null = null
+
         if (getSharedState.PROD) {
             const results = await DTRManager.broadcastToPool([validatedData])
             const accepted = results.filter(res => res.result === 200)
@@ -339,8 +341,24 @@ export async function handleExecuteTransaction(
                 )
             }
 
+            broadcastConfirmation =
+                DTRManager.aggregateConfirmationBlock(results)
+
             if (getSharedState.inConsensusLoop) {
-                return await DTRManager.inConsensusHandler([validatedData])
+                const parked = await DTRManager.inConsensusHandler([
+                    validatedData,
+                ])
+
+                if (broadcastConfirmation !== null) {
+                    ;(
+                        parked.response as { confirmationBlock: number }
+                    ).confirmationBlock = broadcastConfirmation
+                    ;(
+                        parked.extra as { confirmationBlock: number }
+                    ).confirmationBlock = broadcastConfirmation
+                }
+
+                return parked
             }
         }
 
@@ -361,7 +379,7 @@ export async function handleExecuteTransaction(
 
             result.extra = {
                 ...(result.extra ? result.extra : {}),
-                confirmationBlock,
+                confirmationBlock: broadcastConfirmation ?? confirmationBlock,
                 lastBlockNumber: getSharedState.lastBlockNumber,
                 ...(error ? { error } : {}),
             }

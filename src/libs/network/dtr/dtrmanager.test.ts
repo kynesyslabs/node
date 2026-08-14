@@ -249,6 +249,67 @@ describe("broadcastToPool", () => {
     })
 })
 
+describe("aggregateConfirmationBlock", () => {
+    function makeResponse(
+        result: number,
+        confirmationBlock?: number,
+        opts: { inExtra?: boolean } = {},
+    ) {
+        return {
+            result,
+            response: opts.inExtra ? {} : { confirmationBlock },
+            extra: opts.inExtra ? { confirmationBlock } : {},
+            require_reply: false,
+        } as any
+    }
+
+    it("returns the earliest confirmation among accepted responses", () => {
+        const results = [
+            makeResponse(200, 103),
+            makeResponse(200, 101),
+            makeResponse(200, 102),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(101)
+    })
+
+    it("reads confirmations from extra when absent from the body", () => {
+        const results = [makeResponse(200, 102, { inExtra: true })]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
+    })
+
+    it("ignores rejected responses", () => {
+        const results = [
+            makeResponse(400, 101),
+            makeResponse(500, 101),
+            makeResponse(200, 103),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(103)
+    })
+
+    it("ignores confirmations at or below the local tip", () => {
+        const results = [
+            makeResponse(200, 99),
+            makeResponse(200, 100),
+            makeResponse(200, 102),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
+    })
+
+    it("returns null when no usable confirmation exists", () => {
+        const results = [
+            makeResponse(400, 101),
+            makeResponse(200, 90),
+            makeResponse(200, undefined),
+        ]
+
+        expect(DTRManager.aggregateConfirmationBlock(results)).toBeNull()
+    })
+})
+
 describe("stage", () => {
     it("dedups staged transactions by hash", () => {
         const vd = makeValidityData("tx-1")
