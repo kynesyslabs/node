@@ -942,10 +942,10 @@ function isBlockValid(pro: number, totalVotes: number): boolean {
     const isMinimumValidators = pro >= minValidators
 
     // DEBUG: DO NOT REMOVE COMMENTED CODE
-    // if (totalVotes >= minValidators && pro < threshold) {
-    //     log.error("[consensusRoutine] Block is not valid")
-    //     process.exit(0)
-    // }
+    if (totalVotes >= minValidators && pro < threshold) {
+        log.error("[consensusRoutine] Block is not valid")
+        process.exit(0)
+    }
 
     return isMinimumValidators && pro >= threshold
 }
