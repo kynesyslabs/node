@@ -409,7 +409,6 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             BroadcastManager.broadcastNewBlock(block)
-            DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
@@ -533,13 +532,11 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         releaseSyncLock?.()
 
-        // INFO: If there was a relayed tx past finalize block step, release
-        if (DTRManager.poolSize > 0) {
-            DTRManager.releaseDTRWaiter()
-        }
-
         cleanupConsensusState()
         manager.endConsensusRoutine()
+
+        // INFO: Insert transactions staged during the round into the mempool
+        await DTRManager.flushStagedToMempool()
 
         log.only("[consensusRoutine] Consensus routine ended")
 

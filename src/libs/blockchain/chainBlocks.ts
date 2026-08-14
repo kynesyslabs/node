@@ -491,10 +491,10 @@ export async function insertBlock(
             getSharedState.lastBlockInsertedAt = Date.now()
 
             void import("@/libs/network/dtr/dtrmanager")
-                .then(dtr => dtr.DTRManager.releaseDTRWaiter(block))
+                .then(dtr => dtr.DTRManager.flushStagedToMempool())
                 .catch(e =>
                     log.warning(
-                        `[insertBlock] DTR relay release after block ${block.number} failed: ${(e as Error).message}`,
+                        `[insertBlock] DTR staged flush after block ${block.number} failed: ${(e as Error).message}`,
                     ),
                 )
         }

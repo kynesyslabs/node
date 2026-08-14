@@ -30,7 +30,6 @@ import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
-import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
 import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
 
@@ -329,66 +328,19 @@ export async function handleExecuteTransaction(
         }
 
         if (getSharedState.PROD) {
-            if (getSharedState.inConsensusLoop) {
-                return await DTRManager.inConsensusHandler([validatedData])
+            const results = await DTRManager.broadcastToPool([validatedData])
+            const accepted = results.filter(res => res.result === 200)
+
+            if (accepted.length === 0) {
+                log.warning(
+                    "[handleExecuteTransaction] No validator accepted the broadcast, " +
+                        "keeping the transaction in the local mempool only: " +
+                        validatedData.data.transaction.hash,
+                )
             }
 
-            const { isValidator, validators, lastBlockHash } =
-                await isValidatorForNextBlock()
-
-            if (!isValidator) {
-                const availableValidators = validators.sort(
-                    () => Math.random() - 0.5,
-                )
-
-                const results = await DTRManager.relayTransactions(
-                    availableValidators,
-                    [validatedData],
-                    lastBlockHash,
-                )
-
-                const accepted = (results.response as RPCResponse[]).filter(
-                    res => res.result === 200,
-                )
-
-                if (accepted.length === 0) {
-                    log.warning(
-                        "[handleExecuteTransaction] No validator accepted the relay, holding for retry: " +
-                            validatedData.data.transaction.hash,
-                    )
-                    DTRManager.cacheForRetry(validatedData)
-
-                    return {
-                        success: true,
-                        response: {
-                            message:
-                                "Transaction held for relay to the next shard",
-                        },
-                        extra: {
-                            confirmationBlock:
-                                DTRManager.parkedConfirmationBlock,
-                        },
-                        require_reply: false,
-                    }
-                }
-
-                const confirmationBlocks = accepted
-                    .map(res => DTRManager.readConfirmationBlock(res))
-                    .filter((block): block is number => block !== null)
-
-                return {
-                    success: true,
-                    response: {
-                        message: "Transaction relayed to validators",
-                    },
-                    extra: {
-                        confirmationBlock:
-                            confirmationBlocks.length > 0
-                                ? Math.min(...confirmationBlocks)
-                                : getSharedState.lastBlockNumber + 1,
-                    },
-                    require_reply: false,
-                }
+            if (getSharedState.inConsensusLoop) {
+                return await DTRManager.inConsensusHandler([validatedData])
             }
         }
 

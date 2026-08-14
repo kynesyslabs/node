@@ -1,6 +1,5 @@
 import Mempool from "../../blockchain/mempool"
-import getShard from "../../consensus/v2/routines/getShard"
-import getCommonValidatorSeed from "../../consensus/v2/routines/getCommonValidatorSeed"
+import { getEligiblePool } from "../../consensus/v2/routines/getShard"
 import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
 import { Peer, PeerManager } from "@/libs/peer"
@@ -10,15 +9,9 @@ import {
     SigningAlgorithm,
     ValidityData,
 } from "@kynesyslabs/demosdk/types"
-import {
-    Hashing,
-    hexToUint8Array,
-    ucrypto,
-} from "@kynesyslabs/demosdk/encryption"
+import { Hashing, hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 
 import TxUtils from "../../blockchain/transaction"
-import { Waiter } from "@/utilities/waiter"
-import Block from "@/libs/blockchain/block"
 import Chain from "@/libs/blockchain/chain"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import { handleError } from "@/errors"
@@ -27,18 +20,15 @@ import { deepWindowCutoff } from "@/libs/blockchain/referenceBlockWindow"
 const MAX_CACHED_RELAY_TXS = 5_000
 
 /**
- * DTR (Distributed Transaction Routing) Relay Retry Service
+ * DTR (Distributed Transaction Routing)
  *
- * Background service that continuously attempts to relay transactions from non-validator nodes
- * to validator nodes. Runs every 10 seconds on non-validator nodes in production mode.
+ * Incoming transactions are broadcast immediately to enough eligible-pool
+ * validators that every possible next shard contains at least one holder
+ * (pool - shardSize + 1 successful deliveries; see broadcastToPool).
  *
- * Key Features:
- * - Only runs on non-validator nodes when PROD=true
- * - Recalculates validator set only when block number changes (optimized)
- * - Tries all validators in random order for load balancing
- * - Removes successfully relayed transactions from local mempool
- * - Gives up after 10 failed attempts per transaction
- * - Manages ValidityData cache cleanup
+ * A receiver that is mid-consensus stages the transaction and flushes it
+ * into its mempool once the round ends (flushStagedToMempool); otherwise
+ * it inserts directly.
  */
 export class DTRManager {
     private static instance: DTRManager
@@ -57,15 +47,11 @@ export class DTRManager {
         return DTRManager.validityDataCache.size
     }
 
-    static get isWaitingForBlock(): boolean {
-        return Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)
-    }
-
     static get parkedConfirmationBlock(): number {
         return getSharedState.lastBlockNumber + 2
     }
 
-    static cacheForRetry(validityData: ValidityData) {
+    static stage(validityData: ValidityData) {
         const txhash = validityData.data.transaction.hash
 
         if (
@@ -75,23 +61,13 @@ export class DTRManager {
             const oldest = DTRManager.validityDataCache.keys().next()
             if (!oldest.done) {
                 log.warning(
-                    `[DTR] Relay cache full (${MAX_CACHED_RELAY_TXS}), dropping ${oldest.value}`,
+                    `[DTR] Staging area full (${MAX_CACHED_RELAY_TXS}), dropping ${oldest.value}`,
                 )
                 DTRManager.validityDataCache.delete(oldest.value)
             }
         }
 
         DTRManager.validityDataCache.set(txhash, validityData)
-        DTRManager.ensureRelayScheduled()
-    }
-
-    static ensureRelayScheduled() {
-        if (!DTRManager.isWaitingForBlock) {
-            log.debug(
-                "[DTRManager] not waiting for block, starting relay waiter",
-            )
-            DTRManager.waitForBlockThenRelay()
-        }
     }
 
     static readConfirmationBlock(res: RPCResponse): number | null {
@@ -105,17 +81,71 @@ export class DTRManager {
     }
 
     /**
-     * Releases the DTR transaction relay waiter
-     *
-     * @param block - Block to use for the common validator seed.
-     * If not provided, the last block will be used.
+     * Broadcasts the payload to eligible-pool validators that any
+     * shard drawn from the pool must contain at least one recipient:
+     * pool - shardSize + 1 successful deliveries. Failed deliveries are
+     * topped up from the remaining pool until the target is met or the
+     * pool is exhausted.
      */
-    static async releaseDTRWaiter(block?: Block) {
-        if (Waiter.isWaiting(Waiter.keys.DTR_WAIT_FOR_BLOCK)) {
-            log.debug("[DTRManager] releasing DTR transaction relay waiter")
-            const { commonValidatorSeed } = await getCommonValidatorSeed(block)
-            Waiter.resolve(Waiter.keys.DTR_WAIT_FOR_BLOCK, commonValidatorSeed)
+    static async broadcastToPool(
+        payload: ValidityData[],
+    ): Promise<RPCResponse[]> {
+        const pool = await getEligiblePool(getSharedState.lastBlockNumber)
+        const ourId = getSharedState.publicKeyHex
+        const peerman = PeerManager.getInstance()
+
+        const candidates = pool
+            .filter(identity => identity !== ourId)
+            .map(identity => peerman.getPeer(identity))
+            .filter(peer => peer && peer.connection.string)
+            .sort(() => Math.random() - 0.5)
+
+        const target = Math.max(
+            1,
+            Math.min(
+                candidates.length,
+                pool.length - getSharedState.shardSize + 1,
+            ),
+        )
+
+        const results: RPCResponse[] = []
+        let successes = 0
+        let cursor = 0
+
+        while (successes < target && cursor < candidates.length) {
+            const batch = candidates.slice(
+                cursor,
+                cursor + (target - successes),
+            )
+            cursor += batch.length
+
+            const responses = await Promise.all(
+                batch.map(validator =>
+                    DTRManager.relayTransaction(
+                        validator,
+                        payload,
+                        getSharedState.lastBlockHash,
+                    ),
+                ),
+            )
+
+            for (const res of responses) {
+                if (res.result === 200) {
+                    successes++
+                }
+                results.push(res)
+            }
         }
+
+        if (successes < target) {
+            log.warning(
+                `[DTR] Broadcast reached ${successes}/${target} validators ` +
+                    `(pool ${pool.length}, reachable ${candidates.length}): ` +
+                    "next-shard coverage is not guaranteed",
+            )
+        }
+
+        return results
     }
 
     static async relayTransaction(
@@ -216,29 +246,6 @@ export class DTRManager {
         )
 
         try {
-            if (
-                data.blockRef &&
-                data.blockRef !== getSharedState.lastBlockHash
-            ) {
-                log.warning(
-                    "[DTR] Relay drawn from a different tip: " +
-                        `sender blockRef ${data.blockRef}, ours ${getSharedState.lastBlockHash}`,
-                )
-
-                return {
-                    result: 409,
-                    response: {
-                        message:
-                            "REJECTED: relay drawn from a different chain tip",
-                    },
-                    require_reply: false,
-                    extra: {
-                        blockNumber: getSharedState.lastBlockNumber,
-                        blockHash: getSharedState.lastBlockHash,
-                    },
-                }
-            }
-
             if (getSharedState.inConsensusLoop) {
                 return await this.inConsensusHandler(data.payload)
             }
@@ -253,6 +260,7 @@ export class DTRManager {
             // INFO: Filter by signing algorithm
             const peers = await PeerManager.getInstance().getOnlinePeers()
             const peerSet = new Set(peers.map(peer => peer.identity))
+            peerSet.add(getSharedState.publicKeyHex)
 
             let payload = data.payload.filter(
                 payload =>
@@ -325,7 +333,7 @@ export class DTRManager {
     }
 
     /**
-     * Adds the transaction to the validity data cache and starts the relay waiter
+     * Stages the transactions until the running consensus round ends
      *
      * @param payload - ValidityData of the transaction to receive
      *
@@ -335,7 +343,7 @@ export class DTRManager {
         const confirmationBlock = DTRManager.parkedConfirmationBlock
 
         for (const validityData of payload) {
-            DTRManager.cacheForRetry(validityData)
+            DTRManager.stage(validityData)
         }
 
         return {
@@ -399,12 +407,13 @@ export class DTRManager {
             }
 
             // 2. Verify receipt from a known validator
-            const isFromKnownValidator = (
-                await PeerManager.getInstance().getOnlinePeers()
-            ).some(
-                // Assuming both nodes are running on same signing algorithm
-                peer => peer.identity === validityData.rpc_public_key.data,
-            )
+            const isFromKnownValidator =
+                validityData.rpc_public_key.data ===
+                    getSharedState.publicKeyHex ||
+                (await PeerManager.getInstance().getOnlinePeers()).some(
+                    // Assuming both nodes are running on same signing algorithm
+                    peer => peer.identity === validityData.rpc_public_key.data,
+                )
 
             if (!isFromKnownValidator) {
                 log.error("[DTR] Transaction relayed from unknown validator")
@@ -519,103 +528,77 @@ export class DTRManager {
         }
     }
 
-    static async waitForBlockThenRelay() {
-        let cvsa: string
-
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            try {
-                cvsa = await Waiter.wait(
-                    Waiter.keys.DTR_WAIT_FOR_BLOCK,
-                    120_000,
-                )
-                log.debug("waitForBlockThenRelay resolved. CVSA: " + cvsa)
-                break
-            } catch (error) {
-                if (!getSharedState.inConsensusLoop) {
-                    const { commonValidatorSeed } =
-                        await getCommonValidatorSeed()
-                    cvsa = commonValidatorSeed
-                    break
-                }
-
-                log.error(
-                    "[waitForBlockThenRelay] Error waiting for block, retrying...",
-                )
-            }
+    /**
+     * Flushes staged transactions into the local mempool. No-op while a
+     * consensus round is running: the round-end path calls this after the
+     * block is saved and the consensus flags are cleared.
+     */
+    static async flushStagedToMempool(): Promise<void> {
+        if (DTRManager.validityDataCache.size === 0) {
+            return
         }
-
-        const validators = await getShard(cvsa)
-        const txs = Array.from(DTRManager.validityDataCache.values())
-
-        //INFO: Filter transactions applied in last block
-        const lastBlockTxs = await Chain.getLastBlockTransactionSet()
-        const staleCutoff = deepWindowCutoff(getSharedState.lastBlockNumber)
-        const txsToRelay: ValidityData[] = []
-
-        for (const tx of txs) {
-            const txhash = tx.data.transaction.hash
-
-            if (lastBlockTxs.has(txhash)) {
-                DTRManager.validityDataCache.delete(txhash)
-                continue
-            }
-
-            if (tx.data.reference_block < staleCutoff) {
-                log.warning(
-                    `[DTR] Dropping ${txhash}: reference block ` +
-                        `${tx.data.reference_block} is below the deep window cutoff ${staleCutoff}`,
-                )
-                DTRManager.validityDataCache.delete(txhash)
-                continue
-            }
-
-            txsToRelay.push(tx)
-        }
-
-        if (txsToRelay.length === 0) {
+        if (getSharedState.inConsensusLoop) {
             return
         }
 
-        // if we're up next, keep the transactions
-        if (validators.some(v => v.identity === getSharedState.publicKeyHex)) {
-            if (getSharedState.inConsensusLoop) {
-                log.debug(
-                    "[waitForBlockThenRelay] still in the consensus loop, " +
-                        "holding transactions until the next block",
-                )
-                DTRManager.ensureRelayScheduled()
+        try {
+            const staged = Array.from(DTRManager.validityDataCache.values())
+
+            const lastBlockTxs = await Chain.getLastBlockTransactionSet()
+            const staleCutoff = deepWindowCutoff(
+                getSharedState.lastBlockNumber,
+            )
+            const toFlush: ValidityData[] = []
+
+            for (const tx of staged) {
+                const txhash = tx.data.transaction.hash
+
+                if (lastBlockTxs.has(txhash)) {
+                    DTRManager.validityDataCache.delete(txhash)
+                    continue
+                }
+
+                if (tx.data.reference_block < staleCutoff) {
+                    log.warning(
+                        `[DTR] Dropping ${txhash}: reference block ` +
+                            `${tx.data.reference_block} is below the deep window cutoff ${staleCutoff}`,
+                    )
+                    DTRManager.validityDataCache.delete(txhash)
+                    continue
+                }
+
+                toFlush.push(tx)
+            }
+
+            if (toFlush.length === 0) {
                 return
             }
 
-            const res = await Mempool.lock.runExclusive(
-                async () =>
-                    await this.receiveRelayedTransactions({
-                        payload: txsToRelay,
-                        blockRef: getSharedState.lastBlockHash,
-                        blockNumber: getSharedState.lastBlockNumber + 1,
-                    }),
-            )
+            const flushed = await Mempool.lock.runExclusive(async () => {
+                if (getSharedState.inConsensusLoop) {
+                    return false
+                }
 
-            for (const tx of txsToRelay) {
-                DTRManager.validityDataCache.delete(tx.data.transaction.hash)
-            }
+                await DTRManager.receiveRelayedTransactions({
+                    payload: toFlush,
+                    blockRef: getSharedState.lastBlockHash,
+                    blockNumber: getSharedState.lastBlockNumber + 1,
+                })
+                return true
+            })
 
-            return res
-        }
-
-        const nodeResults = await this.relayTransactions(
-            validators,
-            txsToRelay,
-            getSharedState.lastBlockHash,
-        )
-
-        for (const result of nodeResults.response as RPCResponse[]) {
-            if (result.result === 200) {
-                for (const txhash of result.extra?.txhashes ?? []) {
-                    DTRManager.validityDataCache.delete(txhash)
+            if (flushed) {
+                for (const tx of toFlush) {
+                    DTRManager.validityDataCache.delete(
+                        tx.data.transaction.hash,
+                    )
                 }
             }
+        } catch (error) {
+            log.error(
+                "[DTR] Error flushing staged transactions to mempool: " +
+                    (error instanceof Error ? error.message : String(error)),
+            )
         }
     }
 }
