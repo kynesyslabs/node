@@ -362,6 +362,7 @@ describe("receiveRelayedTransactions", () => {
 
         expect(res.result).toBe(200)
         expect((res.extra as any).confirmationBlock).toBe(102)
+        expect((res.extra as any).lastBlockNumber).toBe(100)
         expect(DTRManager.validityDataCache.has("tx-1")).toBe(true)
     })
 })

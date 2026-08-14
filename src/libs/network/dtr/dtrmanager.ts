@@ -314,6 +314,7 @@ export class DTRManager {
                 require_reply: false,
                 extra: {
                     confirmationBlock: targetBlock,
+                    lastBlockNumber: getSharedState.lastBlockNumber,
                 },
             }
         } catch (error) {
@@ -354,6 +355,7 @@ export class DTRManager {
             },
             extra: {
                 confirmationBlock,
+                lastBlockNumber: getSharedState.lastBlockNumber,
             },
             require_reply: false,
         }
@@ -511,6 +513,11 @@ export class DTRManager {
                 response: {
                     message: "Relayed transaction accepted",
                     confirmationBlock,
+                },
+                extra: {
+                    ...response.extra,
+                    confirmationBlock,
+                    lastBlockNumber: getSharedState.lastBlockNumber,
                 },
             }
         } catch (error) {
