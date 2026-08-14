@@ -1,5 +1,6 @@
 import Mempool from "../../blockchain/mempool"
 import { getEligiblePool } from "../../consensus/v2/routines/getShard"
+import isValidatorForNextBlock from "../../consensus/v2/routines/isValidator"
 import { getSharedState } from "../../../utilities/sharedState"
 import log from "../../../utilities/logger"
 import { Peer, PeerManager } from "@/libs/peer"
@@ -268,11 +269,14 @@ export class DTRManager {
         }
     }
 
-    static async receiveRelayedTransactions(data: {
-        payload: ValidityData[]
-        blockNumber: number
-        blockRef: string
-    }): Promise<RPCResponse> {
+    static async receiveRelayedTransactions(
+        data: {
+            payload: ValidityData[]
+            blockNumber: number
+            blockRef: string
+        },
+        opts: { bypassStaging?: boolean } = {},
+    ): Promise<RPCResponse> {
         log.debug(
             "[receiveRelayedTransactions] Receiving relayed transactions: " +
                 data.payload.length,
@@ -287,7 +291,7 @@ export class DTRManager {
         )
 
         try {
-            if (getSharedState.inConsensusLoop) {
+            if (!opts.bypassStaging && getSharedState.inConsensusLoop) {
                 return await this.inConsensusHandler(data.payload)
             }
 
@@ -578,15 +582,20 @@ export class DTRManager {
     }
 
     /**
-     * Flushes staged transactions into the local mempool. No-op while a
-     * consensus round is running: the round-end path calls this after the
-     * block is saved and the consensus flags are cleared.
+     * Flushes staged transactions into the local mempool.
+     *
+     * Unforced calls are a no-op while a consensus round is running. The
+     * round-end path in consensusRoutine calls this with `force` BEFORE the
+     * consensus flags are cleared: no new round can start while
+     * inConsensusLoop is still set, so the flush cannot race the next
+     * round's mempool snapshot — which is what strands staged transactions
+     * for an extra block during back-to-back catch-up rounds.
      */
-    static async flushStagedToMempool(): Promise<void> {
+    static async flushStagedToMempool(force = false): Promise<void> {
         if (DTRManager.validityDataCache.size === 0) {
             return
         }
-        if (getSharedState.inConsensusLoop) {
+        if (!force && getSharedState.inConsensusLoop) {
             return
         }
 
@@ -624,15 +633,18 @@ export class DTRManager {
             }
 
             const flushed = await Mempool.lock.runExclusive(async () => {
-                if (getSharedState.inConsensusLoop) {
+                if (!force && getSharedState.inConsensusLoop) {
                     return false
                 }
 
-                await DTRManager.receiveRelayedTransactions({
-                    payload: toFlush,
-                    blockRef: getSharedState.lastBlockHash,
-                    blockNumber: getSharedState.lastBlockNumber + 1,
-                })
+                await DTRManager.receiveRelayedTransactions(
+                    {
+                        payload: toFlush,
+                        blockRef: getSharedState.lastBlockHash,
+                        blockNumber: getSharedState.lastBlockNumber + 1,
+                    },
+                    { bypassStaging: true },
+                )
                 return true
             })
 
@@ -642,10 +654,35 @@ export class DTRManager {
                         tx.data.transaction.hash,
                     )
                 }
+
+                void DTRManager.relayFlushedIfNotNextValidator(toFlush)
             }
         } catch (error) {
             log.error(
                 "[DTR] Error flushing staged transactions to mempool: " +
+                    (error instanceof Error ? error.message : String(error)),
+            )
+        }
+    }
+
+    /**
+     * Staged transactions only reach a block through this node's own merge
+     * participation. If this node is not in the next shard, relay them so
+     * the shard that will forge holds them.
+     */
+    static async relayFlushedIfNotNextValidator(
+        payload: ValidityData[],
+    ): Promise<void> {
+        try {
+            const { isValidator } = await isValidatorForNextBlock()
+            if (isValidator) {
+                return
+            }
+
+            await DTRManager.broadcastToPool(payload)
+        } catch (error) {
+            log.error(
+                "[DTR] Error relaying flushed transactions: " +
                     (error instanceof Error ? error.message : String(error)),
             )
         }

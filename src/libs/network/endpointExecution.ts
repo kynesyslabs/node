@@ -28,6 +28,7 @@ import {
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
+import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
@@ -331,45 +332,30 @@ export async function handleExecuteTransaction(
         let relayed = false
 
         if (getSharedState.PROD) {
-            const results = await DTRManager.broadcastToPool([validatedData])
-            const accepted = results.filter(res => res.result === 200)
-            relayed = accepted.length > 0
-
-            if (accepted.length === 0) {
-                log.warning(
-                    "[handleExecuteTransaction] No validator accepted the broadcast, " +
-                        "keeping the transaction in the local mempool only: " +
-                        validatedData.data.transaction.hash,
-                )
+            if (getSharedState.inConsensusLoop) {
+                return await DTRManager.inConsensusHandler([validatedData])
             }
 
-            if (getSharedState.inConsensusLoop) {
-                const parked = await DTRManager.inConsensusHandler([
+            const { isValidator } = await isValidatorForNextBlock()
+
+            if (!isValidator) {
+                const results = await DTRManager.broadcastToPool([
                     validatedData,
                 ])
+                const accepted = results.filter(res => res.result === 200)
+                relayed = accepted.length > 0
 
-                const remoteStaged =
-                    DTRManager.aggregateStagedConfirmation(results)
-
-                if (remoteStaged !== null) {
-                    const parkedExtra = parked.extra as {
-                        confirmationBlock: number
-                    }
-                    const confirmation = Math.max(
-                        parkedExtra.confirmationBlock,
-                        remoteStaged,
+                if (accepted.length === 0) {
+                    log.warning(
+                        "[handleExecuteTransaction] No validator accepted the broadcast, " +
+                            "keeping the transaction in the local mempool only: " +
+                            validatedData.data.transaction.hash,
                     )
-                    ;(
-                        parked.response as { confirmationBlock: number }
-                    ).confirmationBlock = confirmation
-                    parkedExtra.confirmationBlock = confirmation
                 }
 
-                return parked
+                broadcastConfirmation =
+                    DTRManager.aggregateConfirmationBlock(results)
             }
-
-            broadcastConfirmation =
-                DTRManager.aggregateConfirmationBlock(results)
         }
 
         try {
