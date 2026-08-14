@@ -233,9 +233,10 @@ export default class SecretaryManager {
                 log.error(
                     "[SECRETARY ROUTINE] Error waiting for SET_WAIT_STATUS:",
                 )
+                
+                log.error(error as string)
                 process.exit(0)
 
-                log.error(error as string)
                 if (error instanceof TimeoutError) {
                     // INFO: If the secretary routine times out, we need to handle the nodes that are gone offline
                     // Then release the waiting members
