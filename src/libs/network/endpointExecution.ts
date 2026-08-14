@@ -328,10 +328,12 @@ export async function handleExecuteTransaction(
         }
 
         let broadcastConfirmation: number | null = null
+        let relayed = false
 
         if (getSharedState.PROD) {
             const results = await DTRManager.broadcastToPool([validatedData])
             const accepted = results.filter(res => res.result === 200)
+            relayed = accepted.length > 0
 
             if (accepted.length === 0) {
                 log.warning(
@@ -363,10 +365,11 @@ export async function handleExecuteTransaction(
         }
 
         try {
-            const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
-                ...queriedTx,
-                reference_block: validatedData.data.reference_block,
-            })
+            const { confirmationBlock, error } =
+                await Mempool.addTransactionWithLock({
+                    ...queriedTx,
+                    reference_block: validatedData.data.reference_block,
+                })
 
             log.debug("[handleExecuteTransaction] Transaction added to mempool")
 
@@ -374,6 +377,13 @@ export async function handleExecuteTransaction(
                 result.success = false
                 result.response = {
                     message: "Failed to add transaction to mempool",
+                }
+            } else if (relayed) {
+                result.response = {
+                    ...(result.response && typeof result.response === "object"
+                        ? result.response
+                        : {}),
+                    message: "Transaction relayed to validators",
                 }
             }
 
