@@ -249,102 +249,6 @@ describe("broadcastToPool", () => {
     })
 })
 
-describe("aggregateConfirmationBlock", () => {
-    function makeResponse(
-        result: number,
-        confirmationBlock?: number,
-        opts: { inExtra?: boolean; staged?: boolean } = {},
-    ) {
-        return {
-            result,
-            response: opts.inExtra ? {} : { confirmationBlock },
-            extra: {
-                ...(opts.inExtra ? { confirmationBlock } : {}),
-                ...(opts.staged ? { staged: true } : {}),
-            },
-            require_reply: false,
-        } as any
-    }
-
-    it("returns the most common confirmation among accepted responses", () => {
-        const results = [
-            makeResponse(200, 103),
-            makeResponse(200, 101),
-            makeResponse(200, 101),
-            makeResponse(200, 102),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(101)
-    })
-
-    it("breaks ties toward the later block", () => {
-        const results = [
-            makeResponse(200, 101),
-            makeResponse(200, 101),
-            makeResponse(200, 102),
-            makeResponse(200, 102),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-
-    it("reads confirmations from extra when absent from the body", () => {
-        const results = [makeResponse(200, 102, { inExtra: true })]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-
-    it("ignores rejected responses", () => {
-        const results = [
-            makeResponse(400, 101),
-            makeResponse(500, 101),
-            makeResponse(200, 103),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(103)
-    })
-
-    it("outvotes a single outlier with the majority value", () => {
-        const results = [
-            makeResponse(200, 102, { staged: true }),
-            makeResponse(200, 102, { staged: true }),
-            makeResponse(200, 101),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-
-    it("ignores confirmations at or below the local tip", () => {
-        const results = [
-            makeResponse(200, 99),
-            makeResponse(200, 100),
-            makeResponse(200, 102),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-
-    it("returns null when no usable confirmation exists", () => {
-        const results = [
-            makeResponse(400, 101),
-            makeResponse(200, 90),
-            makeResponse(200, undefined),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBeNull()
-    })
-
-    it("discards stale confirmations before counting", () => {
-        const results = [
-            makeResponse(200, 99, { staged: true }),
-            makeResponse(200, 99),
-            makeResponse(200, 102),
-        ]
-
-        expect(DTRManager.aggregateConfirmationBlock(results)).toBe(102)
-    })
-})
-
 describe("stage", () => {
     it("dedups staged transactions by hash", () => {
         const vd = makeValidityData("tx-1")
@@ -432,29 +336,6 @@ describe("flushStagedToMempool", () => {
         expect(DTRManager.poolSize).toBe(2)
     })
 
-    it("force-flushes while a round is still marked running", async () => {
-        DTRManager.stage(makeValidityData("tx-1"))
-        DTRManager.stage(makeValidityData("tx-2"))
-        state.inConsensusLoop = true
-
-        await DTRManager.flushStagedToMempool(true)
-
-        expect(Mempool.receive).toHaveBeenCalledTimes(1)
-        expect(DTRManager.poolSize).toBe(0)
-    })
-
-    it("does not broadcast during the flush", async () => {
-        setupPool(12)
-        DTRManager.stage(makeValidityData("tx-1"))
-        DTRManager.stage(makeValidityData("tx-2"))
-
-        await DTRManager.flushStagedToMempool()
-        await new Promise(resolve => setImmediate(resolve))
-
-        expect(totalCalls()).toBe(0)
-        expect(DTRManager.poolSize).toBe(0)
-    })
-
     it("accepts self-originated validity data on the single-tx path", async () => {
         DTRManager.stage(makeValidityData("tx-1", { rpcKey: OUR_KEY }))
         onlinePeers = []
@@ -482,7 +363,6 @@ describe("receiveRelayedTransactions", () => {
         expect(res.result).toBe(200)
         expect((res.extra as any).confirmationBlock).toBe(102)
         expect((res.extra as any).lastBlockNumber).toBe(100)
-        expect((res.extra as any).staged).toBe(true)
         expect(DTRManager.validityDataCache.has("tx-1")).toBe(true)
     })
 })

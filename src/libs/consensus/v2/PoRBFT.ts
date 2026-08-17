@@ -532,14 +532,11 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         releaseSyncLock?.()
 
-        // INFO: Insert transactions staged during the round into the mempool.
-        // Forced and BEFORE cleanupConsensusState: inConsensusLoop still
-        // being set blocks any new round from starting, so the flush cannot
-        // lose the race against the next round's mempool snapshot.
-        await DTRManager.flushStagedToMempool(true)
-
         cleanupConsensusState()
         manager.endConsensusRoutine()
+
+        // INFO: Insert transactions staged during the round into the mempool
+        await DTRManager.flushStagedToMempool()
 
         log.only("[consensusRoutine] Consensus routine ended")
 

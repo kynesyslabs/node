@@ -28,7 +28,6 @@ import {
 import { NativeBridgeOperationCompiled } from "@kynesyslabs/demosdk/bridge"
 import handleNativeBridgeTx from "./routines/transactions/handleNativeBridgeTx"
 import { DTRManager } from "./dtr/dtrmanager"
-import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 import handleL2PS from "./routines/transactions/handleL2PS"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
@@ -328,50 +327,28 @@ export async function handleExecuteTransaction(
             return result
         }
 
-        let broadcastConfirmation: number | null = null
-        let relayed = false
-
         if (getSharedState.PROD) {
-            const inRound = getSharedState.inConsensusLoop
+            const results = await DTRManager.broadcastToPool([validatedData])
+            const accepted = results.filter(res => res.result === 200)
 
-            // The only case that skips the broadcast: we are idle AND our
-            // own merge participation will carry the tx into the next block.
-            let skipBroadcast = false
-            if (!inRound) {
-                const { isValidator } = await isValidatorForNextBlock()
-                skipBroadcast = isValidator
+            if (accepted.length === 0) {
+                log.warning(
+                    "[handleExecuteTransaction] No validator accepted the broadcast, " +
+                        "keeping the transaction in the local mempool only: " +
+                        validatedData.data.transaction.hash,
+                )
             }
 
-            if (!skipBroadcast) {
-                const results = await DTRManager.broadcastToPool([
-                    validatedData,
-                ])
-                const accepted = results.filter(res => res.result === 200)
-                relayed = accepted.length > 0
-
-                if (accepted.length === 0) {
-                    log.warning(
-                        "[handleExecuteTransaction] No validator accepted the broadcast, " +
-                            "keeping the transaction in the local mempool only: " +
-                            validatedData.data.transaction.hash,
-                    )
-                }
-
-                broadcastConfirmation =
-                    DTRManager.aggregateConfirmationBlock(results)
-            }
-
-            if (inRound) {
+            if (getSharedState.inConsensusLoop) {
                 return await DTRManager.inConsensusHandler([validatedData])
             }
         }
 
         try {
-            const { confirmationBlock, error } =
-                await Mempool.addTransactionWithLock({
-                    ...queriedTx,
-                    reference_block: validatedData.data.reference_block,
-                })
+            const { confirmationBlock, error } = await Mempool.addTransactionWithLock({
+                ...queriedTx,
+                reference_block: validatedData.data.reference_block,
+            })
 
             log.debug("[handleExecuteTransaction] Transaction added to mempool")
 
@@ -380,18 +357,11 @@ export async function handleExecuteTransaction(
                 result.response = {
                     message: "Failed to add transaction to mempool",
                 }
-            } else if (relayed) {
-                result.response = {
-                    ...(result.response && typeof result.response === "object"
-                        ? result.response
-                        : {}),
-                    message: "Transaction relayed to validators",
-                }
             }
 
             result.extra = {
                 ...(result.extra ? result.extra : {}),
-                confirmationBlock: broadcastConfirmation ?? confirmationBlock,
+                confirmationBlock,
                 lastBlockNumber: getSharedState.lastBlockNumber,
                 ...(error ? { error } : {}),
             }

@@ -90,7 +90,7 @@ export default class SecretaryManager {
         if (
             !this.shard.members.map(peer => peer.identity).includes(this.ourKey)
         ) {
-            log.warn("We are not in the shard")
+            log.error("We are not in the shard")
             throw new NotInShardError("We are not in the shard")
         }
 

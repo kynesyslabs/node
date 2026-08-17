@@ -81,46 +81,6 @@ export class DTRManager {
     }
 
     /**
-     * Confirmation block to advertise for a broadcast: the most common
-     * value among the accepted responses. The majority of the pool shares
-     * the true network view, so the mode discards both stale laggards and
-     * single ahead-of-tip outliers. Ties break to the later block — the
-     * benign error direction (a transaction confirms earlier than promised,
-     * never later). Confirmations at or below our own tip come from lagging
-     * peers and are ignored.
-     */
-    static aggregateConfirmationBlock(results: RPCResponse[]): number | null {
-        const floor = getSharedState.lastBlockNumber + 1
-        const candidates = results
-            .filter(res => res.result === 200)
-            .map(res => DTRManager.readConfirmationBlock(res))
-            .filter((block): block is number => block !== null && block >= floor)
-
-        if (candidates.length === 0) {
-            return null
-        }
-
-        const counts = new Map<number, number>()
-        for (const block of candidates) {
-            counts.set(block, (counts.get(block) ?? 0) + 1)
-        }
-
-        let best: number | null = null
-        let bestCount = 0
-        for (const [block, count] of counts) {
-            if (
-                count > bestCount ||
-                (count === bestCount && best !== null && block > best)
-            ) {
-                best = block
-                bestCount = count
-            }
-        }
-
-        return best
-    }
-
-    /**
      * Broadcasts the payload to eligible-pool validators that any
      * shard drawn from the pool must contain at least one recipient:
      * pool - shardSize + 1 successful deliveries. Failed deliveries are
@@ -265,14 +225,11 @@ export class DTRManager {
         }
     }
 
-    static async receiveRelayedTransactions(
-        data: {
-            payload: ValidityData[]
-            blockNumber: number
-            blockRef: string
-        },
-        opts: { bypassStaging?: boolean } = {},
-    ): Promise<RPCResponse> {
+    static async receiveRelayedTransactions(data: {
+        payload: ValidityData[]
+        blockNumber: number
+        blockRef: string
+    }): Promise<RPCResponse> {
         log.debug(
             "[receiveRelayedTransactions] Receiving relayed transactions: " +
                 data.payload.length,
@@ -287,7 +244,7 @@ export class DTRManager {
         )
 
         try {
-            if (!opts.bypassStaging && getSharedState.inConsensusLoop) {
+            if (getSharedState.inConsensusLoop) {
                 return await this.inConsensusHandler(data.payload)
             }
 
@@ -399,7 +356,6 @@ export class DTRManager {
             extra: {
                 confirmationBlock,
                 lastBlockNumber: getSharedState.lastBlockNumber,
-                staged: true,
             },
             require_reply: false,
         }
@@ -578,20 +534,15 @@ export class DTRManager {
     }
 
     /**
-     * Flushes staged transactions into the local mempool.
-     *
-     * Unforced calls are a no-op while a consensus round is running. The
-     * round-end path in consensusRoutine calls this with `force` BEFORE the
-     * consensus flags are cleared: no new round can start while
-     * inConsensusLoop is still set, so the flush cannot race the next
-     * round's mempool snapshot — which is what strands staged transactions
-     * for an extra block during back-to-back catch-up rounds.
+     * Flushes staged transactions into the local mempool. No-op while a
+     * consensus round is running: the round-end path calls this after the
+     * block is saved and the consensus flags are cleared.
      */
-    static async flushStagedToMempool(force = false): Promise<void> {
+    static async flushStagedToMempool(): Promise<void> {
         if (DTRManager.validityDataCache.size === 0) {
             return
         }
-        if (!force && getSharedState.inConsensusLoop) {
+        if (getSharedState.inConsensusLoop) {
             return
         }
 
@@ -629,18 +580,15 @@ export class DTRManager {
             }
 
             const flushed = await Mempool.lock.runExclusive(async () => {
-                if (!force && getSharedState.inConsensusLoop) {
+                if (getSharedState.inConsensusLoop) {
                     return false
                 }
 
-                await DTRManager.receiveRelayedTransactions(
-                    {
-                        payload: toFlush,
-                        blockRef: getSharedState.lastBlockHash,
-                        blockNumber: getSharedState.lastBlockNumber + 1,
-                    },
-                    { bypassStaging: true },
-                )
+                await DTRManager.receiveRelayedTransactions({
+                    payload: toFlush,
+                    blockRef: getSharedState.lastBlockHash,
+                    blockNumber: getSharedState.lastBlockNumber + 1,
+                })
                 return true
             })
 
