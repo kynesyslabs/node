@@ -71,6 +71,20 @@ export interface CoreConfig {
      * block-signer aggregate. Disabled by default until multi-node validation.
      */
     blockSyncAggregationEnabled: boolean
+    /**
+     * Aggregate wire/dissemination version when aggregation is enabled.
+     * 1 = secretary-only publisher with a JSON identity list.
+     * 2 = committee-partitioned block delivery plus a bitmap partial
+     * aggregate from every committee member. Receivers accept both.
+     */
+    blockSyncAggregationVersion: 1 | 2
+    /**
+     * First block height at which the aggregation send path activates.
+     * Below it nodes keep the legacy broadcast behaviour even when the flag
+     * is on, so a mixed-version fleet flips together at one coordinated
+     * block. 0 activates immediately.
+     */
+    blockSyncAggregationActivationHeight: number
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

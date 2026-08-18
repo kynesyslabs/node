@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 NODE_COUNTS="${NODE_COUNTS:-100,250,500}"
 ITERATIONS="${ITERATIONS:-5}"
+AGGREGATE_VERSION="${AGGREGATE_VERSION:-2}"
 MIN_AVAILABLE_KIB="${MIN_AVAILABLE_KIB:-2097152}"
 RESULTS_DIR="${RESULTS_DIR:-${ROOT_DIR}/.poc-results}"
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -47,13 +48,14 @@ if (( AVAILABLE_KIB < MIN_AVAILABLE_KIB )); then
 fi
 
 mkdir -p "${RESULTS_DIR}"
-echo "Running bounded sync emulator: nodes=${NODE_COUNTS} iterations=${ITERATIONS}" >&2
+echo "Running bounded sync emulator: nodes=${NODE_COUNTS} iterations=${ITERATIONS} aggregate-version=${AGGREGATE_VERSION}" >&2
 echo "Six-node POC paused=${#PAUSED_NODES[@]}; live DACS remains active" >&2
 
 cd "${ROOT_DIR}"
 bun testing/devnet/scripts/run-sync-scale-emulator.ts \
 	--nodes="${NODE_COUNTS}" \
-	--iterations="${ITERATIONS}" >"${REPORT_PATH}" &
+	--iterations="${ITERATIONS}" \
+	--aggregate-version="${AGGREGATE_VERSION}" >"${REPORT_PATH}" &
 EMULATOR_PID=$!
 
 while kill -0 "${EMULATOR_PID}" 2>/dev/null; do

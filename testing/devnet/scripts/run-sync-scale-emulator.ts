@@ -1,15 +1,18 @@
 import { performance } from "node:perf_hooks"
 import {
     admitSyncAggregate,
+    blockDeliveryPartition,
     buildSyncAggregate,
+    buildSyncAggregateV2,
     estimatePostBlockTraffic,
-    type BlockSyncAggregateV1,
+    type BlockSyncAggregate,
     type SyncAggregateBlockView,
 } from "../../../src/libs/communications/syncAggregation"
 
 interface EmulatorConfig {
     nodeCounts: number[]
     iterations: number
+    aggregateVersion: 1 | 2
     signerCount: number
     baseLatencyMs: number
     jitterMs: number
@@ -25,6 +28,10 @@ interface ActiveRound {
     identities: string[]
     secretary: string
     config: EmulatorConfig
+    /** Successful /block deliveries per peer index (v2 exactly-once check). */
+    blockDeliveredCounts: number[]
+    /** Per receiving peer, union of acceptedPeerIds across admitted partials. */
+    acceptedUnions: Set<string>[]
 }
 
 interface AttemptResult {
@@ -51,12 +58,21 @@ interface IterationResult {
     blockPhaseMs: number
     aggregatePhaseMs: number
     requestLatenciesMs: number[]
+    /** v2 only: v1 aggregate size for the same responses as the partial. */
+    v1AggregateBytes?: number
+    /** v2 only: every non-signer received the block exactly once. */
+    blockDeliveredExactlyOnce?: boolean
+    /** v2 only: every partial was admitted (HTTP ok + result 200) everywhere. */
+    allPartialsAdmitted?: boolean
+    /** v2 only: every receiver's accepted union is all identities but itself. */
+    coverageExact?: boolean
 }
 
 interface ScenarioResult {
     nodeCount: number
     signerCount: number
     iterations: number
+    aggregateVersion: 1 | 2
     legacyCallsPerBlock: number
     aggregateCallsPerBlock: number
     modeledReductionPercent: number
@@ -87,6 +103,11 @@ interface ScenarioResult {
         max: number
     }
     allDeliveriesAdmitted: boolean
+    coverageExact: boolean
+    v1VsV2AggregateBytes: {
+        v1AggregateBytes: number | null
+        v2PartialAggregateBytes: number | null
+    }
 }
 
 const encoder = new TextEncoder()
@@ -101,6 +122,20 @@ function numericArgument(name: string, fallback: number): number {
     const parsed = Number(raw)
     if (!Number.isFinite(parsed) || parsed < 0) {
         throw new Error(`Invalid --${name}`)
+    }
+    return parsed
+}
+
+function parseAggregateVersion(): 1 | 2 {
+    const raw =
+        process.argv
+            .find(value => value.startsWith("--aggregate-version="))
+            ?.slice("--aggregate-version=".length) ??
+        process.env.AGGREGATE_VERSION ??
+        "2"
+    const parsed = Number(raw)
+    if (parsed !== 1 && parsed !== 2) {
+        throw new Error("--aggregate-version must be 1 or 2")
     }
     return parsed
 }
@@ -123,6 +158,7 @@ function parseConfig(): EmulatorConfig {
     return {
         nodeCounts,
         iterations: numericArgument("iterations", 5),
+        aggregateVersion: parseAggregateVersion(),
         signerCount: numericArgument("signers", 4),
         baseLatencyMs: numericArgument("base-latency-ms", 20),
         jitterMs: numericArgument("jitter-ms", 80),
@@ -225,6 +261,7 @@ const server = Bun.serve({
         )
 
         if (phaseName === "block") {
+            round.blockDeliveredCounts[peerIndex] += 1
             return json({
                 result: 200,
                 response: {
@@ -233,13 +270,30 @@ const server = Bun.serve({
             })
         }
 
+        // v2 partials arrive from every committee member; the sender index
+        // travels as a query parameter so the handler admits with the real
+        // sender identity. Absent (v1 flow), the secretary remains the sender.
+        const senderParam = url.searchParams.get("sender")
+        let senderIdentity = round.secretary
+        if (senderParam !== null) {
+            const senderIndex = Number(senderParam)
+            if (
+                !Number.isSafeInteger(senderIndex) ||
+                senderIndex < 0 ||
+                senderIndex >= round.identities.length
+            ) {
+                return json({ error: "unknown-sender" }, 404)
+            }
+            senderIdentity = round.identities[senderIndex]
+        }
+
         const payload = (await request.json()) as {
-            aggregate?: BlockSyncAggregateV1
+            aggregate?: BlockSyncAggregate
         }
         const admission = admitSyncAggregate(
             payload.aggregate,
             round.block,
-            round.secretary,
+            senderIdentity,
             round.identities[peerIndex],
             round.identities,
         )
@@ -248,6 +302,9 @@ const server = Bun.serve({
                 { result: admission.status, message: admission.message },
                 admission.status,
             )
+        }
+        for (const identity of admission.acceptedPeerIds) {
+            round.acceptedUnions[peerIndex].add(identity)
         }
         return json({
             result: 200,
@@ -324,11 +381,11 @@ function rounded(value: number): number {
     return Number(value.toFixed(3))
 }
 
-async function runIteration(
+function makeRoundFixture(
     nodeCount: number,
     blockNumber: number,
     config: EmulatorConfig,
-): Promise<IterationResult> {
+): ActiveRound {
     const identities = Array.from({ length: nodeCount }, (_, index) =>
         peerIdentity(index),
     )
@@ -344,7 +401,27 @@ async function runIteration(
         },
         content: { peerlist: identities },
     }
-    activeRound = { block, identities, secretary, config }
+    return {
+        block,
+        identities,
+        secretary,
+        config,
+        blockDeliveredCounts: new Array<number>(nodeCount).fill(0),
+        acceptedUnions: identities.map(() => new Set<string>()),
+    }
+}
+
+async function runIteration(
+    nodeCount: number,
+    blockNumber: number,
+    config: EmulatorConfig,
+): Promise<IterationResult> {
+    if (config.aggregateVersion === 2) {
+        return runIterationV2(nodeCount, blockNumber, config)
+    }
+    const round = makeRoundFixture(nodeCount, blockNumber, config)
+    const { block, identities, secretary } = round
+    activeRound = round
 
     const started = performance.now()
     const blockStarted = performance.now()
@@ -425,6 +502,216 @@ async function runIteration(
     }
 }
 
+async function runIterationV2(
+    nodeCount: number,
+    blockNumber: number,
+    config: EmulatorConfig,
+): Promise<IterationResult> {
+    const round = makeRoundFixture(nodeCount, blockNumber, config)
+    const { block, identities } = round
+    const signers = identities.slice(0, config.signerCount)
+    const nonSigners = identities.slice(config.signerCount)
+    const indexOf = new Map(
+        identities.map((identity, index) => [identity, index] as const),
+    )
+
+    // Every committee member computes its own delivery slice with the real
+    // partition function; together the slices must cover every non-signer
+    // exactly once.
+    const slices = signers.map(member => {
+        const slice = blockDeliveryPartition(member, signers, identities)
+        if (slice === null) {
+            throw new Error(
+                `committee member ${member} has no v2 delivery slice`,
+            )
+        }
+        return { member, slice }
+    })
+    const coveredCounts = new Map<string, number>()
+    for (const { slice } of slices) {
+        for (const identity of slice) {
+            coveredCounts.set(identity, (coveredCounts.get(identity) ?? 0) + 1)
+        }
+    }
+    if (
+        coveredCounts.size !== nonSigners.length ||
+        nonSigners.some(identity => coveredCounts.get(identity) !== 1)
+    ) {
+        throw new Error(
+            "v2 delivery slices do not cover the non-signers exactly once",
+        )
+    }
+
+    activeRound = round
+
+    const started = performance.now()
+    const blockStarted = performance.now()
+    const blockBody = { blockNumber: block.number, blockHash: block.hash }
+    const memberDeliveries = await Promise.all(
+        slices.map(async ({ member, slice }) => {
+            const results = await Promise.all(
+                slice.map(identity => {
+                    const peerIndex = indexOf.get(identity)
+                    if (peerIndex === undefined) {
+                        throw new Error(`unknown delivery target ${identity}`)
+                    }
+                    return postWithRetry(
+                        attempt => `/block/${peerIndex}/${attempt}`,
+                        blockBody,
+                        config,
+                    ).then(result => ({ identity, result }))
+                }),
+            )
+            return { member, results }
+        }),
+    )
+    const blockPhaseMs = performance.now() - blockStarted
+    const blockResults = memberDeliveries.flatMap(entry => entry.results)
+
+    // One partial bitmap aggregate per committee member, built from that
+    // member's own slice responses with the real builder.
+    const partials = memberDeliveries.map(({ member, results }) => {
+        const responses = results
+            .filter(entry => entry.result.ok)
+            .map(entry => ({
+                pubkey: entry.identity,
+                result: entry.result.body as {
+                    result: number
+                    response?: unknown
+                },
+            }))
+        const partial = buildSyncAggregateV2(
+            block as unknown as Parameters<typeof buildSyncAggregateV2>[0],
+            member,
+            responses,
+        )
+        if (!partial) {
+            throw new Error(
+                "buildSyncAggregateV2 returned null for a committed peerlist",
+            )
+        }
+        return { member, responses, partial }
+    })
+    // v1 aggregate for the same responses, built in memory purely for the
+    // byte comparison — never sent.
+    const v1Comparison = buildSyncAggregate(
+        { number: block.number, hash: block.hash },
+        partials[0].member,
+        partials[0].responses,
+    )
+
+    // Each builder applies its own partial locally (a node never posts to
+    // itself), through the real admission path, so its accepted union also
+    // carries its own slice.
+    for (const { member, partial } of partials) {
+        const selfIndex = indexOf.get(member)
+        if (selfIndex === undefined) {
+            throw new Error(`unknown committee member ${member}`)
+        }
+        const selfAdmission = admitSyncAggregate(
+            partial,
+            block,
+            member,
+            member,
+            identities,
+        )
+        if (!selfAdmission.ok) {
+            throw new Error(
+                `local self-admission failed for committee member ${member}`,
+            )
+        }
+        for (const identity of selfAdmission.acceptedPeerIds) {
+            round.acceptedUnions[selfIndex].add(identity)
+        }
+    }
+
+    const aggregateStarted = performance.now()
+    const aggregateResults = (
+        await Promise.all(
+            partials.map(({ member, partial }) => {
+                const senderIndex = indexOf.get(member)
+                if (senderIndex === undefined) {
+                    throw new Error(`unknown committee member ${member}`)
+                }
+                const aggregateBody = { aggregate: partial }
+                return Promise.all(
+                    identities
+                        .map((_, peerIndex) => peerIndex)
+                        .filter(peerIndex => peerIndex !== senderIndex)
+                        .map(peerIndex =>
+                            postWithRetry(
+                                attempt =>
+                                    `/aggregate/${peerIndex}/${attempt}?sender=${senderIndex}`,
+                                aggregateBody,
+                                config,
+                            ),
+                        ),
+                )
+            }),
+        )
+    ).flat()
+    const aggregatePhaseMs = performance.now() - aggregateStarted
+    activeRound = null
+
+    const blockDeliveredExactlyOnce = round.blockDeliveredCounts.every(
+        (count, index) => count === (index < config.signerCount ? 0 : 1),
+    )
+    const allPartialsAdmitted = aggregateResults.every(result => {
+        if (!result.ok) return false
+        const body = result.body as { result?: unknown } | null
+        return body !== null && body?.result === 200
+    })
+    // Admission excludes the receiver's own identity, so every receiver must
+    // end with exactly the committed peerlist minus itself.
+    const coverageExact = identities.every((identity, index) => {
+        const union = round.acceptedUnions[index]
+        return (
+            union.size === identities.length - 1 &&
+            !union.has(identity) &&
+            identities.every(
+                other => other === identity || union.has(other),
+            )
+        )
+    })
+
+    const allResults = [
+        ...blockResults.map(entry => entry.result),
+        ...aggregateResults,
+    ]
+    return {
+        nodeCount,
+        blockNumber,
+        aggregateIdentities: partials[0].responses.length + 1,
+        aggregateBytes: bodyBytes(partials[0].partial),
+        v1AggregateBytes: bodyBytes(v1Comparison),
+        blockDeliverySuccesses: blockResults.filter(entry => entry.result.ok)
+            .length,
+        aggregateDeliverySuccesses: aggregateResults.filter(result => result.ok)
+            .length,
+        blockDeliveredExactlyOnce,
+        allPartialsAdmitted,
+        coverageExact,
+        logicalCalls: allResults.length,
+        httpAttempts: allResults.reduce(
+            (total, result) => total + result.attempts,
+            0,
+        ),
+        retryAttempts: allResults.reduce(
+            (total, result) => total + result.attempts - 1,
+            0,
+        ),
+        wireBytes: allResults.reduce(
+            (total, result) =>
+                total + result.requestBytes + result.responseBytes,
+            0,
+        ),
+        elapsedMs: performance.now() - started,
+        blockPhaseMs,
+        aggregatePhaseMs,
+        requestLatenciesMs: allResults.map(result => result.elapsedMs),
+    }
+}
+
 async function runScenario(
     nodeCount: number,
     config: EmulatorConfig,
@@ -467,6 +754,7 @@ async function runScenario(
         nodeCount,
         config.signerCount,
         true,
+        config.aggregateVersion,
     )
     const elapsed = iterations.map(result => result.elapsedMs)
     const requestLatencies = iterations.flatMap(
@@ -485,6 +773,7 @@ async function runScenario(
         nodeCount,
         signerCount: config.signerCount,
         iterations: config.iterations,
+        aggregateVersion: config.aggregateVersion,
         legacyCallsPerBlock: legacy.totalRequests,
         aggregateCallsPerBlock: aggregate.totalRequests,
         modeledReductionPercent: rounded(
@@ -529,14 +818,48 @@ async function runScenario(
             p99: rounded(percentile(eventLoopDelaysMs, 0.99)),
             max: rounded(Math.max(0, ...eventLoopDelaysMs)),
         },
-        allDeliveriesAdmitted: iterations.every(
-            result =>
-                result.blockDeliverySuccesses ===
-                    nodeCount - config.signerCount &&
-                result.aggregateDeliverySuccesses === nodeCount - 1 &&
-                result.aggregateIdentities ===
-                    nodeCount - config.signerCount + 1,
-        ),
+        allDeliveriesAdmitted:
+            config.aggregateVersion === 2
+                ? iterations.every(
+                      result =>
+                          result.blockDeliverySuccesses ===
+                              nodeCount - config.signerCount &&
+                          result.aggregateDeliverySuccesses ===
+                              config.signerCount * (nodeCount - 1) &&
+                          result.blockDeliveredExactlyOnce === true &&
+                          result.allPartialsAdmitted === true,
+                  )
+                : iterations.every(
+                      result =>
+                          result.blockDeliverySuccesses ===
+                              nodeCount - config.signerCount &&
+                          result.aggregateDeliverySuccesses ===
+                              nodeCount - 1 &&
+                          result.aggregateIdentities ===
+                              nodeCount - config.signerCount + 1,
+                  ),
+        coverageExact:
+            config.aggregateVersion === 2
+                ? iterations.every(result => result.coverageExact === true)
+                : true,
+        v1VsV2AggregateBytes:
+            config.aggregateVersion === 2
+                ? {
+                      v1AggregateBytes: Math.max(
+                          ...iterations.map(
+                              result => result.v1AggregateBytes ?? 0,
+                          ),
+                      ),
+                      v2PartialAggregateBytes: Math.max(
+                          ...iterations.map(result => result.aggregateBytes),
+                      ),
+                  }
+                : {
+                      v1AggregateBytes: Math.max(
+                          ...iterations.map(result => result.aggregateBytes),
+                      ),
+                      v2PartialAggregateBytes: null,
+                  },
     }
 }
 
@@ -586,6 +909,63 @@ function validateSafetyCases(): Record<string, boolean> {
         identities[1],
         identities,
     )
+    const v2Responses = identities.slice(4).map(pubkey => ({
+        pubkey,
+        result: {
+            result: 200,
+            response: { syncData: "1:42:block-42" },
+        },
+    }))
+    const aggregateV2 = buildSyncAggregateV2(
+        block as unknown as Parameters<typeof buildSyncAggregateV2>[0],
+        identities[0],
+        v2Responses,
+    )
+    if (!aggregateV2) {
+        return { v2AggregateBuilt: false }
+    }
+    const validV2 = admitSyncAggregate(
+        aggregateV2,
+        block,
+        identities[0],
+        identities[1],
+        identities,
+    )
+    const v2NonSigner = admitSyncAggregate(
+        aggregateV2,
+        block,
+        identities[5],
+        identities[1],
+        identities,
+    )
+    const v2WrongBlock = admitSyncAggregate(
+        aggregateV2,
+        { ...block, hash: "wrong-block" },
+        identities[0],
+        identities[1],
+        identities,
+    )
+    const v2PeerlistMismatch = admitSyncAggregate(
+        { ...aggregateV2, peerlistSize: aggregateV2.peerlistSize + 1 },
+        block,
+        identities[0],
+        identities[1],
+        identities,
+    )
+    // Craft a bitmap with a set bit beyond the canonical index: decode the
+    // valid ackBits, set a high trailing bit and re-encode.
+    const tamperedBytes = Buffer.from(aggregateV2.ackBits, "base64")
+    tamperedBytes[tamperedBytes.length - 1] |= 0x80
+    const v2TrailingBit = admitSyncAggregate(
+        {
+            ...aggregateV2,
+            ackBits: Buffer.from(tamperedBytes).toString("base64"),
+        },
+        block,
+        identities[0],
+        identities[1],
+        identities,
+    )
     return {
         validAggregateAccepted: valid.ok,
         nonSignerRejected:
@@ -594,6 +974,24 @@ function validateSafetyCases(): Record<string, boolean> {
             !wrongBlock.ok &&
             "status" in wrongBlock &&
             wrongBlock.status === 400,
+        v2AggregateBuilt: true,
+        v2AggregateAccepted: validV2.ok,
+        v2NonSignerRejected:
+            !v2NonSigner.ok &&
+            "status" in v2NonSigner &&
+            v2NonSigner.status === 403,
+        v2WrongBlockRejected:
+            !v2WrongBlock.ok &&
+            "status" in v2WrongBlock &&
+            v2WrongBlock.status === 400,
+        v2PeerlistSizeMismatchRejected:
+            !v2PeerlistMismatch.ok &&
+            "status" in v2PeerlistMismatch &&
+            v2PeerlistMismatch.status === 400,
+        v2TrailingBitRejected:
+            !v2TrailingBit.ok &&
+            "status" in v2TrailingBit &&
+            v2TrailingBit.status === 400,
     }
 }
 
@@ -623,6 +1021,7 @@ async function main(): Promise<void> {
         results.every(
             result =>
                 result.allDeliveriesAdmitted &&
+                result.coverageExact &&
                 result.observedLogicalCallsPerBlock ===
                     result.aggregateCallsPerBlock,
         ) && Object.values(safety).every(Boolean)

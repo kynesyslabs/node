@@ -44,6 +44,19 @@ function envBool(key: string, fallback: boolean): boolean {
     return raw === "true" || raw === "1"
 }
 
+function envAggregationVersion(fallback: 1 | 2): 1 | 2 {
+    const raw = process.env[EnvKey.BLOCK_SYNC_AGGREGATION_VERSION]
+    if (raw === undefined || raw === "") return fallback
+    if (raw === "1") return 1
+    if (raw === "2") return 2
+    // A silently coerced version would produce divergent dissemination
+    // behaviour inside one committee, so refuse anything unrecognised.
+    console.warn(
+        `Invalid ${EnvKey.BLOCK_SYNC_AGGREGATION_VERSION}="${raw}" (expected 1 or 2); using ${fallback}`,
+    )
+    return fallback
+}
+
 function envList(key: string, fallback: string[] = []): string[] {
     const raw = process.env[key]
     if (!raw) return fallback
@@ -162,6 +175,16 @@ export function loadConfig(): Readonly<AppConfig> {
             blockSyncAggregationEnabled: envBool(
                 EnvKey.BLOCK_SYNC_AGGREGATION_ENABLED,
                 d.core.blockSyncAggregationEnabled,
+            ),
+            blockSyncAggregationVersion: envAggregationVersion(
+                d.core.blockSyncAggregationVersion,
+            ),
+            blockSyncAggregationActivationHeight: Math.max(
+                0,
+                envInt(
+                    EnvKey.BLOCK_SYNC_AGGREGATION_ACTIVATION_HEIGHT,
+                    d.core.blockSyncAggregationActivationHeight,
+                ),
             ),
         },
 

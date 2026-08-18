@@ -11,9 +11,13 @@ import { Mutex } from "async-mutex"
 import { Config } from "src/config"
 import { MetricsService } from "src/features/metrics/MetricsService"
 import {
-    BlockSyncAggregateV1,
+    BlockSyncAggregate,
     admitSyncAggregate,
+    blockDeliveryPartition,
     buildSyncAggregate,
+    buildSyncAggregateV2,
+    shouldPublishBlock,
+    syncAggregationActiveAt,
 } from "./syncAggregation"
 
 /**
@@ -21,25 +25,104 @@ import {
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
-    private static syncAggregationEnabled(): boolean {
-        return Config.getInstance().core.blockSyncAggregationEnabled
+    /**
+     * Post-block dissemination mode for a given block height.
+     * 0 = legacy broadcast, 1 = secretary aggregate POC, 2 = partitioned
+     * bitmap aggregation. Receivers admit aggregates regardless of mode.
+     */
+    private static syncAggregationModeFor(blockNumber: number): 0 | 1 | 2 {
+        const core = Config.getInstance().core
+        if (
+            !syncAggregationActiveAt(
+                core.blockSyncAggregationEnabled,
+                core.blockSyncAggregationActivationHeight,
+                blockNumber,
+            )
+        ) {
+            return 0
+        }
+        return core.blockSyncAggregationVersion
+    }
+
+    /**
+     * Post-consensus publication entry point. Every committee member calls
+     * this; the active mode decides who actually sends what.
+     */
+    static async publishBlock(block: Block, committeeIdentities: string[]) {
+        const mode = this.syncAggregationModeFor(block.number)
+        if (
+            mode === 1 &&
+            !shouldPublishBlock(
+                true,
+                getSharedState.publicKeyHex,
+                committeeIdentities,
+            )
+        ) {
+            // Version 1 keeps the POC's single designated publisher.
+            return false
+        }
+        return this.broadcastNewBlock(block, committeeIdentities)
     }
 
     /**
      * Broadcasts a new block to the network
      *
      * @param block The new block to broadcast
+     * @param committeeIdentities Current committee; only used by mode 2 to
+     * derive this node's deterministic delivery slice.
      */
-    static async broadcastNewBlock(block: Block) {
+    static async broadcastNewBlock(
+        block: Block,
+        committeeIdentities: string[],
+    ) {
+        const mode = this.syncAggregationModeFor(block.number)
         const peerlist = PeerManager.getInstance().getPeers()
 
         // filter by block signers
-        const peers = peerlist.filter(
+        let peers = peerlist.filter(
             peer =>
                 block.validation_data.signatures[peer.identity] == undefined,
         )
 
-        if (peers.length === 0) {
+        if (mode === 2) {
+            // Each SIGNING committee member delivers only its deterministic
+            // slice. A member that aborted mid-round holds no signature (and
+            // no block), so it must stay a delivery target rather than a
+            // deliverer. The assignment depends on the peer identity, the
+            // signing committee and the block hash (rotating slice ownership
+            // every block), so divergent local peer views cost at most
+            // duplicate or missed deliveries, both repaired by dedupe and
+            // anti-entropy.
+            const signerIds = new Set(
+                Object.keys(block.validation_data.signatures ?? {}).map(
+                    identity => identity.toLowerCase(),
+                ),
+            )
+            const signingCommittee = committeeIdentities.filter(identity =>
+                signerIds.has(identity.toLowerCase()),
+            )
+            const slice = blockDeliveryPartition(
+                getSharedState.publicKeyHex,
+                signingCommittee,
+                peers.map(peer => peer.identity),
+                block.hash,
+            )
+            if (slice === null) {
+                log.warning(
+                    `[broadcastNewBlock] Asked to publish block ${block.number} without a partition slot (not a signing committee member)`,
+                )
+            }
+            const allowed = new Set(
+                (slice ?? []).map(identity => identity.toLowerCase()),
+            )
+            peers = peers.filter(peer =>
+                allowed.has(peer.identity.toLowerCase()),
+            )
+        }
+
+        // Mode 2 still publishes its partial aggregate (it carries our own
+        // acknowledgement) even when the delivery slice is empty.
+        if (peers.length === 0 && mode !== 2) {
             return
         }
 
@@ -80,12 +163,23 @@ export class BroadcastManager {
             .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
-        if (this.syncAggregationEnabled()) {
-            const aggregate = buildSyncAggregate(
-                block,
-                getSharedState.publicKeyHex,
-                responses,
-            )
+        if (mode !== 0) {
+            // Mode 2 encodes acknowledgements as a bitmap over the block's
+            // hash-committed peerlist; blocks without a usable committed
+            // peerlist fall back to the bounded version-1 identity list.
+            const aggregate: BlockSyncAggregate =
+                (mode === 2
+                    ? buildSyncAggregateV2(
+                          block,
+                          getSharedState.publicKeyHex,
+                          responses,
+                      )
+                    : null) ??
+                buildSyncAggregate(
+                    block,
+                    getSharedState.publicKeyHex,
+                    responses,
+                )
             // Apply the same aggregate locally before publishing it so the
             // block sender and recipients converge through one code path.
             this.applySyncAggregate(
@@ -211,11 +305,19 @@ export class BroadcastManager {
         const peer = peerman.getPeer(sender)
         const res = await syncBlock(block, peer)
 
+        if (res) {
+            // Partial aggregates that raced this block's delivery were
+            // buffered; replay them now through the same admission path.
+            this.drainPendingSyncAggregates(block)
+        }
+
         // Legacy behaviour fans each recipient's status back out to every
-        // peer. The POC returns the same syncData in this response and lets
-        // the block sender publish one aggregate instead. Existing hello and
-        // peer-gossip routines remain the anti-entropy recovery path.
-        if (!this.syncAggregationEnabled()) {
+        // peer. The aggregation path returns the same syncData in this
+        // response and lets the block deliverer publish an aggregate
+        // instead. Existing hello and peer-gossip routines remain the
+        // anti-entropy recovery path. Gated per block height so a fleet
+        // waiting on an activation height keeps legacy semantics below it.
+        if (this.syncAggregationModeFor(block.number) === 0) {
             await this.broadcastOurSyncData("receiver_post_block")
         }
 
@@ -291,7 +393,7 @@ export class BroadcastManager {
     }
 
     /** Publish one compact acknowledgement set for a consensus-approved block. */
-    static async broadcastSyncAggregate(aggregate: BlockSyncAggregateV1) {
+    static async broadcastSyncAggregate(aggregate: BlockSyncAggregate) {
         const peerlist = PeerManager.getInstance()
             .getPeers()
             .filter(
@@ -338,6 +440,46 @@ export class BroadcastManager {
     }
 
     /**
+     * Partitioned committee members publish their partial aggregates as soon
+     * as their own slice settles, so a partial routinely reaches a peer
+     * moments before that peer's own block delivery. Buffering those
+     * next-block aggregates briefly (instead of rejecting them outright)
+     * preserves the acknowledgements they carry; each entry is replayed
+     * through the same fail-closed admission path once the block lands.
+     */
+    private static readonly MAX_PENDING_SYNC_AGGREGATES = 64
+    private static readonly PENDING_SYNC_AGGREGATE_TTL_MS = 60_000
+    private static pendingSyncAggregates: {
+        sender: string
+        value: unknown
+        blockNumber: number
+        receivedAt: number
+    }[] = []
+
+    private static prunePendingSyncAggregates() {
+        const cutoff = Date.now() - this.PENDING_SYNC_AGGREGATE_TTL_MS
+        this.pendingSyncAggregates = this.pendingSyncAggregates.filter(
+            entry =>
+                entry.receivedAt >= cutoff &&
+                entry.blockNumber > getSharedState.lastBlockNumber,
+        )
+    }
+
+    /** Replay buffered aggregates for a block that just finished syncing. */
+    private static drainPendingSyncAggregates(block: Block) {
+        const matching = this.pendingSyncAggregates.filter(
+            entry => entry.blockNumber === block.number,
+        )
+        this.pendingSyncAggregates = this.pendingSyncAggregates.filter(
+            entry => entry.blockNumber !== block.number,
+        )
+        for (const entry of matching) {
+            this.applySyncAggregate(entry.sender, entry.value, block)
+        }
+        this.prunePendingSyncAggregates()
+    }
+
+    /**
      * Apply a bounded block-signer observation. This POC deliberately treats
      * the aggregate as a liveness hint: it can only advance known peers to an
      * already verified local block and never marks a peer online.
@@ -357,6 +499,32 @@ export class BroadcastManager {
             typeof (value as { blockNumber?: unknown }).blockNumber === "number"
                 ? (value as { blockNumber: number }).blockNumber
                 : -1
+        if (
+            Number.isSafeInteger(rawBlockNumber) &&
+            rawBlockNumber === getSharedState.lastBlockNumber + 1
+        ) {
+            this.prunePendingSyncAggregates()
+            if (
+                this.pendingSyncAggregates.length <
+                this.MAX_PENDING_SYNC_AGGREGATES
+            ) {
+                this.pendingSyncAggregates.push({
+                    sender,
+                    value,
+                    blockNumber: rawBlockNumber,
+                    receivedAt: Date.now(),
+                })
+                return {
+                    result: 200,
+                    message: "Sync aggregate buffered until the block arrives",
+                    accepted: 0,
+                    syncData: PeerManager.getInstance().ourSyncDataString,
+                }
+            }
+            log.debug(
+                "[handleSyncAggregate] Pending aggregate buffer full, dropping next-block aggregate",
+            )
+        }
         const blockNumber =
             Number.isSafeInteger(rawBlockNumber) &&
             rawBlockNumber >= 0 &&
@@ -402,6 +570,18 @@ export class BroadcastManager {
                 .getPeers()
                 .find(peer => peer.identity.toLowerCase() === identity)
             if (!existing) continue
+            // Monotonicity: an aggregate for an older (locally verified)
+            // block must never regress a fresher hint. The legacy
+            // updateSyncData path enforces this inside PeerManager.addPeer;
+            // this path mutates live Peer objects directly, so it guards
+            // here. Same-height aggregates may still correct a conflicting
+            // hash to the locally verified one.
+            if (
+                typeof existing.sync.block === "number" &&
+                existing.sync.block > block.number
+            ) {
+                continue
+            }
             const changed =
                 !existing.sync.status ||
                 existing.sync.block !== block.number ||
