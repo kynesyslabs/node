@@ -10,6 +10,7 @@ import { NomisIdentityProvider } from "@/libs/identity/providers/nomisIdentityPr
 import HumanPassportProvider from "@/libs/identity/tools/humanpassport"
 import { EthosIdentityProvider } from "@/libs/identity/providers/ethosIdentityProvider"
 import { BroadcastManager } from "../communications/broadcastManager"
+import { PeerManager } from "../peer"
 import { GCRStorageProgramRoutines } from "../blockchain/gcr/gcr_routines/GCRStorageProgramRoutines"
 import Datasource from "@/model/datasource"
 import { GCRStorageProgram } from "@/model/entities/GCRv2/GCR_StorageProgram"
@@ -264,7 +265,14 @@ export default async function manageGCRRoutines(
 
             if (block.number <= getSharedState.lastBlockNumber) {
                 response.result = 200
-                response.response = "Block is already processed"
+                // Keep the handleNewBlock response shape: without syncData
+                // the block deliverer cannot count an already-synced peer in
+                // its acknowledgement aggregate.
+                response.response = {
+                    result: 200,
+                    message: "Block is already processed",
+                    syncData: PeerManager.getInstance().ourSyncDataString,
+                }
                 break
             }
 
