@@ -285,6 +285,14 @@ export default async function manageGCRRoutines(
             break
         }
 
+        case "updateSyncAggregate": {
+            response.response = await BroadcastManager.handleSyncAggregate(
+                sender,
+                params[0],
+            )
+            break
+        }
+
         // case "getAccountByTelegramUsername": {
         //     const username = params[0]
 

@@ -144,6 +144,11 @@ export class MetricsService {
             "type",
         ])
         this.createCounter(
+            "block_sync_messages_sent_total",
+            "POC block synchronization messages sent",
+            ["kind", "source"],
+        )
+        this.createCounter(
             "messages_received_total",
             "Total messages received",
             ["type"],

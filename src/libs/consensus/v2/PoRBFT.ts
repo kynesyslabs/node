@@ -45,6 +45,8 @@ import {
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { computeMergedPeerlist } from "./routines/peerlistMerge"
+import { Config } from "src/config"
+import { shouldPublishBlock } from "src/libs/communications/syncAggregation"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -408,7 +410,25 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            BroadcastManager.broadcastNewBlock(block)
+            const aggregationEnabled =
+                Config.getInstance().core.blockSyncAggregationEnabled
+            if (
+                shouldPublishBlock(
+                    aggregationEnabled,
+                    getSharedState.publicKeyHex,
+                    manager.shard.members.map(member => member.identity),
+                )
+            ) {
+                BroadcastManager.broadcastNewBlock(block).catch(error => {
+                    log.error(
+                        `[consensusRoutine] Block broadcast failed: ${
+                            error instanceof Error
+                                ? error.message
+                                : String(error)
+                        }`,
+                    )
+                })
+            }
             DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state

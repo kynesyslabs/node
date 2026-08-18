@@ -8,6 +8,8 @@ CREATE DATABASE node4_db;
 -- the node-5 service is gated behind a docker-compose profile and only
 -- starts when the rehearsal harness brings it up.
 CREATE DATABASE node5_db;
+-- node6_db is used only by the opt-in block-sync scale POC.
+CREATE DATABASE node6_db;
 
 -- Grant permissions
 GRANT ALL PRIVILEGES ON DATABASE node1_db TO demosuser;
@@ -15,3 +17,4 @@ GRANT ALL PRIVILEGES ON DATABASE node2_db TO demosuser;
 GRANT ALL PRIVILEGES ON DATABASE node3_db TO demosuser;
 GRANT ALL PRIVILEGES ON DATABASE node4_db TO demosuser;
 GRANT ALL PRIVILEGES ON DATABASE node5_db TO demosuser;
+GRANT ALL PRIVILEGES ON DATABASE node6_db TO demosuser;

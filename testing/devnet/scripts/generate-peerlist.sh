@@ -11,27 +11,16 @@ if [[ -f "${DEVNET_DIR}/.env" ]]; then
 fi
 
 # Default ports if not set
-NODE1_PORT=${NODE1_PORT:-53551}
-NODE2_PORT=${NODE2_PORT:-53553}
-NODE3_PORT=${NODE3_PORT:-53555}
-NODE4_PORT=${NODE4_PORT:-53557}
-NODE5_PORT=${NODE5_PORT:-53559}
-
-# NODE_COUNT mirrors generate-identities.sh — use 5 for the rehearsal
-# fresh-joiner scenario, 4 for the default 4-node devnet.
+# NODE_COUNT mirrors generate-identities.sh. Ports default to the existing
+# odd-numbered sequence (53551, 53553, ...), while NODE<N>_PORT can override
+# any member. This keeps the POC topology extensible without another case arm.
 NODE_COUNT="${NODE_COUNT:-4}"
 
-# Map index → exposed port for the peerlist body. Add new entries here if
-# NODE_COUNT grows beyond 5.
 get_port() {
-	case "$1" in
-		1) echo "${NODE1_PORT}" ;;
-		2) echo "${NODE2_PORT}" ;;
-		3) echo "${NODE3_PORT}" ;;
-		4) echo "${NODE4_PORT}" ;;
-		5) echo "${NODE5_PORT}" ;;
-		*) echo "❌ Unknown node index $1" >&2 && exit 1 ;;
-	esac
+	local index="$1"
+	local variable="NODE${index}_PORT"
+	local default_port=$((53549 + (2 * index)))
+	echo "${!variable:-${default_port}}"
 }
 
 echo "📋 Generating devnet peerlist (count=${NODE_COUNT})..."

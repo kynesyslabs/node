@@ -1,0 +1,128 @@
+# Isolated, resource-bounded overlay for the block-sync aggregation POC.
+# All host-facing ports bind to loopback and all nodes use the same flag.
+services:
+    postgres:
+        mem_limit: 768m
+        cpus: 0.5
+        ports: !override
+            - "127.0.0.1:55432:5432"
+
+    tlsnotary:
+        mem_limit: 512m
+        cpus: 0.25
+        ports: !override
+            - "127.0.0.1:7148:7047"
+
+    node-1:
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ../../src:/app/src:ro
+        ports: !override
+            - "127.0.0.1:53551:53551"
+            - "127.0.0.1:53552:53552"
+            - "127.0.0.1:3105:3005"
+
+    node-2:
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ../../src:/app/src:ro
+        ports: !override
+            - "127.0.0.1:53553:53553"
+            - "127.0.0.1:53554:53554"
+            - "127.0.0.1:3106:3005"
+
+    node-3:
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ../../src:/app/src:ro
+        ports: !override
+            - "127.0.0.1:53555:53555"
+            - "127.0.0.1:53556:53556"
+            - "127.0.0.1:3107:3005"
+
+    node-4:
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ../../src:/app/src:ro
+        ports: !override
+            - "127.0.0.1:53557:53557"
+            - "127.0.0.1:53558:53558"
+            - "127.0.0.1:3108:3005"
+
+    node-5:
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ../../src:/app/src:ro
+        ports: !override
+            - "127.0.0.1:53559:53559"
+            - "127.0.0.1:53560:53560"
+            - "127.0.0.1:3109:3005"
+
+    # Second non-committee receiver for the scale POC. It is absent from the
+    # canonical devnet and starts only when the scale-poc profile is selected.
+    node-6:
+        profiles: [scale-poc]
+        image: demos-devnet-node
+        container_name: demos-devnet-node-6
+        depends_on:
+            postgres:
+                condition: service_healthy
+            tlsnotary:
+                condition: service_started
+            node-1:
+                condition: service_started
+        mem_limit: 1280m
+        cpus: 0.55
+        environment:
+            NODE_ENV: development
+            L2PS_HASH_RELAY_NON_PROD: "true"
+            PG_HOST: postgres
+            PG_PORT: "5432"
+            PG_USER: ${POSTGRES_USER:-demosuser}
+            PG_PASSWORD: ${POSTGRES_PASSWORD:-demospass}
+            PG_DATABASE: node6_db
+            PORT: ${NODE6_PORT:-53561}
+            OMNI_PORT: ${NODE6_OMNI_PORT:-53562}
+            EXPOSED_URL: http://node-6:${NODE6_PORT:-53561}
+            CONSENSUS_TIME: ${CONSENSUS_TIME:-10}
+            SUDO_PUBKEY: ${SUDO_PUBKEY:-}
+            TLSNOTARY_ENABLED: "true"
+            TLSNOTARY_MODE: docker
+            TLSNOTARY_HOST: tlsnotary
+            TLSNOTARY_PORT: "7047"
+            BLOCK_SYNC_AGGREGATION_ENABLED: ${BLOCK_SYNC_AGGREGATION_ENABLED:-true}
+            METRICS_ENABLED: "true"
+        volumes:
+            - ./identities/node6.identity:/app/.demos_identity:ro
+            - ./demos_peerlist.json:/app/demos_peerlist.json:ro
+            - ./l2ps:/app/data/l2ps:ro
+            - ./genesis.devnet.json:/app/data/genesis.json:ro
+            - ./empty-snapshot:/app/data/snapshot:ro
+            - ../../src:/app/src:ro
+        ports:
+            - "127.0.0.1:53561:53561"
+            - "127.0.0.1:53562:53562"
+            - "127.0.0.1:3110:3005"
+        networks:
+            - demos-network
+        restart: unless-stopped

@@ -8,12 +8,23 @@ import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Mutex } from "async-mutex"
+import { Config } from "src/config"
+import { MetricsService } from "src/features/metrics/MetricsService"
+import {
+    BlockSyncAggregateV1,
+    admitSyncAggregate,
+    buildSyncAggregate,
+} from "./syncAggregation"
 
 /**
  *
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
+    private static syncAggregationEnabled(): boolean {
+        return Config.getInstance().core.blockSyncAggregationEnabled
+    }
+
     /**
      * Broadcasts a new block to the network
      *
@@ -48,6 +59,17 @@ export class BroadcastManager {
             }
         })
 
+        MetricsService.getInstance().incrementCounter(
+            "messages_sent_total",
+            { type: "syncNewBlock" },
+            peers.length,
+        )
+        MetricsService.getInstance().incrementCounter(
+            "block_sync_messages_sent_total",
+            { kind: "syncNewBlock", source: "post_block" },
+            peers.length,
+        )
+
         type BroadcastResult = { pubkey: string; result: RPCResponse }
         const settled = await Promise.allSettled(promises)
         const responses = settled
@@ -58,15 +80,33 @@ export class BroadcastManager {
             .map(r => r.value)
         const successful = responses.filter(res => res.result.result === 200)
 
-        for (const res of responses) {
-            if (res.result.result !== 200) continue
-            await this.handleUpdatePeerSyncData(
-                res.pubkey,
-                res.result.response.syncData,
+        if (this.syncAggregationEnabled()) {
+            const aggregate = buildSyncAggregate(
+                block,
+                getSharedState.publicKeyHex,
+                responses,
             )
-        }
+            // Apply the same aggregate locally before publishing it so the
+            // block sender and recipients converge through one code path.
+            this.applySyncAggregate(
+                getSharedState.publicKeyHex,
+                aggregate,
+                block,
+            )
+            await this.broadcastSyncAggregate(aggregate)
+        } else {
+            for (const res of responses) {
+                if (res.result.result !== 200) continue
+                const body = res.result.response
+                if (!body || typeof body !== "object") continue
+                await this.handleUpdatePeerSyncData(
+                    res.pubkey,
+                    (body as { syncData?: string }).syncData,
+                )
+            }
 
-        await this.broadcastOurSyncData()
+            await this.broadcastOurSyncData("sender_post_block")
+        }
 
         if (successful.length > 0) {
             return true
@@ -171,8 +211,13 @@ export class BroadcastManager {
         const peer = peerman.getPeer(sender)
         const res = await syncBlock(block, peer)
 
-        // REVIEW: Should we await this?
-        await this.broadcastOurSyncData()
+        // Legacy behaviour fans each recipient's status back out to every
+        // peer. The POC returns the same syncData in this response and lets
+        // the block sender publish one aggregate instead. Existing hello and
+        // peer-gossip routines remain the anti-entropy recovery path.
+        if (!this.syncAggregationEnabled()) {
+            await this.broadcastOurSyncData("receiver_post_block")
+        }
 
         return {
             result: res ? 200 : 400,
@@ -184,7 +229,7 @@ export class BroadcastManager {
     /**
      * Broadcasts our sync data to the network
      */
-    static async broadcastOurSyncData() {
+    static async broadcastOurSyncData(source = "anti_entropy") {
         const peerlist = PeerManager.getInstance().getPeers()
         const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
@@ -213,6 +258,16 @@ export class BroadcastManager {
 
         type SyncResult = { pubkey: string; result: RPCResponse }
         const settled = await Promise.allSettled(promises)
+        MetricsService.getInstance().incrementCounter(
+            "messages_sent_total",
+            { type: "updateSyncData" },
+            peerlist.length,
+        )
+        MetricsService.getInstance().incrementCounter(
+            "block_sync_messages_sent_total",
+            { kind: "updateSyncData", source },
+            peerlist.length,
+        )
         const responses = settled
             .filter(
                 (r): r is PromiseFulfilledResult<SyncResult> =>
@@ -233,6 +288,139 @@ export class BroadcastManager {
         }
 
         return successful.length > 0
+    }
+
+    /** Publish one compact acknowledgement set for a consensus-approved block. */
+    static async broadcastSyncAggregate(aggregate: BlockSyncAggregateV1) {
+        const peerlist = PeerManager.getInstance()
+            .getPeers()
+            .filter(
+                peer =>
+                    peer.identity.toLowerCase() !==
+                    getSharedState.publicKeyHex.toLowerCase(),
+            )
+
+        const settled = await Promise.allSettled(
+            peerlist.map(peer => {
+                // Authenticated calls add their envelope to params, so each
+                // concurrent peer must receive an independent request object.
+                const request: RPCRequest = {
+                    method: "gcr_routine",
+                    params: [
+                        {
+                            method: "updateSyncAggregate",
+                            params: [aggregate],
+                        },
+                    ],
+                }
+                return peer.longCall(request, true, {
+                    sleepTime: 250,
+                    retries: 2,
+                    allowedCodes: [400],
+                })
+            }),
+        )
+        MetricsService.getInstance().incrementCounter(
+            "messages_sent_total",
+            { type: "updateSyncAggregate" },
+            peerlist.length,
+        )
+        MetricsService.getInstance().incrementCounter(
+            "block_sync_messages_sent_total",
+            { kind: "updateSyncAggregate", source: "sender_post_block" },
+            peerlist.length,
+        )
+
+        return settled.filter(
+            result =>
+                result.status === "fulfilled" && result.value.result === 200,
+        ).length
+    }
+
+    /**
+     * Apply a bounded block-signer observation. This POC deliberately treats
+     * the aggregate as a liveness hint: it can only advance known peers to an
+     * already verified local block and never marks a peer online.
+     */
+    static async handleSyncAggregate(
+        sender: string,
+        value: unknown,
+    ): Promise<{
+        result: number
+        message: string
+        accepted: number
+        syncData: string
+    }> {
+        const rawBlockNumber =
+            value &&
+            typeof value === "object" &&
+            typeof (value as { blockNumber?: unknown }).blockNumber === "number"
+                ? (value as { blockNumber: number }).blockNumber
+                : -1
+        const blockNumber =
+            Number.isSafeInteger(rawBlockNumber) &&
+            rawBlockNumber >= 0 &&
+            rawBlockNumber <= getSharedState.lastBlockNumber
+                ? rawBlockNumber
+                : -1
+        const block =
+            blockNumber >= 0 ? await Chain.getBlockByNumber(blockNumber) : null
+        return this.applySyncAggregate(sender, value, block)
+    }
+
+    private static applySyncAggregate(
+        sender: string,
+        value: unknown,
+        block: Block | null,
+    ): {
+        result: number
+        message: string
+        accepted: number
+        syncData: string
+    } {
+        const peerman = PeerManager.getInstance()
+        const syncData = peerman.ourSyncDataString
+        const admission = admitSyncAggregate(
+            value,
+            block,
+            sender,
+            getSharedState.publicKeyHex,
+            peerman.getPeers().map(peer => peer.identity),
+        )
+        if ("status" in admission) {
+            return {
+                result: admission.status,
+                message: admission.message,
+                accepted: 0,
+                syncData,
+            }
+        }
+
+        let accepted = 0
+        for (const identity of admission.acceptedPeerIds) {
+            const existing = peerman
+                .getPeers()
+                .find(peer => peer.identity.toLowerCase() === identity)
+            if (!existing) continue
+            const changed =
+                !existing.sync.status ||
+                existing.sync.block !== block.number ||
+                existing.sync.block_hash !== block.hash
+            // The PeerManager returns live Peer objects. Mutating only the
+            // sync hint avoids touching connection, authentication, or online
+            // status while also correcting a same-height conflicting hash.
+            existing.sync.status = true
+            existing.sync.block = block.number
+            existing.sync.block_hash = block.hash
+            if (changed) accepted++
+        }
+
+        return {
+            result: 200,
+            message: "Sync aggregate applied",
+            accepted,
+            syncData: peerman.ourSyncDataString,
+        }
     }
 
     /**
