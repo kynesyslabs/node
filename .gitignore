@@ -89,6 +89,7 @@ testing/devnet/identities/
 testing/devnet/.env
 testing/devnet/postgres-data/
 testing/runs/
+.poc-results/
 local_tests/
 
 # ---- Local devnet identities (private keys / mnemonics) ----

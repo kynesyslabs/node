@@ -126,3 +126,40 @@ The host had four CPUs and 15 GiB RAM. Six full nodes saturated the available
 CPU during rounds and used roughly 1 GiB resident memory each, so larger real
 tests must use dedicated multi-host infrastructure. Running 20–50 processes on
 that host would measure resource starvation rather than network scalability.
+
+## Lightweight transport-scale result
+
+`testing/devnet/scripts/run-sync-scale-emulator.ts` exercises the real
+aggregate builder, wire shape, and recipient admission code over loopback HTTP
+with hundreds of virtual identities. It injects 20–100 ms baseline jitter, 5%
+slow peers with another 220 ms delay, and 5% retryable first-attempt failures.
+The VPS wrapper pauses (but does not remove) the six full POC nodes, enforces a
+memory floor, verifies DACS health, and resumes all six nodes after the run.
+
+On 2026-08-18, five post-block bursts were measured at each size:
+
+| Peers | Legacy calls/block | Aggregate calls/block | Reduction | Mean burst | Aggregate | Total wire/block | Peak RSS | Event-loop p99 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 10,384 | 195 | 98.1% | 504 ms | 6.8 KB | 0.72 MB | 70 MB | 3.9 ms |
+| 250 | 63,484 | 495 | 99.2% | 528 ms | 17.1 KB | 4.51 MB | 104 MB | 14.7 ms |
+| 500 | 251,984 | 995 | 99.6% | 810 ms | 34.4 KB | 18.10 MB | 149 MB | 55.2 ms |
+
+The observed logical call count matched the linear model at every size. All
+deliveries were admitted after bounded retries; valid aggregates passed, while
+non-signer and wrong-block aggregates failed closed. The six full nodes and
+all four live DACS services were healthy after automatic resume.
+
+Run the guarded VPS test with:
+
+```text
+NODE_COUNTS=100,250,500 ITERATIONS=5 \
+  testing/devnet/scripts/run-sync-scale-vps.sh
+```
+
+This is strong evidence for the transport path, not a substitute for a real
+multi-host validator soak. The emulator multiplexes virtual recipients through
+one Bun process and does not reproduce hundreds of databases, consensus loops,
+OmniProtocol connections, cryptographic acknowledgement signatures, or WAN
+kernel scheduling. The 18.1 MB sender burst at 500 peers also motivates the
+documented bitmap/tree follow-up even though the burst completed in under one
+second here.
