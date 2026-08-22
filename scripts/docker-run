@@ -510,6 +510,22 @@ if [[ "$USE_DEVNET" == "true" && "$SUBCOMMAND" == "up" && -f "$HOST_GENESIS_FILE
         '
 fi
 
+HOST_SNAPSHOT_DIR="${REPO_ROOT}/data/snapshot"
+if [[ "$USE_DEVNET" == "true" && "$SUBCOMMAND" == "up" && -d "$HOST_SNAPSHOT_DIR" ]]; then
+    docker volume inspect "$DATA_VOL_NAME" >/dev/null 2>&1 || docker volume create "$DATA_VOL_NAME" >/dev/null
+    echo "+ [devnet] syncing data/snapshot/ -> $DATA_VOL_NAME"
+    docker run --rm \
+        -v "$DATA_VOL_NAME":/data \
+        -v "$HOST_SNAPSHOT_DIR":/src/snapshot:ro \
+        alpine sh -c '
+            rm -rf /data/snapshot &&
+            cp -r /src/snapshot /data/snapshot &&
+            chmod 755 /data/snapshot &&
+            chmod 644 /data/snapshot/* &&
+            chown -R 1000:1000 /data/snapshot
+        '
+fi
+
 # Use ${arr[@]+"${arr[@]}"} guards because `set -u` treats expansion
 # of an empty array as unset. Without these guards the default (no
 # --proxy, no extra args) invocation aborts with "PROFILES[@]: unbound
