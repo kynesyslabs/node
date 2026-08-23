@@ -159,6 +159,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.BLOCK_WATCHDOG_TIMEOUT_SECONDS,
                 d.core.blockWatchdogTimeoutSeconds,
             ),
+            blockSyncAggregationEnabled: envBool(
+                EnvKey.BLOCK_SYNC_AGGREGATION_ENABLED,
+                d.core.blockSyncAggregationEnabled,
+            ),
         },
 
         tlsnotary: {

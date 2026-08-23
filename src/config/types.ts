@@ -66,6 +66,11 @@ export interface CoreConfig {
     restore: boolean
     blockWatchdogEnabled: boolean
     blockWatchdogTimeoutSeconds: number
+    /**
+     * POC: replace receiver-side all-peer sync rebroadcasts with one
+     * block-signer aggregate. Disabled by default until multi-node validation.
+     */
+    blockSyncAggregationEnabled: boolean
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

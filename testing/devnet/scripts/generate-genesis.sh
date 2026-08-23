@@ -19,23 +19,14 @@ if [[ -f "${DEVNET_DIR}/.env" ]]; then
 	source "${DEVNET_DIR}/.env"
 fi
 
-NODE1_PORT=${NODE1_PORT:-53551}
-NODE2_PORT=${NODE2_PORT:-53553}
-NODE3_PORT=${NODE3_PORT:-53555}
-NODE4_PORT=${NODE4_PORT:-53557}
-NODE5_PORT=${NODE5_PORT:-53559}
 NODE_COUNT="${NODE_COUNT:-4}"
 STAKE="${DEVNET_VALIDATOR_STAKE:-1000000000000000000}"
 
 get_port() {
-	case "$1" in
-	1) echo "${NODE1_PORT}" ;;
-	2) echo "${NODE2_PORT}" ;;
-	3) echo "${NODE3_PORT}" ;;
-	4) echo "${NODE4_PORT}" ;;
-	5) echo "${NODE5_PORT}" ;;
-	*) echo "❌ Unknown node index $1" >&2 && exit 1 ;;
-	esac
+	local index="$1"
+	local variable="NODE${index}_PORT"
+	local default_port=$((53549 + (2 * index)))
+	echo "${!variable:-${default_port}}"
 }
 
 echo "🧬 Syncing genesis validators to identities (count=${NODE_COUNT})..."
