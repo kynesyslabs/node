@@ -6,6 +6,23 @@ import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
 
+const SECRETARY_ROTATION_GRACE_SECONDS = 90
+
+export function getSecretaryRoundIndex(lastBlockTimestamp?: number): number {
+    if (!lastBlockTimestamp) {
+        return 0
+    }
+
+    const delta = getNetworkTimestamp() - lastBlockTimestamp
+    const consensusIntervalTime = getSharedState.getConsensusTime()
+    const rotationWindow =
+        consensusIntervalTime + SECRETARY_ROTATION_GRACE_SECONDS
+    return Math.max(
+        0,
+        Math.floor((delta - consensusIntervalTime) / rotationWindow),
+    )
+}
+
 export async function checkConsensusTime(
     flexible = false,
     flextime = 2,
