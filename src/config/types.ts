@@ -66,6 +66,9 @@ export interface CoreConfig {
     restore: boolean
     blockWatchdogEnabled: boolean
     blockWatchdogTimeoutSeconds: number
+    /** Consecutive missed shard selections before the node exits for
+     *  investigation. 0 or lower disables the exit. */
+    stallDetectionBlocks: number
     rpcFee: number
     networkFee: number
     /** Per-tx burn — sat/lamport-style integer for now.

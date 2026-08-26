@@ -159,6 +159,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.BLOCK_WATCHDOG_TIMEOUT_SECONDS,
                 d.core.blockWatchdogTimeoutSeconds,
             ),
+            stallDetectionBlocks: envInt(
+                EnvKey.STALL_DETECTION_BLOCKS,
+                d.core.stallDetectionBlocks,
+            ),
         },
 
         tlsnotary: {

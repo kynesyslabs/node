@@ -20,6 +20,7 @@ import Block from "../block"
 import Chain from "../chain"
 import log from "src/utilities/logger"
 import { verifyBlock } from "../validation/verifyBlock"
+import { recordSyncedBlock } from "src/libs/consensus/v2/routines/stallDetection"
 import {
     RPCRequest,
     RPCResponse,
@@ -903,9 +904,9 @@ let unreconciledGcrBlock: number | null = null
 async function assertNoUnreconciledGcrState(): Promise<void> {
     if (unreconciledGcrBlock !== null) {
         throw new Error(
-            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+            "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
                 `${unreconciledGcrBlock} was applied without its block and local state has ` +
-                `drifted from the chain. The node must be resynced from scratch.`,
+                "drifted from the chain. The node must be resynced from scratch.",
         )
     }
 
@@ -914,10 +915,10 @@ async function assertNoUnreconciledGcrState(): Promise<void> {
         unreconciledGcrBlock = orphanedBlock
         getSharedState.syncStatus = false
         throw new Error(
-            `[applySyncedBlock] refusing to apply further blocks: GCR state for block ` +
+            "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
                 `${orphanedBlock} exists but the block does not (chain tip is ` +
                 `${await Chain.getLastBlockNumber()}). Local state has drifted from the ` +
-                `chain — the node must be resynced from scratch.`,
+                "chain — the node must be resynced from scratch.",
         )
     }
 }
@@ -975,13 +976,15 @@ async function insertBlockOrHalt(
         getSharedState.syncStatus = false
         log.error(
             `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
-                `but the block failed to insert; local state has drifted from the chain. ` +
-                `Marking the node unsynced and refusing further block application — ` +
-                `it must be resynced from scratch: ` +
+                "but the block failed to insert; local state has drifted from the chain. " +
+                "Marking the node unsynced and refusing further block application — " +
+                "it must be resynced from scratch: " +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
         throw e
     }
+
+    await recordSyncedBlock(block)
 }
 
 /**

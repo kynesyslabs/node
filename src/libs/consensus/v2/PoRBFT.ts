@@ -964,6 +964,7 @@ async function finalizeBlock(
     txs: MempoolTransaction[],
 ): Promise<void> {
     await Chain.insertBlock(block, txs) // NOTE Transactions are added to the Transactions table here
+    getSharedState.consecutiveMissedShardBlocks = 0
     log.info("[CONSENSUS] Block added to the chain")
 }
 

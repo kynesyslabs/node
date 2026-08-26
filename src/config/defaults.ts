@@ -67,6 +67,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         restore: false,
         blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
+        stallDetectionBlocks: 3,
     },
 
     tlsnotary: {

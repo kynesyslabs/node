@@ -130,7 +130,10 @@ services:
         GIT_DIRTY: ${GIT_DIRTY:-false}
         BUILT_AT: ${BUILT_AT:-}
     container_name: demos-node${INSTANCE_SUFFIX:-}
-    restart: unless-stopped
+    # Deliberately not restarted: a stall-detector or watchdog exit must keep
+    # the node down with its logs intact for investigation. The reaper service
+    # below stops the rest of the stack when this container exits.
+    restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
@@ -240,6 +243,43 @@ services:
       timeout: 5s
       retries: 3
       start_period: 90s
+    logging: *default-logging
+    networks:
+      - demos-network
+
+  # ---------------------------------------------------------------------------
+  # Reaper — stops the rest of the stack when the node container exits. The
+  # node runs with restart "no" so an intentional exit stays down; the support
+  # services have no purpose without it. Sibling containers are resolved via
+  # compose project labels so this works unchanged under the devnet overlay.
+  # Mounting docker.sock is root-equivalent on the host — acceptable for our
+  # own deployments, do not ship this service in third-party operator setups.
+  # ---------------------------------------------------------------------------
+  reaper:
+    image: docker:27-cli
+    container_name: demos-reaper${INSTANCE_SUFFIX:-}
+    restart: on-failure
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      node:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        SELF=$$(hostname)
+        PROJECT=$$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$$SELF")
+        NODE=$$(docker ps -aq --filter "label=com.docker.compose.project=$$PROJECT" --filter "label=com.docker.compose.service=node" | head -n1)
+        if [ -z "$$NODE" ]; then
+          echo "reaper: no node container found for project $$PROJECT" >&2
+          exit 1
+        fi
+        echo "reaper: waiting on node container $$NODE"
+        docker wait "$$NODE"
+        echo "reaper: node exited, stopping project $$PROJECT"
+        docker ps -q --filter "label=com.docker.compose.project=$$PROJECT" \
+          | grep -v "^$$(echo "$$SELF" | cut -c1-12)" \
+          | xargs -r docker stop
     logging: *default-logging
     networks:
       - demos-network

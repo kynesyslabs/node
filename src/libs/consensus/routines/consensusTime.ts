@@ -6,7 +6,7 @@ import terminalkit from "terminal-kit"
 
 const term = terminalkit.terminal
 
-const SECRETARY_ROTATION_GRACE_SECONDS = 90
+export const SECRETARY_ROTATION_GRACE_SECONDS = 90
 
 export function getSecretaryRoundIndex(lastBlockTimestamp?: number): number {
     if (!lastBlockTimestamp) {
