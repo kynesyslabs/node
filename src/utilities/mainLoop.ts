@@ -14,33 +14,49 @@ import { getSharedState } from "./sharedState"
 import { peerGossip } from "src/libs/peer/routines/peerGossip"
 import { handleError } from "src/errors/handleError"
 import { Config } from "src/config"
+import {
+    markStep,
+    reportWedgedLoops,
+    startLoopTask,
+} from "./loopScheduler"
 
 // INFO The main loop executed in background by index.ts
-async function sleep(time: number) {
-    return new Promise(resolve => setTimeout(resolve, time))
-}
 
 export default async function mainLoop() {
     log.info("[MAIN LOOP] ✅ Started")
-    // return await consensusRoutine()
-    while (getSharedState.runMainLoop) {
-        try {
-            log.debug("Mainloop cycle started!")
-            await mainLoopCycle()
-        } catch (error) {
-            log.only("Error in mainloop cycle:")
-            console.error(error)
-        } finally {
-            // Reset flags
-            getSharedState.inMainLoop = false
-            getSharedState.inPeerRecheckLoop = false
-            await sleep(getSharedState.mainLoopSleepTime)
-        }
-    }
+
+    const interval = () => getSharedState.mainLoopSleepTime
+
+    await Promise.all([
+        startLoopTask({
+            name: "block_watchdog",
+            fn: blockWatchdogTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+            runWhilePaused: true,
+        }),
+        startLoopTask({
+            name: "peer_recheck",
+            fn: peerRecheckTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+        }),
+        startLoopTask({
+            name: "sync_guard",
+            fn: syncGuardTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+        }),
+        startLoopTask({
+            name: "consensus_trigger",
+            fn: consensusTriggerTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+        }),
+    ])
 }
 
-async function mainLoopCycle() {
-    await sleep(getSharedState.mainLoopSleepTime)
+async function blockWatchdogTask() {
     // Heartbeat (Epic 13 T5). /health derives staleness from this — once
     // the gap exceeds 3× the loop interval, status flips to "failing".
     // First heartbeat also flips the `main_loop` subsystem to "ready".
@@ -63,49 +79,68 @@ async function mainLoopCycle() {
         const { markSubsystem } = await import("./subsystemRegistry")
         markSubsystem(getSharedState.subsystems, "main_loop", "ready")
     }
-    log.info(
-        "\n============================================================\n",
-        true,
-    )
-    // ANCHOR Get the current UTC time (set the currentUTCTime variable in sharedState)
-    // await getSharedState.getUTCTime()
 
-    // Check if the main loop is paused
+    reportWedgedLoops()
+
     if (getSharedState.mainLoopPaused) {
         return
     }
 
-    if (await checkBlockWatchdog()) {
-        return
+    await checkBlockWatchdog()
+}
+
+async function peerRecheckTask() {
+    try {
+        await checkOfflinePeers()
+    } catch (e) {
+        handleError(e, "PEER", { source: "checkOfflinePeers" })
+    }
+}
+
+async function syncGuardTask() {
+    let ahead: boolean
+    markStep("sync_guard", "isNetworkAhead")
+    try {
+        ahead = await isNetworkAhead("mainLoop")
+    } finally {
+        markStep("sync_guard", null)
     }
 
-    // If it is not in pause, we set (or force set) the mainLoop flag to be on
-    getSharedState.inMainLoop = true
+    getSharedState.networkAhead = ahead
+    getSharedState.networkAheadCheckedAt = Date.now()
 
-    // Diagnostic logging
-    // logCurrentDiagnostics()
-
-    // ANCHOR Execute the peer routine before the consensus loop
-    /* NOTE The peerRoutine also checks getOnlinePeers, so it works by waiting for
-    getSharedState.peerRoutineRunning to be 0 so we don't get into conflicts while
-    running the consensus routine. */
-    // await peerRoutine()
-    checkOfflinePeers().catch(e => handleError(e, "PEER", { source: "checkOfflinePeers" }))
-    // await peerGossip()
-
-    // await fastSync([], "mainloop") // REVIEW Test here
-    // we now have a list of online peers that can be used for consensus
-
-    // ANCHOR Syncing the blockchain after the peer routine
-    // log.info("[MAIN LOOP] Synced! 🟢", true)
-
-    // await PeerManager.getInstance().sayHelloToAllPeers()
-    // SECTION Todo list for a typical consensus operation
-
-    if (await isNetworkAhead("mainLoop")) {
+    if (ahead) {
         fastSync([], "networkAheadVeto").catch(e =>
             handleError(e, "SYNC", { source: "networkAheadVeto" }),
         )
+    }
+}
+
+async function consensusTriggerTask() {
+    log.info(
+        "\n============================================================\n",
+        true,
+    )
+
+    if (!getSharedState.syncStatus) {
+        log.warning("[MAIN LOOP] Not in sync, starting sync loop", true)
+        fastSync([], "syncRecovery").catch(e =>
+            handleError(e, "SYNC", { source: "syncRecovery" }),
+        )
+        return
+    }
+
+    const checkedAt = getSharedState.networkAheadCheckedAt
+    const maxVerdictAge = Math.max(3 * getSharedState.mainLoopSleepTime, 30_000)
+    if (checkedAt === null || Date.now() - checkedAt > maxVerdictAge) {
+        log.warning(
+            "[MAIN LOOP] Network-ahead verdict is missing or stale, skipping consensus this tick",
+            true,
+        )
+        return
+    }
+
+    if (getSharedState.networkAhead) {
         return
     }
 
@@ -114,7 +149,6 @@ async function mainLoopCycle() {
     log.debug("Is consensus time reached:", isConsensusTimeReached)
     log.debug("Sync status:", getSharedState.syncStatus)
     log.debug("Starting consensus:", getSharedState.startingConsensus)
-    // ? Move this to a standalone method?
     // NOTE We need both the consensus time and the sync status to be true, to avoid
     // conflicts with the sync loop that would alead to a failure in the consensus mechanism.
 
@@ -126,27 +160,8 @@ async function mainLoopCycle() {
         // Set the startingConsensus flag to true to avoid conflicts with starting loops
         getSharedState.startingConsensus = true
         log.debug("[MAIN LOOP] Consensus time reached and sync status is true")
-        // Wait for the peer routine to finish if it is still running
-        // let timer = 0
-        // while (getSharedState.peerRoutineRunning > 0) {
-        //     await sleep(100)
-        //     timer += 1
-        //     if (timer > 10) {
-        //         log.error(
-        //             "[MAIN LOOP] Peer routine is taking too long to finish: forcing consensus",
-        //         )
-        //         log.error("[MAIN LOOP] Peer routine running: " + getSharedState.peerRoutineRunning)
-        //         getSharedState.peerRoutineRunning = 0 // Force the peer routine to act as if it finished
-        //         break
-        //     }
-        // }
         // ANCHOR Calling the consensus routine if is time for it
         consensusRoutine()
-    } else if (!getSharedState.syncStatus) {
-        log.warning("[MAIN LOOP] Not in sync, starting sync loop", true)
-        fastSync([], "syncRecovery").catch(e =>
-            handleError(e, "SYNC", { source: "syncRecovery" }),
-        )
     }
 }
 

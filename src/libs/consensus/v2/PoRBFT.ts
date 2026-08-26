@@ -45,6 +45,7 @@ import {
     readNonces,
 } from "@/libs/debug/nonceTrace"
 import { computeMergedPeerlist } from "./routines/peerlistMerge"
+import { markStep } from "@/utilities/loopScheduler"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
 
@@ -108,6 +109,7 @@ export async function consensusRoutine(): Promise<void> {
         log.only("[consensusRoutine] Initializing the consensus state")
         await initializeConsensusState()
 
+        markStep("consensus", "fastSync")
         const { latestChainBlock, ourLatestBlock } = await fastSync(
             [],
             "consensusRoutine",
@@ -119,6 +121,7 @@ export async function consensusRoutine(): Promise<void> {
             )
             return
         }
+        markStep("consensus", "waitForPeerStatus")
         const peersReady = await waitForPeerStatus()
         if (!peersReady) {
             log.warn(
@@ -134,6 +137,7 @@ export async function consensusRoutine(): Promise<void> {
         // INFO: We won't use the shard returned by initializeShard
         // as it can change through the consensus routine
         // INFO: CONSENSUS ACTION 1: Initialize the shard
+        markStep("consensus", "initializeShard")
         await initializeShard(blockRef)
         blockRef = manager.shard.blockRef
 
@@ -161,6 +165,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: Broadcast our validation phase to the secretary
+        markStep("consensus", "updateValidatorPhase:1")
         await updateValidatorPhase(1, blockRef)
         preventForgingEnded(blockRef)
         // synchronize and average the time
@@ -169,6 +174,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // INFO: CONSENSUS ACTION 2: Merge and order the mempools with the mempool lock
         log.only("[consensusRoutine] Merging and ordering the mempools...")
+        markStep("consensus", "mergeAndOrderMempools")
         const { txs: initialMempool, peerlist: mergedPeerlist } =
             await mergeAndOrderMempools(
                 manager.shard.members,
@@ -210,6 +216,7 @@ export async function consensusRoutine(): Promise<void> {
             log.error(
                 "[CONSENSUS ROUTINE] Secretary block timestamp not received yet, requesting it ...",
             )
+            markStep("consensus", "getSecretaryBlockTimestamp")
             const blockTimestamp = await manager.getSecretaryBlockTimestamp()
             preventForgingEnded(blockRef)
 
@@ -223,6 +230,7 @@ export async function consensusRoutine(): Promise<void> {
         }
 
         // INFO: CONSENSUS ACTION 5: Forge the block
+        markStep("consensus", "forgeBlock")
         const block = await forgeBlock(
             blockTxs,
             manager.blockTimestamp,
@@ -241,10 +249,12 @@ export async function consensusRoutine(): Promise<void> {
                 !manager.unresponsiveMembers.has(m.identity) &&
                 (m.connection.string !== "" || m.isLocalNode),
         )
+        markStep("consensus", "voteOnBlock")
         const [pro, con] = await voteOnBlock(block, responsiveMembers)
 
         // Check if the block is valid
         if (isBlockValid(pro, manager.shard.members.length)) {
+            markStep("consensus", "syncLock.acquire")
             releaseSyncLock = await syncLock.acquire()
 
             const existingBlock = await Chain.getBlockByNumber(blockRef)
@@ -315,6 +325,7 @@ export async function consensusRoutine(): Promise<void> {
                 ? await readNonces(traceAccounts)
                 : {}
 
+            markStep("consensus", "applyGCREdits")
             const applyRes = await applyGCREditsFromMergedMempool(
                 refRes.validTxs,
             )
@@ -439,6 +450,7 @@ export async function consensusRoutine(): Promise<void> {
             const finalizeStart = Date.now()
 
             // Call finalizeBlock with final block transactions with updated status
+            markStep("consensus", "finalizeBlock")
             await finalizeBlock(
                 block,
                 blockTxs.map(tx => txMap.get(tx.hash)),
@@ -531,6 +543,7 @@ export async function consensusRoutine(): Promise<void> {
         log.error(`[CONSENSUS] ${error}`)
         process.exit(1)
     } finally {
+        markStep("consensus", null)
         releaseSyncLock?.()
 
         // INFO: If there was a relayed tx past finalize block step, release

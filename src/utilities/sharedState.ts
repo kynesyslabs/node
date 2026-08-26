@@ -236,6 +236,8 @@ export default class SharedState {
     fastSyncAborted = false
     _syncStatus = false
     consecutiveMissedShardBlocks = 0
+    networkAhead = false
+    networkAheadCheckedAt: number | null = null
 
     // Batch sync configuration
     batchSyncBlockSize = BATCH_SYNC_BLOCK_SIZE
