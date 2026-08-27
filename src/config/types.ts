@@ -38,6 +38,7 @@ export interface CoreConfig {
     prod: boolean
     shardSize: number
     mainLoopSleepTime: number
+    helloRefreshIntervalMs: number
     rpcFeePercent: number
     identityFile: string
     peerListFile: string

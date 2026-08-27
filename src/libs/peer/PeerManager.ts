@@ -17,6 +17,7 @@ import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import { Config } from "src/config"
 
 const HELLO_TIMEOUT_MS = 5000
 
@@ -39,6 +40,8 @@ export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
+    private lastHelloFanoutAt = 0
+    private helloFanoutInFlight: Promise<void> | null = null
 
     private constructor() {
         this.peerList = {}
@@ -233,10 +236,36 @@ export default class PeerManager {
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
-        //const onlinePeers: Peer[] = []
+        const refreshIntervalMs = Config.getInstance().core.helloRefreshIntervalMs
+
+        if (this.helloFanoutInFlight) {
+            await this.helloFanoutInFlight
+        } else if (Date.now() - this.lastHelloFanoutAt >= refreshIntervalMs) {
+            this.lastHelloFanoutAt = Date.now()
+            this.helloFanoutInFlight = this.runHelloFanout(refreshIntervalMs)
+            try {
+                await this.helloFanoutInFlight
+            } finally {
+                this.helloFanoutInFlight = null
+            }
+        }
+
+        // Returning the list of online peers from the peerlist
+        return this.getPeers() // REVIEW is this working?
+    }
+
+    private async runHelloFanout(recentContactWindowMs: number): Promise<void> {
+        const now = Date.now()
         await Promise.allSettled(
             Object.values(this.peerList).map(async peerInstance => {
                 if (peerInstance.identity == getSharedState.publicKeyHex) {
+                    return
+                }
+
+                if (
+                    peerInstance.status.online &&
+                    now - peerInstance.status.timestamp < recentContactWindowMs
+                ) {
                     return
                 }
 
@@ -247,9 +276,6 @@ export default class PeerManager {
                 )
             }),
         )
-
-        // Returning the list of online peers from the peerlist
-        return this.getPeers() // REVIEW is this working?
     }
 
     addPeer(peer: Peer): [boolean, string] {

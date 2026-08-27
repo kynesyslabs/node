@@ -124,6 +124,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.MAIN_LOOP_SLEEP_TIME,
                 d.core.mainLoopSleepTime,
             ),
+            helloRefreshIntervalMs: envInt(
+                EnvKey.HELLO_REFRESH_INTERVAL_MS,
+                d.core.helloRefreshIntervalMs,
+            ),
             rpcFeePercent: envInt(EnvKey.RPC_FEE_PERCENT, d.core.rpcFeePercent),
             rpcFee: envInt(EnvKey.RPC_FEE, d.core.rpcFee),
             networkFee: envInt(EnvKey.NETWORK_FEE, d.core.networkFee),
