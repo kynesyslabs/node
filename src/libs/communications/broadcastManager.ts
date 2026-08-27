@@ -14,6 +14,10 @@ import { Mutex } from "async-mutex"
  * Manages the broadcasting of messages to the network
  */
 export class BroadcastManager {
+    private static lastBroadcastSyncData: string | null = null
+    private static syncDataBroadcastInFlight = false
+    private static syncDataBroadcastPending = false
+
     /**
      * Broadcasts a new block to the network
      *
@@ -185,18 +189,43 @@ export class BroadcastManager {
      * Broadcasts our sync data to the network
      */
     static async broadcastOurSyncData() {
-        const peerlist = PeerManager.getInstance().getPeers()
+        if (BroadcastManager.syncDataBroadcastInFlight) {
+            BroadcastManager.syncDataBroadcastPending = true
+            return false
+        }
+
+        BroadcastManager.syncDataBroadcastInFlight = true
+        try {
+            let anySuccessful = false
+            do {
+                BroadcastManager.syncDataBroadcastPending = false
+                const syncData = `${getSharedState.syncStatus ? "1" : "0"}:${
+                    getSharedState.lastBlockNumber
+                }:${getSharedState.lastBlockHash}`
+
+                if (syncData !== BroadcastManager.lastBroadcastSyncData) {
+                    BroadcastManager.lastBroadcastSyncData = syncData
+                    const successful =
+                        await BroadcastManager.sendSyncDataToPeers(syncData)
+                    anySuccessful = anySuccessful || successful
+                }
+            } while (BroadcastManager.syncDataBroadcastPending)
+
+            return anySuccessful
+        } finally {
+            BroadcastManager.syncDataBroadcastInFlight = false
+        }
+    }
+
+    private static async sendSyncDataToPeers(syncData: string) {
+        const peerlist = await PeerManager.getInstance().getOnlinePeers()
         const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",
                 params: [
                     {
                         method: "updateSyncData",
-                        params: [
-                            `${getSharedState.syncStatus ? "1" : "0"}:${
-                                getSharedState.lastBlockNumber
-                            }:${getSharedState.lastBlockHash}`,
-                        ],
+                        params: [syncData],
                     },
                 ],
             }
