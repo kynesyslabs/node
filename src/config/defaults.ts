@@ -26,6 +26,11 @@ export const DEFAULT_CONFIG: AppConfig = {
         user: "demosuser",
         password: "demospassword",
         database: "demos",
+        connectTimeoutMs: 3_000,
+        statementTimeoutMs: 10_000,
+        queryTimeoutMs: 3_000,
+        lockTimeoutMs: 20_000,
+        idleTransactionTimeoutMs: 20_000,
     },
 
     core: {

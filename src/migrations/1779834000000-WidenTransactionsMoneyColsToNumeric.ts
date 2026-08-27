@@ -41,6 +41,10 @@ export class WidenTransactionsMoneyColsToNumeric1779834000000
     name = "WidenTransactionsMoneyColsToNumeric1779834000000"
 
     public async up(queryRunner: QueryRunner): Promise<void> {
+        // Table rewrite: exempt from the session statement/lock timeouts,
+        // which are sized for hot-path queries, not migrations.
+        await queryRunner.query("SET statement_timeout = 0")
+        await queryRunner.query("SET lock_timeout = 0")
         // `amount` is nullable with no default.
         await queryRunner.query(
             `ALTER TABLE "transactions" ALTER COLUMN "amount" TYPE numeric(38, 0)`,
@@ -84,6 +88,8 @@ export class WidenTransactionsMoneyColsToNumeric1779834000000
         // the historical ledger. Operators MUST snapshot before running
         // this down-migration and accept that they cannot reverse without
         // wiping any post-fork OS magnitudes from `transactions`.
+        await queryRunner.query("SET statement_timeout = 0")
+        await queryRunner.query("SET lock_timeout = 0")
         await queryRunner.query(
             `ALTER TABLE "transactions" ALTER COLUMN "additionalFee" DROP DEFAULT`,
         )

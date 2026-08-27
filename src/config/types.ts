@@ -24,6 +24,12 @@ export interface DatabaseConfig {
     user: string
     password: string
     database: string
+    /** Timeouts in milliseconds; 0 disables the corresponding limit. */
+    connectTimeoutMs: number
+    statementTimeoutMs: number
+    queryTimeoutMs: number
+    lockTimeoutMs: number
+    idleTransactionTimeoutMs: number
 }
 
 // --- Core Node ---

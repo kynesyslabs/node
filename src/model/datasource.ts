@@ -51,6 +51,16 @@ export const dataSource = new DataSource({
     username: Config.getInstance().database.user,
     password: Config.getInstance().database.password,
     database: Config.getInstance().database.database,
+    extra: {
+        connectionTimeoutMillis: Config.getInstance().database.connectTimeoutMs,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 5000,
+        statement_timeout: Config.getInstance().database.statementTimeoutMs,
+        query_timeout: Config.getInstance().database.queryTimeoutMs,
+        lock_timeout: Config.getInstance().database.lockTimeoutMs,
+        idle_in_transaction_session_timeout:
+            Config.getInstance().database.idleTransactionTimeoutMs,
+    },
     migrations: ["src/migrations/*.{ts,js}"],
     migrationsRun: true,
     entities: [

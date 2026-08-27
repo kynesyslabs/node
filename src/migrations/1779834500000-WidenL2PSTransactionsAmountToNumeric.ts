@@ -30,6 +30,8 @@ export class WidenL2PSTransactionsAmountToNumeric1779834500000
     name = "WidenL2PSTransactionsAmountToNumeric1779834500000"
 
     public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query("SET statement_timeout = 0")
+        await queryRunner.query("SET lock_timeout = 0")
         await queryRunner.query(
             `ALTER TABLE "l2ps_transactions" ALTER COLUMN "amount" DROP DEFAULT`,
         )
@@ -42,6 +44,8 @@ export class WidenL2PSTransactionsAmountToNumeric1779834500000
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query("SET statement_timeout = 0")
+        await queryRunner.query("SET lock_timeout = 0")
         await queryRunner.query(
             `ALTER TABLE "l2ps_transactions" ALTER COLUMN "amount" DROP DEFAULT`,
         )

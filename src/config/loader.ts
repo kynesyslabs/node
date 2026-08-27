@@ -95,6 +95,26 @@ export function loadConfig(): Readonly<AppConfig> {
             user: envStr(EnvKey.PG_USER, d.database.user),
             password: envStr(EnvKey.PG_PASSWORD, d.database.password),
             database: envStr(EnvKey.PG_DATABASE, d.database.database),
+            connectTimeoutMs: envInt(
+                EnvKey.PG_CONNECT_TIMEOUT_MS,
+                d.database.connectTimeoutMs,
+            ),
+            statementTimeoutMs: envInt(
+                EnvKey.PG_STATEMENT_TIMEOUT_MS,
+                d.database.statementTimeoutMs,
+            ),
+            queryTimeoutMs: envInt(
+                EnvKey.PG_QUERY_TIMEOUT_MS,
+                d.database.queryTimeoutMs,
+            ),
+            lockTimeoutMs: envInt(
+                EnvKey.PG_LOCK_TIMEOUT_MS,
+                d.database.lockTimeoutMs,
+            ),
+            idleTransactionTimeoutMs: envInt(
+                EnvKey.PG_IDLE_TX_TIMEOUT_MS,
+                d.database.idleTransactionTimeoutMs,
+            ),
         },
 
         core: {
