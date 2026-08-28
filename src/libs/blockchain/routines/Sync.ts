@@ -1235,8 +1235,6 @@ async function requestBlocks(): Promise<boolean> {
                 peer = next
                 continue
             }
-            await BroadcastManager.broadcastOurSyncData()
-
             // Trigger L2PS sync
             triggerL2PSSync(peer)
 
@@ -1531,7 +1529,7 @@ export async function fastSync(
 
             if (difference >= 2) {
                 getSharedState.syncStatus = false
-                await BroadcastManager.broadcastOurSyncData()
+                void BroadcastManager.broadcastOurSyncData()
                 log.debug(
                     "[fastSync] Network highest block is more than 2 blocks ahead of our highest block, setting sync status to false and broadcasting",
                 )
@@ -1594,7 +1592,7 @@ export async function fastSync(
         log.debug("[fastSync] Fast sync routine ended ⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️⚪️")
         log.debug("[fastSync] Sync status: " + synced)
         getSharedState.syncStatus = synced
-        BroadcastManager.broadcastOurSyncData()
+        void BroadcastManager.broadcastOurSyncData()
 
         log.debug("[fastSync] Broadcasted our sync data 📤📤📤📤📤📤📤📤📤")
         const lastBlockNumber = await Chain.getLastBlockNumber()

@@ -175,8 +175,7 @@ export class BroadcastManager {
         const peer = peerman.getPeer(sender)
         const res = await syncBlock(block, peer)
 
-        // REVIEW: Should we await this?
-        await this.broadcastOurSyncData()
+        void this.broadcastOurSyncData()
 
         return {
             result: res ? 200 : 400,
@@ -218,7 +217,7 @@ export class BroadcastManager {
     }
 
     private static async sendSyncDataToPeers(syncData: string) {
-        const peerlist = await PeerManager.getInstance().getOnlinePeers()
+        const peerlist = PeerManager.getInstance().getPeers()
         const promises = peerlist.map(async peer => {
             const request: RPCRequest = {
                 method: "gcr_routine",
