@@ -6,6 +6,7 @@ import log from "src/utilities/logger"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Mempool from "@/libs/blockchain/mempool"
+import { filterSignaturesByShardMembership } from "./signerMembership"
 
 /**
  * Per-peer vote outcome. The `signaturesToMerge` map carries every
@@ -35,8 +36,11 @@ async function verifyIncomingSignatures(
     incoming: Record<string, string>,
     candidateBlockHash: string,
     peerId: string,
+    shard: Peer[],
 ): Promise<Record<string, string>> {
-    const entries = Object.entries(incoming)
+    const entries = Object.entries(
+        filterSignaturesByShardMembership(incoming, shard),
+    )
     const checks = await Promise.all(
         entries.map(async ([identity, signature]) => {
             try {
@@ -96,6 +100,7 @@ async function proposeAndCollect(
     peer: Peer,
     block: Block,
     proposeParams: [string, Block["validation_data"], string],
+    shard: Peer[],
 ): Promise<PeerVoteOutcome> {
     const peerId = peer.identity
     let response: RPCResponse
@@ -269,6 +274,7 @@ async function proposeAndCollect(
         incomingSignatures,
         block.hash,
         peerId,
+        shard,
     )
 
     // PR #888 Greptile P1 (continued): a peer's signature on our
@@ -369,7 +375,7 @@ export async function broadcastBlockHash(
     ]
 
     const outcomes = await Promise.all(
-        shard.map(peer => proposeAndCollect(peer, block, proposeParams)),
+        shard.map(peer => proposeAndCollect(peer, block, proposeParams, shard)),
     )
 
     let pro = 0
