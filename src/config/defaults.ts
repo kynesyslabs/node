@@ -71,7 +71,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         // See docs/discoveries/startup-assessment-2026-05-13/08-epic-3-blockers.md.
         mcpEnabled: false,
         restore: false,
-        blockWatchdogEnabled: true,
+        blockWatchdogEnabled: false,
         blockWatchdogTimeoutSeconds: 600,
         stallDetectionBlocks: 3,
     },
@@ -144,7 +144,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     debug: {
-        assertionsEnabled: true,
+        assertionsEnabled: false,
     },
 
     identity: {
