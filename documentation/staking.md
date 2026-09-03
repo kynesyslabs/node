@@ -1,3 +1,40 @@
+### Prerequisites
+
+Make sure you have the following tools installed in your Linux system:
+
+1. [Docker](https://docs.docker.com/desktop/setup/install/linux)
+2. [Bun](https://bun.com/docs/installation)
+
+Confirm these are set up correctly by running these verification commands:
+
+```sh
+bun --version
+
+systemctl status docker
+```
+
+> [!IMPORTANT]
+> Follow the [Docker post-installation instructions](https://docs.docker.com/engine/install/linux-postinstall/), then restart your server to be able to delete folders created by Docker without using `sudo`.
+
+## 1. Initial Setup
+
+Clone the node:
+
+```sh
+git clone https://github.com/kynesyslabs/node.git
+```
+
+Then, change into the node folder and install dependencies:
+
+```sh
+cd ./node
+
+# switch into the active branch
+git checkout stabilisation
+
+bun install
+```
+
 # Validator Staking
 
 Pull the latest changes by running the following commands in the node source directory:
@@ -12,23 +49,10 @@ git pull
 bun install
 ```
 
-Then confirm that you're on latest commit on `stabilisation` branch:
-
-```sh
-git --no-pager log -1 --format='%H%n%s'
-
-# 70a901c6fbcdf5861e69cffe2f77674748c08e5f
-# put back validators
-```
-
 For a node to participate in the consensus, they need to stake DEM. Get your node public key by running the following command:
 
 ```sh
 bun run show:pubkey
-
-# or
-
-cat publickey*
 ```
 
 Head over to https://faucet.demos.sh and paste your public key to get 2400 DEM.
