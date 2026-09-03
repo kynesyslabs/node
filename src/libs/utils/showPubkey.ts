@@ -3,7 +3,8 @@
  *
  * Displays the public key associated with the node's identity
  * without starting the node. Uses the new unified crypto system
- * (mnemonic-based identity with ucrypto).
+ * (mnemonic-based identity with ucrypto). If the identity file does
+ * not exist, a new BIP39 mnemonic is generated and saved to it first.
  *
  * Usage:
  *   bun run show:pubkey                 - Display public key to console
@@ -22,6 +23,7 @@ import {
     uint8ArrayToHex,
 } from "@kynesyslabs/demosdk/encryption"
 import { SigningAlgorithm } from "@kynesyslabs/demosdk/types"
+import { Demos } from "@kynesyslabs/demosdk/websdk"
 import * as dotenv from "dotenv"
 import { Config } from "src/config"
 
@@ -109,13 +111,13 @@ async function mnemonicToSeed(mnemonic: string): Promise<Uint8Array> {
 async function main() {
     const { outputFile, identityFile, algorithm } = parseArgs()
 
-    // Check if identity file exists
+    // Create the identity file with a fresh mnemonic if it does not exist
     if (!fs.existsSync(identityFile)) {
-        console.error(`Error: Identity file not found at '${identityFile}'`)
-        console.error(
-            "Run the node once to generate an identity, or create one manually.",
-        )
-        process.exit(1)
+        const newMnemonic = new Demos().newMnemonic()
+        await fs.promises.writeFile(identityFile, newMnemonic, {
+            encoding: "utf8",
+        })
+        console.error(`Created new identity file at '${identityFile}'`)
     }
 
     // Read the mnemonic from identity file
