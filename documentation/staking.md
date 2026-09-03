@@ -17,8 +17,8 @@ Then confirm that you're on latest commit on `stabilisation` branch:
 ```sh
 git --no-pager log -1 --format='%H%n%s'
 
-# 765e80ad7cec7ff07f5d20cc3c96921d8e4d4e81
-# merge #949 fix:tlsn-wstcp-proxy-reachability by @Shitikyan
+# 70a901c6fbcdf5861e69cffe2f77674748c08e5f
+# put back validators
 ```
 
 For a node to participate in the consensus, they need to stake DEM. Get your node public key by running the following command:
@@ -49,7 +49,7 @@ Run the following command in the node source folder to stake the DEM you acquire
 bun run validator:stake
 ```
 
-## Restarting your node
+## Starting your node
 
 Update your `.env` file to include your exposed URL
 
@@ -59,7 +59,7 @@ EXPOSED_URL=http://<your-ipaddress>:53550
 # other keys here
 ```
 
-Then restart your node by running the following command:
+Then start your node by running the following command:
 
 ```sh
 ./run --docker --clean --build
@@ -67,7 +67,7 @@ Then restart your node by running the following command:
 
 This will run the node with the new Docker workflow. The `--clean` flag deletes existing databases.
 
-After your node is up and running (wait for debug prints), open `http://<your-ip>:53550/info` and confirm that `commitMessage` reads as `merge #949 fix:tlsn-wstcp-proxy-reachability by @Shitikyan`.
+After your node is up and running (wait for debug prints), open `http://<your-ip>:53550/info` and confirm that `commitMessage` reads as `put back validators`.
 
 ## TIPS
 
