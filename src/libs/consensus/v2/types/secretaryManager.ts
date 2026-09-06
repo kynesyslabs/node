@@ -611,7 +611,12 @@ export default class SecretaryManager {
         phase?: number,
         src?: string,
     ) {
-        required(this.checkIfWeAreSecretary(), "We are not the secretary")
+        if (!this.checkIfWeAreSecretary()) {
+            log.warn(
+                `[SECRETARY ROUTINE] Not releasing waiting members from ${src}: we are not the secretary`,
+            )
+            return
+        }
         log.debug(`RELEASING WAITING MEMBERS FROM: ${src}`)
 
         if (!phase) {
