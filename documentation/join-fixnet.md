@@ -84,7 +84,7 @@ sudo rm -rf postgres_5332
 To make starting the node easier, create a `fnode.sh` script with the following contents:
 
 ```sh
-./run -c false -u http://<your-server-ip>:53550 -t true
+./run -c false -u http://<your-server-ip>:53550 -t
 ```
 
 The flags are configure as follows:
@@ -93,7 +93,7 @@ The flags are configure as follows:
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `-c false`                         | Don't delete the database folder                                                                       |
 | `-u http://<your-server-ip>:53550` | Configures your exposed URL, i.e. the node's internet URL (required to connect to an external network) |
-| `-t true`                          | Disables the DEMOS Terminal UI for easier debugging                                                    |
+| `-t`                               | Disables the DEMOS Terminal UI for easier debugging                                                    |
 
 Then make the script executable:
 
