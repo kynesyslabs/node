@@ -11,8 +11,6 @@ import log from "src/utilities/logger"
 import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import { getSecretaryRoundIndex } from "../../routines/consensusTime"
-import Chain from "src/libs/blockchain/chain"
 import { getCommitteeFloor } from "../routines/getShard"
 
 export class AbortConsensusError extends Error {
@@ -111,14 +109,8 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary walks the deterministic draw by the elapsed-round
-        // index, so a stalled round hands the role to the next member
-        const lastBlock = await Chain.getBlockByNumber(lastBlockNumber)
-        const roundIndex = getSecretaryRoundIndex(lastBlock?.content?.timestamp)
-        this.shard.secretaryKey =
-            this.shard.members[
-                roundIndex % this.shard.members.length
-            ].identity
+        // The secretary is the first member of the deterministic draw
+        this.shard.secretaryKey = this.shard.members[0].identity
 
         log.only("\n\n\n")
         log.only("INITIALIZED SHARD:")
