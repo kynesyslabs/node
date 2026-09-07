@@ -69,6 +69,28 @@ export type OsDenominationConfig = BaseForkConfig
 export type NonceEnforcementConfig = BaseForkConfig
 
 /**
+ * `deterministicBlockHash` fork: drops node-local content from the block
+ * hash so the shard can agree on a candidate hash.
+ *
+ * Pre-fork: `serializeBlockContent` hashes the whole `BlockContent`,
+ * including `peerlist` — the proposer's OWN live peer list. Every
+ * validator holds a different peer view, so once peer topologies diverge
+ * the same (height, tx-set) yields a different hash on each node, no two
+ * validators ever agree, and BFT quorum (`floor(n*2/3)+1`) can never be
+ * reached — a permanent liveness stall (observed on the live net at
+ * height 249445 after a peer-management change made peerlists diverge).
+ *
+ * Post-fork: the block hash is taken over the same content with
+ * `peerlist` neutralised to `[]`, removing consensus' dependence on
+ * node-local peer topology. `peerlist` stays in the stored block for
+ * downstream readers; only the HASH ignores it.
+ *
+ * No payload beyond the base. Declared as a type alias (not an empty
+ * interface) for the same reason as `OsDenominationConfig`.
+ */
+export type DeterministicBlockHashConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -97,6 +119,7 @@ export type ForkConfig =
     | OsDenominationConfig
     | GasFeeSeparationConfig
     | NonceEnforcementConfig
+    | DeterministicBlockHashConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -107,6 +130,7 @@ export type ForkName =
     | "osDenomination"
     | "gasFeeSeparation"
     | "nonceEnforcement"
+    | "deterministicBlockHash"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -116,6 +140,7 @@ export interface ForkConfigByName {
     osDenomination: OsDenominationConfig
     gasFeeSeparation: GasFeeSeparationConfig
     nonceEnforcement: NonceEnforcementConfig
+    deterministicBlockHash: DeterministicBlockHashConfig
 }
 
 /**
@@ -190,6 +215,21 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "per native tx, rejects same-nonce replays at consensus apply-time. " +
             "Paired with confirmed-tx-hash uniqueness at apply time.",
     },
+    deterministicBlockHash: {
+        // Inactive by default. Unlike the value-format forks above (which
+        // default to height 0 so fresh chains boot fully post-fork), this
+        // is a MID-CHAIN remediation: it changes what bytes the block hash
+        // covers, so activating it below an existing chain's tip would make
+        // verifyBlock re-hash historical blocks without their stored
+        // peerlist and reject them. Defaulting to null keeps existing
+        // chains bit-identical until an operator pins the coordinated
+        // activation height in genesis, rolled across all validators in
+        // lock-step. Fresh multi-validator chains pin height 0.
+        activationHeight: null,
+        description:
+            "Excludes node-local peerlist from the block hash so validators " +
+            "with divergent peer views can still agree on a candidate hash.",
+    },
 }
 
 /**
@@ -203,5 +243,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         osDenomination: { ...DEFAULT_FORK_CONFIG.osDenomination },
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
+        deterministicBlockHash: {
+            ...DEFAULT_FORK_CONFIG.deterministicBlockHash,
+        },
     }
 }

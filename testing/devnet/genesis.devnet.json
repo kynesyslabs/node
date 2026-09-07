@@ -17,6 +17,9 @@
     },
     "nonceEnforcement": {
       "activationHeight": 0
+    },
+    "deterministicBlockHash": {
+      "activationHeight": 0
     }
   },
   "balances": [
