@@ -26,18 +26,18 @@ export async function dispatchOmniMessage<TPayload = unknown>(
     }
 
     // Check if handler requires authentication
-    if (descriptor.authRequired) {
-        // Verify auth block is present
-        if (!options.message.auth) {
-            throw new OmniProtocolError(
-                `Authentication required for opcode ${descriptor.name} (0x${opcode.toString(16)})`,
-                ERROR_CODE_UNAUTHORIZED,
-            )
-        }
+    if (descriptor.authRequired && !options.message.auth) {
+        throw new OmniProtocolError(
+            `Authentication required for opcode ${descriptor.name} (0x${opcode.toString(16)})`,
+            ERROR_CODE_UNAUTHORIZED,
+        )
+    }
 
-        // Verify signature. requirePayloadBinding=true: this is the
-        // auth-required path, so the signature MUST cover the payload — reject
-        // non-binding modes like SIGN_PUBKEY (audit C3a).
+    if (options.message.auth) {
+        // Verify signature. requirePayloadBinding=true: the signature MUST
+        // cover the payload — reject non-binding modes like SIGN_PUBKEY
+        // (audit C3a). A present-but-invalid auth block is rejected even on
+        // opcodes that do not require auth: it is an unproven identity claim.
         const verificationResult = await SignatureVerifier.verify(
             options.message.auth,
             options.message.header,

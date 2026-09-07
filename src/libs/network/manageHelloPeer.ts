@@ -42,6 +42,18 @@ export async function manageHelloPeer(
 
     peerObject.connection.string = content.url
 
+    if (sender.toLowerCase() !== content.publicKey.toLowerCase()) {
+        log.error(
+            `[Hello Peer Listener] Sender ${sender} does not match the announced identity ${content.publicKey}`,
+        )
+        response.result = 401
+        response.response = false
+        response.extra = {
+            msg: "sender does not match the announced identity",
+        }
+        return response
+    }
+
     // Check if the authentication info is valid based on the sender info from the headers
     const signatureValid = await TxValidatorPool.getInstance().verify({
         algorithm: content.signature.type,
@@ -79,7 +91,7 @@ export async function manageHelloPeer(
     const peerManager = PeerManager.getInstance()
 
     // If we are here, the peer is connected
-    const [isAddedToPeerlist, message] = peerManager.addPeer(peerObject)
+    const [isAddedToPeerlist, message] = peerManager.addPeer(peerObject, true)
     if (!isAddedToPeerlist) {
         response.result = 400
         response.response = false

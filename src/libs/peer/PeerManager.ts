@@ -278,7 +278,7 @@ export default class PeerManager {
         )
     }
 
-    addPeer(peer: Peer): [boolean, string] {
+    addPeer(peer: Peer, urlSignedByOwner = false): [boolean, string] {
         if (peer.identity === "placeholder") {
             log.warning(
                 "[PEERMANAGER] No identity detected: refusing to add peer",
@@ -291,9 +291,9 @@ export default class PeerManager {
             return [false, "No identity detected!"]
         }
 
-        let parsedHostname: string
+        let parsedUrl: URL
         try {
-            parsedHostname = new URL(peer.connection.string).hostname
+            parsedUrl = new URL(peer.connection.string)
         } catch (_e) {
             log.warning(
                 "[PEERMANAGER] Invalid connection string URL, rejecting peer: " +
@@ -306,9 +306,8 @@ export default class PeerManager {
         }
 
         if (
-            getSharedState.PROD &&
             peer.identity !== getSharedState.publicKeyHex &&
-            ["127.0.0.1", "localhost", "0.0.0.0"].includes(parsedHostname)
+            PeerManager.urlPointsAtUs(parsedUrl)
         ) {
             log.warning(
                 "[PEERMANAGER] Invalid connection string: " +
@@ -349,7 +348,10 @@ export default class PeerManager {
                 existingPeer.status.online = peer.status.online
             }
 
-            if (peer.connection.string !== existingPeer.connection.string) {
+            if (
+                urlSignedByOwner &&
+                peer.connection.string !== existingPeer.connection.string
+            ) {
                 existingPeer.connection.string = peer.connection.string
             }
         } else {
@@ -433,6 +435,27 @@ export default class PeerManager {
     }
 
     // REVIEW This method should be tested and finalized with the new peer structure
+    static urlPointsAtUs(url: URL): boolean {
+        const loopbackHosts = [
+            "127.0.0.1",
+            "localhost",
+            "0.0.0.0",
+            "::1",
+            "[::1]",
+            "host.docker.internal",
+        ]
+        if (loopbackHosts.includes(url.hostname)) {
+            return true
+        }
+
+        try {
+            const ours = new URL(getSharedState.exposedUrl)
+            return url.hostname === ours.hostname && url.port === ours.port
+        } catch (_e) {
+            return false
+        }
+    }
+
     static async sayHelloToPeer(peer: Peer, waitForDiscovery = false) {
         // TODO test and finalize this method
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
@@ -501,6 +524,18 @@ export default class PeerManager {
         // REVIEW is the message the response itself?
         // Based on the response, we can decide what to do
         if (response.result === 200) {
+            if (
+                typeof response.extra?.msg === "string" &&
+                response.extra.msg.startsWith("Peer is us")
+            ) {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} answered as ourselves: dropping bogus peer ${peer.identity}`,
+                )
+                PeerManager.getInstance().removeOnlinePeer(peer.identity)
+                PeerManager.getInstance().removeOfflinePeer(peer.identity)
+                return []
+            }
+
             if (response.extra.syncData) {
                 peer.sync = response.extra.syncData
             }

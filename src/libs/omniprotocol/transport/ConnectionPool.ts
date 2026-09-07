@@ -16,7 +16,6 @@ import log from "@/utilities/logger"
 import { RateLimiter } from "../ratelimit"
 import { PeerManager } from "@/libs/peer"
 import { DEFAULT_OMNIPROTOCOL_CONFIG } from "../types/config"
-import { getSharedState } from "@/utilities/sharedState"
 import {
     DEFAULT_POOL_MAX_TOTAL_CONNECTIONS,
     DEFAULT_POOL_MAX_CONNECTIONS_PER_PEER,
@@ -246,8 +245,10 @@ export class ConnectionPool extends EventEmitter {
 
         // Check per-peer limits
         const peerConnections = this.connections.get(peerIdentity) || []
-        const usableCount = peerConnections.filter(c =>
-            ConnectionStateUtils.isUsable(c.getState()),
+        const usableCount = peerConnections.filter(
+            c =>
+                c.origin === "outbound" &&
+                ConnectionStateUtils.isUsable(c.getState()),
         ).length
         if (usableCount >= this.config.maxConnectionsPerPeer) {
             throw new PoolCapacityError(
@@ -259,10 +260,8 @@ export class ConnectionPool extends EventEmitter {
         const connection = new PeerConnection(peerIdentity, connectionString)
 
         // Add to pool before connecting (allows tracking)
-        if (peerIdentity !== getSharedState.publicKeyHex) {
-            peerConnections.push(connection)
-            this.connections.set(peerIdentity, peerConnections)
-        }
+        peerConnections.push(connection)
+        this.connections.set(peerIdentity, peerConnections)
 
         // Listen for close
         connection.on("close", () => {
@@ -592,8 +591,10 @@ export class ConnectionPool extends EventEmitter {
         }
 
         // Filter to usable connections
-        const usable = peerConnections.filter(conn =>
-            ConnectionStateUtils.isUsable(conn.getState()),
+        const usable = peerConnections.filter(
+            conn =>
+                conn.origin === "outbound" &&
+                ConnectionStateUtils.isUsable(conn.getState()),
         )
 
         if (usable.length === 0) {
