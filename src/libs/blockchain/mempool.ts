@@ -399,9 +399,18 @@ export default class Mempool {
 
     public static async receive(incoming: Transaction[], returnDiff = true) {
         if (incoming.length === 0) {
+            // An idle peer (empty mempool) still pulls ours via the "mempool"
+            // exchange (handleMempool → receive(theirTxs).mempool). Return our
+            // own pool — not [] — otherwise the puller never learns our txs,
+            // the proposer's candidate block diverges from the shard's tx-set
+            // (broadcastBlockHash missingFromThem>0), and a tx submitted to a
+            // single node is never included. Mirrors the unseenTransactions===0
+            // path below.
+            const blockNumber = SecretaryManager.lastBlockRef
+            const finalPool = await this.getMempool(blockNumber)
             return {
                 success: true,
-                mempool: [],
+                mempool: finalPool.filter(tx => tx.blockNumber <= blockNumber),
             }
         }
 
