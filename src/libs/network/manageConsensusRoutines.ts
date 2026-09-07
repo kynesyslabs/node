@@ -361,6 +361,21 @@ export default async function manageConsensusRoutines(
                 }
 
                 const peerKey = sender
+
+                log.debug("Received setValidatorPhase from: " + sender)
+                log.debug(
+                    "Peerlist: " +
+                        JSON.stringify(
+                            PeerManager.getInstance()
+                                .getPeers()
+                                .map(p => ({
+                                    url: p.connection.string,
+                                    identity: p.identity,
+                                })),
+                            null,
+                            2,
+                        ),
+                )
                 const peer = PeerManager.getInstance().getPeer(sender)
                 if (!peer) {
                     response.result = 401
