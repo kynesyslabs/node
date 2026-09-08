@@ -404,6 +404,13 @@ export default class PeerManager {
     }
 
     addOfflinePeer(peerInstance: Peer) {
+        if (!parseNodeUrl(peerInstance.connection.string)) {
+            log.warning(
+                "[PEERMANAGER] Invalid connection string URL, not tracking offline peer: " +
+                    peerInstance.connection.string,
+            )
+            return
+        }
         log.info(
             "[PEERMANAGER] Adding offline peer " +
                 peerInstance.connection.string,
@@ -425,10 +432,7 @@ export default class PeerManager {
         delete this.offlinePeers[identity]
     }
 
-    setPeers(peerlist: Peer[], discardCurrentPeerlist = true) {
-        if (discardCurrentPeerlist) {
-            this.peerList = {}
-        }
+    setPeers(peerlist: Peer[]) {
         for (const peer of peerlist) {
             this.addPeer(peer)
         }

@@ -180,7 +180,7 @@ export default class ServerHandlers {
         const orderedPeerList = mergedPeerList.sort((a, b) =>
             a.identity.localeCompare(b.identity),
         )
-        PeerManager.getInstance().setPeers(orderedPeerList, true)
+        PeerManager.getInstance().setPeers(orderedPeerList)
         const extra = { peerlistState: "merged" }
         const requireReply = false
         const response = true

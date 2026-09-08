@@ -120,7 +120,7 @@ async function peersGossipProcess(
             })
         })
 
-    peerlistsToMerge.push(ourPeerlist)
+    peerlistsToMerge.unshift(ourPeerlist)
 
     log.custom("peerGossip", "Merging peerlists", false)
     await mergePeerlists(peerlistsToMerge)
