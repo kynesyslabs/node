@@ -9,6 +9,7 @@ import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig } from "./types"
+import { validateExposedUrl } from "./nodeUrl"
 
 // Ensure .env is loaded before reading any env vars.
 // This must happen here (not in index.ts) because ES module imports
@@ -70,6 +71,7 @@ export function loadConfig(): Readonly<AppConfig> {
     const d = DEFAULT_CONFIG
 
     const serverPort = envInt(EnvKey.SERVER_PORT, d.server.serverPort)
+    const prod = envBool(EnvKey.PROD, d.core.prod)
     const serverConfig = {
         serverPort,
         rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),
@@ -118,7 +120,7 @@ export function loadConfig(): Readonly<AppConfig> {
         },
 
         core: {
-            prod: envBool(EnvKey.PROD, d.core.prod),
+            prod,
             shardSize: envInt(EnvKey.SHARD_SIZE, d.core.shardSize),
             mainLoopSleepTime: envInt(
                 EnvKey.MAIN_LOOP_SLEEP_TIME,
@@ -138,9 +140,11 @@ export function loadConfig(): Readonly<AppConfig> {
             ),
             identityFile: envStr(EnvKey.IDENTITY_FILE, d.core.identityFile),
             peerListFile: envStr(EnvKey.PEER_LIST_FILE, d.core.peerListFile),
-            exposedUrl:
-                envStr(EnvKey.EXPOSED_URL, d.core.exposedUrl) ||
-                `http://localhost:${serverPort}`,
+            exposedUrl: validateExposedUrl(
+                envStr(EnvKey.EXPOSED_URL, d.core.exposedUrl),
+                prod,
+                serverPort,
+            ),
             sudoPubkey: envStr(EnvKey.SUDO_PUBKEY, "") || null,
             maxMessageSize: envInt(
                 EnvKey.MAX_MESSAGE_SIZE,

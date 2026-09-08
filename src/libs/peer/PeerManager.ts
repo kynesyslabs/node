@@ -13,6 +13,7 @@ import fs from "fs"
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
+import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import { HelloPeerRequest } from "../network/manageHelloPeer"
 import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -291,10 +292,8 @@ export default class PeerManager {
             return [false, "No identity detected!"]
         }
 
-        let parsedUrl: URL
-        try {
-            parsedUrl = new URL(peer.connection.string)
-        } catch (_e) {
+        const parsedUrl = parseNodeUrl(peer.connection.string)
+        if (!parsedUrl) {
             log.warning(
                 "[PEERMANAGER] Invalid connection string URL, rejecting peer: " +
                     peer.connection.string,
@@ -304,6 +303,7 @@ export default class PeerManager {
                 "Invalid connection string: " + peer.connection.string,
             ]
         }
+        peer.connection.string = parsedUrl.origin
 
         if (
             peer.identity !== getSharedState.publicKeyHex &&
@@ -436,15 +436,7 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static urlPointsAtUs(url: URL): boolean {
-        const loopbackHosts = [
-            "127.0.0.1",
-            "localhost",
-            "0.0.0.0",
-            "::1",
-            "[::1]",
-            "host.docker.internal",
-        ]
-        if (loopbackHosts.includes(url.hostname)) {
+        if (isLoopbackHost(url.hostname)) {
             return true
         }
 

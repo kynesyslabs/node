@@ -365,6 +365,23 @@ export default class Peer {
                 }
             }
 
+            if (axios.isAxiosError(error) && error.code === "ERR_INVALID_URL") {
+                log.error(
+                    `[RPC Call] [${method}] [${timestampReadable}] Invalid peer URL, marking offline: ${connectionUrl}`,
+                )
+                PeerManager.markPeerOffline(this)
+
+                return {
+                    result: 500,
+                    response: "Invalid peer URL",
+                    require_reply: false,
+                    extra: {
+                        code: error.code,
+                        url: connectionUrl,
+                    },
+                }
+            }
+
             if (axios.isAxiosError(error) && error.code === "ECONNREFUSED") {
                 log.warn(
                     `[RPC Call] [${method}] [${timestampReadable}] Connection refused to: ${connectionUrl}`,
