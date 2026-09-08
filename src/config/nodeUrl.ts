@@ -84,3 +84,24 @@ export function validateExposedUrl(
 
     return url.origin
 }
+
+/**
+ * Build provenance is exposed over /info and /version. A deployed node
+ * without a resolvable commit cannot be audited, so it is fatal under
+ * PROD and a warning otherwise.
+ */
+export function validateBuildProvenance(
+    commit: string | null,
+    prod: boolean,
+): void {
+    if (commit) {
+        return
+    }
+    const problem =
+        "the running commit could not be resolved (no .git/ in the runtime tree and GIT_COMMIT is unset). " +
+        "Build the image through scripts/docker-run or pass GIT_COMMIT explicitly."
+    if (prod) {
+        throw new Error(`[config] PROD=true requires build provenance: ${problem}`)
+    }
+    console.warn(`[config] ${problem} /info will report commit=null.`)
+}

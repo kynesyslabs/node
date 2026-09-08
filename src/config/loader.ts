@@ -9,7 +9,8 @@ import * as dotenv from "dotenv"
 import { EnvKey } from "./envKeys"
 import { DEFAULT_CONFIG } from "./defaults"
 import type { AppConfig } from "./types"
-import { validateExposedUrl } from "./nodeUrl"
+import { validateBuildProvenance, validateExposedUrl } from "./nodeUrl"
+import { NODE_VERSION } from "../utilities/nodeVersion"
 
 // Ensure .env is loaded before reading any env vars.
 // This must happen here (not in index.ts) because ES module imports
@@ -72,6 +73,7 @@ export function loadConfig(): Readonly<AppConfig> {
 
     const serverPort = envInt(EnvKey.SERVER_PORT, d.server.serverPort)
     const prod = envBool(EnvKey.PROD, d.core.prod)
+    validateBuildProvenance(NODE_VERSION.commit, prod)
     const serverConfig = {
         serverPort,
         rpcPort: envInt(EnvKey.RPC_PORT, d.server.rpcPort),

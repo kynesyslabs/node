@@ -118,7 +118,12 @@ export class Config {
 export { EnvKey } from "./envKeys"
 export { DEFAULT_CONFIG } from "./defaults"
 export { loadConfig } from "./loader"
-export { parseNodeUrl, isLoopbackHost, validateExposedUrl } from "./nodeUrl"
+export {
+    parseNodeUrl,
+    isLoopbackHost,
+    validateExposedUrl,
+    validateBuildProvenance,
+} from "./nodeUrl"
 export type {
     AppConfig,
     ServerConfig,

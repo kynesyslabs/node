@@ -203,13 +203,28 @@ COPY --from=wstcp --chown=demos:demos /wstcp/bin/wstcp /app/.cargo/bin/wstcp
 # + `git diff --quiet; echo $?` + an ISO timestamp). They land in the
 # image as ENV so `process.env.GIT_COMMIT` etc. resolve from
 # `src/utilities/nodeVersion.ts` without shipping `.git/` into the runtime
-# layer. Missing values fall through to the module's null defaults — the
-# node never panics on absence.
+# layer. A node started with PROD=true refuses to boot without a commit,
+# so the image build fails early when GIT_COMMIT is missing or malformed.
+# Set REQUIRE_GIT_COMMIT=false for a throwaway build from a tree without
+# git history.
 ARG GIT_COMMIT=
 ARG GIT_BRANCH=
 ARG GIT_COMMIT_MESSAGE=
 ARG GIT_DIRTY=false
 ARG BUILT_AT=
+ARG REQUIRE_GIT_COMMIT=true
+RUN if [ "$REQUIRE_GIT_COMMIT" = "true" ]; then \
+        case "$GIT_COMMIT" in \
+            *[!0-9a-fA-F]*|"") \
+                echo >&2 "ERROR: GIT_COMMIT build arg is missing or not a hex SHA (got '$GIT_COMMIT')."; \
+                echo >&2 "       Build through scripts/docker-run, or pass --build-arg GIT_COMMIT=\$(git rev-parse HEAD)."; \
+                echo >&2 "       Use --build-arg REQUIRE_GIT_COMMIT=false to build without provenance."; \
+                exit 1 ;; \
+        esac; \
+        if [ "${#GIT_COMMIT}" -lt 7 ] || [ "${#GIT_COMMIT}" -gt 40 ]; then \
+            echo >&2 "ERROR: GIT_COMMIT must be 7-40 hex chars (got ${#GIT_COMMIT})."; exit 1; \
+        fi; \
+    fi
 
 # Sensible image-level defaults. Anything else (DATABASE_URL, EXPOSED_URL,
 # IDENTITY_FILE, PEER_LIST_FILE, etc.) must be supplied at runtime.
