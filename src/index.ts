@@ -27,7 +27,10 @@ import {
 import { serverRpcBun } from "./libs/network/server_rpc"
 import { getSharedState } from "./utilities/sharedState"
 import { markSubsystem, subsystemError } from "./utilities/subsystemRegistry"
-import { fastSync } from "./libs/blockchain/routines/Sync"
+import {
+    fastSync,
+    waitForInFlightBlockApply,
+} from "./libs/blockchain/routines/Sync"
 import peerBootstrap from "./libs/peer/routines/peerBootstrap"
 import {
     getNetworkTimestamp,
@@ -1286,6 +1289,24 @@ export async function gracefulShutdown(signal: string, exitCode = 0) {
     getSharedState.runMainLoop = false
 
     log.info(`[CORE] Received ${signal}, shutting down gracefully...`)
+
+    // A block apply writes GCR state and then inserts the block in separate
+    // commits; exiting between them leaves state ahead of the chain. Let the
+    // block in flight finish before anything else is torn down.
+    const BLOCK_APPLY_DRAIN_MS = 30_000
+    let drainTimer: ReturnType<typeof setTimeout> | null = null
+    const drained = await Promise.race([
+        waitForInFlightBlockApply().then(() => true),
+        new Promise<boolean>(resolve => {
+            drainTimer = setTimeout(() => resolve(false), BLOCK_APPLY_DRAIN_MS)
+        }),
+    ])
+    if (drainTimer) clearTimeout(drainTimer)
+    if (!drained) {
+        log.error(
+            `[CORE] Block apply still in flight after ${BLOCK_APPLY_DRAIN_MS}ms; exiting anyway — local GCR state may be ahead of the chain`,
+        )
+    }
 
     // Force exit after 10 seconds if graceful shutdown hangs
     const forceExitTimeout = setTimeout(() => {

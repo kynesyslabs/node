@@ -63,6 +63,30 @@ import {
  */
 export const syncLock = new Mutex()
 
+let inFlightBlockApply: Promise<void> | null = null
+
+/**
+ * Runs the apply-then-insert critical section of one block and exposes it
+ * to gracefulShutdown, which waits for it before exiting so a stop cannot
+ * land between the GCR edits and the block insert.
+ */
+async function trackBlockApply<T>(section: () => Promise<T>): Promise<T> {
+    const run = section()
+    inFlightBlockApply = run.then(
+        () => undefined,
+        () => undefined,
+    )
+    try {
+        return await run
+    } finally {
+        inFlightBlockApply = null
+    }
+}
+
+export function waitForInFlightBlockApply(): Promise<void> {
+    return inFlightBlockApply ?? Promise.resolve()
+}
+
 class SyncAssertionError extends Error {
     constructor(message: string) {
         super(message)
@@ -587,9 +611,10 @@ export async function syncBlock(block: Block, peer: Peer) {
     const applied = await verifyBlockAttrs(block, txs)
 
     // ! Sync the native tables
-    await syncGCRTables(applied, block)
-
-    await insertBlockOrHalt(block, txs)
+    await trackBlockApply(async () => {
+        await syncGCRTables(applied, block)
+        await insertBlockOrHalt(block, txs)
+    })
     log.debug("Block inserted successfully")
     log.debug(
         `Last block number: ${getSharedState.lastBlockNumber} Last block hash: ${getSharedState.lastBlockHash}`,
@@ -871,9 +896,10 @@ async function applySyncedBlock(
     const applied = await verifyBlockAttrs(block, blockTxs)
 
     // Sync GCR tables
-    await syncGCRTables(applied, block)
-
-    await insertBlockOrHalt(block, blockTxs)
+    await trackBlockApply(async () => {
+        await syncGCRTables(applied, block)
+        await insertBlockOrHalt(block, blockTxs)
+    })
 
     log.info(
         `[batchDownloadBlocks] Block ${block.number} inserted successfully`,
@@ -1064,6 +1090,13 @@ async function batchDownloadBlocks(
     // verify: each block's validator set (valid_at <= number-1) is already
     // persisted by the time the next block is checked.
     for (const block of blocks.sort((a, b) => a.number - b.number)) {
+        if (getSharedState.isShuttingDown) {
+            log.info(
+                `[batchDownloadBlocks] Shutdown in progress, stopping before block ${block.number}`,
+            )
+            return false
+        }
+
         const blockTxs = block.content.ordered_transactions
             .map(txHash => txMap[txHash])
             .filter(tx => !!tx)
