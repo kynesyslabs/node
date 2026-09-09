@@ -2,6 +2,7 @@ import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import type {
     BaseForkConfig,
+    DeterministicBlockHashConfig,
     ForkConfig,
     ForkName,
     GasFeeSeparationConfig,
@@ -228,6 +229,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.nonceEnforcement =
                 config as NonceEnforcementConfig
             return
+        case "deterministicBlockHash":
+            getSharedState.forkConfig.deterministicBlockHash =
+                config as DeterministicBlockHashConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -336,6 +341,10 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             // No payload beyond the base. Genesis may only set
             // activationHeight + description.
             return base as NonceEnforcementConfig
+        case "deterministicBlockHash":
+            // No payload beyond the base. Genesis may only set
+            // activationHeight + description.
+            return base as DeterministicBlockHashConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
