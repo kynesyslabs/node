@@ -360,14 +360,19 @@ export default class PeerManager {
         if (existingPeer) {
             action = "updated"
 
-            const { block, status } = existingPeer.sync
+            const { block, status, block_hash: blockHash } = existingPeer.sync
             const { timestamp, ready, online } = existingPeer.status
 
             // INFO: When overwriting an existing peer, info update properties
-            // if the new peer has data && data is more recent
+            // if the new peer has data && data is more recent. At equal
+            // height a differing non-empty hash also wins: sync reports have
+            // been validated against our chain by the time they get here.
             if (
                 peer.sync.block > block ||
-                (peer.sync.block == block && peer.sync.status !== status)
+                (peer.sync.block == block &&
+                    (peer.sync.status !== status ||
+                        (Boolean(peer.sync.block_hash) &&
+                            peer.sync.block_hash !== blockHash)))
             ) {
                 existingPeer.sync.block = peer.sync.block
                 existingPeer.sync.block_hash = peer.sync.block_hash

@@ -513,6 +513,13 @@ async function preMainLoop() {
     // hits a handler that reads networkParameters / fees. Order matters:
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
+
+    // INFO: Set initial last block data before the first hello goes out, so
+    // the sync data we advertise carries the real tip and genesis hash
+    const lastBlock = await Chain.getLastBlock()
+    getSharedState.lastBlockNumber = lastBlock.number
+    getSharedState.lastBlockHash = lastBlock.hash
+
     await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
@@ -535,10 +542,6 @@ async function preMainLoop() {
             indexState.peerManager.getPeers().length +
             ")",
     )
-    // INFO: Set initial last block data
-    const lastBlock = await Chain.getLastBlock()
-    getSharedState.lastBlockNumber = lastBlock.number
-    getSharedState.lastBlockHash = lastBlock.hash
     // Arm the block watchdog at boot. It only ever gets set when a HIGHER
     // block is inserted, so a node starting on an already-stalled chain
     // would leave it null and skip the watchdog forever. Stamp it now so
