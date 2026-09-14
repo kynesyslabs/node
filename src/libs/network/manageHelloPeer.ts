@@ -5,9 +5,14 @@ import { Waiter } from "@/utilities/waiter"
 import { PeerManager, Peer } from "../peer"
 import { emptyResponse } from "./server_rpc"
 import { getSharedState } from "src/utilities/sharedState"
-import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
+import { helloResponseMessage } from "../peer/helloAuth"
 
 export interface HelloPeerRequest {
     url: string
@@ -17,6 +22,27 @@ export interface HelloPeerRequest {
         data: string
     }
     syncData: SyncData
+    nonce?: string
+}
+
+/**
+ * Proof that the node answering this hello holds our key and serves the
+ * URL we advertise. Bound to the caller's nonce so it cannot be replayed.
+ */
+async function signHelloResponse(nonce: string) {
+    const url = getSharedState.exposedUrl
+    const signed = await TxValidatorPool.getInstance().sign(
+        getSharedState.signingAlgorithm,
+        helloResponseMessage(nonce, url),
+    )
+    return {
+        identity: getSharedState.publicKeyHex,
+        url,
+        signature: {
+            type: getSharedState.signingAlgorithm,
+            data: uint8ArrayToHex(signed.signature),
+        },
+    }
 }
 
 // Hello Peer takes the request of an already authenticated client and treat the client as a peer
@@ -90,15 +116,45 @@ export async function manageHelloPeer(
 
     const peerManager = PeerManager.getInstance()
 
-    // If we are here, the peer is connected
-    const [isAddedToPeerlist, message] = peerManager.addPeer(peerObject, true)
-    if (!isAddedToPeerlist) {
-        response.result = 400
-        response.response = false
-        response.extra = {
-            msg: "Peer not added to peerlist: " + message,
+    if (peerManager.getPeer(peerObject.identity)) {
+        // Known peer: the signed hello may update its URL and sync data
+        const [isAddedToPeerlist, message] = peerManager.addPeer(
+            peerObject,
+            true,
+        )
+        if (!isAddedToPeerlist) {
+            response.result = 400
+            response.response = false
+            response.extra = {
+                msg: "Peer not added to peerlist: " + message,
+            }
+            return response
         }
-        return response
+    } else {
+        // Stranger: the caller proved it holds the key, not that the URL
+        // reaches it. Hello back and let the verified reply add it.
+        const [acceptable, message] = peerManager.canAddPeer(peerObject)
+        if (!acceptable) {
+            response.result = 400
+            response.response = false
+            response.extra = {
+                msg: "Peer not added to peerlist: " + message,
+            }
+            return response
+        }
+
+        if (!PeerManager.verifying.has(peerObject.identity)) {
+            log.info(
+                `[Hello Peer Listener] New peer ${peerObject.identity} @ ${peerObject.connection.string}: verifying with a hello back`,
+            )
+            void PeerManager.sayHelloToPeer(peerObject).catch(error =>
+                log.warning(
+                    `[Hello Peer Listener] Hello back to ${peerObject.identity} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                ),
+            )
+        }
     }
 
     // INFO: Return a list of all our connected peers
@@ -107,6 +163,7 @@ export async function manageHelloPeer(
     response.response = true
     response.extra = {
         msg: "Peer connected",
+        ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
         syncData: peerManager.ourSyncData,
         peerlist: peerManager
             .getPeers()

@@ -10,13 +10,19 @@ KyneSys Labs: https://www.kynesys.xyz/
 */
 
 import fs from "fs"
+import crypto from "node:crypto"
 import Peer from "./Peer"
 import log from "src/utilities/logger"
 import { getSharedState } from "src/utilities/sharedState"
 import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { HelloPeerRequest } from "../network/manageHelloPeer"
-import { ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import type { HelloPeerRequest } from "../network/manageHelloPeer"
+import { helloResponseMessage } from "./helloAuth"
+import {
+    hexToUint8Array,
+    ucrypto,
+    uint8ArrayToHex,
+} from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { Config } from "src/config"
 
@@ -320,6 +326,32 @@ export default class PeerManager {
             ]
         }
 
+        const sameUrlOtherKey = this.findPeersByUrl(
+            parsedUrl.origin,
+            peer.identity,
+        )
+        if (sameUrlOtherKey.length > 0) {
+            if (!urlSignedByOwner) {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} is already bound to ${sameUrlOtherKey
+                        .map(p => p.identity)
+                        .join(", ")}: refusing unsigned claim by ${peer.identity}`,
+                )
+                return [
+                    false,
+                    "URL already bound to another identity: " +
+                        peer.connection.string,
+                ]
+            }
+            for (const stale of sameUrlOtherKey) {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} now verified for ${peer.identity}: evicting stale binding ${stale.identity}`,
+                )
+                this.removeOnlinePeer(stale.identity)
+                this.removeOfflinePeer(stale.identity)
+            }
+        }
+
         // REVIEW check for duplicates
         const identity = peer.identity
         let action = "added"
@@ -434,8 +466,63 @@ export default class PeerManager {
 
     setPeers(peerlist: Peer[]) {
         for (const peer of peerlist) {
-            this.addPeer(peer)
+            if (this.peerList[peer.identity]) {
+                this.addPeer(peer)
+                continue
+            }
+            if (
+                peer.identity === getSharedState.publicKeyHex ||
+                PeerManager.verifying.has(peer.identity)
+            ) {
+                continue
+            }
+            const [acceptable] = this.canAddPeer(peer)
+            if (!acceptable) {
+                continue
+            }
+            void PeerManager.sayHelloToPeer(
+                new Peer(peer.connection.string, peer.identity),
+            ).catch(error =>
+                log.debug(
+                    `[PEERMANAGER] Verification hello to ${peer.identity} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                ),
+            )
         }
+    }
+
+    /**
+     * Static checks a candidate must pass before we spend a handshake on it:
+     * valid URL, not pointing at us, not colliding with a verified binding.
+     */
+    canAddPeer(peer: Peer): [boolean, string] {
+        const parsedUrl = parseNodeUrl(peer.connection.string)
+        if (!parsedUrl) {
+            return [false, "Invalid connection string: " + peer.connection.string]
+        }
+        if (
+            peer.identity !== getSharedState.publicKeyHex &&
+            PeerManager.urlPointsAtUs(parsedUrl)
+        ) {
+            return [false, "Connection string points at us"]
+        }
+        if (this.findPeersByUrl(parsedUrl.origin, peer.identity).length > 0) {
+            return [false, "URL already bound to another identity"]
+        }
+        return [true, ""]
+    }
+
+    private findPeersByUrl(origin: string, exceptIdentity: string): Peer[] {
+        const matches: Peer[] = []
+        for (const list of [this.peerList, this.offlinePeers]) {
+            for (const candidate of Object.values(list)) {
+                if (candidate.identity === exceptIdentity) continue
+                const url = parseNodeUrl(candidate.connection.string)
+                if (url && url.origin === origin) matches.push(candidate)
+            }
+        }
+        return matches
     }
 
     // REVIEW This method should be tested and finalized with the new peer structure
@@ -452,8 +539,27 @@ export default class PeerManager {
         }
     }
 
+    /** Identities with a hello in flight; breaks hello/hello-back cycles. */
+    static verifying = new Set<string>()
+
     static async sayHelloToPeer(peer: Peer, waitForDiscovery = false) {
-        // TODO test and finalize this method
+        if (PeerManager.verifying.has(peer.identity)) {
+            return
+        }
+
+        PeerManager.verifying.add(peer.identity)
+        try {
+            await PeerManager.sayHelloToPeerUnguarded(peer, waitForDiscovery)
+        } finally {
+            PeerManager.verifying.delete(peer.identity)
+        }
+    }
+
+    private static async sayHelloToPeerUnguarded(
+        peer: Peer,
+        waitForDiscovery = false,
+    ) {
+        const nonce = crypto.randomBytes(32).toString("hex")
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
         const signedConnectionString = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
@@ -473,6 +579,7 @@ export default class PeerManager {
                 block_hash: getSharedState.lastBlockHash,
                 status: getSharedState.syncStatus,
             },
+            nonce,
         }
 
         // Not awaiting the response to not block the main thread
@@ -489,7 +596,11 @@ export default class PeerManager {
             },
         )
 
-        const newPeersUnfiltered = PeerManager.helloPeerCallback(response, peer)
+        const newPeersUnfiltered = await PeerManager.helloPeerCallback(
+            response,
+            peer,
+            nonce,
+        )
 
         if (newPeersUnfiltered.length === 0) {
             return
@@ -511,14 +622,12 @@ export default class PeerManager {
     }
 
     // Callback for the hello peer
-    static helloPeerCallback(
+    static async helloPeerCallback(
         response: RPCResponse,
         peer: Peer,
-    ): { url: string; publicKey: string }[] {
-        //console.log(response) // ? Delete this if not needed
-        // TODO Test and Finish this
-        // REVIEW is the message the response itself?
-        // Based on the response, we can decide what to do
+        nonce: string,
+    ): Promise<{ url: string; publicKey: string }[]> {
+        const peerman = PeerManager.getInstance()
         if (response.result === 200) {
             if (
                 typeof response.extra?.msg === "string" &&
@@ -527,8 +636,28 @@ export default class PeerManager {
                 log.warning(
                     `[PEERMANAGER] ${peer.connection.string} answered as ourselves: dropping bogus peer ${peer.identity}`,
                 )
-                PeerManager.getInstance().removeOnlinePeer(peer.identity)
-                PeerManager.getInstance().removeOfflinePeer(peer.identity)
+                peerman.removeOnlinePeer(peer.identity)
+                peerman.removeOfflinePeer(peer.identity)
+                return []
+            }
+
+            const verdict = await PeerManager.verifyHelloResponse(
+                response,
+                peer,
+                nonce,
+            )
+            if (verdict === "invalid") {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} did not prove ${peer.identity}: dropping`,
+                )
+                peerman.removeOnlinePeer(peer.identity)
+                peerman.removeOfflinePeer(peer.identity)
+                return []
+            }
+            if (verdict === "unsigned" && !peerman.getPeer(peer.identity)) {
+                log.warning(
+                    `[PEERMANAGER] ${peer.connection.string} answered without a signed hello (old node?): not adding ${peer.identity} until it upgrades or hellos us itself`,
+                )
                 return []
             }
 
@@ -536,8 +665,8 @@ export default class PeerManager {
                 peer.sync = response.extra.syncData
             }
 
-            PeerManager.getInstance().addPeer(peer)
-            PeerManager.getInstance().removeOfflinePeer(peer.identity)
+            peerman.addPeer(peer, verdict === "verified")
+            peerman.removeOfflinePeer(peer.identity)
 
             return response.extra.peerlist || []
         } else {
@@ -547,6 +676,52 @@ export default class PeerManager {
         // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
         //process.exit(0)
         return []
+    }
+
+    /**
+     * "verified": the reply is signed by the key we dialed for, over our
+     * nonce and the URL we dialed. "unsigned": a pre-upgrade node.
+     * "invalid": someone else answered, or a bad signature.
+     */
+    static async verifyHelloResponse(
+        response: RPCResponse,
+        peer: Peer,
+        nonce: string,
+    ): Promise<"verified" | "unsigned" | "invalid"> {
+        const extra = response.extra ?? {}
+        const { identity, url, signature } = extra
+        if (!identity && !signature) {
+            return "unsigned"
+        }
+        if (
+            typeof identity !== "string" ||
+            typeof url !== "string" ||
+            !signature?.type ||
+            typeof signature.data !== "string"
+        ) {
+            return "invalid"
+        }
+        if (identity.toLowerCase() !== peer.identity.toLowerCase()) {
+            log.warning(
+                `[PEERMANAGER] ${peer.connection.string} answered as ${identity}, expected ${peer.identity}`,
+            )
+            return "invalid"
+        }
+        const dialed = parseNodeUrl(peer.connection.string)
+        const claimed = parseNodeUrl(url)
+        if (!dialed || !claimed || dialed.origin !== claimed.origin) {
+            log.warning(
+                `[PEERMANAGER] ${peer.identity} signed URL ${url} but we dialed ${peer.connection.string}`,
+            )
+            return "invalid"
+        }
+        const valid = await TxValidatorPool.getInstance().verify({
+            algorithm: signature.type,
+            message: helloResponseMessage(nonce, url),
+            signature: hexToUint8Array(signature.data),
+            publicKey: hexToUint8Array(identity),
+        })
+        return valid ? "verified" : "invalid"
     }
 
     static markPeerOffline(peer: Peer) {

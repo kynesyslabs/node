@@ -1,6 +1,4 @@
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
-import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import { getSharedState } from "src/utilities/sharedState"
 import getPeerInfo from "../routines/nodecalls/getPeerInfo"
 import getPeerlist from "../routines/nodecalls/getPeerlist"
 import Hashing from "../../crypto/hashing"
@@ -25,13 +23,6 @@ export const peerHandlers: Record<string, NodeCallHandler> = {
             "manageNodeCall",
             "Peerlist hash: " + response.response,
             true,
-        )
-        return response
-    },
-
-    getPeerIdentity: async (_data, response) => {
-        response.response = uint8ArrayToHex(
-            getSharedState.keypair.publicKey as Uint8Array,
         )
         return response
     },

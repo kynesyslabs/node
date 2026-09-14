@@ -15,7 +15,6 @@ import axios from "axios"
 import Peer from "../Peer"
 import log from "src/utilities/logger"
 import PeerManager from "../PeerManager"
-import getPeerIdentity from "./getPeerIdentity"
 import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
@@ -149,46 +148,27 @@ async function tryConnectPeer(peer: Peer) {
             currentPublicKey,
     )
     // ANCHOR Connection test and hello_peer routine
-    const blankPeer = new Peer(currentPeerUrl, currentPublicKey)
-    // Adding identity if any
-    log.debug("[BOOTSTRAP] Testing " + currentPeerUrl + " identity")
-    // After this, the peer object will have an identity and thus will be verified
-    const verifiedPeer = await getPeerIdentity(blankPeer, currentPublicKey)
-    if (!verifiedPeer) {
-        log.warning(
-            "[BOOTSTRAP] [FAILED] Failed to get peer identity: see above",
-        )
-
-        PeerManager.markPeerOffline(blankPeer)
-        return
-    }
-
-    try {
-        verifiedPeer.connection.string = currentPeerUrl // Adding this step
-    } catch (error) {
-        log.error("[BOOTSTRAP] Error setting connection string: " + error)
-        log.critical("Error setting connection string: " + error)
-        return
-    }
-    log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
-
-    try {
-        await ensureGenesisDataMatch(verifiedPeer)
-    } catch (error) {
-        log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
-        log.error("[PEER] Bootstrap error: " + error)
-        throw new Error(`Genesis data match failed for peer ${verifiedPeer.connection.string}: ${error instanceof Error ? error.message : String(error)}`)
-    }
+    // The signed hello reply proves the key answers at this URL; the reply
+    // verification in helloPeerCallback adds the peer only when it does.
+    const verifiedPeer = new Peer(currentPeerUrl, currentPublicKey)
 
     let maxRetries = 3
     while (maxRetries > 0) {
-        // INFO: Check if peer's genesis hash matches ours, else download their genesis data
         await PeerManager.sayHelloToPeer(verifiedPeer, true)
 
         // INFO: Confirmed we paired with anchor node
         if (
             peerman.getPeers().find(p => p.identity === verifiedPeer.identity)
         ) {
+            log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)
+            try {
+                await ensureGenesisDataMatch(verifiedPeer)
+            } catch (error) {
+                peerman.removeOnlinePeer(verifiedPeer.identity)
+                log.error("[BOOTSTRAP] Error ensuring genesis data match: " + error)
+                log.error("[PEER] Bootstrap error: " + error)
+                throw new Error(`Genesis data match failed for peer ${verifiedPeer.connection.string}: ${error instanceof Error ? error.message : String(error)}`)
+            }
             return
         }
 

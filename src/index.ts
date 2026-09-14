@@ -513,7 +513,6 @@ async function preMainLoop() {
     // hits a handler that reads networkParameters / fees. Order matters:
     // findGenesisBlock → loadNetworkParameters → peerBootstrap.
     await loadNetworkParameters()
-
     await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
