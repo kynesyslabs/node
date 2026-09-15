@@ -420,20 +420,27 @@ export default class PeerManager {
             pubkey = "0x" + pubkey
         }
 
-        let peer = this.peerList[pubkey]
+        const peer = this.peerList[pubkey]
 
         if (!peer) {
-            // Check if peer is in offlinePeers — if so, move back to active list
-            if (this.offlinePeers[pubkey]) {
-                log.warn(
-                    "[PEERMANAGER] Peer is in offlinePeers: removing from offlinePeers and adding to peer list",
+            // An offline peer talking to us again is a hint, not proof: it
+            // only rejoins the table through a verified hello reply.
+            const offline = this.offlinePeers[pubkey]
+            if (offline && !PeerManager.verifying.has(pubkey)) {
+                log.info(
+                    `[PEERMANAGER] Offline peer ${pubkey} contacted us: verifying with a hello`,
                 )
-                this.addPeer(this.offlinePeers[pubkey])
-                this.removeOfflinePeer(pubkey)
-                peer = this.peerList[pubkey]
-            } else {
-                return
+                void PeerManager.sayHelloToPeer(
+                    new Peer(offline.connection.string, pubkey),
+                ).catch(error =>
+                    log.debug(
+                        `[PEERMANAGER] Verification hello to ${pubkey} failed: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    ),
+                )
             }
+            return
         }
 
         peer.status.online = true
@@ -735,11 +742,20 @@ export default class PeerManager {
             return
         }
 
-        peer.status.online = false
-        peer.status.timestamp = Date.now()
-
         const peerman = PeerManager.getInstance()
-        peerman.addOfflinePeer(peer)
-        peerman.removeOnlinePeer(peer.identity)
+        const tracked =
+            peerman.peerList[peer.identity] ?? peerman.offlinePeers[peer.identity]
+        if (!tracked) {
+            log.debug(
+                `[PEERMANAGER] ${peer.identity} @ ${peer.connection.string} failed before it was ever verified: not tracking it`,
+            )
+            return
+        }
+
+        tracked.status.online = false
+        tracked.status.timestamp = Date.now()
+
+        peerman.addOfflinePeer(tracked)
+        peerman.removeOnlinePeer(tracked.identity)
     }
 }
