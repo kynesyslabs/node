@@ -8,6 +8,7 @@ import type {
     NonceEnforcementConfig,
     OsDenominationConfig,
     SignatureDomainConfig,
+    Web2ProofBindingConfig,
 } from "./forkConfig"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
@@ -244,6 +245,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.signatureDomain =
                 config as SignatureDomainConfig
             return
+        case "web2ProofBinding":
+            getSharedState.forkConfig.web2ProofBinding =
+                config as Web2ProofBindingConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -356,6 +361,9 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             // No payload: the chain id the preimage binds to comes from
             // genesis `properties.id`, not from the fork entry.
             return base as SignatureDomainConfig
+        case "web2ProofBinding":
+            // No payload beyond the base.
+            return base as Web2ProofBindingConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

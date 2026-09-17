@@ -87,6 +87,18 @@ export type NonceEnforcementConfig = BaseForkConfig
 export type SignatureDomainConfig = BaseForkConfig
 
 /**
+ * `web2ProofBinding` fork: a web2 identity proof must sign
+ * `demos-web2:v1:<context>:<username>:<sender>` instead of the constant
+ * `"dw2p"`, so a published proof cannot be reused to claim a handle its
+ * signer does not own (see `libs/abstraction/web2/boundMessage.ts`).
+ *
+ * Pre-fork: both shapes verify, so clients can migrate without a flag day.
+ * Post-fork: only the bound shape, and a proof lifted from someone else's
+ * post stops verifying.
+ */
+export type Web2ProofBindingConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -116,6 +128,7 @@ export type ForkConfig =
     | GasFeeSeparationConfig
     | NonceEnforcementConfig
     | SignatureDomainConfig
+    | Web2ProofBindingConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -127,6 +140,7 @@ export type ForkName =
     | "gasFeeSeparation"
     | "nonceEnforcement"
     | "signatureDomain"
+    | "web2ProofBinding"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -137,6 +151,7 @@ export interface ForkConfigByName {
     gasFeeSeparation: GasFeeSeparationConfig
     nonceEnforcement: NonceEnforcementConfig
     signatureDomain: SignatureDomainConfig
+    web2ProofBinding: Web2ProofBindingConfig
 }
 
 /**
@@ -198,6 +213,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         treasuryAddress:
             "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
+    web2ProofBinding: {
+        // Inactive by default: the bound shape has to be out in clients
+        // before proofs signed the old way stop verifying.
+        activationHeight: null,
+        description:
+            "Web2 identity proofs sign demos-web2:v1:<context>:<username>:<sender>, " +
+            "so a published proof cannot be reused to claim another handle.",
+    },
     signatureDomain: {
         // Inactive by default even on fresh chains: every signer in the
         // ecosystem (node, SDK, wallet) has to ship the new preimage before a
@@ -236,5 +259,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
         signatureDomain: { ...DEFAULT_FORK_CONFIG.signatureDomain },
+        web2ProofBinding: { ...DEFAULT_FORK_CONFIG.web2ProofBinding },
     }
 }
