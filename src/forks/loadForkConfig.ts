@@ -8,6 +8,7 @@ import type {
     NonceEnforcementConfig,
     OsDenominationConfig,
     SignatureDomainConfig,
+    TlsnProofEnforcementConfig,
     Web2ProofBindingConfig,
 } from "./forkConfig"
 
@@ -249,6 +250,10 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
             getSharedState.forkConfig.web2ProofBinding =
                 config as Web2ProofBindingConfig
             return
+        case "tlsnProofEnforcement":
+            getSharedState.forkConfig.tlsnProofEnforcement =
+                config as TlsnProofEnforcementConfig
+            return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
             // without a case here will fail the type check.
@@ -364,6 +369,9 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
         case "web2ProofBinding":
             // No payload beyond the base.
             return base as Web2ProofBindingConfig
+        case "tlsnProofEnforcement":
+            // No payload beyond the base.
+            return base as TlsnProofEnforcementConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive

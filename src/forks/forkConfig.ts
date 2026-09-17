@@ -99,6 +99,24 @@ export type SignatureDomainConfig = BaseForkConfig
 export type Web2ProofBindingConfig = BaseForkConfig
 
 /**
+ * `tlsnProofEnforcement` fork: refuse TLSNotary identity claims the node
+ * cannot actually verify.
+ *
+ * `verifyTLSNotaryPresentation` checks that the presentation is an object
+ * holding a long-enough hex string and returns
+ * `verifyingKey: "structure-validation-only"` — the cryptography is done in
+ * the client, which decides nothing for consensus. Everything else in the
+ * claim (`revealedRecv`, `recvHash`, `username`, `userId`) is supplied by the
+ * same caller and only checked against itself, so any account can attach any
+ * GitHub, Discord or Telegram identity by authoring its own bytes.
+ *
+ * Active, a `tlsn_identity_assign` is rejected until the node verifies the
+ * notary signature itself. Inactive, the legacy structure-only behaviour
+ * stays, for test networks that depend on it.
+ */
+export type TlsnProofEnforcementConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -129,6 +147,7 @@ export type ForkConfig =
     | NonceEnforcementConfig
     | SignatureDomainConfig
     | Web2ProofBindingConfig
+    | TlsnProofEnforcementConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -141,6 +160,7 @@ export type ForkName =
     | "nonceEnforcement"
     | "signatureDomain"
     | "web2ProofBinding"
+    | "tlsnProofEnforcement"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -152,6 +172,7 @@ export interface ForkConfigByName {
     nonceEnforcement: NonceEnforcementConfig
     signatureDomain: SignatureDomainConfig
     web2ProofBinding: Web2ProofBindingConfig
+    tlsnProofEnforcement: TlsnProofEnforcementConfig
 }
 
 /**
@@ -213,6 +234,15 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         treasuryAddress:
             "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
+    tlsnProofEnforcement: {
+        // Active from genesis on fresh chains, like nonceEnforcement: a new
+        // chain must not accept identity claims nothing verifies. Existing
+        // chains coordinate a mid-chain activation height in their genesis.
+        activationHeight: 0,
+        description:
+            "Reject TLSNotary identity claims while the node only structure-checks the " +
+            "presentation — the claim's own bytes are the only evidence behind it.",
+    },
     web2ProofBinding: {
         // Inactive by default: the bound shape has to be out in clients
         // before proofs signed the old way stop verifying.
@@ -260,5 +290,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
         signatureDomain: { ...DEFAULT_FORK_CONFIG.signatureDomain },
         web2ProofBinding: { ...DEFAULT_FORK_CONFIG.web2ProofBinding },
+        tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
     }
 }
