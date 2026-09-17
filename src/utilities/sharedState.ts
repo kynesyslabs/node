@@ -363,6 +363,13 @@ export default class SharedState {
     // read fork-specific payload fields without runtime narrowing — e.g.
     // `forkConfig.gasFeeSeparation.treasuryAddress` is statically typed.
     forkConfig: ForkConfigByName = cloneDefaultForkConfig()
+
+    // Network identity from genesis `properties.id`. Bound into the
+    // transaction signature preimage once the `signatureDomain` fork is
+    // active, so a signature made here cannot be replayed on another chain.
+    // Null until genesis is read; the gate refuses to treat the fork as
+    // active without it rather than binding to a guessed id.
+    chainId: number | null = null
     // !SECTION Forks
 
     // SECTION Fee distribution (DEM-665)

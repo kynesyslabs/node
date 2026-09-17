@@ -69,6 +69,24 @@ export type OsDenominationConfig = BaseForkConfig
 export type NonceEnforcementConfig = BaseForkConfig
 
 /**
+ * `signatureDomain` fork: transaction signatures stop covering the bare
+ * `tx.hash` and start covering `demos-tx:v1:<chainId>:<hash>` (see
+ * `libs/crypto/txSignaturePreimage.ts`).
+ *
+ * Pre-fork: the signed bytes are `TextEncoder(tx.hash)` — byte-identical to
+ * legacy, so re-sync and old clients keep validating.
+ *
+ * Post-fork: a signature no longer doubles as a signature over an arbitrary
+ * 64-hex message (a wallet asked to sign a "login nonce" can no longer be
+ * tricked into signing a transaction), and it is bound to one network, so a
+ * transaction cannot be replayed onto another chain that shares the account.
+ *
+ * Activating it requires signers and verifiers to move together: the node,
+ * the SDK and the wallet all derive the preimage from the same helper.
+ */
+export type SignatureDomainConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -97,6 +115,7 @@ export type ForkConfig =
     | OsDenominationConfig
     | GasFeeSeparationConfig
     | NonceEnforcementConfig
+    | SignatureDomainConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -107,6 +126,7 @@ export type ForkName =
     | "osDenomination"
     | "gasFeeSeparation"
     | "nonceEnforcement"
+    | "signatureDomain"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -116,6 +136,7 @@ export interface ForkConfigByName {
     osDenomination: OsDenominationConfig
     gasFeeSeparation: GasFeeSeparationConfig
     nonceEnforcement: NonceEnforcementConfig
+    signatureDomain: SignatureDomainConfig
 }
 
 /**
@@ -177,6 +198,17 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         treasuryAddress:
             "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
+    signatureDomain: {
+        // Inactive by default even on fresh chains: every signer in the
+        // ecosystem (node, SDK, wallet) has to ship the new preimage before a
+        // chain switches, or in-flight transactions stop verifying. Set an
+        // explicit height once the clients are out.
+        activationHeight: null,
+        description:
+            "Transaction signatures cover demos-tx:v1:<chainId>:<hash> instead of the " +
+            "bare hash: a message signature can no longer stand in for a transaction " +
+            "signature, and a transaction cannot replay onto another chain.",
+    },
     nonceEnforcement: {
         // Active from genesis on fresh chains (audit C5). Mirrors
         // osDenomination's height-0 default: a brand-new chain boots fully
@@ -203,5 +235,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         osDenomination: { ...DEFAULT_FORK_CONFIG.osDenomination },
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
+        signatureDomain: { ...DEFAULT_FORK_CONFIG.signatureDomain },
     }
 }

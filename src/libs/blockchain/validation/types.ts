@@ -17,6 +17,8 @@ export type PqcIdentityHint = SavedPqcIdentity | null
 export type IdentityHintMap = Record<string, PqcIdentityHint>
 
 /** Parent → worker messages. */
+import type { TxSignatureDomain } from "./txValidator"
+
 export type WorkerRequest =
     | {
           type: "validate"
@@ -27,6 +29,9 @@ export type WorkerRequest =
           // the main thread (the worker has no forkConfig/height). Drives the
           // coherence serializer's amount canonicalization (audit H1).
           isPostFork: boolean
+          // signatureDomain fork state + chain id, same reason: the worker
+          // cannot resolve either, and the signature preimage depends on both.
+          signatureDomain: TxSignatureDomain
       }
     | {
           type: "sign"

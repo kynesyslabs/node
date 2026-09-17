@@ -12,7 +12,7 @@ import Datasource from "@/model/datasource"
 
 import Chain from "./chain"
 import log from "src/utilities/logger"
-import { isForkActive } from "@/forks"
+import { currentTxSignatureContext, isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
@@ -487,9 +487,13 @@ export default class Mempool {
             "osDenomination",
             getSharedState.lastBlockNumber ?? 0,
         )
+        // Same story for the signature preimage: resolved here, where the
+        // fork config and the chain tip live, and threaded into the workers.
+        const signatureDomain = currentTxSignatureContext()
         const results = await TxValidatorPool.getInstance().validate(
             unseenTransactions,
             coherenceIsPostFork,
+            signatureDomain,
         )
         const end = Date.now()
         log.only(

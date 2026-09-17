@@ -75,7 +75,10 @@ import { deserializeUint8Array } from "@kynesyslabs/demosdk/utils" // FIXME Impo
 import log from "@/utilities/logger"
 import { handleError } from "@/errors"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
-import { serializeTransactionContent } from "@/forks"
+import {
+    serializeTransactionContent,
+    txSignaturePreimageForTip,
+} from "@/forks"
 /**
  * SignalingServer class that manages peer connections and message routing
  */
@@ -680,7 +683,7 @@ export class SignalingServer {
             )
             const signature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
-                new TextEncoder().encode(transaction.hash),
+                txSignaturePreimageForTip(transaction.hash),
             )
             transaction.signature = {
                 type: getSharedState.signingAlgorithm,
