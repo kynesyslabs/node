@@ -46,7 +46,16 @@ export interface ForkStatus {
 export interface NetworkInfo {
     forks: {
         osDenomination: ForkStatus
+        signatureDomain: ForkStatus
     }
+    /**
+     * Network identity from genesis `properties.id`. A signer needs it to
+     * build the transaction signature preimage once `signatureDomain` is
+     * active, and it is what stops a signature from being replayed on
+     * another chain. Null on a node whose genesis declared none — such a
+     * node cannot activate the fork.
+     */
+    chainId: number | null
     nodeVersion: NodeVersionInfo
 }
 
@@ -79,6 +88,10 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
         const activationHeight =
             osDenominationConfig?.activationHeight ?? null
 
+        const signatureDomainHeight =
+            getSharedState.forkConfig?.signatureDomain?.activationHeight ??
+            null
+
         const networkInfo: NetworkInfo = {
             forks: {
                 osDenomination: {
@@ -86,7 +99,13 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                     activated: isForkActive("osDenomination", currentHeight),
                     currentHeight,
                 },
+                signatureDomain: {
+                    activationHeight: signatureDomainHeight,
+                    activated: isForkActive("signatureDomain", currentHeight),
+                    currentHeight,
+                },
             },
+            chainId: getSharedState.chainId,
             nodeVersion: NODE_VERSION,
         }
 
