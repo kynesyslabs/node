@@ -18,6 +18,7 @@
  */
 
 import * as snarkjs from "snarkjs"
+import { parseIdentityPublicSignals } from "./publicSignals"
 import { readFile } from "fs/promises"
 import { join } from "path"
 import { DataSource, Repository, EntityManager } from "typeorm"
@@ -174,17 +175,15 @@ export class ProofVerifier {
     ): Promise<ProofVerificationResult> {
         const { proof, publicSignals } = attestation
 
-        // Validate public signals format
-        if (!publicSignals || publicSignals.length < 2) {
-            return {
-                valid: false,
-                reason: "Invalid public signals format (expected [nullifier, merkle_root] or [nullifier, merkle_root, context])",
-            }
+        // Signal order comes from the circuit this verification key belongs
+        // to: [nullifier, context, merkle_root]. Reading position 1 as the
+        // root checked the prover-chosen context against the tree state and
+        // left the real root unchecked — see parseIdentityPublicSignals.
+        const parsed = parseIdentityPublicSignals(publicSignals)
+        if (!parsed.signals) {
+            return { valid: false, reason: parsed.reason ?? "Invalid public signals" }
         }
-
-        const nullifier = publicSignals[0]
-        const merkleRoot = publicSignals[1]
-        const context = publicSignals[2] || "default" // Context is optional in some circuit versions
+        const { nullifier, context, merkleRoot } = parsed.signals
 
         // REVIEW: CRITICAL FIX - Pessimistic locking approach
         // If EntityManager provided, use pessimistic lock within transaction
