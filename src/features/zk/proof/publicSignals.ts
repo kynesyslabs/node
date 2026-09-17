@@ -58,13 +58,63 @@ export function parseIdentityPublicSignals(
                 `([nullifier, context, merkle_root]), got ${publicSignals.length}`,
         }
     }
-    const [nullifier, context, merkleRoot] = publicSignals
-    if (!nullifier || !context || !merkleRoot) {
+    const [rawNullifier, rawContext, rawMerkleRoot] = publicSignals
+    if (!rawNullifier || !rawContext || !rawMerkleRoot) {
         return {
             signals: null,
             reason:
                 "Invalid public signals: empty nullifier, context or merkle root",
         }
     }
+
+    // Canonicalise before anything compares or stores these as text — see
+    // canonicalFieldElement.
+    const nullifier = canonicalFieldElement(rawNullifier)
+    const context = canonicalFieldElement(rawContext)
+    const merkleRoot = canonicalFieldElement(rawMerkleRoot)
+    if (!nullifier || !context || !merkleRoot) {
+        return {
+            signals: null,
+            reason: "Invalid public signals: not field elements",
+        }
+    }
+
     return { signals: { nullifier, context, merkleRoot }, reason: null }
+}
+
+/**
+ * BN254's scalar field order — the modulus snarkjs reduces public signals by
+ * before checking a Groth16 proof.
+ */
+export const BN254_FIELD_ORDER = BigInt(
+    "21888242871839275222246405745257275088548364400416034343698204186575808495617",
+)
+
+/**
+ * The canonical decimal form of a field element.
+ *
+ * Signals arrive as strings and are only meaningful as field elements: the
+ * proof check parses them, so "42", "042" and "0x2a" are the same element and
+ * all verify. Anything that compares or stores them as text — the used
+ * nullifier table, the Merkle root check — sees three different values, which
+ * turns a spent nullifier into a fresh one and lets the same identity attest
+ * again and again.
+ *
+ * Reducing modulo the field order closes the same gap from the other side: a
+ * value and that value plus the order are one element to the verifier.
+ *
+ * Returns null when the text is not a number at all, so callers fail closed
+ * rather than storing something that compares equal to nothing.
+ */
+export function canonicalFieldElement(value: string): string | null {
+    const text = value.trim()
+    if (!/^(0x[0-9a-fA-F]+|[0-9]+)$/.test(text)) {
+        return null
+    }
+    try {
+        const asBigInt = BigInt(text) % BN254_FIELD_ORDER
+        return asBigInt.toString(10)
+    } catch {
+        return null
+    }
 }

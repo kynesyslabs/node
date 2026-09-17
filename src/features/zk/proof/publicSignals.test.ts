@@ -1,4 +1,8 @@
-import { parseIdentityPublicSignals } from "./publicSignals"
+import {
+    BN254_FIELD_ORDER,
+    canonicalFieldElement,
+    parseIdentityPublicSignals,
+} from "./publicSignals"
 
 /**
  * The circuit behind `verification_key_merkle.json` declares
@@ -31,13 +35,14 @@ describe("parseIdentityPublicSignals", () => {
         // the membership proof is about — went unchecked, letting a proof
         // over a self-built tree through.
         const storedRoot = "999"
+        const attackerTreeRoot = "12345"
         const { signals } = parseIdentityPublicSignals([
             NULLIFIER,
             storedRoot,
-            "attacker-tree-root",
+            attackerTreeRoot,
         ])
 
-        expect(signals?.merkleRoot).toBe("attacker-tree-root")
+        expect(signals?.merkleRoot).toBe(attackerTreeRoot)
         expect(signals?.merkleRoot).not.toBe(storedRoot)
     })
 
@@ -68,5 +73,44 @@ describe("parseIdentityPublicSignals", () => {
         ).toBeNull()
         expect(parseIdentityPublicSignals(null).signals).toBeNull()
         expect(parseIdentityPublicSignals(undefined).signals).toBeNull()
+    })
+})
+
+describe("canonicalFieldElement", () => {
+    it("treats leading zeroes as the same element", () => {
+        expect(canonicalFieldElement("042")).toBe(canonicalFieldElement("42"))
+    })
+
+    it("treats hex and decimal as the same element", () => {
+        expect(canonicalFieldElement("0x2a")).toBe("42")
+    })
+
+    it("reduces a value shifted by the field order", () => {
+        const shifted = (BN254_FIELD_ORDER + 42n).toString()
+
+        expect(canonicalFieldElement(shifted)).toBe("42")
+    })
+
+    it("rejects anything that is not a number", () => {
+        expect(canonicalFieldElement("nullifier")).toBeNull()
+        expect(canonicalFieldElement("")).toBeNull()
+        expect(canonicalFieldElement("12ab")).toBeNull()
+    })
+})
+
+describe("a spent nullifier cannot be re-spelled", () => {
+    it("normalises every accepted spelling to one value", () => {
+        // All three verify as the same proof statement, so the used-nullifier
+        // table has to see one value, or the identity attests again.
+        const spellings = ["42", "042", "0x2a"]
+
+        const parsed = spellings.map(
+            spelling =>
+                parseIdentityPublicSignals([spelling, "7", "9"]).signals
+                    ?.nullifier,
+        )
+
+        expect(new Set(parsed).size).toBe(1)
+        expect(parsed[0]).toBe("42")
     })
 })

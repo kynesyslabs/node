@@ -18,7 +18,10 @@
  */
 
 import * as snarkjs from "snarkjs"
-import { parseIdentityPublicSignals } from "./publicSignals"
+import {
+    canonicalFieldElement,
+    parseIdentityPublicSignals,
+} from "./publicSignals"
 import { readFile } from "fs/promises"
 import { join } from "path"
 import { DataSource, Repository, EntityManager } from "typeorm"
@@ -148,7 +151,11 @@ export class ProofVerifier {
             return false
         }
 
-        return currentState.rootHash === merkleRoot
+        // Compare as field elements: the stored root and the one in the proof
+        // are the same number whether written as decimal, with leading zeroes
+        // or in hex, and a text comparison would call them different.
+        const storedRoot = canonicalFieldElement(currentState.rootHash)
+        return storedRoot !== null && storedRoot === merkleRoot
     }
 
     /**
