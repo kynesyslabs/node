@@ -139,6 +139,19 @@ export interface L2PSConfig {
     minBatchSize: number
     maxBatchSize: number
     cleanupAgeMs: number
+    /**
+     * How long an executed transaction stays in the durable history table,
+     * in days. 0 keeps history forever, which is the default: `cleanupAgeMs`
+     * above governs the aggregation *queue* only, and a subnet that wants its
+     * history to expire has to say so.
+     */
+    historyRetentionDays: number
+    /**
+     * Also keep the decrypted payload of every transaction in the history
+     * table. Off by default: the ciphertext is stored instead and decrypted
+     * only to answer an authenticated read from the account it belongs to.
+     */
+    historyStorePlaintext: boolean
 }
 
 // --- Metrics & Monitoring ---

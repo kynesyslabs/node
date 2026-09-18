@@ -270,6 +270,7 @@ async function executeAndRecordL2PSTransaction(
             l2psTx.hash, // encrypted_hash
             0, // batch_index
             "pending", // Initial status - executed locally, waiting for aggregation
+            l2psTx as unknown as Record<string, any>, // ciphertext, so history outlives the queue
         )
         log.info(`[handleL2PS] Recorded transaction ${decryptedTx.hash.slice(0, 16)}... to history as 'pending'`)
     } catch (recordError) {

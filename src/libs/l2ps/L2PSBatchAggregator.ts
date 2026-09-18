@@ -72,6 +72,10 @@ export class L2PSBatchAggregator {
     /** Cleanup age - remove batched transactions older than this (ms) */
     private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
+    /** History retention in days; 0 keeps history forever. */
+    private readonly HISTORY_RETENTION_DAYS =
+        Config.getInstance().l2ps.historyRetentionDays
+
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
 
@@ -792,6 +796,16 @@ export class L2PSBatchAggregator {
             if (deleted > 0) {
                 this.stats.cleanedUpTransactions += deleted
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
+            }
+
+            // The sweep above only empties the aggregation queue. History is
+            // a separate table with its own retention, off unless configured.
+            const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
+            const pruned = await L2PSTransactionExecutor.pruneHistory(
+                this.HISTORY_RETENTION_DAYS,
+            )
+            if (pruned > 0) {
+                log.info(`[L2PS Batch Aggregator] Pruned ${pruned} transactions past the ${this.HISTORY_RETENTION_DAYS}-day history retention`)
             }
 
         } catch (error: unknown) {

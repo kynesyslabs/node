@@ -33,6 +33,7 @@ import { isForkActive } from "@/forks/forkGates"
 import { getSharedState } from "@/utilities/sharedState"
 import log from "@/utilities/logger"
 import { getErrorMessage } from "@/utilities/errorMessage"
+import { Config } from "src/config"
 
 /**
  * L2PS Transaction Fee (in DEM)
@@ -407,6 +408,11 @@ export default class L2PSTransactionExecutor {
 
     /**
      * Record transaction in l2ps_transactions table
+     *
+     * @param encryptedPayload - The envelope the subnet submitted. Stored so
+     * the history survives the aggregation queue's five-minute sweep and can
+     * be read back without keeping the plaintext on disk; passing nothing
+     * leaves a row that only the routing metadata can be read from.
      */
     static async recordTransaction(
         l2psUid: string,
@@ -415,6 +421,7 @@ export default class L2PSTransactionExecutor {
         encryptedHash?: string,
         batchIndex = 0,
         initialStatus: "pending" | "batched" | "confirmed" | "failed" = "pending",
+        encryptedPayload?: Record<string, any> | null,
     ): Promise<number> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -434,7 +441,10 @@ export default class L2PSTransactionExecutor {
             nonce: BigInt(tx.content.nonce || 0),
             timestamp: BigInt(tx.content.timestamp || Date.now()),
             status: initialStatus,
-            content: tx.content as Record<string, any>,
+            encrypted_payload: encryptedPayload ?? null,
+            content: Config.getInstance().l2ps.historyStorePlaintext
+                ? (tx.content as Record<string, any>)
+                : null,
             execution_message: null,
         })
 
@@ -480,12 +490,17 @@ export default class L2PSTransactionExecutor {
 
     /**
      * Get transactions for an account (from l2ps_transactions table)
+     *
+     * @param since - Only transactions stamped after this millisecond
+     * timestamp. Lets a client that already holds history ask for the tail
+     * instead of paging back through all of it.
      */
     static async getAccountTransactions(
         l2psUid: string,
         pubkey: string,
         limit = 100,
         offset = 0,
+        since = 0,
     ): Promise<L2PSTransaction[]> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
@@ -494,15 +509,88 @@ export default class L2PSTransactionExecutor {
 
         // Use query builder to get unique transactions where user is sender or receiver
         // This prevents duplicates when from_address === to_address (self-transfer)
-        const transactions = await txRepo.createQueryBuilder("tx")
+        const query = txRepo.createQueryBuilder("tx")
             .where("tx.l2ps_uid = :l2psUid", { l2psUid })
             .andWhere("(tx.from_address = :pubkey OR tx.to_address = :pubkey)", { pubkey })
+
+        if (since > 0) {
+            query.andWhere("tx.timestamp > :since", { since: String(since) })
+        }
+
+        return query
             .orderBy("tx.timestamp", "DESC")
             .take(limit)
             .skip(offset)
             .getMany()
+    }
 
-        return transactions
+    /**
+     * Every transaction in a subnet, newest first — the durable answer to the
+     * sync request that used to be served from the aggregation queue.
+     *
+     * A node that was offline longer than `l2ps.cleanupAgeMs` could not catch
+     * up from the queue, because the rows it needed had already been swept;
+     * this reads the table that keeps them.
+     *
+     * @param since - A peer's high-water mark, which it takes from the time
+     * its own queue admitted a transaction. So the cutoff is this node's
+     * record time, not the sender's `timestamp`: the latter is set by the
+     * wallet and runs behind admission, so comparing the two clocks would
+     * place transactions before a cursor that has already passed them and
+     * drop them from the sync.
+     */
+    static async getSubnetTransactions(
+        l2psUid: string,
+        limit = 100,
+        offset = 0,
+        since = 0,
+    ): Promise<L2PSTransaction[]> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const txRepo = ds.getRepository(L2PSTransaction)
+
+        const query = txRepo.createQueryBuilder("tx")
+            .where("tx.l2ps_uid = :l2psUid", { l2psUid })
+
+        if (since > 0) {
+            query.andWhere("tx.created_at > :since", { since: new Date(since) })
+        }
+
+        return query
+            .orderBy("tx.created_at", "DESC")
+            .take(limit)
+            .skip(offset)
+            .getMany()
+    }
+
+    /**
+     * Drop history older than the configured retention.
+     *
+     * Retention is opt-in: `l2ps.historyRetentionDays` defaults to 0, which
+     * keeps everything. Without this the only thing pruning L2PS data was the
+     * queue sweep, which is a mempool cleanup that happened to be the sole
+     * reason history vanished — an expiry policy nobody chose.
+     */
+    static async pruneHistory(retentionDays: number): Promise<number> {
+        if (!retentionDays || retentionDays <= 0) return 0
+
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const txRepo = ds.getRepository(L2PSTransaction)
+
+        // Age is measured from when this node recorded the transaction, not
+        // from the sender's timestamp, so a backdated payload cannot ask to be
+        // deleted on arrival.
+        const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
+        const result = await txRepo.createQueryBuilder()
+            .delete()
+            .from(L2PSTransaction)
+            .where("created_at < :cutoff", { cutoff })
+            .execute()
+
+        return result.affected || 0
     }
 
     /**

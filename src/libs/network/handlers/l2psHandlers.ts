@@ -2,6 +2,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
+import { resolveHistoryMessage, subnetDecryptor } from "@/libs/l2ps/historyPayload"
 
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
@@ -69,25 +70,46 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
 
         try {
             const sinceTimestamp = data.since_timestamp || 0
+            const limit = Math.min(Math.max(1, data.limit || 500), 1000)
+            const offset = Math.max(0, data.offset || 0)
 
-            let transactions = await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
+            // Served from the durable history table, not the aggregation
+            // queue: the queue is swept minutes after confirmation, so a peer
+            // that had been offline longer than that — or a client reopening
+            // its history — got an empty answer for transactions that had in
+            // fact executed.
+            const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
+            const stored = await L2PSTransactionExecutor.getSubnetTransactions(
+                data.l2psUid,
+                limit,
+                offset,
+                sinceTimestamp,
+            )
 
-            if (sinceTimestamp > 0) {
-                transactions = transactions.filter(tx => tx.timestamp > sinceTimestamp)
-            }
+            // Rows written before the ciphertext was stored carry none, so
+            // the queue still answers for them while it holds them.
+            const missingPayload = stored.some(tx => !tx.encrypted_payload)
+            const queued = missingPayload
+                ? await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
+                : []
+            const queuedByOriginalHash = new Map(queued.map(tx => [tx.original_hash, tx]))
 
             response.result = 200
             response.response = {
                 l2psUid: data.l2psUid,
-                transactions: transactions.map(tx => ({
-                    hash: tx.hash,
+                transactions: stored.map(tx => ({
+                    hash: tx.encrypted_hash || tx.hash,
                     l2ps_uid: tx.l2ps_uid,
-                    original_hash: tx.original_hash,
-                    encrypted_tx: tx.encrypted_tx,
-                    timestamp: tx.timestamp,
-                    block_number: tx.block_number,
+                    original_hash: tx.hash,
+                    encrypted_tx:
+                        tx.encrypted_payload ??
+                        queuedByOriginalHash.get(tx.hash)?.encrypted_tx ??
+                        null,
+                    timestamp: Number(tx.timestamp),
+                    block_number: tx.l1_block_number,
                 })),
-                count: transactions.length,
+                count: stored.length,
+                hasMore: stored.length === limit,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)
@@ -155,6 +177,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             const maxLimit = 1000
             const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
             const offset = Math.max(0, data.offset || 0)
+            const since = Math.max(0, Number(data.since) || 0)
 
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
             const transactions = await L2PSTransactionExecutor.getAccountTransactions(
@@ -162,6 +185,15 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 data.address,
                 limit,
                 offset,
+                since,
+            )
+
+            // The payload is stored encrypted, so the message is decrypted
+            // here — after the signature proved the caller owns the address —
+            // rather than kept readable on disk.
+            const decrypt = await subnetDecryptor(data.l2psUid)
+            const messages = await Promise.all(
+                transactions.map(tx => resolveHistoryMessage(tx, decrypt)),
             )
 
             response.result = 200
@@ -169,26 +201,19 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 l2psUid: data.l2psUid,
                 address: data.address,
                 authenticated: true,
-                transactions: transactions.map(tx => {
-                    let txMessage = tx.execution_message
-                    if (!txMessage && tx.content?.data?.[1]?.message) {
-                        txMessage = tx.content.data[1].message
-                    }
-
-                    return {
-                        hash: tx.hash,
-                        encrypted_hash: tx.encrypted_hash,
-                        l1_batch_hash: tx.l1_batch_hash,
-                        type: tx.type,
-                        from: tx.from_address,
-                        to: tx.to_address,
-                        amount: tx.amount?.toString() || "0",
-                        status: tx.status,
-                        timestamp: tx.timestamp?.toString() || "0",
-                        l1_block_number: tx.l1_block_number,
-                        execution_message: txMessage,
-                    }
-                }),
+                transactions: transactions.map((tx, index) => ({
+                    hash: tx.hash,
+                    encrypted_hash: tx.encrypted_hash,
+                    l1_batch_hash: tx.l1_batch_hash,
+                    type: tx.type,
+                    from: tx.from_address,
+                    to: tx.to_address,
+                    amount: tx.amount?.toString() || "0",
+                    status: tx.status,
+                    timestamp: tx.timestamp?.toString() || "0",
+                    l1_block_number: tx.l1_block_number,
+                    execution_message: messages[index],
+                })),
                 count: transactions.length,
                 hasMore: transactions.length === limit,
             }
