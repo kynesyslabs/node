@@ -167,8 +167,15 @@ export function contributePeerlist(
  * deduplicated and sorted ascending. Deterministic given the same set
  * of contributions.
  */
+/**
+ * Identities observed at the round's parent block by at least 2/3 + 1 of
+ * the shard. Each shard member is one voter: our own table is our vote,
+ * and a contribution counts only when its contributor is a member.
+ * Absent members still count towards the denominator.
+ */
 export async function computeMergedPeerlist(
     blockRef: number,
+    shardMembers: string[],
 ): Promise<string[]> {
     const parentNumber = blockRef - 1
     const parentBlock = await Chain.getBlockByNumber(parentNumber)
@@ -179,21 +186,41 @@ export async function computeMergedPeerlist(
         observation.block === parentNumber &&
         observation.block_hash === parentHash
 
-    const merged = new Set<string>([getSharedState.publicKeyHex])
+    const voters = new Set(shardMembers.map(m => m.toLowerCase()))
+    const quorum = Math.floor((voters.size * 2) / 3) + 1
+    const votes = new Map<string, Set<string>>()
+    const vote = (voter: string, observation: SyncObservation) => {
+        if (!isAtParent(observation)) return
+        const identity = observation.identity.toLowerCase()
+        let seenBy = votes.get(identity)
+        if (!seenBy) {
+            seenBy = new Set()
+            votes.set(identity, seenBy)
+        }
+        seenBy.add(voter)
+    }
 
-    for (const observation of getLocalSyncObservations()) {
-        if (isAtParent(observation)) {
-            merged.add(observation.identity)
+    const ourKey = getSharedState.publicKeyHex.toLowerCase()
+    if (voters.has(ourKey)) {
+        for (const observation of getLocalSyncObservations()) {
+            vote(ourKey, observation)
         }
     }
 
     if (contributionsBlockRef === blockRef) {
-        for (const entries of contributions.values()) {
+        for (const [contributor, entries] of contributions) {
+            const voter = contributor.toLowerCase()
+            if (!voters.has(voter)) continue
             for (const observation of entries) {
-                if (isAtParent(observation)) {
-                    merged.add(observation.identity)
-                }
+                vote(voter, observation)
             }
+        }
+    }
+
+    const merged = new Set<string>()
+    for (const [identity, seenBy] of votes) {
+        if (seenBy.size >= quorum) {
+            merged.add(identity)
         }
     }
 

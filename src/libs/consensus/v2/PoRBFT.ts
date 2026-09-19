@@ -706,7 +706,10 @@ async function mergeAndOrderMempools(
     await mergeMempools(outboundPool, shard, blockRef)
     await updateValidatorPhase(3, blockRef)
 
-    const mergedPeerlist = await computeMergedPeerlist(blockRef)
+    const mergedPeerlist = await computeMergedPeerlist(
+        blockRef,
+        shard.map(member => member.identity),
+    )
     log.only(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )
