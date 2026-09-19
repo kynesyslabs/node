@@ -154,10 +154,22 @@ async function tryConnectPeer(peer: Peer) {
 
     let maxRetries = 3
     while (maxRetries > 0) {
-        await PeerManager.sayHelloToPeer(verifiedPeer, true)
+        const verdict = await PeerManager.sayHelloToPeer(verifiedPeer, true)
+
+        if (verdict === "unsigned") {
+            throw new Error(
+                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} answered without a signed hello: it runs pre-signature code. Pick an up-to-date anchor.`,
+            )
+        }
+        if (verdict === "invalid") {
+            throw new Error(
+                `Anchor ${verifiedPeer.identity} @ ${currentPeerUrl} failed identity verification: the URL is not served by that key.`,
+            )
+        }
 
         // INFO: Confirmed we paired with anchor node
         if (
+            verdict === "verified" &&
             peerman.getPeers().find(p => p.identity === verifiedPeer.identity)
         ) {
             log.info("[BOOTSTRAP] OK: Valid peer " + currentPeerUrl)

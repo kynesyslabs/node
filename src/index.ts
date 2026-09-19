@@ -457,7 +457,7 @@ async function preMainLoop() {
 
     // ANCHOR Preparing the peer manager and loading the peer list
     PeerManager.getInstance().loadPeerList()
-    indexState.PeerList = PeerManager.getInstance().getPeers()
+    indexState.PeerList = PeerManager.getInstance().getSeedPeers()
     log.info("[PEER] Loaded a list of peers:")
 
     for (const peer of indexState.PeerList) {

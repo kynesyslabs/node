@@ -43,10 +43,18 @@ function withTimeout<T>(
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
 }
 
+export type HelloVerdict =
+    | "verified"
+    | "unsigned"
+    | "invalid"
+    | "unreachable"
+    | "skipped"
+
 export default class PeerManager {
     private static instance: PeerManager
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
+    private seedPeers: Peer[] = [] // Bootstrap hints from the peer list file; join the table only via a verified hello
     private lastHelloFanoutAt = 0
     private helloFanoutInFlight: Promise<void> | null = null
 
@@ -135,8 +143,22 @@ export default class PeerManager {
                 )
                 continue
             }
-            this.addPeer(peerObject)
+            if (peerObject.identity === getSharedState.publicKeyHex) {
+                this.addPeer(peerObject)
+                continue
+            }
+            if (!parseNodeUrl(peerObject.connection.string)) {
+                log.warning(
+                    `[PEER] Invalid seed URL for ${peer}: ${peerObject.connection.string}`,
+                )
+                continue
+            }
+            this.seedPeers.push(peerObject)
         }
+    }
+
+    getSeedPeers(): Peer[] {
+        return [...this.seedPeers]
     }
 
     // Fetching peer info from /info endpoint
@@ -554,14 +576,20 @@ export default class PeerManager {
     /** Identities with a hello in flight; breaks hello/hello-back cycles. */
     static verifying = new Set<string>()
 
-    static async sayHelloToPeer(peer: Peer, waitForDiscovery = false) {
+    static async sayHelloToPeer(
+        peer: Peer,
+        waitForDiscovery = false,
+    ): Promise<HelloVerdict> {
         if (PeerManager.verifying.has(peer.identity)) {
-            return
+            return "skipped"
         }
 
         PeerManager.verifying.add(peer.identity)
         try {
-            await PeerManager.sayHelloToPeerUnguarded(peer, waitForDiscovery)
+            return await PeerManager.sayHelloToPeerUnguarded(
+                peer,
+                waitForDiscovery,
+            )
         } finally {
             PeerManager.verifying.delete(peer.identity)
         }
@@ -570,7 +598,7 @@ export default class PeerManager {
     private static async sayHelloToPeerUnguarded(
         peer: Peer,
         waitForDiscovery = false,
-    ) {
+    ): Promise<HelloVerdict> {
         const nonce = crypto.randomBytes(32).toString("hex")
         const connectionString = getSharedState.exposedUrl // ? Are we sure about this
         const signedConnectionString = await TxValidatorPool.getInstance().sign(
@@ -608,14 +636,11 @@ export default class PeerManager {
             },
         )
 
-        const newPeersUnfiltered = await PeerManager.helloPeerCallback(
-            response,
-            peer,
-            nonce,
-        )
+        const { peers: newPeersUnfiltered, verdict } =
+            await PeerManager.helloPeerCallback(response, peer, nonce)
 
         if (newPeersUnfiltered.length === 0) {
-            return
+            return verdict
         }
 
         // INFO: Recursively say hello to the new peers
@@ -631,6 +656,7 @@ export default class PeerManager {
         if (waitForDiscovery) {
             await Promise.all(promise)
         }
+        return verdict
     }
 
     // Callback for the hello peer
@@ -638,7 +664,10 @@ export default class PeerManager {
         response: RPCResponse,
         peer: Peer,
         nonce: string,
-    ): Promise<{ url: string; publicKey: string }[]> {
+    ): Promise<{
+        peers: { url: string; publicKey: string }[]
+        verdict: HelloVerdict
+    }> {
         const peerman = PeerManager.getInstance()
         if (response.result === 200) {
             if (
@@ -650,7 +679,7 @@ export default class PeerManager {
                 )
                 peerman.removeOnlinePeer(peer.identity)
                 peerman.removeOfflinePeer(peer.identity)
-                return []
+                return { peers: [], verdict: "invalid" }
             }
 
             const verdict = await PeerManager.verifyHelloResponse(
@@ -664,13 +693,13 @@ export default class PeerManager {
                 )
                 peerman.removeOnlinePeer(peer.identity)
                 peerman.removeOfflinePeer(peer.identity)
-                return []
+                return { peers: [], verdict }
             }
             if (verdict === "unsigned" && !peerman.getPeer(peer.identity)) {
                 log.warning(
                     `[PEERMANAGER] ${peer.connection.string} answered without a signed hello (old node?): not adding ${peer.identity} until it upgrades or hellos us itself`,
                 )
-                return []
+                return { peers: [], verdict }
             }
 
             if (response.extra.syncData) {
@@ -680,14 +709,12 @@ export default class PeerManager {
             peerman.addPeer(peer, verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
 
-            return response.extra.peerlist || []
+            return { peers: response.extra.peerlist || [], verdict }
         } else {
             PeerManager.markPeerOffline(peer)
         }
 
-        // getSharedState.peerRoutineRunning -= 1 // Subtracting one from the peer routine running counter
-        //process.exit(0)
-        return []
+        return { peers: [], verdict: "unreachable" }
     }
 
     /**
