@@ -101,7 +101,13 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                 },
                 signatureDomain: {
                     activationHeight: signatureDomainHeight,
-                    activated: isForkActive("signatureDomain", currentHeight),
+                    // Reported for the block a transaction signed now would
+                    // land in, which is what admission judges it against. A
+                    // wallet asking at tip H-1 is about to sign for block H,
+                    // so answering for H-1 would tell it to use the legacy
+                    // preimage for the activation block and have the node
+                    // reject it.
+                    activated: isForkActive("signatureDomain", currentHeight + 1),
                     currentHeight,
                 },
             },

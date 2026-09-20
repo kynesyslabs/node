@@ -33,7 +33,7 @@ import { validateTxSignature } from "./validation/txValidator"
 import TxValidatorPool from "./validation/txValidatorPool"
 import {
     serializeTransactionContent,
-    currentTxSignatureContext,
+    pendingTxSignatureContext,
 } from "@/forks"
 import { Transactions } from "@/model/entities/Transactions"
 import type { TransactionStatus } from "@/utilities/constants"
@@ -220,7 +220,7 @@ export default class Transaction implements ITransaction {
         const result = await validateTxSignature(
             tx,
             hints[tx.hash] ?? null,
-            currentTxSignatureContext(),
+            pendingTxSignatureContext(),
         )
 
         return {

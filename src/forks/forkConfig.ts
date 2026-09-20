@@ -235,10 +235,16 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
     tlsnProofEnforcement: {
-        // Active from genesis on fresh chains, like nonceEnforcement: a new
-        // chain must not accept identity claims nothing verifies. Existing
-        // chains coordinate a mid-chain activation height in their genesis.
-        activationHeight: 0,
+        // Inactive by default, and deliberately so. A running chain's genesis
+        // predates this entry, and a missing entry hydrates from here — so a
+        // height-0 default would switch the rule on the moment the binary is
+        // upgraded. Every presentation the current verifier produces carries
+        // the structure-only marker, which means every TLSN identity
+        // assignment on that chain would start failing, with no coordination
+        // and no way back short of a downgrade. A fresh chain that wants the
+        // rule from block 0, and a live chain that has scheduled its
+        // switchover, both say so in genesis.
+        activationHeight: null,
         description:
             "Reject TLSNotary identity claims while the node only structure-checks the " +
             "presentation — the claim's own bytes are the only evidence behind it.",

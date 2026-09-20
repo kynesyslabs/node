@@ -62,7 +62,7 @@ import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
 import {
     serializeTransactionContent,
-    txSignaturePreimageForTip,
+    txSignaturePreimageForPendingBlock,
 } from "@/forks"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
@@ -868,7 +868,7 @@ export default class GCR {
 
         const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
-            txSignaturePreimageForTip(tx.hash),
+            txSignaturePreimageForPendingBlock(tx.hash),
         )
         tx.signature = {
             type: getSharedState.signingAlgorithm,

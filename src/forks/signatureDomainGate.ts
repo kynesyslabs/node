@@ -25,8 +25,9 @@ export interface TxSignatureContext {
  * the same default. Refusing to produce a context stops the node rather than
  * letting it sign or accept ambiguous transactions.
  *
- * @param blockHeight - Height to evaluate the fork against. Callers use the
- *   node-local chain tip, never a value taken from the transaction.
+ * @param blockHeight - Height to evaluate the fork against. Callers derive it
+ *   from node-local state — the block being validated, or the tip plus one
+ *   when admitting — never from a value carried by the transaction.
  */
 export function txSignatureContext(blockHeight: number): TxSignatureContext {
     const active = isForkActive("signatureDomain", blockHeight)
@@ -44,19 +45,27 @@ export function txSignatureContext(blockHeight: number): TxSignatureContext {
     return { active: true, chainId }
 }
 
-/** The context for the node-local chain tip. */
-export function currentTxSignatureContext(): TxSignatureContext {
-    return txSignatureContext(getSharedState.lastBlockNumber ?? 0)
+/**
+ * The context for the block a transaction being admitted now would land in.
+ *
+ * That is the tip plus one, not the tip. A transaction accepted while the
+ * chain sits at H-1 is included in block H, and the rule that judges it is
+ * the rule at H. Resolving at the tip would admit and sign legacy bare-hash
+ * signatures for the activation block itself, which the validators then
+ * reject — the fork would break its own first block.
+ */
+export function pendingTxSignatureContext(): TxSignatureContext {
+    return txSignatureContext((getSharedState.lastBlockNumber ?? 0) + 1)
 }
 
 /**
- * The bytes to sign for a transaction the node itself produces, resolved at
- * the node-local tip. Node-built transactions (GCR housekeeping, derived
- * mempool operations, signaling-server messages) must commit to the same
- * preimage the validators check, or they stop being accepted the moment the
- * fork activates.
+ * The bytes to sign for a transaction the node itself produces, resolved for
+ * the block it would land in. Node-built transactions (GCR housekeeping,
+ * derived mempool operations, signaling-server messages) must commit to the
+ * same preimage the validators check, or they stop being accepted the moment
+ * the fork activates.
  */
-export function txSignaturePreimageForTip(hash: string): Uint8Array {
-    const { active, chainId } = currentTxSignatureContext()
+export function txSignaturePreimageForPendingBlock(hash: string): Uint8Array {
+    const { active, chainId } = pendingTxSignatureContext()
     return txSignaturePreimage(hash, chainId, active)
 }

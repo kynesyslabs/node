@@ -77,7 +77,7 @@ import { handleError } from "@/errors"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import {
     serializeTransactionContent,
-    txSignaturePreimageForTip,
+    txSignaturePreimageForPendingBlock,
 } from "@/forks"
 /**
  * SignalingServer class that manages peer connections and message routing
@@ -683,7 +683,7 @@ export class SignalingServer {
             )
             const signature = await TxValidatorPool.getInstance().sign(
                 getSharedState.signingAlgorithm,
-                txSignaturePreimageForTip(transaction.hash),
+                txSignaturePreimageForPendingBlock(transaction.hash),
             )
             transaction.signature = {
                 type: getSharedState.signingAlgorithm,

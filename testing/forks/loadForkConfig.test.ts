@@ -56,6 +56,20 @@ describe("loadForkConfigFromGenesis", () => {
         ).toBeNull()
     })
 
+    it("leaves rules that change existing behaviour switched off by default", () => {
+        // A chain already running has a genesis written before these entries
+        // existed, and a missing entry hydrates from the defaults. So any
+        // default that is not null is a rule change that lands the moment the
+        // binary is upgraded, with no height agreed by anyone. Both of these
+        // reject traffic that a live chain currently accepts, so both wait to
+        // be scheduled in genesis.
+        const defaults = cloneDefaultForkConfig()
+
+        expect(defaults.tlsnProofEnforcement.activationHeight).toBeNull()
+        expect(defaults.signatureDomain.activationHeight).toBeNull()
+        expect(defaults.web2ProofBinding.activationHeight).toBeNull()
+    })
+
     it("hydrates osDenomination activation height when present", () => {
         loadForkConfigFromGenesis({
             forks: {

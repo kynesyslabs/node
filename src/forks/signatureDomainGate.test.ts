@@ -14,8 +14,8 @@ jest.mock("@/utilities/sharedState", () => ({
 
 import {
     txSignatureContext,
-    currentTxSignatureContext,
-    txSignaturePreimageForTip,
+    pendingTxSignatureContext,
+    txSignaturePreimageForPendingBlock,
 } from "./signatureDomainGate"
 import { TX_SIGNATURE_DOMAIN } from "@/libs/crypto/txSignaturePreimage"
 
@@ -60,19 +60,34 @@ describe("txSignatureContext", () => {
 })
 
 describe("the node's own signing preimage", () => {
-    it("follows the chain tip across activation", () => {
+    it("switches one block before the tip reaches activation", () => {
+        // A transaction signed while the chain sits at H-1 is included in
+        // block H, so it has to satisfy the rule at H. Following the tip
+        // instead would sign the legacy bare hash for the activation block
+        // itself, and the validators applying the new rule would reject it.
         sharedState.forkConfig.signatureDomain = { activationHeight: 10 }
         sharedState.chainId = 3
 
-        sharedState.lastBlockNumber = 9
-        expect(new TextDecoder().decode(txSignaturePreimageForTip(HASH))).toBe(
-            HASH,
-        )
+        sharedState.lastBlockNumber = 8
+        expect(
+            new TextDecoder().decode(txSignaturePreimageForPendingBlock(HASH)),
+        ).toBe(HASH)
 
-        sharedState.lastBlockNumber = 10
-        expect(new TextDecoder().decode(txSignaturePreimageForTip(HASH))).toBe(
-            `${TX_SIGNATURE_DOMAIN}3:${HASH}`,
-        )
-        expect(currentTxSignatureContext().active).toBe(true)
+        sharedState.lastBlockNumber = 9
+        expect(
+            new TextDecoder().decode(txSignaturePreimageForPendingBlock(HASH)),
+        ).toBe(`${TX_SIGNATURE_DOMAIN}3:${HASH}`)
+        expect(pendingTxSignatureContext().active).toBe(true)
+    })
+
+    it("stays domain-bound once the fork is behind the tip", () => {
+        sharedState.forkConfig.signatureDomain = { activationHeight: 10 }
+        sharedState.chainId = 3
+        sharedState.lastBlockNumber = 500
+
+        expect(pendingTxSignatureContext()).toEqual({
+            active: true,
+            chainId: 3,
+        })
     })
 })

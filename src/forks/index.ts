@@ -3,8 +3,8 @@
 export { isForkActive } from "./forkGates"
 export {
     txSignatureContext,
-    currentTxSignatureContext,
-    txSignaturePreimageForTip,
+    pendingTxSignatureContext,
+    txSignaturePreimageForPendingBlock,
 } from "./signatureDomainGate"
 export type { TxSignatureContext } from "./signatureDomainGate"
 export {
