@@ -256,7 +256,12 @@ function projectValueEdits(edits: GCREdit[]): string[] {
             )
         }
     }
-    return keys.sort()
+    // Sorted by code unit, explicitly. The order only has to be the same on
+    // both sides of the containment check, but it has to be the same
+    // everywhere the check runs: `localeCompare` would order these by the
+    // node's locale, so two validators with different ICU data could disagree
+    // about whether a transaction's edits were explained.
+    return keys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }
 
 export interface ValueEditsVerification {
