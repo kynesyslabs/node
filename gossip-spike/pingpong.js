@@ -1,8 +1,10 @@
 import os from 'node:os'
 import { createLibp2p } from 'libp2p'
 import { tcp } from '@libp2p/tcp'
+import { webSockets } from '@libp2p/websockets'
 import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
+import { mplex } from '@libp2p/mplex'
 import { identify } from '@libp2p/identify'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { multiaddr } from '@multiformats/multiaddr'
@@ -10,6 +12,7 @@ import { multiaddr } from '@multiformats/multiaddr'
 const PORT = process.env.PORT ?? '9095'
 const PEER = process.env.PEER ?? ''
 const NAME = process.env.NAME ?? os.hostname()
+const PAYLOAD_BYTES = parseInt(process.env.PAYLOAD_BYTES ?? '0', 10)
 const TOPIC = 'spike/pingpong/1'
 const PING_INTERVAL_MS = 2000
 
@@ -17,11 +20,20 @@ const enc = new TextEncoder()
 const dec = new TextDecoder()
 const log = (...args) => console.log(new Date().toISOString(), ...args)
 
+const TRANSPORT = process.env.TRANSPORT ?? 'tcp'
+const MUXER = process.env.MUXER ?? 'yamux'
+
 const node = await createLibp2p({
-    addresses: { listen: [`/ip4/0.0.0.0/tcp/${PORT}`] },
-    transports: [tcp()],
+    addresses: {
+        listen: [
+            TRANSPORT === 'ws'
+                ? `/ip4/0.0.0.0/tcp/${PORT}/ws`
+                : `/ip4/0.0.0.0/tcp/${PORT}`,
+        ],
+    },
+    transports: [TRANSPORT === 'ws' ? webSockets() : tcp()],
     connectionEncrypters: [noise()],
-    streamMuxers: [yamux()],
+    streamMuxers: [MUXER === 'mplex' ? mplex() : yamux()],
     services: {
         identify: identify(),
         pubsub: gossipsub({ allowPublishToZeroTopicPeers: true })
@@ -103,8 +115,14 @@ setInterval(() => {
     }
     n += 1
     inflight.set(n, Date.now())
-    log(`[${NAME}] sending PING #${n} (topic peers: ${subs})`)
-    publish({ type: 'ping', from: NAME, n, ts: Date.now() })
+    log(`[${NAME}] sending PING #${n} (topic peers: ${subs}, payload ${PAYLOAD_BYTES}B)`)
+    publish({
+        type: 'ping',
+        from: NAME,
+        n,
+        ts: Date.now(),
+        pad: PAYLOAD_BYTES > 0 ? 'x'.repeat(PAYLOAD_BYTES) : undefined,
+    })
 }, PING_INTERVAL_MS)
 
 process.on('SIGINT', async () => {

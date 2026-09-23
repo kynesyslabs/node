@@ -185,7 +185,7 @@ export default class Peer {
                 "] Max retries reached for method: " +
                 methodString +
                 " - " +
-                response,
+                JSON.stringify(response),
         )
         return {
             result: 400,

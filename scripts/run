@@ -678,6 +678,24 @@ if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
 	export GOSSIP_KEY_FILE=$GOSSIP_KEY_FILE
 fi
 
+# The gossip sidecar runs under Node (libp2p does not work under Bun for
+# frames >1KB); make sure the runtime and the bundle are present.
+if [[ "${GOSSIP_ENABLED:-true}" != "false" ]]; then
+	if ! command -v node >/dev/null 2>&1; then
+		echo "❌ Gossip is enabled but Node.js is not on PATH (the gossip sidecar requires Node >= 20)."
+		echo "   Install Node, or start with GOSSIP_ENABLED=false."
+		exit 1
+	fi
+	SIDECAR_BUNDLE="sidecar/dist/gossip-sidecar.mjs"
+	if [[ ! -f "$SIDECAR_BUNDLE" || "sidecar/src/index.js" -nt "$SIDECAR_BUNDLE" ]]; then
+		echo "🔧 Building gossip sidecar..."
+		(cd sidecar && bun install --silent && node build.mjs) || {
+			echo "❌ Gossip sidecar build failed"
+			exit 1
+		}
+	fi
+fi
+
 # Only manage PostgreSQL if not using external database
 if [[ "${EXTERNAL_DB}" = false ]]; then
 	# Database management with proper folder based on the port

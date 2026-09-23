@@ -1,31 +1,21 @@
-import { createLibp2p, Libp2p } from "libp2p"
-import { tcp } from "@libp2p/tcp"
-import { noise } from "@chainsafe/libp2p-noise"
-import { yamux } from "@chainsafe/libp2p-yamux"
-import { identify } from "@libp2p/identify"
-import { gossipsub, GossipSub } from "@chainsafe/libp2p-gossipsub"
-import { multiaddr } from "@multiformats/multiaddr"
-import type { Message, PeerId } from "@libp2p/interface"
+import fs from "node:fs"
+import net from "node:net"
+import path from "node:path"
+import { spawn, ChildProcess } from "node:child_process"
 import type { Block } from "@kynesyslabs/demosdk/types"
 
 import log from "src/utilities/logger"
 import { Config } from "src/config"
-import { getSharedState } from "src/utilities/sharedState"
+import { getSharedState } from "@/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 
-import { loadOrCreateTransportKey } from "./identity"
 import {
     buildHeightsRecord,
     HeightsRecord,
     isHeightsRecordShape,
 } from "./records"
 import { validateBlockMessage, validateHeightsMessage } from "./validators"
-import {
-    BLOCKS_TOPIC,
-    GOSSIPSUB_PARAMS,
-    gossipMsgId,
-    HEIGHTS_TOPIC,
-} from "./topics"
+import { BLOCKS_TOPIC, HEIGHTS_TOPIC } from "./topics"
 import {
     countHeightsRecord,
     countPublishSkipped,
@@ -34,16 +24,28 @@ import {
     setReadyGauge,
 } from "./metrics"
 
-const REQ_PROTOCOL = "/demos/req/1.0.0"
+const PROTOCOL_VERSION = 1
+const IPC_CONNECT_TIMEOUT_MS = 5000
+const STOP_KILL_ESCALATION_MS = 2000
+const STATS_STALE_FATAL_MS = 5000
+
+interface SidecarStats {
+    connections: number
+    perTopic: Record<string, { subscribers: number; mesh: number }>
+}
 
 export class GossipManager {
     private static instance: GossipManager | null = null
 
-    private node: Libp2p | null = null
+    private proc: ChildProcess | null = null
+    private sock: net.Socket | null = null
     private started = false
+    private stopping = false
+    private readyInfo: { peerId: string; addrs: string[] } | null = null
+    private lastStats: SidecarStats | null = null
+    private lastStatsAt = 0
     private heightsTimer: ReturnType<typeof setInterval> | null = null
-    private requestHandler: ((data: Uint8Array) => Promise<Uint8Array>) | null =
-        null
+    private recvBuffer = ""
 
     static getInstance(): GossipManager {
         if (!GossipManager.instance) {
@@ -56,11 +58,7 @@ export class GossipManager {
         return Config.getInstance().gossip.enabled
     }
 
-    private pubsub(): GossipSub {
-        return this.node!.services.pubsub as GossipSub
-    }
-
-    // any gossip-module failure is fatal by design (debug posture).
+    // any gossip failure is fatal by design (debug posture).
     private fatal(context: string, error: unknown): never {
         log.error(
             `[GOSSIP] FATAL in ${context}: ${
@@ -72,78 +70,74 @@ export class GossipManager {
         process.exit(1)
     }
 
+    private ipcPath(): string {
+        const cfg = Config.getInstance().gossip
+        return (
+            process.env.GOSSIP_IPC_PATH ??
+            path.join(".", `gossip-${cfg.port}.sock`)
+        )
+    }
+
+    private sidecarEntry(): string {
+        if (process.env.GOSSIP_SIDECAR_PATH) {
+            return process.env.GOSSIP_SIDECAR_PATH
+        }
+        const bundled = "sidecar/dist/gossip-sidecar.mjs"
+        if (fs.existsSync(bundled)) return bundled
+        return "sidecar/src/index.js"
+    }
+
     async start(): Promise<void> {
         if (this.started) return
         const cfg = Config.getInstance().gossip
 
         try {
             registerGossipMetrics()
-            const privateKey = await loadOrCreateTransportKey(cfg.keyFile)
 
-            this.node = await createLibp2p({
-                privateKey,
-                addresses: { listen: [`/ip4/0.0.0.0/tcp/${cfg.port}`] },
-                transports: [tcp()],
-                connectionEncrypters: [noise()],
-                streamMuxers: [yamux()],
-                services: {
-                    identify: identify(),
-                    pubsub: gossipsub({
-                        ...GOSSIPSUB_PARAMS,
-                        msgIdFn: gossipMsgId,
-                    }),
+            const entry = this.sidecarEntry()
+            if (!fs.existsSync(entry)) {
+                throw new Error(
+                    `sidecar entry not found at ${entry} — run 'bun run sidecar:build' (or set GOSSIP_SIDECAR_PATH)`,
+                )
+            }
+
+            log.info(`[GOSSIP] spawning sidecar: node ${entry}`)
+            this.proc = spawn("node", [entry], {
+                env: {
+                    ...process.env,
+                    GOSSIP_PORT: String(cfg.port),
+                    GOSSIP_KEY_FILE: cfg.keyFile,
+                    GOSSIP_IPC_PATH: this.ipcPath(),
                 },
+                stdio: ["pipe", "ignore", "pipe"],
             })
-
-            const pubsub = this.pubsub()
-            pubsub.topicValidators.set(
-                HEIGHTS_TOPIC,
-                async (_peer: PeerId, msg: Message) =>
-                    (await validateHeightsMessage(msg)).result,
-            )
-            pubsub.topicValidators.set(
-                BLOCKS_TOPIC,
-                async (_peer: PeerId, msg: Message) =>
-                    (await validateBlockMessage(msg)).result,
-            )
-
-            pubsub.addEventListener("message", evt => {
-                this.onMessage(evt.detail).catch(e =>
-                    log.error(
-                        `[GOSSIP] message handler error: ${
-                            e instanceof Error ? e.message : String(e)
-                        }`,
-                    ),
-                )
+            this.proc.on("error", e => {
+                if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+                    this.fatal(
+                        "sidecar spawn",
+                        new Error(
+                            "Node.js runtime not found on PATH — the gossip sidecar requires Node >= 20 (or set GOSSIP_ENABLED=false)",
+                        ),
+                    )
+                }
+                this.fatal("sidecar spawn", e)
             })
-
-            this.node.addEventListener("peer:connect", evt => {
-                log.debug(
-                    `[GOSSIP] peer connected: ${evt.detail.toString()} (${this.node?.getConnections().length ?? 0} connections)`,
-                )
+            this.proc.stderr?.on("data", (d: Buffer) => {
+                for (const line of d.toString().split("\n")) {
+                    if (line.trim()) log.warning(`[GOSSIP-SIDECAR] ${line}`)
+                }
             })
-            this.node.addEventListener("peer:disconnect", evt => {
-                log.info(
-                    `[GOSSIP] peer disconnected: ${evt.detail.toString()} (${this.node?.getConnections().length ?? 0} connections)`,
-                )
-            })
-            pubsub.addEventListener("subscription-change", evt => {
-                for (const sub of evt.detail.subscriptions) {
-                    log.debug(
-                        `[GOSSIP] ${evt.detail.peerId.toString()} ${sub.subscribe ? "subscribed to" : "unsubscribed from"} '${sub.topic}'`,
+            this.proc.on("exit", code => {
+                if (!this.stopping) {
+                    this.fatal(
+                        "sidecar process",
+                        new Error(`sidecar exited unexpectedly with code ${code}`),
                     )
                 }
             })
 
-            pubsub.subscribe(HEIGHTS_TOPIC)
-            pubsub.subscribe(BLOCKS_TOPIC)
-            log.debug(
-                `[GOSSIP] subscribed to '${HEIGHTS_TOPIC}' and '${BLOCKS_TOPIC}'`,
-            )
-
-            await this.node.handle(REQ_PROTOCOL, ({ stream }) => {
-                void this.serveRequest(stream)
-            })
+            await this.connectIpc()
+            await this.awaitReady()
 
             this.heightsTimer = setInterval(() => {
                 this.publishOwnHeights().catch(e =>
@@ -158,91 +152,207 @@ export class GossipManager {
 
             this.started = true
             log.info(
-                `[GOSSIP] started: peerId ${this.node.peerId.toString()}, listening on port ${cfg.port}`,
+                `[GOSSIP] started: sidecar peerId ${this.readyInfo?.peerId}, gossip port ${cfg.port}`,
             )
         } catch (e) {
             this.fatal("start()", e)
         }
     }
 
+    private connectIpc(): Promise<void> {
+        const ipc = this.ipcPath()
+        const deadline = Date.now() + IPC_CONNECT_TIMEOUT_MS
+        return new Promise((resolve, reject) => {
+            const tryConnect = () => {
+                const sock = net.connect(ipc)
+                sock.on("connect", () => {
+                    this.sock = sock
+                    sock.on("data", (d: Buffer) => this.onIpcData(d))
+                    sock.on("close", () => {
+                        if (!this.stopping) {
+                            this.fatal(
+                                "ipc socket",
+                                new Error("IPC connection to sidecar closed"),
+                            )
+                        }
+                    })
+                    this.send({ type: "hello" })
+                    resolve()
+                })
+                sock.on("error", () => {
+                    sock.destroy()
+                    if (Date.now() > deadline) {
+                        reject(
+                            new Error(
+                                `could not connect to sidecar IPC at ${ipc} within ${IPC_CONNECT_TIMEOUT_MS}ms`,
+                            ),
+                        )
+                        return
+                    }
+                    setTimeout(tryConnect, 100)
+                })
+            }
+            tryConnect()
+        })
+    }
+
+    private awaitReady(): Promise<void> {
+        return new Promise((resolve, reject) => {
+            const t = setTimeout(
+                () => reject(new Error("sidecar did not report ready in 10s")),
+                10_000,
+            )
+            this.onReady = () => {
+                clearTimeout(t)
+                this.onReady = null
+                resolve()
+            }
+        })
+    }
+
+    private onReady: (() => void) | null = null
+
+    private send(obj: Record<string, unknown>): void {
+        if (!this.sock || this.sock.destroyed) return
+        this.sock.write(
+            JSON.stringify({ v: PROTOCOL_VERSION, ...obj }) + "\n",
+        )
+    }
+
+    private onIpcData(chunk: Buffer): void {
+        this.recvBuffer += chunk.toString()
+        for (;;) {
+            const nl = this.recvBuffer.indexOf("\n")
+            if (nl === -1) break
+            const line = this.recvBuffer.slice(0, nl)
+            this.recvBuffer = this.recvBuffer.slice(nl + 1)
+            if (!line.trim()) continue
+            let msg: Record<string, never>
+            try {
+                msg = JSON.parse(line)
+            } catch {
+                log.warning(`[GOSSIP] unparseable IPC line (${line.length} bytes)`)
+                continue
+            }
+            this.onIpcMessage(msg).catch(e =>
+                log.error(
+                    `[GOSSIP] IPC message handler error: ${
+                        e instanceof Error ? e.message : String(e)
+                    }`,
+                ),
+            )
+        }
+    }
+
+    private async onIpcMessage(msg: {
+        type?: string
+        [k: string]: unknown
+    }): Promise<void> {
+        switch (msg.type) {
+            case "hello":
+                break
+            case "ready": {
+                this.readyInfo = {
+                    peerId: String(msg.peerId),
+                    addrs: (msg.addrs as string[]) ?? [],
+                }
+                this.onReady?.()
+                break
+            }
+            case "stats": {
+                this.lastStats = {
+                    connections: Number(msg.connections),
+                    perTopic: (msg.perTopic as SidecarStats["perTopic"]) ?? {},
+                }
+                this.lastStatsAt = Date.now()
+                break
+            }
+            case "peer": {
+                const line = `[GOSSIP] peer ${msg.event}: ${msg.peerId} (${msg.connections} connections)`
+                if (msg.event === "disconnect") log.info(line)
+                else log.debug(line)
+                break
+            }
+            case "message": {
+                await this.onGossipMessage(
+                    String(msg.topic),
+                    Buffer.from(String(msg.data), "base64"),
+                )
+                break
+            }
+            case "publish_result": {
+                if (msg.ok !== true) {
+                    log.warning(
+                        `[GOSSIP] publish to ${msg.topic} failed in sidecar: ${msg.error}`,
+                    )
+                    countPublishSkipped("sidecar_error")
+                }
+                break
+            }
+            default:
+                log.debug(`[GOSSIP] unknown IPC message type: ${msg.type}`)
+        }
+    }
+
     async stop(): Promise<void> {
-        if (!this.started) return
+        if (!this.started && !this.proc) return
         log.info("[GOSSIP] stopping")
+        this.stopping = true
         this.started = false
         if (this.heightsTimer) clearInterval(this.heightsTimer)
         setReadyGauge(false)
-        try {
-            await this.node?.stop()
-        } catch (e) {
-            this.fatal("stop()", e)
+        this.sock?.end()
+        this.proc?.stdin?.end()
+        const proc = this.proc
+        if (proc) {
+            await new Promise<void>(resolve => {
+                const t = setTimeout(() => {
+                    proc.kill()
+                    resolve()
+                }, STOP_KILL_ESCALATION_MS)
+                proc.on("exit", () => {
+                    clearTimeout(t)
+                    resolve()
+                })
+            })
         }
+        this.proc = null
+        this.sock = null
     }
 
     isReady(): boolean {
-        if (!this.started || !this.node) return false
-        try {
-            return this.pubsub().getSubscribers(HEIGHTS_TOPIC).length >= 1
-        } catch {
-            return false
+        if (!this.started || !this.readyInfo || !this.lastStats) return false
+        if (Date.now() - this.lastStatsAt > STATS_STALE_FATAL_MS) {
+            this.fatal(
+                "stats heartbeat",
+                new Error(
+                    `no stats from sidecar for ${Date.now() - this.lastStatsAt}ms — sidecar wedged`,
+                ),
+            )
         }
+        return (this.lastStats.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0) >= 1
     }
 
     getListenAddr(): string | null {
-        if (!this.started || !this.node) return null
+        if (!this.readyInfo) return null
         const publicIP = getSharedState.identity?.publicIP
         if (publicIP) {
             const port = Config.getInstance().gossip.port
-            return `/ip4/${publicIP}/tcp/${port}/p2p/${this.node.peerId.toString()}`
+            return `/ip4/${publicIP}/tcp/${port}/p2p/${this.readyInfo.peerId}`
         }
-        const addrs = this.node.getMultiaddrs().map(a => a.toString())
-        if (addrs.length === 0) return null
-        const external = addrs.find(
+        const external = this.readyInfo.addrs.find(
             a => !a.includes("/127.0.0.1/") && !a.includes("/0.0.0.0/"),
         )
-        return external ?? addrs[0]
+        return external ?? this.readyInfo.addrs[0] ?? null
     }
 
     getPeerId(): string | null {
-        return this.node?.peerId.toString() ?? null
+        return this.readyInfo?.peerId ?? null
     }
 
     dial(addrs: string[]): void {
-        if (!this.started || !this.node) return
-        for (const addr of addrs) {
-            const targetPeerId = this.peerIdFromAddr(addr)
-            if (targetPeerId && this.isConnectedTo(targetPeerId)) {
-                log.debug(
-                    `[GOSSIP] already connected to ${targetPeerId}, skipping dial`,
-                )
-                continue
-            }
-            log.debug(`[GOSSIP] dialing ${addr}`)
-            this.node
-                .dial(multiaddr(addr))
-                .then(() => log.debug(`[GOSSIP] dial succeeded: ${addr}`))
-                .catch(e =>
-                    log.debug(
-                        `[GOSSIP] dial ${addr} failed: ${
-                            e instanceof Error ? e.message : String(e)
-                        }`,
-                    ),
-                )
-        }
-    }
-
-    private peerIdFromAddr(addr: string): string | null {
-        const marker = "/p2p/"
-        const idx = addr.lastIndexOf(marker)
-        if (idx === -1) return null
-        const id = addr.slice(idx + marker.length)
-        return id.length > 0 ? id : null
-    }
-
-    private isConnectedTo(peerIdStr: string): boolean {
-        if (!this.node) return false
-        return this.node
-            .getConnections()
-            .some(conn => conn.remotePeer.toString() === peerIdStr)
+        if (!this.started) return
+        this.send({ type: "dial", addrs })
     }
 
     async publishOwnHeights(): Promise<boolean> {
@@ -253,16 +363,15 @@ export class GossipManager {
         const advertised = this.getListenAddr()
         const record = await buildHeightsRecord(
             this.getPeerId() ?? "",
-            advertised
-                ? [advertised]
-                : this.node!.getMultiaddrs().map(a => a.toString()),
+            advertised ? [advertised] : (this.readyInfo?.addrs ?? []),
         )
-        await this.pubsub().publish(
-            HEIGHTS_TOPIC,
-            new TextEncoder().encode(JSON.stringify(record)),
-        )
+        this.send({
+            type: "publish",
+            topic: HEIGHTS_TOPIC,
+            data: Buffer.from(JSON.stringify(record)).toString("base64"),
+        })
         log.debug(
-            `[GOSSIP] published heights: height ${record.height}, seq ${record.seq}, ${this.pubsub().getSubscribers(HEIGHTS_TOPIC).length} topic peers`,
+            `[GOSSIP] published heights: height ${record.height}, seq ${record.seq}, ${this.lastStats?.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0} topic peers`,
         )
         return true
     }
@@ -272,14 +381,14 @@ export class GossipManager {
             countPublishSkipped("not_ready")
             return false
         }
-        const res = await this.pubsub().publish(
-            BLOCKS_TOPIC,
-            new TextEncoder().encode(JSON.stringify(block)),
-        )
+        this.send({
+            type: "publish",
+            topic: BLOCKS_TOPIC,
+            data: Buffer.from(JSON.stringify(block)).toString("base64"),
+        })
         log.info(
-            `[GOSSIP] published block ${block.number} (${block.hash}) to ${this.pubsub().getSubscribers(BLOCKS_TOPIC).length} topic peers`,
+            `[GOSSIP] published block ${block.number} (${block.hash}) to ${this.lastStats?.perTopic[BLOCKS_TOPIC]?.subscribers ?? 0} topic peers`,
         )
-        log.info(`[GOSSIP] publish result: ${JSON.stringify(res)}`)
         return true
     }
 
@@ -295,52 +404,38 @@ export class GossipManager {
             )
         }
         setReadyGauge(ready)
-        if (!this.node) return
-        try {
-            const mesh = this.pubsub().getMeshPeers(HEIGHTS_TOPIC).length
-            if (mesh !== this.lastMeshCount) {
-                log.info(
-                    `[GOSSIP] mesh peers on '${HEIGHTS_TOPIC}': ${this.lastMeshCount < 0 ? "" : `${this.lastMeshCount} -> `}${mesh} (subscribers: ${this.pubsub().getSubscribers(HEIGHTS_TOPIC).length}, connections: ${this.node.getConnections().length})`,
-                )
-                this.lastMeshCount = mesh
-            }
-        } catch {
-            /* gauges only */
+        const stats = this.lastStats
+        if (!stats) return
+        const mesh = stats.perTopic[HEIGHTS_TOPIC]?.mesh ?? 0
+        if (mesh !== this.lastMeshCount) {
+            log.info(
+                `[GOSSIP] mesh peers on '${HEIGHTS_TOPIC}': ${this.lastMeshCount < 0 ? "" : `${this.lastMeshCount} -> `}${mesh} (subscribers: ${stats.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0}, connections: ${stats.connections})`,
+            )
+            this.lastMeshCount = mesh
         }
-        try {
-            setMeshPeersGauge(
-                HEIGHTS_TOPIC,
-                this.pubsub().getSubscribers(HEIGHTS_TOPIC).length,
-            )
-            setMeshPeersGauge(
-                BLOCKS_TOPIC,
-                this.pubsub().getSubscribers(BLOCKS_TOPIC).length,
-            )
-        } catch {
-            /* gauges only */
+        for (const topic of [HEIGHTS_TOPIC, BLOCKS_TOPIC]) {
+            setMeshPeersGauge(topic, stats.perTopic[topic]?.subscribers ?? 0)
         }
     }
 
-    // The 'message' event only fires for messages the topic validators
-    // accepted, so this only re-parses; re-validating would consume the
-    // heights seq LRU twice and drop every record.
-    private async onMessage(msg: Message): Promise<void> {
-        log.debug(
-            `[GOSSIP] message received on '${msg.topic}' (${msg.data.length} bytes)`,
-        )
-        let payload: unknown
-        try {
-            payload = JSON.parse(new TextDecoder().decode(msg.data))
-        } catch {
-            return
-        }
-        if (msg.topic === HEIGHTS_TOPIC && isHeightsRecordShape(payload)) {
-            log.debug(
-                `[GOSSIP] heights record from ${payload.pubkey}: height ${payload.height}, seq ${payload.seq}`,
+    // Phase-1 validation placement: the sidecar relays without app-level
+    // gating, so every delivered message is validated here before applying.
+    private async onGossipMessage(topic: string, data: Buffer): Promise<void> {
+        log.debug(`[GOSSIP] message received on '${topic}' (${data.length} bytes)`)
+        if (topic === HEIGHTS_TOPIC) {
+            const { result, record } = await validateHeightsMessage(
+                new Uint8Array(data),
             )
-            await this.applyHeightsRecord(payload)
-        } else if (msg.topic === BLOCKS_TOPIC) {
-            const block = payload as Block
+            if (result !== "accept" || !record) return
+            log.debug(
+                `[GOSSIP] heights record from ${record.pubkey}: height ${record.height}, seq ${record.seq}`,
+            )
+            await this.applyHeightsRecord(record)
+        } else if (topic === BLOCKS_TOPIC) {
+            const { result, block } = await validateBlockMessage(
+                new Uint8Array(data),
+            )
+            if (result !== "accept" || !block) return
             log.info(
                 `[GOSSIP] block ${block.number} (${block.hash}) received via gossip`,
             )
@@ -427,69 +522,6 @@ export class GossipManager {
             .find(p => p.status.online && p.sync.block >= block.number)
         return synced?.identity ?? null
     }
-
-    // --- Unicast request/response ---
-
-    onRequest(handler: (data: Uint8Array) => Promise<Uint8Array>): void {
-        this.requestHandler = handler
-    }
-
-    async request(addr: string, data: Uint8Array): Promise<Uint8Array> {
-        if (!this.started || !this.node) {
-            throw new Error("gossip not started")
-        }
-        log.debug(
-            `[GOSSIP] request to ${addr} (${data.length} bytes) on ${REQ_PROTOCOL}`,
-        )
-        const stream = await this.node.dialProtocol(
-            multiaddr(addr),
-            REQ_PROTOCOL,
-        )
-        await stream.sink([data])
-        const chunks: Uint8Array[] = []
-        for await (const chunk of stream.source) {
-            chunks.push(chunk.subarray())
-        }
-        return concat(chunks)
-    }
-
-    private async serveRequest(stream: {
-        sink: (source: Iterable<Uint8Array>) => Promise<void>
-        source: AsyncIterable<{ subarray: () => Uint8Array }>
-        close?: () => Promise<void>
-    }): Promise<void> {
-        try {
-            const chunks: Uint8Array[] = []
-            for await (const chunk of stream.source) {
-                chunks.push(chunk.subarray())
-            }
-            const request = concat(chunks)
-            log.debug(
-                `[GOSSIP] inbound request (${request.length} bytes), handler ${this.requestHandler ? "registered" : "missing"}`,
-            )
-            const response = this.requestHandler
-                ? await this.requestHandler(request)
-                : new Uint8Array(0)
-            await stream.sink([response])
-        } catch (e) {
-            log.debug(
-                `[GOSSIP] request serve failed: ${
-                    e instanceof Error ? e.message : String(e)
-                }`,
-            )
-        }
-    }
-}
-
-function concat(chunks: Uint8Array[]): Uint8Array {
-    const total = chunks.reduce((n, c) => n + c.length, 0)
-    const out = new Uint8Array(total)
-    let offset = 0
-    for (const c of chunks) {
-        out.set(c, offset)
-        offset += c.length
-    }
-    return out
 }
 
 export default GossipManager

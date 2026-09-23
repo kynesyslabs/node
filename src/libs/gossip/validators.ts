@@ -1,5 +1,3 @@
-import { TopicValidatorResult } from "@libp2p/interface"
-import type { Message } from "@libp2p/interface"
 import type { Block } from "@kynesyslabs/demosdk/types"
 
 import GCR from "src/libs/blockchain/gcr/gcr"
@@ -17,6 +15,8 @@ import {
 } from "./records"
 import { BLOCKS_MAX_BYTES, HEIGHTS_MAX_BYTES } from "./topics"
 import { recordVerdict } from "./metrics"
+
+export type GossipVerdict = "accept" | "reject" | "ignore"
 
 const BLOCK_HEIGHT_WINDOW = 2
 const SEQ_LRU_MAX = 2048
@@ -71,33 +71,31 @@ function seqIsFresh(pubkey: string, seq: number): boolean {
 }
 
 export interface HeightsValidation {
-    result: TopicValidatorResult
+    result: GossipVerdict
     record?: HeightsRecord
 }
 
 export async function validateHeightsMessage(
-    msg: Message,
+    data: Uint8Array,
 ): Promise<HeightsValidation> {
-    if (msg.data.length > HEIGHTS_MAX_BYTES) {
-        log.debug(
-            `[GOSSIP] heights reject: oversized (${msg.data.length} bytes)`,
-        )
+    if (data.length > HEIGHTS_MAX_BYTES) {
+        log.debug(`[GOSSIP] heights reject: oversized (${data.length} bytes)`)
         recordVerdict("heights", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     let record: unknown
     try {
-        record = JSON.parse(new TextDecoder().decode(msg.data))
+        record = JSON.parse(new TextDecoder().decode(data))
     } catch {
         log.debug("[GOSSIP] heights reject: payload is not JSON")
         recordVerdict("heights", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
     if (!isHeightsRecordShape(record)) {
         log.debug("[GOSSIP] heights reject: malformed record shape")
         recordVerdict("heights", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     await refreshStakedSet()
@@ -106,7 +104,7 @@ export async function validateHeightsMessage(
             `[GOSSIP] heights reject: ${record.pubkey} not in staked set (${stakedSet.size} entries at height ${stakedSetHeight})`,
         )
         recordVerdict("heights", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     if (!seqIsFresh(record.pubkey, record.seq)) {
@@ -114,7 +112,7 @@ export async function validateHeightsMessage(
             `[GOSSIP] heights ignore: stale seq ${record.seq} from ${record.pubkey}`,
         )
         recordVerdict("heights", "ignore")
-        return { result: TopicValidatorResult.Ignore }
+        return { result: "ignore" }
     }
 
     if (!(await verifyHeightsRecord(record))) {
@@ -122,39 +120,37 @@ export async function validateHeightsMessage(
             `[GOSSIP] heights reject: bad signature from ${record.pubkey}`,
         )
         recordVerdict("heights", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     log.debug(
         `[GOSSIP] heights accept: ${record.pubkey} at height ${record.height} (seq ${record.seq})`,
     )
     recordVerdict("heights", "accept")
-    return { result: TopicValidatorResult.Accept, record }
+    return { result: "accept", record }
 }
 
 export interface BlockValidation {
-    result: TopicValidatorResult
+    result: GossipVerdict
     block?: Block
 }
 
 export async function validateBlockMessage(
-    msg: Message,
+    data: Uint8Array,
 ): Promise<BlockValidation> {
-    if (msg.data.length > BLOCKS_MAX_BYTES) {
-        log.debug(
-            `[GOSSIP] block reject: oversized (${msg.data.length} bytes)`,
-        )
+    if (data.length > BLOCKS_MAX_BYTES) {
+        log.debug(`[GOSSIP] block reject: oversized (${data.length} bytes)`)
         recordVerdict("blocks", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     let block: Block
     try {
-        block = JSON.parse(new TextDecoder().decode(msg.data))
+        block = JSON.parse(new TextDecoder().decode(data))
     } catch {
         log.debug("[GOSSIP] block reject: payload is not JSON")
         recordVerdict("blocks", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
     if (
         block == null ||
@@ -167,7 +163,7 @@ export async function validateBlockMessage(
     ) {
         log.debug("[GOSSIP] block reject: malformed block shape")
         recordVerdict("blocks", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     const head = getSharedState.lastBlockNumber
@@ -176,7 +172,7 @@ export async function validateBlockMessage(
             `[GOSSIP] block ignore: ${block.number} outside window around head ${head}`,
         )
         recordVerdict("blocks", "ignore")
-        return { result: TopicValidatorResult.Ignore }
+        return { result: "ignore" }
     }
 
     let expectedHash: string
@@ -186,25 +182,25 @@ export async function validateBlockMessage(
         )
     } catch {
         recordVerdict("blocks", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
     if (expectedHash !== block.hash) {
         log.debug(
             `[GOSSIP] block reject: hash mismatch (claimed ${block.hash}, recomputed ${expectedHash})`,
         )
         recordVerdict("blocks", "reject")
-        return { result: TopicValidatorResult.Reject }
+        return { result: "reject" }
     }
 
     // Full quorum verification needs the parent block; only possible for
     // heights we can anchor locally. `ignore` (never `reject`) when the
-    // failure is our own lag — rejects penalize the sender's peer score.
+    // failure is our own lag.
     if (block.number > head + 1) {
         log.debug(
             `[GOSSIP] block ignore: ${block.number} ahead of head ${head}, cannot verify quorum yet`,
         )
         recordVerdict("blocks", "ignore")
-        return { result: TopicValidatorResult.Ignore }
+        return { result: "ignore" }
     }
 
     try {
@@ -215,13 +211,13 @@ export async function validateBlockMessage(
                     `[GOSSIP] block ignore: ${verdict.reason} (local lag)`,
                 )
                 recordVerdict("blocks", "ignore")
-                return { result: TopicValidatorResult.Ignore }
+                return { result: "ignore" }
             }
             log.warning(
                 `[GOSSIP] rejecting block ${block.number}: ${verdict.reason}`,
             )
             recordVerdict("blocks", "reject")
-            return { result: TopicValidatorResult.Reject }
+            return { result: "reject" }
         }
     } catch (e) {
         log.warning(
@@ -230,12 +226,12 @@ export async function validateBlockMessage(
             }`,
         )
         recordVerdict("blocks", "ignore")
-        return { result: TopicValidatorResult.Ignore }
+        return { result: "ignore" }
     }
 
     log.debug(
         `[GOSSIP] block accept: ${block.number} (${block.hash}), quorum verified`,
     )
     recordVerdict("blocks", "accept")
-    return { result: TopicValidatorResult.Accept, block }
+    return { result: "accept", block }
 }
