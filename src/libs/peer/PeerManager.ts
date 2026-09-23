@@ -561,7 +561,7 @@ export default class PeerManager {
 
     // REVIEW This method should be tested and finalized with the new peer structure
     static urlPointsAtUs(url: URL): boolean {
-        if (isLoopbackHost(url.hostname)) {
+        if (getSharedState.prod && isLoopbackHost(url.hostname)) {
             return true
         }
 
