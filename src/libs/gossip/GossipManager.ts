@@ -123,7 +123,7 @@ export class GossipManager {
                 )
             })
             this.node.addEventListener("peer:disconnect", evt => {
-                log.debug(
+                log.info(
                     `[GOSSIP] peer disconnected: ${evt.detail.toString()} (${this.node?.getConnections().length ?? 0} connections)`,
                 )
             })
@@ -209,6 +209,13 @@ export class GossipManager {
     dial(addrs: string[]): void {
         if (!this.started || !this.node) return
         for (const addr of addrs) {
+            const targetPeerId = this.peerIdFromAddr(addr)
+            if (targetPeerId && this.isConnectedTo(targetPeerId)) {
+                log.debug(
+                    `[GOSSIP] already connected to ${targetPeerId}, skipping dial`,
+                )
+                continue
+            }
             log.debug(`[GOSSIP] dialing ${addr}`)
             this.node
                 .dial(multiaddr(addr))
@@ -221,6 +228,21 @@ export class GossipManager {
                     ),
                 )
         }
+    }
+
+    private peerIdFromAddr(addr: string): string | null {
+        const marker = "/p2p/"
+        const idx = addr.lastIndexOf(marker)
+        if (idx === -1) return null
+        const id = addr.slice(idx + marker.length)
+        return id.length > 0 ? id : null
+    }
+
+    private isConnectedTo(peerIdStr: string): boolean {
+        if (!this.node) return false
+        return this.node
+            .getConnections()
+            .some(conn => conn.remotePeer.toString() === peerIdStr)
     }
 
     async publishOwnHeights(): Promise<boolean> {
@@ -250,17 +272,19 @@ export class GossipManager {
             countPublishSkipped("not_ready")
             return false
         }
-        await this.pubsub().publish(
+        const res = await this.pubsub().publish(
             BLOCKS_TOPIC,
             new TextEncoder().encode(JSON.stringify(block)),
         )
         log.info(
             `[GOSSIP] published block ${block.number} (${block.hash}) to ${this.pubsub().getSubscribers(BLOCKS_TOPIC).length} topic peers`,
         )
+        log.info(`[GOSSIP] publish result: ${JSON.stringify(res)}`)
         return true
     }
 
     private lastReady = false
+    private lastMeshCount = -1
 
     private refreshGauges(): void {
         const ready = this.isReady()
@@ -272,6 +296,17 @@ export class GossipManager {
         }
         setReadyGauge(ready)
         if (!this.node) return
+        try {
+            const mesh = this.pubsub().getMeshPeers(HEIGHTS_TOPIC).length
+            if (mesh !== this.lastMeshCount) {
+                log.info(
+                    `[GOSSIP] mesh peers on '${HEIGHTS_TOPIC}': ${this.lastMeshCount < 0 ? "" : `${this.lastMeshCount} -> `}${mesh} (subscribers: ${this.pubsub().getSubscribers(HEIGHTS_TOPIC).length}, connections: ${this.node.getConnections().length})`,
+                )
+                this.lastMeshCount = mesh
+            }
+        } catch {
+            /* gauges only */
+        }
         try {
             setMeshPeersGauge(
                 HEIGHTS_TOPIC,
