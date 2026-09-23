@@ -1199,63 +1199,63 @@ async function main() {
         markSubsystem(getSharedState.subsystems, "main_loop", "running")
 
         // Load L2PS networks configuration
-        bootTracker.start("l2ps.networks")
-        try {
-            await ParallelNetworks.getInstance().loadAllL2PS()
-            bootTracker.ready("l2ps.networks")
-            log.info(
-                `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
-            )
-        } catch (error) {
-            handleError(error, "CORE", {
-                source: ErrorSource.L2PS_NETWORK_LOADING,
-            })
-            bootTracker.fail("l2ps.networks", error)
-            subsystemError(getSharedState.subsystems, "l2ps", error)
-        }
+        // bootTracker.start("l2ps.networks")
+        // try {
+        //     await ParallelNetworks.getInstance().loadAllL2PS()
+        //     bootTracker.ready("l2ps.networks")
+        //     log.info(
+        //         `[CORE] [L2PS] Loaded ${(getSharedState.l2psJoinedUids || []).length} joined L2PS network(s)`,
+        //     )
+        // } catch (error) {
+        //     handleError(error, "CORE", {
+        //         source: ErrorSource.L2PS_NETWORK_LOADING,
+        //     })
+        //     bootTracker.fail("l2ps.networks", error)
+        //     subsystemError(getSharedState.subsystems, "l2ps", error)
+        // }
 
         // Start L2PS hash generation service (for L2PS participating nodes)
         // Note: l2psJoinedUids is populated during ParallelNetworks initialization
-        if (
-            getSharedState.l2psJoinedUids &&
-            getSharedState.l2psJoinedUids.length > 0
-        ) {
-            bootTracker.start("l2ps.services")
-            try {
-                const l2psHashService = L2PSHashService.getInstance()
-                await l2psHashService.start()
-                log.info(
-                    `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
-                )
+        // if (
+        //     getSharedState.l2psJoinedUids &&
+        //     getSharedState.l2psJoinedUids.length > 0
+        // ) {
+        //     bootTracker.start("l2ps.services")
+        //     try {
+        //         const l2psHashService = L2PSHashService.getInstance()
+        //         await l2psHashService.start()
+        //         log.info(
+        //             `[CORE] [L2PS] Hash generation service started for ${getSharedState.l2psJoinedUids.length} L2PS networks`,
+        //         )
 
-                // Start L2PS batch aggregator (batches transactions and submits to main mempool)
-                const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
-                await l2psBatchAggregator.start()
-                log.info("[CORE] [L2PS] Batch aggregator service started")
-                bootTracker.ready("l2ps.services")
-                markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
-                    enabled: true,
-                    extra: {
-                        joined_uids: getSharedState.l2psJoinedUids.length,
-                    },
-                })
-            } catch (error) {
-                handleError(error, "CORE", {
-                    source: ErrorSource.L2PS_SERVICES_STARTUP,
-                })
-                bootTracker.fail("l2ps.services", error)
-                subsystemError(getSharedState.subsystems, "l2ps", error)
-            }
-        } else {
-            log.info(
-                "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
-            )
-            markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
-                reason: "no joined networks",
-                enabled: false,
-            })
-            bootTracker.skip("l2ps.services", "no joined networks")
-        }
+        //         // Start L2PS batch aggregator (batches transactions and submits to main mempool)
+        //         const l2psBatchAggregator = L2PSBatchAggregator.getInstance()
+        //         await l2psBatchAggregator.start()
+        //         log.info("[CORE] [L2PS] Batch aggregator service started")
+        //         bootTracker.ready("l2ps.services")
+        //         markSubsystem(getSharedState.subsystems, "l2ps", "ready", {
+        //             enabled: true,
+        //             extra: {
+        //                 joined_uids: getSharedState.l2psJoinedUids.length,
+        //             },
+        //         })
+        //     } catch (error) {
+        //         handleError(error, "CORE", {
+        //             source: ErrorSource.L2PS_SERVICES_STARTUP,
+        //         })
+        //         bootTracker.fail("l2ps.services", error)
+        //         subsystemError(getSharedState.subsystems, "l2ps", error)
+        //     }
+        // } else {
+        //     log.info(
+        //         "[CORE] [L2PS] No L2PS networks joined, L2PS services not started",
+        //     )
+        //     markSubsystem(getSharedState.subsystems, "l2ps", "skipped", {
+        //         reason: "no joined networks",
+        //         enabled: false,
+        //     })
+        //     bootTracker.skip("l2ps.services", "no joined networks")
+        // }
     }
 }
 
