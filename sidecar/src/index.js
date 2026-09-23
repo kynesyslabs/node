@@ -1,6 +1,7 @@
 // Demos gossip sidecar: a Node.js libp2p host driven by the Bun node over
 // a Unix-socket NDJSON bridge (specs/gossip-sidecar.md). It moves bytes
 // and maintains the mesh — no chain logic lives here.
+import "./polyfill.js"
 import fs from "node:fs"
 import net from "node:net"
 import path from "node:path"
