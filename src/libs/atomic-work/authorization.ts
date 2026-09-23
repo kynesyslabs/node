@@ -1,0 +1,179 @@
+import Hashing from "@/libs/crypto/hashing"
+import { jcsCanonicalize } from "@/libs/crypto/jcs"
+
+/**
+ * Atomic Work per-operation authorization (DACS §A.6 / D3).
+ *
+ * Every operation names `requiredRoles`; each (operation, role) pair must be
+ * covered by exactly one signed authorization whose envelope binds the Work
+ * identity, the operation identity, the role, and the roster signer for that
+ * role. This module is the pure envelope-binding + coverage layer plus the
+ * authorization hash; ed25519 signature verification is injected (the node wires
+ * its own verifier) so this stays dependency-light and unit-testable.
+ *
+ * Ports the reference `verify_authorizations` structural checks + `authorization_hash`.
+ */
+
+/** Signature domain: signatures are over AUTH_DOMAIN ‖ authorizationHash(ascii). */
+export const AUTH_DOMAIN = "dacs-atomic-work-authorization:v1:"
+
+/** Canonical role evaluation order. */
+export const ROLE_ORDER = ["buyer", "seller", "orchestrator", "payer"] as const
+
+/** authorizationHash = sha256(JCS(authorization without its `value` signature)). */
+export function computeAuthorizationHash(
+    authorization: Record<string, unknown>,
+): string {
+    const { value: _omit, ...unsigned } = authorization
+    return Hashing.sha256Bytes(Buffer.from(jcsCanonicalize(unsigned), "utf-8"))
+}
+
+export interface AuthorizationEnvelope {
+    authorizationVersion: "1"
+    workId: string
+    executionProfile: string
+    networkId: string
+    railId: string
+    jobId: string
+    phaseIndex: number
+    operationId: string
+    operationIndex: number
+    operationKind: string
+    role: string
+    signer: unknown
+}
+
+export interface AuthzOperation {
+    operationId: string
+    kind: string
+    requiredRoles: string[]
+}
+export interface AuthzIntent {
+    executionProfile: string
+    networkId: string
+    railId: string
+    jobId: string
+    phaseIndex: number
+    operations: AuthzOperation[]
+    roleRoster: { role: string; signer: unknown }[]
+}
+
+export class AuthorizationError extends Error {
+    constructor(
+        message: string,
+        readonly reason:
+            | "envelope-mismatch"
+            | "unexpected-or-duplicate"
+            | "missing-authorization"
+            | "bad-algorithm"
+            | "bad-signature",
+    ) {
+        super(message)
+        this.name = "AuthorizationError"
+    }
+}
+
+/** The exact authorization envelope required for one (operation, role) pair. */
+export function buildExpectedEnvelope(
+    intent: AuthzIntent,
+    operationIndex: number,
+    role: string,
+    workId: string,
+): AuthorizationEnvelope {
+    const op = intent.operations[operationIndex]
+    const roster = new Map(intent.roleRoster.map(r => [r.role, r.signer]))
+    return {
+        authorizationVersion: "1",
+        workId,
+        executionProfile: intent.executionProfile,
+        networkId: intent.networkId,
+        railId: intent.railId,
+        jobId: intent.jobId,
+        phaseIndex: intent.phaseIndex,
+        operationId: op.operationId,
+        operationIndex,
+        operationKind: op.kind,
+        role,
+        signer: roster.get(role),
+    }
+}
+
+function canonicalEq(a: unknown, b: unknown): boolean {
+    return jcsCanonicalize(a as never) === jcsCanonicalize(b as never)
+}
+
+/**
+ * Verify per-operation authorization coverage + envelope binding for an intent.
+ *
+ * Enforces (byte-for-byte with the reference):
+ *  - the set of (operationIndex, role) authorizations equals exactly the set
+ *    required by every operation's `requiredRoles` — none missing, extra, or
+ *    duplicated;
+ *  - each authorization's envelope matches the derived expected envelope
+ *    (Work + operation identity + role + roster signer) and `algorithm==="ed25519"`.
+ *
+ * `verifySignature`, if provided, is called per authorization with the signer
+ * claim and the AUTH_DOMAIN-prefixed digest; returning false rejects. Omit it to
+ * check only structure/coverage (the node injects its ed25519 verifier).
+ */
+export function verifyAuthorizationCoverage(
+    intent: AuthzIntent,
+    authorizations: Record<string, unknown>[],
+    workId: string,
+    verifySignature?: (signer: unknown, domainDigest: string) => boolean,
+): void {
+    const expectedPairs = new Set<string>()
+    intent.operations.forEach((op, i) => {
+        for (const role of op.requiredRoles) expectedPairs.add(`${i}:${role}`)
+    })
+
+    const seen = new Set<string>()
+    for (const authorization of authorizations) {
+        const index = authorization.operationIndex
+        const role = authorization.role
+        if (
+            typeof index !== "number" ||
+            !Number.isInteger(index) ||
+            index < 0 ||
+            index >= intent.operations.length
+        )
+            throw new AuthorizationError("invalid authorization operationIndex", "envelope-mismatch")
+        if (authorization.algorithm !== "ed25519")
+            throw new AuthorizationError("authorization algorithm not supported", "bad-algorithm")
+
+        const expected = buildExpectedEnvelope(intent, index, role as string, workId)
+        for (const [field, want] of Object.entries(expected)) {
+            const got = authorization[field]
+            const ok =
+                field === "signer" ? canonicalEq(got, want) : got === want
+            if (!ok)
+                throw new AuthorizationError(
+                    `authorization envelope mismatch: ${field}`,
+                    "envelope-mismatch",
+                )
+        }
+
+        const pair = `${index}:${role}`
+        if (!expectedPairs.has(pair) || seen.has(pair))
+            throw new AuthorizationError(
+                "unexpected or duplicate operation authorization",
+                "unexpected-or-duplicate",
+            )
+
+        if (verifySignature) {
+            const digest = AUTH_DOMAIN + computeAuthorizationHash(authorization)
+            if (!verifySignature(authorization.signer, digest))
+                throw new AuthorizationError(
+                    "invalid operation authorization signature",
+                    "bad-signature",
+                )
+        }
+        seen.add(pair)
+    }
+
+    if (seen.size !== expectedPairs.size)
+        throw new AuthorizationError(
+            "missing required operation authorization",
+            "missing-authorization",
+        )
+}
