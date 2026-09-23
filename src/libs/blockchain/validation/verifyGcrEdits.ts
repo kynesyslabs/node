@@ -215,3 +215,107 @@ export async function verifyGcrEditsMatch(
     }
     return { match, txEditsHash, regenEditsHash }
 }
+
+/**
+ * Edits that move something scarce: funds, stake, or incentive points.
+ *
+ * `verifyGcrEditsMatch` binds the whole edit set, but it only runs for native
+ * transactions — the rest were assumed to carry nothing worth forging. They
+ * do: `handleGCR` applies `gcr_edits` from a transaction of ANY type, and
+ * `GCRIdentityRoutines` has `pointsadd`/`pointsremove` operations, so a
+ * self-signed `identity` transaction carrying a balance or points edit is
+ * applied as written. The peer-gossip `mempool` RPC is unauthenticated, so
+ * such a transaction can be pushed straight into the mempool without ever
+ * passing the `confirm` path, which does bind the full set for every type.
+ *
+ * This is the narrow version of that binding for non-native transactions:
+ * instead of demanding the whole set match (which risks false-rejecting legit
+ * traffic wherever regeneration is not byte-deterministic across nodes), it
+ * demands that every value-moving edit a transaction ships is one the node
+ * would have generated for it. Everything else is left to the per-type
+ * handlers.
+ */
+function projectValueEdits(edits: GCREdit[]): string[] {
+    const keys: string[] = []
+    for (const edit of edits) {
+        const anyEdit = edit as unknown as Record<string, unknown>
+        const type = String(anyEdit.type ?? "")
+        const operation = String(anyEdit.operation ?? "")
+        const account = String(anyEdit.account ?? "").toLowerCase()
+        const amount = String(anyEdit.amount ?? "")
+
+        if (type === "balance" || type === "validatorStake") {
+            keys.push(`${type}|${account}|${operation}|${amount}`)
+            continue
+        }
+        // Points ride on identity edits; the SDK's typed union does not name
+        // them, but the node's identity routines apply them.
+        if (type === "identity" && operation.startsWith("points")) {
+            keys.push(
+                `points|${account}|${operation}|${JSON.stringify(anyEdit.data ?? null)}`,
+            )
+        }
+    }
+    // Sorted by code unit, explicitly. The order only has to be the same on
+    // both sides of the containment check, but it has to be the same
+    // everywhere the check runs: `localeCompare` would order these by the
+    // node's locale, so two validators with different ICU data could disagree
+    // about whether a transaction's edits were explained.
+    return keys.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+}
+
+export interface ValueEditsVerification {
+    /** true when every value-moving edit shipped was one the node regenerates. */
+    ok: boolean
+    /** Descriptors of the shipped edits with no counterpart, for the log. */
+    unexplained: string[]
+}
+
+/**
+ * Admission-side guard for non-native transactions: reject any funds, stake or
+ * points edit the node would not have produced from the signed body.
+ *
+ * Fails closed — a transaction whose edits cannot be regenerated at all is
+ * reported as unexplained rather than waved through.
+ */
+export async function verifyNoUnexplainedValueEdits(
+    tx: Transaction,
+): Promise<ValueEditsVerification> {
+    const shipped = projectValueEdits(
+        (tx.content?.gcr_edits ?? []) as GCREdit[],
+    )
+    if (shipped.length === 0) {
+        return { ok: true, unexplained: [] }
+    }
+
+    let regenerated: string[]
+    try {
+        regenerated = projectValueEdits(await GCRGeneration.generate(tx))
+    } catch (e) {
+        log.error(
+            `[verifyNoUnexplainedValueEdits] regeneration failed for tx ${tx.hash}: ` +
+                (e instanceof Error ? e.message : String(e)),
+        )
+        return { ok: false, unexplained: shipped }
+    }
+
+    // Multiset containment: two identical edits shipped need two regenerated.
+    const remaining = [...regenerated]
+    const unexplained: string[] = []
+    for (const key of shipped) {
+        const at = remaining.indexOf(key)
+        if (at === -1) {
+            unexplained.push(key)
+        } else {
+            remaining.splice(at, 1)
+        }
+    }
+
+    if (unexplained.length > 0) {
+        log.error(
+            `[verifyNoUnexplainedValueEdits] tx ${tx.hash} ships value edits the node ` +
+                `would not generate: ${unexplained.join(", ")}`,
+        )
+    }
+    return { ok: unexplained.length === 0, unexplained }
+}

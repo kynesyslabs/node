@@ -12,6 +12,8 @@
  */
 import log from "@/utilities/logger"
 import Hashing from "@/libs/crypto/hashing"
+import { isForkActive } from "@/forks/forkGates"
+import { getSharedState } from "@/utilities/sharedState"
 
 /**
  * TLSNotary presentation format (from tlsn-js attestation)
@@ -519,6 +521,12 @@ export function isVerifierInitialized(): boolean {
  * @param presentationJSON - The TLSNotary presentation to verify
  * @returns Verification result
  */
+/**
+ * Marker returned instead of a real notary key, so callers can tell a
+ * structure check apart from a verified presentation.
+ */
+export const STRUCTURE_ONLY_VERIFYING_KEY = "structure-validation-only"
+
 export async function verifyTLSNotaryPresentation(
     presentationJSON: TLSNotaryPresentation,
 ): Promise<TLSNotaryVerificationResult> {
@@ -572,7 +580,7 @@ export async function verifyTLSNotaryPresentation(
         return {
             success: true,
             time: Date.now(),
-            verifyingKey: "structure-validation-only",
+            verifyingKey: STRUCTURE_ONLY_VERIFYING_KEY,
         }
     } catch (error) {
         log.error(`[TLSNotary Verifier] Verification failed: ${error}`)
@@ -750,6 +758,30 @@ export async function verifyTLSNProof(payload: TLSNIdentityPayload): Promise<{
         return {
             success: false,
             message: `Proof verification failed: ${verified.error}`,
+        }
+    }
+
+    // Everything below this point compares the claim against bytes the SAME
+    // caller supplied: `revealedRecv` is theirs, `recvHash` is its hash, and
+    // the username/userId are extracted from those bytes. The presentation is
+    // the only outside evidence, and the node does not verify it — it checks
+    // the shape and returns `verifyingKey: "structure-validation-only"`,
+    // leaving the cryptography to the client, which decides nothing here. So
+    // until the notary signature is checked on this side, a claim proves only
+    // that its author can author bytes: any account could attach any GitHub,
+    // Discord or Telegram identity, and linked identities gate incentives.
+    if (
+        verified.verifyingKey === STRUCTURE_ONLY_VERIFYING_KEY &&
+        isForkActive(
+            "tlsnProofEnforcement",
+            getSharedState.lastBlockNumber ?? 0,
+        )
+    ) {
+        return {
+            success: false,
+            message:
+                "TLSNotary identity claims are refused: this node does not verify the " +
+                "notary signature, so the claim carries no evidence beyond its own bytes",
         }
     }
 

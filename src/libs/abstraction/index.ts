@@ -1,3 +1,5 @@
+import { isForkActive } from "@/forks/forkGates"
+import { web2BoundProofMessage } from "./web2/boundMessage"
 import { GithubProofParser } from "./web2/github"
 import { TwitterProofParser } from "./web2/twitter"
 import { DiscordProofParser } from "./web2/discord"
@@ -294,17 +296,44 @@ export async function verifyWeb2Proof(
         // and the tx sender; the parsed payload tag is ignored for domain.
         // This shape MUST stay in lockstep with the SDK's createDomainProofPayload.
         // Freshness (nonce/issuedAt) is the Tier-2 follow-up tracked in DEM-767.
-        const messageToVerify =
+        // Every context binds its claim into the signed message: `domain` to
+        // the verified host, the rest to context + claimed handle. Without it
+        // the signed text is the constant "dw2p", and a proof copied out of
+        // someone's public post is a valid proof under whatever handle it is
+        // republished on — enough to claim a handle the signer does not own.
+        const boundMessage =
             payload.context === "domain"
                 ? `dacs-domain:v1:${(payload.username as string).toLowerCase()}:${sender}`
-                : message
+                : web2BoundProofMessage(
+                      payload.context,
+                      String(payload.username ?? ""),
+                      sender,
+                  )
         try {
-            const verified = await TxValidatorPool.getInstance().verify({
-                algorithm: type,
-                message: new TextEncoder().encode(messageToVerify),
-                publicKey: hexToUint8Array(sender),
-                signature: hexToUint8Array(signature),
-            })
+            const verifyAgainst = async (candidate: string) =>
+                await TxValidatorPool.getInstance().verify({
+                    algorithm: type,
+                    message: new TextEncoder().encode(candidate),
+                    publicKey: hexToUint8Array(sender),
+                    signature: hexToUint8Array(signature),
+                })
+
+            let verified = await verifyAgainst(boundMessage)
+
+            // Until the fork activates, a proof signed the old way (the parsed
+            // payload tag, i.e. the constant) still verifies, so clients can
+            // migrate without a flag day. `domain` was already bound when it
+            // shipped and never accepts the legacy shape.
+            if (
+                !verified &&
+                payload.context !== "domain" &&
+                !isForkActive(
+                    "web2ProofBinding",
+                    getSharedState.lastBlockNumber ?? 0,
+                )
+            ) {
+                verified = await verifyAgainst(message)
+            }
 
             return {
                 success: verified,

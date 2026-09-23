@@ -60,7 +60,10 @@ import { getSharedState } from "@/utilities/sharedState"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import HandleGCR from "./handleGCR"
 import Mempool from "../mempool"
-import { serializeTransactionContent } from "@/forks"
+import {
+    serializeTransactionContent,
+    txSignaturePreimageForPendingBlock,
+} from "@/forks"
 import TxValidatorPool from "../validation/txValidatorPool"
 import { GCRSubnetsTxs } from "@/model/entities/GCRv2/GCRSubnetsTxs"
 import { emptyResponse } from "@/libs/network"
@@ -865,7 +868,7 @@ export default class GCR {
 
         const signature = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
-            new TextEncoder().encode(tx.hash),
+            txSignaturePreimageForPendingBlock(tx.hash),
         )
         tx.signature = {
             type: getSharedState.signingAlgorithm,

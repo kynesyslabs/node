@@ -46,13 +46,16 @@ function makeResponse(): RPCResponse {
     }
 }
 
+interface ForkStatusResponse {
+    activationHeight: number | null
+    activated: boolean
+    currentHeight: number
+}
+
 interface NetworkInfoResponse {
     forks: {
-        osDenomination: {
-            activationHeight: number | null
-            activated: boolean
-            currentHeight: number
-        }
+        osDenomination: ForkStatusResponse
+        signatureDomain: ForkStatusResponse
     }
 }
 
@@ -172,6 +175,31 @@ describe("getNetworkInfo RPC handler", () => {
         expect(body.forks.osDenomination.activationHeight).toBe(1000)
         expect(body.forks.osDenomination.activated).toBe(true)
         expect(body.forks.osDenomination.currentHeight).toBe(1500)
+    })
+
+    it("reports signatureDomain for the block a signature would land in", async () => {
+        // A wallet asks this to decide which preimage to sign, and what it
+        // signs now goes into the next block. Answering for the tip would
+        // hand it the legacy preimage for the activation block itself, which
+        // admission — judging at tip + 1 — then rejects.
+        getSharedState.forkConfig.signatureDomain.activationHeight = 1000
+        getSharedState.lastBlockNumber = 999
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as NetworkInfoResponse
+
+        expect(body.forks.signatureDomain.activated).toBe(true)
+        expect(body.forks.signatureDomain.currentHeight).toBe(999)
+    })
+
+    it("keeps signatureDomain inactive two blocks out", async () => {
+        getSharedState.forkConfig.signatureDomain.activationHeight = 1000
+        getSharedState.lastBlockNumber = 998
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as NetworkInfoResponse
+
+        expect(body.forks.signatureDomain.activated).toBe(false)
     })
 
     it("does not mutate the response status fields when successful", async () => {

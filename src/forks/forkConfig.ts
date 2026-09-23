@@ -69,6 +69,54 @@ export type OsDenominationConfig = BaseForkConfig
 export type NonceEnforcementConfig = BaseForkConfig
 
 /**
+ * `signatureDomain` fork: transaction signatures stop covering the bare
+ * `tx.hash` and start covering `demos-tx:v1:<chainId>:<hash>` (see
+ * `libs/crypto/txSignaturePreimage.ts`).
+ *
+ * Pre-fork: the signed bytes are `TextEncoder(tx.hash)` — byte-identical to
+ * legacy, so re-sync and old clients keep validating.
+ *
+ * Post-fork: a signature no longer doubles as a signature over an arbitrary
+ * 64-hex message (a wallet asked to sign a "login nonce" can no longer be
+ * tricked into signing a transaction), and it is bound to one network, so a
+ * transaction cannot be replayed onto another chain that shares the account.
+ *
+ * Activating it requires signers and verifiers to move together: the node,
+ * the SDK and the wallet all derive the preimage from the same helper.
+ */
+export type SignatureDomainConfig = BaseForkConfig
+
+/**
+ * `web2ProofBinding` fork: a web2 identity proof must sign
+ * `demos-web2:v1:<context>:<username>:<sender>` instead of the constant
+ * `"dw2p"`, so a published proof cannot be reused to claim a handle its
+ * signer does not own (see `libs/abstraction/web2/boundMessage.ts`).
+ *
+ * Pre-fork: both shapes verify, so clients can migrate without a flag day.
+ * Post-fork: only the bound shape, and a proof lifted from someone else's
+ * post stops verifying.
+ */
+export type Web2ProofBindingConfig = BaseForkConfig
+
+/**
+ * `tlsnProofEnforcement` fork: refuse TLSNotary identity claims the node
+ * cannot actually verify.
+ *
+ * `verifyTLSNotaryPresentation` checks that the presentation is an object
+ * holding a long-enough hex string and returns
+ * `verifyingKey: "structure-validation-only"` — the cryptography is done in
+ * the client, which decides nothing for consensus. Everything else in the
+ * claim (`revealedRecv`, `recvHash`, `username`, `userId`) is supplied by the
+ * same caller and only checked against itself, so any account can attach any
+ * GitHub, Discord or Telegram identity by authoring its own bytes.
+ *
+ * Active, a `tlsn_identity_assign` is rejected until the node verifies the
+ * notary signature itself. Inactive, the legacy structure-only behaviour
+ * stays, for test networks that depend on it.
+ */
+export type TlsnProofEnforcementConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -97,6 +145,9 @@ export type ForkConfig =
     | OsDenominationConfig
     | GasFeeSeparationConfig
     | NonceEnforcementConfig
+    | SignatureDomainConfig
+    | Web2ProofBindingConfig
+    | TlsnProofEnforcementConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -107,6 +158,9 @@ export type ForkName =
     | "osDenomination"
     | "gasFeeSeparation"
     | "nonceEnforcement"
+    | "signatureDomain"
+    | "web2ProofBinding"
+    | "tlsnProofEnforcement"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -116,6 +170,9 @@ export interface ForkConfigByName {
     osDenomination: OsDenominationConfig
     gasFeeSeparation: GasFeeSeparationConfig
     nonceEnforcement: NonceEnforcementConfig
+    signatureDomain: SignatureDomainConfig
+    web2ProofBinding: Web2ProofBindingConfig
+    tlsnProofEnforcement: TlsnProofEnforcementConfig
 }
 
 /**
@@ -177,6 +234,40 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
         treasuryAddress:
             "0xc1b0048492ab1496b94413c9b7b24a89c19552ca7d18d85a8b2d0ca733d8eaa3",
     },
+    tlsnProofEnforcement: {
+        // Inactive by default, and deliberately so. A running chain's genesis
+        // predates this entry, and a missing entry hydrates from here — so a
+        // height-0 default would switch the rule on the moment the binary is
+        // upgraded. Every presentation the current verifier produces carries
+        // the structure-only marker, which means every TLSN identity
+        // assignment on that chain would start failing, with no coordination
+        // and no way back short of a downgrade. A fresh chain that wants the
+        // rule from block 0, and a live chain that has scheduled its
+        // switchover, both say so in genesis.
+        activationHeight: null,
+        description:
+            "Reject TLSNotary identity claims while the node only structure-checks the " +
+            "presentation — the claim's own bytes are the only evidence behind it.",
+    },
+    web2ProofBinding: {
+        // Inactive by default: the bound shape has to be out in clients
+        // before proofs signed the old way stop verifying.
+        activationHeight: null,
+        description:
+            "Web2 identity proofs sign demos-web2:v1:<context>:<username>:<sender>, " +
+            "so a published proof cannot be reused to claim another handle.",
+    },
+    signatureDomain: {
+        // Inactive by default even on fresh chains: every signer in the
+        // ecosystem (node, SDK, wallet) has to ship the new preimage before a
+        // chain switches, or in-flight transactions stop verifying. Set an
+        // explicit height once the clients are out.
+        activationHeight: null,
+        description:
+            "Transaction signatures cover demos-tx:v1:<chainId>:<hash> instead of the " +
+            "bare hash: a message signature can no longer stand in for a transaction " +
+            "signature, and a transaction cannot replay onto another chain.",
+    },
     nonceEnforcement: {
         // Active from genesis on fresh chains (audit C5). Mirrors
         // osDenomination's height-0 default: a brand-new chain boots fully
@@ -203,5 +294,8 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         osDenomination: { ...DEFAULT_FORK_CONFIG.osDenomination },
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
+        signatureDomain: { ...DEFAULT_FORK_CONFIG.signatureDomain },
+        web2ProofBinding: { ...DEFAULT_FORK_CONFIG.web2ProofBinding },
+        tlsnProofEnforcement: { ...DEFAULT_FORK_CONFIG.tlsnProofEnforcement },
     }
 }

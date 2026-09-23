@@ -12,14 +12,17 @@ import Datasource from "@/model/datasource"
 
 import Chain from "./chain"
 import log from "src/utilities/logger"
-import { isForkActive } from "@/forks"
+import { pendingTxSignatureContext, isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
 import { Transaction } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
-import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
+import {
+    verifyGcrEditsMatch,
+    verifyNoUnexplainedValueEdits,
+} from "./validation/verifyGcrEdits"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
@@ -487,9 +490,13 @@ export default class Mempool {
             "osDenomination",
             getSharedState.lastBlockNumber ?? 0,
         )
+        // Same story for the signature preimage: resolved here, where the
+        // fork config and the chain tip live, and threaded into the workers.
+        const signatureDomain = pendingTxSignatureContext()
         const results = await TxValidatorPool.getInstance().validate(
             unseenTransactions,
             coherenceIsPostFork,
+            signatureDomain,
         )
         const end = Date.now()
         log.only(
@@ -534,6 +541,21 @@ export default class Mempool {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
                 if (tx.content?.type !== "native") {
+                    // Non-native transactions are not edit-bound as a whole
+                    // (regeneration is not byte-deterministic across nodes for
+                    // every type), but they must not move funds, stake or
+                    // points the node would not have generated: handleGCR
+                    // applies gcr_edits for ANY type, and this ingress is
+                    // unauthenticated, so an unbound edit here is an
+                    // unauthenticated mint.
+                    const { ok, unexplained } =
+                        await verifyNoUnexplainedValueEdits(tx)
+                    if (!ok) {
+                        log.error(
+                            `[Mempool.receive] Rejecting tx ${tx.hash}: value edits with no counterpart in the regenerated set (${unexplained.join(", ")})`,
+                        )
+                        continue
+                    }
                     editVerifiedTransactions.push(tx)
                     continue
                 }

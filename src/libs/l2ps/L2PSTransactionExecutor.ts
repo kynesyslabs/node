@@ -444,6 +444,36 @@ export default class L2PSTransactionExecutor {
     }
 
     /**
+     * Has this transaction already been executed in this subnet?
+     *
+     * The admission check in `handleL2PS` asks the L2PS *mempool*, whose rows
+     * are deleted by `cleanupByStatus` once they age past
+     * `l2ps.cleanupAgeMs` (five minutes by default). After that the same
+     * encrypted payload is new again — and nothing else stops it: the inner
+     * nonce is not enforced ("nonce edits are always valid"), the ciphertext
+     * is readable from the subnet's public history, and the execute RPC
+     * carries no outer signature or fee. So a confirmed transfer could be
+     * resubmitted and paid out a second time.
+     *
+     * `l2ps_transactions` is the permanent record of what actually executed
+     * (its `hash` column is unique), so it answers the question after the
+     * mempool row is gone. It was already consulted implicitly — by failing
+     * the insert AFTER the balance edits had been generated.
+     */
+    static async hasExecuted(originalHash: string): Promise<boolean> {
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+        const txRepo = ds.getRepository(L2PSTransaction)
+
+        const existing = await txRepo.findOne({
+            where: { hash: originalHash },
+            select: { id: true },
+        })
+        return existing !== null
+    }
+
+    /**
      * Update transaction status after proof is applied at consensus
      */
     static async updateTransactionStatus(
