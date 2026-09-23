@@ -1537,6 +1537,15 @@ export async function fastSync(
     peers: Peer[] = [],
     from: string,
 ): Promise<{ latestChainBlock: number; ourLatestBlock: number }> {
+    if (process.env.SYNC_PULL_DISABLED === "true" && from !== "index.ts") {
+        log.debug(`[fastSync] SYNC_PULL_DISABLED: skipping pull from ${from}`)
+
+        return {
+            latestChainBlock: getSharedState.lastBlockNumber,
+            ourLatestBlock: getSharedState.lastBlockNumber,
+        }
+    }
+
     if (getSharedState.inSyncLoop) {
         log.debug("[fastSync] Sync loop already running, skipping")
 

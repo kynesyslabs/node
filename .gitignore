@@ -215,3 +215,4 @@ src/graphify-out/
 graphify-out/
 .token-savior-cache.json
 HANDOFF.md
+.demos_gossip_key*

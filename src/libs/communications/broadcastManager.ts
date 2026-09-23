@@ -353,6 +353,7 @@ export class BroadcastManager {
                 syncData: peerman.ourSyncDataString,
             }
         }
+
         if (claimedBlock > (getSharedState.lastBlockNumber ?? 0)) {
             return {
                 result: 400,
@@ -361,6 +362,7 @@ export class BroadcastManager {
                 syncData: peerman.ourSyncDataString,
             }
         }
+
         const ourBlock = await Chain.getBlockByNumber(claimedBlock)
         if (!ourBlock || ourBlock.hash !== claimedHash) {
             return {
