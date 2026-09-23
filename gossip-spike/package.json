@@ -1,0 +1,15 @@
+{
+    "name": "gossip-spike",
+    "private": true,
+    "type": "module",
+    "description": "Two-server Bun + libp2p gossipsub ping-pong verification",
+    "dependencies": {
+        "libp2p": "2.10.0",
+        "@chainsafe/libp2p-gossipsub": "14.1.2",
+        "@chainsafe/libp2p-noise": "16.1.5",
+        "@chainsafe/libp2p-yamux": "7.0.4",
+        "@libp2p/tcp": "10.1.19",
+        "@libp2p/identify": "3.0.39",
+        "@multiformats/multiaddr": "^12.0.0"
+    }
+}
