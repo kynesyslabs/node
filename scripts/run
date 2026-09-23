@@ -2,13 +2,15 @@
 
 PG_PORT=5332
 PEER_LIST_FILE="demos_peerlist.json"
+GOSSIP_PORT="${GOSSIP_PORT:-}"
+GOSSIP_KEY_FILE="${GOSSIP_KEY_FILE:-}"
 VERBOSE=false
 NO_TUI=false
 EXTERNAL_DB=false
 
 GIT_PULL=true
-TLSNOTARY_DISABLED=false
-MONITORING_DISABLED=false
+TLSNOTARY_DISABLED=true
+MONITORING_DISABLED=true
 
 # Detect platform for cross-platform compatibility
 PLATFORM=$(uname -s)
@@ -82,6 +84,8 @@ OPTIONS:
     -n <true/false>                Skip git pull (useful for custom branches)
     -u <url>                       Override EXPOSED_URL
     -l <path>                      Peer list file (default: demos_peerlist.json)
+    -g <port>                      Gossip (libp2p) TCP port (default: 9095)
+    -k <path>                      Gossip transport key file (default: .demos_gossip_key)
     -r <runtime>                   Force runtime (bun only - node deprecated)
     -b <true/false>                Restore from backup
     -t                             Disable TUI (use legacy scrolling logs)
@@ -482,13 +486,15 @@ for arg in "$@"; do
 done
 
 # Getting arguments
-while getopts "p:d:c:i:n:u:l:r:b:tvehm" opt; do
+while getopts "p:d:c:i:n:u:l:r:b:g:k:tvehm" opt; do
 	case $opt in
 	p) PORT=$OPTARG ;;
 	d) PG_PORT=$OPTARG ;;
 	c) CLEAN=$OPTARG ;;
 	i) IDENTITY_FILE=$OPTARG ;;
 	l) PEER_LIST_FILE=$OPTARG ;;
+	g) GOSSIP_PORT=$OPTARG ;;
+	k) GOSSIP_KEY_FILE=$OPTARG ;;
 	n) GIT_PULL=false ;;
 	u) EXPOSED_URL=$OPTARG ;;
 	r) RUNTIME=$OPTARG ;;
@@ -592,6 +598,12 @@ if [[ ! -z "${EXPOSED_URL}" ]]; then
 	echo "   📡 Exposed URL: $EXPOSED_URL"
 fi
 echo "   👥 Peer List: $PEER_LIST_FILE"
+if [[ ! -z "${GOSSIP_PORT}" ]]; then
+	echo "   📣 Gossip Port: $GOSSIP_PORT"
+fi
+if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
+	echo "   🔐 Gossip Key File: $GOSSIP_KEY_FILE"
+fi
 if [[ "${EXTERNAL_DB}" = true ]]; then
 	echo "   🔗 Mode: External database (DATABASE_URL)"
 elif [[ "${RESTORE}" = "true" ]]; then
@@ -659,6 +671,12 @@ export IDENTITY_FILE=$IDENTITY_FILE
 export EXPOSED_URL=$EXPOSED_URL
 export PEER_LIST_FILE=$PEER_LIST_FILE
 export RESTORE=${RESTORE}
+if [[ ! -z "${GOSSIP_PORT}" ]]; then
+	export GOSSIP_PORT=$GOSSIP_PORT
+fi
+if [[ ! -z "${GOSSIP_KEY_FILE}" ]]; then
+	export GOSSIP_KEY_FILE=$GOSSIP_KEY_FILE
+fi
 
 # Only manage PostgreSQL if not using external database
 if [[ "${EXTERNAL_DB}" = false ]]; then

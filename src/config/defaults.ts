@@ -35,7 +35,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     core: {
         prod: false,
-        shardSize: 4,
+        shardSize: 1,
         mainLoopSleepTime: 1000,
         helloRefreshIntervalMs: 5000,
         rpcFeePercent: 10,
@@ -176,5 +176,12 @@ export const DEFAULT_CONFIG: AppConfig = {
     ipfs: {
         swarmPort: 4001,
         apiPort: 5001,
+    },
+
+    gossip: {
+        enabled: true,
+        port: 9095,
+        heightsIntervalMs: 1000,
+        keyFile: ".demos_gossip_key",
     },
 }
