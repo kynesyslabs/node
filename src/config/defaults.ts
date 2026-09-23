@@ -37,7 +37,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         prod: false,
         shardSize: 1,
         mainLoopSleepTime: 1000,
-        helloRefreshIntervalMs: 60_000,
+        helloRefreshIntervalMs: 5000,
         rpcFeePercent: 10,
         // Flat per-tx fee components. Total cost of a tx today is the sum
         // of these three: networkFee + rpcFee + burnFee = 1 + 1 + 1 = 3.

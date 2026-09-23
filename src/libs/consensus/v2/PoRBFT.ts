@@ -419,7 +419,7 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
 
-            // BroadcastManager.broadcastNewBlock(block)
+            BroadcastManager.broadcastNewBlock(block)
             DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state
