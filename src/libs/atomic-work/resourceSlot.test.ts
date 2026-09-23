@@ -6,7 +6,7 @@ import {
     reserveSlot,
     settleSlot,
     rollbackSlot,
-    PaymentSlotCasError,
+    SlotCasError,
     type SlotState,
 } from "@/libs/atomic-work/resourceSlot"
 
@@ -87,7 +87,7 @@ describe("payment-slot CAS + reserve", () => {
     it("rejects a CAS state mismatch (compare-and-reject, like nonce)", () => {
         expect(() =>
             assertCasPrecondition({ state: "in-flight", generation: 1, workId: "w", conflictDigest: "d" }, { state: "vacant", generation: 1 }),
-        ).toThrow(PaymentSlotCasError)
+        ).toThrow(SlotCasError)
     })
 
     it("rejects a CAS generation mismatch (stale reservation)", () => {
@@ -97,7 +97,7 @@ describe("payment-slot CAS + reserve", () => {
         } catch (e) {
             err = e
         }
-        expect(err).toBeInstanceOf(PaymentSlotCasError)
-        expect((err as PaymentSlotCasError).reason).toBe("generation-mismatch")
+        expect(err).toBeInstanceOf(SlotCasError)
+        expect((err as SlotCasError).reason).toBe("generation-mismatch")
     })
 })

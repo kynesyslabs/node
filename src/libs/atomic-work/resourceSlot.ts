@@ -54,7 +54,7 @@ export interface SlotCasExpectation {
     generation: number
 }
 
-export class PaymentSlotCasError extends Error {
+export class SlotCasError extends Error {
     constructor(
         message: string,
         readonly reason:
@@ -63,7 +63,7 @@ export class PaymentSlotCasError extends Error {
             | "not-in-flight",
     ) {
         super(message)
-        this.name = "PaymentSlotCasError"
+        this.name = "SlotCasError"
     }
 }
 
@@ -77,13 +77,13 @@ export function assertCasPrecondition(
     expected: SlotCasExpectation,
 ): void {
     if (stored.state !== expected.state)
-        throw new PaymentSlotCasError(
-            `payment-slot CAS: expected state ${expected.state}, stored ${stored.state}`,
+        throw new SlotCasError(
+            `slot CAS: expected state ${expected.state}, stored ${stored.state}`,
             "state-mismatch",
         )
     if (stored.generation !== expected.generation)
-        throw new PaymentSlotCasError(
-            `payment-slot CAS: expected generation ${expected.generation}, stored ${stored.generation}`,
+        throw new SlotCasError(
+            `slot CAS: expected generation ${expected.generation}, stored ${stored.generation}`,
             "generation-mismatch",
         )
 }
