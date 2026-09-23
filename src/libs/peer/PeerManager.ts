@@ -706,6 +706,18 @@ export default class PeerManager {
                 peer.sync = response.extra.syncData
             }
 
+            if (typeof response.extra.gossip?.multiaddr === "string") {
+                void import("../gossip/GossipManager").then(
+                    ({ default: gossipManager }) => {
+                        if (gossipManager.isEnabled()) {
+                            gossipManager.getInstance().dial([
+                                response.extra.gossip.multiaddr,
+                            ])
+                        }
+                    },
+                )
+            }
+
             peerman.addPeer(peer, verdict === "verified")
             peerman.removeOfflinePeer(peer.identity)
 

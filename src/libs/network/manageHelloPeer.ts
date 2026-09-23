@@ -13,6 +13,7 @@ import {
 import { RPCResponse, SigningAlgorithm } from "@kynesyslabs/demosdk/types"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { helloResponseMessage } from "../peer/helloAuth"
+import GossipManager from "../gossip/GossipManager"
 
 export interface HelloPeerRequest {
     url: string
@@ -159,11 +160,23 @@ export async function manageHelloPeer(
 
     // INFO: Return a list of all our connected peers
 
+    const gossipAddr = GossipManager.isEnabled()
+        ? GossipManager.getInstance().getListenAddr()
+        : null
+
     response.result = 200
     response.response = true
     response.extra = {
         msg: "Peer connected",
         ...(content.nonce ? await signHelloResponse(content.nonce) : {}),
+        ...(gossipAddr
+            ? {
+                  gossip: {
+                      peerId: GossipManager.getInstance().getPeerId(),
+                      multiaddr: gossipAddr,
+                  },
+              }
+            : {}),
         syncData: peerManager.ourSyncData,
         peerlist: peerManager
             .getPeers()

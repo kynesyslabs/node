@@ -18,6 +18,7 @@ import { Peer } from "./libs/peer"
 import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
+import GossipManager from "./libs/gossip/GossipManager"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -471,6 +472,17 @@ async function preMainLoop() {
     } catch (e) {
         log.debug("[NETWORK] " + e)
         log.warning("[NETWORK] {OFFLINE?} Failed to get public IP")
+    }
+
+    // ANCHOR Gossip layer (libp2p gossipsub) — must be up before the hello
+    // phase so hello responses can carry our multiaddr. Failure inside
+    // start() is fatal by design.
+    if (GossipManager.isEnabled()) {
+        getSharedState.bootTracker.start("gossip")
+        await GossipManager.getInstance().start()
+        getSharedState.bootTracker.ready("gossip")
+    } else {
+        getSharedState.bootTracker.skip("gossip", "disabled")
     }
 
     // ANCHOR Looking for the genesis block

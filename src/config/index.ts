@@ -32,6 +32,7 @@ import type {
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,
+    GossipConfig,
 } from "./types"
 
 export class Config {
@@ -104,6 +105,10 @@ export class Config {
         return this.data.ipfs
     }
 
+    get gossip(): Readonly<GossipConfig> {
+        return this.data.gossip
+    }
+
     /** Full config snapshot (read-only) */
     get all(): Readonly<AppConfig> {
         return this.data
@@ -138,4 +143,5 @@ export type {
     IdentityConfig,
     BridgesConfig,
     IPFSConfig,
+    GossipConfig,
 } from "./types"

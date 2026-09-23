@@ -8,6 +8,8 @@ import { Waiter } from "@/utilities/waiter"
 import { getSharedState } from "@/utilities/sharedState"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { Mutex } from "async-mutex"
+import GossipManager from "../gossip/GossipManager"
+import { observeBlockFirstSeen } from "../gossip/metrics"
 
 /**
  *
@@ -24,6 +26,26 @@ export class BroadcastManager {
      * @param block The new block to broadcast
      */
     static async broadcastNewBlock(block: Block) {
+        // Gossip is the primary push path; the HTTP fan-out below only
+        // runs when gossip is off or the mesh is not ready.
+        if (GossipManager.isEnabled() && GossipManager.getInstance().isReady()) {
+            log.debug(
+                `[GOSSIP] routing block ${block.number} push over gossip`,
+            )
+            const published = await GossipManager.getInstance().publishBlock(
+                block as never,
+            )
+            if (published) {
+                await this.broadcastOurSyncData()
+                return true
+            }
+        }
+
+        log.debug(
+            `[GOSSIP] routing block ${block.number} push over HTTP fan-out (gossip ${
+                GossipManager.isEnabled() ? "not ready" : "disabled"
+            })`,
+        )
         const peerlist = PeerManager.getInstance().getPeers()
 
         // filter by block signers
@@ -84,7 +106,11 @@ export class BroadcastManager {
      *
      * @param block The new block received
      */
-    static async handleNewBlock(sender: string, block: Block) {
+    static async handleNewBlock(
+        sender: string,
+        block: Block,
+        source: "http" | "gossip" = "http",
+    ) {
         log.debug("handleNewBlock called with block: " + block.number)
         const peerman = PeerManager.getInstance()
 
@@ -172,6 +198,11 @@ export class BroadcastManager {
             }
         }
 
+        observeBlockFirstSeen(
+            source,
+            Math.max(0, Date.now() - (block.content?.timestamp ?? 0) * 1000),
+        )
+
         const peer = peerman.getPeer(sender)
         const res = await syncBlock(block, peer)
 
@@ -204,8 +235,21 @@ export class BroadcastManager {
 
                 if (syncData !== BroadcastManager.lastBroadcastSyncData) {
                     BroadcastManager.lastBroadcastSyncData = syncData
-                    const successful =
-                        await BroadcastManager.sendSyncDataToPeers(syncData)
+                    let successful: boolean
+                    if (
+                        GossipManager.isEnabled() &&
+                        GossipManager.getInstance().isReady()
+                    ) {
+                        log.debug(
+                            `[GOSSIP] routing sync data over gossip: ${syncData}`,
+                        )
+                        successful = await GossipManager.getInstance()
+                            .publishOwnHeights()
+                            .catch(() => false)
+                    } else {
+                        successful =
+                            await BroadcastManager.sendSyncDataToPeers(syncData)
+                    }
                     anySuccessful = anySuccessful || successful
                 }
             } while (BroadcastManager.syncDataBroadcastPending)

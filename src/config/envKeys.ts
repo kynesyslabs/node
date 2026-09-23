@@ -151,6 +151,12 @@ export const EnvKey = {
     IPFS_SWARM_PORT: "IPFS_SWARM_PORT",
     IPFS_API_PORT: "IPFS_API_PORT",
 
+    // --- Gossip (libp2p gossipsub) ---
+    GOSSIP_ENABLED: "GOSSIP_ENABLED",
+    GOSSIP_PORT: "GOSSIP_PORT",
+    GOSSIP_HEIGHTS_INTERVAL: "GOSSIP_HEIGHTS_INTERVAL",
+    GOSSIP_KEY_FILE: "GOSSIP_KEY_FILE",
+
     // --- External service credentials (compose-scoped; node may not see these) ---
     GRAFANA_ADMIN_PASSWORD: "GRAFANA_ADMIN_PASSWORD",
     NEO4J_AUTH: "NEO4J_AUTH",
