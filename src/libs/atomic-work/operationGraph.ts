@@ -1,12 +1,16 @@
+import { atomicWorkProfile, type ExpectedOperation } from "@/libs/atomic-work/profile"
+
 /**
- * Atomic Work fixed operation-graph validator (DACS §A.6, `_profile_shape`).
+ * Atomic Work fixed operation-graph validator.
  *
- * Approach A binds each Work profile to ONE fixed operation graph. The node
- * must reject any intent whose operations deviate in count, id, kind,
- * dependency edges, or required roles before it expands the intent into GCR
- * edits — the shape is what makes the expansion deterministic and safe.
+ * A profile binds itself to ONE fixed operation graph. The node rejects any
+ * intent whose operations deviate in count, id, kind, dependency edges or
+ * required roles before it expands the intent into state edits — the fixed
+ * shape is what makes that expansion deterministic, and therefore safe to
+ * roll back as a unit.
  *
- * This is a byte-for-byte port of the reference `_profile_shape` predicate.
+ * An intent naming a profile nobody registered is rejected outright: an
+ * unknown shape cannot be checked, so it cannot be admitted.
  */
 
 export interface OperationView {
@@ -19,29 +23,6 @@ export interface IntentGraphView {
     profile?: string
     operations?: OperationView[]
 }
-
-interface ExpectedOp {
-    operationId: string
-    kinds: string[]
-    dependsOn: string[]
-    requiredRoles: string[]
-}
-
-/** dacs-purchase-v1: six operations, buyer/seller vetting → agreement → commitment → slot → payment. */
-export const PURCHASE_GRAPH: ExpectedOp[] = [
-    { operationId: "buyer-vet", kinds: ["assert-artifact", "storage-program-put"], dependsOn: [], requiredRoles: ["orchestrator"] },
-    { operationId: "seller-vet", kinds: ["assert-artifact", "storage-program-put"], dependsOn: [], requiredRoles: ["orchestrator"] },
-    { operationId: "agreement", kinds: ["assert-artifact"], dependsOn: ["buyer-vet", "seller-vet"], requiredRoles: ["orchestrator"] },
-    { operationId: "commitment", kinds: ["storage-program-put"], dependsOn: ["agreement"], requiredRoles: ["orchestrator"] },
-    { operationId: "payment-slot", kinds: ["payment-slot-cas"], dependsOn: ["commitment"], requiredRoles: ["payer"] },
-    { operationId: "payment", kinds: ["native-dem-transfer"], dependsOn: ["payment-slot"], requiredRoles: ["payer"] },
-]
-
-/** Any non-purchase profile (e.g. dacs-completion-v1): receipt → delivery. */
-export const COMPLETION_GRAPH: ExpectedOp[] = [
-    { operationId: "purchase-receipt", kinds: ["assert-work-receipt"], dependsOn: [], requiredRoles: ["orchestrator"] },
-    { operationId: "delivery", kinds: ["storage-program-put"], dependsOn: ["purchase-receipt"], requiredRoles: ["seller"] },
-]
 
 export class OperationGraphError extends Error {
     constructor(message: string) {
@@ -58,9 +39,15 @@ function arrayEquals(a: unknown, b: string[]): boolean {
     )
 }
 
-/** The expected graph for a profile (purchase has its own; all others share completion). */
-export function expectedGraphFor(profile: string | undefined): ExpectedOp[] {
-    return profile === "dacs-purchase-v1" ? PURCHASE_GRAPH : COMPLETION_GRAPH
+/** The graph a registered profile declares. */
+export function expectedGraphFor(profile: string | undefined): ExpectedOperation[] {
+    const registered = atomicWorkProfile(profile)
+    if (!registered) {
+        throw new OperationGraphError(
+            `unknown atomic work profile: ${profile ?? "(none)"}`,
+        )
+    }
+    return registered.operationGraph
 }
 
 /**

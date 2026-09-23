@@ -2,9 +2,13 @@ import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
-    WORK_RECEIPT_DOMAIN,
     computeReceiptCommitment,
 } from "@/libs/atomic-work/receiptCommitment"
+import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
+import { registerDacsAtomicWorkProfiles } from "@/libs/atomic-work/dacs/profile"
+
+registerDacsAtomicWorkProfiles()
+const WORK_RECEIPT_DOMAIN = DACS_DOMAINS.workReceipt
 
 // Real atomic-work receipts + their PUBLISHED receiptCommitment, lifted from the
 // #336 conformance vectors (DACS-Standard atomic-work-*-v0.1 @ 6a4dd2a). Spans
@@ -39,14 +43,14 @@ describe("computeReceiptCommitment — reconciliation vs published #336 vectors"
 
     for (const [i, c] of fixture.cases.entries()) {
         it(`reproduces published receiptCommitment [case ${i}] (${c.source})`, () => {
-            expect(computeReceiptCommitment(c.receipt)).toBe(c.receiptCommitment)
+            expect(computeReceiptCommitment(c.receipt, WORK_RECEIPT_DOMAIN)).toBe(c.receiptCommitment)
         })
     }
 
     it("does not mutate the input receipt", () => {
         const c = fixture.cases[0]
         const before = JSON.stringify(c.receipt)
-        computeReceiptCommitment(c.receipt)
+        computeReceiptCommitment(c.receipt, WORK_RECEIPT_DOMAIN)
         expect(JSON.stringify(c.receipt)).toBe(before)
     })
 })

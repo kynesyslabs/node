@@ -6,6 +6,9 @@ import {
     OperationGraphError,
     type IntentGraphView,
 } from "@/libs/atomic-work/operationGraph"
+import { registerDacsAtomicWorkProfiles } from "@/libs/atomic-work/dacs/profile"
+
+registerDacsAtomicWorkProfiles()
 
 // Canonical operation graphs from #336 pass vectors (both profiles), each of
 // which passes the reference `_profile_shape` predicate.

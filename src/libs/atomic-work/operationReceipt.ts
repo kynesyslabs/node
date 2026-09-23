@@ -1,14 +1,15 @@
 import crypto from "crypto"
 import Hashing from "@/libs/crypto/hashing"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
+import { leafDigest } from "@/libs/atomic-work/digest"
 
 /**
- * DACS §A.6 / D6 evidence hashes: per-operation input/output hashes, the
- * operation-receipt merkle root, and the business-state roots. All are pure
- * JCS-over-sha256 (no domain prefix) except the merkle leaf, which is
- * domain-separated. Byte-exact ports of the DACS reference.
+ * Per-operation evidence hashes: input and output hashes, the business-state
+ * roots, and the merkle root over operation results. All are plain
+ * JCS-over-sha256 except the merkle leaf, which is domain-separated so a leaf
+ * can never be replayed as an interior node. The leaf's domain belongs to the
+ * profile and arrives as a parameter.
  */
-export const OP_RECEIPT_DOMAIN = "dacs-atomic-operation-receipt:v1:"
 
 function jcsBytes(value: unknown): Buffer {
     return Buffer.from(jcsCanonicalize(value), "utf-8")
@@ -76,18 +77,12 @@ function merkleRootFromHashes(hashes: Buffer[]): Buffer {
     )
 }
 
-/** operationLeafHash = sha256(0x00 ‖ OP_RECEIPT_DOMAIN ‖ JCS(leaf)). */
-function operationLeafHash(leaf: unknown): Buffer {
-    return sha256(
-        Buffer.concat([
-            Buffer.from([0x00]),
-            Buffer.from(OP_RECEIPT_DOMAIN, "ascii"),
-            jcsBytes(leaf),
-        ]),
-    )
-}
-
 /** operationReceiptRoot = merkle root over the leaf-hashed operation results. */
-export function computeOperationReceiptRoot(results: unknown[]): string {
-    return merkleRootFromHashes(results.map(operationLeafHash)).toString("hex")
+export function computeOperationReceiptRoot(
+    results: unknown[],
+    domain: string,
+): string {
+    return merkleRootFromHashes(
+        results.map((leaf) => leafDigest(domain, leaf)),
+    ).toString("hex")
 }

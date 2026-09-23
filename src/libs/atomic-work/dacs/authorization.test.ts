@@ -8,7 +8,7 @@ import {
     verifyAuthorizationCoverage,
     AuthorizationError,
     type AuthzIntent,
-} from "@/libs/atomic-work/authorization"
+} from "@/libs/atomic-work/dacs/authorization"
 
 // Authorization fixtures from #336 pass vectors (DACS-Standard @ 6a4dd2a):
 // self-validated authorization_hash cases + full coverage cases (intent envelope

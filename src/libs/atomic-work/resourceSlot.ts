@@ -1,18 +1,20 @@
 /**
- * Payment-slot compare-and-swap state machine (DACS §A.6 / D2).
+ * Resource-slot compare-and-swap state machine.
  *
- * The atomic payment slot is keyed by `(networkId, railId, jobId, phaseIndex)`
- * and carries a monotone `generation`. It moves through a fixed lifecycle:
+ * A slot is the reservation over one contended resource. Its key is derived by
+ * the profile — the substrate never chooses it, and never accepts one chosen
+ * by the caller — and it carries a monotone `generation`. It moves through a
+ * fixed lifecycle:
  *
  *   vacant ──reserve──▶ in-flight ──settle────▶ settled
  *                              └────rollback───▶ rolled-back ──reserve(retry)─▶ …
  *
- * The node applies a payment-slot-cas edit exactly like the nonce precondition
+ * The node applies a slot edit exactly like the nonce precondition
  * (`expectedPrior` compare-and-reject): the stored slot must equal the edit's
  * signed `expected` {state, generation}, or the edit is rejected. This module is
  * the pure state machine; wiring into the GCR routine/edit is the consensus layer.
  *
- * Generation arithmetic (byte-exact with the DACS reference): a terminal
+ * Generation arithmetic: a terminal
  * transition bumps the generation by one ONLY on a retry — i.e. when the prior
  * state was `rolled-back` — and leaves it unchanged on a first attempt from
  * `vacant`. Reserve never changes the generation.
@@ -46,7 +48,7 @@ export interface RolledBackSlot {
 }
 export type SlotState = VacantSlot | InFlightSlot | SettledSlot | RolledBackSlot
 
-/** The signed CAS precondition carried by a payment-slot-cas edit. */
+/** The signed CAS precondition carried by a slot edit. */
 export interface SlotCasExpectation {
     state: "vacant" | "rolled-back"
     generation: number

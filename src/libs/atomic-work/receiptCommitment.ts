@@ -1,28 +1,26 @@
-import Hashing from "@/libs/crypto/hashing"
-import { jcsCanonicalize } from "@/libs/crypto/jcs"
-
-/** Domain separation tag — normative (matches DACS WORK_RECEIPT_DOMAIN). */
-export const WORK_RECEIPT_DOMAIN = "dacs-atomic-work-receipt:v1:"
+import { domainDigest } from "@/libs/atomic-work/digest"
+import { atomicWorkProfile } from "@/libs/atomic-work/profile"
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
     return typeof v === "object" && v !== null && !Array.isArray(v)
 }
 
 /**
- * receiptCommitment = SHA-256("dacs-atomic-work-receipt:v1:" ‖ JCS(core)), where
- * `core` is the receipt with the non-committed / self-referential fields
- * projected out (a faithful port of the DACS reference `_receipt_commitment`):
+ * What a block commits to when it commits to a receipt.
  *
- *   - top-level `receiptCommitment` and `finalityEvidence` removed;
- *   - `blockRef.id`, `businessState.evidence`, and top-level `slotStateEvidence`
- *     removed (post-commit evidence the commitment must not bind);
- *   - for the `dacs-purchase-v1` profile only, the payment slot's `after`
- *     `receiptCommitment` / `failureReceiptCommitment` removed (they embed this
- *     very commitment and would be circular).
+ * The commitment covers the receipt with its non-committed and
+ * self-referential fields projected out: the commitment itself, finality
+ * evidence, the block id, business-state evidence and slot-state evidence —
+ * all of which are only knowable after the commit, so binding them would be
+ * circular. A profile removes whatever else its own receipt embeds, through
+ * `projectReceiptCore`.
  *
- * The input receipt is not mutated (it is deep-cloned first).
+ * The input receipt is not mutated.
  */
-export function computeReceiptCommitment(receipt: Record<string, unknown>): string {
+export function computeReceiptCommitment(
+    receipt: Record<string, unknown>,
+    domain: string,
+): string {
     const core = structuredClone(receipt) as Record<string, unknown>
     delete core.receiptCommitment
     delete core.finalityEvidence
@@ -31,13 +29,7 @@ export function computeReceiptCommitment(receipt: Record<string, unknown>): stri
     if (isPlainObject(core.businessState)) delete core.businessState.evidence
     delete core.slotStateEvidence
 
-    if (core.profile === "dacs-purchase-v1" && isPlainObject(core.paymentSlot)) {
-        const after = (core.paymentSlot as Record<string, unknown>).after
-        if (isPlainObject(after)) {
-            delete after.receiptCommitment
-            delete after.failureReceiptCommitment
-        }
-    }
+    atomicWorkProfile(core.profile as string | undefined)?.projectReceiptCore?.(core)
 
-    return Hashing.sha256(WORK_RECEIPT_DOMAIN + jcsCanonicalize(core))
+    return domainDigest(domain, core)
 }

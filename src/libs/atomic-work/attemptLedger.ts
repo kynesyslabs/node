@@ -1,16 +1,16 @@
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
 
 /**
- * Atomic Work attempt ledger — single-winner selection + fencing (DACS §A.6 / D5).
+ * Atomic Work attempt ledger — single-winner selection and fencing.
  *
  * A Work may be attempted on the native ledger more than once (retries,
  * replacements). At most ONE attempt may carry an authenticated `included-*`
  * lifecycle state; that attempt is the winner, and only it may produce business
  * effects. This module is the pure selection/fence layer — it consumes lifecycle
- * states that the authorization layer (D3) has already authenticated; it does not
- * itself verify signatures.
+ * states the authorization layer has already authenticated; it does not itself
+ * verify signatures.
  *
- * Invariants enforced (byte-for-byte with the DACS reference `evaluate_attempts`):
+ * Invariants enforced:
  *  - `nativeTransactionRef` is unique across attempts (the double-execution fence);
  *  - `attemptId` is unique;
  *  - at most one attempt is `included-*`;

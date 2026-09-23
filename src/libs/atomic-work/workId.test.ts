@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test"
 import Hashing from "@/libs/crypto/hashing"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
-import { ATOMIC_WORK_ID_DOMAIN, computeWorkId } from "@/libs/atomic-work/workId"
+import { computeWorkId } from "@/libs/atomic-work/workId"
+import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
+
+const ATOMIC_WORK_ID_DOMAIN = DACS_DOMAINS.workId
 
 describe("computeWorkId", () => {
     const intent = { b: "2", a: "1", nested: { y: 2, x: 1 } }
@@ -10,7 +13,7 @@ describe("computeWorkId", () => {
         const expected = Hashing.sha256(
             ATOMIC_WORK_ID_DOMAIN + jcsCanonicalize(intent),
         )
-        expect(computeWorkId(intent)).toBe(expected)
+        expect(computeWorkId(intent, ATOMIC_WORK_ID_DOMAIN)).toBe(expected)
     })
 
     it("pins the domain string verbatim", () => {
@@ -18,12 +21,12 @@ describe("computeWorkId", () => {
     })
 
     it("is 64-char lowercase hex", () => {
-        expect(computeWorkId(intent)).toMatch(/^[0-9a-f]{64}$/)
+        expect(computeWorkId(intent, ATOMIC_WORK_ID_DOMAIN)).toMatch(/^[0-9a-f]{64}$/)
     })
 
     it("is independent of caller key order (JCS canonicalizes)", () => {
-        expect(computeWorkId({ a: "1", b: "2" })).toBe(
-            computeWorkId({ b: "2", a: "1" }),
+        expect(computeWorkId({ a: "1", b: "2" }, ATOMIC_WORK_ID_DOMAIN)).toBe(
+            computeWorkId({ b: "2", a: "1" }, ATOMIC_WORK_ID_DOMAIN),
         )
     })
 })

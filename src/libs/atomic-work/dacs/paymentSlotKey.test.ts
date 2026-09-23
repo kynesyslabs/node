@@ -5,7 +5,7 @@ import {
     PAYMENT_SLOT_DOMAIN,
     computeConflictDigest,
     type PaymentSlotConflictFields,
-} from "@/libs/atomic-work/paymentSlotDigest"
+} from "@/libs/atomic-work/dacs/paymentSlotKey"
 
 const fields: PaymentSlotConflictFields = {
     networkId: "demos-testnet",

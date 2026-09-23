@@ -1,15 +1,12 @@
-import Hashing from "@/libs/crypto/hashing"
-import { jcsCanonicalize } from "@/libs/crypto/jcs"
-
-/** Domain separation tag — normative (Binding-Pass §5, AW-14/16/17/18). */
-export const ATOMIC_WORK_ID_DOMAIN = "dacs-atomic-work:v1:"
+import { domainDigest } from "@/libs/atomic-work/digest"
 
 /**
- * workId = SHA-256("dacs-atomic-work:v1:" ‖ JCS(unsignedIntent)).
+ * The identity of an atomic Work.
  *
- * WHY: the node MUST recompute this from the unsigned intent and never trust a
- * caller-supplied value (AW-14/16/17/18).
+ * workId = sha256(domain ‖ JCS(unsignedIntent)), where the domain belongs to
+ * the profile. The node MUST recompute this from the unsigned intent and never
+ * trust a caller-supplied value, or a Work could claim another's identity.
  */
-export function computeWorkId(unsignedIntent: unknown): string {
-    return Hashing.sha256(ATOMIC_WORK_ID_DOMAIN + jcsCanonicalize(unsignedIntent))
+export function computeWorkId(unsignedIntent: unknown, domain: string): string {
+    return domainDigest(domain, unsignedIntent)
 }

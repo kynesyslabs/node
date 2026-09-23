@@ -8,7 +8,7 @@ import {
     rollbackSlot,
     PaymentSlotCasError,
     type SlotState,
-} from "@/libs/atomic-work/paymentSlot"
+} from "@/libs/atomic-work/resourceSlot"
 
 // Published settle/rollback transitions lifted from the #336
 // atomic-work-settlement-slot-v0.1 vectors (DACS-Standard @ 6a4dd2a): each is a

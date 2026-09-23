@@ -2,7 +2,11 @@ import Hashing from "@/libs/crypto/hashing"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
 
 /**
- * Atomic Work per-operation authorization (DACS §A.6 / D3).
+ * DACS per-operation authorization.
+ *
+ * This is a binding, not substrate: the envelope it builds names a network,
+ * rail, job and phase, which are DACS concepts. The substrate only knows that
+ * an operation declares `requiredRoles` and that something must cover them.
  *
  * Every operation names `requiredRoles`; each (operation, role) pair must be
  * covered by exactly one signed authorization whose envelope binds the Work
@@ -14,11 +18,14 @@ import { jcsCanonicalize } from "@/libs/crypto/jcs"
  * Ports the reference `verify_authorizations` structural checks + `authorization_hash`.
  */
 
+import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
+import { DACS_ROLES } from "@/libs/atomic-work/dacs/profile"
+
 /** Signature domain: signatures are over AUTH_DOMAIN ‖ authorizationHash(ascii). */
-export const AUTH_DOMAIN = "dacs-atomic-work-authorization:v1:"
+export const AUTH_DOMAIN: string = DACS_DOMAINS.authorization
 
 /** Canonical role evaluation order. */
-export const ROLE_ORDER = ["buyer", "seller", "orchestrator", "payer"] as const
+export const ROLE_ORDER: readonly string[] = DACS_ROLES
 
 /** authorizationHash = sha256(JCS(authorization without its `value` signature)). */
 export function computeAuthorizationHash(

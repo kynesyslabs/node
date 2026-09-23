@@ -2,13 +2,15 @@ import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import {
-    OP_RECEIPT_DOMAIN,
     computeInputHash,
     computeOutputHash,
     computeStateRoot,
     computeEffectsRoot,
     computeOperationReceiptRoot,
 } from "@/libs/atomic-work/operationReceipt"
+import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
+
+const OP_RECEIPT_DOMAIN = DACS_DOMAINS.operationReceipt
 
 // D6 evidence-hash fixture from the #336 pass vectors (DACS-Standard @ 6a4dd2a);
 // every case self-validated against the reference before emission.
@@ -49,7 +51,7 @@ describe("D6 operation/evidence hashes — reconciliation vs #336 vectors", () =
 
     for (const [i, c] of fx.receiptRoot.entries()) {
         it(`reproduces operationReceiptRoot [case ${i}, ${c.operationResults.length} leaves]`, () => {
-            expect(computeOperationReceiptRoot(c.operationResults)).toBe(
+            expect(computeOperationReceiptRoot(c.operationResults, OP_RECEIPT_DOMAIN)).toBe(
                 c.operationReceiptRoot,
             )
         })
@@ -78,15 +80,15 @@ describe("D6 operation/evidence hashes — reconciliation vs #336 vectors", () =
 
 describe("operationReceiptRoot — merkle structure", () => {
     it("single leaf returns the leaf hash verbatim (no internal node)", () => {
-        const single = computeOperationReceiptRoot([{ a: 1 }])
-        const asTwo = computeOperationReceiptRoot([{ a: 1 }, { b: 2 }])
+        const single = computeOperationReceiptRoot([{ a: 1 }], OP_RECEIPT_DOMAIN)
+        const asTwo = computeOperationReceiptRoot([{ a: 1 }, { b: 2 }], OP_RECEIPT_DOMAIN)
         expect(single).toMatch(/^[0-9a-f]{64}$/)
         expect(single).not.toBe(asTwo)
     })
 
     it("is order-sensitive", () => {
-        expect(computeOperationReceiptRoot([{ a: 1 }, { b: 2 }])).not.toBe(
-            computeOperationReceiptRoot([{ b: 2 }, { a: 1 }]),
+        expect(computeOperationReceiptRoot([{ a: 1 }, { b: 2 }], OP_RECEIPT_DOMAIN)).not.toBe(
+            computeOperationReceiptRoot([{ b: 2 }, { a: 1 }], OP_RECEIPT_DOMAIN),
         )
     })
 })

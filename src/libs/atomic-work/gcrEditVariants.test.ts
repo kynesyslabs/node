@@ -6,7 +6,7 @@ import type {
     GCREditWorkReceipt,
     GCREditStoragePut,
 } from "@kynesyslabs/demosdk/types"
-import type { SlotCasExpectation } from "@/libs/atomic-work/paymentSlot"
+import type { SlotCasExpectation } from "@/libs/atomic-work/resourceSlot"
 
 /**
  * s1 verification: the four Atomic Work GCR edit variants are exported from the

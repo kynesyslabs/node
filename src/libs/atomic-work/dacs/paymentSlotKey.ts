@@ -1,9 +1,17 @@
-import Hashing from "@/libs/crypto/hashing"
-import { jcsCanonicalize } from "@/libs/crypto/jcs"
 import { assertOsCanonicalAmount } from "@/libs/atomic-work/amountGuard"
+import { domainDigest } from "@/libs/atomic-work/digest"
+import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
 
-/** Domain separation tag — normative (Binding-Pass §5, AWS-1/7). */
-export const PAYMENT_SLOT_DOMAIN = "dacs-atomic-payment-slot:v1:"
+/**
+ * How the DACS profile derives the key of a payment slot.
+ *
+ * This lives in the binding, not the substrate: the substrate knows that a
+ * slot is contended and must be claimed by compare-and-set, and nothing about
+ * rails, jobs or phases. Deriving the key from authenticated fields — rather
+ * than letting a caller name a slot — is what stops one payment from claiming
+ * another's reservation.
+ */
+export const PAYMENT_SLOT_DOMAIN = DACS_DOMAINS.paymentSlot
 
 /**
  * The exact, normative field set of a payment-slot conflict digest.
@@ -28,7 +36,7 @@ export interface PaymentSlotConflictFields {
  */
 export function computeConflictDigest(f: PaymentSlotConflictFields): string {
     assertOsCanonicalAmount(f.amount, "amount")
-    const canonical = jcsCanonicalize({
+    return domainDigest(PAYMENT_SLOT_DOMAIN, {
         networkId: f.networkId,
         railId: f.railId,
         jobId: f.jobId,
@@ -40,5 +48,4 @@ export function computeConflictDigest(f: PaymentSlotConflictFields): string {
         asset: f.asset,
         amount: f.amount,
     })
-    return Hashing.sha256(PAYMENT_SLOT_DOMAIN + canonical)
 }
