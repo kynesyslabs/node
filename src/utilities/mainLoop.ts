@@ -28,31 +28,31 @@ export default async function mainLoop() {
     const interval = () => getSharedState.mainLoopSleepTime
 
     await Promise.all([
-        // startLoopTask({
-        //     name: "block_watchdog",
-        //     fn: blockWatchdogTask,
-        //     intervalMs: interval,
-        //     budgetMs: 30_000,
-        //     runWhilePaused: true,
-        // }),
-        // startLoopTask({
-        //     name: "peer_recheck",
-        //     fn: peerRecheckTask,
-        //     intervalMs: interval,
-        //     budgetMs: 30_000,
-        // }),
+        startLoopTask({
+            name: "block_watchdog",
+            fn: blockWatchdogTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+            runWhilePaused: true,
+        }),
+        startLoopTask({
+            name: "peer_recheck",
+            fn: peerRecheckTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+        }),
         // startLoopTask({
         //     name: "sync_guard",
         //     fn: syncGuardTask,
         //     intervalMs: interval,
         //     budgetMs: 30_000,
         // }),
-        // startLoopTask({
-        //     name: "consensus_trigger",
-        //     fn: consensusTriggerTask,
-        //     intervalMs: interval,
-        //     budgetMs: 30_000,
-        // }),
+        startLoopTask({
+            name: "consensus_trigger",
+            fn: consensusTriggerTask,
+            intervalMs: interval,
+            budgetMs: 30_000,
+        }),
     ])
 }
 
