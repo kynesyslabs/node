@@ -277,6 +277,7 @@ export class GossipManager {
                 await this.onGossipMessage(
                     String(msg.topic),
                     Buffer.from(String(msg.data), "base64"),
+                    String(msg.from ?? ""),
                 )
                 break
             }
@@ -418,10 +419,32 @@ export class GossipManager {
         }
     }
 
+    /** Connection URL of the message originator, from the peerId binding
+     * learned via heights records; falls back to the raw peerId. */
+    private senderUrl(fromPeerId: string): string {
+        if (!fromPeerId) return "unknown"
+        const peer = PeerManager.getInstance()
+            .getAll()
+            .find(p => p.gossip?.peerId === fromPeerId)
+        return peer?.connection.string || fromPeerId
+    }
+
     // Phase-1 validation placement: the sidecar relays without app-level
     // gating, so every delivered message is validated here before applying.
-    private async onGossipMessage(topic: string, data: Buffer): Promise<void> {
-        log.debug(`[GOSSIP] message received on '${topic}' (${data.length} bytes)`)
+    private async onGossipMessage(
+        topic: string,
+        data: Buffer,
+        from: string,
+    ): Promise<void> {
+        let seq: number | undefined
+        try {
+            seq = JSON.parse(data.toString())?.seq
+        } catch {
+            /* validator rejects unparseable payloads below */
+        }
+        log.debug(
+            `[GOSSIP] message received on '${topic}' (${data.length} bytes) from ${this.senderUrl(from)}${seq !== undefined ? `, seq: ${seq}` : ""}`,
+        )
         if (topic === HEIGHTS_TOPIC) {
             const { result, record } = await validateHeightsMessage(
                 new Uint8Array(data),
