@@ -1,5 +1,39 @@
 import { describe, expect, it } from "bun:test"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
+
+/**
+ * The vectors are the contract with the reference implementation. They were
+ * checked in but never executed, and the implementation had drifted from them
+ * in two ways that change consensus identity — so they run first here.
+ */
+interface JcsVectors {
+    accepts: { name: string; input: unknown; canonical: string }[]
+    rejects: { name: string; input: unknown; error: string }[]
+}
+const vectors: JcsVectors = JSON.parse(
+    readFileSync(join(import.meta.dir, "__fixtures__", "jcs_diff.vectors.json"), "utf8"),
+)
+
+describe("the reference vectors", () => {
+    it("covers a meaningful number of cases", () => {
+        expect(vectors.accepts.length).toBeGreaterThan(10)
+        expect(vectors.rejects.length).toBeGreaterThan(0)
+    })
+
+    for (const vector of vectors.accepts) {
+        it(`canonicalizes ${vector.name} exactly`, () => {
+            expect(jcsCanonicalize(vector.input)).toBe(vector.canonical)
+        })
+    }
+
+    for (const vector of vectors.rejects) {
+        it(`refuses ${vector.name}`, () => {
+            expect(() => jcsCanonicalize(vector.input)).toThrow()
+        })
+    }
+})
 
 // ASCII-only source: build unicode forms via code points so bytes are exact.
 const DECOMPOSED = String.fromCodePoint(0x65, 0x301) // "e" + combining acute
@@ -24,8 +58,28 @@ describe("jcsCanonicalize", () => {
         expect(DECOMPOSED).not.toBe(COMPOSED)
     })
 
-    it("NFC-normalizes object keys AND keeps their values", () => {
-        expect(jcsCanonicalize({ [DECOMPOSED]: 5 })).toBe(`{"${COMPOSED}":5}`)
+    it("leaves object keys exactly as received", () => {
+        // Normalizing a key would change the bytes of any payload carrying a
+        // decomposed one, and could collapse two distinct keys into one member.
+        expect(jcsCanonicalize({ [DECOMPOSED]: 5 })).toBe(`{"${DECOMPOSED}":5}`)
+        expect(jcsCanonicalize({ [DECOMPOSED]: 5 })).not.toBe(
+            jcsCanonicalize({ [COMPOSED]: 5 }),
+        )
+    })
+
+    it("normalizes a value but not the key it sits under", () => {
+        expect(jcsCanonicalize({ [DECOMPOSED]: DECOMPOSED })).toBe(
+            `{"${DECOMPOSED}":"${COMPOSED}"}`,
+        )
+    })
+
+    it("refuses numbers with no agreed canonical spelling", () => {
+        expect(() => jcsCanonicalize({ a: 1.5 })).toThrow(/non-integer/)
+        expect(() => jcsCanonicalize({ a: 2 ** 53 })).toThrow(/safe range/)
+        expect(() => jcsCanonicalize({ a: -(2 ** 53) })).toThrow(/safe range/)
+        expect(jcsCanonicalize({ a: Number.MAX_SAFE_INTEGER })).toBe(
+            '{"a":9007199254740991}',
+        )
     })
 
     it("serializes null/boolean/integer", () => {

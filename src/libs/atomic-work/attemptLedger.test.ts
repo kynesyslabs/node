@@ -128,3 +128,33 @@ describe("attempt ledger — invariants", () => {
         expect(() => assertReplacementsValid(unknown)).toThrow(/unknown attempt/)
     })
 })
+
+describe("a replay attempt", () => {
+    /**
+     * The authoritative fixture carries one, but the type did not admit it: a
+     * caller constructing the same valid attempt could not compile without
+     * relabelling it as a first attempt, which would then be checked by the
+     * wrong rules.
+     */
+    const base = {
+        attemptId: "attempt-b",
+        lifecycleState: null,
+        nativeTransactionRef: { kind: "demos-transaction", value: "tx-b" },
+    }
+
+    it("is a class the ledger accepts", () => {
+        expect(() =>
+            assertReplacementsValid([
+                { ...base, attemptClass: "replay", replacementFor: null },
+            ]),
+        ).not.toThrow()
+    })
+
+    it("cannot claim to replace an attempt", () => {
+        expect(() =>
+            assertReplacementsValid([
+                { ...base, attemptClass: "replay", replacementFor: "attempt-a" },
+            ]),
+        ).toThrow(/cannot name a replaced attempt/)
+    })
+})

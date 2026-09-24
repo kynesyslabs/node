@@ -35,6 +35,16 @@ export function computeAuthorizationHash(
     return Hashing.sha256Bytes(Buffer.from(jcsCanonicalize(unsigned), "utf-8"))
 }
 
+/** Everything an injected verifier needs to check one authorization. */
+export interface AuthorizationSignatureInput {
+    /** The roster signer claim the envelope binds this role to. */
+    signer: unknown
+    /** The exact bytes covered by the signature. */
+    signedBytes: string
+    /** The signature as submitted. */
+    signature: string
+}
+
 export interface AuthorizationEnvelope {
     authorizationVersion: "1"
     workId: string
@@ -119,15 +129,20 @@ function canonicalEq(a: unknown, b: unknown): boolean {
  *  - each authorization's envelope matches the derived expected envelope
  *    (Work + operation identity + role + roster signer) and `algorithm==="ed25519"`.
  *
- * `verifySignature`, if provided, is called per authorization with the signer
- * claim and the AUTH_DOMAIN-prefixed digest; returning false rejects. Omit it to
- * check only structure/coverage (the node injects its ed25519 verifier).
+ * `verifySignature`, if provided, is called per authorization with everything
+ * a verifier needs: the signer claim, the exact bytes that were signed, and the
+ * signature carried by the authorization. Returning false rejects. Omit it to
+ * check only structure and coverage — the node injects its ed25519 verifier.
+ *
+ * An authorization with no signature value is rejected before the callback
+ * runs: a verifier handed an empty signature has nothing to check, and a
+ * permissive one would then pass it.
  */
 export function verifyAuthorizationCoverage(
     intent: AuthzIntent,
     authorizations: Record<string, unknown>[],
     workId: string,
-    verifySignature?: (signer: unknown, domainDigest: string) => boolean,
+    verifySignature?: (input: AuthorizationSignatureInput) => boolean,
 ): void {
     const expectedPairs = new Set<string>()
     intent.operations.forEach((op, i) => {
@@ -168,8 +183,15 @@ export function verifyAuthorizationCoverage(
             )
 
         if (verifySignature) {
-            const digest = AUTH_DOMAIN + computeAuthorizationHash(authorization)
-            if (!verifySignature(authorization.signer, digest))
+            const signature = authorization.value
+            if (typeof signature !== "string" || signature.length === 0)
+                throw new AuthorizationError(
+                    "operation authorization carries no signature value",
+                    "bad-signature",
+                )
+            const signedBytes =
+                AUTH_DOMAIN + computeAuthorizationHash(authorization)
+            if (!verifySignature({ signer: authorization.signer, signedBytes, signature }))
                 throw new AuthorizationError(
                     "invalid operation authorization signature",
                     "bad-signature",

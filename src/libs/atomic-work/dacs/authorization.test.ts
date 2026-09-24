@@ -7,6 +7,7 @@ import {
     computeAuthorizationHash,
     verifyAuthorizationCoverage,
     AuthorizationError,
+    type AuthorizationSignatureInput,
     type AuthzIntent,
 } from "@/libs/atomic-work/dacs/authorization"
 
@@ -86,8 +87,8 @@ describe("authorization coverage — reconciliation vs #336", () => {
     it("invokes the injected signature verifier over AUTH_DOMAIN‖hash", () => {
         const c = fx.coverageCases[0]
         const seen: string[] = []
-        verifyAuthorizationCoverage(c.intent, c.authorizations, c.intent.workId, (_s, digest) => {
-            seen.push(digest)
+        verifyAuthorizationCoverage(c.intent, c.authorizations, c.intent.workId, input => {
+            seen.push(input.signedBytes)
             return true
         })
         expect(seen.length).toBe(c.authorizations.length)
@@ -99,5 +100,58 @@ describe("authorization coverage — reconciliation vs #336", () => {
         expect(() =>
             verifyAuthorizationCoverage(c.intent, c.authorizations, c.intent.workId, () => false),
         ).toThrow(/signature/)
+    })
+})
+
+describe("the injected signature verifier", () => {
+    /**
+     * The callback used to receive only the signer and the digest, so it could
+     * not actually verify anything — an ed25519 check needs the signature too.
+     * A node wiring its verifier in would have had to either fabricate a pass
+     * or reach around this function for the value.
+     */
+    function firstCoverageCase() {
+        const fixture = JSON.parse(
+            readFileSync(join(import.meta.dir, "__fixtures__", "authorization.vectors.json"), "utf8"),
+        )
+        const testCase = fixture.coverageCases[0]
+        return { ...testCase, workId: testCase.authorizations[0].workId }
+    }
+
+    it("receives the signer, the signed bytes and the signature", () => {
+        const fx = firstCoverageCase()
+        const seen: AuthorizationSignatureInput[] = []
+
+        try {
+            verifyAuthorizationCoverage(
+                fx.intent,
+                fx.authorizations,
+                fx.workId,
+                input => {
+                    seen.push(input)
+                    return true
+                },
+            )
+        } catch {
+            // Coverage may fail for unrelated fixture reasons; what matters is
+            // what the callback was handed before that.
+        }
+
+        expect(seen.length).toBeGreaterThan(0)
+        expect(seen[0].signature).toBeTruthy()
+        expect(seen[0].signedBytes).toContain(AUTH_DOMAIN)
+        expect(seen[0].signer).toBeDefined()
+    })
+
+    it("refuses an authorization carrying no signature at all", () => {
+        const fx = firstCoverageCase()
+        const stripped = fx.authorizations.map((a: Record<string, unknown>) => ({
+            ...a,
+            value: "",
+        }))
+
+        expect(() =>
+            verifyAuthorizationCoverage(fx.intent, stripped, fx.workId, () => true),
+        ).toThrow(/no signature value/)
     })
 })

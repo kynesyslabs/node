@@ -1,12 +1,25 @@
 /**
- * JCS (RFC 8785) canonical JSON + CF-1 NFC normalization.
+ * JCS (RFC 8785) canonical JSON with CF-1 normalization.
  *
- * WHY: Atomic Work `workId`/`conflictDigest` must be byte-identical to the DACS
- * reference, which hashes JCS-canonical bytes with NFC-normalized strings and
- * keys. The SDK `canonicalJSONStringify` sorts keys but does NOT NFC-normalize,
- * so it can't be reused verbatim for cross-implementation byte equality.
+ * Work identity, authorization hashes and receipt commitments all hash these
+ * bytes, so any divergence from the reference is a divergence in consensus
+ * identity — the same payload would be a different Work here than there.
  *
- * Keys are sorted by UTF-16 code units — JS default string sort already does this.
+ * Two rules carry that weight and are easy to get backwards:
+ *
+ * Normalization is asymmetric. String *values* are NFC-normalized; object
+ * *keys* are emitted exactly as received. Normalizing keys would change the
+ * bytes of any payload carrying a decomposed key, and would let two distinct
+ * keys collapse into one member name.
+ *
+ * Numbers are integers within the safe range. A fractional or oversized
+ * number has no single canonical spelling both implementations agree on, so
+ * it is refused rather than hashed into an identifier the reference would
+ * never produce. The conformance vectors in `__fixtures__` are the contract;
+ * the test executes them.
+ *
+ * Keys sort by UTF-16 code units, which is what JS string comparison already
+ * does — on the received spelling, not a normalized one.
  */
 export function jcsCanonicalize(value: unknown): string {
     return serialize(value, new Set())
@@ -19,6 +32,10 @@ function serialize(value: unknown, seen: Set<object>): string {
     if (t === "boolean") return value ? "true" : "false"
     if (t === "number") {
         if (!Number.isFinite(value)) throw new Error("JCS: non-finite number")
+        if (!Number.isInteger(value))
+            throw new Error(`JCS: non-integer number: ${value}`)
+        if (!Number.isSafeInteger(value))
+            throw new Error(`JCS: integer outside the safe range: ${value}`)
         return JSON.stringify(value)
     }
     if (t === "bigint" || t === "undefined" || t === "function" || t === "symbol")
@@ -38,15 +55,14 @@ function serialize(value: unknown, seen: Set<object>): string {
                 `JCS: only plain objects supported (found ${proto?.constructor?.name})`,
             )
         const rec = obj as Record<string, unknown>
-        // NFC-normalize keys for output + sort, but look up values by the
-        // ORIGINAL key — normalization can change the string. Strict: undefined
-        // values are NOT dropped; they fall through to the non-JSON throw.
-        const entries = Object.keys(rec).map(
-            k => [k.normalize("NFC"), k] as const,
+        // Keys as received: sorted and emitted on their own spelling, never a
+        // normalized one. Undefined values are not dropped — they fall through
+        // to the non-JSON throw rather than silently changing the member set.
+        const keys = Object.keys(rec).sort((a, b) =>
+            a < b ? -1 : a > b ? 1 : 0,
         )
-        entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-        const parts = entries.map(
-            ([nk, ok]) => `${JSON.stringify(nk)}:${serialize(rec[ok], seen)}`,
+        const parts = keys.map(
+            k => `${JSON.stringify(k)}:${serialize(rec[k], seen)}`,
         )
         out = `{${parts.join(",")}}`
     }

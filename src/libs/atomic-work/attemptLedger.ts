@@ -30,7 +30,14 @@ export interface AttemptView {
      *  "authoritative-non-inclusion", or null when the attempt has no evidence. */
     lifecycleState: string | null
     nativeTransactionRef: NativeTransactionRef
-    attemptClass: "normal" | "replacement"
+    /**
+     * `normal` is a first attempt, `replacement` supersedes an attempt the
+     * chain authoritatively did not include, and `replay` re-submits a Work
+     * that already ran in order to recover its receipt. A replay names no
+     * prior attempt and must not produce business effects of its own — the
+     * winner already did.
+     */
+    attemptClass: "normal" | "replacement" | "replay"
     replacementFor?: string | null
 }
 
@@ -41,6 +48,7 @@ export type AttemptLedgerReason =
     | "unfenced-business-effect"
     | "unknown-replacement-target"
     | "illegal-replacement"
+    | "replay-names-a-prior"
 
 export class AttemptLedgerError extends Error {
     constructor(message: string, readonly reason: AttemptLedgerReason) {
@@ -117,6 +125,17 @@ export function assertBusinessEffectsFenced(
 export function assertReplacementsValid(attempts: AttemptView[]): void {
     const byId = new Map(attempts.map(a => [a.attemptId, a]))
     for (const a of attempts) {
+        if (a.attemptClass === "replay") {
+            // A replay recovers an existing receipt rather than superseding
+            // anything, so naming a prior attempt would claim a relationship
+            // the ledger does not model.
+            if (a.replacementFor)
+                throw new AttemptLedgerError(
+                    "a replay attempt cannot name a replaced attempt",
+                    "replay-names-a-prior",
+                )
+            continue
+        }
         if (a.attemptClass !== "replacement") continue
         const prior = a.replacementFor ? byId.get(a.replacementFor) : undefined
         if (!prior)
