@@ -154,6 +154,37 @@ function deriveFeeEditsForApply(tx: Transaction): GCREdit[] {
     }) as GCREdit[]
 }
 
+function sameFeeEdit(a: GCREdit, b: GCREdit): boolean {
+    if (a.type !== "balance" || b.type !== "balance") return false
+    return (
+        a.operation === b.operation &&
+        normalizePubkey(a.account) === normalizePubkey(b.account) &&
+        String(a.amount) === String(b.amount)
+    )
+}
+
+/**
+ * The tx with its fee edits in front, without touching the tx passed in.
+ *
+ * A tx that already starts with exactly those edits is returned as is: rows
+ * stored before the fee edits were kept off the persisted tx still carry
+ * them, and peers serve those rows during sync.
+ */
+export function withDerivedFeeEdits(tx: Transaction): Transaction {
+    const feeEdits = deriveFeeEditsForApply(tx)
+    if (feeEdits.length === 0) return tx
+
+    const edits = tx.content.gcr_edits ?? []
+    const alreadyCarried =
+        edits.length >= feeEdits.length &&
+        feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
+    if (alreadyCarried) return tx
+
+    return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
+        content: { ...tx.content, gcr_edits: [...feeEdits, ...edits] },
+    }) as Transaction
+}
+
 /**
  * Type guard to check if a GCREdit targets GCRMain (can be batch processed)
  * Returns true for balance and nonce types which have the 'account' property
@@ -842,27 +873,18 @@ export default class HandleGCR {
         }
 
         // Epic #21 #204: derive gasFeeSeparation fee-distribution edits at
-        // APPLY time from each tx's SDK-shipped transaction_fee and prepend
-        // them onto the in-memory tx (NOT the gossiped/stored one — this is a
-        // post-admission local copy, never re-hashed). confirmTransaction no
-        // longer mutates the signed tx, so the gossiped tx is byte-identical to
-        // what the sender signed (coherence passes cross-node). Deriving here —
-        // before prepareEntities + partitionIndependentTxs — means the fee
-        // accounts (burn/treasury) are loaded into the entity cache and grouped
-        // correctly. Skipped on rollback (the stored edits are replayed in
-        // reverse as-is). Every node derives identical edits from the same
+        // APPLY time from each tx's SDK-shipped transaction_fee. Deriving
+        // here — before prepareEntities + partitionIndependentTxs — means the
+        // fee accounts (burn/treasury) are loaded into the entity cache and
+        // grouped correctly. Every node derives identical edits from the same
         // shipped fee, so applied state never diverges.
-        if (!isRollback) {
-            for (const tx of finalTxs) {
-                const feeEdits = deriveFeeEditsForApply(tx)
-                if (feeEdits.length > 0) {
-                    tx.content.gcr_edits = [
-                        ...feeEdits,
-                        ...(tx.content.gcr_edits ?? []),
-                    ]
-                }
-            }
-        }
+        //
+        // The edits go onto a copy. The caller persists and serves these same
+        // tx objects: prepending in place stored the fee edits with the tx,
+        // a syncing node then prepended them a second time, and its
+        // forged-edit guard refused the tx it had just been sent. Rollback
+        // derives too, because the stored tx no longer carries them.
+        finalTxs = finalTxs.map(withDerivedFeeEdits)
 
         const entities = await this.prepareEntities(finalTxs)
         const groups = this.partitionIndependentTxs(finalTxs)
