@@ -69,6 +69,16 @@ export type OsDenominationConfig = BaseForkConfig
 export type NonceEnforcementConfig = BaseForkConfig
 
 /**
+ * `atomicWork` fork: lets a transaction carry Work edits (resource-slot
+ * CAS, Work attempt, Work receipt, storage put) that apply all-or-nothing.
+ *
+ * Dormant by default (`activationHeight: null`): until a height is pinned,
+ * every Work edit is refused at apply, so a node carrying the code applies
+ * exactly what a node without it does. No payload beyond the base.
+ */
+export type AtomicWorkConfig = BaseForkConfig
+
+/**
  * `gasFeeSeparation` fork (DEM-665): splits the single lump-sum gas fee
  * into three components (network / rpc / additional) with distinct
  * distribution rules, plus a new special-ops rule for TLSN.
@@ -97,6 +107,7 @@ export type ForkConfig =
     | OsDenominationConfig
     | GasFeeSeparationConfig
     | NonceEnforcementConfig
+    | AtomicWorkConfig
 
 /**
  * Centralized registry of known fork names. Keeping this as a literal union
@@ -107,6 +118,7 @@ export type ForkName =
     | "osDenomination"
     | "gasFeeSeparation"
     | "nonceEnforcement"
+    | "atomicWork"
 
 /**
  * Per-fork type map. Used by the loader and gates to narrow the union by
@@ -116,6 +128,7 @@ export interface ForkConfigByName {
     osDenomination: OsDenominationConfig
     gasFeeSeparation: GasFeeSeparationConfig
     nonceEnforcement: NonceEnforcementConfig
+    atomicWork: AtomicWorkConfig
 }
 
 /**
@@ -190,6 +203,14 @@ export const DEFAULT_FORK_CONFIG: ForkConfigByName = {
             "per native tx, rejects same-nonce replays at consensus apply-time. " +
             "Paired with confirmed-tx-hash uniqueness at apply time.",
     },
+    atomicWork: {
+        // Dormant everywhere, including fresh chains: the substrate is not
+        // yet conformant, so activation is an explicit operator decision.
+        activationHeight: null,
+        description:
+            "Atomic Works: Work edits (resource-slot CAS, attempt, receipt, " +
+            "storage put) applied all-or-nothing in one transition.",
+    },
 }
 
 /**
@@ -203,5 +224,6 @@ export function cloneDefaultForkConfig(): ForkConfigByName {
         osDenomination: { ...DEFAULT_FORK_CONFIG.osDenomination },
         gasFeeSeparation: { ...DEFAULT_FORK_CONFIG.gasFeeSeparation },
         nonceEnforcement: { ...DEFAULT_FORK_CONFIG.nonceEnforcement },
+        atomicWork: { ...DEFAULT_FORK_CONFIG.atomicWork },
     }
 }

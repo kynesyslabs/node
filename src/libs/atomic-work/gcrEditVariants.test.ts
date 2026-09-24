@@ -23,8 +23,9 @@ const slot: GCREditResourceSlot = {
     resourceKey: "k".repeat(64),
     expected: { state: "vacant", generation: 0 },
     conflictDigest: "e".repeat(64),
-    transition: "reserve",
+    transition: "settle",
     workId: "w".repeat(64),
+    receiptCommitment: "r".repeat(64),
 }
 const attempt: GCREditWorkAttempt = {
     type: "work-attempt",
@@ -83,7 +84,7 @@ describe("Atomic Work GCR edit variants (s1)", () => {
     })
 
     it("discriminate on `type` (runtime narrowing)", () => {
-        expect(labelAtomicEdit(slot)).toBe("slot:reserve:vacant")
+        expect(labelAtomicEdit(slot)).toBe("slot:settle:vacant")
         expect(labelAtomicEdit(attempt)).toBe("attempt:attempt-a")
         expect(labelAtomicEdit(receipt)).toBe("receipt:rrrr")
         expect(labelAtomicEdit(storage)).toBe("storage:stor-abc")

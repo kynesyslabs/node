@@ -62,6 +62,19 @@ import {
     applyAllOrNothing,
     requiresAtomicApplication,
 } from "@/libs/atomic-work/atomicApply"
+import {
+    applySlotCas,
+    applyWorkAttempt,
+    applyWorkReceipt,
+    assertWorkEditSet,
+    type SlotCasEdit,
+    type SlotRecord,
+    type WorkAttemptEdit,
+    type WorkReceiptEdit,
+    type WorkRecord,
+} from "@/libs/atomic-work/workLedger"
+import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
+import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -97,6 +110,8 @@ export interface GCREntityCaches {
     accounts: Map<string, GCRMain>
     storagePrograms: Map<string, GCRStorageProgram | null>
     tlsNotaries: Map<string, GCRTLSNotary | null>
+    atomicWorks: Map<string, WorkRecord | null>
+    resourceSlots: Map<string, SlotRecord | null>
 }
 
 export interface GCRApplyResult {
@@ -258,6 +273,8 @@ export default class HandleGCR {
         const affectedPubkeys = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
+        const affectedWorkIds = new Set<string>()
+        const affectedSlotKeys = new Set<string>()
 
         // Single pass to collect all keys
         for (const tx of txs) {
@@ -277,6 +294,18 @@ export default class HandleGCR {
                     affectedTokenIds.add(
                         (edit as unknown as GCREditTLSNotary).data.tokenId,
                     )
+                } else if (
+                    (editType as string) === "work-attempt" ||
+                    (editType as string) === "work-receipt"
+                ) {
+                    affectedWorkIds.add(
+                        (edit as unknown as { workId: string }).workId,
+                    )
+                } else if ((editType as string) === "resource-slot-cas") {
+                    affectedSlotKeys.add(
+                        (edit as unknown as { resourceKey: string })
+                            .resourceKey,
+                    )
                 }
             }
 
@@ -288,18 +317,54 @@ export default class HandleGCR {
         }
 
         // Parallel DB loads
-        const [gcrMainCache, storageProgramCache, tlsNotaryCache] =
-            await Promise.all([
-                this.loadGCRMainEntities(affectedPubkeys),
-                this.loadStorageProgramEntities(affectedStorageAddresses),
-                this.loadTLSNotaryEntities(affectedTokenIds),
-            ])
+        const [
+            gcrMainCache,
+            storageProgramCache,
+            tlsNotaryCache,
+            atomicWorkCache,
+            resourceSlotCache,
+        ] = await Promise.all([
+            this.loadGCRMainEntities(affectedPubkeys),
+            this.loadStorageProgramEntities(affectedStorageAddresses),
+            this.loadTLSNotaryEntities(affectedTokenIds),
+            this.loadAtomicWorks(affectedWorkIds),
+            this.loadResourceSlots(affectedSlotKeys),
+        ])
 
         return {
             accounts: gcrMainCache,
             storagePrograms: storageProgramCache,
             tlsNotaries: tlsNotaryCache,
+            atomicWorks: atomicWorkCache,
+            resourceSlots: resourceSlotCache,
         }
+    }
+
+    // Missing rows stay absent: an absent Work has not run, an absent slot is
+    // vacant. Rows are copied into plain records so the edit handlers never
+    // hold an entity instance.
+    private static async loadAtomicWorks(
+        workIds: Set<string>,
+    ): Promise<Map<string, WorkRecord | null>> {
+        const cache = new Map<string, WorkRecord | null>()
+        if (workIds.size === 0) return cache
+        const rows = await dataSource
+            .getRepository(GCRAtomicWork)
+            .find({ where: { workId: In([...workIds]) } })
+        for (const row of rows) cache.set(row.workId, { ...row })
+        return cache
+    }
+
+    private static async loadResourceSlots(
+        keys: Set<string>,
+    ): Promise<Map<string, SlotRecord | null>> {
+        const cache = new Map<string, SlotRecord | null>()
+        if (keys.size === 0) return cache
+        const rows = await dataSource
+            .getRepository(GCRResourceSlot)
+            .find({ where: { resourceKey: In([...keys]) } })
+        for (const row of rows) cache.set(row.resourceKey, row.record)
+        return cache
     }
 
     private static async loadGCRMainEntities(
@@ -465,6 +530,28 @@ export default class HandleGCR {
         // A Work's edits never go through apply-then-reverse: the reversal
         // leaves intermediate state visible and can itself fail halfway.
         if (requiresAtomicApplication(gcrEdits)) {
+            const refusal = (message: string): GCRApplyResult => {
+                log.error(
+                    `[applyTransaction] Work tx ${tx.hash} not applied: ${message}`,
+                )
+                return {
+                    success: false,
+                    entities,
+                    message,
+                    sideEffects: [],
+                    appliedEditsCount: 0,
+                }
+            }
+            if (
+                !isForkActive("atomicWork", getSharedState.lastBlockNumber ?? 0)
+            ) {
+                return refusal("Work edits are not active at this height")
+            }
+            // Rollback replays edits the block already accepted, reversed.
+            if (!isRollback) {
+                const shape = assertWorkEditSet(gcrEdits)
+                if (!shape.success) return refusal(shape.message)
+            }
             const result = await applyAllOrNothing(
                 entities,
                 gcrEdits,
@@ -1088,6 +1175,43 @@ export default class HandleGCR {
             }
         }
 
+        if (entities.atomicWorks?.size > 0) {
+            const repo = dataSource.getRepository(GCRAtomicWork)
+            const toSave: GCRAtomicWork[] = []
+            const toDelete: string[] = []
+            for (const [workId, record] of entities.atomicWorks) {
+                if (record === null) toDelete.push(workId)
+                else toSave.push(repo.create(record))
+            }
+            if (toSave.length > 0) await repo.save(toSave)
+            if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
+        }
+
+        if (entities.resourceSlots?.size > 0) {
+            const repo = dataSource.getRepository(GCRResourceSlot)
+            const toSave: GCRResourceSlot[] = []
+            const toDelete: string[] = []
+            for (const [resourceKey, record] of entities.resourceSlots) {
+                if (record === null) {
+                    toDelete.push(resourceKey)
+                    continue
+                }
+                toSave.push(
+                    repo.create({
+                        resourceKey,
+                        state: record.state,
+                        generation: record.generation,
+                        workId: "workId" in record ? record.workId : "",
+                        record,
+                    }),
+                )
+            }
+            if (toSave.length > 0) await repo.save(toSave)
+            if (toDelete.length > 0) {
+                await repo.delete({ resourceKey: In(toDelete) })
+            }
+        }
+
         // INFO: Apply side-effects in sequence
         for (const sideEffect of sideEffects) {
             try {
@@ -1154,6 +1278,29 @@ export default class HandleGCR {
                 success: false,
                 message: `Missing account for ${editOperation.type} edit`,
             }
+        }
+
+        // Work edits are newer than some SDK builds' edit union, so they are
+        // matched as strings ahead of the typed switch.
+        switch (editOperation.type as string) {
+            case "work-attempt":
+                return applyWorkAttempt(
+                    editOperation as unknown as WorkAttemptEdit,
+                    entities.atomicWorks,
+                    isRollback,
+                )
+            case "work-receipt":
+                return applyWorkReceipt(
+                    editOperation as unknown as WorkReceiptEdit,
+                    entities.atomicWorks,
+                    isRollback,
+                )
+            case "resource-slot-cas":
+                return applySlotCas(
+                    editOperation as unknown as SlotCasEdit,
+                    entities.resourceSlots,
+                    isRollback,
+                )
         }
 
         // Applying the edit operations

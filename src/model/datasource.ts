@@ -24,6 +24,8 @@ import { GCRSubnetsTxs } from "./entities/GCRv2/GCRSubnetsTxs.js"
 import { GCRMain } from "./entities/GCRv2/GCR_Main.js"
 import { GCRAssignedTx } from "./entities/GCRv2/GCRAssignedTx.js"
 import { GCRTLSNotary } from "./entities/GCRv2/GCR_TLSNotary.js"
+import { GCRAtomicWork } from "./entities/GCRv2/GCR_AtomicWork.js"
+import { GCRResourceSlot } from "./entities/GCRv2/GCR_ResourceSlot.js"
 import { GCRStorageProgram } from "./entities/GCRv2/GCR_StorageProgram.js"
 // ZK Identity entities
 import { IdentityCommitment } from "./entities/GCRv2/IdentityCommitment.js"
@@ -75,6 +77,8 @@ export const dataSource = new DataSource({
         GCRAssignedTx,
         GCRTLSNotary,
         GCRStorageProgram,
+        GCRAtomicWork,
+        GCRResourceSlot,
         Validators,
         // ZK Identity entities
         IdentityCommitment,

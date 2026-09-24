@@ -1,6 +1,8 @@
-import { describe, expect, it } from "bun:test"
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
+import { cloneDefaultForkConfig } from "@/forks/forkConfig"
 import type { GCREntityCaches } from "@/libs/blockchain/gcr/handleGCR"
+import { getSharedState } from "@/utilities/sharedState"
 
 const { default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
 
@@ -12,6 +14,8 @@ function caches(): GCREntityCaches {
         ]),
         storagePrograms: new Map(),
         tlsNotaries: new Map(),
+        atomicWorks: new Map(),
+        resourceSlots: new Map(),
     }
 }
 
@@ -25,6 +29,131 @@ function tx(hash: string, from: string, edits: unknown[]): any {
     return { hash, content: { type: "demoswork", from, from_ed25519_address: from, gcr_edits: edits } }
 }
 
+const state = getSharedState as any
+let forks: unknown
+
+beforeEach(() => {
+    forks = state.forkConfig
+    state.forkConfig = cloneDefaultForkConfig()
+    state.forkConfig.atomicWork.activationHeight = 0
+    state.lastBlockNumber = 10
+})
+
+afterEach(() => {
+    state.forkConfig = forks
+})
+
+const work = {
+    attempt: { type: "work-attempt", workId: "w1", attemptId: "a1", canonicalBytesHash: "h1", isRollback: false, txhash: "" },
+    slot: (expected = { state: "vacant", generation: 0 }) => ({
+        type: "resource-slot-cas",
+        resourceKey: "k1",
+        expected,
+        transition: "settle",
+        workId: "w1",
+        conflictDigest: "c1",
+        receiptCommitment: "r1",
+        isRollback: false,
+        txhash: "",
+    }),
+    receipt: {
+        type: "work-receipt",
+        workId: "w1",
+        receiptCommitment: "r1",
+        effectsRoot: "e1",
+        inputHash: "i1",
+        outputHash: "o1",
+        isRollback: false,
+        txhash: "",
+    },
+}
+
+describe("HandleGCR.applyTransaction with a whole Work", () => {
+    it("commits the transfer, the slot and the receipt together", async () => {
+        const entities = caches()
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx("0x10", "0xaa", [
+                work.attempt,
+                balance("0xaa", "remove", 30n),
+                balance("0xbb", "add", 30n),
+                work.slot(),
+                work.receipt,
+            ]),
+            false,
+            false,
+        )
+
+        expect(result.success).toBe(true)
+        expect(entities.accounts.get("0xbb")!.balance).toBe(35n)
+        expect(entities.resourceSlots.get("k1")).toMatchObject({ state: "settled", workId: "w1" })
+        expect(entities.atomicWorks.get("w1")).toMatchObject({ winnerAttemptId: "a1", receiptCommitment: "r1" })
+    })
+
+    it("commits nothing when the slot was already taken", async () => {
+        const entities = caches()
+        const taken = {
+            state: "settled",
+            generation: 0,
+            workId: "w0",
+            conflictDigest: "c0",
+            receiptCommitment: "r0",
+            resourceKey: "k1",
+            txHash: "0x0",
+            previous: null,
+        } as any
+        entities.resourceSlots.set("k1", taken)
+
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx("0x11", "0xaa", [
+                work.attempt,
+                balance("0xaa", "remove", 30n),
+                balance("0xbb", "add", 30n),
+                work.slot(),
+                work.receipt,
+            ]),
+            false,
+            false,
+        )
+
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("expected state vacant")
+        expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
+        expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
+        expect(entities.resourceSlots.get("k1")).toBe(taken)
+        expect(entities.atomicWorks.has("w1")).toBe(false)
+    })
+
+    it("undoes a committed Work on block rollback", async () => {
+        const entities = caches()
+        const edits = [work.attempt, balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n), work.slot(), work.receipt]
+        await HandleGCR.applyTransaction(entities, tx("0x12", "0xaa", structuredClone(edits)), false, false)
+
+        const undone = await HandleGCR.applyTransaction(entities, tx("0x12", "0xaa", structuredClone(edits)), true, false)
+
+        expect(undone.success).toBe(true)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
+        expect(entities.resourceSlots.get("k1")).toBeNull()
+        expect(entities.atomicWorks.get("w1")).toBeNull()
+    })
+
+    it("refuses every Work edit while the fork is dormant", async () => {
+        state.forkConfig.atomicWork.activationHeight = null
+        const entities = caches()
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx("0x13", "0xaa", [work.attempt, work.slot(), work.receipt]),
+            false,
+            false,
+        )
+
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("not active")
+        expect(entities.atomicWorks.has("w1")).toBe(false)
+    })
+})
+
 describe("HandleGCR.applyTransaction with Work edits", () => {
     it("leaves every account untouched when a Work edit cannot be applied", async () => {
         const entities = caches()
@@ -34,7 +163,7 @@ describe("HandleGCR.applyTransaction with Work edits", () => {
             tx("0x1", "0xaa", [
                 balance("0xaa", "remove", 30n),
                 balance("0xbb", "add", 30n),
-                // No handler yet: must sink the whole set, not just itself.
+                // No attempt: the malformed Work sinks the whole set.
                 { type: "work-receipt", workId: "w1", isRollback: false, txhash: "" },
             ]),
             false,
@@ -53,8 +182,10 @@ describe("HandleGCR.applyTransaction with Work edits", () => {
         const result = await HandleGCR.applyTransaction(
             entities,
             tx("0x2", "0xaa", [
+                { ...work.attempt, workId: "w2" },
                 balance("0xaa", "remove", 30n),
-                { type: "resource-slot-cas", resourceKey: "k", workId: "w2", isRollback: false, txhash: "" },
+                { ...work.slot(), workId: "w2" },
+                { ...work.receipt, workId: "w2" },
                 { type: "validatorStake", isRollback: false, txhash: "" },
             ]),
             false,
