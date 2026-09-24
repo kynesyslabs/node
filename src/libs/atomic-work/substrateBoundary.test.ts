@@ -52,6 +52,25 @@ describe("the generic substrate", () => {
         expect(offenders).toEqual([])
     })
 
+    it("never reads the host clock", () => {
+        // §A.6 excludes client and RPC time from deadline evaluation. The way
+        // that rule survives is structural: if no substrate source can reach a
+        // clock, no deadline can accidentally be judged against one. The time
+        // arrives as a value from block assembly instead.
+        const offenders: string[] = []
+
+        for (const path of substrateSources()) {
+            const text = readFileSync(path, "utf8")
+            for (const call of ["Date.now(", "new Date(", "performance.now(", "hrtime"]) {
+                if (text.includes(call)) {
+                    offenders.push(`${path.split("/").pop()}: ${call}`)
+                }
+            }
+        }
+
+        expect(offenders).toEqual([])
+    })
+
     it("covers a meaningful amount of source", () => {
         // A boundary check over an empty set passes for the wrong reason.
         expect(substrateSources().length).toBeGreaterThanOrEqual(7)
