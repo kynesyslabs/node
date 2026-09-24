@@ -58,6 +58,10 @@ import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
 import { INativePayload } from "@kynesyslabs/demosdk/types"
+import {
+    applyAllOrNothing,
+    requiresAtomicApplication,
+} from "@/libs/atomic-work/atomicApply"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -458,6 +462,38 @@ export default class HandleGCR {
             gcrEdits.reverse()
         }
 
+        // A Work's edits never go through apply-then-reverse: the reversal
+        // leaves intermediate state visible and can itself fail halfway.
+        if (requiresAtomicApplication(gcrEdits)) {
+            const result = await applyAllOrNothing(
+                entities,
+                gcrEdits,
+                (edit, caches) => {
+                    if (!simulate && tx.hash) {
+                        edit.txhash = tx.hash
+                    }
+                    return HandleGCR.applyGCREdit(
+                        edit,
+                        caches,
+                        isRollback,
+                        simulate,
+                    )
+                },
+            )
+            if (!result.success) {
+                log.error(
+                    `[applyTransaction] Work tx ${tx.hash} not applied (edit ${result.failedAt}): ${result.message}`,
+                )
+            }
+            return {
+                success: result.success,
+                entities,
+                message: result.message,
+                sideEffects: result.sideEffects,
+                appliedEditsCount: result.appliedEditsCount,
+            }
+        }
+
         // Capture snapshots for potential rollback
         const snapshots: GCRMainSnapshot[] = []
         const editPubkeys = new Set<string>()
@@ -623,6 +659,31 @@ export default class HandleGCR {
                         if (spEdit.context?.sender) {
                             keys.push("acc:" + spEdit.context.sender)
                         }
+                    } else if (
+                        // Compared as a string: these kinds are newer than
+                        // some SDK builds' edit union.
+                        (edit.type as string) === "storage-program-put"
+                    ) {
+                        keys.push(
+                            "sp:" +
+                                (edit as unknown as { target: string }).target,
+                        )
+                    } else if ((edit.type as string) === "resource-slot-cas") {
+                        // Two Works contending for one slot must be applied
+                        // in order, never in concurrent groups.
+                        keys.push(
+                            "slot:" +
+                                (edit as unknown as { resourceKey: string })
+                                    .resourceKey,
+                        )
+                    } else if (
+                        (edit.type as string) === "work-attempt" ||
+                        (edit.type as string) === "work-receipt"
+                    ) {
+                        keys.push(
+                            "work:" +
+                                (edit as unknown as { workId: string }).workId,
+                        )
                     } else if (edit.type === "tlsnotary") {
                         const tlsEdit = edit as unknown as GCREditTLSNotary
                         keys.push("tls:" + tlsEdit.data.tokenId)
