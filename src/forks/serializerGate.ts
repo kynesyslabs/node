@@ -138,17 +138,27 @@ export function serializeTransactionContent(
 /**
  * Serialize block content for hashing.
  *
- * P3a finding: `BlockContent` (see `@kynesyslabs/demosdk/types`) has no
- * amount/fee fields — it stores transaction *hashes*, peer lists, and
- * table digests. The fork therefore changes nothing at the block-content
- * level; both branches return identical bytes. The transactions inside
- * the block were already serialised through
- * {@link serializeTransactionContent}, so block coherence is correctly
- * gated transitively.
+ * P3a finding: the `osDenomination` fork changes nothing at the
+ * block-content level — `BlockContent` has no amount/fee fields, it stores
+ * transaction *hashes*, peer lists, and table digests. The transactions
+ * inside the block were already serialised through
+ * {@link serializeTransactionContent}, so block coherence is gated
+ * transitively.
  *
- * The fork-aware branch is preserved (instead of removed) so that a
- * future fork that *does* change `BlockContent` can plug a transformer
- * here without re-touching all block hash sites.
+ * `deterministicBlockHash` fork: `BlockContent.peerlist` is the proposer's
+ * OWN live peer list, which differs from validator to validator. Since the
+ * whole content is hashed, once peer topologies diverge the same
+ * (height, tx-set) hashes differently on each node, the shard never agrees
+ * on a candidate hash, and BFT quorum can never be reached (a liveness
+ * stall observed on the live net at height 249445). Post-fork, `peerlist`
+ * is neutralised to `[]` before hashing so the hash no longer depends on
+ * node-local peer topology. Everything else is byte-identical to the
+ * pre-fork serialization, so the two paths differ ONLY in the peerlist
+ * bytes — historical blocks (below the activation height) still verify via
+ * the pre-fork path, keyed on the block's own number.
+ *
+ * `peerlist` is stripped from the hash input only; the stored block keeps
+ * its real `peerlist` for any downstream reader.
  *
  * @param content - The block content to serialize.
  * @param blockHeight - The block's own number. Genesis is `0`.
@@ -158,11 +168,12 @@ export function serializeBlockContent(
     content: BlockContent,
     blockHeight: number,
 ): string {
-    if (isForkActive("osDenomination", blockHeight)) {
-        // No-op for `osDenomination`: BlockContent has no amount/fee fields.
-        // Kept as an explicit branch so future forks can add a transformer
-        // without re-routing all block hash sites.
-        return JSON.stringify(content)
+    if (isForkActive("deterministicBlockHash", blockHeight)) {
+        // Neutralise the node-local peer list so every validator hashes the
+        // same bytes for the same (height, tx-set). Shallow copy — the Map
+        // fields keep serialising to `{}` exactly as before; only peerlist
+        // changes, keeping the post-fork bytes maximally close to pre-fork.
+        return JSON.stringify({ ...content, peerlist: [] })
     }
     return JSON.stringify(content)
 }

@@ -14,6 +14,9 @@
       "gasFeeSeparation": {
           "activationHeight": null,
           "treasuryAddress": "0xf7a1c3417e39563ca8f63f2e9a9ba08890888695768e95e22026e6f942addf23"
+      },
+      "deterministicBlockHash": {
+          "activationHeight": 249445
       }
   },
   "balances": [],
