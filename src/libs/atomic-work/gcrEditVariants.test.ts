@@ -55,6 +55,7 @@ const storage: GCREditStoragePut = {
     discriminator: "1",
     mode: "create-only",
     valueDigest: "h".repeat(64),
+    value: { ok: true },
 }
 
 // Exhaustive discriminator: if a NEW variant is added to the union without a

@@ -1,5 +1,6 @@
 import Hashing from "@/libs/crypto/hashing"
 import { domainDigest } from "@/libs/atomic-work/digest"
+import { jcsCanonicalize } from "@/libs/crypto/jcs"
 
 /**
  * Writing to storage from inside an atomic Work.
@@ -176,7 +177,20 @@ export function storageWriteOutput(
     }
 }
 
-/** Digest of a stored value, for callers that hold the value itself. */
+/**
+ * Digest of a stored value, for callers that hold the value itself.
+ *
+ * Canonical (JCS), not `JSON.stringify`: the value comes back from storage
+ * with its keys in whatever order the database keeps them, and a
+ * compare-and-set that hashed insertion order would never match again.
+ */
 export function storageValueDigest(value: unknown): string {
-    return Hashing.sha256(JSON.stringify(value ?? null))
+    return Hashing.sha256(jcsCanonicalize(value ?? null))
 }
+
+/**
+ * The tag this node derives Work storage addresses under. It belongs to the
+ * node rather than to any profile: every profile's writes share one address
+ * space, kept apart by writer, name and discriminator.
+ */
+export const ATOMIC_STORAGE_DOMAIN = "demos-atomic-storage-address:v1:"

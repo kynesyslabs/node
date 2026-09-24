@@ -63,10 +63,15 @@ import {
     requiresAtomicApplication,
 } from "@/libs/atomic-work/atomicApply"
 import {
+    applyAtomicStoragePut,
+    type StoragePutEdit,
+} from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
+import {
     applySlotCas,
     applyWorkAttempt,
     applyWorkReceipt,
     assertWorkEditSet,
+    contendedWorkTxs,
     type SlotCasEdit,
     type SlotRecord,
     type WorkAttemptEdit,
@@ -300,6 +305,10 @@ export default class HandleGCR {
                 ) {
                     affectedWorkIds.add(
                         (edit as unknown as { workId: string }).workId,
+                    )
+                } else if ((editType as string) === "storage-program-put") {
+                    affectedStorageAddresses.add(
+                        (edit as unknown as { target: string }).target,
                     )
                 } else if ((editType as string) === "resource-slot-cas") {
                     affectedSlotKeys.add(
@@ -549,7 +558,12 @@ export default class HandleGCR {
             }
             // Rollback replays edits the block already accepted, reversed.
             if (!isRollback) {
-                const shape = assertWorkEditSet(gcrEdits)
+                const shape = assertWorkEditSet(
+                    gcrEdits,
+                    normalizePubkey(
+                        tx.content.from_ed25519_address || tx.content.from,
+                    ),
+                )
                 if (!shape.success) return refusal(shape.message)
             }
             const result = await applyAllOrNothing(
@@ -1012,6 +1026,18 @@ export default class HandleGCR {
             }
         }
 
+        // A block touches each Work, slot and storage address from at most one
+        // transaction; later ones are refused. Rollback depends on it: every
+        // record then changed once in the block being undone.
+        const blockOrder = finalTxs
+        const contended = contendedWorkTxs(finalTxs)
+        if (contended.size > 0) {
+            log.warning(
+                `[applyTransactions] ${contended.size} tx(s) touch Work state already touched earlier in this block`,
+            )
+            finalTxs = finalTxs.filter(tx => !contended.has(tx.hash))
+        }
+
         const entities = await this.prepareEntities(finalTxs)
         const groups = this.partitionIndependentTxs(finalTxs)
 
@@ -1070,7 +1096,8 @@ export default class HandleGCR {
         // Preserve original tx order in returned arrays.
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
-        for (const tx of finalTxs) {
+        for (const h of contended) failedSet.add(h)
+        for (const tx of blockOrder) {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
         }
@@ -1299,6 +1326,12 @@ export default class HandleGCR {
                 return applySlotCas(
                     editOperation as unknown as SlotCasEdit,
                     entities.resourceSlots,
+                    isRollback,
+                )
+            case "storage-program-put":
+                return applyAtomicStoragePut(
+                    editOperation as unknown as StoragePutEdit,
+                    entities.storagePrograms,
                     isRollback,
                 )
         }

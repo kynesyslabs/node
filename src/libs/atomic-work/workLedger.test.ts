@@ -5,12 +5,15 @@ import {
     applyWorkAttempt,
     applyWorkReceipt,
     assertWorkEditSet,
+    contendedWorkTxs,
     type SlotCasEdit,
     type SlotRecord,
     type WorkAttemptEdit,
     type WorkReceiptEdit,
     type WorkRecord,
 } from "@/libs/atomic-work/workLedger"
+
+const SENDER = "0xAbC"
 
 const attempt = (over: Partial<WorkAttemptEdit> = {}): WorkAttemptEdit => ({
     type: "work-attempt",
@@ -159,26 +162,54 @@ describe("resource slots", () => {
 
 describe("the shape of a Work transaction", () => {
     it("accepts attempt, slots and receipt that agree", () => {
-        expect(assertWorkEditSet([attempt(), slot(), receipt()]).success).toBe(true)
+        expect(assertWorkEditSet([attempt(), slot(), receipt()], SENDER).success).toBe(true)
     })
 
     it("refuses two attempts, a missing receipt, or a receipt for another Work", () => {
-        expect(assertWorkEditSet([attempt(), attempt({ attemptId: "a2" }), receipt()]).success).toBe(false)
-        expect(assertWorkEditSet([attempt(), slot()]).success).toBe(false)
-        expect(assertWorkEditSet([attempt(), receipt({ workId: "w9" })]).success).toBe(false)
+        expect(assertWorkEditSet([attempt(), attempt({ attemptId: "a2" }), receipt()], SENDER).success).toBe(false)
+        expect(assertWorkEditSet([attempt(), slot()], SENDER).success).toBe(false)
+        expect(assertWorkEditSet([attempt(), receipt({ workId: "w9" })], SENDER).success).toBe(false)
     })
 
     it("refuses a slot that moves with another receipt, or twice", () => {
-        expect(assertWorkEditSet([attempt(), slot({ receiptCommitment: "rX" }), receipt()]).success).toBe(false)
-        expect(assertWorkEditSet([attempt(), slot(), slot(), receipt()]).success).toBe(false)
+        expect(assertWorkEditSet([attempt(), slot({ receiptCommitment: "rX" }), receipt()], SENDER).success).toBe(false)
+        expect(assertWorkEditSet([attempt(), slot(), slot(), receipt()], SENDER).success).toBe(false)
     })
 
     it("refuses a replay that carries effects", () => {
-        expect(assertWorkEditSet([attempt({ attemptClass: "replay" })]).success).toBe(true)
-        expect(assertWorkEditSet([attempt({ attemptClass: "replay" }), slot()]).success).toBe(false)
+        expect(assertWorkEditSet([attempt({ attemptClass: "replay" })], SENDER).success).toBe(true)
+        expect(assertWorkEditSet([attempt({ attemptClass: "replay" }), slot()], SENDER).success).toBe(false)
     })
 
     it("requires the attempt to lead", () => {
-        expect(assertWorkEditSet([receipt(), attempt()]).success).toBe(false)
+        expect(assertWorkEditSet([receipt(), attempt()], SENDER).success).toBe(false)
+    })
+})
+
+describe("storage writes in a Work", () => {
+    const put = (writer: string, target = "stor-1") => ({ type: "storage-program-put", writer, target })
+
+    it("must be written by the sender, once per address", () => {
+        expect(assertWorkEditSet([attempt(), put("0xabc") as never, receipt()], SENDER).success).toBe(true)
+        expect(assertWorkEditSet([attempt(), put("0xdef") as never, receipt()], SENDER).success).toBe(false)
+        expect(
+            assertWorkEditSet([attempt(), put("0xabc") as never, put("0xabc") as never, receipt()], SENDER).success,
+        ).toBe(false)
+    })
+})
+
+describe("contendedWorkTxs", () => {
+    const tx = (hash: string, edits: unknown[]) => ({ hash, content: { gcr_edits: edits as { type: string }[] } })
+
+    it("refuses later transactions touching Work state an earlier one in the block touches", () => {
+        const contended = contendedWorkTxs([
+            tx("t1", [attempt(), slot(), receipt()]),
+            tx("t2", [attempt({ workId: "w2" }), slot({ workId: "w2" }), receipt({ workId: "w2" })]),
+            tx("t3", [attempt({ workId: "w3" }), slot({ workId: "w3", resourceKey: "k3" }), receipt({ workId: "w3" })]),
+            tx("t4", [{ type: "balance" }]),
+            tx("t5", [attempt({ attemptClass: "replay", attemptId: "a9" })]),
+        ])
+        // t2 reuses slot k1; t5 replays Work w1, already touched by t1.
+        expect([...contended].sort()).toEqual(["t2", "t5"])
     })
 })

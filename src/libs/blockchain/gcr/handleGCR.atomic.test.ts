@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 
 import { cloneDefaultForkConfig } from "@/forks/forkConfig"
+import {
+    ATOMIC_STORAGE_DOMAIN,
+    deriveStorageAddress,
+    storageValueDigest,
+} from "@/libs/atomic-work/storageWrite"
 import type { GCREntityCaches } from "@/libs/blockchain/gcr/handleGCR"
 import { getSharedState } from "@/utilities/sharedState"
 
@@ -136,6 +141,53 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
         expect(entities.resourceSlots.get("k1")).toBeNull()
         expect(entities.atomicWorks.get("w1")).toBeNull()
+    })
+
+    it("writes storage with the Work and removes it again on block rollback", async () => {
+        const entities = caches()
+        const value = { delivered: true }
+        const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, "0xaa", "result", "1")
+        const put = {
+            type: "storage-program-put",
+            target,
+            writer: "0xaa",
+            name: "result",
+            discriminator: "1",
+            mode: "create-only",
+            valueDigest: storageValueDigest(value),
+            value,
+            isRollback: false,
+            txhash: "",
+        }
+        const edits = [work.attempt, put, work.slot(), work.receipt]
+
+        const applied = await HandleGCR.applyTransaction(entities, tx("0x14", "0xaa", structuredClone(edits)), false, false)
+        expect(applied.success).toBe(true)
+        expect(entities.storagePrograms.get(target)?.data).toEqual(value)
+
+        const undone = await HandleGCR.applyTransaction(entities, tx("0x14", "0xaa", structuredClone(edits)), true, false)
+        expect(undone.success).toBe(true)
+        expect(entities.storagePrograms.get(target)).toBeNull()
+    })
+
+    it("refuses a storage write signed by someone other than the writer", async () => {
+        const entities = caches()
+        const value = { delivered: true }
+        const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, "0xbb", "result", "1")
+        const result = await HandleGCR.applyTransaction(
+            entities,
+            tx("0x15", "0xaa", [
+                work.attempt,
+                { type: "storage-program-put", target, writer: "0xbb", name: "result", discriminator: "1", mode: "create-only", valueDigest: storageValueDigest(value), value, isRollback: false, txhash: "" },
+                work.slot(),
+                work.receipt,
+            ]),
+            false,
+            false,
+        )
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("not by the sender")
+        expect(entities.storagePrograms.has(target)).toBe(false)
     })
 
     it("refuses every Work edit while the fork is dormant", async () => {

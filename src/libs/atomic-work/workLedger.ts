@@ -226,7 +226,9 @@ export function applySlotCas(
         ...next,
         resourceKey: edit.resourceKey,
         txHash: edit.txhash ?? "",
-        previous: stored,
+        // One level is enough: a block moves a slot at most once
+        // (`contendedWorkTxs`), and a rollback only ever undoes that block.
+        previous: stored ? { ...stored, previous: null } : null,
     })
     return ok(`slot ${edit.transition === "settle" ? "settled" : "rolled back"}`)
 }
@@ -239,7 +241,10 @@ export function applySlotCas(
  * with the winner. Anything else commits its receipt in the same transition
  * as the slots it moves, and every slot names the receipt it moved with.
  */
-export function assertWorkEditSet(edits: ReadonlyArray<{ type: string }>): WorkEditOutcome {
+export function assertWorkEditSet(
+    edits: ReadonlyArray<{ type: string }>,
+    sender: string,
+): WorkEditOutcome {
     const attempts = edits.filter(e => e.type === "work-attempt") as WorkAttemptEdit[]
     const receipts = edits.filter(e => e.type === "work-receipt") as WorkReceiptEdit[]
     const slotEdits = edits.filter(e => e.type === "resource-slot-cas") as SlotCasEdit[]
@@ -282,5 +287,52 @@ export function assertWorkEditSet(edits: ReadonlyArray<{ type: string }>): WorkE
     if (keys.size !== slotEdits.length) {
         return refuse("a Work moves each slot at most once")
     }
+    const targets = new Set<string>()
+    for (const put of puts as unknown as { target: string; writer: string }[]) {
+        // The address is derived from the writer, so the writer has to be
+        // the one who signed; otherwise anyone could derive and fill it.
+        if (put.writer?.toLowerCase() !== sender.toLowerCase()) {
+            return refuse(`storage write to ${put.target} is not by the sender`)
+        }
+        if (targets.has(put.target)) return refuse("a Work writes each address at most once")
+        targets.add(put.target)
+    }
     return ok("Work shape")
+}
+
+/** The state a transaction's Work edits touch, as block-wide keys. */
+export function workKeys(edits: ReadonlyArray<{ type: string }> | undefined): string[] {
+    const keys: string[] = []
+    for (const e of edits ?? []) {
+        const edit = e as unknown as Record<string, string>
+        if (e.type === "work-attempt" || e.type === "work-receipt") keys.push("work:" + edit.workId)
+        else if (e.type === "resource-slot-cas") keys.push("slot:" + edit.resourceKey)
+        else if (e.type === "storage-program-put") keys.push("sp:" + edit.target)
+    }
+    return [...new Set(keys)]
+}
+
+/**
+ * Transactions a block cannot apply because an earlier one in the same
+ * block already touches the same Work, slot or storage address.
+ *
+ * Decided from inclusion order alone, so every node reaches the same answer
+ * from the same block. The payoff is at rollback: each record then changed
+ * at most once in the block being undone, so the single record it keeps of
+ * what it replaced is always the right one to restore.
+ */
+export function contendedWorkTxs<T extends { hash: string; content: { gcr_edits?: ReadonlyArray<{ type: string }> } }>(
+    txs: ReadonlyArray<T>,
+): Set<string> {
+    const claimed = new Set<string>()
+    const contended = new Set<string>()
+    for (const tx of txs) {
+        const keys = workKeys(tx.content.gcr_edits)
+        if (keys.some(k => claimed.has(k))) {
+            contended.add(tx.hash)
+            continue
+        }
+        for (const k of keys) claimed.add(k)
+    }
+    return contended
 }
