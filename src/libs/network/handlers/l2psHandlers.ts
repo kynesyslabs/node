@@ -147,8 +147,8 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             response.result = 401
             response.response = "Authentication required. Provide signature and timestamp."
             response.extra = {
-                message: "Sign the message 'getL2PSHistory:{address}:{timestamp}' with your wallet",
-                example: `getL2PSHistory:${data.address}:${Date.now()}`,
+                message: "Sign the message 'getL2PSHistory:{l2psUid}:{address}:{timestamp}' with your wallet",
+                example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
             }
             return response
         }
@@ -162,7 +162,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         }
 
         try {
-            const expectedMessage = `getL2PSHistory:${data.address}:${data.timestamp}`
+            // The subnet is part of what is signed. Without it one signature
+            // would authorize a read of any subnet this node serves, so
+            // anything able to relay the request could repoint it and still
+            // present a signature that verifies.
+            const expectedMessage = `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
 
             const Cryptography = (await import("../../crypto/cryptography")).default
 
@@ -194,13 +198,17 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             const since = Math.max(0, Number(data.since) || 0)
 
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
-            const transactions = await L2PSTransactionExecutor.getAccountTransactions(
+            // One past the page, so a full last page can say there is nothing
+            // after it instead of inviting a request for an empty one.
+            const fetched = await L2PSTransactionExecutor.getAccountTransactions(
                 data.l2psUid,
                 data.address,
-                limit,
+                limit + 1,
                 offset,
                 since,
             )
+            const hasMore = fetched.length > limit
+            const transactions = hasMore ? fetched.slice(0, limit) : fetched
 
             // The payload is stored encrypted, so the message is decrypted
             // here — after the signature proved the caller owns the address —
@@ -229,7 +237,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                     execution_message: messages[index],
                 })),
                 count: transactions.length,
-                hasMore: transactions.length === limit,
+                hasMore,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get account transactions:", error)
