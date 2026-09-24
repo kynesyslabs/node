@@ -72,6 +72,10 @@ export class L2PSBatchAggregator {
     /** Cleanup age - remove batched transactions older than this (ms) */
     private readonly CLEANUP_AGE_MS = Config.getInstance().l2ps.cleanupAgeMs
 
+    /** History retention in days; 0 keeps history forever. */
+    private readonly HISTORY_RETENTION_DAYS =
+        Config.getInstance().l2ps.historyRetentionDays
+
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
 
@@ -236,6 +240,10 @@ export class L2PSBatchAggregator {
             log.error(`[L2PS Batch Aggregator] Aggregation cycle failed: ${message}`)
 
         } finally {
+            // Retention runs whether or not this cycle aggregated anything.
+            // A subnet whose submission is failing is precisely the one that
+            // would otherwise hold data past the day it agreed to delete it.
+            await this.pruneHistoryRetention()
             this.isAggregating = false
         }
     }
@@ -797,6 +805,29 @@ export class L2PSBatchAggregator {
         } catch (error: unknown) {
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error during cleanup: ${message}`)
+        }
+    }
+
+    /**
+     * Sweep history past its retention.
+     *
+     * Deliberately not chained to a successful aggregation: retention is a
+     * data-handling promise, and a subnet whose batch submission is failing is
+     * exactly the one that would otherwise keep ciphertext and metadata past
+     * the day it agreed to delete them.
+     */
+    private async pruneHistoryRetention(): Promise<void> {
+        if (!this.HISTORY_RETENTION_DAYS || this.HISTORY_RETENTION_DAYS <= 0) return
+        try {
+            const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
+            const pruned = await L2PSTransactionExecutor.pruneHistory(
+                this.HISTORY_RETENTION_DAYS,
+            )
+            if (pruned > 0) {
+                log.info(`[L2PS Batch Aggregator] Pruned ${pruned} transactions past the ${this.HISTORY_RETENTION_DAYS}-day history retention`)
+            }
+        } catch (error: unknown) {
+            log.error(`[L2PS Batch Aggregator] History retention sweep failed: ${getErrorMessage(error)}`)
         }
     }
 

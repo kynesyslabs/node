@@ -104,33 +104,67 @@ export function clearL2PSCache(): void {
  * Synchronize L2PS mempool with a specific peer for a specific network.
  * Uses delta sync based on last received timestamp.
  */
+/**
+ * Where this node has read up to in each peer's history, by peer and subnet.
+ *
+ * The value is a cursor the peer issued, in the peer's own clock, and is only
+ * ever echoed back to that peer. Taking a high-water mark from local state
+ * instead — as this did — compares two machines' clocks: after inserting a
+ * page under local timestamps, the mark jumps past everything still missing,
+ * and a peer more than one page behind can never finish catching up.
+ *
+ * In memory on purpose. A restart resyncs from the beginning, which costs a
+ * few duplicate inserts that the mempool already rejects.
+ */
+const syncCursors = new Map<string, number>()
+
+export function clearL2PSSyncCursors(): void {
+    syncCursors.clear()
+}
+
 export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<void> {
     try {
-        // 1. Get local high-water mark (latest timestamp)
-        const latestTx = await L2PSMempool.getLastTransaction(l2psUid)
-        const sinceTimestamp = latestTx ? Number(latestTx.timestamp) : 0
+        const cursorKey = `${peer.identity}\u0000${l2psUid}`
+        const cursor = syncCursors.get(cursorKey) ?? 0
 
-        // 2. Request transactions from peer
         const response = await peer.call({
             method: "nodeCall",
             params: [{
                 message: "getL2PSTransactions",
                 data: {
                     l2psUid: l2psUid,
-                    since_timestamp: sinceTimestamp,
+                    cursor,
                 },
                 muid: `l2ps_sync_${Date.now()}`,
             }],
         })
 
         if (response?.result === 200 && response.response?.transactions) {
-            const txs = response.response.transactions as any[] // Using any to avoid strict type mismatch with raw response
+            const body = response.response as {
+                transactions: any[]
+                nextCursor?: number
+                hasMore?: boolean
+            }
+            const txs = body.transactions
+
+            // Advance even on an empty page: the peer may have skipped rows it
+            // can no longer serve, and refusing to move would ask for them for
+            // ever.
+            if (typeof body.nextCursor === "number" && body.nextCursor > cursor) {
+                syncCursors.set(cursorKey, body.nextCursor)
+            }
+
             if (txs.length === 0) return
 
             log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
 
-            // 3. Process transactions (verify & store)
             await processReceivedTransactions(l2psUid, txs, peer.identity)
+
+            // Keep pulling while the peer says there is more, so a backlog
+            // drains instead of being re-read one page at a time.
+            if (body.hasMore) {
+                await syncL2PSWithPeer(peer, l2psUid)
+            }
         }
 
     } catch (e) {

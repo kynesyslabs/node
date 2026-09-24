@@ -295,6 +295,14 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_CLEANUP_AGE_MS,
                 d.l2ps.cleanupAgeMs,
             ),
+            historyRetentionDays: envInt(
+                EnvKey.L2PS_HISTORY_RETENTION_DAYS,
+                d.l2ps.historyRetentionDays,
+            ),
+            historyStorePlaintext: envBool(
+                EnvKey.L2PS_HISTORY_STORE_PLAINTEXT,
+                d.l2ps.historyStorePlaintext,
+            ),
         },
 
         metrics: {
