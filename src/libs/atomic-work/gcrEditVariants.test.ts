@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test"
 import type {
     GCREdit,
-    GCREditPaymentSlot,
+    GCREditResourceSlot,
     GCREditWorkAttempt,
     GCREditWorkReceipt,
     GCREditStoragePut,
@@ -14,11 +14,13 @@ import type { SlotCasExpectation } from "@/libs/atomic-work/resourceSlot"
  * with the node-side state machines that consume them.
  */
 
-const slot: GCREditPaymentSlot = {
-    type: "payment-slot-cas",
+// Keyed by an opaque derived key: the edit family is profile-free, and a
+// profile derives the key from its own authenticated fields.
+const slot: GCREditResourceSlot = {
+    type: "resource-slot-cas",
     isRollback: false,
     txhash: "tx1",
-    slotKey: { networkId: "demos", railId: "rail/dem", jobId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", phaseIndex: 0 },
+    resourceKey: "k".repeat(64),
     expected: { state: "vacant", generation: 0 },
     conflictDigest: "e".repeat(64),
     transition: "reserve",
@@ -48,8 +50,10 @@ const storage: GCREditStoragePut = {
     txhash: "tx4",
     target: "stor-abc",
     writer: "writer1",
-    nonce: 0,
-    payload: { logicalAddress: "stor-abc", contentHash: "h".repeat(64) },
+    name: "commitment",
+    discriminator: "1",
+    mode: "create-only",
+    valueDigest: "h".repeat(64),
 }
 
 // Exhaustive discriminator: if a NEW variant is added to the union without a
@@ -57,7 +61,7 @@ const storage: GCREditStoragePut = {
 // completeness guard for the Atomic Work edit family.
 function labelAtomicEdit(edit: GCREdit): string {
     switch (edit.type) {
-        case "payment-slot-cas":
+        case "resource-slot-cas":
             return `slot:${edit.transition}:${edit.expected.state}`
         case "work-attempt":
             return `attempt:${edit.attemptId}`
@@ -72,7 +76,7 @@ function labelAtomicEdit(edit: GCREdit): string {
 
 describe("Atomic Work GCR edit variants (s1)", () => {
     it("are importable from the SDK barrel and carry their discriminant", () => {
-        expect(slot.type).toBe("payment-slot-cas")
+        expect(slot.type).toBe("resource-slot-cas")
         expect(attempt.type).toBe("work-attempt")
         expect(receipt.type).toBe("work-receipt")
         expect(storage.type).toBe("storage-program-put")
@@ -97,12 +101,14 @@ describe("Atomic Work GCR edit variants (s1)", () => {
         expect(labelAtomicEdit(balance)).toBe("other:balance")
     })
 
-    it("slot edit's expected/slotKey shapes agree with paymentSlot.ts", () => {
-        // Structural check: GCREditPaymentSlot.expected IS a SlotCasExpectation.
+    it("slot edit's expectation is exactly the resource slot's", () => {
+        // Structural check: the edit's `expected` IS a SlotCasExpectation, so
+        // the node applies the edit with the same precondition it stages.
         const exp: SlotCasExpectation = slot.expected
         expect(exp.state).toBe("vacant")
-        expect(new Set(Object.keys(slot.slotKey))).toEqual(
-            new Set(["networkId", "railId", "jobId", "phaseIndex"]),
-        )
+        // The key is opaque. A profile's own fields (rail, job, phase) never
+        // appear in the edit, which is what keeps the edit family profile-free.
+        expect(typeof slot.resourceKey).toBe("string")
+        expect(Object.keys(slot)).not.toContain("slotKey")
     })
 })
