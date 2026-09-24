@@ -60,6 +60,7 @@ import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
 import { INativePayload } from "@kynesyslabs/demosdk/types"
 import {
     applyAllOrNothing,
+    carriesWorkEdits,
     requiresAtomicApplication,
 } from "@/libs/atomic-work/atomicApply"
 import {
@@ -497,7 +498,7 @@ export default class HandleGCR {
         if (
             !simulate &&
             !isRollback &&
-            tx.content.type === "native" &&
+            (tx.content.type === "native" || carriesWorkEdits(tx)) &&
             isForkActive(
                 "nonceEnforcement",
                 getSharedState.lastBlockNumber ?? 0,

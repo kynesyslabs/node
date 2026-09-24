@@ -138,6 +138,16 @@ export async function handleExecuteTransaction(
     log.only(`[SERVER] Cloned tx in ${cloneTxEnd - cloneTxStart}ms`)
     let payload: DemoScript | any
 
+    // Newer than some SDK builds' type union, so matched ahead of the switch.
+    // The simulated apply below decides: while the atomicWork fork is
+    // dormant it refuses every Work, so nothing reaches the mempool.
+    if ((tx.content.type as string) === "atomicWork") {
+        result.response = {
+            message: "Transaction applied, waiting for confirmation",
+        }
+        result.success = true
+    }
+
     switch (tx.content.type) {
         case "crosschainOperation": {
             payload = tx.content.data

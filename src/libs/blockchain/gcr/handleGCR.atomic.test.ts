@@ -41,6 +41,10 @@ beforeEach(() => {
     forks = state.forkConfig
     state.forkConfig = cloneDefaultForkConfig()
     state.forkConfig.atomicWork.activationHeight = 0
+    // These cases hand-build their edits to exercise apply semantics; the
+    // guard that regenerates edits from the signed body is exercised with
+    // SDK-built transactions on the devnet.
+    state.forkConfig.nonceEnforcement.activationHeight = null
     state.lastBlockNumber = 10
 })
 

@@ -71,6 +71,20 @@ export function requiresAtomicApplication(
     )
 }
 
+/**
+ * Whether a transaction is a Work or carries Work edits under another type.
+ * Either way its edits must be regenerated from the signed body and matched
+ * before anything admits or applies them.
+ */
+export function carriesWorkEdits(tx: {
+    content?: { type?: string; gcr_edits?: ReadonlyArray<{ type: string }> }
+}): boolean {
+    return (
+        tx.content?.type === "atomicWork" ||
+        requiresAtomicApplication(tx.content?.gcr_edits)
+    )
+}
+
 function detach<T>(value: T): T {
     if (value === null || typeof value !== "object") return value
     // Handlers may rely on the entity's class, which structuredClone drops.
