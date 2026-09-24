@@ -7,14 +7,15 @@
         "build": "node build.mjs"
     },
     "dependencies": {
-        "libp2p": "2.10.0",
         "@chainsafe/libp2p-gossipsub": "14.1.2",
         "@chainsafe/libp2p-noise": "16.1.5",
         "@chainsafe/libp2p-yamux": "7.0.4",
-        "@libp2p/tcp": "10.1.19",
-        "@libp2p/identify": "3.0.39",
         "@libp2p/crypto": "5.1.8",
-        "@multiformats/multiaddr": "12.5.1"
+        "@libp2p/identify": "3.0.39",
+        "@libp2p/ping": "2.0.29",
+        "@libp2p/tcp": "10.1.19",
+        "@multiformats/multiaddr": "12.5.1",
+        "libp2p": "2.10.0"
     },
     "devDependencies": {
         "esbuild": "0.24.2"

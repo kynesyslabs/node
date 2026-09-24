@@ -14,6 +14,7 @@ import { tcp } from "@libp2p/tcp"
 import { noise } from "@chainsafe/libp2p-noise"
 import { yamux } from "@chainsafe/libp2p-yamux"
 import { identify } from "@libp2p/identify"
+import { ping } from "@libp2p/ping"
 import { gossipsub } from "@chainsafe/libp2p-gossipsub"
 import { multiaddr } from "@multiformats/multiaddr"
 import {
@@ -114,6 +115,10 @@ const node = await createLibp2p({
     streamMuxers: [yamux()],
     services: {
         identify: identify(),
+        // the default connection monitor heartbeats over /ipfs/ping/1.0.0
+        // every 10s; without this handler every heartbeat logs a
+        // protocol-selection error on one side and a stream reset on the other
+        ping: ping(),
         pubsub: gossipsub({
             D: 8,
             Dlo: 6,
