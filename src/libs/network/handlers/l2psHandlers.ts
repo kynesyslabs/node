@@ -69,9 +69,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         }
 
         try {
-            const sinceTimestamp = data.since_timestamp || 0
+            // The cursor is one this node issued and the peer echoes back.
+            // `since_timestamp` is still accepted from peers that predate the
+            // cursor, but it is their clock, so it can only be honoured as a
+            // starting point, never as a running high-water mark.
+            const cursor = Math.max(0, Number(data.cursor) || Number(data.since_timestamp) || 0)
             const limit = Math.min(Math.max(1, data.limit || 500), 1000)
-            const offset = Math.max(0, data.offset || 0)
 
             // Served from the durable history table, not the aggregation
             // queue: the queue is swept minutes after confirmation, so a peer
@@ -79,25 +82,22 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // its history — got an empty answer for transactions that had in
             // fact executed.
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
-            const stored = await L2PSTransactionExecutor.getSubnetTransactions(
+            const { rows, nextCursor } = await L2PSTransactionExecutor.getSubnetTransactions(
                 data.l2psUid,
                 limit,
-                offset,
-                sinceTimestamp,
+                cursor,
             )
 
             // Rows written before the ciphertext was stored carry none, so
             // the queue still answers for them while it holds them.
-            const missingPayload = stored.some(tx => !tx.encrypted_payload)
+            const missingPayload = rows.some(tx => !tx.encrypted_payload)
             const queued = missingPayload
                 ? await L2PSMempool.getByUID(data.l2psUid, L2PS_STATUS.EXECUTED)
                 : []
             const queuedByOriginalHash = new Map(queued.map(tx => [tx.original_hash, tx]))
 
-            response.result = 200
-            response.response = {
-                l2psUid: data.l2psUid,
-                transactions: stored.map(tx => ({
+            const transactions = rows
+                .map(tx => ({
                     hash: tx.encrypted_hash || tx.hash,
                     l2ps_uid: tx.l2ps_uid,
                     original_hash: tx.hash,
@@ -107,9 +107,23 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                         null,
                     timestamp: Number(tx.timestamp),
                     block_number: tx.l1_block_number,
-                })),
-                count: stored.length,
-                hasMore: stored.length === limit,
+                }))
+                // A row from before the migration whose queue entry has been
+                // swept has no ciphertext left anywhere. Sending it with a null
+                // payload would only have the peer reject it as malformed; the
+                // cursor still advances past it, so it cannot wedge the sync.
+                .filter(tx => tx.encrypted_tx !== null)
+
+            response.result = 200
+            response.response = {
+                l2psUid: data.l2psUid,
+                transactions,
+                /** Echo this back as `cursor` to continue; it is this node's clock. */
+                nextCursor,
+                /** Rows in this page with no recoverable ciphertext, skipped. */
+                unrecoverable: rows.length - transactions.length,
+                count: transactions.length,
+                hasMore: rows.length === limit,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)

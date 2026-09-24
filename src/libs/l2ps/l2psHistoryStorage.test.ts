@@ -189,20 +189,39 @@ describe("pruneHistory", () => {
 })
 
 describe("getSubnetTransactions", () => {
-    it("pages a peer forward by record time, not by the sender's clock", async () => {
-        // A peer's cursor is the moment its own queue admitted a transaction.
-        // Matching that against the wallet-set timestamp would hide any
-        // transaction whose payload was stamped before it arrived.
-        await L2PSTransactionExecutor.getSubnetTransactions(
-            "subnet-1",
-            500,
-            0,
-            1_700_000_000_000,
-        )
+    it("pages oldest first from a cursor this node issued", async () => {
+        // Newest-first paging cannot drain a backlog: every round hands back
+        // the same newest page while everything older stays behind whatever
+        // the peer last recorded.
+        getMany.mockResolvedValueOnce([
+            { created_at: new Date(1_700_000_001_000), hash: "a" },
+            { created_at: new Date(1_700_000_002_000), hash: "b" },
+        ] as never)
 
-        const cursor = whereClauses.find(c => c.clause.includes(":since"))
+        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 1_700_000_000_000)
+
+        expect(page.rows).toHaveLength(2)
+        expect(page.nextCursor).toBe(1_700_000_002_000)
+        const cursor = whereClauses.find(c => c.clause.includes(":cursor"))
         expect(cursor?.clause).toContain("created_at")
-        expect(cursor?.params.since).toEqual(new Date(1_700_000_000_000))
+        expect(cursor?.params.cursor).toEqual(new Date(1_700_000_000_000))
+    })
+
+    it("holds the cursor where it was when a page comes back empty", async () => {
+        getMany.mockResolvedValueOnce([] as never)
+
+        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 42)
+
+        expect(page.rows).toEqual([])
+        expect(page.nextCursor).toBe(42)
+    })
+
+    it("asks for everything when the peer has no cursor yet", async () => {
+        getMany.mockResolvedValueOnce([] as never)
+
+        await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 0)
+
+        expect(whereClauses.some(c => c.clause.includes(":cursor"))).toBe(false)
     })
 })
 

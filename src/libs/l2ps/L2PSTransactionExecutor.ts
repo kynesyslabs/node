@@ -532,19 +532,17 @@ export default class L2PSTransactionExecutor {
      * up from the queue, because the rows it needed had already been swept;
      * this reads the table that keeps them.
      *
-     * @param since - A peer's high-water mark, which it takes from the time
-     * its own queue admitted a transaction. So the cutoff is this node's
-     * record time, not the sender's `timestamp`: the latter is set by the
-     * wallet and runs behind admission, so comparing the two clocks would
-     * place transactions before a cursor that has already passed them and
-     * drop them from the sync.
+     * @param cursor - A cursor this node issued, echoed back by the peer.
+     * It is this node's own record time, never the peer's clock and never the
+     * wallet-set `timestamp`: comparing clocks across machines silently drops
+     * transactions, and a peer that inserted a page under its own local time
+     * would jump its cursor past everything it had not yet received.
      */
     static async getSubnetTransactions(
         l2psUid: string,
         limit = 100,
-        offset = 0,
-        since = 0,
-    ): Promise<L2PSTransaction[]> {
+        cursor = 0,
+    ): Promise<{ rows: L2PSTransaction[]; nextCursor: number }> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
@@ -553,15 +551,19 @@ export default class L2PSTransactionExecutor {
         const query = txRepo.createQueryBuilder("tx")
             .where("tx.l2ps_uid = :l2psUid", { l2psUid })
 
-        if (since > 0) {
-            query.andWhere("tx.created_at > :since", { since: new Date(since) })
+        if (cursor > 0) {
+            query.andWhere("tx.created_at > :cursor", { cursor: new Date(cursor) })
         }
 
-        return query
-            .orderBy("tx.created_at", "DESC")
-            .take(limit)
-            .skip(offset)
-            .getMany()
+        // Oldest first. Newest-first paging cannot drain a backlog: each round
+        // would hand back the same newest page while everything older stayed
+        // behind whatever the peer last recorded.
+        const rows = await query.orderBy("tx.created_at", "ASC").take(limit).getMany()
+        const last = rows.at(-1)
+        return {
+            rows,
+            nextCursor: last ? new Date(last.created_at).getTime() : cursor,
+        }
     }
 
     /**
