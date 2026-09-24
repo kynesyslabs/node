@@ -26,7 +26,14 @@ async function getValidatorAddresses(lastBlock: number): Promise<Set<string>> {
 export async function getAheadValidatorPeers(): Promise<Peer[]> {
     const ourBlock = getSharedState.lastBlockNumber
     const onlinePeers = await PeerManager.getInstance().getOnlinePeers()
-    const aheadPeers = onlinePeers.filter(peer => peer.sync.block > ourBlock)
+    // peer.sync is corroborated and can never exceed our own head; the
+    // signed self-attested head from gossip heights records is what lets
+    // a lagging node see the network is ahead at all.
+    const aheadPeers = onlinePeers.filter(
+        peer =>
+            Math.max(peer.sync.block ?? 0, peer.gossip?.height ?? 0) >
+            ourBlock,
+    )
 
     if (aheadPeers.length === 0) {
         return []

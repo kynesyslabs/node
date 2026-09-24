@@ -109,13 +109,19 @@ async function sleep(time: number) {
     return new Promise(resolve => setTimeout(resolve, time))
 }
 
+// Corroborated sync state, or the peer's signed self-attested head from
+// gossip heights records. The gossip claim exists precisely because
+// handleUpdatePeerSyncData refuses heights ahead of our own chain — without
+// it a lagging node can never learn the network head once push sync is
+// gossip-only.
+const peerHeight = (peer: Peer) =>
+    Math.max(peer.sync.block ?? 0, peer.gossip?.height ?? 0)
+
 const latestBlock = () =>
-    peerManager
-        .getAll()
-        .reduce((max, peer) => Math.max(max, peer.sync.block), 0)
+    peerManager.getAll().reduce((max, peer) => Math.max(max, peerHeight(peer)), 0)
 
 const highestBlockPeer = () =>
-    peerManager.getAll().find(peer => peer.sync.block === latestBlock())
+    peerManager.getAll().find(peer => peerHeight(peer) === latestBlock())
 
 const FAST_SYNC_TIMEOUT_MS = 30_000
 
@@ -1208,7 +1214,7 @@ function triggerL2PSSync(peer: Peer): void {
 function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
     const highestBlockPeers = peerManager
         .getAll()
-        .filter(p => p.sync.block === latestBlock())
+        .filter(p => peerHeight(p) === latestBlock())
         .filter(p => !seenPeers.has(p.identity))
 
     log.info(
@@ -1313,7 +1319,7 @@ async function requestBlocks(): Promise<boolean> {
                 // Find alternative peers with highest block
                 const highestBlockPeers = peerManager
                     .getAll()
-                    .filter(p => p.sync.block === latestBlock())
+                    .filter(p => peerHeight(p) === latestBlock())
                     .filter(p => !seenPeers.has(p.identity))
 
                 log.info(

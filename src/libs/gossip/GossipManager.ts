@@ -471,6 +471,8 @@ export class GossipManager {
                 peerId: record.peerId,
                 addrs: record.addrs,
                 seq: record.seq,
+                height: record.height,
+                headHash: record.headHash,
             }
             peerman.updatePeerLastSeen(record.pubkey)
             if (
