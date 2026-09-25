@@ -1330,107 +1330,113 @@ export default class HandleGCR {
         sideEffects: (() => Promise<void>)[],
     ) {
         const now = Date.now()
-        // Save GCRMain entities
-        const entitiesToSave = entities.accounts.values().toArray()
-        entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
-        if (entitiesToSave.length > 0) {
-            log.debug(
-                `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
-            )
-            const gcrMainRepo = dataSource.getRepository(GCRMain)
-            await gcrMainRepo.save(entitiesToSave)
-        }
+        // One database transaction for the whole set: a crash or a failed
+        // write part-way leaves none of it on disk rather than, say, a Work's
+        // payment without the Work that justified it. Side effects run only
+        // once the state they follow from is durable.
+        await dataSource.transaction(async em => {
+            // Save GCRMain entities
+            const entitiesToSave = entities.accounts.values().toArray()
+            entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
+            if (entitiesToSave.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
+                )
+                const gcrMainRepo = em.getRepository(GCRMain)
+                await gcrMainRepo.save(entitiesToSave)
+            }
 
-        // Save/delete GCRStorageProgram entities
-        if (entities.storagePrograms.size > 0) {
-            const spToSave: GCRStorageProgram[] = []
-            const spToDelete: string[] = []
-            for (const [key, entity] of entities.storagePrograms) {
-                if (entity === null) {
-                    spToDelete.push(key)
-                } else {
-                    spToSave.push(entity)
+            // Save/delete GCRStorageProgram entities
+            if (entities.storagePrograms.size > 0) {
+                const spToSave: GCRStorageProgram[] = []
+                const spToDelete: string[] = []
+                for (const [key, entity] of entities.storagePrograms) {
+                    if (entity === null) {
+                        spToDelete.push(key)
+                    } else {
+                        spToSave.push(entity)
+                    }
+                }
+
+                const spRepo = em.getRepository(GCRStorageProgram)
+                if (spToSave.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
+                    )
+                    await spRepo.save(spToSave)
+                }
+                if (spToDelete.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
+                    )
+                    await spRepo.delete({ storageAddress: In(spToDelete) })
                 }
             }
 
-            const spRepo = dataSource.getRepository(GCRStorageProgram)
-            if (spToSave.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
-                )
-                await spRepo.save(spToSave)
-            }
-            if (spToDelete.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
-                )
-                await spRepo.delete({ storageAddress: In(spToDelete) })
-            }
-        }
+            // Save/delete GCRTLSNotary entities
+            if (entities.tlsNotaries.size > 0) {
+                const tlsToSave: GCRTLSNotary[] = []
+                const tlsToDelete: string[] = []
+                for (const [key, entity] of entities.tlsNotaries) {
+                    if (entity === null) {
+                        tlsToDelete.push(key)
+                    } else {
+                        tlsToSave.push(entity)
+                    }
+                }
 
-        // Save/delete GCRTLSNotary entities
-        if (entities.tlsNotaries.size > 0) {
-            const tlsToSave: GCRTLSNotary[] = []
-            const tlsToDelete: string[] = []
-            for (const [key, entity] of entities.tlsNotaries) {
-                if (entity === null) {
-                    tlsToDelete.push(key)
-                } else {
-                    tlsToSave.push(entity)
+                const tlsRepo = em.getRepository(GCRTLSNotary)
+                if (tlsToSave.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
+                    )
+                    await tlsRepo.save(tlsToSave)
+                }
+                if (tlsToDelete.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
+                    )
+                    await tlsRepo.delete({ tokenId: In(tlsToDelete) })
                 }
             }
 
-            const tlsRepo = dataSource.getRepository(GCRTLSNotary)
-            if (tlsToSave.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
-                )
-                await tlsRepo.save(tlsToSave)
-            }
-            if (tlsToDelete.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
-                )
-                await tlsRepo.delete({ tokenId: In(tlsToDelete) })
-            }
-        }
-
-        if (entities.atomicWorks?.size > 0) {
-            const repo = dataSource.getRepository(GCRAtomicWork)
-            const toSave: GCRAtomicWork[] = []
-            const toDelete: string[] = []
-            for (const [workId, record] of entities.atomicWorks) {
-                if (record === null) toDelete.push(workId)
-                else toSave.push(repo.create(record))
-            }
-            if (toSave.length > 0) await repo.save(toSave)
-            if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
-        }
-
-        if (entities.resourceSlots?.size > 0) {
-            const repo = dataSource.getRepository(GCRResourceSlot)
-            const toSave: GCRResourceSlot[] = []
-            const toDelete: string[] = []
-            for (const [resourceKey, record] of entities.resourceSlots) {
-                if (record === null) {
-                    toDelete.push(resourceKey)
-                    continue
+            if (entities.atomicWorks?.size > 0) {
+                const repo = em.getRepository(GCRAtomicWork)
+                const toSave: GCRAtomicWork[] = []
+                const toDelete: string[] = []
+                for (const [workId, record] of entities.atomicWorks) {
+                    if (record === null) toDelete.push(workId)
+                    else toSave.push(repo.create(record))
                 }
-                toSave.push(
-                    repo.create({
-                        resourceKey,
-                        state: record.state,
-                        generation: record.generation,
-                        workId: "workId" in record ? record.workId : "",
-                        record,
-                    }),
-                )
+                if (toSave.length > 0) await repo.save(toSave)
+                if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
             }
-            if (toSave.length > 0) await repo.save(toSave)
-            if (toDelete.length > 0) {
-                await repo.delete({ resourceKey: In(toDelete) })
+
+            if (entities.resourceSlots?.size > 0) {
+                const repo = em.getRepository(GCRResourceSlot)
+                const toSave: GCRResourceSlot[] = []
+                const toDelete: string[] = []
+                for (const [resourceKey, record] of entities.resourceSlots) {
+                    if (record === null) {
+                        toDelete.push(resourceKey)
+                        continue
+                    }
+                    toSave.push(
+                        repo.create({
+                            resourceKey,
+                            state: record.state,
+                            generation: record.generation,
+                            workId: "workId" in record ? record.workId : "",
+                            record,
+                        }),
+                    )
+                }
+                if (toSave.length > 0) await repo.save(toSave)
+                if (toDelete.length > 0) {
+                    await repo.delete({ resourceKey: In(toDelete) })
+                }
             }
-        }
+        })
 
         // INFO: Apply side-effects in sequence
         for (const sideEffect of sideEffects) {
