@@ -58,6 +58,7 @@ dotenv.config()
 // Uses the unified error module for consistent logging and classification.
 import { handleError, ErrorSource } from "src/errors"
 import { Config } from "src/config"
+import { registerAtomicWorkRuntime } from "@/libs/atomic-work/dacs/runtime"
 
 process.on("uncaughtException", (error: Error) => {
     handleError(error, "CORE", { source: ErrorSource.UNCAUGHT_EXCEPTION })
@@ -624,6 +625,8 @@ async function main() {
         subsystemError(getSharedState.subsystems, "chain", e)
         throw e
     }
+
+    registerAtomicWorkRuntime()
 
     bootTracker.start("mempool.init")
     try {

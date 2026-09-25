@@ -4,6 +4,11 @@ import {
     type ExpectedOperation,
 } from "@/libs/atomic-work/profile"
 import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
+import { DACS_ROLES } from "@/libs/atomic-work/dacs/roles"
+import {
+    verifyAuthorizationCoverage,
+    type AuthzIntent,
+} from "@/libs/atomic-work/dacs/authorization"
 
 /**
  * The DACS Atomic Work profile binding.
@@ -19,7 +24,14 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
     return typeof v === "object" && v !== null && !Array.isArray(v)
 }
 
-export const DACS_ROLES = ["buyer", "seller", "orchestrator", "payer"] as const
+export { DACS_ROLES }
+
+const verifyAuthorizations: AtomicWorkProfile["verifyAuthorizations"] = (
+    intent,
+    authorizations,
+    workId,
+    verifySignature,
+) => verifyAuthorizationCoverage(intent as unknown as AuthzIntent, authorizations, workId, verifySignature)
 
 /** Purchase: buyer and seller vetting, agreement, commitment, slot, payment. */
 export const PURCHASE_GRAPH: ExpectedOperation[] = [
@@ -42,6 +54,7 @@ export const DACS_PURCHASE_PROFILE: AtomicWorkProfile = {
     operationGraph: PURCHASE_GRAPH,
     roles: DACS_ROLES,
     domains: DACS_DOMAINS,
+    verifyAuthorizations,
     /**
      * The slot's `after` state carries the very commitment being computed, so
      * committing to it would be circular.
@@ -61,6 +74,7 @@ export const DACS_COMPLETION_PROFILE: AtomicWorkProfile = {
     operationGraph: COMPLETION_GRAPH,
     roles: DACS_ROLES,
     domains: DACS_DOMAINS,
+    verifyAuthorizations,
 }
 
 /** Register both DACS profiles. Idempotent. */

@@ -37,6 +37,18 @@ export interface AtomicWorkProfile {
      * circularly. Called on a clone; mutate it in place.
      */
     projectReceiptCore?(core: Record<string, unknown>): void
+    /**
+     * Check that every operation carries the authorizations its roles
+     * require, each bound to this Work and validly signed. Throws on the
+     * first failure. A profile without it cannot have its Works executed:
+     * effects nobody authorized are not the profile's to commit.
+     */
+    verifyAuthorizations?(
+        intent: Record<string, unknown>,
+        authorizations: Record<string, unknown>[],
+        workId: string,
+        verifySignature: (input: { signer: unknown; signedBytes: string; signature: string }) => boolean,
+    ): void
 }
 
 const profiles = new Map<string, AtomicWorkProfile>()

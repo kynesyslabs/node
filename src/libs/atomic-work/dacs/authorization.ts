@@ -19,7 +19,7 @@ import { jcsCanonicalize } from "@/libs/crypto/jcs"
  */
 
 import { DACS_DOMAINS } from "@/libs/atomic-work/dacs/domains"
-import { DACS_ROLES } from "@/libs/atomic-work/dacs/profile"
+import { DACS_ROLES } from "@/libs/atomic-work/dacs/roles"
 
 /** Signature domain: signatures are over AUTH_DOMAIN ‖ authorizationHash(ascii). */
 export const AUTH_DOMAIN: string = DACS_DOMAINS.authorization

@@ -79,7 +79,15 @@ import {
     type WorkReceiptEdit,
     type WorkRecord,
 } from "@/libs/atomic-work/workLedger"
+import { DEFAULT_ATOMIC_WORK_LIMITS } from "@/libs/atomic-work/limits"
+import {
+    assertWorkEnvelope,
+    ed25519SignerVerifier,
+    type WorkEnvelope,
+} from "@/libs/atomic-work/workEnvelope"
 import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
+
+type AtomicWorkPayloadView = WorkEnvelope & { transfers?: unknown[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
 
 export type GetNativeStatusOptions = {
@@ -559,6 +567,20 @@ export default class HandleGCR {
             }
             // Rollback replays edits the block already accepted, reversed.
             if (!isRollback) {
+                // Work edits are bound to an authorized intent, which only
+                // an atomicWork transaction carries.
+                if ((tx.content.type as string) !== "atomicWork") {
+                    return refusal("Work edits travel only in an atomicWork transaction")
+                }
+                const payload = (tx.content.data as unknown as [string, AtomicWorkPayloadView])[1]
+                const envelope = assertWorkEnvelope(
+                    payload,
+                    gcrEdits as never,
+                    payload?.transfers?.length ?? 0,
+                    DEFAULT_ATOMIC_WORK_LIMITS,
+                    ed25519SignerVerifier,
+                )
+                if (!envelope.success) return refusal(envelope.message)
                 const shape = assertWorkEditSet(
                     gcrEdits,
                     normalizePubkey(
