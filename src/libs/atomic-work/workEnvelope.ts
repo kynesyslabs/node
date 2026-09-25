@@ -166,7 +166,7 @@ export function assertWorkEnvelope(
         }
     }
     for (const e of edits) {
-        if ((e.type === "resource-slot-cas" || e.type === "work-receipt") && e.workId !== workId) {
+        if (e.type === "resource-slot-cas" && e.workId !== workId) {
             return refuse(`${e.type} names a Work other than this intent's`)
         }
     }

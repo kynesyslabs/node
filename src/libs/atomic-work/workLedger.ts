@@ -12,8 +12,13 @@ import {
  *
  * A Work commits in one transaction, so a slot never rests in `in-flight` on
  * chain: it goes from vacant (or rolled-back) straight to settled or
- * rolled-back, with the receipt that justifies the move. The in-flight state
- * exists only inside the overlay while the Work runs.
+ * rolled-back. The in-flight state exists only inside the overlay while the
+ * Work runs.
+ *
+ * The receipt is not an edit. It commits to the block the Work lands in,
+ * which the sender cannot know when signing, so the node builds it once
+ * every edit has passed (`sealWork`) and writes its commitment into the Work
+ * record and every slot the Work moved, in the same transition.
  *
  * Every forward transition records what it replaced, so a block rollback can
  * put back exactly the prior state instead of inferring it.
@@ -27,9 +32,9 @@ export interface WorkRecord {
     replacementFor: string | null
     txHash: string
     receiptCommitment: string | null
-    effectsRoot: string | null
-    inputHash: string | null
-    outputHash: string | null
+    operationReceiptRoot: string | null
+    /** The receipt the node built, exactly as committed to. */
+    receipt: Record<string, unknown> | null
 }
 
 export type SlotRecord = SlotState & {
@@ -50,17 +55,6 @@ export interface WorkAttemptEdit {
     replacementFor?: string | null
 }
 
-export interface WorkReceiptEdit {
-    type: "work-receipt"
-    isRollback?: boolean
-    txhash?: string
-    workId: string
-    receiptCommitment: string
-    effectsRoot: string
-    inputHash: string
-    outputHash: string
-}
-
 export interface SlotCasEdit {
     type: "resource-slot-cas"
     isRollback?: boolean
@@ -70,10 +64,9 @@ export interface SlotCasEdit {
     transition: "settle" | "rollback"
     workId: string
     conflictDigest: string
-    receiptCommitment: string
 }
 
-export type WorkEdit = WorkAttemptEdit | WorkReceiptEdit | SlotCasEdit
+export type WorkEdit = WorkAttemptEdit | SlotCasEdit
 
 export interface WorkEditOutcome {
     success: boolean
@@ -84,6 +77,9 @@ const ok = (message: string): WorkEditOutcome => ({ success: true, message })
 const refuse = (message: string): WorkEditOutcome => ({ success: false, message })
 
 const VACANT: SlotState = { state: "vacant", generation: 0 }
+
+/** Placeholder until `sealWork` writes the receipt the move was made under. */
+const PENDING_RECEIPT = ""
 
 export function applyWorkAttempt(
     edit: WorkAttemptEdit,
@@ -136,46 +132,10 @@ export function applyWorkAttempt(
         replacementFor,
         txHash: edit.txhash ?? "",
         receiptCommitment: null,
-        effectsRoot: null,
-        inputHash: null,
-        outputHash: null,
+        operationReceiptRoot: null,
+        receipt: null,
     })
     return ok("attempt recorded")
-}
-
-export function applyWorkReceipt(
-    edit: WorkReceiptEdit,
-    works: Map<string, WorkRecord | null>,
-    isRollback: boolean,
-): WorkEditOutcome {
-    const stored = works.get(edit.workId) ?? null
-    if (!stored) return refuse(`no winning attempt for Work ${edit.workId}`)
-
-    if (isRollback) {
-        if (stored.receiptCommitment !== edit.receiptCommitment) {
-            return refuse("cannot undo a receipt that is not the recorded one")
-        }
-        works.set(edit.workId, {
-            ...stored,
-            receiptCommitment: null,
-            effectsRoot: null,
-            inputHash: null,
-            outputHash: null,
-        })
-        return ok("receipt undone")
-    }
-
-    if (stored.receiptCommitment !== null) {
-        return refuse(`Work ${edit.workId} already has a receipt`)
-    }
-    works.set(edit.workId, {
-        ...stored,
-        receiptCommitment: edit.receiptCommitment,
-        effectsRoot: edit.effectsRoot,
-        inputHash: edit.inputHash,
-        outputHash: edit.outputHash,
-    })
-    return ok("receipt recorded")
 }
 
 function slotState(record: SlotRecord | null): SlotState {
@@ -205,10 +165,6 @@ export function applySlotCas(
         // move it on: a Work that commits in one transition never needs it.
         return refuse(`slot transition ${String(edit.transition)} cannot be committed on chain`)
     }
-    if (!edit.receiptCommitment) {
-        return refuse("a slot moves only with the receipt that justifies it")
-    }
-
     const before = slotState(stored)
     try {
         assertCasPrecondition(before, edit.expected)
@@ -219,8 +175,8 @@ export function applySlotCas(
 
     const next =
         edit.transition === "settle"
-            ? settleSlot(before, edit.workId, edit.conflictDigest, edit.receiptCommitment)
-            : rollbackSlot(before, edit.workId, edit.conflictDigest, edit.receiptCommitment)
+            ? settleSlot(before, edit.workId, edit.conflictDigest, PENDING_RECEIPT)
+            : rollbackSlot(before, edit.workId, edit.conflictDigest, PENDING_RECEIPT)
 
     slots.set(edit.resourceKey, {
         ...next,
@@ -238,15 +194,15 @@ export function applySlotCas(
  *
  * One attempt per transaction, so one transaction is one Work. A replay
  * carries nothing else from the Work family: its effects already happened
- * with the winner. Anything else commits its receipt in the same transition
- * as the slots it moves, and every slot names the receipt it moved with.
+ * with the winner. A receipt is never accepted from the sender: the node
+ * builds it. Every slot names this Work.
  */
 export function assertWorkEditSet(
     edits: ReadonlyArray<{ type: string }>,
     sender: string,
 ): WorkEditOutcome {
     const attempts = edits.filter(e => e.type === "work-attempt") as WorkAttemptEdit[]
-    const receipts = edits.filter(e => e.type === "work-receipt") as WorkReceiptEdit[]
+    const receipts = edits.filter(e => e.type === "work-receipt")
     const slotEdits = edits.filter(e => e.type === "resource-slot-cas") as SlotCasEdit[]
     const puts = edits.filter(e => e.type === "storage-program-put")
 
@@ -261,26 +217,19 @@ export function assertWorkEditSet(
         return refuse("the attempt must come before the Work's other edits")
     }
 
+    if (receipts.length) {
+        return refuse("a receipt is built by the node, not carried by the sender")
+    }
     if (attempt.attemptClass === "replay") {
-        if (receipts.length || slotEdits.length || puts.length) {
+        if (slotEdits.length || puts.length) {
             return refuse("a replay produces no effects of its own")
         }
         return ok("replay shape")
     }
 
-    if (receipts.length !== 1) {
-        return refuse("a Work commits exactly one receipt with its effects")
-    }
-    const receipt = receipts[0]
-    if (receipt.workId !== attempt.workId) {
-        return refuse("the receipt names a different Work than the attempt")
-    }
     for (const slot of slotEdits) {
         if (slot.workId !== attempt.workId) {
             return refuse(`slot ${slot.resourceKey} names a different Work`)
-        }
-        if (slot.receiptCommitment !== receipt.receiptCommitment) {
-            return refuse(`slot ${slot.resourceKey} moves with a receipt other than this Work's`)
         }
     }
     const keys = new Set(slotEdits.map(s => s.resourceKey))
@@ -335,4 +284,47 @@ export function contendedWorkTxs<T extends { hash: string; content: { gcr_edits?
         for (const k of keys) claimed.add(k)
     }
     return contended
+}
+
+/**
+ * Record the receipt the node built for a Work, in the same transition as
+ * its effects: on the Work record, and on every slot it moved so the slot
+ * says which receipt justified the move.
+ */
+export function sealWork(
+    workId: string,
+    receipt: Record<string, unknown>,
+    receiptCommitment: string,
+    operationReceiptRoot: string,
+    slotKeys: string[],
+    works: Map<string, WorkRecord | null>,
+    slots: Map<string, SlotRecord | null>,
+): WorkEditOutcome {
+    const record = works.get(workId)
+    if (!record || record.receiptCommitment !== null) {
+        return refuse(`Work ${workId} has no unsealed winning attempt`)
+    }
+    // Check every slot before touching anything, so a refusal changes nothing.
+    const moved: SlotRecord[] = []
+    for (const key of slotKeys) {
+        const slot = slots.get(key)
+        if (!slot || !("workId" in slot) || slot.workId !== workId) {
+            return refuse(`slot ${key} was not moved by Work ${workId}`)
+        }
+        if (slot.state !== "settled" && slot.state !== "rolled-back") {
+            return refuse(`slot ${key} is ${slot.state}, not terminal`)
+        }
+        moved.push(slot)
+    }
+
+    works.set(workId, { ...record, receipt, receiptCommitment, operationReceiptRoot })
+    for (const slot of moved) {
+        slots.set(
+            slot.resourceKey,
+            (slot.state === "settled"
+                ? { ...slot, receiptCommitment }
+                : { ...slot, failureReceiptCommitment: receiptCommitment }) as SlotRecord,
+        )
+    }
+    return ok("Work sealed")
 }

@@ -70,13 +70,12 @@ import {
 import {
     applySlotCas,
     applyWorkAttempt,
-    applyWorkReceipt,
+    sealWork,
     assertWorkEditSet,
     contendedWorkTxs,
     type SlotCasEdit,
     type SlotRecord,
     type WorkAttemptEdit,
-    type WorkReceiptEdit,
     type WorkRecord,
 } from "@/libs/atomic-work/workLedger"
 import { DEFAULT_ATOMIC_WORK_LIMITS } from "@/libs/atomic-work/limits"
@@ -85,6 +84,11 @@ import {
     ed25519SignerVerifier,
     type WorkEnvelope,
 } from "@/libs/atomic-work/workEnvelope"
+import { atomicWorkProfile } from "@/libs/atomic-work/profile"
+import {
+    buildWorkReceipt,
+    type AppliedStorageWrite,
+} from "@/libs/atomic-work/workReceipt"
 import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
 type AtomicWorkPayloadView = WorkEnvelope & { transfers?: unknown[] }
@@ -565,6 +569,8 @@ export default class HandleGCR {
             ) {
                 return refusal("Work edits are not active at this height")
             }
+            // Built and sealed after every edit passed, in the same transition.
+            let seal: ((caches: GCREntityCaches) => GCRResult) | undefined
             // Rollback replays edits the block already accepted, reversed.
             if (!isRollback) {
                 // Work edits are bound to an authorized intent, which only
@@ -588,6 +594,46 @@ export default class HandleGCR {
                     ),
                 )
                 if (!shape.success) return refusal(shape.message)
+
+                const attempt = gcrEdits.find(
+                    e => (e.type as string) === "work-attempt",
+                ) as unknown as WorkAttemptEdit
+                if (attempt.attemptClass !== "replay") {
+                    const profile = atomicWorkProfile(
+                        payload.intent.profile as string,
+                    )
+                    const writes = gcrEdits
+                        .filter(e => (e.type as string) === "storage-program-put")
+                        .map(e => e as unknown as AppliedStorageWrite)
+                    const slotKeys = gcrEdits
+                        .filter(e => (e.type as string) === "resource-slot-cas")
+                        .map(e => (e as unknown as SlotCasEdit).resourceKey)
+                    seal = caches => {
+                        const built = buildWorkReceipt({
+                            intent: payload.intent,
+                            profile,
+                            workId: attempt.workId,
+                            attemptId: attempt.attemptId,
+                            txHash: tx.hash ?? "",
+                            // The block being built (consensus) or the block
+                            // being synced: the same number on every node.
+                            height:
+                                tx.blockNumber ??
+                                (getSharedState.lastBlockNumber ?? 0) + 1,
+                            nonce: tx.content.nonce,
+                            writes,
+                        })
+                        return sealWork(
+                            attempt.workId,
+                            built.receipt,
+                            built.receiptCommitment,
+                            built.operationReceiptRoot,
+                            slotKeys,
+                            caches.atomicWorks,
+                            caches.resourceSlots,
+                        )
+                    }
+                }
             }
             const result = await applyAllOrNothing(
                 entities,
@@ -603,6 +649,7 @@ export default class HandleGCR {
                         simulate,
                     )
                 },
+                seal,
             )
             if (!result.success) {
                 log.error(
@@ -1336,12 +1383,6 @@ export default class HandleGCR {
             case "work-attempt":
                 return applyWorkAttempt(
                     editOperation as unknown as WorkAttemptEdit,
-                    entities.atomicWorks,
-                    isRollback,
-                )
-            case "work-receipt":
-                return applyWorkReceipt(
-                    editOperation as unknown as WorkReceiptEdit,
                     entities.atomicWorks,
                     isRollback,
                 )

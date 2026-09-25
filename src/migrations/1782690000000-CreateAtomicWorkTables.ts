@@ -28,10 +28,9 @@ export class CreateAtomicWorkTables1782690000000 implements MigrationInterface {
                 "attemptClass"       text NOT NULL,
                 "replacementFor"     text NULL,
                 "txHash"             text NOT NULL,
-                "receiptCommitment"  text NULL,
-                "effectsRoot"        text NULL,
-                "inputHash"          text NULL,
-                "outputHash"         text NULL
+                "receiptCommitment"    text NULL,
+                "operationReceiptRoot" text NULL,
+                "receipt"              jsonb NULL
             )
         `)
         await queryRunner.query(

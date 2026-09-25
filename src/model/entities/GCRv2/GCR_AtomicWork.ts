@@ -1,8 +1,8 @@
 import { Column, Entity, Index, PrimaryColumn } from "typeorm"
 
 /**
- * One row per Work that ran: the attempt that won and, once committed in
- * the same transition, its receipt. Losing attempts never reach a block
+ * One row per Work that ran: the attempt that won and the receipt the node
+ * built for it in the same transition. Losing attempts never reach a block
  * (their whole transaction is refused), so no other attempt is stored.
  */
 @Entity("gcr_atomic_works")
@@ -29,12 +29,10 @@ export class GCRAtomicWork {
     @Column({ type: "text", name: "receiptCommitment", nullable: true })
     receiptCommitment: string | null
 
-    @Column({ type: "text", name: "effectsRoot", nullable: true })
-    effectsRoot: string | null
+    @Column({ type: "text", name: "operationReceiptRoot", nullable: true })
+    operationReceiptRoot: string | null
 
-    @Column({ type: "text", name: "inputHash", nullable: true })
-    inputHash: string | null
-
-    @Column({ type: "text", name: "outputHash", nullable: true })
-    outputHash: string | null
+    /** The receipt the node built, exactly as committed to. */
+    @Column({ type: "jsonb", name: "receipt", nullable: true })
+    receipt: Record<string, unknown> | null
 }

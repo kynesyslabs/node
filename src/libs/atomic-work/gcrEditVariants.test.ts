@@ -3,13 +3,12 @@ import type {
     GCREdit,
     GCREditResourceSlot,
     GCREditWorkAttempt,
-    GCREditWorkReceipt,
     GCREditStoragePut,
 } from "@kynesyslabs/demosdk/types"
 import type { SlotCasExpectation } from "@/libs/atomic-work/resourceSlot"
 
 /**
- * s1 verification: the four Atomic Work GCR edit variants are exported from the
+ * s1 verification: the three Atomic Work GCR edit variants are exported from the
  * SDK barrel, discriminate correctly on `type`, and their field shapes agree
  * with the node-side state machines that consume them.
  */
@@ -25,7 +24,6 @@ const slot: GCREditResourceSlot = {
     conflictDigest: "e".repeat(64),
     transition: "settle",
     workId: "w".repeat(64),
-    receiptCommitment: "r".repeat(64),
 }
 const attempt: GCREditWorkAttempt = {
     type: "work-attempt",
@@ -34,16 +32,6 @@ const attempt: GCREditWorkAttempt = {
     workId: "w".repeat(64),
     attemptId: "attempt-a",
     canonicalBytesHash: "c".repeat(64),
-}
-const receipt: GCREditWorkReceipt = {
-    type: "work-receipt",
-    isRollback: false,
-    txhash: "tx3",
-    workId: "w".repeat(64),
-    receiptCommitment: "r".repeat(64),
-    effectsRoot: "f".repeat(64),
-    inputHash: "i".repeat(64),
-    outputHash: "o".repeat(64),
 }
 const storage: GCREditStoragePut = {
     type: "storage-program-put",
@@ -67,8 +55,6 @@ function labelAtomicEdit(edit: GCREdit): string {
             return `slot:${edit.transition}:${edit.expected.state}`
         case "work-attempt":
             return `attempt:${edit.attemptId}`
-        case "work-receipt":
-            return `receipt:${edit.receiptCommitment.slice(0, 4)}`
         case "storage-program-put":
             return `storage:${edit.target}`
         default:
@@ -80,14 +66,12 @@ describe("Atomic Work GCR edit variants (s1)", () => {
     it("are importable from the SDK barrel and carry their discriminant", () => {
         expect(slot.type).toBe("resource-slot-cas")
         expect(attempt.type).toBe("work-attempt")
-        expect(receipt.type).toBe("work-receipt")
         expect(storage.type).toBe("storage-program-put")
     })
 
     it("discriminate on `type` (runtime narrowing)", () => {
         expect(labelAtomicEdit(slot)).toBe("slot:settle:vacant")
         expect(labelAtomicEdit(attempt)).toBe("attempt:attempt-a")
-        expect(labelAtomicEdit(receipt)).toBe("receipt:rrrr")
         expect(labelAtomicEdit(storage)).toBe("storage:stor-abc")
     })
 

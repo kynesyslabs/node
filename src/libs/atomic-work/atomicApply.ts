@@ -207,6 +207,12 @@ export async function applyAllOrNothing<
     base: C,
     edits: ReadonlyArray<E>,
     applyOne: (edit: E, caches: C) => Promise<EditOutcome>,
+    /**
+     * Runs on the shadow after every edit passed and before anything is
+     * committed, for state derived from the whole set (a Work's receipt).
+     * Its failure discards the set like any edit's would.
+     */
+    finalize?: (caches: C) => EditOutcome | Promise<EditOutcome>,
 ): Promise<AtomicApplyResult> {
     const refused = edits.findIndex(e => !CACHE_CONFINED_EDIT_TYPES.has(e.type))
     if (refused !== -1) {
@@ -242,6 +248,24 @@ export async function applyAllOrNothing<
             }
         }
         if (outcome.sideEffect) sideEffects.push(outcome.sideEffect)
+    }
+
+    if (finalize) {
+        let outcome: EditOutcome
+        try {
+            outcome = await finalize(shadow.view)
+        } catch (error) {
+            outcome = { success: false, message: `finalizing the set failed: ${error}` }
+        }
+        if (!outcome.success) {
+            return {
+                success: false,
+                message: outcome.message,
+                failedAt: edits.length,
+                sideEffects: [],
+                appliedEditsCount: 0,
+            }
+        }
     }
 
     shadow.commit()

@@ -92,17 +92,6 @@ function work(profile: keyof typeof GRAPHS, seed: string) {
             transition: "settle",
             workId,
             conflictDigest: "c1",
-            receiptCommitment: `${seed}-r`,
-            isRollback: false,
-            txhash: "",
-        }),
-        receipt: () => ({
-            type: "work-receipt",
-            workId,
-            receiptCommitment: `${seed}-r`,
-            effectsRoot: "e1",
-            inputHash: "i1",
-            outputHash: "o1",
             isRollback: false,
             txhash: "",
         }),
@@ -148,7 +137,7 @@ afterEach(() => {
 
 const payWork = (seed = "w1") => {
     const w = work("test-pay-v1", seed)
-    const edits: unknown[] = [w.attempt(), w.slot(), balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n), w.receipt()]
+    const edits: unknown[] = [w.attempt(), w.slot(), balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n)]
     return { w, edits, transfers: [{ to: "0xbb", amount: "30" }] }
 }
 
@@ -161,7 +150,12 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         expect(result.success).toBe(true)
         expect(entities.accounts.get("0xbb")!.balance).toBe(35n)
         expect(entities.resourceSlots.get("k1")).toMatchObject({ state: "settled", workId: w.workId })
-        expect(entities.atomicWorks.get(w.workId)).toMatchObject({ winnerAttemptId: "w1-a1", receiptCommitment: "w1-r" })
+        // The node built the receipt and put its commitment on the slot too.
+        const record = entities.atomicWorks.get(w.workId)!
+        expect(record.winnerAttemptId).toBe("w1-a1")
+        expect(record.receiptCommitment).toMatch(/^[0-9a-f]{64}$/)
+        expect(record.receipt).toMatchObject({ workId: w.workId, outcome: "committed", receiptCommitment: record.receiptCommitment })
+        expect(entities.resourceSlots.get("k1")).toMatchObject({ receiptCommitment: record.receiptCommitment })
     })
 
     it("commits nothing when the slot was already taken", async () => {
@@ -219,7 +213,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
             isRollback: false,
             txhash: "",
         }
-        const edits = [w.attempt(), put, w.slot(), w.receipt()]
+        const edits = [w.attempt(), put, w.slot()]
 
         const applied = await HandleGCR.applyTransaction(entities, workTx("0x14", "0xaa", w, structuredClone(edits)), false, false)
         expect(applied.success).toBe(true)
@@ -237,7 +231,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, "0xbb", "result", "1")
         const put = { type: "storage-program-put", target, writer: "0xbb", name: "result", discriminator: "1", mode: "create-only", valueDigest: storageValueDigest(value), value, isRollback: false, txhash: "" }
 
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x15", "0xaa", w, [w.attempt(), put, w.slot(), w.receipt()]), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x15", "0xaa", w, [w.attempt(), put, w.slot()]), false, false)
 
         expect(result.success).toBe(false)
         expect(result.message).toContain("not by the sender")
@@ -337,11 +331,11 @@ describe("HandleGCR.partitionIndependentTxs with Work edits", () => {
         expect(groups.length).toBe(2)
     })
 
-    it("groups attempts and receipts of one Work together", () => {
+    it("groups every transaction of one Work together", () => {
         const w = work("test-pay-v1", "w1")
         const groups = HandleGCR.partitionIndependentTxs([
             workTx("0xa", "0x01", w, [w.attempt()]),
-            workTx("0xb", "0x02", w, [w.receipt()]),
+            workTx("0xb", "0x02", w, [{ ...w.attempt(), attemptId: "w1-a2", attemptClass: "replay" }]),
         ])
         expect(groups.length).toBe(1)
     })
