@@ -1357,19 +1357,22 @@ export async function syncGCRTables(txs: Transaction[], block?: Block) {
 
     // sort transactions deterministic
     const sortedTxs = orderDeterministically(confirmedTxs)
+    const clock = block
+        ? { height: block.number, timestampSec: block.content.timestamp }
+        : undefined
 
     const nonceTrace = debugAssertionsEnabled()
         ? readNonceTrace(block?.attrs)
         : null
 
     if (!nonceTrace) {
-        await HandleGCR.applyTransactions(sortedTxs, false)
+        await HandleGCR.applyTransactions(sortedTxs, false, clock)
         return
     }
 
     const traceAccounts = Object.keys(nonceTrace)
     const localBefore = await readNonces(traceAccounts)
-    await HandleGCR.applyTransactions(sortedTxs, false)
+    await HandleGCR.applyTransactions(sortedTxs, false, clock)
     const localAfter = await readNonces(traceAccounts)
 
     assertSyncedNonceTrace(block.number, nonceTrace, localBefore, localAfter)

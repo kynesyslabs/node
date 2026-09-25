@@ -84,6 +84,11 @@ import {
     ed25519SignerVerifier,
     type WorkEnvelope,
 } from "@/libs/atomic-work/workEnvelope"
+import {
+    assertWithinWindow,
+    executionClock,
+    type ExecutionClock,
+} from "@/libs/atomic-work/executionClock"
 import { atomicWorkProfile } from "@/libs/atomic-work/profile"
 import {
     buildWorkReceipt,
@@ -130,6 +135,18 @@ export interface GCREntityCaches {
     tlsNotaries: Map<string, GCRTLSNotary | null>
     atomicWorks: Map<string, WorkRecord | null>
     resourceSlots: Map<string, SlotRecord | null>
+}
+
+/**
+ * The block a transaction set is applied as part of. Its timestamp is the
+ * consensus time a Work's deadlines are judged against: fixed before the
+ * block's transactions are applied, and read back from the block by every
+ * node that syncs it, so every node judges with the same value.
+ */
+export interface BlockClock {
+    height: number
+    /** Block timestamp, in seconds, as the block carries it. */
+    timestampSec: number
 }
 
 export interface GCRApplyResult {
@@ -467,12 +484,14 @@ export default class HandleGCR {
      * @param tx - The transaction to execute
      * @param isRollback - Whether the operation is a rollback
      * @param simulate - Whether the operation is being simulated (used for pre-consensus simulation)
+     * @param clock - The block being applied, when there is one
      **/
     static async applyTransaction(
         entities: GCREntityCaches,
         tx: Transaction,
         isRollback: boolean,
         simulate: boolean,
+        clock?: BlockClock,
     ): Promise<GCRApplyResult> {
         // Skip txs without GCR edits (valid but no state changes)
         if (
@@ -595,6 +614,38 @@ export default class HandleGCR {
                 )
                 if (!shape.success) return refusal(shape.message)
 
+                // Deadlines are judged against consensus time only. A
+                // simulation has no block yet, so it uses the last block's
+                // time: a Work already expired then cannot become valid.
+                let workClock: ExecutionClock
+                try {
+                    if (clock) {
+                        workClock = executionClock(
+                            clock.height,
+                            clock.timestampSec * 1000,
+                        )
+                    } else if (simulate) {
+                        const last = getSharedState.lastBlockNumber ?? 0
+                        const lastBlock = await Chain.getBlockByNumber(last)
+                        workClock = executionClock(
+                            last,
+                            Number(lastBlock?.content?.timestamp ?? 0) * 1000 || 1,
+                        )
+                    } else {
+                        return refusal(
+                            "a Work cannot execute without the consensus block time",
+                        )
+                    }
+                    assertWithinWindow(workClock, {
+                        notBeforeMs: payload.intent.notBefore as number | null,
+                        deadlineMs: payload.intent.expiresAt as number | null,
+                    }, "this Work")
+                } catch (error) {
+                    return refusal(
+                        error instanceof Error ? error.message : String(error),
+                    )
+                }
+
                 const attempt = gcrEdits.find(
                     e => (e.type as string) === "work-attempt",
                 ) as unknown as WorkAttemptEdit
@@ -622,6 +673,7 @@ export default class HandleGCR {
                                 (getSharedState.lastBlockNumber ?? 0) + 1,
                             nonce: tx.content.nonce,
                             writes,
+                            timestampMs: clock ? clock.timestampSec * 1000 : undefined,
                         })
                         return sealWork(
                             attempt.workId,
@@ -905,6 +957,7 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         isRollback: boolean,
         txIndex: Map<string, number>,
+        clock?: BlockClock,
     ) {
         const successful: string[] = []
         const failed: string[] = []
@@ -922,6 +975,7 @@ export default class HandleGCR {
                 tx,
                 isRollback,
                 false,
+                clock,
             )
             if (!applyResult.success) {
                 failed.push(tx.hash)
@@ -965,7 +1019,11 @@ export default class HandleGCR {
      *
      * @returns The successful and failed transactions (in original order)
      */
-    static async applyTransactions(txs: Transaction[], isRollback: boolean) {
+    static async applyTransactions(
+        txs: Transaction[],
+        isRollback: boolean,
+        clock?: BlockClock,
+    ) {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
         const skippedTxs: string[] = []
@@ -1132,7 +1190,13 @@ export default class HandleGCR {
             const slice = groups.slice(i, i + CONCURRENCY)
             const sliceResults = await Promise.all(
                 slice.map(group =>
-                    HandleGCR.runGroup(group, entities, isRollback, txIndex),
+                    HandleGCR.runGroup(
+                        group,
+                        entities,
+                        isRollback,
+                        txIndex,
+                        clock,
+                    ),
                 ),
             )
             groupResults.push(...sliceResults)

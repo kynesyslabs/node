@@ -14,9 +14,9 @@ import { computeReceiptCommitment } from "@/libs/atomic-work/receiptCommitment"
  * no sender can know when signing, and a receipt someone else wrote is a
  * claim, not evidence.
  *
- * `blockRef` carries the height only. The block's timestamp is settled after
- * its transactions are applied, so no node could commit to it here; the block
- * at that height is the timestamp's authority.
+ * `blockRef` carries the block's height and, when the node applies the Work
+ * as part of a block, its consensus timestamp. Both are fixed before the
+ * block's transactions run and read back identically by every syncing node.
  */
 
 export interface AppliedStorageWrite {
@@ -35,6 +35,8 @@ export interface ReceiptInputs {
     nonce: number | string
     /** The Work's storage writes, in the order its operations declare them. */
     writes: AppliedStorageWrite[]
+    /** The block's consensus time in ms; absent only in a simulation. */
+    timestampMs?: number
 }
 
 export interface BuiltReceipt {
@@ -100,7 +102,10 @@ export function buildWorkReceipt(inputs: ReceiptInputs): BuiltReceipt {
             attemptId: inputs.attemptId,
             nativeTransactionRef: { kind: "demos-transaction", value: inputs.txHash },
         },
-        blockRef: { height: String(inputs.height) },
+        blockRef:
+            inputs.timestampMs === undefined
+                ? { height: String(inputs.height) }
+                : { height: String(inputs.height), timestamp: inputs.timestampMs },
         outcome: "committed",
         operationResults,
         operationReceiptRoot,

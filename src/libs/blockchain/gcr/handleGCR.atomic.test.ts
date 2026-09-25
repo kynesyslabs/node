@@ -135,6 +135,9 @@ afterEach(() => {
     state.forkConfig = forks
 })
 
+// The block these Works are applied in: height 11, consensus time 1.8e9 s.
+const CLOCK = { height: 11, timestampSec: 1_800_000_000 }
+
 const payWork = (seed = "w1") => {
     const w = work("test-pay-v1", seed)
     const edits: unknown[] = [w.attempt(), w.slot(), balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n)]
@@ -145,7 +148,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
     it("commits the transfer, the slot and the receipt together", async () => {
         const entities = caches()
         const { w, edits, transfers } = payWork()
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x10", "0xaa", w, edits, transfers), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x10", "0xaa", w, edits, transfers), false, false, CLOCK)
 
         expect(result.success).toBe(true)
         expect(entities.accounts.get("0xbb")!.balance).toBe(35n)
@@ -173,7 +176,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         entities.resourceSlots.set("k1", taken)
         const { w, edits, transfers } = payWork()
 
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x11", "0xaa", w, edits, transfers), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x11", "0xaa", w, edits, transfers), false, false, CLOCK)
 
         expect(result.success).toBe(false)
         expect(result.message).toContain("expected state vacant")
@@ -186,9 +189,9 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
     it("undoes a committed Work on block rollback", async () => {
         const entities = caches()
         const { w, edits, transfers } = payWork()
-        await HandleGCR.applyTransaction(entities, workTx("0x12", "0xaa", w, structuredClone(edits), transfers), false, false)
+        await HandleGCR.applyTransaction(entities, workTx("0x12", "0xaa", w, structuredClone(edits), transfers), false, false, CLOCK)
 
-        const undone = await HandleGCR.applyTransaction(entities, workTx("0x12", "0xaa", w, structuredClone(edits), transfers), true, false)
+        const undone = await HandleGCR.applyTransaction(entities, workTx("0x12", "0xaa", w, structuredClone(edits), transfers), true, false, CLOCK)
 
         expect(undone.success).toBe(true)
         expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
@@ -215,11 +218,11 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         }
         const edits = [w.attempt(), put, w.slot()]
 
-        const applied = await HandleGCR.applyTransaction(entities, workTx("0x14", "0xaa", w, structuredClone(edits)), false, false)
+        const applied = await HandleGCR.applyTransaction(entities, workTx("0x14", "0xaa", w, structuredClone(edits)), false, false, CLOCK)
         expect(applied.success).toBe(true)
         expect(entities.storagePrograms.get(target)?.data).toEqual(value)
 
-        const undone = await HandleGCR.applyTransaction(entities, workTx("0x14", "0xaa", w, structuredClone(edits)), true, false)
+        const undone = await HandleGCR.applyTransaction(entities, workTx("0x14", "0xaa", w, structuredClone(edits)), true, false, CLOCK)
         expect(undone.success).toBe(true)
         expect(entities.storagePrograms.get(target)).toBeNull()
     })
@@ -231,7 +234,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         const target = deriveStorageAddress(ATOMIC_STORAGE_DOMAIN, "0xbb", "result", "1")
         const put = { type: "storage-program-put", target, writer: "0xbb", name: "result", discriminator: "1", mode: "create-only", valueDigest: storageValueDigest(value), value, isRollback: false, txhash: "" }
 
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x15", "0xaa", w, [w.attempt(), put, w.slot()]), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x15", "0xaa", w, [w.attempt(), put, w.slot()]), false, false, CLOCK)
 
         expect(result.success).toBe(false)
         expect(result.message).toContain("not by the sender")
@@ -242,11 +245,60 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         state.forkConfig.atomicWork.activationHeight = null
         const entities = caches()
         const { w, edits, transfers } = payWork()
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x13", "0xaa", w, edits, transfers), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x13", "0xaa", w, edits, transfers), false, false, CLOCK)
 
         expect(result.success).toBe(false)
         expect(result.message).toContain("not active")
         expect(entities.atomicWorks.has(w.workId)).toBe(false)
+    })
+})
+
+describe("HandleGCR.applyTransaction judges deadlines by consensus time", () => {
+    const timed = (window: Record<string, number>) => {
+        const w = work("test-pay-v1", "t-" + JSON.stringify(window))
+        Object.assign(w.intent, window)
+        return work2(w)
+    }
+    // Rebuild the ids once the intent carries its window.
+    const work2 = (w: ReturnType<typeof work>) => {
+        const workId = computeWorkId(w.intent, DOMAINS.workId)
+        const attempt = { ...w.attempt(), workId, canonicalBytesHash: intentBytesHash(w.intent) }
+        const slot = { ...w.slot(), workId }
+        return { w: { ...w, workId }, edits: [attempt, slot, balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n)] }
+    }
+    const transfers = [{ to: "0xbb", amount: "30" }]
+
+    it("stamps the receipt with the block's consensus time", async () => {
+        const entities = caches()
+        const { w, edits } = timed({ expiresAt: 1_800_000_000_000 + 1 })
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x30", "0xaa", w, edits, transfers), false, false, CLOCK)
+        expect(result.success).toBe(true)
+        expect(entities.atomicWorks.get(w.workId)!.receipt!.blockRef).toEqual({ height: "11", timestamp: 1_800_000_000_000 })
+    })
+
+    it("refuses a Work whose deadline passed before the block", async () => {
+        const entities = caches()
+        const { w, edits } = timed({ expiresAt: 1_800_000_000_000 - 1 })
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x31", "0xaa", w, edits, transfers), false, false, CLOCK)
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("expired")
+        expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
+    })
+
+    it("refuses a Work not yet valid at the block", async () => {
+        const entities = caches()
+        const { w, edits } = timed({ notBefore: 1_800_000_000_000 + 1 })
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x32", "0xaa", w, edits, transfers), false, false, CLOCK)
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("not valid until")
+    })
+
+    it("refuses to execute a Work without a block to take the time from", async () => {
+        const entities = caches()
+        const { w, edits, transfers: t } = payWork()
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x33", "0xaa", w, edits, t), false, false)
+        expect(result.success).toBe(false)
+        expect(result.message).toContain("consensus block time")
     })
 })
 
@@ -257,7 +309,7 @@ describe("HandleGCR.applyTransaction binds Work edits to their intent", () => {
         const tx = workTx("0x20", "0xaa", w, edits, transfers)
         tx.content.type = "demoswork"
 
-        const result = await HandleGCR.applyTransaction(entities, tx, false, false)
+        const result = await HandleGCR.applyTransaction(entities, tx, false, false, CLOCK)
         expect(result.success).toBe(false)
         expect(result.message).toContain("atomicWork transaction")
         expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
@@ -268,7 +320,7 @@ describe("HandleGCR.applyTransaction binds Work edits to their intent", () => {
         const { w, edits, transfers } = payWork()
         edits[0] = { ...(edits[0] as object), workId: "forged" }
 
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x21", "0xaa", w, edits, transfers), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x21", "0xaa", w, edits, transfers), false, false, CLOCK)
         expect(result.success).toBe(false)
         expect(result.message).toContain("workId")
     })
@@ -293,7 +345,7 @@ describe("HandleGCR.applyTransaction binds Work edits to their intent", () => {
         const { w, edits, transfers } = payWork()
         edits.push({ type: "validatorStake", isRollback: false, txhash: "" })
 
-        const result = await HandleGCR.applyTransaction(entities, workTx("0x23", "0xaa", w, edits, transfers), false, false)
+        const result = await HandleGCR.applyTransaction(entities, workTx("0x23", "0xaa", w, edits, transfers), false, false, CLOCK)
         expect(result.success).toBe(false)
         expect(result.message).toContain("validatorStake")
         expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
