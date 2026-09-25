@@ -26,6 +26,25 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 export { DACS_ROLES }
 
+/**
+ * The payer's native account is the one the Work's payment debits, and the
+ * node debits the submitter. So they must be the same account. A relayed
+ * payment, submitted by someone else on the payer's behalf, needs a bundle
+ * binding the node does not accept yet, and is refused rather than silently
+ * charged to the relayer.
+ */
+const assertSubmitter: AtomicWorkProfile["assertSubmitter"] = (intent, submitter) => {
+    const roster = (intent.roleRoster ?? []) as { role: string; signer?: unknown; nativeAccount?: unknown }[]
+    const payer = roster.find(r => r.role === "payer")
+    if (!payer) throw new Error("the intent names no payer")
+    const account = typeof payer.nativeAccount === "string" ? payer.nativeAccount : payer.signer
+    if (typeof account !== "string" || account.toLowerCase() !== submitter.toLowerCase()) {
+        throw new Error(
+            "the submitter is not the payer's native account; a relayed payment needs a bundle binding this node does not accept",
+        )
+    }
+}
+
 const verifyAuthorizations: AtomicWorkProfile["verifyAuthorizations"] = (
     intent,
     authorizations,
@@ -55,6 +74,7 @@ export const DACS_PURCHASE_PROFILE: AtomicWorkProfile = {
     roles: DACS_ROLES,
     domains: DACS_DOMAINS,
     verifyAuthorizations,
+    assertSubmitter,
     /**
      * The slot's `after` state carries the very commitment being computed, so
      * committing to it would be circular.

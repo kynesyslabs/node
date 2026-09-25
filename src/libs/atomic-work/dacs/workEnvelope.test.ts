@@ -25,7 +25,12 @@ function keypair() {
 // The reference intent, with DID signers swapped for keys a node can check.
 const keys = Object.fromEntries(["buyer", "seller", "orchestrator", "payer"].map(r => [r, keypair()]))
 const intent = structuredClone(reference.intent)
-intent.roleRoster = intent.roleRoster.map((r: any) => ({ ...r, signer: keys[r.role].hex }))
+const SUBMITTER = "0x" + "5e".repeat(32)
+intent.roleRoster = intent.roleRoster.map((r: any) => ({
+    ...r,
+    signer: keys[r.role].hex,
+    ...(r.role === "payer" ? { nativeAccount: SUBMITTER } : {}),
+}))
 const workId = computeWorkId(intent, DACS_DOMAINS.workId)
 
 function authorizations(sign = true) {
@@ -67,6 +72,7 @@ const check = (over: { env?: any; edits?: any[]; transfers?: number } = {}) =>
         over.transfers ?? 1,
         DEFAULT_ATOMIC_WORK_LIMITS,
         ed25519SignerVerifier,
+        SUBMITTER,
     )
 
 beforeAll(() => {
@@ -107,6 +113,7 @@ describe("assertWorkEnvelope", () => {
             1,
             DEFAULT_ATOMIC_WORK_LIMITS,
             ed25519SignerVerifier,
+            SUBMITTER,
         )
         expect(result.success).toBe(false)
     })
@@ -115,6 +122,19 @@ describe("assertWorkEnvelope", () => {
         expect(check({ edits: [attempt, put, put, slot, receipt] }).message).toContain("storage")
         expect(check({ transfers: 2 }).message).toContain("transfer")
         expect(check({ edits: [attempt, put, put, put, { ...slot, workId: "other" }, receipt] }).success).toBe(false)
+    })
+
+    it("refuses a payment submitted by anyone but the payer's account", () => {
+        const other = assertWorkEnvelope(
+            { intent, authorizations: authorizations() },
+            edits as never,
+            1,
+            DEFAULT_ATOMIC_WORK_LIMITS,
+            ed25519SignerVerifier,
+            "0x" + "99".repeat(32),
+        )
+        expect(other.success).toBe(false)
+        expect(other.message).toContain("not the payer")
     })
 
     it("lets a replay through on identity alone", () => {

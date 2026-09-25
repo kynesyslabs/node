@@ -103,6 +103,7 @@ export function assertWorkEnvelope(
     transferCount: number,
     limits: AtomicWorkLimits,
     verifySignature: SignatureVerifier,
+    submitter: string,
 ): Outcome {
     const intent = envelope?.intent
     if (!intent || typeof intent !== "object") return refuse("a Work transaction must carry its intent")
@@ -146,6 +147,14 @@ export function assertWorkEnvelope(
         profile.verifyAuthorizations(intent, envelope?.authorizations ?? [], workId, verifySignature)
     } catch (error) {
         return refuse(error instanceof Error ? error.message : String(error))
+    }
+
+    if (transferCount > 0 && profile.assertSubmitter) {
+        try {
+            profile.assertSubmitter(intent, submitter)
+        } catch (error) {
+            return refuse(error instanceof Error ? error.message : String(error))
+        }
     }
 
     const declared = { storage: 0, slot: 0, transfer: 0 }

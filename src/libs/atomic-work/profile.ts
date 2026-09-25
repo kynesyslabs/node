@@ -49,6 +49,13 @@ export interface AtomicWorkProfile {
         workId: string,
         verifySignature: (input: { signer: unknown; signedBytes: string; signature: string }) => boolean,
     ): void
+    /**
+     * Check that the account submitting the Work may be the one its
+     * transfers are debited from. Throws otherwise. Transfers always debit
+     * the submitter, so a profile that names who pays must name the
+     * submitter, or the wrong party would pay without a word.
+     */
+    assertSubmitter?(intent: Record<string, unknown>, submitter: string): void
 }
 
 const profiles = new Map<string, AtomicWorkProfile>()

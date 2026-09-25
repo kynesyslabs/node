@@ -619,6 +619,9 @@ export default class HandleGCR {
                     payload?.transfers?.length ?? 0,
                     DEFAULT_ATOMIC_WORK_LIMITS,
                     ed25519SignerVerifier,
+                    normalizePubkey(
+                        tx.content.from_ed25519_address || tx.content.from,
+                    ),
                 )
                 if (!envelope.success) return refusal(envelope.message)
                 const shape = assertWorkEditSet(
