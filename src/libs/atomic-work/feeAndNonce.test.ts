@@ -71,3 +71,31 @@ describe("one Work, one charge", () => {
         )
     })
 })
+
+describe("settling a Work transaction's edits", () => {
+    const { splitSettlement, settledEdits } = require("@/libs/atomic-work/feeAndNonce")
+    const kinds = new Set(["work-attempt", "resource-slot-cas"])
+    const edits = [
+        { type: "work-attempt" },
+        { type: "balance", n: "transfer-out" },
+        { type: "balance", n: "transfer-in" },
+        { type: "resource-slot-cas" },
+        { type: "balance", n: "gas" },
+        { type: "nonce" },
+    ]
+    const parts = splitSettlement(edits, kinds, 1)
+
+    it("finds the envelope after the Work's own edits and transfers", () => {
+        expect(parts.work.map((e: any) => e.n ?? e.type)).toEqual(["work-attempt", "transfer-out", "transfer-in", "resource-slot-cas"])
+        expect(parts.fee).toEqual([{ type: "balance", n: "gas" }])
+        expect(parts.nonce).toEqual([{ type: "nonce" }])
+    })
+
+    it("charges a rolled-back Work its fee and nonce but none of its effects", () => {
+        expect(settledEdits(parts, "rolled-back", false)).toEqual([...parts.fee, ...parts.nonce])
+    })
+
+    it("lets a replay spend its nonce without paying again", () => {
+        expect(settledEdits(parts, "replayed", true)).toEqual([...parts.work, ...parts.nonce])
+    })
+})

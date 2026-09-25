@@ -72,7 +72,9 @@ const SETTLEMENTS: Record<WorkOutcome, Settlement> = {
     },
     replayed: {
         chargeFee: false,
-        consumeNonce: false,
+        // The chain's replay protection is per transaction: an included
+        // transaction that left its nonce unspent could be included again.
+        consumeNonce: true,
         rationale:
             "recovers the receipt of a Work that already paid; charging again bills one effect twice",
     },
@@ -116,11 +118,54 @@ export function assertSingleCharge(outcomes: WorkOutcome[]): void {
             "double-charge",
         )
     }
-    const consumed = outcomes.filter(o => settlementFor(o).consumeNonce)
+    // A replay spends its own transaction's nonce, not the Work's: only the
+    // attempts that executed the Work count against it.
+    const consumed = outcomes.filter(o => o !== "replayed" && settlementFor(o).consumeNonce)
     if (consumed.length > 1) {
         throw new SettlementError(
             `a Work consumed the nonce ${consumed.length} times across its attempts`,
             "double-nonce",
         )
     }
+}
+
+export interface SettlementParts<E> {
+    /** The Work's own edits: its Work-kind edits and its transfers. */
+    work: E[]
+    /** What the sender pays to have the transaction processed. */
+    fee: E[]
+    /** The sender's nonce spend. */
+    nonce: E[]
+}
+
+/**
+ * Split a Work transaction's edits into the Work, its fee and its nonce.
+ *
+ * The edits are generated from the signed payload in a fixed order — the
+ * Work's edits with its transfers, then the transaction envelope — and bound
+ * to that payload before this runs, so the envelope is whatever follows the
+ * Work's own edits.
+ */
+export function splitSettlement<E extends { type: string }>(
+    edits: readonly E[],
+    workKinds: ReadonlySet<string>,
+    transferCount: number,
+): SettlementParts<E> {
+    const own = edits.filter(e => workKinds.has(e.type)).length + 2 * transferCount
+    const envelope = edits.slice(own)
+    return {
+        work: edits.slice(0, own),
+        fee: envelope.filter(e => e.type !== "nonce"),
+        nonce: envelope.filter(e => e.type === "nonce"),
+    }
+}
+
+/** The edits to apply for a Work that ended with `outcome`, in order. */
+export function settledEdits<E>(parts: SettlementParts<E>, outcome: WorkOutcome, includeWork: boolean): E[] {
+    const rule = settlementFor(outcome)
+    return [
+        ...(includeWork ? parts.work : []),
+        ...(rule.chargeFee ? parts.fee : []),
+        ...(rule.consumeNonce ? parts.nonce : []),
+    ]
 }

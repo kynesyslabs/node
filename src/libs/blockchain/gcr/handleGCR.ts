@@ -60,9 +60,14 @@ import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
 import { INativePayload } from "@kynesyslabs/demosdk/types"
 import {
     applyAllOrNothing,
+    ATOMIC_ONLY_EDIT_TYPES,
     carriesWorkEdits,
     requiresAtomicApplication,
 } from "@/libs/atomic-work/atomicApply"
+import {
+    settledEdits,
+    splitSettlement,
+} from "@/libs/atomic-work/feeAndNonce"
 import {
     applyAtomicStoragePut,
     type StoragePutEdit,
@@ -590,6 +595,17 @@ export default class HandleGCR {
             }
             // Built and sealed after every edit passed, in the same transition.
             let seal: ((caches: GCREntityCaches) => GCRResult) | undefined
+            const payload = (tx.content.data as unknown as [string, AtomicWorkPayloadView] | undefined)?.[1]
+            // In signed order: rollback reverses its own copy of the edits.
+            const parts = splitSettlement(
+                tx.content.gcr_edits,
+                ATOMIC_ONLY_EDIT_TYPES,
+                payload?.transfers?.length ?? 0,
+            )
+            const attempt = tx.content.gcr_edits.find(
+                e => (e.type as string) === "work-attempt",
+            ) as unknown as WorkAttemptEdit | undefined
+            const isReplay = attempt?.attemptClass === "replay"
             // Rollback replays edits the block already accepted, reversed.
             if (!isRollback) {
                 // Work edits are bound to an authorized intent, which only
@@ -597,7 +613,6 @@ export default class HandleGCR {
                 if ((tx.content.type as string) !== "atomicWork") {
                     return refusal("Work edits travel only in an atomicWork transaction")
                 }
-                const payload = (tx.content.data as unknown as [string, AtomicWorkPayloadView])[1]
                 const envelope = assertWorkEnvelope(
                     payload,
                     gcrEdits as never,
@@ -646,10 +661,7 @@ export default class HandleGCR {
                     )
                 }
 
-                const attempt = gcrEdits.find(
-                    e => (e.type as string) === "work-attempt",
-                ) as unknown as WorkAttemptEdit
-                if (attempt.attemptClass !== "replay") {
+                if (!isReplay) {
                     const profile = atomicWorkProfile(
                         payload.intent.profile as string,
                     )
@@ -687,34 +699,81 @@ export default class HandleGCR {
                     }
                 }
             }
-            const result = await applyAllOrNothing(
+            const applyOne = (edit: GCREdit, caches: GCREntityCaches) => {
+                if (!simulate && tx.hash) {
+                    edit.txhash = tx.hash
+                }
+                return HandleGCR.applyGCREdit(edit, caches, isRollback, simulate)
+            }
+            const inOrder = (edits: GCREdit[]) =>
+                isRollback ? [...edits].reverse() : edits
+            const done = (
+                r: Awaited<ReturnType<typeof applyAllOrNothing>>,
+                message = r.message,
+            ): GCRApplyResult => ({
+                success: r.success,
                 entities,
-                gcrEdits,
-                (edit, caches) => {
-                    if (!simulate && tx.hash) {
-                        edit.txhash = tx.hash
-                    }
-                    return HandleGCR.applyGCREdit(
-                        edit,
-                        caches,
-                        isRollback,
-                        simulate,
-                    )
-                },
-                seal,
-            )
-            if (!result.success) {
-                log.error(
-                    `[applyTransaction] Work tx ${tx.hash} not applied (edit ${result.failedAt}): ${result.message}`,
+                message,
+                sideEffects: r.sideEffects,
+                appliedEditsCount: r.appliedEditsCount,
+            })
+
+            // What a block applied for this Work decides what its rollback
+            // undoes: the whole Work if it is the recorded winner, otherwise
+            // only the fee and nonce it was charged when it rolled back.
+            if (isRollback) {
+                const record = attempt
+                    ? entities.atomicWorks.get(attempt.workId)
+                    : null
+                const committed =
+                    !isReplay &&
+                    record?.winnerAttemptId === attempt?.attemptId &&
+                    record?.txHash === tx.hash
+                const outcome = isReplay
+                    ? "replayed"
+                    : committed
+                      ? "committed"
+                      : "rolled-back"
+                return done(
+                    await applyAllOrNothing(
+                        entities,
+                        inOrder(settledEdits(parts, outcome, outcome !== "rolled-back")),
+                        applyOne,
+                    ),
                 )
             }
-            return {
-                success: result.success,
+
+            const result = await applyAllOrNothing(
                 entities,
-                message: result.message,
-                sideEffects: result.sideEffects,
-                appliedEditsCount: result.appliedEditsCount,
+                settledEdits(parts, isReplay ? "replayed" : "committed", true),
+                applyOne,
+                seal,
+            )
+            if (result.success || simulate || isReplay) {
+                if (!result.success) {
+                    log.error(
+                        `[applyTransaction] Work tx ${tx.hash} not applied (edit ${result.failedAt}): ${result.message}`,
+                    )
+                }
+                return done(result)
             }
+
+            // Executed in a block and failed: its effects are gone, but the
+            // execution cost what a success would, so the fee and nonce are
+            // spent. Free failure would be an unlimited retry. Every node
+            // reruns the same Work on the same state, so all charge alike.
+            const charged = await applyAllOrNothing(
+                entities,
+                settledEdits(parts, "rolled-back", false),
+                applyOne,
+            )
+            log.warning(
+                `[applyTransaction] Work tx ${tx.hash} rolled back (edit ${result.failedAt}): ${result.message}` +
+                    (charged.success ? "; fee and nonce charged" : `; could not charge: ${charged.message}`),
+            )
+            return charged.success
+                ? done(charged, `Work rolled back: ${result.message}`)
+                : done(result)
         }
 
         // Capture snapshots for potential rollback

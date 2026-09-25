@@ -29,6 +29,7 @@ const CAPABILITY_DOMAIN = "demos-atomic-capability:v1:"
 
 type WorkState =
     | "included-committed"
+    | "included-rolled-back"
     | "included-replay"
     | "included-failed"
     | "pending"
@@ -107,11 +108,18 @@ async function stateOfTx(hash: string): Promise<Record<string, unknown>> {
         const content = parsedContent(row)
         const attempt = workAttemptOf(content)
         const failed = String(row.status) === "failed"
+        // Included and executed, but not the recorded winner: it rolled back
+        // and was charged its fee and nonce.
+        const winner = attempt
+            ? await dataSource.getRepository(GCRAtomicWork).findOneBy({ workId: attempt.workId })
+            : null
         const state: WorkState = failed
             ? "included-failed"
             : attempt?.attemptClass === "replay"
               ? "included-replay"
-              : "included-committed"
+              : winner?.txHash === hash
+                ? "included-committed"
+                : "included-rolled-back"
         return {
             txHash: hash,
             workId: attempt?.workId ?? null,

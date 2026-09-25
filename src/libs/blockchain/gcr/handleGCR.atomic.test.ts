@@ -138,9 +138,21 @@ afterEach(() => {
 // The block these Works are applied in: height 11, consensus time 1.8e9 s.
 const CLOCK = { height: 11, timestampSec: 1_800_000_000 }
 
+// The envelope every Work transaction ends with: gas, then the nonce spend.
+const envelope = () => [
+    balance("0xaa", "remove", 1n),
+    { type: "nonce", account: "0xaa", operation: "add", amount: 1, isRollback: false, txhash: "" },
+]
+
 const payWork = (seed = "w1") => {
     const w = work("test-pay-v1", seed)
-    const edits: unknown[] = [w.attempt(), w.slot(), balance("0xaa", "remove", 30n), balance("0xbb", "add", 30n)]
+    const edits: unknown[] = [
+        w.attempt(),
+        w.slot(),
+        balance("0xaa", "remove", 30n),
+        balance("0xbb", "add", 30n),
+        ...envelope(),
+    ]
     return { w, edits, transfers: [{ to: "0xbb", amount: "30" }] }
 }
 
@@ -161,7 +173,7 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         expect(entities.resourceSlots.get("k1")).toMatchObject({ receiptCommitment: record.receiptCommitment })
     })
 
-    it("commits nothing when the slot was already taken", async () => {
+    it("rolls back a Work that lost its slot, charging only its fee and nonce", async () => {
         const entities = caches()
         const taken = {
             state: "settled",
@@ -178,12 +190,57 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
 
         const result = await HandleGCR.applyTransaction(entities, workTx("0x11", "0xaa", w, edits, transfers), false, false, CLOCK)
 
-        expect(result.success).toBe(false)
+        // Included and charged, with none of its effects.
+        expect(result.success).toBe(true)
+        expect(result.message).toContain("rolled back")
         expect(result.message).toContain("expected state vacant")
-        expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(99n)
+        expect(entities.accounts.get("0xaa")!.nonce).toBe(1)
         expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
         expect(entities.resourceSlots.get("k1")).toBe(taken)
         expect(entities.atomicWorks.has(w.workId)).toBe(false)
+    })
+
+    it("refuses at admission, charging nothing, a Work that would roll back", async () => {
+        const entities = caches()
+        entities.resourceSlots.set("k1", { state: "settled", generation: 0, workId: "w0", conflictDigest: "c0", receiptCommitment: "r0", resourceKey: "k1", txHash: "0x0", previous: null } as any)
+        const { w, edits, transfers } = payWork()
+
+        const simulated = await HandleGCR.applyTransaction(entities, workTx("0x16", "0xaa", w, edits, transfers), false, true)
+        expect(simulated.success).toBe(false)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
+    })
+
+    it("undoes only the fee and nonce of a rolled-back Work on block rollback", async () => {
+        const entities = caches()
+        entities.resourceSlots.set("k1", { state: "settled", generation: 0, workId: "w0", conflictDigest: "c0", receiptCommitment: "r0", resourceKey: "k1", txHash: "0x0", previous: null } as any)
+        const { w, edits, transfers } = payWork()
+        await HandleGCR.applyTransaction(entities, workTx("0x17", "0xaa", w, structuredClone(edits), transfers), false, false, CLOCK)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(99n)
+
+        const undone = await HandleGCR.applyTransaction(entities, workTx("0x17", "0xaa", w, structuredClone(edits), transfers), true, false)
+        expect(undone.success).toBe(true)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(100n)
+        expect(entities.accounts.get("0xaa")!.nonce).toBe(0)
+        expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
+    })
+
+    it("lets a replay spend its nonce without paying a fee again", async () => {
+        const entities = caches()
+        const { w, edits, transfers } = payWork()
+        await HandleGCR.applyTransaction(entities, workTx("0x18", "0xaa", w, edits, transfers), false, false, CLOCK)
+        const paid = entities.accounts.get("0xaa")!.balance
+
+        const replay = await HandleGCR.applyTransaction(
+            entities,
+            workTx("0x19", "0xaa", w, [w.attempt({ attemptId: "w1-replay", attemptClass: "replay" }), ...envelope()], []),
+            false,
+            false,
+            CLOCK,
+        )
+        expect(replay.success).toBe(true)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(paid)
+        expect(entities.accounts.get("0xaa")!.nonce).toBe(2)
     })
 
     it("undoes a committed Work on block rollback", async () => {
