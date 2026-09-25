@@ -20,6 +20,7 @@ import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
+import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
@@ -533,7 +534,12 @@ export default class Mempool {
         {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
-                if (tx.content?.type !== "native") {
+                // Work edits are state the sender signs for, so a tx that
+                // carries them is bound like a native one whatever its type.
+                if (
+                    tx.content?.type !== "native" &&
+                    !carriesWorkEdits(tx)
+                ) {
                     editVerifiedTransactions.push(tx)
                     continue
                 }

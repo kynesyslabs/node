@@ -58,6 +58,51 @@ import { Referrals } from "@/features/incentive/referrals"
 // REVIEW: TLSNotary token management for native operations
 import { createToken, extractDomain } from "@/features/tlsnotary/tokenManager"
 import { INativePayload } from "@kynesyslabs/demosdk/types"
+import {
+    applyAllOrNothing,
+    ATOMIC_ONLY_EDIT_TYPES,
+    carriesWorkEdits,
+    requiresAtomicApplication,
+} from "@/libs/atomic-work/atomicApply"
+import {
+    settledEdits,
+    splitSettlement,
+} from "@/libs/atomic-work/feeAndNonce"
+import {
+    applyAtomicStoragePut,
+    type StoragePutEdit,
+} from "@/libs/blockchain/gcr/gcr_routines/GCRAtomicStorageRoutines"
+import {
+    applySlotCas,
+    applyWorkAttempt,
+    sealWork,
+    assertWorkEditSet,
+    contendedWorkTxs,
+    type SlotCasEdit,
+    type SlotRecord,
+    type WorkAttemptEdit,
+    type WorkRecord,
+} from "@/libs/atomic-work/workLedger"
+import { DEFAULT_ATOMIC_WORK_LIMITS } from "@/libs/atomic-work/limits"
+import {
+    assertWorkEnvelope,
+    ed25519SignerVerifier,
+    type WorkEnvelope,
+} from "@/libs/atomic-work/workEnvelope"
+import {
+    assertWithinWindow,
+    executionClock,
+    type ExecutionClock,
+} from "@/libs/atomic-work/executionClock"
+import { atomicWorkProfile } from "@/libs/atomic-work/profile"
+import {
+    buildWorkReceipt,
+    type AppliedStorageWrite,
+} from "@/libs/atomic-work/workReceipt"
+import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
+
+type AtomicWorkPayloadView = WorkEnvelope & { transfers?: unknown[] }
+import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -93,6 +138,20 @@ export interface GCREntityCaches {
     accounts: Map<string, GCRMain>
     storagePrograms: Map<string, GCRStorageProgram | null>
     tlsNotaries: Map<string, GCRTLSNotary | null>
+    atomicWorks: Map<string, WorkRecord | null>
+    resourceSlots: Map<string, SlotRecord | null>
+}
+
+/**
+ * The block a transaction set is applied as part of. Its timestamp is the
+ * consensus time a Work's deadlines are judged against: fixed before the
+ * block's transactions are applied, and read back from the block by every
+ * node that syncs it, so every node judges with the same value.
+ */
+export interface BlockClock {
+    height: number
+    /** Block timestamp, in seconds, as the block carries it. */
+    timestampSec: number
 }
 
 export interface GCRApplyResult {
@@ -254,6 +313,8 @@ export default class HandleGCR {
         const affectedPubkeys = new Set<string>()
         const affectedStorageAddresses = new Set<string>()
         const affectedTokenIds = new Set<string>()
+        const affectedWorkIds = new Set<string>()
+        const affectedSlotKeys = new Set<string>()
 
         // Single pass to collect all keys
         for (const tx of txs) {
@@ -273,6 +334,22 @@ export default class HandleGCR {
                     affectedTokenIds.add(
                         (edit as unknown as GCREditTLSNotary).data.tokenId,
                     )
+                } else if (
+                    (editType as string) === "work-attempt" ||
+                    (editType as string) === "work-receipt"
+                ) {
+                    affectedWorkIds.add(
+                        (edit as unknown as { workId: string }).workId,
+                    )
+                } else if ((editType as string) === "storage-program-put") {
+                    affectedStorageAddresses.add(
+                        (edit as unknown as { target: string }).target,
+                    )
+                } else if ((editType as string) === "resource-slot-cas") {
+                    affectedSlotKeys.add(
+                        (edit as unknown as { resourceKey: string })
+                            .resourceKey,
+                    )
                 }
             }
 
@@ -284,18 +361,54 @@ export default class HandleGCR {
         }
 
         // Parallel DB loads
-        const [gcrMainCache, storageProgramCache, tlsNotaryCache] =
-            await Promise.all([
-                this.loadGCRMainEntities(affectedPubkeys),
-                this.loadStorageProgramEntities(affectedStorageAddresses),
-                this.loadTLSNotaryEntities(affectedTokenIds),
-            ])
+        const [
+            gcrMainCache,
+            storageProgramCache,
+            tlsNotaryCache,
+            atomicWorkCache,
+            resourceSlotCache,
+        ] = await Promise.all([
+            this.loadGCRMainEntities(affectedPubkeys),
+            this.loadStorageProgramEntities(affectedStorageAddresses),
+            this.loadTLSNotaryEntities(affectedTokenIds),
+            this.loadAtomicWorks(affectedWorkIds),
+            this.loadResourceSlots(affectedSlotKeys),
+        ])
 
         return {
             accounts: gcrMainCache,
             storagePrograms: storageProgramCache,
             tlsNotaries: tlsNotaryCache,
+            atomicWorks: atomicWorkCache,
+            resourceSlots: resourceSlotCache,
         }
+    }
+
+    // Missing rows stay absent: an absent Work has not run, an absent slot is
+    // vacant. Rows are copied into plain records so the edit handlers never
+    // hold an entity instance.
+    private static async loadAtomicWorks(
+        workIds: Set<string>,
+    ): Promise<Map<string, WorkRecord | null>> {
+        const cache = new Map<string, WorkRecord | null>()
+        if (workIds.size === 0) return cache
+        const rows = await dataSource
+            .getRepository(GCRAtomicWork)
+            .find({ where: { workId: In([...workIds]) } })
+        for (const row of rows) cache.set(row.workId, { ...row })
+        return cache
+    }
+
+    private static async loadResourceSlots(
+        keys: Set<string>,
+    ): Promise<Map<string, SlotRecord | null>> {
+        const cache = new Map<string, SlotRecord | null>()
+        if (keys.size === 0) return cache
+        const rows = await dataSource
+            .getRepository(GCRResourceSlot)
+            .find({ where: { resourceKey: In([...keys]) } })
+        for (const row of rows) cache.set(row.resourceKey, row.record)
+        return cache
     }
 
     private static async loadGCRMainEntities(
@@ -376,12 +489,14 @@ export default class HandleGCR {
      * @param tx - The transaction to execute
      * @param isRollback - Whether the operation is a rollback
      * @param simulate - Whether the operation is being simulated (used for pre-consensus simulation)
+     * @param clock - The block being applied, when there is one
      **/
     static async applyTransaction(
         entities: GCREntityCaches,
         tx: Transaction,
         isRollback: boolean,
         simulate: boolean,
+        clock?: BlockClock,
     ): Promise<GCRApplyResult> {
         // Skip txs without GCR edits (valid but no state changes)
         if (
@@ -419,7 +534,7 @@ export default class HandleGCR {
         if (
             !simulate &&
             !isRollback &&
-            tx.content.type === "native" &&
+            (tx.content.type === "native" || carriesWorkEdits(tx)) &&
             isForkActive(
                 "nonceEnforcement",
                 getSharedState.lastBlockNumber ?? 0,
@@ -456,6 +571,212 @@ export default class HandleGCR {
         // INFO: Reverse order of gcr_edits for rollback
         if (isRollback) {
             gcrEdits.reverse()
+        }
+
+        // A Work's edits never go through apply-then-reverse: the reversal
+        // leaves intermediate state visible and can itself fail halfway.
+        if (requiresAtomicApplication(gcrEdits)) {
+            const refusal = (message: string): GCRApplyResult => {
+                log.error(
+                    `[applyTransaction] Work tx ${tx.hash} not applied: ${message}`,
+                )
+                return {
+                    success: false,
+                    entities,
+                    message,
+                    sideEffects: [],
+                    appliedEditsCount: 0,
+                }
+            }
+            if (
+                !isForkActive("atomicWork", getSharedState.lastBlockNumber ?? 0)
+            ) {
+                return refusal("Work edits are not active at this height")
+            }
+            // Built and sealed after every edit passed, in the same transition.
+            let seal: ((caches: GCREntityCaches) => GCRResult) | undefined
+            const payload = (tx.content.data as unknown as [string, AtomicWorkPayloadView] | undefined)?.[1]
+            // In signed order: rollback reverses its own copy of the edits.
+            const parts = splitSettlement(
+                tx.content.gcr_edits,
+                ATOMIC_ONLY_EDIT_TYPES,
+                payload?.transfers?.length ?? 0,
+            )
+            const attempt = tx.content.gcr_edits.find(
+                e => (e.type as string) === "work-attempt",
+            ) as unknown as WorkAttemptEdit | undefined
+            const isReplay = attempt?.attemptClass === "replay"
+            // Rollback replays edits the block already accepted, reversed.
+            if (!isRollback) {
+                // Work edits are bound to an authorized intent, which only
+                // an atomicWork transaction carries.
+                if ((tx.content.type as string) !== "atomicWork") {
+                    return refusal("Work edits travel only in an atomicWork transaction")
+                }
+                const envelope = assertWorkEnvelope(
+                    payload,
+                    gcrEdits as never,
+                    payload?.transfers?.length ?? 0,
+                    DEFAULT_ATOMIC_WORK_LIMITS,
+                    ed25519SignerVerifier,
+                    normalizePubkey(
+                        tx.content.from_ed25519_address || tx.content.from,
+                    ),
+                )
+                if (!envelope.success) return refusal(envelope.message)
+                const shape = assertWorkEditSet(
+                    gcrEdits,
+                    normalizePubkey(
+                        tx.content.from_ed25519_address || tx.content.from,
+                    ),
+                )
+                if (!shape.success) return refusal(shape.message)
+
+                // Deadlines are judged against consensus time only. A
+                // simulation has no block yet, so it uses the last block's
+                // time: a Work already expired then cannot become valid.
+                let workClock: ExecutionClock
+                try {
+                    if (clock) {
+                        workClock = executionClock(
+                            clock.height,
+                            clock.timestampSec * 1000,
+                        )
+                    } else if (simulate) {
+                        const last = getSharedState.lastBlockNumber ?? 0
+                        const lastBlock = await Chain.getBlockByNumber(last)
+                        workClock = executionClock(
+                            last,
+                            Number(lastBlock?.content?.timestamp ?? 0) * 1000 || 1,
+                        )
+                    } else {
+                        return refusal(
+                            "a Work cannot execute without the consensus block time",
+                        )
+                    }
+                    assertWithinWindow(workClock, {
+                        notBeforeMs: payload.intent.notBefore as number | null,
+                        deadlineMs: payload.intent.expiresAt as number | null,
+                    }, "this Work")
+                } catch (error) {
+                    return refusal(
+                        error instanceof Error ? error.message : String(error),
+                    )
+                }
+
+                if (!isReplay) {
+                    const profile = atomicWorkProfile(
+                        payload.intent.profile as string,
+                    )
+                    const writes = gcrEdits
+                        .filter(e => (e.type as string) === "storage-program-put")
+                        .map(e => e as unknown as AppliedStorageWrite)
+                    const slotKeys = gcrEdits
+                        .filter(e => (e.type as string) === "resource-slot-cas")
+                        .map(e => (e as unknown as SlotCasEdit).resourceKey)
+                    seal = caches => {
+                        const built = buildWorkReceipt({
+                            intent: payload.intent,
+                            profile,
+                            workId: attempt.workId,
+                            attemptId: attempt.attemptId,
+                            txHash: tx.hash ?? "",
+                            // The block being built (consensus) or the block
+                            // being synced: the same number on every node.
+                            height:
+                                tx.blockNumber ??
+                                (getSharedState.lastBlockNumber ?? 0) + 1,
+                            nonce: tx.content.nonce,
+                            writes,
+                            timestampMs: clock ? clock.timestampSec * 1000 : undefined,
+                        })
+                        return sealWork(
+                            attempt.workId,
+                            built.receipt,
+                            built.receiptCommitment,
+                            built.operationReceiptRoot,
+                            slotKeys,
+                            caches.atomicWorks,
+                            caches.resourceSlots,
+                        )
+                    }
+                }
+            }
+            const applyOne = (edit: GCREdit, caches: GCREntityCaches) => {
+                if (!simulate && tx.hash) {
+                    edit.txhash = tx.hash
+                }
+                return HandleGCR.applyGCREdit(edit, caches, isRollback, simulate)
+            }
+            const inOrder = (edits: GCREdit[]) =>
+                isRollback ? [...edits].reverse() : edits
+            const done = (
+                r: Awaited<ReturnType<typeof applyAllOrNothing>>,
+                message = r.message,
+            ): GCRApplyResult => ({
+                success: r.success,
+                entities,
+                message,
+                sideEffects: r.sideEffects,
+                appliedEditsCount: r.appliedEditsCount,
+            })
+
+            // What a block applied for this Work decides what its rollback
+            // undoes: the whole Work if it is the recorded winner, otherwise
+            // only the fee and nonce it was charged when it rolled back.
+            if (isRollback) {
+                const record = attempt
+                    ? entities.atomicWorks.get(attempt.workId)
+                    : null
+                const committed =
+                    !isReplay &&
+                    record?.winnerAttemptId === attempt?.attemptId &&
+                    record?.txHash === tx.hash
+                const outcome = isReplay
+                    ? "replayed"
+                    : committed
+                      ? "committed"
+                      : "rolled-back"
+                return done(
+                    await applyAllOrNothing(
+                        entities,
+                        inOrder(settledEdits(parts, outcome, outcome !== "rolled-back")),
+                        applyOne,
+                    ),
+                )
+            }
+
+            const result = await applyAllOrNothing(
+                entities,
+                settledEdits(parts, isReplay ? "replayed" : "committed", true),
+                applyOne,
+                seal,
+            )
+            if (result.success || simulate || isReplay) {
+                if (!result.success) {
+                    log.error(
+                        `[applyTransaction] Work tx ${tx.hash} not applied (edit ${result.failedAt}): ${result.message}`,
+                    )
+                }
+                return done(result)
+            }
+
+            // Executed in a block and failed: its effects are gone, but the
+            // execution cost what a success would, so the fee and nonce are
+            // spent. Free failure would be an unlimited retry. Every node
+            // reruns the same Work on the same state, so all charge alike.
+            const charged = await applyAllOrNothing(
+                entities,
+                settledEdits(parts, "rolled-back", false),
+                applyOne,
+            )
+            log.warning(
+                `[applyTransaction] Work tx ${tx.hash} rolled back (edit ${result.failedAt}): ${result.message}` +
+                    (charged.success ? "; fee and nonce charged" : `; could not charge: ${charged.message}`),
+            )
+            return charged.success
+                ? done(charged, `Work rolled back: ${result.message}`)
+                : done(result)
         }
 
         // Capture snapshots for potential rollback
@@ -623,6 +944,31 @@ export default class HandleGCR {
                         if (spEdit.context?.sender) {
                             keys.push("acc:" + spEdit.context.sender)
                         }
+                    } else if (
+                        // Compared as a string: these kinds are newer than
+                        // some SDK builds' edit union.
+                        (edit.type as string) === "storage-program-put"
+                    ) {
+                        keys.push(
+                            "sp:" +
+                                (edit as unknown as { target: string }).target,
+                        )
+                    } else if ((edit.type as string) === "resource-slot-cas") {
+                        // Two Works contending for one slot must be applied
+                        // in order, never in concurrent groups.
+                        keys.push(
+                            "slot:" +
+                                (edit as unknown as { resourceKey: string })
+                                    .resourceKey,
+                        )
+                    } else if (
+                        (edit.type as string) === "work-attempt" ||
+                        (edit.type as string) === "work-receipt"
+                    ) {
+                        keys.push(
+                            "work:" +
+                                (edit as unknown as { workId: string }).workId,
+                        )
                     } else if (edit.type === "tlsnotary") {
                         const tlsEdit = edit as unknown as GCREditTLSNotary
                         keys.push("tls:" + tlsEdit.data.tokenId)
@@ -673,6 +1019,7 @@ export default class HandleGCR {
         entities: GCREntityCaches,
         isRollback: boolean,
         txIndex: Map<string, number>,
+        clock?: BlockClock,
     ) {
         const successful: string[] = []
         const failed: string[] = []
@@ -690,6 +1037,7 @@ export default class HandleGCR {
                 tx,
                 isRollback,
                 false,
+                clock,
             )
             if (!applyResult.success) {
                 failed.push(tx.hash)
@@ -733,7 +1081,11 @@ export default class HandleGCR {
      *
      * @returns The successful and failed transactions (in original order)
      */
-    static async applyTransactions(txs: Transaction[], isRollback: boolean) {
+    static async applyTransactions(
+        txs: Transaction[],
+        isRollback: boolean,
+        clock?: BlockClock,
+    ) {
         log.debug("Applying GCR Edits for merged mempool (parallel groups)")
         const now = Date.now()
         const skippedTxs: string[] = []
@@ -864,6 +1216,18 @@ export default class HandleGCR {
             }
         }
 
+        // A block touches each Work, slot and storage address from at most one
+        // transaction; later ones are refused. Rollback depends on it: every
+        // record then changed once in the block being undone.
+        const blockOrder = finalTxs
+        const contended = contendedWorkTxs(finalTxs)
+        if (contended.size > 0) {
+            log.warning(
+                `[applyTransactions] ${contended.size} tx(s) touch Work state already touched earlier in this block`,
+            )
+            finalTxs = finalTxs.filter(tx => !contended.has(tx.hash))
+        }
+
         const entities = await this.prepareEntities(finalTxs)
         const groups = this.partitionIndependentTxs(finalTxs)
 
@@ -888,7 +1252,13 @@ export default class HandleGCR {
             const slice = groups.slice(i, i + CONCURRENCY)
             const sliceResults = await Promise.all(
                 slice.map(group =>
-                    HandleGCR.runGroup(group, entities, isRollback, txIndex),
+                    HandleGCR.runGroup(
+                        group,
+                        entities,
+                        isRollback,
+                        txIndex,
+                        clock,
+                    ),
                 ),
             )
             groupResults.push(...sliceResults)
@@ -922,7 +1292,8 @@ export default class HandleGCR {
         // Preserve original tx order in returned arrays.
         const successfulTxs: string[] = []
         const failedTxs: string[] = []
-        for (const tx of finalTxs) {
+        for (const h of contended) failedSet.add(h)
+        for (const tx of blockOrder) {
             if (successfulSet.has(tx.hash)) successfulTxs.push(tx.hash)
             else if (failedSet.has(tx.hash)) failedTxs.push(tx.hash)
         }
@@ -962,70 +1333,113 @@ export default class HandleGCR {
         sideEffects: (() => Promise<void>)[],
     ) {
         const now = Date.now()
-        // Save GCRMain entities
-        const entitiesToSave = entities.accounts.values().toArray()
-        entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
-        if (entitiesToSave.length > 0) {
-            log.debug(
-                `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
-            )
-            const gcrMainRepo = dataSource.getRepository(GCRMain)
-            await gcrMainRepo.save(entitiesToSave)
-        }
+        // One database transaction for the whole set: a crash or a failed
+        // write part-way leaves none of it on disk rather than, say, a Work's
+        // payment without the Work that justified it. Side effects run only
+        // once the state they follow from is durable.
+        await dataSource.transaction(async em => {
+            // Save GCRMain entities
+            const entitiesToSave = entities.accounts.values().toArray()
+            entitiesToSave.sort((a, b) => a.pubkey.localeCompare(b.pubkey))
+            if (entitiesToSave.length > 0) {
+                log.debug(
+                    `[saveGCREditChanges] Saving ${entitiesToSave.length} GCRMain entities`,
+                )
+                const gcrMainRepo = em.getRepository(GCRMain)
+                await gcrMainRepo.save(entitiesToSave)
+            }
 
-        // Save/delete GCRStorageProgram entities
-        if (entities.storagePrograms.size > 0) {
-            const spToSave: GCRStorageProgram[] = []
-            const spToDelete: string[] = []
-            for (const [key, entity] of entities.storagePrograms) {
-                if (entity === null) {
-                    spToDelete.push(key)
-                } else {
-                    spToSave.push(entity)
+            // Save/delete GCRStorageProgram entities
+            if (entities.storagePrograms.size > 0) {
+                const spToSave: GCRStorageProgram[] = []
+                const spToDelete: string[] = []
+                for (const [key, entity] of entities.storagePrograms) {
+                    if (entity === null) {
+                        spToDelete.push(key)
+                    } else {
+                        spToSave.push(entity)
+                    }
+                }
+
+                const spRepo = em.getRepository(GCRStorageProgram)
+                if (spToSave.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
+                    )
+                    await spRepo.save(spToSave)
+                }
+                if (spToDelete.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
+                    )
+                    await spRepo.delete({ storageAddress: In(spToDelete) })
                 }
             }
 
-            const spRepo = dataSource.getRepository(GCRStorageProgram)
-            if (spToSave.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Saving ${spToSave.length} StorageProgram entities`,
-                )
-                await spRepo.save(spToSave)
-            }
-            if (spToDelete.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Deleting ${spToDelete.length} StorageProgram entities`,
-                )
-                await spRepo.delete({ storageAddress: In(spToDelete) })
-            }
-        }
+            // Save/delete GCRTLSNotary entities
+            if (entities.tlsNotaries.size > 0) {
+                const tlsToSave: GCRTLSNotary[] = []
+                const tlsToDelete: string[] = []
+                for (const [key, entity] of entities.tlsNotaries) {
+                    if (entity === null) {
+                        tlsToDelete.push(key)
+                    } else {
+                        tlsToSave.push(entity)
+                    }
+                }
 
-        // Save/delete GCRTLSNotary entities
-        if (entities.tlsNotaries.size > 0) {
-            const tlsToSave: GCRTLSNotary[] = []
-            const tlsToDelete: string[] = []
-            for (const [key, entity] of entities.tlsNotaries) {
-                if (entity === null) {
-                    tlsToDelete.push(key)
-                } else {
-                    tlsToSave.push(entity)
+                const tlsRepo = em.getRepository(GCRTLSNotary)
+                if (tlsToSave.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
+                    )
+                    await tlsRepo.save(tlsToSave)
+                }
+                if (tlsToDelete.length > 0) {
+                    log.debug(
+                        `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
+                    )
+                    await tlsRepo.delete({ tokenId: In(tlsToDelete) })
                 }
             }
 
-            const tlsRepo = dataSource.getRepository(GCRTLSNotary)
-            if (tlsToSave.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Saving ${tlsToSave.length} TLSNotary entities`,
-                )
-                await tlsRepo.save(tlsToSave)
+            if (entities.atomicWorks?.size > 0) {
+                const repo = em.getRepository(GCRAtomicWork)
+                const toSave: GCRAtomicWork[] = []
+                const toDelete: string[] = []
+                for (const [workId, record] of entities.atomicWorks) {
+                    if (record === null) toDelete.push(workId)
+                    else toSave.push(repo.create(record))
+                }
+                if (toSave.length > 0) await repo.save(toSave)
+                if (toDelete.length > 0) await repo.delete({ workId: In(toDelete) })
             }
-            if (tlsToDelete.length > 0) {
-                log.debug(
-                    `[saveGCREditChanges] Deleting ${tlsToDelete.length} TLSNotary entities`,
-                )
-                await tlsRepo.delete({ tokenId: In(tlsToDelete) })
+
+            if (entities.resourceSlots?.size > 0) {
+                const repo = em.getRepository(GCRResourceSlot)
+                const toSave: GCRResourceSlot[] = []
+                const toDelete: string[] = []
+                for (const [resourceKey, record] of entities.resourceSlots) {
+                    if (record === null) {
+                        toDelete.push(resourceKey)
+                        continue
+                    }
+                    toSave.push(
+                        repo.create({
+                            resourceKey,
+                            state: record.state,
+                            generation: record.generation,
+                            workId: "workId" in record ? record.workId : "",
+                            record,
+                        }),
+                    )
+                }
+                if (toSave.length > 0) await repo.save(toSave)
+                if (toDelete.length > 0) {
+                    await repo.delete({ resourceKey: In(toDelete) })
+                }
             }
-        }
+        })
 
         // INFO: Apply side-effects in sequence
         for (const sideEffect of sideEffects) {
@@ -1093,6 +1507,29 @@ export default class HandleGCR {
                 success: false,
                 message: `Missing account for ${editOperation.type} edit`,
             }
+        }
+
+        // Work edits are newer than some SDK builds' edit union, so they are
+        // matched as strings ahead of the typed switch.
+        switch (editOperation.type as string) {
+            case "work-attempt":
+                return applyWorkAttempt(
+                    editOperation as unknown as WorkAttemptEdit,
+                    entities.atomicWorks,
+                    isRollback,
+                )
+            case "resource-slot-cas":
+                return applySlotCas(
+                    editOperation as unknown as SlotCasEdit,
+                    entities.resourceSlots,
+                    isRollback,
+                )
+            case "storage-program-put":
+                return applyAtomicStoragePut(
+                    editOperation as unknown as StoragePutEdit,
+                    entities.storagePrograms,
+                    isRollback,
+                )
         }
 
         // Applying the edit operations
