@@ -17,11 +17,13 @@ import { identify } from "@libp2p/identify"
 import { ping } from "@libp2p/ping"
 import { gossipsub } from "@chainsafe/libp2p-gossipsub"
 import { multiaddr } from "@multiformats/multiaddr"
+import { generateKeyPairFromSeed } from "@libp2p/crypto/keys"
 import {
-    generateKeyPair,
-    privateKeyFromProtobuf,
-    privateKeyToProtobuf,
-} from "@libp2p/crypto/keys"
+    generateMnemonic,
+    mnemonicToEntropy,
+    validateMnemonic,
+} from "@scure/bip39"
+import { wordlist } from "@scure/bip39/wordlists/english.js"
 
 const PROTOCOL_VERSION = 1
 const HEIGHTS_TOPIC = "demos/heights/1"
@@ -90,17 +92,31 @@ function gossipMsgId(msg) {
     return new Uint8Array(createHash("sha256").update(msg.data).digest())
 }
 
+// The key file holds a 24-word BIP39 mnemonic; its 32-byte entropy is the
+// Ed25519 seed, so the same words always derive the same peerId. 
 async function loadOrCreateTransportKey(keyFile) {
     try {
         if (fs.existsSync(keyFile)) {
-            return privateKeyFromProtobuf(new Uint8Array(fs.readFileSync(keyFile)))
+            const mnemonic = fs.readFileSync(keyFile, "utf8").trim()
+            if (validateMnemonic(mnemonic, wordlist)) {
+                return generateKeyPairFromSeed(
+                    "Ed25519",
+                    mnemonicToEntropy(mnemonic, wordlist),
+                )
+            }
+            slog(
+                `transport key at ${keyFile} is not a valid mnemonic (legacy or corrupt); regenerating`,
+            )
         }
     } catch (e) {
         slog(`transport key at ${keyFile} unreadable (${e.message}); regenerating`)
     }
-    const key = await generateKeyPair("Ed25519")
-    fs.writeFileSync(keyFile, privateKeyToProtobuf(key), { mode: 0o600 })
-    return key
+    const mnemonic = generateMnemonic(wordlist, 256)
+    fs.writeFileSync(keyFile, mnemonic + "\n", { mode: 0o600 })
+    return generateKeyPairFromSeed(
+        "Ed25519",
+        mnemonicToEntropy(mnemonic, wordlist),
+    )
 }
 
 // --- libp2p host ---

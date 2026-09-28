@@ -15,6 +15,7 @@
         "@libp2p/ping": "2.0.29",
         "@libp2p/tcp": "10.1.19",
         "@multiformats/multiaddr": "12.5.1",
+        "@scure/bip39": "2.0.1",
         "libp2p": "2.10.0"
     },
     "devDependencies": {

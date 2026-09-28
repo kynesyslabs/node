@@ -5,7 +5,7 @@ import { spawn, ChildProcess } from "node:child_process"
 import type { Block } from "@kynesyslabs/demosdk/types"
 
 import log from "src/utilities/logger"
-import { Config } from "src/config"
+import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { PeerManager } from "src/libs/peer"
 
@@ -336,9 +336,21 @@ export class GossipManager {
 
     getListenAddr(): string | null {
         if (!this.readyInfo) return null
+        const port = Config.getInstance().gossip.port
+
+        // EXPOSED_URL is the operator's declaration of how peers reach this
+        // node; advertise the gossip port on the same host.
+        const exposed = parseNodeUrl(getSharedState.exposedUrl)
+        if (exposed) {
+            const host = isLoopbackHost(exposed.hostname)
+                ? "127.0.0.1"
+                : exposed.hostname
+            const proto = /^\d+\.\d+\.\d+\.\d+$/.test(host) ? "ip4" : "dns4"
+            return `/${proto}/${host}/tcp/${port}/p2p/${this.readyInfo.peerId}`
+        }
+
         const publicIP = getSharedState.identity?.publicIP
         if (publicIP) {
-            const port = Config.getInstance().gossip.port
             return `/ip4/${publicIP}/tcp/${port}/p2p/${this.readyInfo.peerId}`
         }
         const external = this.readyInfo.addrs.find(
