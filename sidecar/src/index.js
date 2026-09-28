@@ -37,6 +37,31 @@ const IPC_PATH =
 const STATS_INTERVAL_MS = 1000
 const CLIENT_GONE_EXIT_MS = 5000
 
+// Gossipsub mesh parameters: target degree, the lower/upper bounds the
+// heartbeat re-grafts/prunes toward, and the outbound-connection quota
+// (must be <= Dlo and <= D/2).
+//
+// TEST values: a degree-1 mesh forces multi-hop relay on a handful of
+// nodes, which a full mesh would never exercise.
+// Production defaults: MESH_DEGREE = 8, MESH_DEGREE_LOW = 6,
+// MESH_DEGREE_HIGH = 12, MESH_OUTBOUND_MIN = 2, FLOOD_PUBLISH = true.
+const MESH_DEGREE = 1
+const MESH_DEGREE_LOW = 1
+const MESH_DEGREE_HIGH = 2
+const MESH_OUTBOUND_MIN = 0
+
+// With flood publish on, a node's OWN messages go to all topic peers,
+// bypassing the mesh — it must be off for relay tests to mean anything.
+// Keep it on in production: it is the attack-resistant first hop.
+const FLOOD_PUBLISH = false
+
+// PRUNE messages carry alternate peers, so the mesh doubles as discovery.
+const PEER_EXCHANGE = true
+
+// Publishing into an empty mesh is a silent no-op instead of an error; the
+// node gates publishing on readiness itself.
+const ALLOW_PUBLISH_TO_ZERO_PEERS = true
+
 const slog = (msg) => process.stderr.write(`[SIDECAR] ${msg}\n`)
 
 // Errors that mean a gossipsub stream silently died; the node must know.
@@ -136,11 +161,13 @@ const node = await createLibp2p({
         // protocol-selection error on one side and a stream reset on the other
         ping: ping(),
         pubsub: gossipsub({
-            D: 8,
-            Dlo: 6,
-            Dhi: 12,
-            doPX: true,
-            allowPublishToZeroTopicPeers: true,
+            D: MESH_DEGREE,
+            Dlo: MESH_DEGREE_LOW,
+            Dhi: MESH_DEGREE_HIGH,
+            Dout: MESH_OUTBOUND_MIN,
+            floodPublish: FLOOD_PUBLISH,
+            doPX: PEER_EXCHANGE,
+            allowPublishToZeroTopicPeers: ALLOW_PUBLISH_TO_ZERO_PEERS,
             msgIdFn: gossipMsgId,
         }),
     },
