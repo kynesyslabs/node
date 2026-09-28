@@ -54,6 +54,17 @@ describe("withDerivedFeeEdits", () => {
         expect(out.hash).toBe(tx.hash)
     })
 
+    it("copies the signed edits, so writing into them during apply leaves the tx as signed", () => {
+        const tx = signedTransfer()
+        const signed = structuredClone(tx.content.gcr_edits)
+        const out = withDerivedFeeEdits(tx)
+
+        // What applyTransaction does to every edit it applies.
+        for (const edit of out.content.gcr_edits) edit.txhash = out.hash
+
+        expect(tx.content.gcr_edits).toEqual(signed)
+    })
+
     it("derives the same edits when a synced node applies what the producer served", () => {
         // The producer applies, then persists and serves the tx it was given.
         const producerTx = signedTransfer()

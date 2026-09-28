@@ -180,8 +180,13 @@ export function withDerivedFeeEdits(tx: Transaction): Transaction {
         feeEdits.every((fee, i) => sameFeeEdit(fee, edits[i]))
     if (alreadyCarried) return tx
 
+    // The edits are copied too, not just the array: apply writes into each
+    // edit (its txhash), and those objects belong to the signed tx.
     return Object.assign(Object.create(Object.getPrototypeOf(tx)), tx, {
-        content: { ...tx.content, gcr_edits: [...feeEdits, ...edits] },
+        content: {
+            ...tx.content,
+            gcr_edits: [...feeEdits, ...edits.map(edit => structuredClone(edit))],
+        },
     }) as Transaction
 }
 
