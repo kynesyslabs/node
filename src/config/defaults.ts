@@ -35,7 +35,7 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     core: {
         prod: false,
-        shardSize: 1,
+        shardSize: 2,
         mainLoopSleepTime: 1000,
         helloRefreshIntervalMs: 5000,
         rpcFeePercent: 10,
