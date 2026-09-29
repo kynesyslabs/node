@@ -9,6 +9,10 @@ import log from "src/utilities/logger"
 import { getSharedState } from "@/utilities/sharedState"
 import prefetchIdentities from "./prefetchIdentities"
 import { validateTx } from "./txValidator"
+import type { TxSignatureDomain } from "./txValidator"
+
+/** Legacy preimage: the bare tx hash, what every pre-fork signer produced. */
+const LEGACY_SIGNATURE_DOMAIN: TxSignatureDomain = { active: false, chainId: 0 }
 import type {
     IdentityHintMap,
     TxValidationResult,
@@ -311,10 +315,14 @@ export default class TxValidatorPool {
      *   supplied by the caller (Mempool.receive). Threaded to the coherence
      *   check so it canonicalizes amounts identically to the signer/consensus
      *   (audit H1). The worker cannot compute it (no forkConfig/height).
+     * @param signatureDomain signatureDomain fork state + chain id, resolved
+     *   by the caller for the same reason. Omitted, it stays on the legacy
+     *   preimage (the bare hash).
      */
     async validate(
         txs: Transaction[],
         isPostFork: boolean,
+        signatureDomain: TxSignatureDomain = LEGACY_SIGNATURE_DOMAIN,
     ): Promise<TxValidationResult[]> {
         log.only("[TxValidatorPool] validate() called")
         log.only(`[TxValidatorPool] txs length: ${txs.length}`)
@@ -325,12 +333,12 @@ export default class TxValidatorPool {
             log.warning(
                 "[TxValidatorPool] validate() called but pool not started; using inline fallback",
             )
-            return this.validateInline(txs, isPostFork)
+            return this.validateInline(txs, isPostFork, signatureDomain)
         }
 
         // Small batches and unstarted pool both take the inline path.
         if (txs.length < SMALL_BATCH_THRESHOLD) {
-            return this.validateInline(txs, isPostFork)
+            return this.validateInline(txs, isPostFork, signatureDomain)
         }
 
         const now = Date.now()
@@ -341,7 +349,7 @@ export default class TxValidatorPool {
         const dispatched = chunks.map(c =>
             c.length === 0
                 ? Promise.resolve([] as TxValidationResult[])
-                : this.dispatchChunk(c, hints, isPostFork),
+                : this.dispatchChunk(c, hints, isPostFork, signatureDomain),
         )
         const settled = await Promise.allSettled(dispatched)
 
@@ -455,10 +463,18 @@ export default class TxValidatorPool {
     private async validateInline(
         txs: Transaction[],
         isPostFork: boolean,
+        signatureDomain: TxSignatureDomain,
     ): Promise<TxValidationResult[]> {
         const hints = await prefetchIdentities(txs)
         return Promise.all(
-            txs.map(tx => validateTx(tx, hints[tx.hash] ?? null, isPostFork)),
+            txs.map(tx =>
+                validateTx(
+                    tx,
+                    hints[tx.hash] ?? null,
+                    isPostFork,
+                    signatureDomain,
+                ),
+            ),
         )
     }
 
@@ -466,6 +482,7 @@ export default class TxValidatorPool {
         txs: Transaction[],
         hints: IdentityHintMap,
         isPostFork: boolean,
+        signatureDomain: TxSignatureDomain,
     ): Promise<TxValidationResult[]> {
         // Round-robin worker selection. We allow each worker to hold multiple
         // in-flight requests because validation throughput per worker is
@@ -500,6 +517,7 @@ export default class TxValidatorPool {
                 txs,
                 identityHints: subHints,
                 isPostFork,
+                signatureDomain,
             }
             try {
                 handle.worker.postMessage(req)

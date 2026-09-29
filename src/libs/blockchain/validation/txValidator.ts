@@ -17,7 +17,21 @@ import {
 // constants.js + conversion.js, both worker-safe (audit H1).
 import { serializeTransactionContent } from "../../../../node_modules/@kynesyslabs/demosdk/build/denomination/serializerGate.js"
 import Hashing from "../../crypto/hashing"
+import { txSignaturePreimage } from "../../crypto/txSignaturePreimage"
 import type { PqcIdentityHint, TxValidationResult } from "./types"
+
+/**
+ * Signature-preimage context, resolved on the main thread (fork config and
+ * chain height live there) and threaded in like `isPostFork` is for
+ * coherence. Defaulting to inactive keeps any caller that has not been
+ * updated on the legacy bytes rather than silently rejecting live traffic.
+ */
+export interface TxSignatureDomain {
+    active: boolean
+    chainId: number
+}
+
+const LEGACY_DOMAIN: TxSignatureDomain = { active: false, chainId: 0 }
 
 /**
  * Coherence: SHA-256 of the CANONICAL serialization of tx.content === tx.hash.
@@ -63,8 +77,14 @@ export function validateTxCoherence(
 export async function validateTxSignature(
     tx: Transaction,
     hint: PqcIdentityHint,
+    domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
     let ed25519SignatureVerified = false
+    const signedBytes = txSignaturePreimage(
+        tx.hash,
+        domain.chainId,
+        domain.active,
+    )
 
     if (tx.signature.type !== "ed25519") {
         if (!tx.ed25519_signature) {
@@ -88,7 +108,7 @@ export async function validateTxSignature(
             // PQC with co-signature: verify the supplied ed25519 signature against tx.hash.
             ed25519SignatureVerified = await ucrypto.verify({
                 algorithm: "ed25519",
-                message: new TextEncoder().encode(tx.hash),
+                message: signedBytes,
                 publicKey: hexToUint8Array(tx.content.from_ed25519_address),
                 signature: hexToUint8Array(tx.ed25519_signature),
             })
@@ -127,7 +147,7 @@ export async function validateTxSignature(
 
     const mainSignatureVerified = await ucrypto.verify({
         algorithm: tx.signature.type as SigningAlgorithm,
-        message: new TextEncoder().encode(tx.hash),
+        message: signedBytes,
         publicKey: hexToUint8Array(tx.content.from as string),
         signature: hexToUint8Array(tx.signature.data),
     })
@@ -149,8 +169,9 @@ export async function validateTx(
     tx: Transaction,
     hint: PqcIdentityHint,
     isPostFork: boolean,
+    domain: TxSignatureDomain = LEGACY_DOMAIN,
 ): Promise<TxValidationResult> {
     const coherence = validateTxCoherence(tx, isPostFork)
     if (!coherence.valid) return coherence
-    return await validateTxSignature(tx, hint)
+    return await validateTxSignature(tx, hint, domain)
 }

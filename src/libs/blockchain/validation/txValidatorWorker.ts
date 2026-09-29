@@ -44,6 +44,7 @@ port.on("message", async (msg: WorkerRequest) => {
                         tx,
                         msg.identityHints[tx.hash] ?? null,
                         msg.isPostFork,
+                        msg.signatureDomain,
                     ),
                 )
             }

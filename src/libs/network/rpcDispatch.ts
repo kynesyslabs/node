@@ -248,7 +248,9 @@ export async function processPayload(
                             valid: false,
                             reason: "Nullifier already used",
                             nullifier: attestation.publicSignals[0],
-                            merkleRoot: attestation.publicSignals[1],
+                            // [nullifier, context, merkle_root] — see
+                            // features/zk/proof/publicSignals.ts.
+                            merkleRoot: attestation.publicSignals[2],
                         },
                         require_reply: false,
                         extra: null,
@@ -266,7 +268,7 @@ export async function processPayload(
                         valid: isValid,
                         reason: isValid ? "Valid proof" : "Invalid cryptographic proof",
                         nullifier: attestation.publicSignals[0],
-                        merkleRoot: attestation.publicSignals[1],
+                        merkleRoot: attestation.publicSignals[2],
                     },
                     require_reply: false,
                     extra: null,

@@ -46,7 +46,16 @@ export interface ForkStatus {
 export interface NetworkInfo {
     forks: {
         osDenomination: ForkStatus
+        signatureDomain: ForkStatus
     }
+    /**
+     * Network identity from genesis `properties.id`. A signer needs it to
+     * build the transaction signature preimage once `signatureDomain` is
+     * active, and it is what stops a signature from being replayed on
+     * another chain. Null on a node whose genesis declared none — such a
+     * node cannot activate the fork.
+     */
+    chainId: number | null
     nodeVersion: NodeVersionInfo
 }
 
@@ -79,6 +88,10 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
         const activationHeight =
             osDenominationConfig?.activationHeight ?? null
 
+        const signatureDomainHeight =
+            getSharedState.forkConfig?.signatureDomain?.activationHeight ??
+            null
+
         const networkInfo: NetworkInfo = {
             forks: {
                 osDenomination: {
@@ -86,7 +99,19 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                     activated: isForkActive("osDenomination", currentHeight),
                     currentHeight,
                 },
+                signatureDomain: {
+                    activationHeight: signatureDomainHeight,
+                    // Reported for the block a transaction signed now would
+                    // land in, which is what admission judges it against. A
+                    // wallet asking at tip H-1 is about to sign for block H,
+                    // so answering for H-1 would tell it to use the legacy
+                    // preimage for the activation block and have the node
+                    // reject it.
+                    activated: isForkActive("signatureDomain", currentHeight + 1),
+                    currentHeight,
+                },
             },
+            chainId: getSharedState.chainId,
             nodeVersion: NODE_VERSION,
         }
 
