@@ -28,6 +28,7 @@ const PROTOCOL_VERSION = 1
 const IPC_CONNECT_TIMEOUT_MS = 5000
 const STOP_KILL_ESCALATION_MS = 2000
 const STATS_STALE_FATAL_MS = 5000
+const TICK_LATE_TOLERANCE_MS = 2000
 
 interface SidecarStats {
     connections: number
@@ -139,7 +140,9 @@ export class GossipManager {
             await this.connectIpc()
             await this.awaitReady()
 
+            this.lastTickAt = Date.now()
             this.heightsTimer = setInterval(() => {
+                this.checkSidecarHealth(cfg.heightsIntervalMs)
                 this.publishOwnHeights().catch(e =>
                     log.warning(
                         `[GOSSIP] heights publish failed: ${
@@ -256,6 +259,9 @@ export class GossipManager {
                     peerId: String(msg.peerId),
                     addrs: (msg.addrs as string[]) ?? [],
                 }
+                // Seed the staleness clock so the wedge check never compares
+                // against epoch 0 before the first stats message is read.
+                this.lastStatsAt = Date.now()
                 this.onReady?.()
                 break
             }
@@ -321,16 +327,47 @@ export class GossipManager {
         this.sock = null
     }
 
+    private lastTickAt = 0
+
+    /**
+     * Wedge detection, run once per heights tick. Fatal only when the
+     * evidence is clean: this tick fired on schedule (our own loop did not
+     * stall), the sidecar process is still alive (a dead one is handled by
+     * the exit handler), and stats are still stale. A late tick skips the
+     * verdict — the queued stats messages get processed right after the
+     * timers, so the next on-time tick judges fresh data.
+     */
+    private checkSidecarHealth(intervalMs: number): void {
+        const now = Date.now()
+        const tickLateMs = now - this.lastTickAt - intervalMs
+        this.lastTickAt = now
+
+        const staleMs = now - this.lastStatsAt
+        if (staleMs <= STATS_STALE_FATAL_MS) return
+
+        if (tickLateMs > TICK_LATE_TOLERANCE_MS) {
+            log.warning(
+                `[GOSSIP] own event loop stalled ${tickLateMs}ms; stats are ${staleMs}ms old but the reading is contaminated — deferring wedge check to the next clean tick`,
+            )
+            return
+        }
+        if (this.proc?.exitCode !== null && this.proc?.exitCode !== undefined) {
+            // process already exited; the 'exit' handler owns that fatal
+            return
+        }
+        this.fatal(
+            "stats heartbeat",
+            new Error(
+                `no stats from sidecar for ${staleMs}ms with a healthy local event loop — sidecar wedged`,
+            ),
+        )
+    }
+
     isReady(): boolean {
         if (!this.started || !this.readyInfo || !this.lastStats) return false
-        if (Date.now() - this.lastStatsAt > STATS_STALE_FATAL_MS) {
-            this.fatal(
-                "stats heartbeat",
-                new Error(
-                    `no stats from sidecar for ${Date.now() - this.lastStatsAt}ms — sidecar wedged`,
-                ),
-            )
-        }
+        // Stale stats mean "not ready" (routing falls back to HTTP); whether
+        // the sidecar is wedged is judged by checkSidecarHealth on the timer.
+        if (Date.now() - this.lastStatsAt > STATS_STALE_FATAL_MS) return false
         return (this.lastStats.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0) >= 1
     }
 
