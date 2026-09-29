@@ -129,10 +129,27 @@ export function clearL2PSSyncCursors(): void {
  */
 export const MAX_SYNC_PAGES_PER_RUN = 20
 
+/**
+ * Pause before the next run when a run stopped at the page cap with the peer
+ * still reporting more. Nothing else would start that run: block sync does
+ * not, and discovery skips peers it already knows.
+ */
+let continueDelayMs = 1_000
+export function setL2PSSyncContinueDelay(ms: number): void {
+    continueDelayMs = ms
+}
+
+/** Runs in progress, by peer and subnet, so a scheduled one never overlaps another. */
+const running = new Set<string>()
+
 export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<void> {
     const cursorKey = `${peer.identity}\u0000${l2psUid}`
+    if (running.has(cursorKey)) return
+    running.add(cursorKey)
+    let more = false
     try {
         for (let page = 0; page < MAX_SYNC_PAGES_PER_RUN; page++) {
+            more = false
             const cursor = syncCursors.get(cursorKey) ?? 0
 
             const response = await peer.call({
@@ -174,9 +191,21 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
             // while its cursor moves. "More" with a cursor that stands still
             // is the same page again.
             if (!body.hasMore || !advanced) return
+            more = true
         }
     } catch (e) {
+        more = false
         log.warning(`[L2PS-SYNC] Failed to sync with ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+        running.delete(cursorKey)
+    }
+
+    // Stopped at the cap with more to come: carry on shortly, from the
+    // stored cursor, rather than leave the rest missing until a restart.
+    if (more) {
+        setTimeout(() => {
+            syncL2PSWithPeer(peer, l2psUid).catch(() => undefined)
+        }, continueDelayMs)
     }
 }
 

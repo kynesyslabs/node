@@ -34,6 +34,7 @@ jest.mock("@/utilities/logger", () => ({
 import {
     clearL2PSSyncCursors,
     MAX_SYNC_PAGES_PER_RUN,
+    setL2PSSyncContinueDelay,
     syncL2PSWithPeer,
 } from "./L2PSConcurrentSync"
 
@@ -60,6 +61,9 @@ const tx = (n: number) => ({
 beforeEach(() => {
     clearL2PSSyncCursors()
     addTransaction.mockClear()
+    // Far enough out that a continuation never fires inside a case that
+    // does not wait for it.
+    setL2PSSyncContinueDelay(60_000)
 })
 
 describe("syncL2PSWithPeer", () => {
@@ -94,6 +98,42 @@ describe("syncL2PSWithPeer", () => {
         await syncL2PSWithPeer(peer, "subnet-1")
 
         expect(cursors).toEqual([0])
+    })
+
+    it("carries on by itself after the cap until the backlog is drained", async () => {
+        setL2PSSyncContinueDelay(1)
+        const total = MAX_SYNC_PAGES_PER_RUN * 2 + 5
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: [tx(cursor + 1)],
+            nextCursor: cursor + 1,
+            hasMore: cursor + 1 < total,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        expect(cursors).toHaveLength(MAX_SYNC_PAGES_PER_RUN)
+
+        for (let i = 0; i < 200 && addTransaction.mock.calls.length < total; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        expect(addTransaction).toHaveBeenCalledTimes(total)
+        expect(new Set(cursors).size).toBe(cursors.length)
+    })
+
+    it("does not start a second run for a peer while one is in progress", async () => {
+        let release!: () => void
+        const gate = new Promise<void>(r => (release = r))
+        const peer = {
+            identity: "peer-1",
+            call: jest.fn(async () => {
+                await gate
+                return { result: 200, response: { transactions: [], nextCursor: 0, hasMore: false } }
+            }),
+        }
+        const first = syncL2PSWithPeer(peer as never, "subnet-1")
+        await syncL2PSWithPeer(peer as never, "subnet-1")
+        release()
+        await first
+        expect(peer.call).toHaveBeenCalledTimes(1)
     })
 
     it("pulls at most a bounded number of pages per run, and resumes where it stopped", async () => {
