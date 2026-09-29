@@ -22,8 +22,8 @@ import { MigrationInterface, QueryRunner } from "typeorm"
  *
  * `encrypted_payload` now carries the envelope as submitted, and `content`
  * becomes nullable so a node can be configured to keep no plaintext at all.
- * Rows written before this migration keep whatever they had; both columns are
- * read defensively.
+ * Rows written before this migration take their ciphertext from the queue
+ * when it still holds it; both columns are read defensively.
  *
  * The extra index serves the `since` + newest-first paging the history reads
  * use, which previously had no covering index on the subnet scope.
@@ -45,6 +45,22 @@ export class EncryptL2PSTransactionHistory1789689600000
         await queryRunner.query(
             `CREATE INDEX IF NOT EXISTS "IDX_L2PS_TX_UID_TIMESTAMP" ON "l2ps_transactions" ("l2ps_uid", "timestamp")`,
         )
+        // Rows from before this column have their ciphertext only in the
+        // queue, which is swept minutes after confirmation. Copy it over while
+        // it is still there, or a peer syncing later can never get it.
+        const [{ exists }] = await queryRunner.query(
+            `SELECT to_regclass('public.l2ps_mempool') IS NOT NULL AS "exists"`,
+        )
+        if (exists) {
+            await queryRunner.query(
+                `UPDATE "l2ps_transactions" AS t
+                    SET "encrypted_payload" = m."encrypted_tx"
+                   FROM "l2ps_mempool" AS m
+                  WHERE t."encrypted_payload" IS NULL
+                    AND m."l2ps_uid" = t."l2ps_uid"
+                    AND m."original_hash" = t."hash"`,
+            )
+        }
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {

@@ -189,39 +189,63 @@ describe("pruneHistory", () => {
 })
 
 describe("getSubnetTransactions", () => {
-    it("pages oldest first from a cursor this node issued", async () => {
+    it("pages oldest first after a row id this node issued", async () => {
         // Newest-first paging cannot drain a backlog: every round hands back
         // the same newest page while everything older stays behind whatever
         // the peer last recorded.
         getMany.mockResolvedValueOnce([
-            { created_at: new Date(1_700_000_001_000), hash: "a" },
-            { created_at: new Date(1_700_000_002_000), hash: "b" },
+            { id: 11, hash: "a" },
+            { id: 12, hash: "b" },
         ] as never)
 
-        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 1_700_000_000_000)
+        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, { afterId: 10 })
 
         expect(page.rows).toHaveLength(2)
-        expect(page.nextCursor).toBe(1_700_000_002_000)
-        const cursor = whereClauses.find(c => c.clause.includes(":cursor"))
-        expect(cursor?.clause).toContain("created_at")
-        expect(cursor?.params.cursor).toEqual(new Date(1_700_000_000_000))
+        expect(page.nextCursor).toBe(12)
+        expect(page.hasMore).toBe(false)
+        const cursor = whereClauses.find(c => c.clause.includes(":afterId"))
+        expect(cursor?.clause).toBe("tx.id > :afterId")
+        expect(cursor?.params.afterId).toBe(10)
+    })
+
+    it("says there is more only when a row past the page exists", async () => {
+        getMany.mockResolvedValueOnce([{ id: 1 }, { id: 2 }, { id: 3 }] as never)
+        const full = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 2)
+        expect(full.rows.map(r => r.id)).toEqual([1, 2])
+        expect(full.nextCursor).toBe(2)
+        expect(full.hasMore).toBe(true)
+
+        getMany.mockResolvedValueOnce([{ id: 3 }, { id: 4 }] as never)
+        const last = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 2, { afterId: 2 })
+        expect(last.rows).toHaveLength(2)
+        expect(last.hasMore).toBe(false)
     })
 
     it("holds the cursor where it was when a page comes back empty", async () => {
         getMany.mockResolvedValueOnce([] as never)
 
-        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 42)
+        const page = await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, { afterId: 42 })
 
         expect(page.rows).toEqual([])
         expect(page.nextCursor).toBe(42)
+        expect(page.hasMore).toBe(false)
+    })
+
+    it("starts from a record time for peers that predate the cursor", async () => {
+        getMany.mockResolvedValueOnce([] as never)
+
+        await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, { sinceMs: 1_700_000_000_000 })
+
+        const since = whereClauses.find(c => c.clause.includes(":since"))
+        expect(since?.params.since).toEqual(new Date(1_700_000_000_000))
     })
 
     it("asks for everything when the peer has no cursor yet", async () => {
         getMany.mockResolvedValueOnce([] as never)
 
-        await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, 0)
+        await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500)
 
-        expect(whereClauses.some(c => c.clause.includes(":cursor"))).toBe(false)
+        expect(whereClauses).toHaveLength(1)
     })
 })
 

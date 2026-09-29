@@ -69,11 +69,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         }
 
         try {
-            // The cursor is one this node issued and the peer echoes back.
+            // The cursor is a row id this node issued and the peer echoes back.
             // `since_timestamp` is still accepted from peers that predate the
             // cursor, but it is their clock, so it can only be honoured as a
             // starting point, never as a running high-water mark.
-            const cursor = Math.max(0, Number(data.cursor) || Number(data.since_timestamp) || 0)
+            const afterId = Math.max(0, Math.floor(Number(data.cursor)) || 0)
+            const sinceMs = Math.max(0, Number(data.since_timestamp) || 0)
             const limit = Math.min(Math.max(1, data.limit || 500), 1000)
 
             // Served from the durable history table, not the aggregation
@@ -82,10 +83,10 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // its history — got an empty answer for transactions that had in
             // fact executed.
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
-            const { rows, nextCursor } = await L2PSTransactionExecutor.getSubnetTransactions(
+            const { rows, nextCursor, hasMore } = await L2PSTransactionExecutor.getSubnetTransactions(
                 data.l2psUid,
                 limit,
-                cursor,
+                { afterId, sinceMs },
             )
 
             // Rows written before the ciphertext was stored carry none, so
@@ -118,12 +119,12 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             response.response = {
                 l2psUid: data.l2psUid,
                 transactions,
-                /** Echo this back as `cursor` to continue; it is this node's clock. */
+                /** Echo this back as `cursor` to continue; it is a row id on this node. */
                 nextCursor,
                 /** Rows in this page with no recoverable ciphertext, skipped. */
                 unrecoverable: rows.length - transactions.length,
                 count: transactions.length,
-                hasMore: rows.length === limit,
+                hasMore,
             }
         } catch (error) {
             log.error("[L2PS] Failed to get transactions:", error)

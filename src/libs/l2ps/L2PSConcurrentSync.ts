@@ -122,24 +122,33 @@ export function clearL2PSSyncCursors(): void {
     syncCursors.clear()
 }
 
+/**
+ * Pages one sync run may pull from a peer. The peer decides whether there is
+ * more, so the bound is this node's: a backlog larger than this drains over
+ * the next runs instead of in one unbounded burst.
+ */
+export const MAX_SYNC_PAGES_PER_RUN = 20
+
 export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<void> {
+    const cursorKey = `${peer.identity}\u0000${l2psUid}`
     try {
-        const cursorKey = `${peer.identity}\u0000${l2psUid}`
-        const cursor = syncCursors.get(cursorKey) ?? 0
+        for (let page = 0; page < MAX_SYNC_PAGES_PER_RUN; page++) {
+            const cursor = syncCursors.get(cursorKey) ?? 0
 
-        const response = await peer.call({
-            method: "nodeCall",
-            params: [{
-                message: "getL2PSTransactions",
-                data: {
-                    l2psUid: l2psUid,
-                    cursor,
-                },
-                muid: `l2ps_sync_${Date.now()}`,
-            }],
-        })
+            const response = await peer.call({
+                method: "nodeCall",
+                params: [{
+                    message: "getL2PSTransactions",
+                    data: {
+                        l2psUid: l2psUid,
+                        cursor,
+                    },
+                    muid: `l2ps_sync_${Date.now()}`,
+                }],
+            })
 
-        if (response?.result === 200 && response.response?.transactions) {
+            if (response?.result !== 200 || !response.response?.transactions) return
+
             const body = response.response as {
                 transactions: any[]
                 nextCursor?: number
@@ -150,23 +159,22 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
             // Advance even on an empty page: the peer may have skipped rows it
             // can no longer serve, and refusing to move would ask for them for
             // ever.
-            if (typeof body.nextCursor === "number" && body.nextCursor > cursor) {
-                syncCursors.set(cursorKey, body.nextCursor)
+            const advanced = typeof body.nextCursor === "number" && body.nextCursor > cursor
+            if (advanced) {
+                syncCursors.set(cursorKey, body.nextCursor as number)
             }
 
-            if (txs.length === 0) return
-
-            log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
-
-            await processReceivedTransactions(l2psUid, txs, peer.identity)
+            if (txs.length > 0) {
+                log.info(`[L2PS-SYNC] Received ${txs.length} transactions from ${peer.identity} for ${l2psUid}`)
+                await processReceivedTransactions(l2psUid, txs, peer.identity)
+            }
 
             // Keep pulling while the peer says there is more, so a backlog
-            // drains instead of being re-read one page at a time.
-            if (body.hasMore) {
-                await syncL2PSWithPeer(peer, l2psUid)
-            }
+            // drains instead of being re-read one page at a time — but only
+            // while its cursor moves. "More" with a cursor that stands still
+            // is the same page again.
+            if (!body.hasMore || !advanced) return
         }
-
     } catch (e) {
         log.warning(`[L2PS-SYNC] Failed to sync with ${peer.identity}: ${e instanceof Error ? e.message : String(e)}`)
     }

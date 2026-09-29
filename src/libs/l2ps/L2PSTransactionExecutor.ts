@@ -525,44 +525,50 @@ export default class L2PSTransactionExecutor {
     }
 
     /**
-     * Every transaction in a subnet, newest first — the durable answer to the
+     * Every transaction in a subnet, oldest first — the durable answer to the
      * sync request that used to be served from the aggregation queue.
      *
      * A node that was offline longer than `l2ps.cleanupAgeMs` could not catch
      * up from the queue, because the rows it needed had already been swept;
      * this reads the table that keeps them.
      *
-     * @param cursor - A cursor this node issued, echoed back by the peer.
-     * It is this node's own record time, never the peer's clock and never the
-     * wallet-set `timestamp`: comparing clocks across machines silently drops
-     * transactions, and a peer that inserted a page under its own local time
-     * would jump its cursor past everything it had not yet received.
+     * Pages are keyed on the row id, which is unique and grows with every
+     * insert. A time cursor loses rows: several can share a timestamp, and
+     * a page that ends inside such a tie leaves the rest behind a strict
+     * `>` for good. It would also be the peer comparing this node's clock.
+     *
+     * @param from.afterId - A cursor this node issued, echoed back by the peer.
+     * @param from.sinceMs - A record time, for peers that predate the cursor.
      */
     static async getSubnetTransactions(
         l2psUid: string,
         limit = 100,
-        cursor = 0,
-    ): Promise<{ rows: L2PSTransaction[]; nextCursor: number }> {
+        from: { afterId?: number; sinceMs?: number } = {},
+    ): Promise<{ rows: L2PSTransaction[]; nextCursor: number; hasMore: boolean }> {
         await this.init()
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
         const txRepo = ds.getRepository(L2PSTransaction)
 
+        const afterId = from.afterId && from.afterId > 0 ? from.afterId : 0
         const query = txRepo.createQueryBuilder("tx")
             .where("tx.l2ps_uid = :l2psUid", { l2psUid })
 
-        if (cursor > 0) {
-            query.andWhere("tx.created_at > :cursor", { cursor: new Date(cursor) })
+        if (afterId > 0) {
+            query.andWhere("tx.id > :afterId", { afterId })
+        } else if (from.sinceMs && from.sinceMs > 0) {
+            query.andWhere("tx.created_at > :since", { since: new Date(from.sinceMs) })
         }
 
-        // Oldest first. Newest-first paging cannot drain a backlog: each round
-        // would hand back the same newest page while everything older stayed
-        // behind whatever the peer last recorded.
-        const rows = await query.orderBy("tx.created_at", "ASC").take(limit).getMany()
+        // One row past the page says whether another page exists, so the
+        // last full page does not claim more.
+        const fetched = await query.orderBy("tx.id", "ASC").take(limit + 1).getMany()
+        const rows = fetched.slice(0, limit)
         const last = rows.at(-1)
         return {
             rows,
-            nextCursor: last ? new Date(last.created_at).getTime() : cursor,
+            nextCursor: last ? last.id : afterId,
+            hasMore: fetched.length > limit,
         }
     }
 
