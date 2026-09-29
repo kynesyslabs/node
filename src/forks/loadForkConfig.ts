@@ -7,6 +7,9 @@ import type {
     GasFeeSeparationConfig,
     NonceEnforcementConfig,
     OsDenominationConfig,
+    SignatureDomainConfig,
+    TlsnProofEnforcementConfig,
+    Web2ProofBindingConfig,
 } from "./forkConfig"
 
 // REVIEW: P2 + DEM-665 — genesis loader for fork heights + per-fork payloads.
@@ -175,6 +178,17 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
         primeFeeDistributionFromForkConfig()
         return
     }
+    // Network identity travels with the fork config: both are genesis facts
+    // the signature preimage depends on once `signatureDomain` activates.
+    const declaredChainId = genesisData.properties?.id
+    if (typeof declaredChainId === "number" && Number.isInteger(declaredChainId)) {
+        getSharedState.chainId = declaredChainId
+    } else if (declaredChainId !== undefined) {
+        throw new ForkConfigValidationError(
+            `[FORKS] genesis properties.id must be an integer, got ${String(declaredChainId)}`,
+        )
+    }
+
     const forks = genesisData.forks
     if (!forks || typeof forks !== "object") {
         primeFeeDistributionFromForkConfig()
@@ -227,6 +241,18 @@ function writeForkConfig(name: ForkName, config: ForkConfig): void {
         case "nonceEnforcement":
             getSharedState.forkConfig.nonceEnforcement =
                 config as NonceEnforcementConfig
+            return
+        case "signatureDomain":
+            getSharedState.forkConfig.signatureDomain =
+                config as SignatureDomainConfig
+            return
+        case "web2ProofBinding":
+            getSharedState.forkConfig.web2ProofBinding =
+                config as Web2ProofBindingConfig
+            return
+        case "tlsnProofEnforcement":
+            getSharedState.forkConfig.tlsnProofEnforcement =
+                config as TlsnProofEnforcementConfig
             return
         default: {
             // Exhaustiveness guard — a new ForkName added to the union
@@ -336,6 +362,16 @@ function validateForkEntry(name: ForkName, raw: unknown): ForkConfig {
             // No payload beyond the base. Genesis may only set
             // activationHeight + description.
             return base as NonceEnforcementConfig
+        case "signatureDomain":
+            // No payload: the chain id the preimage binds to comes from
+            // genesis `properties.id`, not from the fork entry.
+            return base as SignatureDomainConfig
+        case "web2ProofBinding":
+            // No payload beyond the base.
+            return base as Web2ProofBindingConfig
+        case "tlsnProofEnforcement":
+            // No payload beyond the base.
+            return base as TlsnProofEnforcementConfig
         default: {
             const _exhaustive: never = name
             void _exhaustive
