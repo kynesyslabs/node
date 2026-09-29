@@ -1,5 +1,7 @@
 import crypto from "crypto"
 
+import bs58 from "bs58"
+
 import Hashing from "@/libs/crypto/hashing"
 import { jcsCanonicalize } from "@/libs/crypto/jcs"
 import { assertRollbackBoundary } from "@/libs/atomic-work/effectBoundary"
@@ -7,6 +9,7 @@ import { assertIntentWithinLimits, type AtomicWorkLimits } from "@/libs/atomic-w
 import { validateOperationGraph } from "@/libs/atomic-work/operationGraph"
 import { atomicWorkProfile } from "@/libs/atomic-work/profile"
 import { computeWorkId } from "@/libs/atomic-work/workId"
+import { matchWritesToOperations } from "@/libs/atomic-work/workReceipt"
 
 /**
  * Binding what a Work transaction does to the intent it was authorized as.
@@ -53,6 +56,28 @@ function decodeSignature(signature: string): Buffer | null {
     return raw.length === 64 ? raw : null
 }
 
+/** Multicodec prefix of an ed25519 public key inside a `did:key`. */
+const ED25519_MULTICODEC = Buffer.from([0xed, 0x01])
+
+/**
+ * The ed25519 key a `did:key` names. A `did:key` is the key itself, encoded,
+ * so every validator reads the same key from it without resolving anything.
+ */
+function didKeyEd25519(did: string): Buffer | null {
+    const match = /^did:key:z([1-9A-HJ-NP-Za-km-z]+)$/.exec(did)
+    if (!match) return null
+    let bytes: Uint8Array
+    try {
+        bytes = bs58.decode(match[1])
+    } catch {
+        return null
+    }
+    if (bytes.length !== 34) return null
+    const raw = Buffer.from(bytes)
+    if (!raw.subarray(0, 2).equals(ED25519_MULTICODEC)) return null
+    return raw.subarray(2)
+}
+
 function signerKey(signer: unknown): Buffer | null {
     const key =
         typeof signer === "string"
@@ -60,7 +85,9 @@ function signerKey(signer: unknown): Buffer | null {
             : typeof (signer as { publicKey?: unknown })?.publicKey === "string"
               ? (signer as { publicKey: string }).publicKey
               : null
-    if (!key || !/^(0x)?[0-9a-f]{64}$/i.test(key)) return null
+    if (!key) return null
+    if (key.startsWith("did:")) return didKeyEd25519(key)
+    if (!/^(0x)?[0-9a-f]{64}$/i.test(key)) return null
     return Buffer.from(key.replace(/^0x/, ""), "hex")
 }
 
@@ -68,9 +95,10 @@ const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex")
 
 /**
  * Verify an ed25519 signature whose signer claim carries the public key
- * itself: a Demos address, or `{ publicKey }`. A claim that names a key
- * indirectly (a DID, say) is refused, because resolving it is not something
- * every validator can do the same way.
+ * itself: a Demos address, `{ publicKey }`, or an ed25519 `did:key`. A claim
+ * that only names a key (a registry DID, `did:web:…`) is refused: resolving it
+ * needs a registry or the network, and validators could resolve it
+ * differently, or not at all, for the same block.
  */
 export const ed25519SignerVerifier: SignatureVerifier = ({ signer, signedBytes, signature }) => {
     const key = signerKey(signer)
@@ -167,11 +195,30 @@ export function assertWorkEnvelope(
         slot: edits.filter(e => e.type === "resource-slot-cas").length,
         transfer: transferCount,
     }
+    // A Work that rolls a slot back is the failure outcome: it moves its
+    // slots to rolled-back and changes nothing else, so its receipt can say
+    // rolled-back and mean it.
+    const rollingBack = edits.some(
+        e => e.type === "resource-slot-cas" && e.transition === "rollback",
+    )
+    const expected = rollingBack ? { ...declared, storage: 0, transfer: 0 } : declared
     for (const effect of ["storage", "slot", "transfer"] as const) {
-        if (declared[effect] !== carried[effect]) {
+        if (expected[effect] !== carried[effect]) {
             return refuse(
-                `intent declares ${declared[effect]} ${effect} effect(s); the transaction carries ${carried[effect]}`,
+                rollingBack && effect !== "slot"
+                    ? `a Work that rolls back carries no ${effect} effects; this one carries ${carried[effect]}`
+                    : `intent declares ${declared[effect]} ${effect} effect(s); the transaction carries ${carried[effect]}`,
             )
+        }
+    }
+    if (!rollingBack) {
+        try {
+            matchWritesToOperations(
+                operations as never,
+                edits.filter(e => e.type === "storage-program-put") as never,
+            )
+        } catch (error) {
+            return refuse(error instanceof Error ? error.message : String(error))
         }
     }
     for (const e of edits) {

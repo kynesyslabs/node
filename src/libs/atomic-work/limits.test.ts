@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test"
 
 import {
-    assertExecutionWithinBudget,
     assertIntentWithinLimits,
     assertProofWithinLimits,
     canonicalByteLength,
@@ -13,7 +12,6 @@ import {
 const limits: AtomicWorkLimits = {
     maxCanonicalBytes: 200,
     maxOperations: 3,
-    maxExecutionTimeMs: 50,
     maxProofBytes: 100,
 }
 
@@ -66,20 +64,8 @@ describe("proof size", () => {
 })
 
 describe("the execution budget", () => {
-    it("aborts a Work that ran past it", () => {
-        let thrown: LimitExceededError | undefined
-        try {
-            assertExecutionWithinBudget(51, limits)
-        } catch (error) {
-            thrown = error as LimitExceededError
-        }
-
-        expect(thrown?.limit).toBe("maxExecutionTimeMs")
-        expect(thrown?.message).toContain("rolling back")
-    })
-
-    it("leaves a Work exactly at the budget alone", () => {
-        expect(() => assertExecutionWithinBudget(50, limits)).not.toThrow()
+    it("is not a wall-clock limit, which validators would measure differently", () => {
+        expect(Object.keys(DEFAULT_ATOMIC_WORK_LIMITS)).not.toContain("maxExecutionTimeMs")
     })
 })
 

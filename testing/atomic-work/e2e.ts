@@ -11,7 +11,7 @@
  */
 import crypto, { createHash, randomBytes } from "node:crypto"
 import { execFileSync } from "node:child_process"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 
 // Run through ./e2e.sh, which brings the network up and sets these.
 const NODE = process.env.NODE_ROOT ?? new URL("../..", import.meta.url).pathname
@@ -27,10 +27,17 @@ const SENDER = readFileSync(`${dev}/node1.pubkey`, "utf8").trim()
 const PAYEE = readFileSync(`${dev}/node3.pubkey`, "utf8").trim()
 const DBS = ["node1_db", "node2_db", "node3_db", "node4_db"]
 
+// An absolute path, not a name looked up in PATH: a writable directory
+// earlier in PATH would otherwise decide what this harness runs.
+const DOCKER = [process.env.DOCKER_BIN, "/usr/bin/docker", "/usr/local/bin/docker"].find(
+    (p): p is string => !!p && p.startsWith("/") && existsSync(p),
+)
+if (!DOCKER) throw new Error("docker not found at /usr/bin or /usr/local/bin; set DOCKER_BIN to its absolute path")
+
 const sha = (s: string) => createHash("sha256").update(s).digest("hex")
 const hex = () => randomBytes(32).toString("hex")
 const sql = (db: string, q: string) =>
-    execFileSync("docker", ["exec", "demos-devnet-postgres", "psql", "-U", "demosuser", "-d", db, "-Atc", q]).toString().trim()
+    execFileSync(DOCKER, ["exec", "demos-devnet-postgres", "psql", "-U", "demosuser", "-d", db, "-Atc", q]).toString().trim()
 const everyNode = (q: string) => DBS.map(db => sql(db, q))
 const step = (n: string) => console.log(`\n== ${n}`)
 function check(ok: boolean, what: string) {
@@ -85,12 +92,17 @@ function put(name: string, discriminator: string, value: Record<string, unknown>
     const target = "stor-" + sha("demos-atomic-storage-address:v1:" + jcsCanonicalize({ writer: SENDER, name, discriminator })).slice(0, 40)
     return { type: "storage-program-put", target, writer: SENDER, name, discriminator, mode: "create-only", valueDigest: sha(jcsCanonicalize(value)), value }
 }
+function artifactOf(p: ReturnType<typeof purchase>, operationId: string) {
+    return p.intent.operations.find((o: any) => o.operationId === operationId).payload.artifact
+}
 function purchaseEdits(p: ReturnType<typeof purchase>, slotKey: string, tag: string) {
     return [
         { type: "work-attempt", workId: p.workId, attemptId: `${tag}-a1`, canonicalBytesHash: p.bytesHash, attemptClass: "normal", replacementFor: null },
-        put("buyer-vet", tag, { pass: true }),
-        put("seller-vet", tag, { pass: true }),
-        put("commitment", tag, { committed: tag }),
+        // Each write stores the artifact its operation declares: the node
+        // pairs writes with operations by that value.
+        put("buyer-vet", tag, artifactOf(p, "buyer-vet")),
+        put("seller-vet", tag, artifactOf(p, "seller-vet")),
+        put("commitment", tag, artifactOf(p, "commitment")),
         { type: "resource-slot-cas", resourceKey: slotKey, expected: { state: "vacant", generation: 0 }, transition: "settle", workId: p.workId, conflictDigest: hex() },
     ]
 }
@@ -129,6 +141,10 @@ check(receipts[0].winningAttempt.nativeTransactionRef.value === r1.tx.hash, "rec
 const blockTs = Number(JSON.parse(sql("node1_db", `select (content#>>'{}') from blocks where number=${landedAt}`)).timestamp) * 1000
 check(receipts.every(r => r.blockRef.timestamp === blockTs), `receipt carries the block's consensus time on every node (${blockTs})`)
 check((receipts[0].operationResults as any[]).length === 6 && receipts[0].operationResults.every((o: any) => o.status === "committed"), "one committed result per operation")
+const nonces = (receipts[0].operationResults as any[]).filter(o => o.storageOutput).map(o => o.storageOutput.nonce)
+check(new Set(nonces).size === 3, `each write carries its own nonce (${nonces.join(", ")})`)
+check(receipts.every(r => r.effects.slots[0].after.state === "settled" && r.effects.writes.length === 3 && r.effects.transfers[0].to === PAYEE), "receipt commits to the slot it settled, the writes and the payment")
+check(everyNode(`select count(*) from transactions where type='atomicWork' and ((case json_typeof(content) when 'string' then (content#>>'{}')::jsonb else content::jsonb end) -> 'gcr_edits') @> '[{"type":"work-attempt","workId":"${w1.workId}"}]'::jsonb`).every(c => c === "1"), "an included attempt is found by its Work id on the stored transactions")
 const payeeAfter = everyNode(`select balance from gcr_main where pubkey='${PAYEE}'`)
 check(payeeAfter.every((b, i) => BigInt(b) - BigInt(payeeBefore[i]) === 500000000000n), "payee paid exactly once on every node")
 
@@ -178,6 +194,22 @@ check(afterReplay.every((a, i) => {
     return b0 === b1 && Number(n1) === Number(n0) + 1
 }), "the replay spent the sender's nonce and charged no fee, on every node")
 
+step("5b. a Work that rolls its slot back is recorded as rolled back, with no effects")
+const w5b = purchase("JOB-" + hex().slice(0, 20))
+const slot5b = hex()
+const r5b = await send({
+    intent: w5b.intent,
+    authorizations: w5b.authorizations,
+    edits: [
+        { type: "work-attempt", workId: w5b.workId, attemptId: "w5b-a1", canonicalBytesHash: w5b.bytesHash, attemptClass: "normal", replacementFor: null },
+        { type: "resource-slot-cas", resourceKey: slot5b, expected: { state: "vacant", generation: 0 }, transition: "rollback", workId: w5b.workId, conflictDigest: hex() },
+    ],
+})
+check(r5b.ok && (await until(() => workRows(w5b.workId).every(c => c === "1"))), "rolled-back Work recorded on all 4 nodes")
+check(everyNode(`select state from gcr_resource_slots where "resourceKey"='${slot5b}'`).every(s => s === "rolled-back"), "its slot is rolled-back on every node")
+const rolled = everyNode(`select receipt::text from gcr_atomic_works where "workId"='${w5b.workId}'`).map(r => JSON.parse(r))
+check(rolled.every(r => r.outcome === "rolled-back" && r.operationResults.every((o: any) => o.status !== "committed")), "its receipt says rolled-back, with no operation committed")
+
 step("6. reading Works back from any node")
 async function nodeCall(port: number, message: string, data: unknown) {
     const res = await fetch(`http://localhost:${port}`, {
@@ -207,6 +239,8 @@ const st1 = await nodeCall(53553, "getAtomicWorkStatus", { workId: w1.workId })
 check(st1.response.statement.state === "included-committed" && attested(st1.response), "purchase: included-committed, signed by the node")
 const st2 = await nodeCall(53553, "getAtomicWorkStatus", { workId: w2.workId })
 check(st2.response.statement.state === "unknown" && attested(st2.response), "refused purchase: unknown (indeterminate), signed")
+const st5b = await nodeCall(53553, "getAtomicWorkStatus", { workId: w5b.workId })
+check(st5b.response.statement.state === "included-rolled-back" && attested(st5b.response), "rolled-back Work: included-rolled-back, signed")
 const st5 = await nodeCall(53553, "getAtomicWorkStatus", { txHash: r5.tx.hash })
 check(st5.response.statement.state === "included-replay" && attested(st5.response), "replay transaction: included-replay, signed")
 const forged = structuredClone(st1.response)
@@ -221,18 +255,27 @@ const snap = (db: string) =>
 const snaps = DBS.map(snap)
 check(snaps.every(s => s === snaps[0]), "Work state, every balance and the block hash identical on all 4 nodes")
 step("8. a node killed mid-run recovers and agrees")
-execFileSync("docker", ["kill", "-s", "KILL", "demos-devnet-node-3"])
+execFileSync(DOCKER, ["kill", "-s", "KILL", "demos-devnet-node-3"])
 const w8 = purchase("JOB-" + hex().slice(0, 20))
 const slot8 = hex()
 const r8 = await send({ intent: w8.intent, authorizations: w8.authorizations, edits: purchaseEdits(w8, slot8, "w8"), transfers: [{ to: PAYEE, amount: "1000" }] })
 check(r8.ok, "a purchase commits while a node is down")
 const upNodes = ["node1_db", "node2_db", "node4_db"]
 check(await until(() => upNodes.every(db => sql(db, `select count(*) from gcr_atomic_works where "workId"='${w8.workId}'`) === "1")), "the running nodes record it")
-execFileSync("docker", ["start", "demos-devnet-node-3"])
+execFileSync(DOCKER, ["start", "demos-devnet-node-3"])
 check(await until(() => sql("node3_db", `select count(*) from gcr_atomic_works where "workId"='${w8.workId}'`) === "1", 240), "the killed node catches up and records the same Work")
+// Compared at one fixed height every node has reached: the chain keeps
+// growing while this reads, so "the latest block" is a moving target.
 const height = sql("node1_db", "select max(number) from blocks")
-await until(() => Number(sql("node3_db", "select coalesce(max(number),0) from blocks")) >= Number(height), 120)
-const recovered = DBS.map(snap)
-check(recovered.every(s => s === recovered[0]), "after recovery, Work state, balances and block hash match on all 4 nodes")
+await until(() => DBS.every(db => Number(sql(db, "select coalesce(max(number),0) from blocks")) >= Number(height)), 120)
+const stateAt = (db: string) => ({
+    works: sql(db, `select md5(coalesce(string_agg("workId"||"winnerAttemptId"||coalesce("receiptCommitment",''), ',' order by "workId"),'')) from gcr_atomic_works`),
+    balances: sql(db, `select md5(coalesce(string_agg(pubkey||balance, ',' order by pubkey),'')) from gcr_main`),
+    block: sql(db, `select hash from blocks where number=${height}`),
+})
+const recovered = DBS.map(stateAt)
+const differs = (["works", "balances", "block"] as const).filter(k => recovered.some(r => r[k] !== recovered[0][k]))
+if (differs.length) console.log("differs:", differs.join(", "), JSON.stringify(recovered))
+check(differs.length === 0, `after recovery, Work state, balances and block ${height}'s hash match on all 4 nodes`)
 
 console.log(process.exitCode ? "\nE2E FAILED" : "\nE2E PASSED")

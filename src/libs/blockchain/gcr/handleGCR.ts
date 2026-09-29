@@ -68,6 +68,7 @@ import {
     settledEdits,
     splitSettlement,
 } from "@/libs/atomic-work/feeAndNonce"
+import { orderDeterministically } from "@/libs/consensus/v2/routines/deterministicOrder"
 import {
     applyAtomicStoragePut,
     type StoragePutEdit,
@@ -101,7 +102,7 @@ import {
 } from "@/libs/atomic-work/workReceipt"
 import { GCRAtomicWork } from "@/model/entities/GCRv2/GCR_AtomicWork"
 
-type AtomicWorkPayloadView = WorkEnvelope & { transfers?: unknown[] }
+type AtomicWorkPayloadView = WorkEnvelope & { transfers?: { to?: unknown; amount?: unknown }[] }
 import { GCRResourceSlot } from "@/model/entities/GCRv2/GCR_ResourceSlot"
 
 export type GetNativeStatusOptions = {
@@ -690,10 +691,19 @@ export default class HandleGCR {
                             "a Work cannot execute without the consensus block time",
                         )
                     }
-                    assertWithinWindow(workClock, {
-                        notBeforeMs: payload.intent.notBefore as number | null,
-                        deadlineMs: payload.intent.expiresAt as number | null,
-                    }, "this Work")
+                    // A replay only reads back a Work that already ran, so
+                    // the original deadline does not apply to it. Admission
+                    // judges only the deadline: notBefore is checked against
+                    // the block the Work lands in, which may be the first
+                    // one late enough, not against the block before it.
+                    if (!isReplay) {
+                        assertWithinWindow(workClock, {
+                            notBeforeMs: simulate && !clock
+                                ? null
+                                : (payload.intent.notBefore as number | null),
+                            deadlineMs: payload.intent.expiresAt as number | null,
+                        }, "this Work")
+                    }
                 } catch (error) {
                     return refusal(
                         error instanceof Error ? error.message : String(error),
@@ -707,10 +717,37 @@ export default class HandleGCR {
                     const writes = gcrEdits
                         .filter(e => (e.type as string) === "storage-program-put")
                         .map(e => e as unknown as AppliedStorageWrite)
-                    const slotKeys = gcrEdits
+                    const slotEdits = gcrEdits
                         .filter(e => (e.type as string) === "resource-slot-cas")
-                        .map(e => (e as unknown as SlotCasEdit).resourceKey)
+                        .map(e => e as unknown as SlotCasEdit)
+                    const slotKeys = slotEdits.map(e => e.resourceKey)
+                    const sender = normalizePubkey(
+                        tx.content.from_ed25519_address || tx.content.from,
+                    )
+                    const transfers = (payload.transfers ?? []).map(t => ({
+                        from: sender,
+                        to: String(t.to),
+                        amount: String(t.amount),
+                    }))
                     seal = caches => {
+                        // Read after every edit applied: the state each slot
+                        // was left in is part of what the receipt commits to.
+                        const slots = slotEdits.map(e => {
+                            const after = caches.resourceSlots.get(e.resourceKey) as
+                                | { state: string; generation: number; workId: string; conflictDigest: string }
+                                | null
+                                | undefined
+                            return {
+                                resourceKey: e.resourceKey,
+                                before: { state: e.expected.state, generation: e.expected.generation },
+                                after: {
+                                    state: after?.state ?? "unknown",
+                                    generation: after?.generation ?? -1,
+                                    workId: after?.workId ?? "",
+                                    conflictDigest: after?.conflictDigest ?? "",
+                                },
+                            }
+                        })
                         const built = buildWorkReceipt({
                             intent: payload.intent,
                             profile,
@@ -724,6 +761,8 @@ export default class HandleGCR {
                                 (getSharedState.lastBlockNumber ?? 0) + 1,
                             nonce: tx.content.nonce,
                             writes,
+                            slots,
+                            transfers,
                             timestampMs: clock ? clock.timestampSec * 1000 : undefined,
                         })
                         return sealWork(
@@ -917,6 +956,15 @@ export default class HandleGCR {
             sideEffects: sideEffects,
             appliedEditsCount: appliedEdits.length,
         }
+    }
+
+    /**
+     * The transactions of a block that lose to an earlier one over the same
+     * Work, slot or storage address. Earlier is the canonical order, so every
+     * node picks the same winners whatever order it received the block in.
+     */
+    static contendedInBlock<T extends Transaction>(txs: T[]): Set<string> {
+        return contendedWorkTxs(orderDeterministically(txs))
     }
 
     /**
@@ -1246,8 +1294,13 @@ export default class HandleGCR {
         // A block touches each Work, slot and storage address from at most one
         // transaction; later ones are refused. Rollback depends on it: every
         // record then changed once in the block being undone.
+        //
+        // "Later" is judged in the canonical order, not in whatever order this
+        // caller passed. The forging and the syncing paths arrive with their
+        // own orderings, and a winner picked by input position could differ
+        // between them for the same block.
         const blockOrder = finalTxs
-        const contended = contendedWorkTxs(finalTxs)
+        const contended = this.contendedInBlock(finalTxs)
         if (contended.size > 0) {
             log.warning(
                 `[applyTransactions] ${contended.size} tx(s) touch Work state already touched earlier in this block`,

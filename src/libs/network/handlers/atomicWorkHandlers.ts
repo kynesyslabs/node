@@ -81,17 +81,55 @@ async function pendingForWork(workId: string): Promise<string | null> {
     return null
 }
 
+/** The latest included transaction carrying an attempt at this Work, if any. */
+async function includedAttempt(workId: string): Promise<Transactions | null> {
+    return dataSource
+        .getRepository(Transactions)
+        .createQueryBuilder("tx")
+        .where("tx.type = :type", { type: "atomicWork" })
+        // `content` is a json column that may hold the transaction as an
+        // encoded string rather than an object; read it either way.
+        .andWhere(
+            "((CASE json_typeof(tx.content) WHEN 'string' THEN (tx.content #>> '{}')::jsonb ELSE tx.content::jsonb END) -> 'gcr_edits') @> :attempt::jsonb",
+            {
+                attempt: JSON.stringify([{ type: "work-attempt", workId }]),
+            },
+        )
+        .orderBy("tx.blockNumber", "DESC")
+        .getOne()
+}
+
 async function stateOfWork(workId: string): Promise<Record<string, unknown>> {
     const row = await dataSource.getRepository(GCRAtomicWork).findOneBy({ workId })
     if (row) {
         const tx = await dataSource.getRepository(Transactions).findOneBy({ hash: row.txHash })
+        // The winner's receipt says whether it committed or rolled its slots
+        // back; both are final for this Work.
+        const rolledBack = (row.receipt as { outcome?: unknown } | null)?.outcome === "rolled-back"
         return {
             workId,
-            state: "included-committed" satisfies WorkState,
+            state: (rolledBack ? "included-rolled-back" : "included-committed") satisfies WorkState,
             txHash: row.txHash,
             attemptId: row.winnerAttemptId,
             receiptCommitment: row.receiptCommitment,
             block: await blockOf(tx?.blockNumber),
+        }
+    }
+    // Included but not recorded as the winner: it failed or rolled back
+    // during block execution, was charged its fee and nonce, and left no
+    // ledger record. The chain still holds the transaction, so report that
+    // rather than "unknown".
+    const included = await includedAttempt(workId)
+    if (included) {
+        const content = parsedContent(included)
+        return {
+            workId,
+            state: (String(included.status) === "failed"
+                ? "included-failed"
+                : "included-rolled-back") satisfies WorkState,
+            txHash: included.hash,
+            attemptId: workAttemptOf(content)?.attemptId ?? null,
+            block: await blockOf(included.blockNumber),
         }
     }
     const pending = await pendingForWork(workId)
@@ -117,7 +155,8 @@ async function stateOfTx(hash: string): Promise<Record<string, unknown>> {
             ? "included-failed"
             : attempt?.attemptClass === "replay"
               ? "included-replay"
-              : winner?.txHash === hash
+              : winner?.txHash === hash &&
+                  (winner.receipt as { outcome?: unknown } | null)?.outcome !== "rolled-back"
                 ? "included-committed"
                 : "included-rolled-back"
         return {

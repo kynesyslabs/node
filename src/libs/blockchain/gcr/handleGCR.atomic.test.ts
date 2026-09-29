@@ -111,6 +111,7 @@ function workTx(
             type: "atomicWork",
             from,
             from_ed25519_address: from,
+            nonce: 1,
             data: ["atomicWork", { intent: w.intent, authorizations: [], transfers }],
             gcr_edits: edits,
         },
@@ -342,6 +343,26 @@ describe("HandleGCR.applyTransaction judges deadlines by consensus time", () => 
         expect(entities.accounts.get("0xbb")!.balance).toBe(5n)
     })
 
+    it("lets a replay read back a Work after its deadline has passed", async () => {
+        const entities = caches()
+        const { w, edits } = timed({ expiresAt: 1_800_000_000_000 + 1 })
+        const ran = await HandleGCR.applyTransaction(entities, workTx("0x34", "0xaa", w, edits, transfers), false, false, CLOCK)
+        expect(ran.success).toBe(true)
+
+        // Two blocks later the deadline is long gone; the Work already ran,
+        // so a replay only recovers it and must not be refused for that.
+        const later = { height: 13, timestampSec: 1_800_000_020 }
+        const replay = await HandleGCR.applyTransaction(
+            entities,
+            workTx("0x35", "0xaa", w, [{ ...edits[0], attemptId: "t-replay", attemptClass: "replay" }], []),
+            false,
+            false,
+            later,
+        )
+        expect(replay.success).toBe(true)
+        expect(entities.atomicWorks.get(w.workId)!.winnerAttemptId).not.toBe("t-replay")
+    })
+
     it("refuses a Work not yet valid at the block", async () => {
         const entities = caches()
         const { w, edits } = timed({ notBefore: 1_800_000_000_000 + 1 })
@@ -447,5 +468,32 @@ describe("HandleGCR.partitionIndependentTxs with Work edits", () => {
             workTx("0xb", "0x02", w, [{ ...w.attempt(), attemptId: "w1-a2", attemptClass: "replay" }]),
         ])
         expect(groups.length).toBe(1)
+    })
+})
+
+describe("HandleGCR.contendedInBlock", () => {
+    const slotTx = (hash: string, from: string, nonce: number, seed: string) => {
+        const w = work("test-pay-v1", seed)
+        const tx = workTx(hash, from, w, [w.attempt(), w.slot("shared")])
+        tx.content.nonce = nonce
+        return tx
+    }
+
+    it("picks the same winner whatever order the block's transactions arrive in", () => {
+        const a = slotTx("0x0a", "0x01", 1, "w1")
+        const b = slotTx("0x0b", "0x02", 1, "w2")
+        const c = slotTx("0x0c", "0x03", 1, "w3")
+
+        const verdicts = [
+            [a, b, c],
+            [c, b, a],
+            [b, c, a],
+        ].map(order => [...HandleGCR.contendedInBlock(order)].sort())
+
+        // The forging and syncing paths hand the block over in different
+        // orders; the loser set must not depend on that.
+        expect(verdicts[1]).toEqual(verdicts[0])
+        expect(verdicts[2]).toEqual(verdicts[0])
+        expect(verdicts[0]).toEqual(["0x0b", "0x0c"])
     })
 })

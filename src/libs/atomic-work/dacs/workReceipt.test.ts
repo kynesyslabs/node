@@ -35,19 +35,66 @@ describe("buildWorkReceipt", () => {
         expect(results.map(r => r.inputHash)).toEqual(reference.operationResults.map((r: any) => r.inputHash))
     })
 
-    it("matches the reference output hash wherever it does not depend on the write's nonce", () => {
-        const results = build().receipt.operationResults as any[]
-        results.forEach((r, i) => {
-            if (r.operationKind !== "storage-program-put") {
-                expect(r.outputHash).toBe(reference.operationResults[i].outputHash)
-            }
-        })
+    it("matches every reference output hash, storage writes included", () => {
+        // The reference numbers writes from the transaction's nonce by
+        // operation index (200, 201, 203 for operations 0, 1, 3).
+        const results = build({ nonce: 200 }).receipt.operationResults as any[]
+        expect(results.map(r => r.outputHash)).toEqual(reference.operationResults.map((r: any) => r.outputHash))
+        expect(results.filter(r => r.storageOutput).map(r => r.storageOutput.nonce)).toEqual(["200", "201", "203"])
     })
 
     it("binds each write's actual address, digest and writer", () => {
         const storage = (build().receipt.operationResults as any[]).filter(r => r.storageOutput)
         expect(storage.map(r => r.storageOutput.nativeAddress)).toEqual(writes.map((w: any) => w.target))
-        expect(storage[0].storageOutput.nonce).toBe("7")
+        expect(storage.map(r => r.storageOutput.nonce)).toEqual(["7", "8", "10"])
+    })
+
+    it("pairs each write with the operation whose value it wrote, not by position", () => {
+        const reordered = build({ writes: [writes[2], writes[0], writes[1]] })
+        const storage = (reordered.receipt.operationResults as any[]).filter(r => r.storageOutput)
+        expect(storage.map(r => r.storageOutput.nativeAddress)).toEqual(writes.map((w: any) => w.target))
+        expect(reordered.receiptCommitment).toBe(build().receiptCommitment)
+    })
+
+    it("refuses a write whose value no operation declares", () => {
+        const swapped = [{ ...writes[0], valueDigest: writes[1].valueDigest }, writes[1], writes[2]]
+        expect(() => build({ writes: swapped })).toThrow("did not make with its value")
+    })
+
+    it("commits to the slots it moved and the payments it made", () => {
+        const slot = {
+            resourceKey: "k1",
+            before: { state: "vacant", generation: 0 },
+            after: { state: "settled", generation: 0, workId: reference.workId, conflictDigest: "c1" },
+        }
+        const pay = { from: "0xaa", to: "0xbb", amount: "10" }
+        const { receipt, receiptCommitment } = build({ slots: [slot], transfers: [pay] })
+        expect(receipt.effects).toEqual({
+            slots: [slot],
+            transfers: [pay],
+            writes: writes.map((w: any) => ({ nativeAddress: w.target, contentHash: w.valueDigest })),
+        })
+        expect(receipt.effectsRoot).toMatch(/^[0-9a-f]{64}$/)
+        const otherAfter = { ...slot, after: { ...slot.after, generation: 1 } }
+        expect(build({ slots: [otherAfter], transfers: [pay] }).receiptCommitment).not.toBe(receiptCommitment)
+    })
+
+    it("reports a Work that rolled its slot back as rolled back, not committed", () => {
+        const slot = {
+            resourceKey: "k1",
+            before: { state: "vacant", generation: 0 },
+            after: { state: "rolled-back", generation: 0, workId: reference.workId, conflictDigest: "c1" },
+        }
+        const { receipt } = build({ writes: [], slots: [slot] })
+        expect(receipt.outcome).toBe("rolled-back")
+        const statuses = (receipt.operationResults as any[]).map(r => [r.operationKind, r.status])
+        expect(statuses).toEqual(reference.operationResults.map((r: any) => [
+            r.operationKind,
+            r.operationKind === "native-dem-transfer" ? "not-executed" : "rolled-back",
+        ]))
+        expect((receipt.operationResults as any[]).every(r => r.outputHash === undefined)).toBe(true)
+
+        expect(() => build({ slots: [slot] })).toThrow("cannot have written storage")
     })
 
     it("commits to itself the way any verifier would recompute it", () => {

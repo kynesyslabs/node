@@ -10,21 +10,22 @@ import { jcsCanonicalize } from "@/libs/crypto/jcs"
  * can tell in advance what will be refused.
  *
  * Size and shape are checked before execution, where a refusal costs nothing.
- * The execution budget is the exception: it can only be observed while running,
- * so it aborts into a rollback rather than a pre-admission refusal.
+ * There is deliberately no wall-clock execution budget: validators measure
+ * time differently, so one near the threshold would commit a Work another
+ * rolls back. Execution is bounded by these deterministic limits instead:
+ * native operation kinds have a fixed cost, and there are at most
+ * `maxOperations` of them.
  */
 
 export interface AtomicWorkLimits {
     maxCanonicalBytes: number
     maxOperations: number
-    maxExecutionTimeMs: number
     maxProofBytes: number
 }
 
 export const DEFAULT_ATOMIC_WORK_LIMITS: AtomicWorkLimits = {
     maxCanonicalBytes: 65_536,
     maxOperations: 32,
-    maxExecutionTimeMs: 2_000,
     maxProofBytes: 16_384,
 }
 
@@ -87,27 +88,6 @@ export function assertProofWithinLimits(
             "maxProofBytes",
             proofBytes,
             limits.maxProofBytes,
-        )
-    }
-}
-
-/**
- * Abort a Work that has run past its budget.
- *
- * Unlike the others this is discovered mid-execution, so the caller rolls back
- * rather than refusing admission — the overlay has staged effects by now and
- * they must go nowhere.
- */
-export function assertExecutionWithinBudget(
-    elapsedMs: number,
-    limits: AtomicWorkLimits,
-): void {
-    if (elapsedMs > limits.maxExecutionTimeMs) {
-        throw new LimitExceededError(
-            `Work ran ${elapsedMs}ms; this node allows ${limits.maxExecutionTimeMs}ms before rolling back`,
-            "maxExecutionTimeMs",
-            elapsedMs,
-            limits.maxExecutionTimeMs,
         )
     }
 }

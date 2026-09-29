@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test"
+
+import { storageValueDigest } from "@/libs/atomic-work/storageWrite"
 import crypto from "crypto"
 
 import vectors from "@/libs/atomic-work/__fixtures__/workid.vectors.json"
@@ -59,11 +61,15 @@ function authorizations(sign = true) {
 }
 
 const attempt = { type: "work-attempt", workId, attemptId: "a1", canonicalBytesHash: intentBytesHash(intent) }
-const put = { type: "storage-program-put" }
+// Each write carries the value its operation declares; the envelope pairs
+// them by that value.
+const puts = intent.operations
+    .filter((op: any) => op.kind === "storage-program-put")
+    .map((op: any) => ({ type: "storage-program-put", valueDigest: storageValueDigest(op.payload.artifact) }))
 const slot = { type: "resource-slot-cas", workId }
 const receipt = { type: "work-receipt", workId }
 // The purchase graph writes three times, claims one slot and pays once.
-const edits = [attempt, put, put, put, slot, receipt]
+const edits = [attempt, ...puts, slot, receipt]
 
 const check = (over: { env?: any; edits?: any[]; transfers?: number } = {}) =>
     assertWorkEnvelope(
@@ -90,8 +96,8 @@ describe("assertWorkEnvelope", () => {
     })
 
     it("refuses a workId or bytes hash not derived from the intent", () => {
-        expect(check({ edits: [{ ...attempt, workId: "0".repeat(64) }, put, put, put, slot, receipt] }).success).toBe(false)
-        expect(check({ edits: [{ ...attempt, canonicalBytesHash: "0".repeat(64) }, put, put, put, slot, receipt] }).success).toBe(false)
+        expect(check({ edits: [{ ...attempt, workId: "0".repeat(64) }, ...puts, slot, receipt] }).success).toBe(false)
+        expect(check({ edits: [{ ...attempt, canonicalBytesHash: "0".repeat(64) }, ...puts, slot, receipt] }).success).toBe(false)
     })
 
     it("refuses an unregistered profile and a missing intent", () => {
@@ -109,7 +115,7 @@ describe("assertWorkEnvelope", () => {
         const didWorkId = computeWorkId(didIntent, DACS_DOMAINS.workId)
         const result = assertWorkEnvelope(
             { intent: didIntent, authorizations: [] },
-            [{ ...attempt, workId: didWorkId, canonicalBytesHash: intentBytesHash(didIntent) }, put, put, put, { ...slot, workId: didWorkId }, { ...receipt, workId: didWorkId }] as never,
+            [{ ...attempt, workId: didWorkId, canonicalBytesHash: intentBytesHash(didIntent) }, ...puts, { ...slot, workId: didWorkId }, { ...receipt, workId: didWorkId }] as never,
             1,
             DEFAULT_ATOMIC_WORK_LIMITS,
             ed25519SignerVerifier,
@@ -119,9 +125,23 @@ describe("assertWorkEnvelope", () => {
     })
 
     it("refuses effects the intent does not declare", () => {
-        expect(check({ edits: [attempt, put, put, slot, receipt] }).message).toContain("storage")
+        expect(check({ edits: [attempt, puts[0], puts[1], slot, receipt] }).message).toContain("storage")
         expect(check({ transfers: 2 }).message).toContain("transfer")
-        expect(check({ edits: [attempt, put, put, put, { ...slot, workId: "other" }, receipt] }).success).toBe(false)
+        expect(check({ edits: [attempt, ...puts, { ...slot, workId: "other" }, receipt] }).success).toBe(false)
+    })
+
+    it("refuses writes whose values their operations do not declare", () => {
+        const stray = { type: "storage-program-put", valueDigest: "0".repeat(64) }
+        expect(check({ edits: [attempt, puts[0], puts[1], stray, slot, receipt] }).message).toContain("with its value")
+        // Order does not matter; the values do.
+        expect(check({ edits: [attempt, puts[2], puts[0], puts[1], slot, receipt] }).success).toBe(true)
+    })
+
+    it("accepts a Work that rolls its slot back only when it carries no other effects", () => {
+        const rollback = { ...slot, transition: "rollback" }
+        expect(check({ edits: [attempt, rollback, receipt], transfers: 0 })).toEqual({ success: true, message: "Work envelope" })
+        expect(check({ edits: [attempt, puts[0], rollback, receipt], transfers: 0 }).message).toContain("rolls back carries no storage")
+        expect(check({ edits: [attempt, rollback, receipt], transfers: 1 }).message).toContain("rolls back carries no transfer")
     })
 
     it("refuses a payment submitted by anyone but the payer's account", () => {
