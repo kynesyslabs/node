@@ -180,7 +180,11 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
     }
     // Network identity travels with the fork config: both are genesis facts
     // the signature preimage depends on once `signatureDomain` activates.
+    // Always taken from this genesis, never left over from a previous load:
+    // a stale id would pass the signatureDomain check below and bind
+    // signatures to another chain.
     const declaredChainId = genesisData.properties?.id
+    getSharedState.chainId = null
     if (typeof declaredChainId === "number" && Number.isInteger(declaredChainId)) {
         getSharedState.chainId = declaredChainId
     } else if (declaredChainId !== undefined) {
@@ -217,6 +221,19 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
         writeForkConfig(name as ForkName, config)
         log.info(
             `[FORKS] Loaded fork "${name}" with activationHeight=${config.activationHeight}`,
+        )
+    }
+
+    // A scheduled signatureDomain binds every signature to the chain id from
+    // `properties.id`. Without one, the node boots fine and then cannot sign
+    // or admit a single transaction once the fork activates: refuse now.
+    if (
+        getSharedState.forkConfig.signatureDomain.activationHeight !== null &&
+        typeof getSharedState.chainId !== "number"
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] signatureDomain is scheduled but genesis properties.id is missing; " +
+                "the signature preimage needs the chain id",
         )
     }
 
