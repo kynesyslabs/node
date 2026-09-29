@@ -14,7 +14,7 @@ jest.mock("src/libs/crypto/hashing", () => ({
     default: { sha256: (v: string) => v },
 }))
 
-import { Proxy } from "./Proxy"
+import { Proxy } from "@/features/web2/proxy/Proxy"
 
 /**
  * Build a Proxy with both config objects supplied so construction never reaches
