@@ -19,11 +19,19 @@ import { bigintNumericTransformer } from "./transformers"
 
 /**
  * L2PS Transaction Entity
- * 
- * Stores decrypted L2PS transaction data with:
+ *
+ * The durable record of what executed in a subnet:
  * - L2PS network scope (l2ps_uid)
- * - Individual transaction details
- * - Reference to L1 batch transaction
+ * - Routing and settlement metadata (parties, amount, batch, status)
+ * - The transaction payload, as ciphertext
+ *
+ * The payload is kept encrypted at rest and decrypted only to answer an
+ * authenticated read from one of the parties. Routing metadata stays in the
+ * clear because the account history query selects on it, and because the
+ * balance movements it describes are already settled on L1 through the
+ * batch's GCR edits — encrypting it here would cost the feature without
+ * buying privacy. The message body is not in that position, and it is what
+ * this table used to leave lying around in `content`.
  */
 @Entity("l2ps_transactions")
 @Index("IDX_L2PS_TX_UID", ["l2ps_uid"])
@@ -34,6 +42,7 @@ import { bigintNumericTransformer } from "./transformers"
 @Index("IDX_L2PS_TX_UID_FROM", ["l2ps_uid", "from_address"])
 @Index("IDX_L2PS_TX_UID_TO", ["l2ps_uid", "to_address"])
 @Index("IDX_L2PS_TX_BLOCK", ["l1_block_number"])
+@Index("IDX_L2PS_TX_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
 export class L2PSTransaction {
     /**
      * Auto-generated primary key
@@ -136,10 +145,22 @@ export class L2PSTransaction {
     status: "pending" | "batched" | "confirmed" | "failed"
 
     /**
-     * Full transaction content (JSON)
+     * The encrypted transaction envelope, exactly as the subnet submitted it.
+     *
+     * This is what makes the history durable: peers sync from it and an
+     * account read decrypts it on the fly, so nothing depends on the
+     * aggregation queue, which is swept minutes after confirmation.
      */
-    @Column("jsonb")
-    content: Record<string, any>
+    @Column("jsonb", { nullable: true })
+    encrypted_payload: Record<string, any> | null
+
+    /**
+     * Decrypted transaction content, only when `l2ps.historyStorePlaintext`
+     * is on. Null otherwise — and null on every row written by a node that
+     * left it off, so readers fall back to decrypting `encrypted_payload`.
+     */
+    @Column("jsonb", { nullable: true })
+    content: Record<string, any> | null
 
     /**
      * Execution result/error message
