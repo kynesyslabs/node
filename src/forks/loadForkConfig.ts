@@ -220,6 +220,19 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
         )
     }
 
+    // A scheduled signatureDomain binds every signature to the chain id from
+    // `properties.id`. Without one, the node boots fine and then cannot sign
+    // or admit a single transaction once the fork activates: refuse now.
+    if (
+        getSharedState.forkConfig.signatureDomain.activationHeight !== null &&
+        typeof getSharedState.chainId !== "number"
+    ) {
+        throw new ForkConfigValidationError(
+            "[FORKS] signatureDomain is scheduled but genesis properties.id is missing; " +
+                "the signature preimage needs the chain id",
+        )
+    }
+
     primeFeeDistributionFromForkConfig()
 }
 

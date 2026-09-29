@@ -39,6 +39,43 @@ describe("loadForkConfigFromGenesis", () => {
         getSharedState.feeDistribution = feeDistSnapshot
     })
 
+    it("refuses a scheduled signatureDomain when genesis has no chain id", () => {
+        const chainIdSnapshot = getSharedState.chainId
+        try {
+            getSharedState.chainId = null
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: 100 } },
+                }),
+            ).toThrow(ForkConfigValidationError)
+
+            getSharedState.chainId = null
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            loadForkConfigFromGenesis({
+                properties: { id: 7, name: "DEMOS", currency: "DEM" },
+                balances: [],
+                forks: { signatureDomain: { activationHeight: 100 } },
+            })
+            expect(getSharedState.chainId).toBe(7)
+            expect(getSharedState.forkConfig.signatureDomain.activationHeight).toBe(100)
+
+            // Dormant, it needs no chain id.
+            getSharedState.chainId = null
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: null } },
+                }),
+            ).not.toThrow()
+        } finally {
+            getSharedState.chainId = chainIdSnapshot
+        }
+    })
+
     it("is a no-op for genesis with no `forks` field", () => {
         // Pin to a known sentinel so we can prove no-op: any value
         // other than the library default would be overwritten if the
