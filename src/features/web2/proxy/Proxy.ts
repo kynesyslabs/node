@@ -78,7 +78,6 @@ export class Proxy {
                 targetMethod,
                 targetHeaders,
                 targetAuthorization,
-                targetUrl,
             )
 
             const req = http.request({
@@ -429,7 +428,6 @@ export class Proxy {
         targetMethod: Web2Method,
         targetHeaders: IWeb2Request["raw"]["headers"],
         targetAuthorization: string,
-        targetUrl: string,
     ): IWeb2Request["raw"]["headers"] {
         // Base headers - only essential ones
         const headers: IWeb2Request["raw"]["headers"] = {
@@ -461,8 +459,14 @@ export class Proxy {
             headers["Accept-Encoding"] = "identity"
         }
 
-        // Add Authorization if required
-        if (this.requiresAuthorization(targetUrl, targetMethod)) {
+        // Only forward an Authorization the caller actually supplied.
+        // `requireAuthForAll` governs INBOUND access to this proxy (the
+        // x-dahr-session-id check in isAuthorizedRequest) and says nothing
+        // about what the target site should receive. Keying the outbound
+        // header on it stamps `Bearer undefined` onto every proxied request,
+        // which any site that validates the header rejects — GitHub answers
+        // 401 on api.github.com and 404 on raw.githubusercontent.com.
+        if (targetAuthorization) {
             headers["Authorization"] = `Bearer ${targetAuthorization}`
         }
 
@@ -510,20 +514,5 @@ export class Proxy {
         }
         entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
         return entries.map(e => `${e.key}:${e.value}`).join("\n")
-    }
-
-    private requiresAuthorization(url: string, method: Web2Method): boolean {
-        if (this._authConfig.requireAuthForAll) {
-            for (const exception of this._authConfig.exceptions) {
-                if (
-                    exception.urlPattern.test(url) &&
-                    exception.methods.includes(method)
-                ) {
-                    return false
-                }
-            }
-            return true
-        }
-        return false
     }
 }
