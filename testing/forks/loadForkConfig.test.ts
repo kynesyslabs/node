@@ -61,6 +61,18 @@ describe("loadForkConfigFromGenesis", () => {
             expect(getSharedState.chainId).toBe(7)
             expect(getSharedState.forkConfig.signatureDomain.activationHeight).toBe(100)
 
+            // An id left from an earlier load does not stand in for a
+            // missing one.
+            getSharedState.forkConfig = cloneDefaultForkConfig()
+            expect(getSharedState.chainId).toBe(7)
+            expect(() =>
+                loadForkConfigFromGenesis({
+                    properties: { name: "DEMOS", currency: "DEM" },
+                    balances: [],
+                    forks: { signatureDomain: { activationHeight: 100 } },
+                }),
+            ).toThrow(ForkConfigValidationError)
+
             // Dormant, it needs no chain id.
             getSharedState.chainId = null
             getSharedState.forkConfig = cloneDefaultForkConfig()

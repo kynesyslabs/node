@@ -180,7 +180,11 @@ export function loadForkConfigFromGenesis(genesisData: any): void {
     }
     // Network identity travels with the fork config: both are genesis facts
     // the signature preimage depends on once `signatureDomain` activates.
+    // Always taken from this genesis, never left over from a previous load:
+    // a stale id would pass the signatureDomain check below and bind
+    // signatures to another chain.
     const declaredChainId = genesisData.properties?.id
+    getSharedState.chainId = null
     if (typeof declaredChainId === "number" && Number.isInteger(declaredChainId)) {
         getSharedState.chainId = declaredChainId
     } else if (declaredChainId !== undefined) {
