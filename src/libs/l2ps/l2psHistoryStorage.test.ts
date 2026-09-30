@@ -13,6 +13,7 @@ const save = jest.fn(async (row: any) => ({ ...row, id: 1 }))
 const create = jest.fn((row: any) => row)
 const execute = jest.fn(async () => ({ affected: 3 }))
 const getMany = jest.fn(async () => [])
+const rawQuery = jest.fn(async (_sql: string, _params: unknown[]) => [{ pruned: 3 }])
 
 const whereClauses: Array<{ clause: string; params: any }> = []
 
@@ -75,6 +76,7 @@ jest.mock("@/model/datasource", () => ({
     default: {
         getInstance: async () => ({
             getDataSource: () => ({
+                query: rawQuery,
                 getRepository: () => ({
                     create,
                     save,
@@ -105,6 +107,7 @@ beforeEach(() => {
     save.mockClear()
     create.mockClear()
     execute.mockClear()
+    rawQuery.mockClear()
     whereClauses.length = 0
     storePlaintext.value = false
     // The executor caches its L1 repository handle across calls.
@@ -167,11 +170,13 @@ describe("pruneHistory", () => {
     it("deletes nothing when no retention is configured", async () => {
         await expect(L2PSTransactionExecutor.pruneHistory(0)).resolves.toBe(0)
         expect(execute).not.toHaveBeenCalled()
+        expect(rawQuery).not.toHaveBeenCalled()
     })
 
     it("deletes nothing for a negative retention", async () => {
         await expect(L2PSTransactionExecutor.pruneHistory(-1)).resolves.toBe(0)
         expect(execute).not.toHaveBeenCalled()
+        expect(rawQuery).not.toHaveBeenCalled()
     })
 
     it("cuts off at the configured age, measured from when the row was written", async () => {
@@ -179,12 +184,26 @@ describe("pruneHistory", () => {
 
         await expect(L2PSTransactionExecutor.pruneHistory(30)).resolves.toBe(3)
 
-        const clause = whereClauses.at(-1)
-        expect(clause?.clause).toContain("created_at")
-        const cutoff = Number(clause?.params.cutoff)
+        const [sql, params] = rawQuery.mock.calls.at(-1)!
+        expect(sql).toContain("created_at")
+        // Epoch milliseconds, converted by the database: a JS Date would be
+        // serialised in the process's zone and shifted by the offset.
+        expect(typeof params[0]).toBe("number")
+        const cutoff = Number(params[0])
         const thirtyDays = 30 * 24 * 60 * 60 * 1000
         expect(cutoff).toBeGreaterThanOrEqual(before - thirtyDays - 5_000)
         expect(cutoff).toBeLessThanOrEqual(Date.now() - thirtyDays)
+    })
+
+    it("keeps the hash of every row it deletes, in the same statement", async () => {
+        // The replay check reads the history table; a prune must not make an
+        // executed transfer look new.
+        await L2PSTransactionExecutor.pruneHistory(30)
+
+        const [sql] = rawQuery.mock.calls.at(-1)!
+        expect(sql).toMatch(/DELETE FROM "l2ps_transactions"/)
+        expect(sql).toMatch(/INSERT INTO "l2ps_executed_hashes"/)
+        expect(sql).toMatch(/RETURNING "hash"/)
     })
 })
 
@@ -237,7 +256,8 @@ describe("getSubnetTransactions", () => {
         await L2PSTransactionExecutor.getSubnetTransactions("subnet-1", 500, { sinceMs: 1_700_000_000_000 })
 
         const since = whereClauses.find(c => c.clause.includes(":since"))
-        expect(since?.params.since).toEqual(new Date(1_700_000_000_000))
+        expect(since?.params.since).toBe(1_700_000_000_000)
+        expect(since?.clause).toContain("to_timestamp")
     })
 
     it("asks for everything when the peer has no cursor yet", async () => {

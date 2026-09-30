@@ -20,6 +20,7 @@ import { Repository } from "typeorm"
 import Datasource from "@/model/datasource"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import { L2PSTransaction } from "@/model/entities/L2PSTransactions"
+import { L2PSExecutedHash } from "@/model/entities/L2PSExecutedHashes"
 import type { Transaction, GCREdit, INativePayload } from "@kynesyslabs/demosdk/types"
 import { denomination } from "@kynesyslabs/demosdk"
 import L2PSProofManager from "./L2PSProofManager"
@@ -469,6 +470,9 @@ export default class L2PSTransactionExecutor {
      * (its `hash` column is unique), so it answers the question after the
      * mempool row is gone. It was already consulted implicitly — by failing
      * the insert AFTER the balance edits had been generated.
+     *
+     * History retention deletes from that table, so the hashes of pruned
+     * rows are kept in `l2ps_executed_hashes` and consulted here as well.
      */
     static async hasExecuted(originalHash: string): Promise<boolean> {
         await this.init()
@@ -480,7 +484,13 @@ export default class L2PSTransactionExecutor {
             where: { hash: originalHash },
             select: { id: true },
         })
-        return existing !== null
+        if (existing !== null) return true
+
+        const pruned = await ds.getRepository(L2PSExecutedHash).findOne({
+            where: { hash: originalHash },
+            select: { hash: true },
+        })
+        return pruned !== null
     }
 
     /**
@@ -587,7 +597,14 @@ export default class L2PSTransactionExecutor {
         if (afterId > 0) {
             query.andWhere("tx.id > :afterId", { afterId })
         } else if (from.sinceMs && from.sinceMs > 0) {
-            query.andWhere("tx.created_at > :since", { since: new Date(from.sinceMs) })
+            // `created_at` has no zone and is written by the database's
+            // `now()`. A JS Date parameter is serialised in the node process's
+            // local zone and the offset dropped on the cast, so the instant is
+            // converted in SQL, the same way `now()` is.
+            query.andWhere(
+                "tx.created_at > to_timestamp(CAST(:since AS double precision) / 1000)::timestamp",
+                { since: from.sinceMs },
+            )
         }
 
         // One row past the page says whether another page exists, so the
@@ -616,19 +633,33 @@ export default class L2PSTransactionExecutor {
         await this.init()
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
-        const txRepo = ds.getRepository(L2PSTransaction)
 
         // Age is measured from when this node recorded the transaction, not
         // from the sender's timestamp, so a backdated payload cannot ask to be
         // deleted on arrival.
-        const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000)
-        const result = await txRepo.createQueryBuilder()
-            .delete()
-            .from(L2PSTransaction)
-            .where("created_at < :cutoff", { cutoff })
-            .execute()
+        //
+        // The cutoff goes in as epoch milliseconds and is converted in SQL,
+        // for the zone reason given in `getSubnetTransactions`.
+        //
+        // Each deleted row's hash is kept in the same statement: the replay
+        // check reads this table, and a prune must not make an executed
+        // transfer look new.
+        const cutoffMs = Date.now() - retentionDays * 24 * 60 * 60 * 1000
+        const [{ pruned }] = await ds.query(
+            `WITH deleted AS (
+                DELETE FROM "l2ps_transactions"
+                 WHERE "created_at" < to_timestamp(CAST($1 AS double precision) / 1000)::timestamp
+             RETURNING "hash", "l2ps_uid"
+            ), kept AS (
+                INSERT INTO "l2ps_executed_hashes" ("hash", "l2ps_uid")
+                SELECT "hash", "l2ps_uid" FROM deleted
+                ON CONFLICT ("hash") DO NOTHING
+            )
+            SELECT COUNT(*)::int AS "pruned" FROM deleted`,
+            [cutoffMs],
+        )
 
-        return result.affected || 0
+        return Number(pruned) || 0
     }
 
     /**

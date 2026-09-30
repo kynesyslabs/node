@@ -13,7 +13,10 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const findOne = jest.fn()
-const getRepository = jest.fn(() => ({ findOne }))
+const findPruned = jest.fn(async () => null)
+const getRepository = jest.fn((entity?: { name?: string }) =>
+    entity?.name === "L2PSExecutedHash" ? { findOne: findPruned } : { findOne },
+)
 
 jest.mock("@/utilities/logger", () => ({
     __esModule: true,
@@ -42,6 +45,8 @@ const ORIGINAL_HASH = "ab".repeat(32)
 
 beforeEach(() => {
     findOne.mockReset()
+    findPruned.mockReset()
+    findPruned.mockResolvedValue(null)
     getRepository.mockClear()
     // The executor caches its L1 repository handle across calls.
     ;(L2PSTransactionExecutor as unknown as { l1Repo: unknown }).l1Repo = {}
@@ -72,6 +77,22 @@ describe("L2PSTransactionExecutor.hasExecuted", () => {
         // transfer inside is the one that already ran.
         findOne.mockImplementation(async ({ where }: { where: { hash: string } }) =>
             where.hash === ORIGINAL_HASH ? { id: 7 } : null,
+        )
+
+        await expect(
+            L2PSTransactionExecutor.hasExecuted(ORIGINAL_HASH),
+        ).resolves.toBe(true)
+        await expect(
+            L2PSTransactionExecutor.hasExecuted("cd".repeat(32)),
+        ).resolves.toBe(false)
+    })
+
+    it("still reports a transfer whose history row was pruned", async () => {
+        // Retention deleted the history row and the queue row was swept long
+        // before; the envelope is still out there to be resubmitted.
+        findOne.mockResolvedValue(null)
+        findPruned.mockImplementation(async ({ where }: { where: { hash: string } }) =>
+            where.hash === ORIGINAL_HASH ? { hash: ORIGINAL_HASH } : null,
         )
 
         await expect(
