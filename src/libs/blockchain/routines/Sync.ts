@@ -123,6 +123,48 @@ const latestBlock = () =>
 const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peerHeight(peer) === latestBlock())
 
+const PEER_COOLDOWN_MS = 60_000
+const peerCooldowns = new Map<string, number>()
+
+function cooldownPeer(identity: string, why: string): void {
+    peerCooldowns.set(identity, Date.now() + PEER_COOLDOWN_MS)
+    log.warning(
+        `[sync] cooling down peer ${identity} for ${PEER_COOLDOWN_MS / 1000}s: ${why}`,
+    )
+}
+
+const isCoolingDown = (p: Peer) =>
+    (peerCooldowns.get(p.identity) ?? 0) > Date.now()
+
+// Prefers peers that can serve the whole batch; random within tier,
+// cooled-down peers only as a last resort.
+function selectSyncPeer(
+    startBlock: number,
+    batchSize: number,
+    exclude: ReadonlySet<string> = new Set(),
+): Peer | null {
+    const candidates = peerManager
+        .getAll()
+        .filter(
+            p =>
+                p.identity !== getSharedState.publicKeyHex &&
+                !exclude.has(p.identity) &&
+                peerHeight(p) >= startBlock,
+        )
+    if (candidates.length === 0) return null
+
+    const fullBatch = candidates.filter(
+        p => peerHeight(p) >= startBlock + batchSize - 1,
+    )
+    const preferWarm = (peers: Peer[]) => {
+        const warm = peers.filter(p => !isCoolingDown(p))
+        return warm.length > 0 ? warm : peers
+    }
+    const tier =
+        fullBatch.length > 0 ? preferWarm(fullBatch) : preferWarm(candidates)
+    return tier[Math.floor(Math.random() * tier.length)]
+}
+
 const FAST_SYNC_TIMEOUT_MS = 30_000
 
 /**
@@ -1033,7 +1075,12 @@ async function batchDownloadBlocks(
     endBlock: number,
 ): Promise<boolean> {
     const batchSize = getSharedState.batchSyncBlockSize
-    const totalBlocks = endBlock - startBlock + 1
+    const knownPeerHeight = peerHeight(peer)
+    const cappedEnd =
+        knownPeerHeight >= startBlock
+            ? Math.min(endBlock, knownPeerHeight)
+            : endBlock
+    const totalBlocks = cappedEnd - startBlock + 1
     const limit = Math.min(totalBlocks, batchSize)
 
     log.debug(
@@ -1212,29 +1259,19 @@ function triggerL2PSSync(peer: Peer): void {
  * Find the next available peer with highest block, excluding seen peers
  */
 function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
-    const highestBlockPeers = peerManager
-        .getAll()
-        .filter(p => peerHeight(p) === latestBlock())
-        .filter(p => !seenPeers.has(p.identity))
-
-    log.info(
-        "[fastSync] Highest block peers: " +
-            JSON.stringify(
-                highestBlockPeers.map(p => p.connection.string),
-                null,
-                2,
-            ),
+    const next = selectSyncPeer(
+        getSharedState.lastBlockNumber + 1,
+        getSharedState.batchSyncBlockSize,
+        seenPeers,
     )
-
-    if (highestBlockPeers.length === 0) {
+    if (!next) {
         return null
     }
 
     log.info(
-        "[fastSync] Switched to peer: " +
-            highestBlockPeers[0].connection.string,
+        "[fastSync] Switched to peer: " + next.connection.string,
     )
-    return highestBlockPeers[0]
+    return next
 }
 
 /**
@@ -1244,7 +1281,14 @@ function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
  */
 async function requestBlocks(): Promise<boolean> {
     const seenPeers = new Set<string>()
-    let peer = highestBlockPeer()
+    let peer = selectSyncPeer(
+        getSharedState.lastBlockNumber + 1,
+        getSharedState.batchSyncBlockSize,
+    )
+    if (!peer) {
+        log.error("[requestBlocks] No peer can serve the blocks we need")
+        return false
+    }
 
     while (getSharedState.lastBlockNumber < latestBlock()) {
         // if (latestBlock() === SecretaryManager.lastBlockRef) {
@@ -1294,6 +1338,7 @@ async function requestBlocks(): Promise<boolean> {
             // or abort the round safely when no valid variant exists
             if (error instanceof ForkedPeerError) {
                 seenPeers.add(peer.identity)
+                cooldownPeer(peer.identity, error.message)
 
                 if (error.validSource) {
                     peer = error.validSource
@@ -1315,23 +1360,15 @@ async function requestBlocks(): Promise<boolean> {
                     `[requestBlocks] Peer ${peer.identity} is unreachable. Switching to next peer.`,
                 )
                 seenPeers.add(peer.identity)
+                cooldownPeer(peer.identity, "unreachable during batch sync")
 
-                // Find alternative peers with highest block
-                const highestBlockPeers = peerManager
-                    .getAll()
-                    .filter(p => peerHeight(p) === latestBlock())
-                    .filter(p => !seenPeers.has(p.identity))
-
-                log.info(
-                    `[requestBlocks] Available highest block peers: ${highestBlockPeers.length}`,
-                )
-
-                if (highestBlockPeers.length === 0) {
+                const next = findNextAvailablePeer(seenPeers)
+                if (!next) {
                     log.error("[requestBlocks] No more peers available to sync")
                     return false
                 }
 
-                peer = highestBlockPeers[0]
+                peer = next
                 log.info(
                     `[requestBlocks] Switched to peer: ${peer.connection.string}`,
                 )
