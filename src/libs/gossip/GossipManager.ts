@@ -575,7 +575,10 @@ export class GossipManager {
         const { BroadcastManager: broadcaster } = await import(
             "src/libs/communications/broadcastManager"
         )
-        await broadcaster.handleNewBlock(sender, block as never, "gossip")
+        const { syncLock } = await import("src/libs/blockchain/routines/Sync")
+        await syncLock.runExclusive(() =>
+            broadcaster.handleNewBlock(sender, block as never, "gossip"),
+        )
     }
 
     /**
