@@ -3,7 +3,7 @@
 #
 #   SDK_BUILD=../sdks/build ./testing/atomic-work/e2e.sh
 #
-# SDK_BUILD     built SDK with atomicWork support (required)
+# SDK_BUILD     built SDK with the atomicWork builder, used by the client only (required)
 # BASE_IMAGE    devnet node image to layer this tree onto (default demos-devnet-node:latest)
 # PG_PORT       host port for the devnet Postgres (default 55432)
 # DEVNET_DATA   directory holding identities/ and genesis.devnet.json, as set up
@@ -56,17 +56,18 @@ jq --arg a "$NODE1" '.validators = [.validators[] | select(.address == $a)] | .f
     done
 } >"$WORK/compose.atomic.yml"
 
-step "image: this tree and the SDK build on top of $BASE_IMAGE"
+# The nodes run this tree on the SDK release the base image already has:
+# a node must admit and apply Works without a newer SDK. Only the client
+# side of the scenario uses SDK_BUILD, for its atomicWork builder.
+step "image: this tree on top of $BASE_IMAGE"
 mkdir -p "$WORK/ctx"
 rsync -a --exclude '*.test.ts' "$ROOT/src" "$WORK/ctx/"
 cp "$ROOT/tsconfig.json" "$WORK/ctx/"
-cp -r "$SDK_BUILD" "$WORK/ctx/sdk-build"
 cat >"$WORK/ctx/Dockerfile" <<DOCKERFILE
 FROM $BASE_IMAGE
-RUN rm -rf /app/src /app/node_modules/@kynesyslabs/demosdk/build
+RUN rm -rf /app/src
 COPY src /app/src
 COPY tsconfig.json /app/tsconfig.json
-COPY sdk-build /app/node_modules/@kynesyslabs/demosdk/build
 DOCKERFILE
 docker build -q -t "$IMAGE" "$WORK/ctx" >>"$LOG"
 

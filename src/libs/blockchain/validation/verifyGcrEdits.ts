@@ -36,7 +36,7 @@ KyneSys Labs: https://www.kynesys.xyz/
  */
 
 import type { Transaction, GCREdit } from "@kynesyslabs/demosdk/types"
-import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { generateGcrEdits } from "./generateGcrEdits"
 import { denomination } from "@kynesyslabs/demosdk"
 
 import Chain from "src/libs/blockchain/chain"
@@ -98,7 +98,7 @@ export async function verifyGcrEditsMatch(
     )
 
     // Regenerate the expected edit set from the signed body.
-    const regen = await GCRGeneration.generate(tx)
+    const regen = await generateGcrEdits(tx)
 
     // When gasFeeSeparation is active, confirmTransaction PREPENDS
     // node-computed fee-distribution edits onto tx.content.gcr_edits before the
@@ -290,7 +290,7 @@ export async function verifyNoUnexplainedValueEdits(
 
     let regenerated: string[]
     try {
-        regenerated = projectValueEdits(await GCRGeneration.generate(tx))
+        regenerated = projectValueEdits(await generateGcrEdits(tx))
     } catch (e) {
         log.error(
             `[verifyNoUnexplainedValueEdits] regeneration failed for tx ${tx.hash}: ` +
