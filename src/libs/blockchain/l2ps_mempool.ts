@@ -283,7 +283,7 @@ export default class L2PSMempool {
      * Get all L2PS transactions for a specific UID, optionally filtered by status
      * 
      * @param l2psUid - L2PS network identifier
-     * @param status - Optional status filter ("pending", "processed", "executed", "failed")
+     * @param status - Optional status filter ("pending", "processed", "executed", "failed"), or a list of statuses
      * @returns Promise resolving to array of L2PS mempool transactions
      * 
      * @example
@@ -292,7 +292,7 @@ export default class L2PSMempool {
      * const txs = await L2PSMempool.getByUID("network_1", "executed")
      * ```
      */
-    public static async getByUID(l2psUid: string, status?: string): Promise<L2PSMempoolTx[]> {
+    public static async getByUID(l2psUid: string, status?: string | string[]): Promise<L2PSMempoolTx[]> {
         try {
             await this.ensureInitialized()
 
@@ -304,7 +304,9 @@ export default class L2PSMempool {
                 },
             }
 
-            if (status) {
+            if (Array.isArray(status)) {
+                options.where = { ...options.where, status: In(status) }
+            } else if (status) {
                 options.where = { ...options.where, status }
             }
 
