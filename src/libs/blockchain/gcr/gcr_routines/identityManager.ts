@@ -14,6 +14,7 @@ import {
     NEAR,
     SOLANA,
     TON,
+    TRON,
     XRPL,
     BTC,
 } from "@kynesyslabs/demosdk/xm-localsdk"
@@ -45,6 +46,7 @@ const chains: { [key: string]: typeof DefaultChain } = {
     evm: EVM,
     egld: MULTIVERSX,
     ton: TON,
+    tron: TRON,
     xrpl: XRPL,
     ibc: IBC,
     atom: IBC,
@@ -146,9 +148,10 @@ export default class IdentityManager {
         //     }
         // }
 
-        // SECTION: SOLANA Checks
-        // INFO: Check if the subchain is mainnet
-        if (chain === "solana" && subchain !== "mainnet") {
+        // SECTION: Mainnet-only chain checks
+        // INFO: Some chains only support mainnet for identity management
+        const mainnetOnlyChains = ["solana", "tron"]
+        if (mainnetOnlyChains.includes(chain) && subchain !== "mainnet") {
             return {
                 ...response,
                 message: "Failed: Testnet addresses are not supported",
