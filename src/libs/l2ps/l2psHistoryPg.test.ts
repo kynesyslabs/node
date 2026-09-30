@@ -6,8 +6,10 @@
  * the cast drops the offset, so a Date compared with that column is off by the
  * process's UTC offset. Run this under more than one `TZ` to see it.
  *
- * Opt-in: set L2PS_TEST_PG_URL to a disposable database. The schema is
- * dropped and recreated.
+ * Opt-in: set L2PS_TEST_PG_URL to a disposable database whose name contains
+ * "test" or "tmp", and L2PS_TEST_PG_DISPOSABLE=1. Anything else is refused.
+ * Even then the tables live in a schema of their own, created for the run and
+ * dropped after it, so nothing already in the database is touched.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test"
@@ -17,6 +19,17 @@ import { L2PSExecutedHash } from "@/model/entities/L2PSExecutedHashes"
 
 const PG_URL = process.env.L2PS_TEST_PG_URL
 const HOUR = 60 * 60 * 1000
+const SCHEMA = `l2ps_test_${process.pid}_${Date.now()}`
+
+function assertDisposable(url: string): void {
+    if (process.env.L2PS_TEST_PG_DISPOSABLE !== "1") {
+        throw new Error("L2PS_TEST_PG_URL is set but L2PS_TEST_PG_DISPOSABLE=1 is not; refusing to run")
+    }
+    const database = decodeURIComponent(new URL(url).pathname.replace(/^\//, ""))
+    if (!/test|tmp/i.test(database)) {
+        throw new Error(`Database "${database}" does not look disposable (no "test" or "tmp" in its name); refusing to run`)
+    }
+}
 
 let ds: DataSource
 
@@ -63,18 +76,25 @@ async function insertAged(hash: string, ageMs: number): Promise<void> {
 
 describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unset"})`, () => {
     beforeAll(async () => {
+        assertDisposable(PG_URL as string)
         ds = new DataSource({
             type: "postgres",
             url: PG_URL,
+            schema: SCHEMA,
+            // The executor's raw SQL names tables unqualified.
+            extra: { options: `-c search_path=${SCHEMA}` },
             entities: [L2PSTransaction, L2PSExecutedHash],
-            synchronize: true,
-            dropSchema: true,
         })
         await ds.initialize()
+        await ds.query(`CREATE SCHEMA "${SCHEMA}"`)
+        await ds.synchronize()
     })
 
     afterAll(async () => {
-        await ds?.destroy()
+        if (ds?.isInitialized) {
+            await ds.query(`DROP SCHEMA IF EXISTS "${SCHEMA}" CASCADE`)
+            await ds.destroy()
+        }
     })
 
     beforeEach(async () => {

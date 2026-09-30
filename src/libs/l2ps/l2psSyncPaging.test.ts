@@ -179,6 +179,24 @@ describe("syncL2PSWithPeer", () => {
         expect(addTransaction).toHaveBeenCalledTimes(SYNC_PAGE_LIMIT)
     })
 
+    it("does not move its cursor past rows it dropped from an oversized page", async () => {
+        // The cursor covers every row the peer sent; keeping only the first
+        // SYNC_PAGE_LIMIT and taking that cursor would skip the rest for good.
+        setL2PSSyncContinueDelay(1)
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: Array.from({ length: SYNC_PAGE_LIMIT * 3 }, (_, i) => tx(cursor + i + 1)),
+            nextCursor: cursor + SYNC_PAGE_LIMIT * 3,
+            hasMore: true,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        await new Promise(r => setTimeout(r, 50))
+        expect(cursors).toEqual([0])
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        expect(cursors).toEqual([0, 0])
+    })
+
     it("stops scheduling its own runs against a peer that never runs out", async () => {
         // A peer answering "more" with a rising cursor for ever would keep
         // this node pulling and storing its pages without end.
@@ -197,10 +215,38 @@ describe("syncL2PSWithPeer", () => {
         await new Promise(r => setTimeout(r, 100))
         expect(cursors).toHaveLength(bound)
 
-        // The regular triggers still get their run, but it does not restart
-        // the self-scheduled chain.
+        // A regular trigger starts a fresh bounded chain: the bound is per
+        // trigger, so the peer alone still cannot drive work without end.
         await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < 2 * bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
         await new Promise(r => setTimeout(r, 100))
-        expect(cursors).toHaveLength(bound + MAX_SYNC_PAGES_PER_RUN)
+        expect(cursors).toHaveLength(2 * bound)
+    })
+
+    it("drains a backlog longer than one chain on the next regular trigger", async () => {
+        setL2PSSyncContinueDelay(1)
+        const bound = MAX_SYNC_PAGES_PER_RUN * (MAX_SYNC_CONTINUATIONS + 1)
+        const total = bound + MAX_SYNC_PAGES_PER_RUN * 3
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: [tx(cursor + 1)],
+            nextCursor: cursor + 1,
+            hasMore: cursor + 1 < total,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(bound)
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && addTransaction.mock.calls.length < total; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        expect(addTransaction).toHaveBeenCalledTimes(total)
+        expect(new Set(cursors).size).toBe(cursors.length)
     })
 })
