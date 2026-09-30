@@ -36,6 +36,7 @@ import { OfflineMessage } from "./entities/OfflineMessages"
 import { L2PSHash } from "./entities/L2PSHashes.js"
 import { L2PSMempoolTx } from "./entities/L2PSMempool.js"
 import { L2PSTransaction } from "./entities/L2PSTransactions.js"
+import { L2PSExecutedHash } from "./entities/L2PSExecutedHashes.js"
 import { L2PSProof } from "./entities/L2PSProofs.js"
 // Stackable-genesis governance entities
 import { NetworkUpgrade } from "./entities/NetworkUpgrade.js"
@@ -89,6 +90,7 @@ export const dataSource = new DataSource({
         L2PSHash,
         L2PSMempoolTx,
         L2PSTransaction,
+        L2PSExecutedHash,
         L2PSProof,
         // Stackable-genesis governance entities
         NetworkUpgrade,

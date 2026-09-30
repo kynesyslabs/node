@@ -256,10 +256,13 @@ export class L2PSMessagingService {
                 // Non-fatal — message is still in mempool
             }
 
-            // Record in L2PS transaction history
+            // Record in L2PS transaction history. The envelope is what history
+            // reads and peer sync serve once the queue row is swept; without
+            // it, and with plaintext storage off, the row holds nothing.
             try {
                 await L2PSTransactionExecutor.recordTransaction(
                     l2psUid, tx, "", encryptedTxHash, 0, "pending",
+                    encryptedTx as unknown as Record<string, any>,
                 )
             } catch (recordError) {
                 log.warning(`[L2PS-IM] Record error: ${recordError}`)

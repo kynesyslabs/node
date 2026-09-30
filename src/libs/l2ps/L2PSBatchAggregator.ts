@@ -802,6 +802,20 @@ export class L2PSBatchAggregator {
                 log.info(`[L2PS Batch Aggregator] Cleaned up ${deleted} old confirmed transactions`)
             }
 
+            // Rows synced from peers are stored as "processed" and nothing
+            // moves them on — this node never executes them, and history is
+            // served from `l2ps_transactions`. A local submission leaves this
+            // status within the same request, so anything this old is a synced
+            // copy that would otherwise stay for ever.
+            const staleProcessed = await L2PSMempool.cleanupByStatus(
+                L2PS_STATUS.PROCESSED,
+                this.CLEANUP_AGE_MS,
+            )
+            if (staleProcessed > 0) {
+                this.stats.cleanedUpTransactions += staleProcessed
+                log.info(`[L2PS Batch Aggregator] Cleaned up ${staleProcessed} synced transactions`)
+            }
+
         } catch (error: unknown) {
             const message = getErrorMessage(error)
             log.error(`[L2PS Batch Aggregator] Error during cleanup: ${message}`)

@@ -33,7 +33,9 @@ jest.mock("@/utilities/logger", () => ({
 
 import {
     clearL2PSSyncCursors,
+    MAX_SYNC_CONTINUATIONS,
     MAX_SYNC_PAGES_PER_RUN,
+    SYNC_PAGE_LIMIT,
     setL2PSSyncContinueDelay,
     syncL2PSWithPeer,
 } from "./L2PSConcurrentSync"
@@ -161,5 +163,90 @@ describe("syncL2PSWithPeer", () => {
 
         expect(cursors).toEqual([0, 5])
         expect(addTransaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("asks for a bounded page and stores no more than that of the answer", async () => {
+        const { peer } = peerServing(() => ({
+            transactions: Array.from({ length: SYNC_PAGE_LIMIT * 3 }, (_, i) => tx(i + 1)),
+            nextCursor: SYNC_PAGE_LIMIT * 3,
+            hasMore: false,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+
+        const request = (peer as any).call.mock.calls[0][0]
+        expect(request.params[0].data.limit).toBe(SYNC_PAGE_LIMIT)
+        expect(addTransaction).toHaveBeenCalledTimes(SYNC_PAGE_LIMIT)
+    })
+
+    it("does not move its cursor past rows it dropped from an oversized page", async () => {
+        // The cursor covers every row the peer sent; keeping only the first
+        // SYNC_PAGE_LIMIT and taking that cursor would skip the rest for good.
+        setL2PSSyncContinueDelay(1)
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: Array.from({ length: SYNC_PAGE_LIMIT * 3 }, (_, i) => tx(cursor + i + 1)),
+            nextCursor: cursor + SYNC_PAGE_LIMIT * 3,
+            hasMore: true,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        await new Promise(r => setTimeout(r, 50))
+        expect(cursors).toEqual([0])
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        expect(cursors).toEqual([0, 0])
+    })
+
+    it("stops scheduling its own runs against a peer that never runs out", async () => {
+        // A peer answering "more" with a rising cursor for ever would keep
+        // this node pulling and storing its pages without end.
+        setL2PSSyncContinueDelay(1)
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: [tx(cursor + 1)],
+            nextCursor: cursor + 1,
+            hasMore: true,
+        }))
+        const bound = MAX_SYNC_PAGES_PER_RUN * (MAX_SYNC_CONTINUATIONS + 1)
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(bound)
+
+        // A regular trigger starts a fresh bounded chain: the bound is per
+        // trigger, so the peer alone still cannot drive work without end.
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < 2 * bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(2 * bound)
+    })
+
+    it("drains a backlog longer than one chain on the next regular trigger", async () => {
+        setL2PSSyncContinueDelay(1)
+        const bound = MAX_SYNC_PAGES_PER_RUN * (MAX_SYNC_CONTINUATIONS + 1)
+        const total = bound + MAX_SYNC_PAGES_PER_RUN * 3
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: [tx(cursor + 1)],
+            nextCursor: cursor + 1,
+            hasMore: cursor + 1 < total,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(bound)
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && addTransaction.mock.calls.length < total; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        expect(addTransaction).toHaveBeenCalledTimes(total)
+        expect(new Set(cursors).size).toBe(cursors.length)
     })
 })
