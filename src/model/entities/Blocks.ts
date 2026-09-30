@@ -3,7 +3,7 @@ import { pki } from "node-forge"
 import { Column, Entity, Index, PrimaryGeneratedColumn } from "typeorm"
 
 @Entity("blocks")
-@Index("idx_blocks_number", ["number"])
+@Index("idx_blocks_number", ["number"], { unique: true })
 @Index("idx_blocks_hash", ["hash"])
 export class Blocks {
     @PrimaryGeneratedColumn({ type: "integer", name: "id" })
