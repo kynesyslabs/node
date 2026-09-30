@@ -15,8 +15,12 @@ import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 export async function generateGcrEdits(tx: Transaction): Promise<GCREdit[]> {
     const generated = await GCRGeneration.generate(tx)
     if ((tx.content?.type as string) !== "atomicWork") return generated
+    // Derived even when the SDK already emits the Work edits: this is where
+    // the node's own rules (a replay carries no transfers, among others)
+    // refuse a Work, whichever generation path produced its edits.
+    const work = atomicWorkEdits(tx)
     if (generated.some(e => (e.type as string) === "work-attempt")) return generated
-    return [...atomicWorkEdits(tx), ...generated]
+    return [...work, ...generated]
 }
 
 const WORK_EDIT_TYPES = new Set(["work-attempt", "resource-slot-cas", "storage-program-put"])
