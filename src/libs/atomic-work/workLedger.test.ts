@@ -181,6 +181,15 @@ describe("the shape of a Work transaction", () => {
         expect(assertWorkEditSet([attempt({ attemptClass: "replay" }), slot()], SENDER).success).toBe(false)
     })
 
+    it("lets a replay pay its fee but move no other balance", () => {
+        const fee = { type: "balance", operation: "remove", account: SENDER.toLowerCase(), amount: 1 }
+        const replay = attempt({ attemptClass: "replay" })
+        expect(assertWorkEditSet([replay, fee], SENDER).success).toBe(true)
+        const credit = { type: "balance", operation: "add", account: "0xdef", amount: 20 }
+        expect(assertWorkEditSet([replay, { ...fee, amount: 20 }, credit, fee], SENDER).success).toBe(false)
+        expect(assertWorkEditSet([replay, { ...fee, account: "0xdef" }], SENDER).success).toBe(false)
+    })
+
     it("requires the attempt to lead", () => {
         expect(assertWorkEditSet([slot(), attempt()], SENDER).success).toBe(false)
     })

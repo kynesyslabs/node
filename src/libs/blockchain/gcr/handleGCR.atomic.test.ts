@@ -244,6 +244,63 @@ describe("HandleGCR.applyTransaction with a whole Work", () => {
         expect(entities.accounts.get("0xaa")!.nonce).toBe(2)
     })
 
+    it("refuses a replay that carries transfers, moving nothing", async () => {
+        const entities = caches()
+        const { w, edits, transfers } = payWork()
+        await HandleGCR.applyTransaction(entities, workTx("0x1a", "0xaa", w, edits, transfers), false, false, CLOCK)
+        const payer = entities.accounts.get("0xaa")!.balance
+        const payee = entities.accounts.get("0xbb")!.balance
+
+        const replay = await HandleGCR.applyTransaction(
+            entities,
+            workTx(
+                "0x1b",
+                "0xaa",
+                w,
+                [
+                    w.attempt({ attemptId: "w1-replay", attemptClass: "replay" }),
+                    balance("0xaa", "remove", 20n),
+                    balance("0xbb", "add", 20n),
+                    ...envelope(),
+                ],
+                [{ to: "0xbb", amount: "20" }],
+            ),
+            false,
+            false,
+            CLOCK,
+        )
+        expect(replay.success).toBe(false)
+        expect(entities.accounts.get("0xaa")!.balance).toBe(payer)
+        expect(entities.accounts.get("0xbb")!.balance).toBe(payee)
+        expect(entities.accounts.get("0xaa")!.nonce).toBe(1)
+    })
+
+    it("refuses a replay whose edits credit a balance without declaring a transfer", async () => {
+        const entities = caches()
+        const { w, edits, transfers } = payWork()
+        await HandleGCR.applyTransaction(entities, workTx("0x1c", "0xaa", w, edits, transfers), false, false, CLOCK)
+
+        const replay = await HandleGCR.applyTransaction(
+            entities,
+            workTx(
+                "0x1d",
+                "0xaa",
+                w,
+                [
+                    w.attempt({ attemptId: "w1-replay", attemptClass: "replay" }),
+                    balance("0xaa", "remove", 20n),
+                    balance("0xbb", "add", 20n),
+                    ...envelope(),
+                ],
+                [],
+            ),
+            false,
+            true,
+        )
+        expect(replay.success).toBe(false)
+        expect(replay.message).toContain("no balance beyond its fee")
+    })
+
     it("undoes a committed Work on block rollback", async () => {
         const entities = caches()
         const { w, edits, transfers } = payWork()

@@ -100,4 +100,12 @@ describe("a validity window", () => {
         expect(() => assertWithinDeadline(clock, Number.NaN)).toThrow(/malformed deadline/)
         expect(() => assertNotBefore(clock, 1.5)).toThrow(/malformed validity start/)
     })
+
+    it("refuses a window bound that is present but not a whole number", () => {
+        const window = (bound: unknown) => bound as number
+        expect(() => assertWithinWindow(clock, { deadlineMs: window(String(T - 1)) })).toThrow(/malformed deadline/)
+        expect(() => assertWithinWindow(clock, { notBeforeMs: window({}) })).toThrow(/malformed validity start/)
+        expect(() => assertWithinWindow(clock, { deadlineMs: window(true) })).toThrow(/malformed deadline/)
+        expect(() => assertWithinWindow(clock, { deadlineMs: T + 0.5 })).toThrow(/malformed deadline/)
+    })
 })

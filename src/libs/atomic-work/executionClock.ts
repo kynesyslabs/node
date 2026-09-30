@@ -140,10 +140,13 @@ export function assertWithinWindow(
     what = "this operation",
 ): void {
     const resolved = requireClock(clock, what)
-    if (typeof window.notBeforeMs === "number") {
+    // Only an absent bound means "none". A bound of the wrong type is still a
+    // signed bound, and skipping it would drop a deadline the signer set;
+    // the single-bound checks refuse it as malformed.
+    if (window.notBeforeMs !== null && window.notBeforeMs !== undefined) {
         assertNotBefore(resolved, window.notBeforeMs, what)
     }
-    if (typeof window.deadlineMs === "number") {
+    if (window.deadlineMs !== null && window.deadlineMs !== undefined) {
         assertWithinDeadline(resolved, window.deadlineMs, what)
     }
 }

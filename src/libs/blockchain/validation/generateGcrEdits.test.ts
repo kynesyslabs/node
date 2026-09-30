@@ -59,8 +59,39 @@ describe("generateGcrEdits for an atomicWork transaction", () => {
         )
     })
 
+    it("refuses a replay that carries transfers", () => {
+        const replay = { ...attempt, attemptClass: "replay" }
+        expect(() => atomicWorkEdits(workTx({ edits: [replay], transfers: [{ to: PAYEE, amount: "20" }] }))).toThrow(
+            "replay carries no transfers",
+        )
+        expect(atomicWorkEdits(workTx({ edits: [replay], transfers: [] }))).toHaveLength(1)
+    })
+
     it("leaves every other transaction type to the SDK", async () => {
         const edits = await generateGcrEdits(workTx({ edits: [attempt] }, "native"))
         expect(edits.some(e => (e.type as string) === "work-attempt")).toBe(false)
     })
+
+    it("refuses a replay with transfers even when the SDK emits the Work edits itself", async () => {
+        const { GCRGeneration } = await import("@kynesyslabs/demosdk/websdk")
+        const original = GCRGeneration.generate
+        ;(GCRGeneration as any).generate = async (tx: any) => [
+            ...atomicWorkEditsUnchecked(tx),
+            ...(await original.call(GCRGeneration, tx)),
+        ]
+        try {
+            const replay = { ...attempt, attemptClass: "replay" }
+            await expect(
+                generateGcrEdits(workTx({ edits: [replay], transfers: [{ to: PAYEE, amount: "20" }] })),
+            ).rejects.toThrow("replay carries no transfers")
+        } finally {
+            ;(GCRGeneration as any).generate = original
+        }
+    })
 })
+
+/** What an SDK that emits Work edits would return, with no node-side checks. */
+function atomicWorkEditsUnchecked(tx: any) {
+    const [, payload] = tx.content.data
+    return payload.edits.map((e: any) => ({ ...e, isRollback: false, txhash: tx.hash }))
+}

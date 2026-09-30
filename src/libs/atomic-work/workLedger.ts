@@ -193,8 +193,8 @@ export function applySlotCas(
  * The shape a transaction's Work edits must have, checked before any runs.
  *
  * One attempt per transaction, so one transaction is one Work. A replay
- * carries nothing else from the Work family: its effects already happened
- * with the winner. A receipt is never accepted from the sender: the node
+ * carries nothing else from the Work family and no balance change beyond its
+ * fee: its effects already happened with the winner. A receipt is never accepted from the sender: the node
  * builds it. Every slot names this Work.
  */
 export function assertWorkEditSet(
@@ -223,6 +223,16 @@ export function assertWorkEditSet(
     if (attempt.attemptClass === "replay") {
         if (slotEdits.length || puts.length) {
             return refuse("a replay produces no effects of its own")
+        }
+        // Only the fee may touch a balance, and a fee only ever leaves the
+        // sender. A credit anywhere is a transfer, which a fee-free replay
+        // would otherwise let the sender repeat without limit.
+        for (const e of edits) {
+            if (e.type !== "balance") continue
+            const balance = e as unknown as { operation?: string; account?: string }
+            if (balance.operation !== "remove" || balance.account?.toLowerCase() !== sender.toLowerCase()) {
+                return refuse("a replay moves no balance beyond its fee")
+            }
         }
         return ok("replay shape")
     }

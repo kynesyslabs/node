@@ -15,8 +15,12 @@ import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 export async function generateGcrEdits(tx: Transaction): Promise<GCREdit[]> {
     const generated = await GCRGeneration.generate(tx)
     if ((tx.content?.type as string) !== "atomicWork") return generated
+    // Derived even when the SDK already emits the Work edits: this is where
+    // the node's own rules (a replay carries no transfers, among others)
+    // refuse a Work, whichever generation path produced its edits.
+    const work = atomicWorkEdits(tx)
     if (generated.some(e => (e.type as string) === "work-attempt")) return generated
-    return [...atomicWorkEdits(tx), ...generated]
+    return [...work, ...generated]
 }
 
 const WORK_EDIT_TYPES = new Set(["work-attempt", "resource-slot-cas", "storage-program-put"])
@@ -45,6 +49,11 @@ export function atomicWorkEdits(tx: Transaction): GCREdit[] {
     // transfers are placed right after it.
     if ((edits[0] as { type?: unknown })?.type !== "work-attempt") {
         throw new Error("atomicWork.edits must start with its work-attempt")
+    }
+    // A replay only reads back a Work that already ran and pays no fee, so
+    // transfers riding on it would be free and repeatable.
+    if ((edits[0] as { attemptClass?: unknown }).attemptClass === "replay" && transfers.length > 0) {
+        throw new Error("atomicWork replay carries no transfers")
     }
 
     const isRollback = false
