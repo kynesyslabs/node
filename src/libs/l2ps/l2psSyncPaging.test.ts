@@ -33,7 +33,9 @@ jest.mock("@/utilities/logger", () => ({
 
 import {
     clearL2PSSyncCursors,
+    MAX_SYNC_CONTINUATIONS,
     MAX_SYNC_PAGES_PER_RUN,
+    SYNC_PAGE_LIMIT,
     setL2PSSyncContinueDelay,
     syncL2PSWithPeer,
 } from "./L2PSConcurrentSync"
@@ -161,5 +163,44 @@ describe("syncL2PSWithPeer", () => {
 
         expect(cursors).toEqual([0, 5])
         expect(addTransaction).toHaveBeenCalledTimes(1)
+    })
+
+    it("asks for a bounded page and stores no more than that of the answer", async () => {
+        const { peer } = peerServing(() => ({
+            transactions: Array.from({ length: SYNC_PAGE_LIMIT * 3 }, (_, i) => tx(i + 1)),
+            nextCursor: SYNC_PAGE_LIMIT * 3,
+            hasMore: false,
+        }))
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+
+        const request = (peer as any).call.mock.calls[0][0]
+        expect(request.params[0].data.limit).toBe(SYNC_PAGE_LIMIT)
+        expect(addTransaction).toHaveBeenCalledTimes(SYNC_PAGE_LIMIT)
+    })
+
+    it("stops scheduling its own runs against a peer that never runs out", async () => {
+        // A peer answering "more" with a rising cursor for ever would keep
+        // this node pulling and storing its pages without end.
+        setL2PSSyncContinueDelay(1)
+        const { peer, cursors } = peerServing(cursor => ({
+            transactions: [tx(cursor + 1)],
+            nextCursor: cursor + 1,
+            hasMore: true,
+        }))
+        const bound = MAX_SYNC_PAGES_PER_RUN * (MAX_SYNC_CONTINUATIONS + 1)
+
+        await syncL2PSWithPeer(peer, "subnet-1")
+        for (let i = 0; i < 400 && cursors.length < bound; i++) {
+            await new Promise(r => setTimeout(r, 5))
+        }
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(bound)
+
+        // The regular triggers still get their run, but it does not restart
+        // the self-scheduled chain.
+        await syncL2PSWithPeer(peer, "subnet-1")
+        await new Promise(r => setTimeout(r, 100))
+        expect(cursors).toHaveLength(bound + MAX_SYNC_PAGES_PER_RUN)
     })
 })

@@ -120,6 +120,7 @@ const syncCursors = new Map<string, number>()
 
 export function clearL2PSSyncCursors(): void {
     syncCursors.clear()
+    continuations.clear()
 }
 
 /**
@@ -139,8 +140,25 @@ export function setL2PSSyncContinueDelay(ms: number): void {
     continueDelayMs = ms
 }
 
+/**
+ * Rows asked of a peer per page. Sent so the page size is this node's choice,
+ * and enforced on the answer, since the peer is free to ignore it.
+ */
+export const SYNC_PAGE_LIMIT = 100
+
+/**
+ * Consecutive self-scheduled runs allowed for one peer and subnet before the
+ * node stops scheduling its own and waits for the regular triggers (block sync,
+ * discovery). A peer that answers "more" for ever with a rising cursor would
+ * otherwise keep this node pulling and storing its pages without end.
+ */
+export const MAX_SYNC_CONTINUATIONS = 5
+
 /** Runs in progress, by peer and subnet, so a scheduled one never overlaps another. */
 const running = new Set<string>()
+
+/** Self-scheduled runs since the peer last reported it had nothing more. */
+const continuations = new Map<string, number>()
 
 export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<void> {
     const cursorKey = `${peer.identity}\u0000${l2psUid}`
@@ -159,6 +177,7 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
                     data: {
                         l2psUid: l2psUid,
                         cursor,
+                        limit: SYNC_PAGE_LIMIT,
                     },
                     muid: `l2ps_sync_${Date.now()}`,
                 }],
@@ -171,7 +190,9 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
                 nextCursor?: number
                 hasMore?: boolean
             }
-            const txs = body.transactions
+            const txs = Array.isArray(body.transactions)
+                ? body.transactions.slice(0, SYNC_PAGE_LIMIT)
+                : []
 
             // Advance even on an empty page: the peer may have skipped rows it
             // can no longer serve, and refusing to move would ask for them for
@@ -200,13 +221,23 @@ export async function syncL2PSWithPeer(peer: Peer, l2psUid: string): Promise<voi
         running.delete(cursorKey)
     }
 
-    // Stopped at the cap with more to come: carry on shortly, from the
-    // stored cursor, rather than leave the rest missing until a restart.
-    if (more) {
-        setTimeout(() => {
-            syncL2PSWithPeer(peer, l2psUid).catch(() => undefined)
-        }, continueDelayMs)
+    if (!more) {
+        continuations.delete(cursorKey)
+        return
     }
+
+    // Stopped at the cap with more to come: carry on shortly, from the
+    // stored cursor, rather than leave the rest missing until the next
+    // trigger — but only a bounded number of times in a row.
+    const scheduled = continuations.get(cursorKey) ?? 0
+    if (scheduled >= MAX_SYNC_CONTINUATIONS) {
+        log.info(`[L2PS-SYNC] ${peer.identity} still reports more for ${l2psUid} after ${scheduled} continuations; resuming on the next sync trigger`)
+        return
+    }
+    continuations.set(cursorKey, scheduled + 1)
+    setTimeout(() => {
+        syncL2PSWithPeer(peer, l2psUid).catch(() => undefined)
+    }, continueDelayMs)
 }
 
 /**
