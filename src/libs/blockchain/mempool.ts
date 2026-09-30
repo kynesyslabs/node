@@ -23,6 +23,7 @@ import {
     verifyGcrEditsMatch,
     verifyNoUnexplainedValueEdits,
 } from "./validation/verifyGcrEdits"
+import { carriesWorkEdits } from "@/libs/atomic-work/atomicApply"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
 import { deepWindowCutoff } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
@@ -540,7 +541,12 @@ export default class Mempool {
         {
             const editVerifiedTransactions: Transaction[] = []
             for (const tx of validTransactions) {
-                if (tx.content?.type !== "native") {
+                // Work edits are state the sender signs for, so a tx that
+                // carries them is bound like a native one whatever its type.
+                if (
+                    tx.content?.type !== "native" &&
+                    !carriesWorkEdits(tx)
+                ) {
                     // Non-native transactions are not edit-bound as a whole
                     // (regeneration is not byte-deterministic across nodes for
                     // every type), but they must not move funds, stake or
