@@ -160,4 +160,10 @@ describe("assertWorkEnvelope", () => {
     it("lets a replay through on identity alone", () => {
         expect(check({ env: { intent }, edits: [{ ...attempt, attemptClass: "replay" }], transfers: 0 }).success).toBe(true)
     })
+
+    it("refuses a replay that carries transfers", () => {
+        const replay = check({ env: { intent }, edits: [{ ...attempt, attemptClass: "replay" }], transfers: 1 })
+        expect(replay.success).toBe(false)
+        expect(replay.message).toContain("carries no transfers")
+    })
 })

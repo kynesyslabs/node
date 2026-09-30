@@ -59,6 +59,14 @@ describe("generateGcrEdits for an atomicWork transaction", () => {
         )
     })
 
+    it("refuses a replay that carries transfers", () => {
+        const replay = { ...attempt, attemptClass: "replay" }
+        expect(() => atomicWorkEdits(workTx({ edits: [replay], transfers: [{ to: PAYEE, amount: "20" }] }))).toThrow(
+            "replay carries no transfers",
+        )
+        expect(atomicWorkEdits(workTx({ edits: [replay], transfers: [] }))).toHaveLength(1)
+    })
+
     it("leaves every other transaction type to the SDK", async () => {
         const edits = await generateGcrEdits(workTx({ edits: [attempt] }, "native"))
         expect(edits.some(e => (e.type as string) === "work-attempt")).toBe(false)

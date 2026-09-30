@@ -157,7 +157,12 @@ export function assertWorkEnvelope(
     }
     if (attempt.workId !== workId) return refuse("the attempt's workId is not derived from this intent")
 
-    if (attempt.attemptClass === "replay") return { success: true, message: "replay envelope" }
+    if (attempt.attemptClass === "replay") {
+        // A replay is charged no fee, so any transfer it carried would move
+        // funds for free, as often as the sender cares to replay.
+        if (transferCount !== 0) return refuse("a replay carries no transfers")
+        return { success: true, message: "replay envelope" }
+    }
 
     const operations = (intent.operations ?? []) as { operationId: string; kind: string }[]
     try {

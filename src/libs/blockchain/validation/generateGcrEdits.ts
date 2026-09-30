@@ -46,6 +46,11 @@ export function atomicWorkEdits(tx: Transaction): GCREdit[] {
     if ((edits[0] as { type?: unknown })?.type !== "work-attempt") {
         throw new Error("atomicWork.edits must start with its work-attempt")
     }
+    // A replay only reads back a Work that already ran and pays no fee, so
+    // transfers riding on it would be free and repeatable.
+    if ((edits[0] as { attemptClass?: unknown }).attemptClass === "replay" && transfers.length > 0) {
+        throw new Error("atomicWork replay carries no transfers")
+    }
 
     const isRollback = false
     const txhash = tx.hash
