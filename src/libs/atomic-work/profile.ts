@@ -1,3 +1,5 @@
+import { byCodeUnit } from "@/libs/atomic-work/effectBoundary"
+
 /**
  * What a profile tells the atomic engine.
  *
@@ -74,7 +76,7 @@ export function atomicWorkProfile(name: string | undefined): AtomicWorkProfile |
 
 /** Every registered profile name, for capability advertisement. */
 export function registeredAtomicWorkProfiles(): string[] {
-    return [...profiles.keys()].sort()
+    return [...profiles.keys()].sort(byCodeUnit)
 }
 
 /** Test seam: drop registrations so a suite cannot leak into the next. */

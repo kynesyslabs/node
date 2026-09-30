@@ -50,8 +50,18 @@ export function effectClassOf(kind: string): EffectClass | undefined {
     return kinds.get(kind)
 }
 
+/**
+ * Plain code-unit order. These lists go into the published capability and
+ * its digest, so every node has to order them identically; a locale-aware
+ * compare would not.
+ */
+export function byCodeUnit(a: string, b: string): number {
+    if (a < b) return -1
+    return a > b ? 1 : 0
+}
+
 export function declaredOperationKinds(): string[] {
-    return [...kinds.keys()].sort()
+    return [...kinds.keys()].sort(byCodeUnit)
 }
 
 /** Test seam: drop declarations so a suite cannot leak into the next. */
