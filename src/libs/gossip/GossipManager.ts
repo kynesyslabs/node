@@ -570,7 +570,27 @@ export class GossipManager {
                 )
                 this.dial(record.addrs)
             }
+        } else if (record.url) {
+            this.helloUnknownPeer(record.pubkey, record.url)
         }
+    }
+
+    private helloAttempts = new Map<string, number>()
+    private helloUnknownPeer(pubkey: string, url: string): void {
+        const now = Date.now()
+        if ((this.helloAttempts.get(pubkey) ?? 0) > now) return
+        this.helloAttempts.set(pubkey, now + 60_000)
+
+        log.info(
+            `[GOSSIP] heights record from unknown staked peer ${pubkey} at ${url}: verifying with a hello`,
+        )
+        void PeerManager.sayHelloToPeer(new Peer(url, pubkey)).catch(e =>
+            log.debug(
+                `[GOSSIP] hello to unknown peer ${pubkey} failed: ${
+                    e instanceof Error ? e.message : String(e)
+                }`,
+            ),
+        )
     }
 
     private async applyBlock(block: Block): Promise<void> {
