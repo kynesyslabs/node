@@ -363,6 +363,9 @@ describe("loadForkConfigFromGenesis", () => {
         expect(fd!.treasuryAddress).toBe(
             cloneDefaultForkConfig().gasFeeSeparation.treasuryAddress,
         )
+        // The fork is live from genesis, so a placeholder default would send
+        // treasury fees to the burn address.
+        expect(fd!.treasuryAddress).not.toBe(PLACEHOLDER_TREASURY_ADDRESS)
     })
 
     it("throws when gasFeeSeparation.treasuryAddress is missing", () => {

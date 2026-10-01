@@ -78,8 +78,6 @@ export const DEFAULT_CONFIG: AppConfig = {
 
     tlsnotary: {
         enabled: false,
-        exposedUrl: "",
-        proxyUrl: "",
         host: "localhost",
         port: 7047,
         signingKey: "",
