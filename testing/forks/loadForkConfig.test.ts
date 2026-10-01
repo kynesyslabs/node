@@ -358,10 +358,14 @@ describe("loadForkConfigFromGenesis", () => {
         const fd = getSharedState.feeDistribution
         expect(fd).not.toBeNull()
         expect(fd!.burnAddress).toBe(GAS_FEE_SEPARATION_BURN_ADDRESS)
-        // Placeholder treasury comes from the default fork config; the
-        // loader does not reject the placeholder until activationHeight
-        // is non-null.
-        expect(fd!.treasuryAddress).toBe(PLACEHOLDER_TREASURY_ADDRESS)
+        // With no forks block the treasury hydrates from the default fork
+        // config.
+        expect(fd!.treasuryAddress).toBe(
+            cloneDefaultForkConfig().gasFeeSeparation.treasuryAddress,
+        )
+        // The fork is live from genesis, so a placeholder default would send
+        // treasury fees to the burn address.
+        expect(fd!.treasuryAddress).not.toBe(PLACEHOLDER_TREASURY_ADDRESS)
     })
 
     it("throws when gasFeeSeparation.treasuryAddress is missing", () => {
