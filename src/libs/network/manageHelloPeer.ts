@@ -15,6 +15,8 @@ import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { helloResponseMessage } from "../peer/helloAuth"
 import GossipManager from "../gossip/GossipManager"
 
+const HELLO_PEERLIST_SAMPLE_SIZE = 32
+
 export interface HelloPeerRequest {
     url: string
     publicKey: string
@@ -185,6 +187,8 @@ export async function manageHelloPeer(
                     peer.identity !== getSharedState.publicKeyHex &&
                     peer.identity !== content.publicKey,
             )
+            .sort(() => Math.random() - 0.5)
+            .slice(0, HELLO_PEERLIST_SAMPLE_SIZE)
             .map(peer => ({
                 url: peer.connection.string,
                 publicKey: peer.identity,

@@ -7,7 +7,7 @@ import type { Block } from "@kynesyslabs/demosdk/types"
 import log from "src/utilities/logger"
 import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
-import { PeerManager } from "src/libs/peer"
+import { Peer, PeerManager } from "src/libs/peer"
 
 import {
     buildHeightsRecord,
@@ -547,6 +547,19 @@ export class GossipManager {
                 headHash: record.headHash,
             }
             peerman.updatePeerLastSeen(record.pubkey)
+
+            if (record.url && record.url !== peer.connection.string) {
+                const updated = new Peer(record.url, record.pubkey)
+                updated.sync = peer.sync
+                updated.gossip = peer.gossip
+                updated.status = peer.status
+                updated.verification = peer.verification
+                const [ok, message] = peerman.addPeer(updated, true)
+                log.info(
+                    `[GOSSIP] ${record.pubkey} announced new URL ${record.url}: ${ok ? "updated" : `rejected (${message})`}`,
+                )
+            }
+
             if (
                 !known ||
                 known.peerId !== record.peerId ||

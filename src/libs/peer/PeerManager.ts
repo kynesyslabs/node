@@ -26,23 +26,6 @@ import {
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { Config } from "src/config"
 
-const HELLO_TIMEOUT_MS = 5000
-
-function withTimeout<T>(
-    promise: Promise<T>,
-    ms: number,
-    label: string,
-): Promise<T> {
-    let timer: ReturnType<typeof setTimeout>
-    const timeout = new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-            () => reject(new Error(`${label} timed out after ${ms}ms`)),
-            ms,
-        )
-    })
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
-}
-
 export type HelloVerdict =
     | "verified"
     | "unsigned"
@@ -55,8 +38,6 @@ export default class PeerManager {
     private peerList: Record<string, Peer> // Storing all the connections, will be filtered once the request is done
     private offlinePeers: Record<string, Peer> // Storing all the offline peers to be retried later
     private seedPeers: Peer[] = [] // Bootstrap hints from the peer list file; join the table only via a verified hello
-    private lastHelloFanoutAt = 0
-    private helloFanoutInFlight: Promise<void> | null = null
 
     private constructor() {
         this.peerList = {}
@@ -265,46 +246,7 @@ export default class PeerManager {
     }
 
     async getOnlinePeers(): Promise<Peer[]> {
-        const refreshIntervalMs = Config.getInstance().core.helloRefreshIntervalMs
-
-        if (this.helloFanoutInFlight) {
-            await this.helloFanoutInFlight
-        } else if (Date.now() - this.lastHelloFanoutAt >= refreshIntervalMs) {
-            this.lastHelloFanoutAt = Date.now()
-            this.helloFanoutInFlight = this.runHelloFanout(refreshIntervalMs)
-            try {
-                await this.helloFanoutInFlight
-            } finally {
-                this.helloFanoutInFlight = null
-            }
-        }
-
-        // Returning the list of online peers from the peerlist
-        return this.getPeers() // REVIEW is this working?
-    }
-
-    private async runHelloFanout(recentContactWindowMs: number): Promise<void> {
-        const now = Date.now()
-        await Promise.allSettled(
-            Object.values(this.peerList).map(async peerInstance => {
-                if (peerInstance.identity == getSharedState.publicKeyHex) {
-                    return
-                }
-
-                if (
-                    peerInstance.status.online &&
-                    now - peerInstance.status.timestamp < recentContactWindowMs
-                ) {
-                    return
-                }
-
-                await withTimeout(
-                    PeerManager.sayHelloToPeer(peerInstance),
-                    HELLO_TIMEOUT_MS,
-                    `sayHelloToPeer(${peerInstance.identity})`,
-                )
-            }),
-        )
+        return this.getPeers()
     }
 
     addPeer(peer: Peer, urlSignedByOwner = false): [boolean, string] {

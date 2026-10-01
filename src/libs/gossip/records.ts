@@ -11,6 +11,7 @@ export interface HeightsRecord {
     pubkey: string
     peerId: string
     addrs: string[]
+    url: string
     height: number
     headHash: string
     seq: number
@@ -40,6 +41,7 @@ export async function buildHeightsRecord(
         pubkey: getSharedState.publicKeyHex,
         peerId,
         addrs: addrs.slice(0, 4),
+        url: getSharedState.exposedUrl,
         height: getSharedState.lastBlockNumber,
         headHash: getSharedState.lastBlockHash,
         seq: Date.now(),
@@ -76,6 +78,8 @@ export function isHeightsRecordShape(x: unknown): x is HeightsRecord {
         Array.isArray(r.addrs) &&
         r.addrs.length <= 4 &&
         r.addrs.every(a => typeof a === "string" && a.length < 256) &&
+        typeof r.url === "string" &&
+        r.url.length < 256 &&
         typeof r.height === "number" &&
         Number.isInteger(r.height) &&
         r.height >= 0 &&
