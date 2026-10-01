@@ -43,17 +43,18 @@ const CLIENT_GONE_EXIT_MS = 5000
 //
 // TEST values: a degree-1 mesh forces multi-hop relay on a handful of
 // nodes, which a full mesh would never exercise.
+//
 // Production defaults: MESH_DEGREE = 8, MESH_DEGREE_LOW = 6,
 // MESH_DEGREE_HIGH = 12, MESH_OUTBOUND_MIN = 2, FLOOD_PUBLISH = true.
-const MESH_DEGREE = 1
-const MESH_DEGREE_LOW = 1
-const MESH_DEGREE_HIGH = 2
-const MESH_OUTBOUND_MIN = 0
+const MESH_DEGREE = 8
+const MESH_DEGREE_LOW = 6
+const MESH_DEGREE_HIGH = 12
+const MESH_OUTBOUND_MIN = 2
 
 // With flood publish on, a node's OWN messages go to all topic peers,
 // bypassing the mesh — it must be off for relay tests to mean anything.
 // Keep it on in production: it is the attack-resistant first hop.
-const FLOOD_PUBLISH = false
+const FLOOD_PUBLISH = true
 
 // PRUNE messages carry alternate peers, so the mesh doubles as discovery.
 const PEER_EXCHANGE = true
