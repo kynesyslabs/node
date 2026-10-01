@@ -7,12 +7,14 @@
 
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
-const relayTransaction = jest.fn(async (_validator: any, _payload: any[], _blockRef: string) => ({
+const accept = async (_validator: any, _payload: any[], _blockRef: string) => ({
     result: 200,
     response: "ok",
     require_reply: false,
     extra: null,
-}))
+})
+
+const relayTransaction = jest.fn(accept)
 
 const validators = [
     { identity: "0xself", status: { online: true }, sync: { status: true } },
@@ -67,7 +69,8 @@ function relay(): Promise<void> {
 
 describe("L2PS hash relay over HTTP", () => {
     beforeEach(() => {
-        relayTransaction.mockClear()
+        relayTransaction.mockReset()
+        relayTransaction.mockImplementation(accept)
     })
 
     it("sends the update to one validator, anchored to the current tip", async () => {
