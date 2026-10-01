@@ -13,7 +13,9 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
 
 const findOne = jest.fn()
-const findPruned = jest.fn(async () => null)
+const findPruned = jest.fn(
+    async (_query: { where: { hash: string } }): Promise<{ hash: string } | null> => null,
+)
 const getRepository = jest.fn((entity?: { name?: string }) =>
     entity?.name === "L2PSExecutedHash" ? { findOne: findPruned } : { findOne },
 )

@@ -81,7 +81,7 @@ export const PHASE_1_GOVERNABLE_KEYS: ReadonlySet<NetworkParameterKey> =
 export const HARDCODED_FALLBACK_NETWORK_PARAMETERS: NetworkParameters = {
     blockTimeMs: 1000,
     shardSize: 4,
-    minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE,
+    minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE.toString(),
     networkFee: 1,
     rpcFee: 1,
     additionalFee: 0,

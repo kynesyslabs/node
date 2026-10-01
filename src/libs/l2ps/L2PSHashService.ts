@@ -400,9 +400,10 @@ export class L2PSHashService {
                     }
 
                     // HTTP fallback
-                    const result = await DTRManager.relayTransactions(
+                    const result = await DTRManager.relayTransaction(
                         validator,
                         [validityData],
+                        getSharedState.lastBlockHash,
                     )
 
                     if (result.result === 200) {

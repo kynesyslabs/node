@@ -187,7 +187,8 @@ describe("the shape of a Work transaction", () => {
         expect(assertWorkEditSet([replay, fee], SENDER).success).toBe(true)
         const credit = { type: "balance", operation: "add", account: "0xdef", amount: 20 }
         expect(assertWorkEditSet([replay, { ...fee, amount: 20 }, credit, fee], SENDER).success).toBe(false)
-        expect(assertWorkEditSet([replay, { ...fee, account: "0xdef" }], SENDER).success).toBe(false)
+        const foreignFee = { ...fee, account: "0xdef" }
+        expect(assertWorkEditSet([replay, foreignFee], SENDER).success).toBe(false)
     })
 
     it("requires the attempt to lead", () => {
