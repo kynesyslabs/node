@@ -29,11 +29,13 @@ export const MERGE_MEMPOOL_MAX_TXS_PER_PEER = 5_000
 
 /**
  * Validator identities guaranteed a committee slot whenever they are
- * eligible and online (see getShard).
+ * eligible and online, placed at the front of the shard in this order so
+ * the first online pin acts as secretary (see getShard).
  */
 export const PINNED_SHARD_IDENTITIES: readonly string[] = [
     "0x24c664d9ef529f798e979357c6a7a01088226eefe05cfdb77fb42841f771e156",
     "0xc8bc5866fecf583bc1232f04fa54fd2c5a6f7c15b91c517ac60f468cdc0b8c82",
+    "0xdad5ae081825bcf93353bb76157ae8368c33fee6fc0f692b85155bb37e4ae0ab",
 ]
 
 // --- Batch sync ---

@@ -109,7 +109,8 @@ export default class SecretaryManager {
             )
         }
 
-        // The secretary is the first member of the deterministic draw
+        // The secretary is the first member: the first online pinned
+        // identity, or the head of the deterministic draw when no pin is online
         this.shard.secretaryKey = this.shard.members[0].identity
 
         log.only("\n\n\n")

@@ -72,7 +72,7 @@ const [PIN_A, PIN_B] = PINNED_SHARD_IDENTITIES
 const peer = (identity: string) => ({ identity }) as any
 
 describe("pinShardIdentities", () => {
-    it("swaps both pins in without touching slot 0", () => {
+    it("puts both pins first, in pin order, displacing the tail of the draw", () => {
         const shard = [
             peer("0xaa"),
             peer("0xbb"),
@@ -83,60 +83,74 @@ describe("pinShardIdentities", () => {
         const candidates = [...shard, peer(PIN_A), peer(PIN_B), peer("0xff")]
         const outcome = pinShardIdentities(shard, candidates)
         const ids = shard.map(p => p.identity)
-        expect(ids).toContain(PIN_A)
-        expect(ids).toContain(PIN_B)
-        expect(ids[0]).toBe("0xaa")
-        expect(ids).toHaveLength(5)
-        expect(ids[4]).toBe(PIN_A)
-        expect(ids[3]).toBe(PIN_B)
+        expect(ids).toEqual([PIN_A, PIN_B, "0xaa", "0xbb", "0xcc"])
         expect(outcome.split(",").every(o => o.endsWith("=swapped"))).toBe(
             true,
         )
     })
 
-    it("skips a pin that is not among the candidates", () => {
+    it("makes the first online pin the secretary (slot 0)", () => {
         const shard = [peer("0xaa"), peer("0xbb"), peer("0xcc")]
-        const candidates = [...shard, peer(PIN_B)]
-        const outcome = pinShardIdentities(shard, candidates)
-        const ids = shard.map(p => p.identity)
-        expect(ids).not.toContain(PIN_A)
-        expect(ids).toContain(PIN_B)
-        expect(ids[0]).toBe("0xaa")
-        expect(outcome).toContain("=absent")
+        pinShardIdentities(shard, [...shard, peer(PIN_A), peer(PIN_B)])
+        expect(shard[0].identity).toBe(PIN_A)
+        expect(shard[1].identity).toBe(PIN_B)
     })
 
-    it("leaves the shard untouched when the draw already contains the pins", () => {
-        const shard = [peer(PIN_A), peer("0xbb"), peer(PIN_B)]
-        const before = shard.map(p => p.identity)
-        const outcome = pinShardIdentities(shard, [...shard, peer("0xcc")])
-        expect(shard.map(p => p.identity)).toEqual(before)
+    it("falls through to the second pin when the first is offline", () => {
+        const shard = [peer("0xaa"), peer("0xbb"), peer("0xcc")]
+        const outcome = pinShardIdentities(shard, [...shard, peer(PIN_B)])
+        const ids = shard.map(p => p.identity)
+        expect(ids).toEqual([PIN_B, "0xaa", "0xbb"])
+        expect(ids).not.toContain(PIN_A)
+        expect(outcome).toContain(`${PIN_A.slice(0, 10)}=absent`)
+    })
+
+    it("moves already-drawn pins to the front without changing the size", () => {
+        const shard = [peer("0xbb"), peer(PIN_B), peer("0xcc"), peer(PIN_A)]
+        const outcome = pinShardIdentities(shard, [...shard, peer("0xdd")])
+        expect(shard.map(p => p.identity)).toEqual([
+            PIN_A,
+            PIN_B,
+            "0xbb",
+            "0xcc",
+        ])
         expect(outcome).toBe(
             `${PIN_A.slice(0, 10)}=drawn,${PIN_B.slice(0, 10)}=drawn`,
         )
     })
 
-    it("is a no-op when every candidate is already in the shard", () => {
-        const shard = [peer("0xaa"), peer(PIN_A), peer(PIN_B)]
+    it("leaves the shard untouched when the pins already lead the draw", () => {
+        const shard = [peer(PIN_A), peer(PIN_B), peer("0xbb")]
         const before = shard.map(p => p.identity)
-        pinShardIdentities(shard, [...shard])
+        pinShardIdentities(shard, [...shard, peer("0xcc")])
         expect(shard.map(p => p.identity)).toEqual(before)
     })
 
-    it("never displaces slot 0, skipping the pin instead", () => {
-        const shard = [peer("0xaa"), peer(PIN_A)]
-        const candidates = [...shard, peer(PIN_B)]
-        const outcome = pinShardIdentities(shard, candidates)
-        const ids = shard.map(p => p.identity)
-        expect(ids[0]).toBe("0xaa")
-        expect(ids).not.toContain(PIN_B)
-        expect(outcome).toContain("=no-slot")
+    it("leaves the shard untouched when no pin is a candidate", () => {
+        const shard = [peer("0xaa"), peer("0xbb")]
+        const before = shard.map(p => p.identity)
+        const outcome = pinShardIdentities(shard, [...shard, peer("0xcc")])
+        expect(shard.map(p => p.identity)).toEqual(before)
+        expect(outcome).toBe(
+            `${PIN_A.slice(0, 10)}=absent,${PIN_B.slice(0, 10)}=absent`,
+        )
     })
 
-    it("leaves a singleton shard untouched", () => {
+    it("drops a pin that has no seat in a committee smaller than the pin count", () => {
         const shard = [peer("0xaa")]
-        const outcome = pinShardIdentities(shard, [peer("0xaa"), peer(PIN_A)])
-        expect(shard[0].identity).toBe("0xaa")
-        expect(outcome).toContain("=no-slot")
+        const outcome = pinShardIdentities(shard, [
+            peer("0xaa"),
+            peer(PIN_A),
+            peer(PIN_B),
+        ])
+        expect(shard.map(p => p.identity)).toEqual([PIN_A])
+        expect(outcome).toContain(`${PIN_B.slice(0, 10)}=no-slot`)
+    })
+
+    it("replaces a singleton shard with the first online pin", () => {
+        const shard = [peer("0xaa")]
+        pinShardIdentities(shard, [peer("0xaa"), peer(PIN_B)])
+        expect(shard.map(p => p.identity)).toEqual([PIN_B])
     })
 
     it("is deterministic for identical inputs", () => {
@@ -157,8 +171,7 @@ describe("pinShardIdentities", () => {
         const shard = [peer("0xaa"), peer("0xbb")]
         const mixedCase = "0x" + PIN_A.slice(2).toUpperCase()
         pinShardIdentities(shard, [...shard, peer(mixedCase)])
-        expect(
-            shard.some(p => p.identity.toLowerCase() === PIN_A),
-        ).toBe(true)
+        expect(shard[0].identity.toLowerCase()).toBe(PIN_A)
+        expect(shard).toHaveLength(2)
     })
 })
