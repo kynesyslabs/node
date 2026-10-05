@@ -123,7 +123,6 @@ export function loadConfig(): Readonly<AppConfig> {
 
         core: {
             prod,
-            shardSize: envInt(EnvKey.SHARD_SIZE, d.core.shardSize),
             mainLoopSleepTime: envInt(
                 EnvKey.MAIN_LOOP_SLEEP_TIME,
                 d.core.mainLoopSleepTime,

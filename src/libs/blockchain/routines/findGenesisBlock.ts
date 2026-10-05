@@ -15,6 +15,10 @@ import Chain from "src/libs/blockchain/chain"
 import { BeforeFindGenesisHooks } from "./beforeFindGenesisHooks"
 import { Config } from "src/config"
 import { ForkConfigValidationError, loadForkConfigFromGenesis } from "@/forks"
+import {
+    loadShardSizeFromGenesisBlock,
+    readGenesisShardSize,
+} from "@/libs/consensus/genesisShardSize"
 
 function getLatestGCRRecoveryData() {
     if (!Config.getInstance().core.restore) {
@@ -88,6 +92,7 @@ export default async function findGenesisBlock() {
     const genesisBlockHash = await Chain.getGenesisBlockHash()
     if (genesisBlockHash) {
         log.info(`[GENESIS] Genesis block found. Hash: ${genesisBlockHash}`)
+        await loadShardSizeFromGenesisBlock()
         return
     }
 
@@ -129,6 +134,12 @@ export default async function findGenesisBlock() {
         genesisData["balances"] = Object.entries(finalBalances)
     }
 
+    // Fail before block 0 is generated: a genesis without a valid shard
+    // size would be committed, hashed, and impossible to fix in place.
+    readGenesisShardSize(genesisData)
+
     // Adding the genesis block to the chain
-    return await Chain.generateGenesisBlock(genesisData)
+    const genesisBlock = await Chain.generateGenesisBlock(genesisData)
+    await loadShardSizeFromGenesisBlock()
+    return genesisBlock
 }

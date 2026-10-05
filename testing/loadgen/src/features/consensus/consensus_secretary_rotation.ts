@@ -26,13 +26,21 @@ async function getBlocks(rpcUrl: string, start: number | "latest", limit: number
   return Array.isArray(res?.response) ? res.response : []
 }
 
-async function getGenesisHash(rpcUrl: string): Promise<string> {
+async function getGenesis(rpcUrl: string): Promise<{ hash: string; shardSize: number }> {
   const genesis = (await getBlocks(rpcUrl, 0, 1, "consensus:secretary:genesis"))[0]
   const hash = genesis?.hash
   if (typeof hash !== "string" || hash.length === 0) {
     throw new Error("consensus_secretary_rotation could not read genesis hash")
   }
-  return hash
+  // Shard size is a static consensus constant committed in block 0
+  // (properties.shardSize); the node no longer reads it from env.
+  let genesisData = genesis?.content?.extra?.genesisData
+  if (typeof genesisData === "string") genesisData = JSON.parse(genesisData)
+  const shardSize = genesisData?.properties?.shardSize
+  if (!Number.isInteger(shardSize) || shardSize < 1) {
+    throw new Error("consensus_secretary_rotation could not read properties.shardSize from genesis")
+  }
+  return { hash, shardSize }
 }
 
 async function getCommonValidatorSeedFromRpc(rpcUrl: string, lastBlockNumber: number, genesisHash: string) {
@@ -83,8 +91,7 @@ export async function runConsensusSecretaryRotation() {
   const rounds = Math.max(2, envInt("CONSENSUS_SECRETARY_ROUNDS", 4))
   const timeoutSec = envInt("CONSENSUS_TIMEOUT_SEC", 90)
   const pollMs = envInt("CONSENSUS_POLL_MS", 500)
-  const shardSize = Math.max(1, envInt("SHARD_SIZE", 10))
-  const genesisHash = await getGenesisHash(bootstrap)
+  const { hash: genesisHash, shardSize } = await getGenesis(bootstrap)
   const peerlist = await getPeerlist(bootstrap)
 
   if (peerlist.length < 2) {

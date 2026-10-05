@@ -114,7 +114,27 @@ export default class SharedState {
     lastTimestamp = 0
     lastShardSeed = ""
     referenceBlockRoom = 1
-    shardSize = Config.getInstance().core.shardSize
+
+    private _shardSize: number | null = null
+    get shardSize(): number {
+        if (this._shardSize === null) {
+            throw new Error(
+                "shardSize read before the genesis block was loaded",
+            )
+        }
+        return this._shardSize
+    }
+    get hasShardSize(): boolean {
+        return this._shardSize !== null
+    }
+    setShardSizeFromGenesis(shardSize: number): void {
+        if (this._shardSize !== null && this._shardSize !== shardSize) {
+            throw new Error(
+                `shardSize already pinned to ${this._shardSize}; refusing to change it to ${shardSize}`,
+            )
+        }
+        this._shardSize = shardSize
+    }
     mainLoopSleepTime = Config.getInstance().core.mainLoopSleepTime
 
     // NOTE See calibrateTime.ts for this value

@@ -49,8 +49,12 @@ export const DISTRIBUTION_KEYS: ReadonlySet<NetworkParameterKey> = new Set([
 ])
 
 /**
- * Phase 1 governable parameter set. Phase 2 adds blockTimeMs + shardSize.
+ * Phase 1 governable parameter set. Phase 2 adds blockTimeMs.
  * Proposals touching keys outside this set are rejected at validation.
+ *
+ * shardSize is NOT governable in any phase: it is a static constant
+ * committed in block 0 (see libs/consensus/genesisShardSize.ts) and only
+ * changes through a hard fork.
  *
  * DEM-665: extended with `additionalFee` + every entry of
  * `DISTRIBUTION_KEYS`. Distribution percentages are governable from day
@@ -80,7 +84,9 @@ export const PHASE_1_GOVERNABLE_KEYS: ReadonlySet<NetworkParameterKey> =
  *  25/50/25 burn/rpc/treasury. */
 export const HARDCODED_FALLBACK_NETWORK_PARAMETERS: NetworkParameters = {
     blockTimeMs: 1000,
-    shardSize: 4,
+    // Placeholder only: the SDK type requires the field. The real value
+    // is pinned from block 0 and written over this by loadNetworkParameters.
+    shardSize: 0,
     minValidatorStake: DEFAULT_MIN_VALIDATOR_STAKE,
     networkFee: 1,
     rpcFee: 1,
@@ -121,7 +127,7 @@ export function getGenesisNetworkParameters(): NetworkParameters {
             consensusSeconds && consensusSeconds > 0
                 ? consensusSeconds * 1000
                 : f.blockTimeMs,
-        shardSize: core.shardSize ?? f.shardSize,
+        shardSize: f.shardSize,
         minValidatorStake: core.minValidatorStake || f.minValidatorStake,
         networkFee: core.networkFee ?? f.networkFee,
         rpcFee: core.rpcFee ?? f.rpcFee,
@@ -169,7 +175,6 @@ export const NUMERIC_BOUNDS: Partial<Record<NetworkParameterKey, NumericBounds>>
     rpcFee: { floor: 0, ceiling: 5000 },
     additionalFee: { floor: 0, ceiling: 5000 },
     blockTimeMs: { floor: 1000, ceiling: 60000 },
-    shardSize: { floor: 3, ceiling: 100 },
     // DEM-665: percentage fields are [0, 100]; the cross-key sum-100
     // invariant is enforced separately by `safetyBounds.ts`.
     networkFeeBurnPct: { floor: 0, ceiling: 100 },

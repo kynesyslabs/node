@@ -71,6 +71,12 @@ import { PINNED_SHARD_IDENTITIES } from "src/utilities/constants"
 const [PIN_A, PIN_B] = PINNED_SHARD_IDENTITIES
 const peer = (identity: string) => ({ identity }) as any
 
+/** Expected outcome string: given pins get their label, the rest are absent. */
+const outcomeOf = (given: Record<string, string>) =>
+    PINNED_SHARD_IDENTITIES.map(
+        pin => `${pin.slice(0, 10)}=${given[pin] ?? "absent"}`,
+    ).join(",")
+
 describe("pinShardIdentities", () => {
     it("puts both pins first, in pin order, displacing the tail of the draw", () => {
         const shard = [
@@ -84,8 +90,8 @@ describe("pinShardIdentities", () => {
         const outcome = pinShardIdentities(shard, candidates)
         const ids = shard.map(p => p.identity)
         expect(ids).toEqual([PIN_A, PIN_B, "0xaa", "0xbb", "0xcc"])
-        expect(outcome.split(",").every(o => o.endsWith("=swapped"))).toBe(
-            true,
+        expect(outcome).toBe(
+            outcomeOf({ [PIN_A]: "swapped", [PIN_B]: "swapped" }),
         )
     })
 
@@ -115,7 +121,7 @@ describe("pinShardIdentities", () => {
             "0xcc",
         ])
         expect(outcome).toBe(
-            `${PIN_A.slice(0, 10)}=drawn,${PIN_B.slice(0, 10)}=drawn`,
+            outcomeOf({ [PIN_A]: "drawn", [PIN_B]: "drawn" }),
         )
     })
 
@@ -131,9 +137,7 @@ describe("pinShardIdentities", () => {
         const before = shard.map(p => p.identity)
         const outcome = pinShardIdentities(shard, [...shard, peer("0xcc")])
         expect(shard.map(p => p.identity)).toEqual(before)
-        expect(outcome).toBe(
-            `${PIN_A.slice(0, 10)}=absent,${PIN_B.slice(0, 10)}=absent`,
-        )
+        expect(outcome).toBe(outcomeOf({}))
     })
 
     it("drops a pin that has no seat in a committee smaller than the pin count", () => {
