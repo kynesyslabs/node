@@ -53,7 +53,9 @@ export default class Transaction implements ITransaction {
     hash: string | null = null
     status: string | TransactionStatus | null = null
     blockNumber: number | null = null
-    attrs: Record<string, any> | null = null
+    // The node also records why a transaction failed, alongside the SDK's
+    // fields.
+    attrs: (ITransaction["attrs"] & { message?: string }) | null = null
 
     constructor(data?: Partial<ITransaction>) {
         // Initialize with defaults or provided data
