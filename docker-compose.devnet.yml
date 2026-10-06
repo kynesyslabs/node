@@ -109,6 +109,11 @@ services:
       - "7574:7474"
       - "7787:7687"
 
+  reaper:
+    container_name: demos-reaper-devnet
+    networks: !override
+      - demos-network-devnet
+
   caddy:
     container_name: demos-caddy-devnet
     environment:
