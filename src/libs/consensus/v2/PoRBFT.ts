@@ -20,7 +20,6 @@ import {
 } from "@/errors"
 import HandleGCR from "src/libs/blockchain/gcr/handleGCR"
 import L2PSConsensus from "@/libs/l2ps/L2PSConsensus"
-import { DTRManager } from "@/libs/network/dtr/dtrmanager"
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import {
     fastSync,
@@ -420,7 +419,6 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             BroadcastManager.broadcastNewBlock(block)
-            DTRManager.releaseDTRWaiter(block)
 
             // Apply pending L2PS proofs to L1 state
             // L2PS proofs contain GCR edits that modify L1 balances (unified state architecture)
@@ -545,11 +543,6 @@ export async function consensusRoutine(): Promise<void> {
     } finally {
         markStep("consensus", null)
         releaseSyncLock?.()
-
-        // INFO: If there was a relayed tx past finalize block step, release
-        if (DTRManager.poolSize > 0) {
-            DTRManager.releaseDTRWaiter()
-        }
 
         cleanupConsensusState()
         manager.endConsensusRoutine()

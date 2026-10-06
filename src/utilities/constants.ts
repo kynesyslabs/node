@@ -40,8 +40,9 @@ export const PINNED_SHARD_IDENTITIES: readonly string[] = [
 
 // --- Batch sync ---
 export const BATCH_SYNC_BLOCK_SIZE = 100
-export const BATCH_SYNC_TX_SIZE = 100
-export const BATCH_SYNC_TX_LIMIT = 100
+/** Hashes per getTxsByHashes request (client chunk) and per response (server cap). */
+export const BATCH_SYNC_TX_SIZE = 1000
+export const BATCH_SYNC_TX_LIMIT = 1000
 export const BATCH_SYNC_BLOCK_LIMIT = 100
 
 // --- Rate limiting defaults ---

@@ -9,7 +9,7 @@
  * - 0x74 L2PS_SYNC_MEMPOOL: Sync L2PS mempool entries
  * - 0x75 L2PS_GET_BATCH_STATUS: Get batch aggregation status
  * - 0x76 L2PS_GET_PARTICIPATION: Check L2PS network participation
- * - 0x77 L2PS_HASH_UPDATE: Relay hash update to validators
+ * - (0x77 L2PS_HASH_UPDATE retired: hash updates travel on the gossip tx topic)
  */
 
 import log from "src/utilities/logger"
@@ -23,9 +23,7 @@ import type {
     L2PSSyncMempoolRequest,
     L2PSGetBatchStatusRequest,
     L2PSGetParticipationRequest,
-    L2PSHashUpdateRequest,
 } from "../../serialization/l2ps"
-import { decodeL2PSHashUpdate } from "../../serialization/l2ps"
 
 /**
  * Handler for 0x70 L2PS_GENERIC opcode
@@ -364,57 +362,3 @@ export const handleL2PSGetParticipation: OmniHandler<Buffer> = async ({ message,
     }
 }
 
-/**
- * Handler for 0x77 L2PS_HASH_UPDATE opcode
- *
- * Receives hash updates from other nodes.
- * Used for synchronizing L2PS state hashes across the network.
- * Uses binary encoding for efficiency.
- */
-export const handleL2PSHashUpdate: OmniHandler<Buffer> = async ({ message, context }) => {
-    if (!message.payload || !Buffer.isBuffer(message.payload) || message.payload.length === 0) {
-        return encodeResponse(errorResponse(400, "Missing payload for L2PS hash update"))
-    }
-
-    try {
-        // Try binary decoding first, fall back to JSON
-        let request: L2PSHashUpdateRequest
-        try {
-            request = decodeL2PSHashUpdate(message.payload)
-        } catch {
-            // Fallback to JSON encoding
-            request = decodeJsonRequest<L2PSHashUpdateRequest>(message.payload)
-        }
-
-        if (!request.l2psUid) {
-            return encodeResponse(errorResponse(400, "l2psUid is required"))
-        }
-
-        if (!request.consolidatedHash) {
-            return encodeResponse(errorResponse(400, "consolidatedHash is required"))
-        }
-
-        const L2PSHashes = (await import("../../../blockchain/l2ps_hashes")).default
-
-        // Store the hash update
-        await L2PSHashes.updateHash(
-            request.l2psUid,
-            request.consolidatedHash,
-            request.transactionCount,
-            BigInt(request.blockNumber),
-        )
-
-        return encodeResponse(
-            successResponse({
-                accepted: true,
-                l2psUid: request.l2psUid,
-                hash: request.consolidatedHash,
-            }),
-        )
-    } catch (error) {
-        log.error("[handleL2PSHashUpdate] Error:", error)
-        return encodeResponse(
-            errorResponse(500, "Internal error", error instanceof Error ? error.message : error),
-        )
-    }
-}

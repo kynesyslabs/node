@@ -1,12 +1,4 @@
-import {
-    EntityManager,
-    FindManyOptions,
-    ILike,
-    In,
-    LessThanOrEqual,
-    QueryFailedError,
-    Repository,
-} from "typeorm"
+import { EntityManager, FindManyOptions, ILike, In, LessThanOrEqual, QueryFailedError, Repository, LessThan } from "typeorm"
 import { Mutex } from "async-mutex"
 import Datasource from "@/model/datasource"
 
@@ -14,14 +6,15 @@ import Chain from "./chain"
 import log from "src/utilities/logger"
 import { isForkActive } from "@/forks"
 import { MempoolTx } from "@/model/entities/Mempool"
-import { Transaction } from "@kynesyslabs/demosdk/types"
+import { Transaction, ValidityData } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import TxValidatorPool from "./validation/txValidatorPool"
 import { chunkedInsert } from "./chainDb"
 import { verifyGcrEditsMatch } from "./validation/verifyGcrEdits"
+import { checkTxAdmissible } from "./validation/txAdmission"
 import SecretaryManager from "../consensus/v2/types/secretaryManager"
-import { deepWindowCutoff } from "./referenceBlockWindow"
+import { deepWindowCutoff, isWithinDeepWindow } from "./referenceBlockWindow"
 import { TRANSACTION_STATUS } from "@/utilities/constants"
 
 /**
@@ -173,6 +166,61 @@ export default class Mempool {
         return await this.lock.runExclusive(
             async () => await this.addTransaction(transaction, blockRef),
         )
+    }
+
+    /**
+     * Single-transaction ingest for the gossip path. The envelope was
+     * already verified by the topic validator (staked publisher, envelope
+     * signature); this runs the per-tx admission checks shared with RPC
+     * intake, the forged-edit guard for native txs, and then the normal
+     * `addTransaction` nonce and persistence rules — under the mempool
+     * lock, since gossip delivery is concurrent with consensus.
+     *
+     * `Mempool.receive` is the batch path for the consensus mempool merge
+     * and is not used here.
+     */
+    public static async ingestGossiped(
+        validityData: ValidityData,
+    ): Promise<{ accepted: boolean; reason?: string; confirmationBlock?: number }> {
+        const tx = {
+            ...validityData.data.transaction,
+            reference_block: validityData.data.reference_block,
+        } as Transaction & { reference_block: number }
+        const head = getSharedState.lastBlockNumber ?? 0
+
+        const admission = await checkTxAdmissible(tx, {
+            head,
+            checkWindow: true,
+            checkMempool: true,
+        })
+        if (!admission.ok) {
+            return { accepted: false, reason: `${admission.code}: ${admission.reason}` }
+        }
+
+        if (tx.content?.type === "native") {
+            try {
+                const { match } = await verifyGcrEditsMatch(tx, {
+                    expectFeeEdits: false,
+                })
+                if (!match) {
+                    return {
+                        accepted: false,
+                        reason: "gcr_edits do not match regenerated set",
+                    }
+                }
+            } catch (e) {
+                return {
+                    accepted: false,
+                    reason: `gcr_edits verification error: ${e instanceof Error ? e.message : String(e)}`,
+                }
+            }
+        }
+
+        const { confirmationBlock, error } = await this.addTransactionWithLock(tx)
+        if (error) {
+            return { accepted: false, reason: error }
+        }
+        return { accepted: true, confirmationBlock }
     }
 
     public static async addTransaction(
@@ -386,6 +434,27 @@ export default class Mempool {
         }
     }
 
+    /**
+     * Post-block hygiene: drop the txs the block included and anything
+     * whose reference block has aged out of the deep window at the new
+     * height. Two indexed deletes, no table scan — cheap enough to run
+     * after every inserted block (see chainBlocks.insertBlock).
+     */
+    public static async pruneAfterBlock(
+        blockNumber: number,
+        includedHashes: string[],
+    ): Promise<{ included: number; expired: number }> {
+        let included = 0
+        if (includedHashes.length > 0) {
+            const res = await this.repo.delete({ hash: In(includedHashes) })
+            included = res.affected ?? 0
+        }
+        const res = await this.repo.delete({
+            reference_block: LessThan(deepWindowCutoff(blockNumber)),
+        })
+        return { included, expired: res.affected ?? 0 }
+    }
+
     public static async removeTransactionsByHashes(
         hashes: string[],
         transactionalEntityManager?: EntityManager,
@@ -418,7 +487,6 @@ export default class Mempool {
         // but inside the deep window — are admitted so consensus can
         // include them in a block as failed.
         const lastBlock = await Chain.getLastBlockNumber()
-        const staleCutoff = deepWindowCutoff(lastBlock)
 
         const unseenCandidates = incoming.filter(
             tx => !existingHashes[tx.hash],
@@ -437,10 +505,7 @@ export default class Mempool {
                 )
                 return false
             }
-            if (
-                tx.reference_block < staleCutoff ||
-                tx.reference_block > lastBlock
-            ) {
+            if (!isWithinDeepWindow(tx.reference_block, lastBlock)) {
                 log.error(
                     `[Mempool.receive] Rejecting tx ${tx.hash}: reference block ` +
                         `${tx.reference_block} outside the allowed window at block ${lastBlock}`,
@@ -626,7 +691,6 @@ export default class Mempool {
 
     /**
      * Removes a specific transaction from the mempool by hash
-     * Used by DTR relay service when transactions are successfully relayed to validators
      * @param txHash - Hash of the transaction to remove
      * @returns {Promise<void>}
      */

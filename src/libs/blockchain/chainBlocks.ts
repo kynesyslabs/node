@@ -14,6 +14,7 @@ import { persistConfirmedTransactionProjection } from "./chainTransactions"
 import tallyUpgradeVotes from "./routines/tallyUpgradeVotes"
 import applyNetworkUpgrade from "./routines/applyNetworkUpgrade"
 import { loadNetworkParameters } from "./routines/loadNetworkParameters"
+import { getStakedSet } from "src/libs/consensus/stakedSet"
 import { NetworkUpgrade } from "@/model/entities/NetworkUpgrade"
 import { NetworkUpgradeVote } from "@/model/entities/NetworkUpgradeVote"
 import {
@@ -489,14 +490,6 @@ export async function insertBlock(
             getSharedState.lastBlockNumber = block.number
             getSharedState.lastBlockHash = block.hash
             getSharedState.lastBlockInsertedAt = Date.now()
-
-            void import("@/libs/network/dtr/dtrmanager")
-                .then(dtr => dtr.DTRManager.releaseDTRWaiter(block))
-                .catch(e =>
-                    log.warning(
-                        `[insertBlock] DTR relay release after block ${block.number} failed: ${(e as Error).message}`,
-                    ),
-                )
         }
 
         // Post-commit refresh: rolled-back tx → no-op; committed tx →
@@ -509,6 +502,35 @@ export async function insertBlock(
                 "GOVERNANCE",
                 `[insertBlock] sharedState refresh after block ${block.number} failed: ${(e as Error).message}`,
             )
+        }
+
+        // Stake status is a per-block fact; refresh now so role-gated
+        // services react at the block boundary rather than on next read.
+        void getStakedSet().catch(e =>
+            log.warning(
+                `[insertBlock] staked-set refresh after block ${block.number} failed: ${(e as Error).message}`,
+            ),
+        )
+
+        // Mempool hygiene after every block once the initial fast sync
+        // has completed: before that the node is replaying history and
+        // the mempool is not in play.
+        if (getSharedState.fastSyncCount > 0) {
+            try {
+                const pruned = await Mempool.pruneAfterBlock(
+                    block.number,
+                    block.content?.ordered_transactions ?? [],
+                )
+                if (pruned.included + pruned.expired > 0) {
+                    log.debug(
+                        `[insertBlock] mempool pruned after block ${block.number}: ${pruned.included} included, ${pruned.expired} expired`,
+                    )
+                }
+            } catch (e) {
+                log.warning(
+                    `[insertBlock] mempool prune after block ${block.number} failed: ${(e as Error).message}`,
+                )
+            }
         }
 
         return result

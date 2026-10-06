@@ -1,27 +1,9 @@
 import { Peer, PeerManager } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
-import GCR from "src/libs/blockchain/gcr/gcr"
+import { getStakedSet } from "src/libs/consensus/stakedSet"
 import log from "src/utilities/logger"
-import type { Validators } from "src/model/entities/Validators"
 
-let cachedBlock: number | null = null
-let cachedAddresses: Set<string> | null = null
 let vetoActive = false
-
-async function getValidatorAddresses(lastBlock: number): Promise<Set<string>> {
-    if (cachedBlock === lastBlock && cachedAddresses !== null) {
-        return cachedAddresses
-    }
-
-    const validators = (await GCR.getGCRValidatorsAtBlock(
-        lastBlock,
-    )) as Validators[]
-    cachedAddresses = new Set(
-        validators.map(v => v.address).filter((a): a is string => a !== null),
-    )
-    cachedBlock = lastBlock
-    return cachedAddresses
-}
 
 export async function getAheadValidatorPeers(): Promise<Peer[]> {
     const ourBlock = getSharedState.lastBlockNumber
@@ -39,7 +21,7 @@ export async function getAheadValidatorPeers(): Promise<Peer[]> {
         return []
     }
 
-    const validatorAddresses = await getValidatorAddresses(ourBlock)
+    const validatorAddresses = await getStakedSet()
     if (validatorAddresses.size === 0) {
         // Same bootstrap edge case guarded in peerlistMerge/getShard: with no
         // validator set to filter against, ANY peer claiming a higher block
@@ -57,7 +39,9 @@ export async function getAheadValidatorPeers(): Promise<Peer[]> {
         return aheadPeers
     }
 
-    return aheadPeers.filter(peer => validatorAddresses.has(peer.identity))
+    return aheadPeers.filter(peer =>
+        validatorAddresses.has(peer.identity.toLowerCase()),
+    )
 }
 
 export async function isNetworkAhead(context: string): Promise<boolean> {

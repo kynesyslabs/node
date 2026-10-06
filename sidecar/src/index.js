@@ -28,6 +28,10 @@ import { wordlist } from "@scure/bip39/wordlists/english.js"
 const PROTOCOL_VERSION = 1
 const HEIGHTS_TOPIC = "demos/heights/1"
 const BLOCKS_TOPIC = "demos/blocks/1"
+const TXS_TOPIC = "demos/txs/1"
+// Subscribed on command from the Bun side: only staked nodes ingest txs.
+const ALWAYS_TOPICS = [HEIGHTS_TOPIC, BLOCKS_TOPIC]
+const ALL_TOPICS = [HEIGHTS_TOPIC, BLOCKS_TOPIC, TXS_TOPIC]
 // Reserved for phase 2: validate, verdict, set_validators, request, respond
 
 const PORT = parseInt(process.env.GOSSIP_PORT ?? "9095", 10)
@@ -106,6 +110,12 @@ function gossipMsgId(msg) {
             return enc.encode(`block:${payload.hash}`)
         }
         if (
+            msg.topic === TXS_TOPIC &&
+            typeof payload?.data?.transaction?.hash === "string"
+        ) {
+            return enc.encode(`tx:${payload.data.transaction.hash}`)
+        }
+        if (
             msg.topic === HEIGHTS_TOPIC &&
             typeof payload?.pubkey === "string" &&
             typeof payload?.seq === "number"
@@ -174,8 +184,7 @@ const node = await createLibp2p({
     },
 })
 const pubsub = node.services.pubsub
-pubsub.subscribe(HEIGHTS_TOPIC)
-pubsub.subscribe(BLOCKS_TOPIC)
+for (const topic of ALWAYS_TOPICS) pubsub.subscribe(topic)
 slog(`libp2p up: peerId ${node.peerId.toString()} port ${PORT}`)
 
 // --- IPC bridge ---
@@ -190,10 +199,11 @@ function send(obj) {
 
 function statsPayload() {
     const perTopic = {}
-    for (const topic of [HEIGHTS_TOPIC, BLOCKS_TOPIC]) {
+    for (const topic of ALL_TOPICS) {
         perTopic[topic] = {
             subscribers: pubsub.getSubscribers(topic).length,
             mesh: pubsub.getMeshPeers(topic).length,
+            subscribed: pubsub.getTopics().includes(topic),
         }
     }
     return { connections: node.getConnections().length, perTopic }
@@ -279,6 +289,28 @@ async function handleCommand(cmd) {
         }
         case "stats": {
             send({ type: "stats", ...statsPayload() })
+            break
+        }
+        case "subscribe": {
+            if (!ALL_TOPICS.includes(cmd.topic)) {
+                slog(`subscribe to unknown topic ${cmd.topic} refused`)
+                break
+            }
+            if (!pubsub.getTopics().includes(cmd.topic)) {
+                pubsub.subscribe(cmd.topic)
+                slog(`subscribed to ${cmd.topic}`)
+            }
+            break
+        }
+        case "unsubscribe": {
+            if (ALWAYS_TOPICS.includes(cmd.topic)) {
+                slog(`unsubscribe from ${cmd.topic} refused: always-on topic`)
+                break
+            }
+            if (pubsub.getTopics().includes(cmd.topic)) {
+                pubsub.unsubscribe(cmd.topic)
+                slog(`unsubscribed from ${cmd.topic}`)
+            }
             break
         }
         default:

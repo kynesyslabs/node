@@ -31,10 +31,20 @@ export function registerGossipMetrics() {
         "Heights records processed",
         ["result"],
     )
+    m.createCounter(
+        "gossip_tx_ingest_total",
+        "Gossiped transactions handed to the mempool",
+        ["result"],
+    )
+    m.createCounter(
+        "gossip_tx_rate_limited_total",
+        "Gossiped transactions dropped by rate limiting",
+        ["reason"],
+    )
 }
 
 export function recordVerdict(
-    topic: "heights" | "blocks",
+    topic: "heights" | "blocks" | "txs",
     verdict: "accept" | "reject" | "ignore",
 ) {
     try {
@@ -90,6 +100,26 @@ export function observeBlockFirstSeen(source: "gossip" | "http", delayMs: number
             delayMs,
             { source },
         )
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countTxIngest(result: string) {
+    try {
+        getMetricsService().incrementCounter("gossip_tx_ingest_total", {
+            result,
+        })
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countTxRateLimited(reason: string) {
+    try {
+        getMetricsService().incrementCounter("gossip_tx_rate_limited_total", {
+            reason,
+        })
     } catch {
         /* ignore */
     }

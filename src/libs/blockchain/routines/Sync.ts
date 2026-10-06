@@ -42,6 +42,7 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
+import { assembleBlockTxs, missingHashes } from "./blockTxAssembly"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
@@ -1419,33 +1420,24 @@ export async function syncGCRTables(txs: Transaction[], block?: Block) {
 }
 
 // Helper function to ask for the transactions in a block
-export async function askTxsForBlock(
+/** Full block body fetch: the block endpoint, then the whole hash list. */
+async function fetchAllBlockTxs(
     block: Block,
     peer: Peer,
 ): Promise<Transaction[]> {
-    if (
-        Array.isArray(block.content.ordered_transactions) &&
-        block.content.ordered_transactions.length === 0
-    ) {
-        return []
-    }
-
-    let request: RPCRequest = {
-        method: "nodeCall",
-        params: [
-            {
-                message: "getBlockTransactions",
-                data: { blockHash: block.hash },
-            },
-        ],
-    }
-
-    let res = await peer.longCall(request, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-
+    let res = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getBlockTransactions",
+                    data: { blockHash: block.hash },
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3 },
+    )
     if (
         res.result === 200 &&
         Array.isArray(res.response) &&
@@ -1453,30 +1445,87 @@ export async function askTxsForBlock(
     ) {
         return res.response as Transaction[]
     }
+    res = await peer.longCall(
+        {
+            method: "nodeCall",
+            params: [
+                {
+                    message: "getTxsByHashes",
+                    data: { hashes: block.content.ordered_transactions },
+                },
+            ],
+        },
+        true,
+        { protocol: "http", sleepTime: 1000, retries: 3 },
+    )
+    return res.result === 200 ? (res.response as Transaction[]) : []
+}
 
-    // INFO: fetch all transactions by hashes
-    request = {
-        method: "nodeCall",
-        params: [
+/** Fetch only `hashes`, chunked at the server's per-call cap. */
+async function fetchTxsByHashes(
+    hashes: string[],
+    peer: Peer,
+): Promise<Transaction[]> {
+    const out: Transaction[] = []
+    const chunk = getSharedState.batchSyncTxSize
+    for (let i = 0; i < hashes.length; i += chunk) {
+        const res = await peer.longCall(
             {
-                message: "getTxsByHashes",
-                data: { hashes: block.content.ordered_transactions },
+                method: "nodeCall",
+                params: [
+                    {
+                        message: "getTxsByHashes",
+                        data: { hashes: hashes.slice(i, i + chunk) },
+                    },
+                ],
             },
-        ],
+            true,
+            { protocol: "http", sleepTime: 1000, retries: 3 },
+        )
+        if (res.result === 200 && Array.isArray(res.response)) {
+            out.push(...(res.response as Transaction[]))
+        }
+    }
+    return out
+}
+
+/**
+ * Transactions for a block we are about to apply.
+ *
+ * At head + 1 the mempool is consulted first: gossip has usually delivered
+ * most bodies already, so only the gap is fetched by hash, or the whole
+ * block when nothing is local. Older blocks never touch the mempool
+ * table; they are history being replayed, and the batch path owns them.
+ */
+export async function askTxsForBlock(
+    block: Block,
+    peer: Peer,
+): Promise<Transaction[]> {
+    const ordered = block.content.ordered_transactions
+    if (!Array.isArray(ordered) || ordered.length === 0) {
+        return []
     }
 
-    res = await peer.longCall(request, true, {
-        protocol: "http",
-        sleepTime: 1000,
-        retries: 3,
-    })
-
-    if (res.result === 200) {
-        return res.response as Transaction[]
+    const atHead = block.number === getSharedState.lastBlockNumber + 1
+    if (!atHead) {
+        return await fetchAllBlockTxs(block, peer)
     }
 
-    log.error("[askTxsForBlock] Failed to fetch transactions")
-    return []
+    const local = (await Mempool.getTransactionsByHashes(
+        ordered,
+    )) as unknown as Transaction[]
+    const missing = missingHashes(ordered, local)
+    log.debug(
+        `[askTxsForBlock] block ${block.number}: ${ordered.length} txs, ${local.length} in mempool, ${missing.length} to fetch`,
+    )
+
+    let fetched: Transaction[] = []
+    if (missing.length === ordered.length) {
+        fetched = await fetchAllBlockTxs(block, peer)
+    } else if (missing.length > 0) {
+        fetched = await fetchTxsByHashes(missing, peer)
+    }
+    return assembleBlockTxs(ordered, local, fetched, block.number)
 }
 
 // Helper function to merge the peerlist from the last block

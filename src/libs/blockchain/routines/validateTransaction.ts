@@ -14,17 +14,15 @@ import Chain from "src/libs/blockchain/chain"
 import GCR from "src/libs/blockchain/gcr/gcr"
 import calculateCurrentGas from "src/libs/blockchain/routines/calculateCurrentGas"
 import Transaction from "src/libs/blockchain/transaction"
-import Hashing from "src/libs/crypto/hashing"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 import { Operation, ValidityData } from "@kynesyslabs/demosdk/types"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import _ from "lodash"
-import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
-import TxValidatorPool from "../validation/txValidatorPool"
+import { signValidityData } from "../validation/validityData"
+import { checkTxAdmissible } from "../validation/txAdmission"
 import { isForkActive } from "@/forks"
 import { applyGasFeeSeparation } from "@/libs/blockchain/routines/applyGasFeeSeparation"
-import Mempool from "@/libs/blockchain/mempool"
 import ParallelNetworks from "@/libs/l2ps/parallelNetworks"
 import { checkInnerTxBalance } from "@/libs/l2ps/balanceCheck"
 import { normalizePubkey } from "../gcr/handleGCR"
@@ -60,14 +58,18 @@ export async function confirmTransaction(
         },
     }
 
-    const { message, success: verified } = await Transaction.confirmTx(
-        tx,
+    const admission = await checkTxAdmissible(tx, {
+        head: referenceBlock,
+        checkMempool: true,
         sender,
-    )
-
-    if (!verified) {
+    })
+    if (!admission.ok) {
+        const label =
+            admission.code === "on_chain" || admission.code === "in_mempool"
+                ? "TX EXISTS ERROR"
+                : "SIGNATURE ERROR"
         validityData.data.message =
-            "[Tx Validation] [SIGNATURE ERROR] " + message + "\n"
+            `[Tx Validation] [${label}] ` + admission.reason + "\n"
         validityData.data.valid = false
         validityData = await signValidityData(validityData)
         return validityData
@@ -118,27 +120,6 @@ export async function confirmTransaction(
             validityData = await signValidityData(validityData)
             return validityData
         }
-    }
-
-    // Check tx in transaction table
-    const dbTx = await Chain.getTransactionFromHash(tx.hash)
-    if (dbTx) {
-        validityData.data.message =
-            "[Tx Validation] [TX EXISTS ERROR] Transaction already executed in block number: " +
-            dbTx.blockNumber
-        validityData.data.valid = false
-        validityData = await signValidityData(validityData)
-        return validityData
-    }
-
-    // Check tx in mempool
-    const mempoolTx = await Mempool.checkTransactionByHash(tx.hash)
-    if (mempoolTx) {
-        validityData.data.message =
-            "[Tx Validation] [TX EXISTS ERROR] Transaction already in mempool\n"
-        validityData.data.valid = false
-        validityData = await signValidityData(validityData)
-        return validityData
     }
 
     let txAmount: bigint
@@ -312,22 +293,6 @@ async function checkL2PSBalance(tx: Transaction): Promise<string | null> {
     return null
 }
 
-async function signValidityData(data: ValidityData): Promise<ValidityData> {
-    const hash = Hashing.sha256(JSON.stringify(data.data))
-    // return data
-
-    const signature = await TxValidatorPool.getInstance().sign(
-        getSharedState.signingAlgorithm,
-        new TextEncoder().encode(hash),
-    )
-
-    data.signature = {
-        type: getSharedState.signingAlgorithm,
-        data: uint8ArrayToHex(signature.signature),
-    }
-    return data
-}
-
 // This method is responsible for calculating the gas for a transaction and checking
 // if the sender can afford it
 async function defineGas(
@@ -357,17 +322,7 @@ async function defineGas(
         )
         validityData.data.message =
             "[Native Tx Validation] [FROM ERROR] No 'from' field found in the transaction\n"
-        // Hash the validation data
-        const hash = Hashing.sha256(JSON.stringify(validityData.data))
-        // Sign the hash
-        const signature = await TxValidatorPool.getInstance().sign(
-            getSharedState.signingAlgorithm,
-            new TextEncoder().encode(hash),
-        )
-        validityData.signature = {
-            type: getSharedState.signingAlgorithm,
-            data: uint8ArrayToHex(signature.signature),
-        }
+        await signValidityData(validityData)
         return [false, validityData]
     }
     // REVIEW getAccountBalance returns bigint; keep this binding bigint
@@ -386,17 +341,7 @@ async function defineGas(
             "[Native Tx Validation] [BALANCE ERROR] No balance found for this address: " +
             from +
             "\n"
-        // Hash the validation data
-        const hash = Hashing.sha256(JSON.stringify(validityData.data))
-        // Sign the hash
-        const signature = await TxValidatorPool.getInstance().sign(
-            getSharedState.signingAlgorithm,
-            new TextEncoder().encode(hash),
-        )
-        validityData.signature = {
-            type: getSharedState.signingAlgorithm,
-            data: uint8ArrayToHex(signature.signature),
-        }
+        await signValidityData(validityData)
     }
     // TODO Work on this method
     const compositeFeeAmount = await calculateCurrentGas(tx)
@@ -445,17 +390,7 @@ async function defineGas(
             fromBalance +
             "\n" +
             "\n"
-        // Hash the validation data
-        const hash = Hashing.sha256(JSON.stringify(validityData.data))
-        // Sign the hash
-        const signature = await TxValidatorPool.getInstance().sign(
-            getSharedState.signingAlgorithm,
-            new TextEncoder().encode(hash),
-        )
-        validityData.signature = {
-            type: getSharedState.signingAlgorithm,
-            data: uint8ArrayToHex(signature.signature),
-        }
+        await signValidityData(validityData)
         return [false, validityData]
     }
 

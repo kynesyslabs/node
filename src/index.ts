@@ -19,6 +19,8 @@ import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import GossipManager from "./libs/gossip/GossipManager"
+import { getStakedSet, onSelfStakeChange } from "./libs/consensus/stakedSet"
+import { syncL2PSServices } from "./libs/l2ps/roleServices"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
 import {
@@ -48,7 +50,6 @@ import loadGenesisIdentities from "./libs/blockchain/routines/loadGenesisIdentit
 // DTR and L2PS imports
 import Mempool from "./libs/blockchain/mempool"
 import TxValidatorPool from "./libs/blockchain/validation/txValidatorPool"
-import { DTRManager } from "./libs/network/dtr/dtrmanager"
 import { L2PSHashService } from "./libs/l2ps/L2PSHashService"
 import { L2PSBatchAggregator } from "./libs/l2ps/L2PSBatchAggregator"
 import ParallelNetworks from "./libs/l2ps/parallelNetworks"
@@ -532,6 +533,14 @@ async function preMainLoop() {
     getSharedState.lastBlockNumber = lastBlock.number
     getSharedState.lastBlockHash = lastBlock.hash
 
+    // Role-gated services follow the node's own stake status; register
+    // before the first refresh so an already-staked node starts them now.
+    onSelfStakeChange(staked => {
+        void syncL2PSServices(staked)
+    })
+    // Prime the node's own role before anything role-gated starts.
+    await getStakedSet()
+
     await peerBootstrap(indexState.PeerList)
 
     log.info("[PEER] 🌐 Bootstrapping peers...")
@@ -569,7 +578,7 @@ async function preMainLoop() {
  * Side effects:
  * - May call process.exit(1) if the signaling server fails to start.
  * - Sets shared-state flags such as `isSignalingServerStarted` and `isMCPServerStarted`.
- * - Starts background services (MCP server and DTRManager) when configured.
+ * - Starts background services (MCP server) when configured.
  */
 async function main() {
     getSharedState.isInitialized = false

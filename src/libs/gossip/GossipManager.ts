@@ -2,7 +2,8 @@ import fs from "node:fs"
 import net from "node:net"
 import path from "node:path"
 import { spawn, ChildProcess } from "node:child_process"
-import type { Block } from "@kynesyslabs/demosdk/types"
+import type { Block, ValidityData } from "@kynesyslabs/demosdk/types"
+import { isSelfStaked, onSelfStakeChange } from "src/libs/consensus/stakedSet"
 
 import log from "src/utilities/logger"
 import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
@@ -14,14 +15,19 @@ import {
     HeightsRecord,
     isHeightsRecordShape,
 } from "./records"
-import { validateBlockMessage, validateHeightsMessage } from "./validators"
-import { BLOCKS_TOPIC, HEIGHTS_TOPIC } from "./topics"
+import {
+    validateBlockMessage,
+    validateHeightsMessage,
+    validateTxMessage,
+} from "./validators"
+import { BLOCKS_TOPIC, HEIGHTS_TOPIC, TXS_TOPIC } from "./topics"
 import {
     countHeightsRecord,
     countPublishSkipped,
     registerGossipMetrics,
     setMeshPeersGauge,
     setReadyGauge,
+    countTxIngest,
 } from "./metrics"
 
 const PROTOCOL_VERSION = 1
@@ -47,6 +53,8 @@ export class GossipManager {
     private lastStatsAt = 0
     private heightsTimer: ReturnType<typeof setInterval> | null = null
     private recvBuffer = ""
+    private stakeUnsubscribe: (() => void) | null = null
+    private txSubscribed = false
 
     static getInstance(): GossipManager {
         if (!GossipManager.instance) {
@@ -154,6 +162,12 @@ export class GossipManager {
             }, cfg.heightsIntervalMs)
 
             this.started = true
+            // Receive-only unless staked: the tx topic is joined and left
+            // as the node's own stake status changes. Heights and blocks
+            // are always received; publishing them is gated per call.
+            this.stakeUnsubscribe = onSelfStakeChange(staked =>
+                this.setTxSubscription(staked),
+            )
             log.info(
                 `[GOSSIP] started: sidecar peerId ${this.readyInfo?.peerId}, gossip port ${cfg.port}`,
             )
@@ -307,6 +321,8 @@ export class GossipManager {
         this.stopping = true
         this.started = false
         if (this.heightsTimer) clearInterval(this.heightsTimer)
+        this.stakeUnsubscribe?.()
+        this.stakeUnsubscribe = null
         setReadyGauge(false)
         this.sock?.end()
         this.proc?.stdin?.end()
@@ -405,11 +421,46 @@ export class GossipManager {
         this.send({ type: "dial", addrs })
     }
 
-    async publishOwnHeights(): Promise<boolean> {
+    private setTxSubscription(on: boolean): void {
+        if (!this.started || this.txSubscribed === on) return
+        this.txSubscribed = on
+        this.send({ type: on ? "subscribe" : "unsubscribe", topic: TXS_TOPIC })
+        log.info(`[GOSSIP] ${on ? "joined" : "left"} ${TXS_TOPIC} (node ${on ? "is" : "is not"} staked)`)
+    }
+
+    /** Publishing changes network state; only a staked node may do it. */
+    private async mayPublish(): Promise<boolean> {
         if (!this.isReady()) {
             countPublishSkipped("not_ready")
             return false
         }
+        if (!(await isSelfStaked())) {
+            countPublishSkipped("not_staked")
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Publish a validated transaction envelope. Fire and forget: no ack,
+     * no retry. Receivers dedup on the tx hash; the per-block mempool merge
+     * repairs anything the mesh dropped.
+     */
+    async publishTx(validityData: ValidityData): Promise<boolean> {
+        if (!(await this.mayPublish())) return false
+        this.send({
+            type: "publish",
+            topic: TXS_TOPIC,
+            data: Buffer.from(JSON.stringify(validityData)).toString("base64"),
+        })
+        log.debug(
+            `[GOSSIP] published tx ${validityData.data.transaction.hash} to ${this.lastStats?.perTopic[TXS_TOPIC]?.subscribers ?? 0} topic peers`,
+        )
+        return true
+    }
+
+    async publishOwnHeights(): Promise<boolean> {
+        if (!(await this.mayPublish())) return false
         const advertised = this.getListenAddr()
         const record = await buildHeightsRecord(
             this.getPeerId() ?? "",
@@ -427,10 +478,7 @@ export class GossipManager {
     }
 
     async publishBlock(block: Block): Promise<boolean> {
-        if (!this.isReady()) {
-            countPublishSkipped("not_ready")
-            return false
-        }
+        if (!(await this.mayPublish())) return false
         this.send({
             type: "publish",
             topic: BLOCKS_TOPIC,
@@ -512,7 +560,32 @@ export class GossipManager {
                 `[GOSSIP] block ${block.number} (${block.hash}) received via gossip`,
             )
             await this.applyBlock(block)
+        } else if (topic === TXS_TOPIC) {
+            const { result, validityData } = await validateTxMessage(
+                new Uint8Array(data),
+            )
+            if (result !== "accept" || !validityData) return
+            await this.applyTx(validityData)
         }
+    }
+
+    private async applyTx(validityData: ValidityData): Promise<void> {
+        const hash = validityData.data.transaction.hash
+        const mempoolModule = await import("src/libs/blockchain/mempool")
+        const outcome = await mempoolModule.default.ingestGossiped(validityData)
+        if (outcome.accepted) {
+            countTxIngest("accepted")
+            log.debug(
+                `[GOSSIP] tx ${hash} ingested from ${validityData.rpc_public_key.data}, target block ${outcome.confirmationBlock}`,
+            )
+            return
+        }
+        const duplicate =
+            outcome.reason?.startsWith("in_mempool") ||
+            outcome.reason?.startsWith("on_chain") ||
+            outcome.reason?.includes("already")
+        countTxIngest(duplicate ? "duplicate" : "rejected")
+        log.debug(`[GOSSIP] tx ${hash} not ingested: ${outcome.reason}`)
     }
 
     private async applyHeightsRecord(record: HeightsRecord): Promise<void> {
