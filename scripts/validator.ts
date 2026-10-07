@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from "node:fs"
 import { demToOs } from "@kynesyslabs/demosdk/utils"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 
+import { resolveStakeConnectionUrl } from "./validator-options"
+
 const DEFAULT_AMOUNT_DEM = "1_000"
 const PEERLIST_FILE = "demos_peerlist.json"
 const DEFAULT_IDENTITY_FILE = ".demos_identity"
@@ -16,6 +18,7 @@ interface ValidatorContext {
     identity: string
     rpc: string
     amountDem: string
+    connectionUrl?: string
 }
 
 declare global {
@@ -187,7 +190,7 @@ async function submit(
 
 async function cmdStake(): Promise<void> {
     const demos = await connect()
-    const { amountDem, rpc } = globalThis.validatorCtx
+    const { amountDem, connectionUrl } = globalThis.validatorCtx
 
     let amountOs: string
     try {
@@ -203,9 +206,9 @@ async function cmdStake(): Promise<void> {
         exitWith(`stake amount must be greater than 0 (got ${amountDem} DEM)`)
     }
 
-    // The validator's public endpoint. Reuse the configured RPC so local and
-    // devnet stacks work without an extra flag.
-    const connectionUrl = rpc
+    if (!connectionUrl) {
+        exitWith("stake connection URL was not configured")
+    }
     const tx = await DemosTransactions.stake(amountOs, connectionUrl, demos)
     await submit(demos, tx, `Staking ${amountDem} DEM`)
 }
@@ -232,6 +235,10 @@ async function main(): Promise<void> {
         identity: flags.identity ?? DEFAULT_IDENTITY_FILE,
         rpc: flags.rpc ?? firstPeerlistRpc(),
         amountDem: flags.amount ?? DEFAULT_AMOUNT_DEM,
+        connectionUrl:
+            command === "stake"
+                ? resolveStakeConnectionUrl(flags, process.env)
+                : undefined,
     }
 
     switch (command) {
@@ -245,7 +252,8 @@ async function main(): Promise<void> {
             exitWith(
                 `unknown command: ${command ?? "(none)"}\n` +
                     "usage: validator <stake|unstake|exit> " +
-                    "[--amount <DEM>] [--identity <file>] [--rpc <url>]",
+                    "[--amount <DEM>] [--identity <file>] [--rpc <url>] " +
+                    "[--connection-url <public-url>]",
             )
     }
 }
