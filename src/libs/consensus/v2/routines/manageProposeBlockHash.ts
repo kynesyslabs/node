@@ -13,6 +13,7 @@ import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
 import { checkTimestampAgainstParent } from "@/libs/blockchain/validation/verifyBlock"
+import { filterSignaturesByShardMembership } from "./signerMembership"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
@@ -92,9 +93,11 @@ export default async function manageProposeBlockHash(
         response.response = getSharedState.publicKeyHex
 
         // INFO: Copy the incoming signatures to our candidate block
-        for (const [identity, signature] of Object.entries(
+        const shardSignatures = filterSignaturesByShardMembership(
             validationData["signatures"],
-        )) {
+            shard,
+        )
+        for (const [identity, signature] of Object.entries(shardSignatures)) {
             let isValid = false
 
             try {
