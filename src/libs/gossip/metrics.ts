@@ -41,6 +41,21 @@ export function registerGossipMetrics() {
         "Gossiped transactions dropped by rate limiting",
         ["reason"],
     )
+    m.createCounter(
+        "gossip_sidecar_restarts_total",
+        "Sidecar restarts by fault reason",
+        ["reason"],
+    )
+    m.createCounter(
+        "gossip_inbound_total",
+        "Messages received from the mesh per topic",
+        ["topic"],
+    )
+    m.createCounter(
+        "gossip_silence_probe_total",
+        "Outcomes of the HTTP cross-check run during gossip silence",
+        ["result"],
+    )
 }
 
 export function recordVerdict(
@@ -119,6 +134,35 @@ export function countTxRateLimited(reason: string) {
     try {
         getMetricsService().incrementCounter("gossip_tx_rate_limited_total", {
             reason,
+        })
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countSidecarRestart(reason: string) {
+    try {
+        getMetricsService().incrementCounter("gossip_sidecar_restarts_total", {
+            reason,
+        })
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countInbound(topic: string, n: number) {
+    if (n <= 0) return
+    try {
+        getMetricsService().incrementCounter("gossip_inbound_total", { topic }, n)
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countSilenceProbe(result: string) {
+    try {
+        getMetricsService().incrementCounter("gossip_silence_probe_total", {
+            result,
         })
     } catch {
         /* ignore */

@@ -197,6 +197,13 @@ function send(obj) {
     client.write(JSON.stringify({ v: PROTOCOL_VERSION, ...obj }) + "\n")
 }
 
+// Inbound evidence for the Bun-side liveness judge: messages received per
+// topic since the previous stats line, plus the time of the last one. The
+// sidecar reports; it never judges the mesh itself, because inbound silence
+// alone cannot tell a dead transport from dead peers.
+const inboundSinceLastStats = {}
+let lastInboundAt = 0
+
 function statsPayload() {
     const perTopic = {}
     for (const topic of ALL_TOPICS) {
@@ -204,9 +211,11 @@ function statsPayload() {
             subscribers: pubsub.getSubscribers(topic).length,
             mesh: pubsub.getMeshPeers(topic).length,
             subscribed: pubsub.getTopics().includes(topic),
+            inbound: inboundSinceLastStats[topic] ?? 0,
         }
+        inboundSinceLastStats[topic] = 0
     }
-    return { connections: node.getConnections().length, perTopic }
+    return { connections: node.getConnections().length, perTopic, lastInboundAt }
 }
 
 node.addEventListener("peer:connect", (evt) => {
@@ -228,6 +237,9 @@ node.addEventListener("peer:disconnect", (evt) => {
     })
 })
 pubsub.addEventListener("message", (evt) => {
+    inboundSinceLastStats[evt.detail.topic] =
+        (inboundSinceLastStats[evt.detail.topic] ?? 0) + 1
+    lastInboundAt = Date.now()
     send({
         type: "message",
         topic: evt.detail.topic,
@@ -360,7 +372,17 @@ server.listen(IPC_PATH, () => {
     slog(`IPC listening on ${IPC_PATH}`)
 })
 
-setInterval(() => send({ type: "stats", ...statsPayload() }), STATS_INTERVAL_MS)
+// The parent is the only reason this process exists. The IPC client-gone
+// timer covers a clean parent shutdown; this covers a parent that died
+// without closing the socket (SIGKILL mid-write, OOM kill).
+const PARENT_PID = process.ppid
+setInterval(() => {
+    if (process.ppid !== PARENT_PID || process.ppid === 1) {
+        slog(`parent ${PARENT_PID} is gone (ppid now ${process.ppid}); exiting`)
+        process.exit(0)
+    }
+    send({ type: "stats", ...statsPayload() })
+}, STATS_INTERVAL_MS)
 
 // Orphan prevention: die with the parent.
 process.stdin.resume()
