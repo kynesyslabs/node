@@ -69,9 +69,6 @@ const ALLOW_PUBLISH_TO_ZERO_PEERS = true
 
 const slog = (msg) => process.stderr.write(`[SIDECAR] ${msg}\n`)
 
-// Errors that mean a gossipsub stream silently died; the node must know.
-const FATAL_LOG_PATTERNS = ["outbound pipe error"]
-
 function componentLogger() {
     const makeLogger = (component) => {
         const noop = () => {}
@@ -87,10 +84,6 @@ function componentLogger() {
                 })
                 .join(" ")
             slog(`libp2p:${component} ERROR ${message}`)
-            if (FATAL_LOG_PATTERNS.some((p) => message.includes(p))) {
-                slog(`FATAL stream failure in ${component}: ${message}`)
-                process.exit(1)
-            }
         }
         logger.trace = noop
         logger.enabled = false

@@ -48,6 +48,8 @@ const RESTART_MAX = 3
 const RESTART_WINDOW_MS = 5 * 60_000
 /** Peers to hello when gossip is silent, to tell a dead mesh from a dead network. */
 const SILENCE_PROBE_PEERS = 3
+/** Sidecar stderr lines kept for the fatal report. */
+const SIDECAR_TAIL_LINES = 30
 
 interface SidecarStats {
     connections: number
@@ -81,6 +83,7 @@ export class GossipManager {
     private silenceProbeInFlight = false
     private lastSilenceProbeAt = 0
     private aloneLogged = false
+    private sidecarTail: string[] = []
 
     static getInstance(): GossipManager {
         if (!GossipManager.instance) {
@@ -95,12 +98,16 @@ export class GossipManager {
 
     // any gossip failure is fatal by design (debug posture).
     private fatal(context: string, error: unknown): never {
+        const tail =
+            this.sidecarTail.length > 0
+                ? `\n--- last ${this.sidecarTail.length} sidecar stderr line(s) ---\n${this.sidecarTail.join("\n")}`
+                : ""
         log.error(
             `[GOSSIP] FATAL in ${context}: ${
                 error instanceof Error
                     ? (error.stack ?? error.message)
                     : String(error)
-            }`,
+            }${tail}`,
         )
         process.exit(1)
     }
@@ -195,14 +202,24 @@ export class GossipManager {
             }
             this.fatal("sidecar spawn", e)
         })
+        this.sidecarTail = []
         proc.stderr?.on("data", (d: Buffer) => {
             for (const line of d.toString().split("\n")) {
-                if (line.trim()) log.warning(`[GOSSIP-SIDECAR] ${line}`)
+                if (!line.trim()) continue
+                log.warning(`[GOSSIP-SIDECAR] ${line}`)
+                this.sidecarTail.push(line)
+                if (this.sidecarTail.length > SIDECAR_TAIL_LINES) {
+                    this.sidecarTail.shift()
+                }
             }
         })
-        proc.on("exit", code => {
+        // "close", not "exit": it fires once stdio has drained, so the
+        // sidecar's last stderr lines (its crash reason) are logged first.
+        proc.on("close", (code, signal) => {
             if (this.proc !== proc) return // a superseded process
-            this.onSidecarGone(`process exited with code ${code}`)
+            this.onSidecarGone(
+                `process exited with code ${code}${signal ? ` (signal ${signal})` : ""}`,
+            )
         })
 
         await this.connectIpc()
@@ -278,19 +295,32 @@ export class GossipManager {
         this.recvBuffer = ""
         sock?.removeAllListeners("close")
         sock?.destroy()
-        if (proc && proc.exitCode === null) {
+        if (proc && proc.exitCode === null && proc.signalCode === null) {
+            proc.kill()
+        }
+        // Wait for "close" (stdio drained) so the old sidecar's final
+        // stderr lines land in the log before the restart/fatal message.
+        if (proc && !this.hasClosed(proc)) {
             await new Promise<void>(resolve => {
                 const t = setTimeout(() => {
                     proc.kill("SIGKILL")
                     resolve()
                 }, STOP_KILL_ESCALATION_MS)
-                proc.once("exit", () => {
+                proc.once("close", () => {
                     clearTimeout(t)
                     resolve()
                 })
-                proc.kill()
             })
         }
+    }
+
+    private hasClosed(proc: ChildProcess): boolean {
+        // Streams are closed and destroyed once "close" has fired.
+        const stderr = proc.stderr
+        return (
+            (proc.exitCode !== null || proc.signalCode !== null) &&
+            (stderr === null || stderr.destroyed)
+        )
     }
 
     private connectIpc(): Promise<void> {
