@@ -55,7 +55,12 @@ interface SidecarStats {
     connections: number
     perTopic: Record<
         string,
-        { subscribers: number; mesh: number; subscribed?: boolean; inbound?: number }
+        {
+            subscribers: number
+            mesh: number
+            subscribed?: boolean
+            inbound?: number
+        }
     >
     lastInboundAt?: number
 }
@@ -374,9 +379,7 @@ export class GossipManager {
 
     private send(obj: Record<string, unknown>): void {
         if (!this.sock || this.sock.destroyed) return
-        this.sock.write(
-            JSON.stringify({ v: PROTOCOL_VERSION, ...obj }) + "\n",
-        )
+        this.sock.write(JSON.stringify({ v: PROTOCOL_VERSION, ...obj }) + "\n")
     }
 
     private onIpcData(chunk: Buffer): void {
@@ -391,7 +394,9 @@ export class GossipManager {
             try {
                 msg = JSON.parse(line)
             } catch {
-                log.warning(`[GOSSIP] unparseable IPC line (${line.length} bytes)`)
+                log.warning(
+                    `[GOSSIP] unparseable IPC line (${line.length} bytes)`,
+                )
                 continue
             }
             this.onIpcMessage(msg).catch(e =>
@@ -569,7 +574,9 @@ export class GossipManager {
                     ).catch(() => "unreachable" as const),
                 ),
             )
-            const alive = verdicts.some(v => v !== "unreachable" && v !== "skipped")
+            const alive = verdicts.some(
+                v => v !== "unreachable" && v !== "skipped",
+            )
             if (alive) {
                 countSilenceProbe("peers_alive")
                 void this.restartSidecar(
@@ -601,15 +608,27 @@ export class GossipManager {
         )
     }
 
-    isReady(): boolean {
+    /**
+     * The sidecar is up, reporting, and has at least one heights
+     * subscriber. This is the publish gate: a node must keep speaking into
+     * a quiet mesh, otherwise a network where every node waits to hear
+     * something first never produces anything to hear.
+     */
+    private sidecarUp(): boolean {
         if (!this.started || !this.readyInfo || !this.lastStats) return false
         if (this.restarting) return false
-        const now = Date.now()
-        // Stale stats or a silent mesh mean "not ready": routing falls back
-        // to HTTP while checkSidecarHealth decides whether anything is wrong.
-        if (now - this.lastStatsAt > STATS_STALE_MS) return false
-        if (now - this.lastInboundAt > INBOUND_SILENCE_MS) return false
+        if (Date.now() - this.lastStatsAt > STATS_STALE_MS) return false
         return (this.lastStats.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0) >= 1
+    }
+
+    /**
+     * Whether callers should prefer gossip over HTTP right now: the sidecar
+     * is up AND the mesh has delivered something recently. Never used to
+     * gate publishing (see sidecarUp).
+     */
+    isReady(): boolean {
+        if (!this.sidecarUp()) return false
+        return Date.now() - this.lastInboundAt <= INBOUND_SILENCE_MS
     }
 
     getListenAddr(): string | null {
@@ -650,20 +669,34 @@ export class GossipManager {
         if (!this.started || this.txSubscribed === on) return
         this.txSubscribed = on
         this.send({ type: on ? "subscribe" : "unsubscribe", topic: TXS_TOPIC })
-        log.info(`[GOSSIP] ${on ? "joined" : "left"} ${TXS_TOPIC} (node ${on ? "is" : "is not"} staked)`)
+        log.info(
+            `[GOSSIP] ${on ? "joined" : "left"} ${TXS_TOPIC} (node ${on ? "is" : "is not"} staked)`,
+        )
     }
 
     /** Publishing changes network state; only a staked node may do it. */
-    private async mayPublish(): Promise<boolean> {
-        if (!this.isReady()) {
+    private async mayPublish(topic: string): Promise<boolean> {
+        if (!this.sidecarUp()) {
             countPublishSkipped("not_ready")
+            this.logPublishSkipped(topic, "sidecar not up or no subscribers")
             return false
         }
         if (!(await isSelfStaked())) {
             countPublishSkipped("not_staked")
+            this.logPublishSkipped(topic, "node is not staked")
             return false
         }
         return true
+    }
+
+    private lastSkipLog = new Map<string, number>()
+
+    /** One debug line per topic per 30 s, so a quiet log still says why. */
+    private logPublishSkipped(topic: string, why: string): void {
+        const now = Date.now()
+        if (now - (this.lastSkipLog.get(topic) ?? 0) < 30_000) return
+        this.lastSkipLog.set(topic, now)
+        log.debug(`[GOSSIP] publish to ${topic} skipped: ${why}`)
     }
 
     /**
@@ -672,7 +705,7 @@ export class GossipManager {
      * repairs anything the mesh dropped.
      */
     async publishTx(validityData: ValidityData): Promise<boolean> {
-        if (!(await this.mayPublish())) return false
+        if (!(await this.mayPublish(TXS_TOPIC))) return false
         this.send({
             type: "publish",
             topic: TXS_TOPIC,
@@ -685,7 +718,7 @@ export class GossipManager {
     }
 
     async publishOwnHeights(): Promise<boolean> {
-        if (!(await this.mayPublish())) return false
+        if (!(await this.mayPublish(HEIGHTS_TOPIC))) return false
         const advertised = this.getListenAddr()
         const record = await buildHeightsRecord(
             this.getPeerId() ?? "",
@@ -703,7 +736,7 @@ export class GossipManager {
     }
 
     async publishBlock(block: Block): Promise<boolean> {
-        if (!(await this.mayPublish())) return false
+        if (!(await this.mayPublish(BLOCKS_TOPIC))) return false
         this.send({
             type: "publish",
             topic: BLOCKS_TOPIC,
@@ -723,7 +756,13 @@ export class GossipManager {
         if (ready !== this.lastReady) {
             this.lastReady = ready
             log.info(
-                `[GOSSIP] ready state changed: ${ready ? "READY (mesh has peers)" : "NOT READY (mesh empty)"}`,
+                `[GOSSIP] ready state changed: ${
+                    ready
+                        ? "READY (mesh delivering)"
+                        : this.sidecarUp()
+                          ? "NOT READY (mesh quiet; still publishing, reads via HTTP)"
+                          : "NOT READY (sidecar down or no subscribers)"
+                }`,
             )
         }
         setReadyGauge(ready)
@@ -815,9 +854,8 @@ export class GossipManager {
 
     private async applyHeightsRecord(record: HeightsRecord): Promise<void> {
         const peerman = PeerManager.getInstance()
-        const { BroadcastManager: broadcaster } = await import(
-            "src/libs/communications/broadcastManager"
-        )
+        const { BroadcastManager: broadcaster } =
+            await import("src/libs/communications/broadcastManager")
 
         const status =
             record.height >= getSharedState.lastBlockNumber ? "1" : "0"
@@ -903,9 +941,8 @@ export class GossipManager {
         log.info(
             `[GOSSIP] handing block ${block.number} to handleNewBlock (tx fetch peer: ${sender})`,
         )
-        const { BroadcastManager: broadcaster } = await import(
-            "src/libs/communications/broadcastManager"
-        )
+        const { BroadcastManager: broadcaster } =
+            await import("src/libs/communications/broadcastManager")
         const { syncLock } = await import("src/libs/blockchain/routines/Sync")
         await syncLock.runExclusive(() =>
             broadcaster.handleNewBlock(sender, block as never, "gossip"),
