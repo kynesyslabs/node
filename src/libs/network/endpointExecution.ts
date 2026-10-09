@@ -34,6 +34,29 @@ import isValidatorForNextBlock from "../consensus/v2/routines/isValidator"
 
 import { isReferenceBlockAllowed } from "@/libs/blockchain/referenceBlockWindow"
 
+/**
+ * How an accepted transaction left this node. "held" means no validator has
+ * it yet: it is cached for a later relay and may land later or not at all.
+ */
+export type BroadcastDisposition = "mempool" | "relayed" | "held"
+
+/**
+ * Names the accepted transaction and the path that took it, in `extra` next
+ * to `confirmationBlock`, so a client can check the node took the bytes it
+ * signed and tell a held transaction from one already with a validator
+ * without matching message text. `response` is left alone: per-type
+ * handlers put their own result there.
+ */
+export function withDisposition<T extends { extra?: unknown }>(
+    reply: T,
+    hash: string,
+    disposition: BroadcastDisposition,
+): T {
+    const extra =
+        reply.extra && typeof reply.extra === "object" ? reply.extra : {}
+    return { ...reply, extra: { ...extra, hash, disposition } }
+}
+
 export async function handleExecuteTransaction(
     validatedData: ValidityData,
     sender: string,
@@ -340,7 +363,11 @@ export async function handleExecuteTransaction(
 
         if (getSharedState.PROD) {
             if (getSharedState.inConsensusLoop) {
-                return await DTRManager.inConsensusHandler([validatedData])
+                return withDisposition(
+                    await DTRManager.inConsensusHandler([validatedData]),
+                    queriedTx.hash,
+                    "held",
+                )
             }
 
             const { isValidator, validators, lastBlockHash } =
@@ -368,7 +395,7 @@ export async function handleExecuteTransaction(
                     )
                     DTRManager.cacheForRetry(validatedData)
 
-                    return {
+                    return withDisposition({
                         success: true,
                         response: {
                             message:
@@ -379,14 +406,14 @@ export async function handleExecuteTransaction(
                                 DTRManager.parkedConfirmationBlock,
                         },
                         require_reply: false,
-                    }
+                    }, queriedTx.hash, "held")
                 }
 
                 const confirmationBlocks = accepted
                     .map(res => DTRManager.readConfirmationBlock(res))
                     .filter((block): block is number => block !== null)
 
-                return {
+                return withDisposition({
                     success: true,
                     response: {
                         message: "Transaction relayed to validators",
@@ -398,7 +425,7 @@ export async function handleExecuteTransaction(
                                 : getSharedState.lastBlockNumber + 1,
                     },
                     require_reply: false,
-                }
+                }, queriedTx.hash, "relayed")
             }
         }
 
@@ -421,6 +448,9 @@ export async function handleExecuteTransaction(
                 ...(result.extra ? result.extra : {}),
                 confirmationBlock,
                 ...(error ? { error } : {}),
+            }
+            if (!error) {
+                return withDisposition(result, queriedTx.hash, "mempool")
             }
         } catch (e) {
             result.success = false
