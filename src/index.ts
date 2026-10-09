@@ -19,7 +19,11 @@ import { PeerManager } from "./libs/peer"
 import Chain from "./libs/blockchain/chain"
 import mainLoop from "./utilities/mainLoop"
 import GossipManager from "./libs/gossip/GossipManager"
-import { getStakedSet, onSelfStakeChange } from "./libs/consensus/stakedSet"
+import {
+    getStakedSet,
+    invalidateStakedSet,
+    onSelfStakeChange,
+} from "./libs/consensus/stakedSet"
 import { syncL2PSServices } from "./libs/l2ps/roleServices"
 import { Waiter } from "./utilities/waiter"
 import { TimeoutError, AbortError } from "@/errors"
@@ -539,6 +543,7 @@ async function preMainLoop() {
         void syncL2PSServices(staked)
     })
     // Prime the node's own role before anything role-gated starts.
+    invalidateStakedSet()
     await getStakedSet()
 
     await peerBootstrap(indexState.PeerList)

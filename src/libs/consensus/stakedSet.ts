@@ -17,6 +17,7 @@ let stakedSet = new Set<string>()
 let stakedSetHeight = -1
 let refreshing: Promise<void> | null = null
 let selfStaked: boolean | null = null
+let emptyWarnedAt = -1
 
 type StakeListener = (staked: boolean) => void
 const selfListeners = new Set<StakeListener>()
@@ -36,7 +37,14 @@ async function refresh(): Promise<void> {
                     .filter((a): a is string => a !== null)
                     .map(a => a.toLowerCase()),
             )
-            stakedSetHeight = head
+
+            stakedSetHeight = stakedSet.size === 0 ? -1 : head
+            if (stakedSet.size === 0 && emptyWarnedAt !== head) {
+                emptyWarnedAt = head
+                log.warning(
+                    `[STAKED SET] no staked validators at head ${head}; not caching, will re-query`,
+                )
+            }
             notifySelf()
         } catch (e) {
             log.warning(
@@ -58,7 +66,7 @@ function notifySelf(): void {
     const first = selfStaked === null
     selfStaked = now
     log.info(
-        `[STAKED SET] this node is ${now ? "staked" : "not staked"} at height ${stakedSetHeight}`,
+        `[STAKED SET] this node is ${now ? "staked" : "not staked"} at height ${getSharedState.lastBlockNumber ?? 0}`,
     )
     if (first && !now) return
     for (const listener of selfListeners) {
@@ -117,8 +125,16 @@ export function onSelfStakeChange(listener: StakeListener): () => void {
     return () => selfListeners.delete(listener)
 }
 
+/**
+ * Drop the cached set so the next lookup re-queries at the current head.
+ */
+export function invalidateStakedSet(): void {
+    stakedSetHeight = -1
+}
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetStakedSet(): void {
+    emptyWarnedAt = -1
     stakedSet = new Set()
     stakedSetHeight = -1
     refreshing = null

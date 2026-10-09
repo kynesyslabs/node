@@ -25,6 +25,7 @@ import {
     __resetStakedSet,
     getStakedSet,
     getStakedSetHeight,
+    invalidateStakedSet,
     isSelfStaked,
     isStaked,
     onSelfStakeChange,
@@ -87,6 +88,29 @@ describe("stakedSet", () => {
         const seen: boolean[] = []
         onSelfStakeChange(v => seen.push(v))
         expect(seen).toEqual([true])
+    })
+
+    it("does not cache an empty set and recovers once validators are seeded", async () => {
+        validators = []
+        expect(await isStaked("0xaaa")).toBe(false)
+        expect(getStakedSetHeight()).toBe(-1)
+        expect(await isSelfStaked()).toBe(false)
+        // table seeded at the same head
+        validators = [{ address: "0xAAA" }, { address: "0xself" }]
+        expect(await isStaked("0xaaa")).toBe(true)
+        expect(await isSelfStaked()).toBe(true)
+        expect(getStakedSetHeight()).toBe(10)
+        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(3)
+    })
+
+    it("re-queries at the same head after invalidation", async () => {
+        await getStakedSet()
+        validators = [{ address: "0xBBB" }]
+        expect(await isStaked("0xbbb")).toBe(false)
+        invalidateStakedSet()
+        expect(await isStaked("0xbbb")).toBe(true)
+        expect(await isStaked("0xaaa")).toBe(false)
+        expect(getGCRValidatorsAtBlock).toHaveBeenCalledTimes(2)
     })
 
     it("keeps the previous set when the refresh fails", async () => {
