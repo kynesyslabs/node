@@ -14,9 +14,23 @@ import L2PSMempool from "@/libs/blockchain/l2ps_mempool"
 import L2PSTransactionExecutor from "@/libs/l2ps/L2PSTransactionExecutor"
 import { L2PSMessage } from "./entities/L2PSMessage"
 import { canonicalizeKey } from "./keys"
-import type { SerializedEncryptedMessage, StoredMessage } from "./types"
+import type { MessageStatus, SerializedEncryptedMessage, StoredMessage } from "./types"
 
 const MAX_OFFLINE_MESSAGES_PER_SENDER = 200
+
+export interface ProcessMessageResult {
+    success: boolean
+    /** Row id of the accepted message (a retry reuses the failed row's id). */
+    messageId?: string
+    l2psTxHash?: string
+    error?: string
+    /** The sender already sent this message to this recipient; nothing was redone. */
+    duplicate?: boolean
+    /** Stored status of the original message, set when `duplicate` is true. */
+    status?: MessageStatus
+}
+
+type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
 
 export class L2PSMessagingService {
     private static instance: L2PSMessagingService
@@ -35,6 +49,11 @@ export class L2PSMessagingService {
      *
      * Implementation split into discrete steps (dedup → quota →
      * persist → submit → update) to keep cognitive complexity bounded.
+     *
+     * A message is identified by subnet, sender, recipient and messageHash.
+     * Clients reuse one hash when they fan a message out to several
+     * recipients, and resend it when an acknowledgement is lost: the resend
+     * gets the original outcome back, and a failed attempt can be retried.
      */
     async processMessage(
         fromKey: string,
@@ -44,45 +63,107 @@ export class L2PSMessagingService {
         messageHash: string,
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
-    ): Promise<{ success: boolean; l2psTxHash?: string; error?: string }> {
+    ): Promise<ProcessMessageResult> {
         const repo = dataSource.getRepository(L2PSMessage)
+        const identity = { l2psUid, fromKey, toKey, messageHash }
 
-        if (await this.isDuplicate(repo, messageHash)) {
-            return { success: false, error: "Duplicate message" }
+        const existing = await this.findExisting(repo, identity)
+        if (existing && existing.status !== "failed") {
+            return this.duplicateResult(existing)
         }
 
         const quotaError = this.reserveOfflineQuota(fromKey, recipientOnline)
         if (quotaError) return { success: false, error: quotaError }
 
         const now = Date.now()
-        const persistError = await this.persistMessage(
-            repo,
-            { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
-        )
-        if (persistError) return { success: false, error: persistError }
+        const status = recipientOnline ? "delivered" : "queued"
+        const writeError = existing
+            ? await this.claimFailed(repo, existing.id, { encrypted, now, status })
+            : await this.persistMessage(
+                repo,
+                { messageId, fromKey, toKey, l2psUid, messageHash, encrypted, now, recipientOnline },
+            )
+        const id = existing?.id ?? messageId
+        if (writeError) {
+            this.releaseOfflineQuota(fromKey, recipientOnline)
+            // A concurrent send of the same message got there first.
+            const winner = await this.findExisting(repo, identity)
+            if (winner && winner.status !== "failed") {
+                return this.duplicateResult(winner)
+            }
+            return { success: false, error: writeError }
+        }
 
-        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, messageId, messageHash, encrypted, now)
+        const l2psResult = await this.submitToL2PS(l2psUid, fromKey, toKey, id, messageHash, encrypted, now)
 
         if (!l2psResult.success) {
-            await this.handleSubmissionFailure(repo, messageId, fromKey, recipientOnline)
+            await this.handleSubmissionFailure(repo, id, fromKey, recipientOnline)
             return { success: false, error: l2psResult.error }
         }
 
         if (l2psResult.txHash) {
-            await repo.update(messageId, {
+            await repo.update(id, {
                 l2psTxHash: l2psResult.txHash,
                 status: recipientOnline ? "delivered" : "queued",
             })
         }
 
-        return { success: true, l2psTxHash: l2psResult.txHash }
+        return { success: true, l2psTxHash: l2psResult.txHash, messageId: id }
     }
 
-    private async isDuplicate(
-        repo: ReturnType<typeof dataSource.getRepository<L2PSMessage>>,
-        messageHash: string,
-    ): Promise<boolean> {
-        return (await repo.findOneBy({ messageHash })) !== null
+    /**
+     * Take a failed row back for a retry. Conditional on it still being
+     * failed, so two concurrent retries cannot both resubmit it.
+     */
+    private async claimFailed(
+        repo: MessageRepo,
+        id: string,
+        retry: { encrypted: SerializedEncryptedMessage; now: number; status: MessageStatus },
+    ): Promise<string | null> {
+        const result = await repo.update(
+            { id, status: "failed" },
+            { encrypted: retry.encrypted, timestamp: String(retry.now), status: retry.status, l2psTxHash: null },
+        )
+        return result.affected ? null : "Duplicate message"
+    }
+
+    /**
+     * The recipient's socket dropped the frame: keep the message for offline
+     * delivery and count it against the sender's offline quota, which
+     * `markDelivered` releases.
+     */
+    async requeue(messageId: string, fromKey: string): Promise<void> {
+        const repo = dataSource.getRepository(L2PSMessage)
+        await repo.update({ id: messageId, status: "delivered" }, { status: "queued" })
+        this.offlineMessageCounts.set(fromKey, (this.offlineMessageCounts.get(fromKey) ?? 0) + 1)
+    }
+
+    private findExisting(
+        repo: MessageRepo,
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+    ): Promise<L2PSMessage | null> {
+        return repo.findOneBy({
+            l2psUid: identity.l2psUid,
+            fromKey: canonicalizeKey(identity.fromKey),
+            toKey: canonicalizeKey(identity.toKey),
+            messageHash: identity.messageHash,
+        })
+    }
+
+    private duplicateResult(existing: L2PSMessage): ProcessMessageResult {
+        return {
+            success: true,
+            duplicate: true,
+            messageId: existing.id,
+            l2psTxHash: existing.l2psTxHash ?? undefined,
+            status: existing.status,
+        }
+    }
+
+    private releaseOfflineQuota(fromKey: string, recipientOnline: boolean): void {
+        if (recipientOnline) return
+        const count = this.offlineMessageCounts.get(fromKey) ?? 0
+        if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
     }
 
     /**
@@ -105,7 +186,7 @@ export class L2PSMessagingService {
     }
 
     private async persistMessage(
-        repo: ReturnType<typeof dataSource.getRepository<L2PSMessage>>,
+        repo: MessageRepo,
         opts: {
             messageId: string
             fromKey: string
@@ -135,7 +216,7 @@ export class L2PSMessagingService {
             return null
         } catch (saveError: any) {
             // Catch duplicate-key constraint violation (TOCTOU race
-            // between the findOneBy guard and the insert).
+            // between the findExisting guard and the insert).
             if (
                 saveError?.code === "23505" ||
                 saveError?.message?.includes("duplicate key")
@@ -147,15 +228,13 @@ export class L2PSMessagingService {
     }
 
     private async handleSubmissionFailure(
-        repo: ReturnType<typeof dataSource.getRepository<L2PSMessage>>,
+        repo: MessageRepo,
         messageId: string,
         fromKey: string,
         recipientOnline: boolean,
     ): Promise<void> {
         await repo.update(messageId, { status: "failed" as const })
-        if (recipientOnline) return
-        const count = this.offlineMessageCounts.get(fromKey) ?? 0
-        if (count > 0) this.offlineMessageCounts.set(fromKey, count - 1)
+        this.releaseOfflineQuota(fromKey, recipientOnline)
     }
 
     /**
