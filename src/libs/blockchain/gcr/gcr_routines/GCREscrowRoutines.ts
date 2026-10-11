@@ -142,6 +142,23 @@ export default class GCREscrowRoutines {
         }
     }
 
+    /**
+     * A claimed escrow, or an expired one whose deposits were all refunded,
+     * holds no funds and is replaced by a new escrow on the next deposit.
+     */
+    private static isSpentEscrow(
+        escrow: EscrowData,
+        currentTimestamp: number,
+    ): boolean {
+        if (escrow.claimed) {
+            return true
+        }
+        return (
+            currentTimestamp > escrow.expiryTimestamp &&
+            escrow.deposits.every(d => d.refunded)
+        )
+    }
+
     private static parseAmount(value?: string | number | bigint): bigint {
         if (value === undefined) {
             return 0n
@@ -300,8 +317,12 @@ export default class GCREscrowRoutines {
                     simulate,
                 )
 
-                // Create new escrow or validate existing one
-                if (!escrowAccount.escrows[escrowAddress]) {
+                // Create new escrow (or replace a spent one) or validate existing one
+                const existingEscrow = escrowAccount.escrows[escrowAddress]
+                if (
+                    !existingEscrow ||
+                    this.isSpentEscrow(existingEscrow, currentTimestamp)
+                ) {
                     escrowAccount.escrows[escrowAddress] = this.createNewEscrowData(
                         platform,
                         username,
