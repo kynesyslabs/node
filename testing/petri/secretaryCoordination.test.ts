@@ -8,7 +8,7 @@
  * - Hash match/mismatch counting
  * - Submission receipt and collection state
  * - Secretary failover logic
- * - Verify-then-sign model (manageProposeBlockHash Petri branch)
+ * (Verify-then-sign is covered against production code in blockHashSigning.test.ts)
  */
 import { describe, expect, test } from "bun:test"
 
@@ -296,45 +296,8 @@ describe("Secretary failover", () => {
     })
 })
 
-// ---- Verify-then-sign model (manageProposeBlockHash Petri branch) ----
-
-describe("Verify-then-sign model", () => {
-    test("matching hashes: sign and accept", () => {
-        const ourCandidateHash = "abc123def456"
-        const proposedBlockHash = "abc123def456"
-        const hashMatch = ourCandidateHash === proposedBlockHash
-        expect(hashMatch).toBe(true)
-    })
-
-    test("mismatched hashes: reject", () => {
-        const ourCandidateHash = "abc123def456"
-        const proposedBlockHash = "xyz789ghi012"
-        const hashMatch = ourCandidateHash === proposedBlockHash
-        expect(hashMatch).toBe(false)
-    })
-
-    test("no candidate block formed: reject", () => {
-        const candidateBlockFormed = false
-        expect(candidateBlockFormed).toBe(false)
-        // Response should be 401
-    })
-
-    test("verify-then-sign is stricter than accept-and-sign", () => {
-        // accept-and-sign: always signs (no verification)
-        // verify-then-sign: only signs if hashes match
-        const scenarios = [
-            { ourHash: "aaa", theirHash: "aaa", acceptAndSign: true, verifyThenSign: true },
-            { ourHash: "aaa", theirHash: "bbb", acceptAndSign: true, verifyThenSign: false },
-            { ourHash: null, theirHash: "ccc", acceptAndSign: true, verifyThenSign: false },
-        ]
-        for (const s of scenarios) {
-            const oldResult = s.acceptAndSign // old model always signs
-            const newResult = s.ourHash !== null && s.ourHash === s.theirHash
-            expect(oldResult).toBe(s.acceptAndSign)
-            expect(newResult).toBe(s.verifyThenSign)
-        }
-    })
-})
+// Verify-then-sign (manageProposeBlockHash Petri branch) is tested against the
+// production code in blockHashSigning.test.ts.
 
 // ---- Secretary block finalization flow ----
 
