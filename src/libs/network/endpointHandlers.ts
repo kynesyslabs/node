@@ -503,40 +503,21 @@ export default class ServerHandlers {
                 result.success = l2psHashResult.result === 200
                 break
             }
-
-            case "storageProgram": {
-                try {
-                    const storageResult = await HandleGCR.applyToTx(queriedTx, false, false)
-                    result.success = storageResult.success
-                    if (!storageResult.success) {
-                        result.response = false
-                        result.extra = {
-                            error: "Failed to apply storage transaction: " + storageResult.message,
-                        }
-                    } else {
-                        result.response = { message: "Storage transaction applied" }
-                    }
-                } catch (e) {
-                    log.error("[handleExecuteTransaction] Error in storageProgram: " + e)
-                    result.success = false
-                    result.response = false
-                    result.extra = { error: String(e) }
-                }
-                break
-            }
         }
 
         // Only if the transaction is valid we add it to the mempool
         if (result.success) {
             // REVIEW Simulating gcr edits application as we will apply them in the consensus
-            // For storageProgram, edits were already applied directly — skip re-simulation to avoid double-apply check
-            const simulate = tx.content.type !== "storageProgram"
+            // NOTE storageProgram edits are simulated here too. The real write happens only
+            // in the block path (consensus / sync); a write here would run before the mempool
+            // duplicate check and without inclusion, and would be applied again in the block.
+            const simulate = true
             // NOTE We apply the GCREdit to the GCR and check if it is successful. If not, we return an error
-            const editsResults = simulate ? await HandleGCR.applyToTx(
+            const editsResults = await HandleGCR.applyToTx(
                 queriedTx,
                 false, // isRollback
                 simulate,
-            ) : { success: true, message: "storageProgram applied directly" }
+            )
 
             if (!editsResults.success) {
                 log.error("[handleExecuteTransaction] Failed to apply GCREdit")
