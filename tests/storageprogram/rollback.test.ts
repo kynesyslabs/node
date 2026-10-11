@@ -2,7 +2,9 @@ import "./mockDatasource"
 import { beforeEach, describe, expect, test } from "bun:test"
 import { FakeGCRMainRepository } from "./fakeRepository"
 
-// Loaded after the datasource stub is registered
+// Loaded after the datasource stub is registered. Class-like default exports
+// keep their PascalCase names.
+/* eslint-disable @typescript-eslint/naming-convention */
 const { default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
 
 const DEPLOYER = "a".repeat(64)
@@ -15,7 +17,12 @@ function applyEdit(edit: any, repo: FakeGCRMainRepository, simulate = false) {
     return (HandleGCR as any).applyStorageProgramEdit(edit, repo, simulate)
 }
 
-function edit(operation: string, txhash: string, data?: any, isRollback = false) {
+function edit(
+    operation: string,
+    txhash: string,
+    data?: any,
+    isRollback = false,
+) {
     return {
         type: "storageProgram",
         target: TARGET,
@@ -40,24 +47,36 @@ const createData = {
 const writeData = { variables: { a: 2, b: 3 }, metadata: { lastModified: 2 } }
 const aclData = {
     variables: {},
-    metadata: { accessControl: "public", allowedAddresses: [], lastModified: 2 },
+    metadata: {
+        accessControl: "public",
+        allowedAddresses: [],
+        lastModified: 2,
+    },
 }
 
 let repo: FakeGCRMainRepository
 beforeEach(async () => {
     repo = new FakeGCRMainRepository()
-    expect((await applyEdit(edit("CREATE", CREATE_TX, createData), repo)).success).toBe(true)
+    expect(
+        (await applyEdit(edit("CREATE", CREATE_TX, createData), repo)).success,
+    ).toBe(true)
 })
 
 describe("storage program rollback (finding 2)", () => {
     test("rolling back CREATE removes the row it created", async () => {
-        const res = await applyEdit(edit("CREATE", CREATE_TX, createData, true), repo)
+        const res = await applyEdit(
+            edit("CREATE", CREATE_TX, createData, true),
+            repo,
+        )
         expect(res.success).toBe(true)
         expect(repo.rows.has(TARGET)).toBe(false)
     })
 
     test("rolling back a CREATE from another tx leaves the existing row alone", async () => {
-        const res = await applyEdit(edit("CREATE", OTHER_TX, createData, true), repo)
+        const res = await applyEdit(
+            edit("CREATE", OTHER_TX, createData, true),
+            repo,
+        )
         expect(res.success).toBe(true)
         expect(repo.rows.has(TARGET)).toBe(true)
     })
@@ -69,7 +88,10 @@ describe("storage program rollback (finding 2)", () => {
 
     test("rolling back WRITE does not merge the data again and fails visibly", async () => {
         const before = repo.rows.get(TARGET).data
-        const res = await applyEdit(edit("WRITE", OTHER_TX, writeData, true), repo)
+        const res = await applyEdit(
+            edit("WRITE", OTHER_TX, writeData, true),
+            repo,
+        )
         expect(res.success).toBe(false)
         expect(res.message).toContain("not supported")
         expect(repo.rows.get(TARGET).data).toEqual(before)
@@ -81,11 +103,16 @@ describe("storage program rollback (finding 2)", () => {
             repo,
         )
         expect(res.success).toBe(false)
-        expect(repo.rows.get(TARGET).data.metadata.accessControl).toBe("private")
+        expect(repo.rows.get(TARGET).data.metadata.accessControl).toBe(
+            "private",
+        )
     })
 
     test("rolling back DELETE does not delete the program", async () => {
-        const res = await applyEdit(edit("DELETE", OTHER_TX, undefined, true), repo)
+        const res = await applyEdit(
+            edit("DELETE", OTHER_TX, undefined, true),
+            repo,
+        )
         expect(res.success).toBe(false)
         expect(repo.rows.get(TARGET).data.metadata).not.toBeNull()
     })

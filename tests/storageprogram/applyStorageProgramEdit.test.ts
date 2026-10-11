@@ -2,7 +2,9 @@ import "./mockDatasource"
 import { beforeEach, describe, expect, test } from "bun:test"
 import { FakeGCRMainRepository } from "./fakeRepository"
 
-// Loaded after the datasource stub is registered
+// Loaded after the datasource stub is registered. Class-like default exports
+// keep their PascalCase names.
+/* eslint-disable @typescript-eslint/naming-convention */
 const { default: HandleGCR } = await import("@/libs/blockchain/gcr/handleGCR")
 
 const DEPLOYER = "a".repeat(64)
@@ -78,7 +80,10 @@ describe("data limits at GCR apply (finding 6)", () => {
     test("valid CREATE and WRITE edits still apply", async () => {
         expect((await applyEdit(createEdit({ a: 1 }), repo)).success).toBe(true)
         const res = await applyEdit(
-            storageEdit("WRITE", { variables: { b: 2 }, metadata: { lastModified: 2 } }),
+            storageEdit("WRITE", {
+                variables: { b: 2 },
+                metadata: { lastModified: 2 },
+            }),
             repo,
         )
         expect(res.success).toBe(true)

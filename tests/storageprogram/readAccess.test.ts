@@ -14,14 +14,22 @@ function program(pubkey: string, accessControl: string) {
         pubkey,
         data: {
             variables: { secret: "v" },
-            metadata: { deployer: DEPLOYER, accessControl, allowedAddresses: [] },
+            metadata: {
+                deployer: DEPLOYER,
+                accessControl,
+                allowedAddresses: [],
+            },
         },
     }
 }
 
 function read(storageAddress: string, extra: Record<string, unknown> = {}) {
     return manageNodeCall(
-        { message: "getStorageProgram", data: { storageAddress, ...extra }, muid: "" } as any,
+        {
+            message: "getStorageProgram",
+            data: { storageAddress, ...extra },
+            muid: "",
+        } as any,
         // nodeCall is a no-auth RPC method, so server_rpc always passes ""
         "",
     )

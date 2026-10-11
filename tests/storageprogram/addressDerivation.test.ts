@@ -33,13 +33,17 @@ describe("storage program address derivation (finding 3)", () => {
             TIMESTAMP,
         )
         expect(res.success).toBe(true)
-        expect(res.gcrEdits?.[0].target).toBe(
+        expect((res.gcrEdits?.[0] as any).target).toBe(
             StorageProgram.deriveStorageAddress(VICTIM, "myApp", "salt1"),
         )
     })
 
     test("squatter cannot CREATE at the address the victim will derive", async () => {
-        const victimAddress = StorageProgram.deriveStorageAddress(VICTIM, "myApp", "salt1")
+        const victimAddress = StorageProgram.deriveStorageAddress(
+            VICTIM,
+            "myApp",
+            "salt1",
+        )
         const res = await handleStorageProgramTransaction(
             createPayload(SQUATTER, victimAddress),
             SQUATTER,
@@ -70,7 +74,7 @@ describe("storage program address derivation (finding 3)", () => {
                 payload,
                 SQUATTER,
                 TX_HASH,
-            TIMESTAMP,
+                TIMESTAMP,
             )
             expect(res.success).toBe(false)
         }
