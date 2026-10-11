@@ -339,6 +339,43 @@ export default class HandleGCR {
                 where: { pubkey: target },
             })
 
+            // REVIEW: Rollbacks must undo the edit, never re-apply it forward
+            if (editOperation.isRollback) {
+                if (operation === "CREATE") {
+                    // Only remove the row this exact CREATE produced
+                    if (
+                        !account ||
+                        account.data?.metadata?.createdTxHash !== editOperation.txhash
+                    ) {
+                        return {
+                            success: true,
+                            message: `Nothing to roll back for CREATE: ${target}`,
+                        }
+                    }
+
+                    if (!simulate) {
+                        await repository.delete({ pubkey: target })
+                        log.info(`[StorageProgram] CREATE rolled back: ${target}`)
+                    }
+
+                    return {
+                        success: true,
+                        message: `Storage program creation rolled back: ${target}`,
+                    }
+                }
+
+                // WRITE, UPDATE_ACCESS_CONTROL and DELETE overwrite state the edit
+                // does not carry, so they cannot be inverted. Fail visibly instead
+                // of applying them forward a second time.
+                log.error(
+                    `[StorageProgram] Rollback of ${operation} is not supported for ${target} (tx ${editOperation.txhash})`,
+                )
+                return {
+                    success: false,
+                    message: `Rollback of ${operation} is not supported: prior state is not recorded`,
+                }
+            }
+
             // REVIEW: Handle operation-specific account existence requirements
             if (operation === "CREATE") {
                 // CREATE requires account to NOT exist
@@ -397,6 +434,7 @@ export default class HandleGCR {
                         variables: context.data.variables,
                         metadata: {
                             ...context.data.metadata,
+                            createdTxHash: editOperation.txhash,
                             size: initialSize,
                             lastModified: context.data.metadata?.lastModified ?? Date.now(),
                         },
