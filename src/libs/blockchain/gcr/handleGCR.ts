@@ -50,7 +50,7 @@ import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
-import { getDataSize, STORAGE_LIMITS } from "@/libs/blockchain/validators/validateStorageProgramSize"
+import { getDataSize, STORAGE_LIMITS, validateStorageProgramData } from "@/libs/blockchain/validators/validateStorageProgramSize"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -349,6 +349,15 @@ export default class HandleGCR {
                     }
                 }
 
+                // REVIEW: Re-check depth and key-length limits here, since every node applies this edit
+                const createDataCheck = validateStorageProgramData(context.data.variables)
+                if (!createDataCheck.success) {
+                    return {
+                        success: false,
+                        message: createDataCheck.error || "Data validation failed",
+                    }
+                }
+
                 // Create new account for CREATE operation
                 const initialSize = getDataSize(context.data.variables)
                 if (initialSize > STORAGE_LIMITS.MAX_SIZE_BYTES) {
@@ -436,6 +445,15 @@ export default class HandleGCR {
                     return {
                         success: false,
                         message: "WRITE operation missing data.variables",
+                    }
+                }
+
+                // REVIEW: Re-check depth and key-length limits here, since every node applies this edit
+                const writeDataCheck = validateStorageProgramData(context.data.variables)
+                if (!writeDataCheck.success) {
+                    return {
+                        success: false,
+                        message: writeDataCheck.error || "Data validation failed",
                     }
                 }
 
