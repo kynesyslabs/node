@@ -218,6 +218,7 @@ export default async function manageConsensusRoutines(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     payload.params[2] as string,
+                    sender,
                 )
             } catch (error) {
                 log.error(

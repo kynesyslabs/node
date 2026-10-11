@@ -96,7 +96,7 @@ export function resetCollection(): void {
  * getShard() is seeded deterministically and we add ourselves to the
  * sorted list so every node agrees on who is secretary.
  */
-function getSecretaryIdentity(shard: Peer[]): string {
+export function getSecretaryIdentity(shard: Peer[]): string {
     const allIdentities = [
         ...shard.map(p => p.identity),
         getSharedState.publicKeyHex,
