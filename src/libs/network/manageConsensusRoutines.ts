@@ -505,6 +505,12 @@ export default async function manageConsensusRoutines(
                 break
             }
 
+            if (!shard.some(member => member.identity === sender)) {
+                response.result = 401
+                response.response = "Sender is not in the shard"
+                break
+            }
+
             try {
                 const [blockHash, signature, blockNumber] = payload.params as [
                     string,
