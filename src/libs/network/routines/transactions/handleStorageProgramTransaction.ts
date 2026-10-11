@@ -1,4 +1,5 @@
 import type { StorageProgramPayload } from "@kynesyslabs/demosdk/storage"
+import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 import { validateStorageProgramData, getDataSize } from "@/libs/blockchain/validators/validateStorageProgramSize"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
@@ -18,6 +19,8 @@ type ValidationContext = "CREATE" | "UPDATE_ACCESS_CONTROL"
 
 const ACCESS_CONTROL_MODES = new Set<AccessControlMode>(ACCESS_CONTROL_VALUES)
 const ALLOWED_ADDRESS_PATTERN = /^[a-f0-9]{64}$/i
+// Storage addresses are always derived: stor-{first 40 hex chars of sha256(deployer:programName:salt)}
+const STORAGE_ADDRESS_PATTERN = /^stor-[a-f0-9]{40}$/
 
 function normalizeAccessControl(
     accessControl: unknown,
@@ -113,6 +116,18 @@ export default async function handleStorageProgramTransaction(
     const { operation, storageAddress } = payload
 
     log.info(`[StorageProgram] Operation: ${operation}, Address: ${storageAddress}, Sender: ${sender}`)
+
+    // REVIEW: Only derived stor- addresses are accepted, so a storage program can
+    // never be written over (or squat) a regular account row in GCR_Main
+    if (
+        typeof storageAddress !== "string" ||
+        !STORAGE_ADDRESS_PATTERN.test(storageAddress)
+    ) {
+        return {
+            success: false,
+            message: "Invalid storageAddress: expected stor-{40 lowercase hex chars}",
+        }
+    }
 
     try {
         switch (operation) {
@@ -219,6 +234,28 @@ async function handleCreate(
 
     // CREATE is permissionless - any address can create a storage program
     // The sender becomes the deployer and is recorded in metadata
+
+    // REVIEW: The address must be derived from the sender, programName and salt.
+    // This binds the address to its deployer, so nobody can claim (squat or
+    // front-run) the address another deployer will derive.
+    if (salt !== undefined && typeof salt !== "string") {
+        return {
+            success: false,
+            message: "salt must be a string",
+        }
+    }
+
+    const expectedAddress = StorageProgram.deriveStorageAddress(
+        sender,
+        programName,
+        salt || "",
+    )
+    if (storageAddress !== expectedAddress) {
+        return {
+            success: false,
+            message: `storageAddress does not match the address derived from sender, programName and salt (expected ${expectedAddress})`,
+        }
+    }
 
     // Validate data constraints
     const dataValidation = validateStorageProgramData(data)
