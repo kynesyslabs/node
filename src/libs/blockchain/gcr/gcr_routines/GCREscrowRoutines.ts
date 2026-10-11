@@ -32,10 +32,12 @@ export default class GCREscrowRoutines {
     /**
      * Gets an existing escrow account or creates a new one within a transaction.
      * Handles race conditions from concurrent account creation.
+     * In simulate mode a new account is only built in memory, never saved.
      */
     private static async getOrCreateEscrowAccount(
         transactionalEntityManager: any,
         escrowAddress: string,
+        simulate: boolean,
     ): Promise<GCRMain> {
         let escrowAccount = await transactionalEntityManager.findOne(GCRMain, {
             where: { pubkey: escrowAddress },
@@ -43,9 +45,17 @@ export default class GCREscrowRoutines {
         })
 
         if (!escrowAccount) {
+            // Build without saving: createAccount would otherwise commit the
+            // row outside this transaction, even when simulating
+            escrowAccount = await HandleGCR.createAccount(
+                escrowAddress,
+                {},
+                false,
+            )
             try {
-                escrowAccount = await HandleGCR.createAccount(escrowAddress)
-                await transactionalEntityManager.save(escrowAccount)
+                if (!simulate) {
+                    await transactionalEntityManager.save(escrowAccount)
+                }
             } catch (error: any) {
                 // Handle race condition: another transaction created the account
                 if (error.code === "23505") {
@@ -280,6 +290,7 @@ export default class GCREscrowRoutines {
                 const escrowAccount = await this.getOrCreateEscrowAccount(
                     transactionalEntityManager,
                     escrowAddress,
+                    simulate,
                 )
 
                 // Create new escrow or validate existing one

@@ -485,6 +485,7 @@ export default class HandleGCR {
     public static createAccount = async (
         pubkey: string,
         fillData: Record<string, any> = {},
+        persist = true, // false: build the entity without saving it
     ) => {
         if (
             !pubkey ||
@@ -535,6 +536,10 @@ export default class HandleGCR {
         account.reviewed = fillData["reviewed"] || false
         account.createdAt = fillData["createdAt"] || new Date()
         account.updatedAt = fillData["updatedAt"] || new Date()
+
+        if (!persist) {
+            return account
+        }
 
         return await repository.save(account)
     }

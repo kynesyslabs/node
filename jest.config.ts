@@ -8,6 +8,7 @@ const jestConfig: JestConfigWithTsJest = {
         // INFO: When you define paths in tsconfig, also define here, eg:
 		// "$lib/*": ["src/lib/*"],
         // TODO: Find a way to avoid the double work
+		"@/*": ["src/*"],
 	}),
 	preset: "ts-jest",
 	roots: ["<rootDir>"],
