@@ -24,6 +24,7 @@ export interface EscrowDeposit {
     amount: string // Stringified bigint
     timestamp: number
     message?: string // Optional memo from sender
+    refunded?: boolean // Refunded to the depositor; kept so the refund can be rolled back
 }
 
 /**

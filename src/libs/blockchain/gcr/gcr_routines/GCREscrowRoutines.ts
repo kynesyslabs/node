@@ -158,6 +158,13 @@ export default class GCREscrowRoutines {
         return value.toString()
     }
 
+    /** Sum of the deposits that have not been refunded */
+    private static activeDepositsTotal(deposits: EscrowDeposit[]): bigint {
+        return deposits
+            .filter(d => !d.refunded)
+            .reduce((sum, d) => sum + this.parseAmount(d.amount), 0n)
+    }
+
     /**
      * Computes deterministic escrow address from platform:username
      * This is a pure function - same input always produces same output
@@ -660,7 +667,7 @@ export default class GCREscrowRoutines {
 
                 // Calculate refunder's portion
                 const refunderDeposits = escrow.deposits.filter(
-                    d => d.from === refunder,
+                    d => d.from === refunder && !d.refunded,
                 )
                 const refundAmount = refunderDeposits.reduce(
                     (sum, d) => sum + this.parseAmount(d.amount),
@@ -685,9 +692,8 @@ export default class GCREscrowRoutines {
                 // REVIEW: Only modify state if not simulating
                 if (!simulate) {
                     // REVIEW: Verify balance integrity BEFORE refund to detect accounting drift
-                    const actualBalance = escrow.deposits.reduce(
-                        (sum, d) => sum + this.parseAmount(d.amount),
-                        0n,
+                    const actualBalance = this.activeDepositsTotal(
+                        escrow.deposits,
                     )
                     const storedBalance = this.parseAmount(escrow.balance)
 
@@ -715,23 +721,16 @@ export default class GCREscrowRoutines {
                     // Credit refund to refunder's account
                     refunderAccount.balance = newRefunderBalance
 
-                    // Update escrow (remove refunder's deposits)
-                    escrow.deposits = escrow.deposits.filter(
-                        d => d.from !== refunder,
-                    )
+                    // Mark the refunder's deposits as refunded rather than
+                    // removing them, so rollbackEscrowRefund can restore them
+                    for (const d of refunderDeposits) {
+                        d.refunded = true
+                    }
 
                     // Recalculate balance from remaining deposits (ensures accuracy)
-                    const refundedBalance = escrow.deposits.reduce(
-                        (sum, d) => sum + this.parseAmount(d.amount),
-                        0n,
+                    escrow.balance = this.formatAmount(
+                        this.activeDepositsTotal(escrow.deposits),
                     )
-
-                    escrow.balance = this.formatAmount(refundedBalance)
-
-                    // If no deposits left, delete escrow
-                    if (escrow.deposits.length === 0) {
-                        delete escrowAccount.escrows[escrowAddress]
-                    }
 
                     // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
@@ -778,7 +777,6 @@ export default class GCREscrowRoutines {
         }
 
         const escrowAddress = this.getEscrowAddress(platform, username)
-        const currentTimestamp = Date.now()
 
         log.info(
             `[EscrowDepositRollback] Rolling back deposit of ${amount} DEM from ${sender} to ${platform}:${username}`,
@@ -827,6 +825,7 @@ export default class GCREscrowRoutines {
                     .findIndex(
                         d =>
                             d.from === sender &&
+                            !d.refunded &&
                             this.parseAmount(d.amount) === depositAmount,
                     )
 
@@ -843,9 +842,8 @@ export default class GCREscrowRoutines {
                 escrow.deposits.splice(actualIndex, 1)
 
                 // Recalculate escrow balance from remaining deposits
-                const newEscrowBalance = escrow.deposits.reduce(
-                    (sum, d) => sum + this.parseAmount(d.amount),
-                    0n,
+                const newEscrowBalance = this.activeDepositsTotal(
+                    escrow.deposits,
                 )
 
                 escrow.balance = this.formatAmount(newEscrowBalance)
@@ -948,10 +946,7 @@ export default class GCREscrowRoutines {
                 }
 
                 // Recalculate original claimed amount from deposits
-                const claimedAmount = escrow.deposits.reduce(
-                    (sum, d) => sum + this.parseAmount(d.amount),
-                    0n,
-                )
+                const claimedAmount = this.activeDepositsTotal(escrow.deposits)
 
                 // Verify claimant has sufficient balance to return
                 if (claimantAccount.balance < claimedAmount) {
@@ -1023,14 +1018,91 @@ export default class GCREscrowRoutines {
             `[EscrowRefundRollback] Rolling back refund by ${refunder} for ${platform}:${username}`,
         )
 
-        // PROBLEM: We need the original deposits that were refunded to restore them
-        // But the original refund operation removed them from the escrow
-        // We need to track what was refunded to be able to rollback properly
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Same lock order as applyEscrowRefund: escrow, then refunder
+                const escrowAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    },
+                )
+
+                const refunderAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: refunder },
+                        lock: { mode: "pessimistic_write" },
+                    })
+
+                if (
+                    !escrowAccount ||
+                    !escrowAccount.escrows?.[escrowAddress]
+                ) {
+                    throw new Error("Escrow not found for refund rollback")
+                }
+
+                if (!refunderAccount) {
+                    throw new Error("Refunder account not found for rollback")
+                }
+
+                const escrow = escrowAccount.escrows[escrowAddress]
+
+                // The refund marked these deposits instead of removing them
+                const refundedDeposits = escrow.deposits.filter(
+                    d => d.from === refunder && d.refunded,
+                )
+
+                if (refundedDeposits.length === 0) {
+                    throw new Error(
+                        `No refunded deposits from ${refunder} to rollback`,
+                    )
+                }
+
+                const refundedAmount = refundedDeposits.reduce(
+                    (sum, d) => sum + this.parseAmount(d.amount),
+                    0n,
+                )
+
+                if (refunderAccount.balance < refundedAmount) {
+                    throw new Error(
+                        "Refunder has insufficient balance to rollback refund. " +
+                            `Has: ${refunderAccount.balance}, needs: ${refundedAmount}`,
+                    )
+                }
+
+                // Restore the deposits and the escrow balance
+                for (const d of refundedDeposits) {
+                    delete d.refunded
+                }
+                escrow.balance = this.formatAmount(
+                    this.activeDepositsTotal(escrow.deposits),
+                )
+
+                // Deduct from refunder
+                refunderAccount.balance -= refundedAmount
+
+                if (!simulate) {
+                    await transactionalEntityManager.save([
+                        escrowAccount,
+                        refunderAccount,
+                    ])
+                }
+
+                return {
+                    amount: refundedAmount.toString(),
+                }
+            },
+        )
+
+        log.info(
+            `[EscrowRefundRollback] ✓ Rolled back refund of ${result.amount} DEM`,
+        )
 
         return {
-            success: false,
-            message:
-                "Refund rollback not fully implemented - requires tracking removed deposits in original operation",
+            success: true,
+            message: `Rolled back refund of ${result.amount} DEM from ${platform}:${username}`,
+            response: result,
         }
     }
 

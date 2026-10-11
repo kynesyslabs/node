@@ -817,7 +817,7 @@ export async function handleGetEscrowBalance(params: {
             escrowAddress,
             exists: true,
             balance: escrow.balance.toString(),
-            deposits: escrow.deposits.map(d => ({
+            deposits: escrow.deposits.filter(d => !d.refunded).map(d => ({
                 from: d.from,
                 amount: d.amount.toString(),
                 timestamp: d.timestamp,
@@ -923,12 +923,14 @@ export async function handleGetClaimableEscrows(params: {
                 username: identity.username,
                 balance: escrow.balance.toString(),
                 escrowAddress,
-                deposits: escrow.deposits.map(d => ({
-                    from: d.from,
-                    amount: d.amount.toString(),
-                    timestamp: d.timestamp,
-                    message: d.message,
-                })),
+                deposits: escrow.deposits
+                    .filter(d => !d.refunded)
+                    .map(d => ({
+                        from: d.from,
+                        amount: d.amount.toString(),
+                        timestamp: d.timestamp,
+                        message: d.message,
+                    })),
                 expiryTimestamp: escrow.expiryTimestamp,
                 expired: Date.now() > escrow.expiryTimestamp,
             })
@@ -1005,7 +1007,9 @@ export async function handleGetSentEscrows(params: {
                 )) {
                     // Skip escrows without sender deposits or valid claimableBy
                     const senderDeposits =
-                        escrow.deposits?.filter(d => d.from === sender) || []
+                        escrow.deposits?.filter(
+                            d => d.from === sender && !d.refunded,
+                        ) || []
                     if (senderDeposits.length === 0) continue
                     if (!escrow.claimableBy?.platform || !escrow.claimableBy?.username) continue
 
