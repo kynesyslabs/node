@@ -65,7 +65,9 @@ describe("escrow address reuse", () => {
     test("a handle can receive a new escrow after its escrow was claimed", async () => {
         at(T0)
         expect((await deposit(ALICE)).success).toBe(true)
-        expect((await apply(edit("claim", { claimant: BOB }), BOB)).success).toBe(true)
+        expect(
+            (await apply(edit("claim", { claimant: BOB }), BOB)).success,
+        ).toBe(true)
 
         at(T0 + 1000)
         const result = await deposit(CAROL, 30)
@@ -81,7 +83,9 @@ describe("escrow address reuse", () => {
         at(T0)
         await deposit(ALICE)
         at(T0 + 2 * DAY)
-        expect((await apply(edit("refund", { refunder: ALICE }), ALICE)).success).toBe(true)
+        expect(
+            (await apply(edit("refund", { refunder: ALICE }), ALICE)).success,
+        ).toBe(true)
 
         const result = await deposit(CAROL, 30)
 

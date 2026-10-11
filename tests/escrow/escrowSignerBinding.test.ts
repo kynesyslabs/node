@@ -39,9 +39,9 @@ function edit(operation: string, data: Record<string, any>): any {
     }
 }
 
-function tx(from: string, from_ed25519_address = from, type = "ed25519"): any {
+function tx(from: string, edAddress = from, type = "ed25519"): any {
     return {
-        content: { from, from_ed25519_address },
+        content: { from, from_ed25519_address: edAddress },
         signature: { type, data: "" },
     }
 }

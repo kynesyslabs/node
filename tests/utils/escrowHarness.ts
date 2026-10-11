@@ -7,7 +7,11 @@ export class FakeGcrDb {
     rows = new Map<string, any>()
     saved: string[] = []
 
-    addAccount(pubkey: string, balance: bigint, extra: Record<string, any> = {}) {
+    addAccount(
+        pubkey: string,
+        balance: bigint,
+        extra: Record<string, any> = {},
+    ) {
         this.rows.set(pubkey, {
             pubkey,
             balance,

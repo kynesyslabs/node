@@ -28,7 +28,11 @@ const ESCROW = GCREscrowRoutines.getEscrowAddress("twitter", "@bob")
 const DAY = 24 * 60 * 60 * 1000
 const T0 = 1_700_000_000_000
 
-function edit(operation: string, data: Record<string, any>, isRollback = false): any {
+function edit(
+    operation: string,
+    data: Record<string, any>,
+    isRollback = false,
+): any {
     return {
         type: "escrow",
         operation,
@@ -51,8 +55,18 @@ beforeEach(async () => {
     mockDb.addAccount(ALICE, 10_000n)
     mockDb.addAccount(CAROL, 10_000n)
     jest.spyOn(Date, "now").mockReturnValue(T0)
-    expect((await apply(edit("deposit", { sender: ALICE, amount: 1000, expiryDays: 1 }), ALICE)).success).toBe(true)
-    expect((await apply(edit("deposit", { sender: CAROL, amount: 500 }), CAROL)).success).toBe(true)
+    expect(
+        (
+            await apply(
+                edit("deposit", { sender: ALICE, amount: 1000, expiryDays: 1 }),
+                ALICE,
+            )
+        ).success,
+    ).toBe(true)
+    expect(
+        (await apply(edit("deposit", { sender: CAROL, amount: 500 }), CAROL))
+            .success,
+    ).toBe(true)
     jest.spyOn(Date, "now").mockReturnValue(T0 + 2 * DAY)
 })
 
@@ -71,7 +85,10 @@ describe("escrow refund rollback", () => {
         expect(mockDb.get(ALICE).balance).toBe(9_000n)
         expect(escrow().balance).toBe("1500")
         expect(escrow().deposits.filter((d: any) => d.refunded)).toEqual([])
-        expect(escrow().deposits.map((d: any) => d.from)).toEqual([ALICE, CAROL])
+        expect(escrow().deposits.map((d: any) => d.from)).toEqual([
+            ALICE,
+            CAROL,
+        ])
     })
 
     test("after a rollback the depositor can take the refund again", async () => {
@@ -89,7 +106,10 @@ describe("escrow refund rollback", () => {
         await apply(carolRefund, CAROL)
         expect(escrow().balance).toBe("0")
 
-        const rollback = await apply({ ...carolRefund, isRollback: true }, CAROL)
+        const rollback = await apply(
+            { ...carolRefund, isRollback: true },
+            CAROL,
+        )
 
         expect(rollback.success).toBe(true)
         expect(escrow().balance).toBe("500")
