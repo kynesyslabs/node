@@ -1,4 +1,4 @@
-import { GCREdit } from "@kynesyslabs/demosdk/types"
+import { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 
 // REVIEW: Extract escrow-specific type from GCREdit union since GCREditEscrow is not exported
 type GCREditEscrow = Extract<GCREdit, { type: "escrow" }>
@@ -1034,6 +1034,25 @@ export default class GCREscrowRoutines {
         }
     }
 
+    private static normalizeAddress(address: string): string {
+        return address.toLowerCase().replace(/^0x/, "")
+    }
+
+    /**
+     * Returns the account whose signature authorizes the tx, as checked by
+     * TxUtils.validateSignature: an ed25519 tx is verified against
+     * content.from, other signers are bound to content.from_ed25519_address.
+     */
+    private static getSignerAccount(tx: Transaction): string | null {
+        const signer =
+            tx?.signature?.type === "ed25519"
+                ? tx.content?.from
+                : tx?.content?.from_ed25519_address
+        return typeof signer === "string" && signer
+            ? this.normalizeAddress(signer)
+            : null
+    }
+
     /**
      * Main entry point for escrow GCREdit operations
      * Routes to appropriate handler based on operation type
@@ -1041,12 +1060,14 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param tx - Transaction carrying the edit; its signer must be the actor
      * @returns Success/failure result
      */
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        tx: Transaction,
     ): Promise<GCRResult> {
         if (editOperation.type !== "escrow") {
             return {
@@ -1056,6 +1077,24 @@ export default class GCREscrowRoutines {
         }
 
         const operation = editOperation.operation
+
+        // SECURITY: The account debited (deposit) or credited (claim, refund)
+        // must be the tx signer. Txs merged from peer mempools are not
+        // re-checked against GCRGeneration, so the edit data is untrusted.
+        const actor = {
+            deposit: editOperation.data?.sender,
+            claim: editOperation.data?.claimant,
+            refund: editOperation.data?.refunder,
+        }[operation]
+        if (typeof actor === "string" && actor) {
+            const signer = this.getSignerAccount(tx)
+            if (!signer || signer !== this.normalizeAddress(actor)) {
+                return {
+                    success: false,
+                    message: `Escrow ${operation} actor does not match the transaction signer`,
+                }
+            }
+        }
 
         // REVIEW: Handle rollbacks by performing inverse operations
         if (editOperation.isRollback) {

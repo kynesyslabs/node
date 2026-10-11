@@ -280,6 +280,7 @@ export default class HandleGCR {
                     editOperation,
                     repositories.main as Repository<GCRMain>,
                     simulate,
+                    tx,
                 )
             case "assign":
             case "subnetsTx":
