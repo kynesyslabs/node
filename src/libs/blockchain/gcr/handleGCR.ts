@@ -711,8 +711,8 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                         result.message,
                 )
                 // If not successful, we stop the execution
+                // NOTE The catch below rolls back the applied edits (once)
                 if (!result.success) {
-                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
                     throw new Error(
                         "GCREdit failed for " +
                             edit.type +
@@ -729,7 +729,7 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                     success: false,
                     message: `${e}`,
                 })
-                await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
                 // Stopping the execution
                 if (!simulate) {
                     break
@@ -757,12 +757,14 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
      * Rolls back a transaction by reversing the order of applied GCR edits
      * @param tx The transaction to rollback
      * @param appliedEditsOriginal The original list of applied GCR edits
+     * @param simulate Whether the edits were only simulated (then the rollback is simulated too)
      * @returns Result indicating success/failure and any error messages
      * @throws May throw if any edit rollback fails
      */
     static async rollback(
         tx: Transaction,
         appliedEditsOriginal: GCREdit[],
+        simulate = false,
     ): Promise<GCRResult> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
@@ -784,7 +786,7 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                     ") Rolling back GCREdit: " +
                     edit.type,
             )
-            const result = await this.apply(edit, tx, true)
+            const result = await this.apply(edit, tx, true, simulate)
             results.push(result)
         }
         log.info(

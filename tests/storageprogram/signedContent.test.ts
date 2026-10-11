@@ -132,6 +132,36 @@ describe("storage edits are derived, signed content is untouched (findings 1 and
         expect(applied).toEqual(["balance", "nonce", "storageProgram"])
     })
 
+    test("a failing simulated storage edit rolls gas and nonce back once, still simulated", async () => {
+        const tx = await buildSignedTx(createPayload())
+        spies.push(spyOn(Chain, "checkTxExists").mockResolvedValue(false))
+        const calls: { type: string; rollback: boolean; simulate: boolean }[] =
+            []
+        spies.push(
+            spyOn(HandleGCR, "apply").mockImplementation(
+                async (
+                    edit: any,
+                    _tx: any,
+                    rollback = false,
+                    simulate = false,
+                ) => {
+                    calls.push({ type: edit.type, rollback, simulate })
+                    // e.g. a WRITE denied by the program's access control
+                    return edit.type === "storageProgram"
+                        ? { success: false, message: "Access denied" }
+                        : { success: true, message: "" }
+                },
+            ),
+        )
+
+        const result = await HandleGCR.applyToTx(tx, false, true)
+
+        expect(result.success).toBe(false)
+        const rollbacks = calls.filter(call => call.rollback)
+        expect(rollbacks.map(call => call.type)).toEqual(["nonce", "balance"])
+        expect(rollbacks.every(call => call.simulate)).toBe(true)
+    })
+
     test("handleExecuteTransaction puts the tx in the mempool unchanged and coherent", async () => {
         const tx = await buildSignedTx(createPayload())
         const nodeKey = new Uint8Array(32).fill(7)
