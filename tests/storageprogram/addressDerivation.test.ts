@@ -10,6 +10,7 @@ const { default: handleStorageProgramTransaction } = await import(
 const VICTIM = "a".repeat(64)
 const SQUATTER = "b".repeat(64)
 const TX_HASH = "c".repeat(64)
+const TIMESTAMP = 1_700_000_000_000
 
 function createPayload(deployer: string, storageAddress?: string) {
     const payload = StorageProgram.createStorageProgram(
@@ -29,6 +30,7 @@ describe("storage program address derivation (finding 3)", () => {
             createPayload(VICTIM),
             VICTIM,
             TX_HASH,
+            TIMESTAMP,
         )
         expect(res.success).toBe(true)
         expect(res.gcrEdits?.[0].target).toBe(
@@ -42,6 +44,7 @@ describe("storage program address derivation (finding 3)", () => {
             createPayload(SQUATTER, victimAddress),
             SQUATTER,
             TX_HASH,
+            TIMESTAMP,
         )
         expect(res.success).toBe(false)
         expect(res.message).toContain("does not match")
@@ -52,6 +55,7 @@ describe("storage program address derivation (finding 3)", () => {
             createPayload(SQUATTER, VICTIM),
             SQUATTER,
             TX_HASH,
+            TIMESTAMP,
         )
         expect(res.success).toBe(false)
         expect(res.message).toContain("Invalid storageAddress")
@@ -66,6 +70,7 @@ describe("storage program address derivation (finding 3)", () => {
                 payload,
                 SQUATTER,
                 TX_HASH,
+            TIMESTAMP,
             )
             expect(res.success).toBe(false)
         }

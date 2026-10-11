@@ -2,7 +2,7 @@ import type { StorageProgramPayload } from "@kynesyslabs/demosdk/storage"
 import { StorageProgram } from "@kynesyslabs/demosdk/storage"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 import { validateStorageProgramData, getDataSize } from "@/libs/blockchain/validators/validateStorageProgramSize"
-import type { GCREdit } from "@kynesyslabs/demosdk/types"
+import type { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 import log from "@/utilities/logger"
 
 // REVIEW: Storage Program transaction handler
@@ -106,12 +106,15 @@ function validateAllowedAddresses(
  * @param payload - Storage Program operation payload
  * @param sender - Transaction sender address
  * @param txHash - Transaction hash
+ * @param timestamp - Signed transaction timestamp (tx.content.timestamp), used for
+ *   created/lastModified so the edit is the same on every node
  * @returns Response with success status, message, and GCR edits
  */
 export default async function handleStorageProgramTransaction(
     payload: StorageProgramPayload,
     sender: string,
     txHash: string,
+    timestamp: number,
 ): Promise<StorageProgramResponse> {
     const { operation, storageAddress } = payload
 
@@ -132,10 +135,10 @@ export default async function handleStorageProgramTransaction(
     try {
         switch (operation) {
             case "CREATE_STORAGE_PROGRAM":
-                return await handleCreate(payload, sender, txHash)
+                return await handleCreate(payload, sender, txHash, timestamp)
 
             case "WRITE_STORAGE":
-                return await handleWrite(payload, sender, txHash)
+                return await handleWrite(payload, sender, txHash, timestamp)
 
             case "READ_STORAGE":
                 // READ is a query operation, not a transaction
@@ -145,7 +148,7 @@ export default async function handleStorageProgramTransaction(
                 }
 
             case "UPDATE_ACCESS_CONTROL":
-                return await handleUpdateAccessControl(payload, sender, txHash)
+                return await handleUpdateAccessControl(payload, sender, txHash, timestamp)
 
             case "DELETE_STORAGE_PROGRAM":
                 return await handleDelete(payload, sender, txHash)
@@ -166,12 +169,56 @@ export default async function handleStorageProgramTransaction(
 }
 
 /**
+ * Derive the storage program GCR edits for a signed storageProgram transaction.
+ *
+ * The edits are a pure function of the signed tx (content.data, content.from,
+ * content.timestamp and hash), so every node derives the same edits without
+ * changing tx.content (which would break sha256(content) == tx.hash).
+ *
+ * @param tx - A storageProgram transaction
+ * @returns Response with success status, message, and the derived GCR edits
+ */
+export async function deriveStorageProgramEdits(
+    tx: Transaction,
+): Promise<StorageProgramResponse> {
+    const payload = tx.content.data
+    if (
+        tx.content.type !== "storageProgram" ||
+        !Array.isArray(payload) ||
+        payload.length < 2 ||
+        payload[0] !== "storageProgram" ||
+        !payload[1] ||
+        typeof payload[1] !== "object"
+    ) {
+        return {
+            success: false,
+            message: "Invalid storageProgram payload structure",
+        }
+    }
+
+    if (typeof tx.content.timestamp !== "number") {
+        return {
+            success: false,
+            message: "storageProgram transaction is missing its timestamp",
+        }
+    }
+
+    return handleStorageProgramTransaction(
+        payload[1] as StorageProgramPayload,
+        tx.content.from,
+        tx.hash,
+        tx.content.timestamp,
+    )
+}
+
+/**
  * Handle CREATE_STORAGE_PROGRAM operation
  */
 async function handleCreate(
     payload: StorageProgramPayload,
     sender: string,
     txHash: string,
+    timestamp: number,
 ): Promise<StorageProgramResponse> {
     const { storageAddress, programName, data, accessControl, allowedAddresses, salt } = payload
 
@@ -267,7 +314,7 @@ async function handleCreate(
     }
 
     // Create GCR edit for storage program creation
-    const now = Date.now()
+    const now = timestamp
     const dataSize = getDataSize(data)
 
     const gcrEdit: GCREdit = {
@@ -309,6 +356,7 @@ async function handleWrite(
     payload: StorageProgramPayload,
     sender: string,
     txHash: string,
+    timestamp: number,
 ): Promise<StorageProgramResponse> {
     const { storageAddress, data } = payload
 
@@ -344,7 +392,7 @@ async function handleWrite(
             data: {
                 variables: data,
                 metadata: {
-                    lastModified: Date.now(),
+                    lastModified: timestamp,
                     size: getDataSize(data), // Delta size only - will be recalculated after merge
                 },
             },
@@ -368,6 +416,7 @@ async function handleUpdateAccessControl(
     payload: StorageProgramPayload,
     sender: string,
     txHash: string,
+    timestamp: number,
 ): Promise<StorageProgramResponse> {
     const { storageAddress, accessControl, allowedAddresses } = payload
 
@@ -405,7 +454,7 @@ async function handleUpdateAccessControl(
                 metadata: {
                     accessControl: accessControlValidation.mode,
                     allowedAddresses: allowedAddressesValidation.addresses,
-                    lastModified: Date.now(),
+                    lastModified: timestamp,
                 },
             },
             sender,

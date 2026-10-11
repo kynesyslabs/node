@@ -421,6 +421,7 @@ export default class ServerHandlers {
                         storagePayload,
                         tx.content.from,
                         tx.hash,
+                        tx.content.timestamp,
                     )
 
                     result.success = storageProgramResult.success
@@ -428,11 +429,10 @@ export default class ServerHandlers {
                         message: storageProgramResult.message,
                     }
 
-                    // If handler generated GCR edits, add them to transaction for HandleGCR to apply
-                    if (storageProgramResult.gcrEdits && storageProgramResult.gcrEdits.length > 0) {
-                        tx.content.gcr_edits = storageProgramResult.gcrEdits
-                        queriedTx.content.gcr_edits = storageProgramResult.gcrEdits
-                    }
+                    // NOTE The storage edit is not written into tx.content.gcr_edits:
+                    // that would change the signed content and break the tx hash, and
+                    // drop the client's gas and nonce edits. HandleGCR.getTxEdits
+                    // derives the same edit from the signed tx on every node.
                 } catch (e) {
                     log.error(
                         "[handleExecuteTransaction] Error in storageProgram: " + e,

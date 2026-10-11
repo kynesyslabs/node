@@ -51,6 +51,7 @@ import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
 import { getDataSize, STORAGE_LIMITS, validateStorageProgramData } from "@/libs/blockchain/validators/validateStorageProgramSize"
+import { deriveStorageProgramEdits } from "@/libs/network/routines/transactions/handleStorageProgramTransaction"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -619,6 +620,46 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
     }
 
     /**
+     * Returns the GCR edits to apply for a transaction.
+     *
+     * For storageProgram txs the storage edit is derived from the signed tx
+     * content on every node and appended after the client's signed edits
+     * (gas and nonce). tx.content is never modified, so the tx hash stays valid.
+     * Client-supplied storageProgram edits are rejected: only derived ones apply.
+     * @param tx Transaction to read the edits from
+     * @returns The edits to apply, or a failure if they cannot be derived
+     */
+    static async getTxEdits(
+        tx: Transaction,
+    ): Promise<GCRResult & { edits: GCREdit[] }> {
+        const signedEdits = tx.content.gcr_edits || []
+        if (tx.content.type !== "storageProgram") {
+            return { success: true, message: "", edits: signedEdits }
+        }
+
+        if (signedEdits.some(edit => edit.type === "storageProgram")) {
+            return {
+                success: false,
+                message: "storageProgram edits must not be supplied by the client",
+                edits: [],
+            }
+        }
+
+        const derived = await deriveStorageProgramEdits(tx)
+        if (!derived.success) {
+            return { success: false, message: derived.message, edits: [] }
+        }
+
+        // Storage edits go last: the gas and nonce edits before them can be
+        // rolled back if the storage edit fails, while most storage edits cannot
+        return {
+            success: true,
+            message: "",
+            edits: [...signedEdits, ...(derived.gcrEdits || [])],
+        }
+    }
+
+    /**
      * Applies all GCR edits from a transaction
      * @param tx Transaction containing GCR edits to apply
      * @param isRollback Whether the operation is a rollback
@@ -640,14 +681,19 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
             }
         }
 
+        const txEdits = await this.getTxEdits(tx)
+        if (!txEdits.success) {
+            return { success: false, message: txEdits.message }
+        }
+
         console.log(
             "[applyToTx] Starting execution of " +
-                tx.content.gcr_edits.length +
+                txEdits.edits.length +
                 " GCREdits",
         )
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
-        for (const edit of tx.content.gcr_edits) {
+        for (const edit of txEdits.edits) {
             console.log("[applyToTx] Executing GCREdit: " + edit.type)
             try {
                 const result = await HandleGCR.apply(
