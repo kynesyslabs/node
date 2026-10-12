@@ -3,7 +3,7 @@ import getCommonValidatorSeed from "../consensus/v2/routines/getCommonValidatorS
 import { emptyResponse } from "./server_rpc"
 import _ from "lodash"
 import { getSharedState } from "src/utilities/sharedState"
-import getShard from "../consensus/v2/routines/getShard"
+import getRoundCommittee from "../consensus/v2/routines/roundCommittee"
 import manageProposeBlockHash from "../consensus/v2/routines/manageProposeBlockHash"
 import { ValidationData } from "../consensus/v2/interfaces"
 import { checkConsensusTime } from "../consensus/routines/consensusTime"
@@ -185,8 +185,11 @@ export default async function manageConsensusRoutines(
     }
 
     // Also refuses the routine if we are not in the shard
-    const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const shard = await getShard(commonValidatorSeed)
+    const {
+        members: shard,
+        seed: commonValidatorSeed,
+        frozen,
+    } = await getRoundCommittee()
     const ourId = getSharedState.publicKeyHex
     let isInShard = false
 
@@ -197,7 +200,7 @@ export default async function manageConsensusRoutines(
         }
     }
 
-    log.debug(`isInShard: ${isInShard}`)
+    log.debug(`isInShard: ${isInShard} (${frozen ? "frozen" : "drawn"} committee)`)
 
     inShardCheck: if (!isInShard) {
         // INFO: If is a greenlight request, return 200

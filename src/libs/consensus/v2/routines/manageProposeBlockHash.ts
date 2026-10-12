@@ -7,8 +7,7 @@ import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
 import { hexToUint8Array } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
-import getCommonValidatorSeed from "./getCommonValidatorSeed"
-import getShard from "./getShard"
+import getRoundCommittee from "./roundCommittee"
 import { isNetworkAhead } from "./networkAheadVeto"
 import TxValidatorPool from "@/libs/blockchain/validation/txValidatorPool"
 import Chain from "@/libs/blockchain/chain"
@@ -30,10 +29,11 @@ export default async function manageProposeBlockHash(
     }
 
     // Checking if the validator that sent us the block hash is in the shard
-    // const shard = getSharedState.lastShard
-    const { commonValidatorSeed } = await getCommonValidatorSeed()
-    const shard = await getShard(commonValidatorSeed)
-    log.debug("Shard: " + JSON.stringify(shard.map(s => s.connection.string), null, 2))
+    const { members: shard, frozen } = await getRoundCommittee()
+    log.debug(
+        `Shard (${frozen ? "frozen" : "drawn"}): ` +
+            JSON.stringify(shard.map(s => s.connection.string), null, 2),
+    )
 
     const validator = shard.find(validator => validator.identity === peerId)
     const peer = PeerManager.getInstance().getPeer(peerId)

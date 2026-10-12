@@ -1,5 +1,6 @@
 import { ValidationPhase, emptyValidationPhase } from "./validationStatusTypes"
 import { Shard } from "./shardTypes"
+import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
 import _ from "lodash"
@@ -1075,6 +1076,17 @@ export default class SecretaryManager {
         this.ourValidatorPhase.currentPhase = phase
         this.ourValidatorPhase.phases[phase][1] = status
         this.ourValidatorPhase.waitStatus = true
+    }
+
+    /** Shard of the running round for the next block, or null if no round is running. */
+    public static runningShard(): Peer[] | null {
+        const manager = SecretaryManager.instances.get(
+            getSharedState.lastBlockNumber + 1,
+        )
+        if (!manager || manager.ended || !manager.shard?.members?.length) {
+            return null
+        }
+        return manager.shard.members
     }
 
     // ANCHOR Singleton logic
