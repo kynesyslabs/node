@@ -50,7 +50,7 @@ export const dataSource = new DataSource({
     username: Config.getInstance().database.user,
     password: Config.getInstance().database.password,
     database: Config.getInstance().database.database,
-    migrations: ["../migrations/*.{ts,js}"],
+    migrations: ["src/migrations/*.{ts,js}"],
     entities: [
         Blocks,
         MempoolTx,
