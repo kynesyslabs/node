@@ -1,9 +1,4 @@
-/**
- * Pure liveness judgement for the gossip sidecar, evaluated once per heights
- * tick on the Bun side. Every verdict that leads to a restart is positive
- * evidence that the sidecar is at fault; quiet is never a fault on its own,
- * because a node that is alone or partitioned must keep running.
- */
+/** Pure liveness judgement for the gossip sidecar, evaluated once per heights tick. */
 
 export const STATS_STALE_MS = 5_000
 /** Stale stats are judged even on a late tick once they are this old. */
@@ -26,7 +21,7 @@ export interface SidecarHealthInputs {
     lastInboundAt: number
     /** Subscribers on the heights topic from the latest stats. */
     heightsSubscribers: number
-    /** True when the child process has already exited (the exit handler owns that case). */
+    /** True when the child process has already exited. */
     processExited: boolean
 }
 
@@ -46,9 +41,6 @@ export function judgeSidecarHealth(
         return { kind: "fault", reason: "stats_stalled" }
     }
 
-    // Heartbeat is fresh: the sidecar's event loop runs. Now the transport.
-    // Silence with subscribers present needs the HTTP cross-check before it
-    // can be called a fault; a late tick contaminates this reading too.
     if (
         input.heightsSubscribers >= 1 &&
         input.now - input.lastInboundAt > INBOUND_SILENCE_MS &&

@@ -3,15 +3,7 @@ import type { Validators } from "src/model/entities/Validators"
 import { getSharedState } from "src/utilities/sharedState"
 import log from "src/utilities/logger"
 
-/**
- * The active (staked) validator set at the local chain head, cached per
- * height. One cache for every consumer that asks "is this key staked
- * right now": gossip sender gates, the network-ahead veto, and the node's
- * own role. Lookups that need a specific historical height keep calling
- * GCR directly.
- *
- * Keys are stored lowercase; callers may pass any case.
- */
+/** Staked validator set at the local head, cached per height. Keys are lowercase. */
 
 let stakedSet = new Set<string>()
 let stakedSetHeight = -1
@@ -104,11 +96,7 @@ export async function isSelfStaked(): Promise<boolean> {
     return selfStaked === true
 }
 
-/**
- * Called when this node's own staked status flips. A listener registered
- * while the node is already staked is invoked once immediately so
- * services can start without waiting for the next block.
- */
+/** Register a listener for own stake flips; called immediately if already staked. */
 export function onSelfStakeChange(listener: StakeListener): () => void {
     selfListeners.add(listener)
     if (selfStaked === true) {

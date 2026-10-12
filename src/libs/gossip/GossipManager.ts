@@ -178,11 +178,7 @@ export class GossipManager {
         }
     }
 
-    /**
-     * Spawn the sidecar, bring the IPC bridge up, and wait for ready.
-     * Used both at start and on every restart; the heights timer and the
-     * stake listener live outside it and survive restarts.
-     */
+    /** Spawn the sidecar, connect IPC, wait for ready, and restore subscriptions and dials. */
     private async launchSidecar(entry: string): Promise<void> {
         const cfg = Config.getInstance().gossip
         log.info(`[GOSSIP] spawning sidecar: node ${entry}`)
@@ -218,8 +214,7 @@ export class GossipManager {
                 }
             }
         })
-        // "close", not "exit": it fires once stdio has drained, so the
-        // sidecar's last stderr lines (its crash reason) are logged first.
+        // "close" fires after stdio has drained, so the last stderr lines are logged first.
         proc.on("close", (code, signal) => {
             if (this.proc !== proc) return // a superseded process
             this.onSidecarGone(
@@ -230,12 +225,11 @@ export class GossipManager {
         await this.connectIpc()
         await this.awaitReady()
 
-        // Fresh start grace: judge silence from now, not from epoch.
+        // Judge staleness and silence from now.
         const now = Date.now()
         this.lastStatsAt = now
         this.lastInboundAt = now
 
-        // Re-establish everything the previous sidecar knew.
         this.txSubscribed = false
         const staked = await isSelfStaked().catch(() => false)
         if (this.started && staked) this.setTxSubscription(true)
@@ -255,11 +249,7 @@ export class GossipManager {
         void this.restartSidecar(reason)
     }
 
-    /**
-     * Replace a sidecar that positive evidence says is broken. Bounded by
-     * the restart budget; past it, the node goes down with the sidecar as
-     * D11 intends.
-     */
+    /** Replace the sidecar; fatal once the restart budget is exhausted. */
     private async restartSidecar(reason: string): Promise<void> {
         if (this.restarting || this.stopping) return
         this.restarting = true
@@ -303,8 +293,7 @@ export class GossipManager {
         if (proc && proc.exitCode === null && proc.signalCode === null) {
             proc.kill()
         }
-        // Wait for "close" (stdio drained) so the old sidecar's final
-        // stderr lines land in the log before the restart/fatal message.
+        // Wait for "close" so the old sidecar's stderr is fully logged.
         if (proc && !this.hasClosed(proc)) {
             await new Promise<void>(resolve => {
                 const t = setTimeout(() => {
@@ -320,7 +309,6 @@ export class GossipManager {
     }
 
     private hasClosed(proc: ChildProcess): boolean {
-        // Streams are closed and destroyed once "close" has fired.
         const stderr = proc.stderr
         return (
             (proc.exitCode !== null || proc.signalCode !== null) &&
@@ -421,8 +409,6 @@ export class GossipManager {
                     peerId: String(msg.peerId),
                     addrs: (msg.addrs as string[]) ?? [],
                 }
-                // Seed the staleness clock so the wedge check never compares
-                // against epoch 0 before the first stats message is read.
                 this.lastStatsAt = Date.now()
                 this.onReady?.()
                 break
@@ -495,12 +481,7 @@ export class GossipManager {
 
     private lastTickAt = 0
 
-    /**
-     * Liveness, once per heights tick. The verdict comes from the pure
-     * judge in sidecarHealth.ts; this method only acts on it. A stalled
-     * heartbeat is a fault. Silence is not: it goes to the HTTP probe,
-     * which decides whether the mesh is dead or the node is alone.
-     */
+    /** Act on the health verdict: restart on a fault, probe on silence. */
     private checkSidecarHealth(intervalMs: number): void {
         const now = Date.now()
         const tickLateMs = now - this.lastTickAt - intervalMs
@@ -537,12 +518,7 @@ export class GossipManager {
         }
     }
 
-    /**
-     * Gossip has been silent with subscribers present. Ask the network over
-     * HTTP: any staked peer that answers a hello proves the network is
-     * alive and the mesh is at fault. Nobody answering means the node is
-     * alone, which is not a fault and must not restart anything.
-     */
+    /** Hello a few staked peers over HTTP; restart the sidecar if any answers, else log that the node is alone. */
     private async probeSilence(now: number): Promise<void> {
         if (this.silenceProbeInFlight) return
         if (now - this.lastSilenceProbeAt < INBOUND_SILENCE_MS) return
@@ -608,12 +584,7 @@ export class GossipManager {
         )
     }
 
-    /**
-     * The sidecar is up, reporting, and has at least one heights
-     * subscriber. This is the publish gate: a node must keep speaking into
-     * a quiet mesh, otherwise a network where every node waits to hear
-     * something first never produces anything to hear.
-     */
+    /** Sidecar running, stats fresh, and at least one heights subscriber. Gates publishing. */
     private sidecarUp(): boolean {
         if (!this.started || !this.readyInfo || !this.lastStats) return false
         if (this.restarting) return false
@@ -621,11 +592,7 @@ export class GossipManager {
         return (this.lastStats.perTopic[HEIGHTS_TOPIC]?.subscribers ?? 0) >= 1
     }
 
-    /**
-     * Whether callers should prefer gossip over HTTP right now: the sidecar
-     * is up AND the mesh has delivered something recently. Never used to
-     * gate publishing (see sidecarUp).
-     */
+    /** Sidecar up and the mesh delivered something recently. Gates reads, not publishing. */
     isReady(): boolean {
         if (!this.sidecarUp()) return false
         return Date.now() - this.lastInboundAt <= INBOUND_SILENCE_MS
@@ -691,7 +658,7 @@ export class GossipManager {
 
     private lastSkipLog = new Map<string, number>()
 
-    /** One debug line per topic per 30 s, so a quiet log still says why. */
+    /** Log a skipped publish at most once per topic per 30 s. */
     private logPublishSkipped(topic: string, why: string): void {
         const now = Date.now()
         if (now - (this.lastSkipLog.get(topic) ?? 0) < 30_000) return
@@ -699,11 +666,7 @@ export class GossipManager {
         log.debug(`[GOSSIP] publish to ${topic} skipped: ${why}`)
     }
 
-    /**
-     * Publish a validated transaction envelope. Fire and forget: no ack,
-     * no retry. Receivers dedup on the tx hash; the per-block mempool merge
-     * repairs anything the mesh dropped.
-     */
+    /** Publish a validated transaction envelope. Fire and forget. */
     async publishTx(validityData: ValidityData): Promise<boolean> {
         if (!(await this.mayPublish(TXS_TOPIC))) return false
         this.send({
@@ -949,11 +912,7 @@ export class GossipManager {
         )
     }
 
-    /**
-     * The gossip deliverer is a mesh relay, not HTTP-callable. Tx bodies
-     * are fetched over HTTP from a block signer (guaranteed to have them),
-     * else any peer synced past this height.
-     */
+    /** Fetch the block's tx bodies over HTTP from a signer, else any peer past this height. */
     private resolveBlockSender(block: Block): string | null {
         const peerman = PeerManager.getInstance()
         const signers = Object.keys(block.validation_data?.signatures ?? {})
