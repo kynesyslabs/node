@@ -442,6 +442,22 @@ describe("messageHash scope", () => {
         expect(submitToL2PS).toHaveBeenCalledTimes(1)
     })
 
+    it("a resend during a succeeding attempt to an offline recipient is answered as queued", async () => {
+        let settle!: (r: { success: boolean; txHash?: string }) => void
+        submitToL2PS.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+
+        const first = service.processMessage("aa", "cc", "subnet_a", crypto.randomUUID(), "h-inflight-offline", encrypted, false)
+        await Bun.sleep(20)
+        const second = service.processMessage("aa", "cc", "subnet_a", crypto.randomUUID(), "h-inflight-offline", encrypted, false)
+        await Bun.sleep(20)
+        settle({ success: true, txHash: "0xtx6" })
+
+        const [r1, r2] = await Promise.all([first, second])
+        expect(r1).toMatchObject({ success: true, status: "queued", l2psTxHash: "0xtx6" })
+        expect(r2).toMatchObject({ success: true, duplicate: true, status: "queued", l2psTxHash: "0xtx6" })
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
+    })
+
     it("does not let another sender's message with the same hash block this one", async () => {
         const seller = identity()
         const s = await register(seller)

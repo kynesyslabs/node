@@ -26,7 +26,7 @@ export interface ProcessMessageResult {
     error?: string
     /** The sender already sent this message to this recipient; nothing was redone. */
     duplicate?: boolean
-    /** Stored status of the original message, set when `duplicate` is true. */
+    /** Status the message is stored with: delivered, queued or, for a duplicate, sent. */
     status?: MessageStatus
 }
 
@@ -131,13 +131,10 @@ export class L2PSMessagingService {
         }
 
         if (l2psResult.txHash) {
-            await repo.update(id, {
-                l2psTxHash: l2psResult.txHash,
-                status: recipientOnline ? "delivered" : "queued",
-            })
+            await repo.update(id, { l2psTxHash: l2psResult.txHash, status })
         }
 
-        return { success: true, l2psTxHash: l2psResult.txHash, messageId: id }
+        return { success: true, l2psTxHash: l2psResult.txHash, messageId: id, status }
     }
 
     /**
