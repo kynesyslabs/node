@@ -143,7 +143,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     },
 
     debug: {
-        assertionsEnabled: false,
+        assertionsEnabled: true,
     },
 
     identity: {
