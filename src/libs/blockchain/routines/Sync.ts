@@ -42,7 +42,6 @@ import {
 import { BroadcastManager } from "@/libs/communications/broadcastManager"
 import { Waiter } from "@/utilities/waiter"
 import Mempool from "../mempool"
-import { assembleBlockTxs, missingHashes } from "./blockTxAssembly"
 import Datasource from "@/model/datasource"
 import { GCRAssignedTx } from "@/model/entities/GCRv2/GCRAssignedTx"
 import { getLastBlockSigners } from "../chainBlocks"
@@ -1519,41 +1518,10 @@ async function fetchAllBlockTxs(
     return res.result === 200 ? (res.response as Transaction[]) : []
 }
 
-/** Fetch only `hashes`, chunked at the server's per-call cap. */
-async function fetchTxsByHashes(
-    hashes: string[],
-    peer: Peer,
-): Promise<Transaction[]> {
-    const out: Transaction[] = []
-    const chunk = getSharedState.batchSyncTxSize
-    for (let i = 0; i < hashes.length; i += chunk) {
-        const res = await peer.longCall(
-            {
-                method: "nodeCall",
-                params: [
-                    {
-                        message: "getTxsByHashes",
-                        data: { hashes: hashes.slice(i, i + chunk) },
-                    },
-                ],
-            },
-            true,
-            { protocol: "http", sleepTime: 1000, retries: 3 },
-        )
-        if (res.result === 200 && Array.isArray(res.response)) {
-            out.push(...(res.response as Transaction[]))
-        }
-    }
-    return out
-}
-
 /**
- * Transactions for a block we are about to apply.
- *
- * At head + 1 the mempool is consulted first: gossip has usually delivered
- * most bodies already, so only the gap is fetched by hash, or the whole
- * block when nothing is local. Older blocks never touch the mempool
- * table; they are history being replayed, and the batch path owns them.
+ * Transactions for a block we are about to apply, always fetched from the
+ * peer: a tx's final status and failure attrs are decided in the round and
+ * only the forger's copy carries them.
  */
 export async function askTxsForBlock(
     block: Block,
@@ -1563,27 +1531,7 @@ export async function askTxsForBlock(
     if (!Array.isArray(ordered) || ordered.length === 0) {
         return []
     }
-
-    const atHead = block.number === getSharedState.lastBlockNumber + 1
-    if (!atHead) {
-        return await fetchAllBlockTxs(block, peer)
-    }
-
-    const local = (await Mempool.getTransactionsByHashes(
-        ordered,
-    )) as unknown as Transaction[]
-    const missing = missingHashes(ordered, local)
-    log.debug(
-        `[askTxsForBlock] block ${block.number}: ${ordered.length} txs, ${local.length} in mempool, ${missing.length} to fetch`,
-    )
-
-    let fetched: Transaction[] = []
-    if (missing.length === ordered.length) {
-        fetched = await fetchAllBlockTxs(block, peer)
-    } else if (missing.length > 0) {
-        fetched = await fetchTxsByHashes(missing, peer)
-    }
-    return assembleBlockTxs(ordered, local, fetched, block.number)
+    return await fetchAllBlockTxs(block, peer)
 }
 
 // Helper function to merge the peerlist from the last block
