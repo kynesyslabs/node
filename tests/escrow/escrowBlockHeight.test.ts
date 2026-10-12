@@ -104,7 +104,7 @@ function escrowEdit(operation: string, data: Record<string, any>): any {
         isRollback: false,
     }
 }
-// Fresh objects per call: HandleGCR.apply sets isRollback on the edit it gets
+// Fresh objects per call so no test shares edit objects with another
 const depositTx = () =>
     tx(ALICE, [
         escrowEdit("deposit", { sender: ALICE, amount: 1000, expiryDays: 1 }),
@@ -265,5 +265,28 @@ describe("rollback with the apply height", () => {
         expect(result.success).toBe(true)
         expect(mockDb.get(ALICE).balance).toBe(10_000n)
         expect(escrow().deposits).toEqual([])
+    })
+})
+
+describe("the rollback flag comes from the caller, not the tx", () => {
+    test("a signed edit claiming isRollback is applied forward", async () => {
+        expect((await applyAt(depositTx(), H0)).success).toBe(true)
+        expect(mockDb.get(ALICE).balance).toBe(9_000n)
+
+        // Before expiry, a depositor marks a deposit edit as a rollback to pull funds out early
+        const forged = depositTx()
+        forged.content.gcr_edits[0].isRollback = true
+        await applyAt(forged, H0 + 1)
+
+        expect(mockDb.get(ALICE).balance).toBe(8_000n)
+        expect(escrow()).toMatchObject({ balance: "2000" })
+    })
+
+    test("rolling back leaves the tx's own edits unflagged", async () => {
+        const t = depositTx()
+        await applyAt(t, H0)
+        await HandleGCR.rollback(t, [...t.content.gcr_edits], H0)
+
+        expect(t.content.gcr_edits[0].isRollback).toBe(false)
     })
 })

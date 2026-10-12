@@ -252,10 +252,10 @@ export default class HandleGCR {
 
         const repositories = await this.getRepositories()
 
-        // NOTE The rollbacks are applied within the single routines based on the isRollback flag
-        if (rollback) {
-            editOperation.isRollback = true
-        }
+        // NOTE The rollbacks are applied within the single routines based on the isRollback flag.
+        // The flag comes only from the caller: a signed edit cannot claim to be a rollback,
+        // and a rollback must not flag the edit stored in the tx.
+        editOperation = { ...editOperation, isRollback: rollback }
 
         // Applying the edit operations
         switch (editOperation.type) {
