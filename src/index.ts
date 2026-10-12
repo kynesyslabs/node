@@ -47,6 +47,11 @@ import getTimestampCorrection from "./libs/utils/calibrateTime"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
 import findGenesisBlock from "./libs/blockchain/routines/findGenesisBlock"
 import { ensureValidatorSeed } from "./libs/blockchain/routines/ensureValidatorSeed"
+import { acquireIdentityLock } from "./libs/identity/identityLock"
+import {
+    assertIdentityNotLive,
+    IdentityLiveError,
+} from "./libs/peer/identityLiveness"
 import { loadNetworkParameters } from "./libs/blockchain/routines/loadNetworkParameters"
 import { SignalingServer } from "./features/InstantMessagingProtocol/signalingServer/signalingServer"
 import log, { TUIManager, CategorizedLogger } from "src/utilities/logger"
@@ -548,6 +553,17 @@ async function preMainLoop() {
 
     await peerBootstrap(indexState.PeerList)
 
+    try {
+        await assertIdentityNotLive()
+    } catch (error) {
+        if (error instanceof IdentityLiveError) {
+            log.error(`[IDENTITY] ${error.message}; refusing to run twice`)
+            await gracefulShutdown("identity_in_use", 1)
+            return
+        }
+        throw error
+    }
+
     log.info("[PEER] 🌐 Bootstrapping peers...")
     log.debug(
         "[PEER] Peer list: " +
@@ -593,6 +609,14 @@ async function main() {
     }
 
     getSharedState.keypair = await getSharedState.identity.loadIdentity()
+    try {
+        acquireIdentityLock(getSharedState.identityFile)
+    } catch (error) {
+        log.error(
+            `[IDENTITY] ${error instanceof Error ? error.message : String(error)}`,
+        )
+        process.exit(1)
+    }
     try {
         await TxValidatorPool.getInstance().start()
     } catch (error) {

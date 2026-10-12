@@ -9,6 +9,7 @@ import log from "src/utilities/logger"
 import { Config, isLoopbackHost, parseNodeUrl } from "src/config"
 import { getSharedState } from "@/utilities/sharedState"
 import { Peer, PeerManager } from "src/libs/peer"
+import { reportTwin } from "src/libs/peer/identityLiveness"
 
 import {
     buildHeightsRecord,
@@ -816,6 +817,13 @@ export class GossipManager {
     }
 
     private async applyHeightsRecord(record: HeightsRecord): Promise<void> {
+        if (
+            record.pubkey.toLowerCase() ===
+            getSharedState.publicKeyHex?.toLowerCase()
+        ) {
+            reportTwin("heights", record.url || record.addrs.join(","))
+            return
+        }
         const peerman = PeerManager.getInstance()
         const { BroadcastManager: broadcaster } =
             await import("src/libs/communications/broadcastManager")

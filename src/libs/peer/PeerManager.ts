@@ -18,6 +18,7 @@ import { isLoopbackHost, parseNodeUrl } from "src/config"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import type { HelloPeerRequest } from "../network/manageHelloPeer"
 import { helloResponseMessage } from "./helloAuth"
+import { noteCallerKnownAt } from "./identityLiveness"
 import {
     hexToUint8Array,
     ucrypto,
@@ -537,19 +538,18 @@ export default class PeerManager {
         }
     }
 
-    private static async sayHelloToPeerUnguarded(
-        peer: Peer,
-        waitForDiscovery = false,
-    ): Promise<HelloVerdict> {
+    /** Our signed hello request with a fresh nonce. */
+    static async buildHelloRequest(): Promise<{
+        request: HelloPeerRequest
+        nonce: string
+    }> {
         const nonce = crypto.randomBytes(32).toString("hex")
-        const connectionString = getSharedState.exposedUrl // ? Are we sure about this
+        const connectionString = getSharedState.exposedUrl
         const signedConnectionString = await TxValidatorPool.getInstance().sign(
             getSharedState.signingAlgorithm,
             new TextEncoder().encode(connectionString),
         )
-
-        // Sending the transmission to the peer
-        const helloRequest: HelloPeerRequest = {
+        const request: HelloPeerRequest = {
             url: connectionString,
             publicKey: getSharedState.publicKeyHex,
             signature: {
@@ -563,8 +563,16 @@ export default class PeerManager {
             },
             nonce,
         }
+        return { request, nonce }
+    }
 
-        // Not awaiting the response to not block the main thread
+    private static async sayHelloToPeerUnguarded(
+        peer: Peer,
+        waitForDiscovery = false,
+    ): Promise<HelloVerdict> {
+        const { request: helloRequest, nonce } =
+            await PeerManager.buildHelloRequest()
+
         const response = await peer.longCall(
             {
                 method: "hello_peer",
@@ -612,6 +620,9 @@ export default class PeerManager {
     }> {
         const peerman = PeerManager.getInstance()
         if (response.result === 200) {
+            if (response.extra?.callerKnownAt !== undefined) {
+                noteCallerKnownAt(response.extra.callerKnownAt)
+            }
             if (
                 typeof response.extra?.msg === "string" &&
                 response.extra.msg.startsWith("Peer is us")

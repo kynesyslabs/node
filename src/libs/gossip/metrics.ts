@@ -56,6 +56,11 @@ export function registerGossipMetrics() {
         "Outcomes of the HTTP cross-check run during gossip silence",
         ["result"],
     )
+    m.createCounter(
+        "self_identity_seen_total",
+        "Messages from another process using this node's identity",
+        ["source"],
+    )
 }
 
 export function recordVerdict(
@@ -163,6 +168,16 @@ export function countSilenceProbe(result: string) {
     try {
         getMetricsService().incrementCounter("gossip_silence_probe_total", {
             result,
+        })
+    } catch {
+        /* ignore */
+    }
+}
+
+export function countSelfIdentitySeen(source: string) {
+    try {
+        getMetricsService().incrementCounter("self_identity_seen_total", {
+            source,
         })
     } catch {
         /* ignore */
