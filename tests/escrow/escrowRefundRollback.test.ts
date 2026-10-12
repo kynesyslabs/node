@@ -25,8 +25,8 @@ import GCREscrowRoutines from "src/libs/blockchain/gcr/gcr_routines/GCREscrowRou
 const ALICE = "a".repeat(64)
 const CAROL = "c".repeat(64)
 const ESCROW = GCREscrowRoutines.getEscrowAddress("twitter", "@bob")
-const DAY = 24 * 60 * 60 * 1000
-const T0 = 1_700_000_000_000
+const BLOCKS_PER_DAY = 8640
+const H0 = 100
 
 function edit(
     operation: string,
@@ -46,15 +46,22 @@ const signedBy = (from: string): any => ({
     content: { from, from_ed25519_address: from },
     signature: { type: "ed25519", data: "" },
 })
+let height: number
 const apply = (e: any, signer: string) =>
-    GCREscrowRoutines.apply(e, mockDb.repository(), false, signedBy(signer))
+    GCREscrowRoutines.apply(
+        e,
+        mockDb.repository(),
+        false,
+        signedBy(signer),
+        height,
+    )
 const escrow = () => mockDb.get(ESCROW).escrows[ESCROW]
 
 beforeEach(async () => {
     mockDb = new FakeGcrDb()
     mockDb.addAccount(ALICE, 10_000n)
     mockDb.addAccount(CAROL, 10_000n)
-    jest.spyOn(Date, "now").mockReturnValue(T0)
+    height = H0
     expect(
         (
             await apply(
@@ -67,10 +74,8 @@ beforeEach(async () => {
         (await apply(edit("deposit", { sender: CAROL, amount: 500 }), CAROL))
             .success,
     ).toBe(true)
-    jest.spyOn(Date, "now").mockReturnValue(T0 + 2 * DAY)
+    height = H0 + 2 * BLOCKS_PER_DAY
 })
-
-afterEach(() => jest.restoreAllMocks())
 
 describe("escrow refund rollback", () => {
     test("rolling back a refund restores deposits and balances", async () => {

@@ -20,7 +20,14 @@ import {
 const DEFAULT_EXPIRY_DAYS = 30
 const MIN_EXPIRY_DAYS = 1
 const MAX_EXPIRY_DAYS = 365 // 1 year maximum to prevent fund locking
-const MS_PER_DAY = 24 * 60 * 60 * 1000
+// Escrow expiry is counted in blocks so every node reaches the same verdict
+// from chain state alone. 10 s is the protocol block time in
+// sharedState.ts (`block_time = 10`, "TODO Get it from the genesis").
+// Not read at runtime: getConsensusTime() lets each node override it via
+// CONSENSUS_TIME, which would make expiry differ between nodes.
+// Blocks are forged at most every 10 s, so a "day" is at least 24 h.
+const BLOCK_TIME_SECONDS = 10
+const BLOCKS_PER_DAY = (24 * 60 * 60) / BLOCK_TIME_SECONDS // 8640
 const MAX_BALANCE = BigInt("1000000000000000000000") // 1 sextillion DEM maximum
 const MAX_PLATFORM_LENGTH = 20
 const MAX_USERNAME_LENGTH = 100
@@ -90,7 +97,7 @@ export default class GCREscrowRoutines {
         username: string,
         expiryDays: number | undefined,
         amount: string | number,
-        currentTimestamp: number,
+        applyHeight: number,
     ): EscrowData {
         const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
 
@@ -107,7 +114,6 @@ export default class GCREscrowRoutines {
             )
         }
 
-        const expiryMs = requestedExpiry * MS_PER_DAY
         return {
             claimableBy: {
                 platform: platform as "twitter" | "github" | "telegram" | "discord",
@@ -115,8 +121,8 @@ export default class GCREscrowRoutines {
             },
             balance: "0",
             deposits: [],
-            expiryTimestamp: currentTimestamp + expiryMs,
-            createdAt: currentTimestamp,
+            expiryBlock: applyHeight + requestedExpiry * BLOCKS_PER_DAY,
+            createdBlock: applyHeight,
         }
     }
 
@@ -126,13 +132,11 @@ export default class GCREscrowRoutines {
      */
     private static validateExistingEscrowForDeposit(
         escrow: EscrowData,
-        currentTimestamp: number,
+        applyHeight: number,
     ): void {
-        if (currentTimestamp > escrow.expiryTimestamp) {
+        if (applyHeight >= escrow.expiryBlock) {
             throw new Error(
-                `Cannot deposit to expired escrow. Expired on ${new Date(
-                    escrow.expiryTimestamp,
-                ).toISOString()}`,
+                `Cannot deposit to expired escrow. Expired at block ${escrow.expiryBlock}`,
             )
         }
         if (escrow.claimed) {
@@ -148,13 +152,13 @@ export default class GCREscrowRoutines {
      */
     private static isSpentEscrow(
         escrow: EscrowData,
-        currentTimestamp: number,
+        applyHeight: number,
     ): boolean {
         if (escrow.claimed) {
             return true
         }
         return (
-            currentTimestamp > escrow.expiryTimestamp &&
+            applyHeight >= escrow.expiryBlock &&
             escrow.deposits.every(d => d.refunded)
         )
     }
@@ -227,12 +231,16 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "deposit"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes (used for pre-validation)
+     * @param applyHeight - Height of the block this edit is applied in
+     * @param txTimestamp - Signed tx timestamp, stored for display only
      * @returns Success/failure result
      */
     static async applyEscrowDeposit(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
+        txTimestamp: number,
     ): Promise<GCRResult> {
         const { sender, platform, username, amount, expiryDays, message } =
             editOperation.data
@@ -284,9 +292,6 @@ export default class GCREscrowRoutines {
                 ` → escrow address: ${escrowAddress}`,
         )
 
-        // REVIEW: Capture timestamp once for consistency across the operation
-        const currentTimestamp = Date.now()
-
         // REVIEW: Execute entire deposit operation in a transaction with locking
         // to prevent race conditions from concurrent deposits
         const result = await gcrMainRepository.manager.transaction(
@@ -321,19 +326,19 @@ export default class GCREscrowRoutines {
                 const existingEscrow = escrowAccount.escrows[escrowAddress]
                 if (
                     !existingEscrow ||
-                    this.isSpentEscrow(existingEscrow, currentTimestamp)
+                    this.isSpentEscrow(existingEscrow, applyHeight)
                 ) {
                     escrowAccount.escrows[escrowAddress] = this.createNewEscrowData(
                         platform,
                         username,
                         expiryDays,
                         amount,
-                        currentTimestamp,
+                        applyHeight,
                     )
                 } else {
                     this.validateExistingEscrowForDeposit(
                         escrowAccount.escrows[escrowAddress],
-                        currentTimestamp,
+                        applyHeight,
                     )
                 }
 
@@ -352,7 +357,8 @@ export default class GCREscrowRoutines {
                 const deposit: EscrowDeposit = {
                     from: sender,
                     amount: BigInt(amount).toString(),
-                    timestamp: currentTimestamp,
+                    block: applyHeight,
+                    timestamp: txTimestamp,
                 }
 
                 if (message) {
@@ -420,12 +426,14 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "claim"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param applyHeight - Height of the block this edit is applied in
      * @returns Success/failure result with claimed amount
      */
     static async applyEscrowClaim(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
     ): Promise<GCRResult> {
         const { claimant, platform, username } = editOperation.data
 
@@ -441,9 +449,6 @@ export default class GCREscrowRoutines {
             `[EscrowClaim] ${claimant} attempting to claim ${platform}:${username}` +
                 ` → escrow address: ${escrowAddress}`,
         )
-
-        // REVIEW: Capture timestamp once for consistency across the operation
-        const currentTimestamp = Date.now()
 
         // CRITICAL SECURITY CHECK: Verify claimant has proven ownership of social identity
         // This uses the existing Web2 identity verification system (GCRIdentityRoutines)
@@ -517,28 +522,25 @@ export default class GCREscrowRoutines {
 
                 // Check if already claimed (prevents race condition - now under lock)
                 if (escrow.claimed) {
-                    const claimedAt = escrow.claimedAt
-                        ? new Date(escrow.claimedAt).toISOString()
-                        : "unknown time"
+                    const claimedIn =
+                        escrow.claimedBlock !== undefined
+                            ? `block ${escrow.claimedBlock}`
+                            : "unknown block"
                     log.warning(
-                        `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedAt}`,
+                        `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedIn}`,
                     )
                     throw new Error(
                         `Escrow already claimed by ${escrow.claimedBy}`,
                     )
                 }
 
-                // Check expiry using consistent timestamp
-                if (currentTimestamp > escrow.expiryTimestamp) {
+                // Check expiry against the height of the applying block
+                if (applyHeight >= escrow.expiryBlock) {
                     log.warning(
-                        `[EscrowClaim] ✗ Escrow expired at ${new Date(
-                            escrow.expiryTimestamp,
-                        )}`,
+                        `[EscrowClaim] ✗ Escrow expired at block ${escrow.expiryBlock}`,
                     )
                     throw new Error(
-                        `Escrow expired on ${new Date(
-                            escrow.expiryTimestamp,
-                        ).toISOString()}. ` +
+                        `Escrow expired at block ${escrow.expiryBlock}. ` +
                             "Original depositors can reclaim funds.",
                     )
                 }
@@ -584,7 +586,7 @@ export default class GCREscrowRoutines {
                     // Mark as claimed (prevents race condition)
                     escrow.claimed = true
                     escrow.claimedBy = claimant
-                    escrow.claimedAt = currentTimestamp
+                    escrow.claimedBlock = applyHeight
                     escrow.balance = this.formatAmount(0n) // Zero out escrow balance
 
                     // Credit claimant's account
@@ -621,12 +623,14 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "refund"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param applyHeight - Height of the block this edit is applied in
      * @returns Success/failure result
      */
     static async applyEscrowRefund(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
     ): Promise<GCRResult> {
         const { refunder, platform, username } = editOperation.data
 
@@ -639,9 +643,6 @@ export default class GCREscrowRoutines {
         log.info(
             `[EscrowRefund] ${refunder} attempting to refund ${platform}:${username}`,
         )
-
-        // REVIEW: Capture timestamp once for consistency
-        const currentTimestamp = Date.now()
 
         // REVIEW: Execute refund in a transaction with locking to prevent race condition
         const result = await gcrMainRepository.manager.transaction(
@@ -666,12 +667,10 @@ export default class GCREscrowRoutines {
                     )
                 }
 
-                // Check escrow is expired using consistent timestamp
-                if (currentTimestamp <= escrow.expiryTimestamp) {
+                // Check escrow is expired at the height of the applying block
+                if (applyHeight < escrow.expiryBlock) {
                     throw new Error(
-                        `Escrow not yet expired. Expires: ${new Date(
-                            escrow.expiryTimestamp,
-                        ).toISOString()}`,
+                        `Escrow not yet expired. Expires at block ${escrow.expiryBlock}`,
                     )
                 }
 
@@ -980,7 +979,7 @@ export default class GCREscrowRoutines {
                 // Restore escrow state
                 escrow.claimed = false
                 escrow.claimedBy = undefined
-                escrow.claimedAt = undefined
+                escrow.claimedBlock = undefined
                 escrow.balance = this.formatAmount(claimedAmount)
 
                 // Deduct from claimant
@@ -1154,6 +1153,8 @@ export default class GCREscrowRoutines {
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
      * @param tx - Transaction carrying the edit; its signer must be the actor
+     * @param applyHeight - Height of the block the edit is applied in (or
+     *   rolled back from). Expiry is decided by this height, never local time.
      * @returns Success/failure result
      */
     static async apply(
@@ -1161,11 +1162,19 @@ export default class GCREscrowRoutines {
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
         tx: Transaction,
+        applyHeight: number,
     ): Promise<GCRResult> {
         if (editOperation.type !== "escrow") {
             return {
                 success: false,
                 message: "Invalid GCREdit type for escrow routine",
+            }
+        }
+
+        if (!Number.isSafeInteger(applyHeight) || applyHeight < 0) {
+            return {
+                success: false,
+                message: `Invalid block height for escrow edit: ${applyHeight}`,
             }
         }
 
@@ -1232,6 +1241,10 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
+                    typeof tx?.content?.timestamp === "number"
+                        ? tx.content.timestamp
+                        : 0,
                 )
 
             case "claim":
@@ -1239,6 +1252,7 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
                 )
 
             case "refund":
@@ -1246,6 +1260,7 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
                 )
 
             default:

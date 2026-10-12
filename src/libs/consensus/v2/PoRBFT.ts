@@ -134,7 +134,7 @@ export async function consensusRoutine(): Promise<void> {
 
         // Applying the GCREdits and see if everything is consistent
         const [localSuccessfulTxs, localFailedTxs] =
-            await applyGCREditsFromMergedMempool(tempMempool)
+            await applyGCREditsFromMergedMempool(tempMempool, blockRef)
         successfulTxs = successfulTxs.concat(localSuccessfulTxs)
         failedTxs = failedTxs.concat(localFailedTxs)
         if (failedTxs.length > 0) {
@@ -236,7 +236,7 @@ export async function consensusRoutine(): Promise<void> {
                     txsToRollback.push(tx)
                 }
             }
-            await rollbackGCREditsFromTxs(txsToRollback)
+            await rollbackGCREditsFromTxs(txsToRollback, blockRef)
             await Mempool.removeTransactionsByHashes(successfulTxs)
 
             return
@@ -344,17 +344,19 @@ async function mergeAndOrderMempools(
  * Rollback the GCREdits from a set of txs
  *
  * @param txs - The txs
+ * @param blockHeight - Height the edits were applied at (the block being forged)
  * @returns The successful and failed GCREdits
  */
 async function rollbackGCREditsFromTxs(
     txs: Transaction[],
+    blockHeight: number,
 ): Promise<[string[], string[]]> {
     const successfulTxs: string[] = []
     const failedTxs: string[] = []
     // 1. Parse the txs to get the GCREdits
     for (const tx of txs) {
         // 2. Apply the GCREdits to the state for each tx with the isRollback flag set to true
-        const result = await HandleGCR.applyToTx(tx, true)
+        const result = await HandleGCR.applyToTx(tx, true, false, blockHeight)
         if (result.success) {
             successfulTxs.push(tx.hash)
         } else {
@@ -368,10 +370,12 @@ async function rollbackGCREditsFromTxs(
  * Apply the GCREdits from the merged mempool
  *
  * @param mempool - The mempool
+ * @param blockHeight - Height of the block being forged (forgeBlock uses last block number + 1)
  * @returns The successful and failed GCREdits
  */
 async function applyGCREditsFromMergedMempool(
     mempool: Transaction[],
+    blockHeight: number,
 ): Promise<[string[], string[]]> {
     // TODO Implement this
     const successfulTxs: string[] = []
@@ -387,7 +391,13 @@ async function applyGCREditsFromMergedMempool(
         const txGCREdits = tx.content.gcr_edits
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
-            const applyResult = await HandleGCR.apply(gcrEdit, tx)
+            const applyResult = await HandleGCR.apply(
+                gcrEdit,
+                tx,
+                false,
+                false,
+                blockHeight,
+            )
             if (applyResult.success) {
                 // If the apply succeeds, add the tx to the successfulTxs array
                 successfulTxs.push(tx.hash)

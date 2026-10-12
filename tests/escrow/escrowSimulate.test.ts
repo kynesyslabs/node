@@ -53,6 +53,8 @@ describe("escrow deposit simulate mode", () => {
             depositEdit(),
             mockDb.repository(),
             true,
+            100,
+            0,
         )
 
         expect(result.success).toBe(true)
@@ -66,6 +68,8 @@ describe("escrow deposit simulate mode", () => {
             depositEdit(),
             mockDb.repository(),
             false,
+            100,
+            0,
         )
 
         expect(result.success).toBe(true)

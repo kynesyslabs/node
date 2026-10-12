@@ -235,6 +235,7 @@ export default class HandleGCR {
      * @param tx The original transaction containing this edit
      * @param rollback Whether the operation is a rollback
      * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     * @param applyHeight Height of the block the edit belongs to (escrow expiry is decided by it)
      * @returns Result indicating success/failure and any error messages
      * @throws May throw database errors during repository operations
      */
@@ -243,6 +244,7 @@ export default class HandleGCR {
         tx: Transaction,
         rollback = false, // operations will be reverse in the rollback
         simulate = false, // used to simulate the GCREdit application
+        applyHeight: number,
     ): Promise<GCRResult> {
         /*if (tx.hash !== editOperation.txhash) {
             return { success: false, message: "Invalid txhash" }
@@ -281,6 +283,7 @@ export default class HandleGCR {
                     repositories.main as Repository<GCRMain>,
                     simulate,
                     tx,
+                    applyHeight,
                 )
             case "assign":
             case "subnetsTx":
@@ -297,6 +300,7 @@ export default class HandleGCR {
      * @param tx Transaction containing GCR edits to apply
      * @param isRollback Whether the operation is a rollback
      * @param simulate Whether the operation is being simulated (used for pre-consensus simulation)
+     * @param applyHeight Height of the block the tx belongs to (escrow expiry is decided by it)
      * @returns Combined result of all edit applications
      * @throws May throw if any edit application fails
      */
@@ -304,6 +308,7 @@ export default class HandleGCR {
         tx: Transaction,
         isRollback = false,
         simulate = false,
+        applyHeight: number,
     ): Promise<GCRResult> {
         const editsResults: GCRResult[] = []
         const txExists = await Chain.checkTxExists(tx.hash)
@@ -329,6 +334,7 @@ export default class HandleGCR {
                     tx,
                     isRollback,
                     simulate,
+                    applyHeight,
                 )
                 console.log(
                     "[applyToTx] GCREdit executed: " +
@@ -340,7 +346,7 @@ export default class HandleGCR {
                 )
                 // If not successful, we stop the execution
                 if (!result.success) {
-                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                    await this.rollback(tx, appliedEdits, applyHeight) // Rollback the applied edits
                     throw new Error(
                         "GCREdit failed for " +
                             edit.type +
@@ -357,7 +363,7 @@ export default class HandleGCR {
                     success: false,
                     message: `${e}`,
                 })
-                await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                await this.rollback(tx, appliedEdits, applyHeight) // Rollback the applied edits
                 // Stopping the execution
                 if (!simulate) {
                     break
@@ -385,12 +391,14 @@ export default class HandleGCR {
      * Rolls back a transaction by reversing the order of applied GCR edits
      * @param tx The transaction to rollback
      * @param appliedEditsOriginal The original list of applied GCR edits
+     * @param applyHeight Height the edits were applied at
      * @returns Result indicating success/failure and any error messages
      * @throws May throw if any edit rollback fails
      */
     static async rollback(
         tx: Transaction,
         appliedEditsOriginal: GCREdit[],
+        applyHeight: number,
     ): Promise<GCRResult> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
@@ -412,7 +420,7 @@ export default class HandleGCR {
                     ") Rolling back GCREdit: " +
                     edit.type,
             )
-            const result = await this.apply(edit, tx, true)
+            const result = await this.apply(edit, tx, true, false, applyHeight)
             results.push(result)
         }
         log.info(

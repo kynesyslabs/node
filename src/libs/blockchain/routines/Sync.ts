@@ -308,7 +308,7 @@ async function downloadBlock(peer: Peer, blockToAsk: number) {
         log.info("[fastSync] Transactions received: " + txs.length, true)
 
         // ! Sync the native tables
-        await syncGCRTables(txs)
+        await syncGCRTables(txs, block.number)
 
         // REVIEW Insert the txs into the transactions database table
         if (txs.length > 0) {
@@ -431,11 +431,12 @@ async function requestBlocks() {
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(
     txs: Transaction[],
+    blockNumber: number, // the synced block's number: edits replay at the height they were applied
 ): Promise<[string, boolean]> {
     // ? Better typing on this return
     // Using the GCREdits in the tx to sync the native tables
     for (const tx of txs) {
-        const result = await HandleGCR.applyToTx(tx)
+        const result = await HandleGCR.applyToTx(tx, false, false, blockNumber)
         if (!result.success) {
             log.error(
                 "[fastSync] GCR edit application failed at tx: " + tx.hash,

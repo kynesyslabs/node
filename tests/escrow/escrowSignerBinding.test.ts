@@ -27,6 +27,7 @@ import GCREscrowRoutines from "src/libs/blockchain/gcr/gcr_routines/GCREscrowRou
 const VICTIM = "a".repeat(64)
 const ATTACKER = "b".repeat(64)
 const ESCROW = GCREscrowRoutines.getEscrowAddress("twitter", "@bob")
+const HEIGHT = 100
 
 function edit(operation: string, data: Record<string, any>): any {
     return {
@@ -62,6 +63,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(ATTACKER),
+            HEIGHT,
         )
 
         expect(result.success).toBe(false)
@@ -75,6 +77,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(VICTIM),
+            HEIGHT,
         )
 
         expect(result.success).toBe(true)
@@ -87,6 +90,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx("0x" + VICTIM.toUpperCase()),
+            HEIGHT,
         )
 
         expect(result.success).toBe(true)
@@ -98,6 +102,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(ATTACKER, VICTIM),
+            HEIGHT,
         )
 
         expect(result.success).toBe(false)
@@ -111,6 +116,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(pqcKey, VICTIM, "falcon"),
+            HEIGHT,
         )
         expect(ok.success).toBe(true)
 
@@ -119,6 +125,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(pqcKey, ATTACKER, "falcon"),
+            HEIGHT,
         )
         expect(bad.success).toBe(false)
     })
@@ -129,6 +136,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(VICTIM),
+            HEIGHT,
         )
 
         const result = await GCREscrowRoutines.apply(
@@ -136,6 +144,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(VICTIM),
+            HEIGHT,
         )
 
         expect(result.success).toBe(false)
@@ -148,6 +157,7 @@ describe("escrow actor must be the tx signer", () => {
             mockDb.repository(),
             false,
             tx(ATTACKER),
+            HEIGHT,
         )
 
         expect(result.success).toBe(false)
