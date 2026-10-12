@@ -50,7 +50,8 @@ import { Repository } from "typeorm"
 import GCRIdentityRoutines from "./gcr_routines/GCRIdentityRoutines"
 import { Referrals } from "@/features/incentive/referrals"
 import { validateStorageProgramAccess } from "@/libs/blockchain/validators/validateStorageProgramAccess"
-import { getDataSize, STORAGE_LIMITS } from "@/libs/blockchain/validators/validateStorageProgramSize"
+import { getDataSize, STORAGE_LIMITS, validateStorageProgramData } from "@/libs/blockchain/validators/validateStorageProgramSize"
+import { deriveStorageProgramEdits } from "@/libs/network/routines/transactions/handleStorageProgramTransaction"
 
 export type GetNativeStatusOptions = {
     balance?: boolean
@@ -339,6 +340,43 @@ export default class HandleGCR {
                 where: { pubkey: target },
             })
 
+            // REVIEW: Rollbacks must undo the edit, never re-apply it forward
+            if (editOperation.isRollback) {
+                if (operation === "CREATE") {
+                    // Only remove the row this exact CREATE produced
+                    if (
+                        !account ||
+                        account.data?.metadata?.createdTxHash !== editOperation.txhash
+                    ) {
+                        return {
+                            success: true,
+                            message: `Nothing to roll back for CREATE: ${target}`,
+                        }
+                    }
+
+                    if (!simulate) {
+                        await repository.delete({ pubkey: target })
+                        log.info(`[StorageProgram] CREATE rolled back: ${target}`)
+                    }
+
+                    return {
+                        success: true,
+                        message: `Storage program creation rolled back: ${target}`,
+                    }
+                }
+
+                // WRITE, UPDATE_ACCESS_CONTROL and DELETE overwrite state the edit
+                // does not carry, so they cannot be inverted. Fail visibly instead
+                // of applying them forward a second time.
+                log.error(
+                    `[StorageProgram] Rollback of ${operation} is not supported for ${target} (tx ${editOperation.txhash})`,
+                )
+                return {
+                    success: false,
+                    message: `Rollback of ${operation} is not supported: prior state is not recorded`,
+                }
+            }
+
             // REVIEW: Handle operation-specific account existence requirements
             if (operation === "CREATE") {
                 // CREATE requires account to NOT exist
@@ -346,6 +384,15 @@ export default class HandleGCR {
                     return {
                         success: false,
                         message: `Storage program already exists: ${target}`,
+                    }
+                }
+
+                // REVIEW: Re-check depth and key-length limits here, since every node applies this edit
+                const createDataCheck = validateStorageProgramData(context.data.variables)
+                if (!createDataCheck.success) {
+                    return {
+                        success: false,
+                        message: createDataCheck.error || "Data validation failed",
                     }
                 }
 
@@ -388,6 +435,7 @@ export default class HandleGCR {
                         variables: context.data.variables,
                         metadata: {
                             ...context.data.metadata,
+                            createdTxHash: editOperation.txhash,
                             size: initialSize,
                             lastModified: context.data.metadata?.lastModified ?? Date.now(),
                         },
@@ -436,6 +484,15 @@ export default class HandleGCR {
                     return {
                         success: false,
                         message: "WRITE operation missing data.variables",
+                    }
+                }
+
+                // REVIEW: Re-check depth and key-length limits here, since every node applies this edit
+                const writeDataCheck = validateStorageProgramData(context.data.variables)
+                if (!writeDataCheck.success) {
+                    return {
+                        success: false,
+                        message: writeDataCheck.error || "Data validation failed",
                     }
                 }
 
@@ -563,6 +620,46 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
     }
 
     /**
+     * Returns the GCR edits to apply for a transaction.
+     *
+     * For storageProgram txs the storage edit is derived from the signed tx
+     * content on every node and appended after the client's signed edits
+     * (gas and nonce). tx.content is never modified, so the tx hash stays valid.
+     * Client-supplied storageProgram edits are rejected: only derived ones apply.
+     * @param tx Transaction to read the edits from
+     * @returns The edits to apply, or a failure if they cannot be derived
+     */
+    static async getTxEdits(
+        tx: Transaction,
+    ): Promise<GCRResult & { edits: GCREdit[] }> {
+        const signedEdits = tx.content.gcr_edits || []
+        if (tx.content.type !== "storageProgram") {
+            return { success: true, message: "", edits: signedEdits }
+        }
+
+        if (signedEdits.some(edit => edit.type === "storageProgram")) {
+            return {
+                success: false,
+                message: "storageProgram edits must not be supplied by the client",
+                edits: [],
+            }
+        }
+
+        const derived = await deriveStorageProgramEdits(tx)
+        if (!derived.success) {
+            return { success: false, message: derived.message, edits: [] }
+        }
+
+        // Storage edits go last: the gas and nonce edits before them can be
+        // rolled back if the storage edit fails, while most storage edits cannot
+        return {
+            success: true,
+            message: "",
+            edits: [...signedEdits, ...(derived.gcrEdits || [])],
+        }
+    }
+
+    /**
      * Applies all GCR edits from a transaction
      * @param tx Transaction containing GCR edits to apply
      * @param isRollback Whether the operation is a rollback
@@ -584,14 +681,19 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
             }
         }
 
+        const txEdits = await this.getTxEdits(tx)
+        if (!txEdits.success) {
+            return { success: false, message: txEdits.message }
+        }
+
         console.log(
             "[applyToTx] Starting execution of " +
-                tx.content.gcr_edits.length +
+                txEdits.edits.length +
                 " GCREdits",
         )
         // Keep track of applied edits to be able to rollback them
         const appliedEdits: GCREdit[] = []
-        for (const edit of tx.content.gcr_edits) {
+        for (const edit of txEdits.edits) {
             console.log("[applyToTx] Executing GCREdit: " + edit.type)
             try {
                 const result = await HandleGCR.apply(
@@ -609,8 +711,8 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                         result.message,
                 )
                 // If not successful, we stop the execution
+                // NOTE The catch below rolls back the applied edits (once)
                 if (!result.success) {
-                    await this.rollback(tx, appliedEdits) // Rollback the applied edits
                     throw new Error(
                         "GCREdit failed for " +
                             edit.type +
@@ -627,7 +729,7 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                     success: false,
                     message: `${e}`,
                 })
-                await this.rollback(tx, appliedEdits) // Rollback the applied edits
+                await this.rollback(tx, appliedEdits, simulate) // Rollback the applied edits
                 // Stopping the execution
                 if (!simulate) {
                     break
@@ -655,12 +757,14 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
      * Rolls back a transaction by reversing the order of applied GCR edits
      * @param tx The transaction to rollback
      * @param appliedEditsOriginal The original list of applied GCR edits
+     * @param simulate Whether the edits were only simulated (then the rollback is simulated too)
      * @returns Result indicating success/failure and any error messages
      * @throws May throw if any edit rollback fails
      */
     static async rollback(
         tx: Transaction,
         appliedEditsOriginal: GCREdit[],
+        simulate = false,
     ): Promise<GCRResult> {
         // We need to reverse the order of the applied edits
         const appliedEdits = appliedEditsOriginal.reverse()
@@ -682,7 +786,7 @@ Stack: ${error.stack || "N/A"}` : String(error)}`)
                     ") Rolling back GCREdit: " +
                     edit.type,
             )
-            const result = await this.apply(edit, tx, true)
+            const result = await this.apply(edit, tx, true, simulate)
             results.push(result)
         }
         log.info(

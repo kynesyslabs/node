@@ -384,7 +384,13 @@ async function applyGCREditsFromMergedMempool(
             continue
         }
 
-        const txGCREdits = tx.content.gcr_edits
+        // NOTE storageProgram txs carry their storage edit implicitly; getTxEdits derives it
+        const txEdits = await HandleGCR.getTxEdits(tx)
+        if (!txEdits.success) {
+            failedTxs.push(tx.hash)
+            continue
+        }
+        const txGCREdits = txEdits.edits
         // 2. Apply the GCREdits to the state for each tx
         for (const gcrEdit of txGCREdits) {
             const applyResult = await HandleGCR.apply(gcrEdit, tx)

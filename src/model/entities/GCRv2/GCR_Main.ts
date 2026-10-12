@@ -74,6 +74,8 @@ export class GCRMain {
             lastModified?: number
             /** Current storage size in bytes */
             size?: number
+            /** Hash of the CREATE tx, used to roll that creation back */
+            createdTxHash?: string
         }
     }
     @Column({ type: "boolean", name: "flagged", default: false })
