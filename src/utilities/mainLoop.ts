@@ -130,6 +130,13 @@ async function consensusTriggerTask() {
         return
     }
 
+    if (await isNetworkAhead("mainLoop")) {
+        fastSync([], "networkAheadVeto").catch(e =>
+            handleError(e, "SYNC", { source: "networkAheadVeto" }),
+        )
+        return
+    }
+
     // const checkedAt = getSharedState.networkAheadCheckedAt
     // const maxVerdictAge = Math.max(3 * getSharedState.mainLoopSleepTime, 30_000)
     // if (checkedAt === null || Date.now() - checkedAt > maxVerdictAge) {

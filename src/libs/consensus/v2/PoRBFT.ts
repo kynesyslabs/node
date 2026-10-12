@@ -485,51 +485,46 @@ export async function consensusRoutine(): Promise<void> {
             )
         }
     } catch (error) {
-        if (
+        const aborted =
             error instanceof NotInShardError ||
             error instanceof ForgingEndedError
-        ) {
-            exitReason = "abortConsensus"
-            log.error(error)
-            log.error("[consensusRoutine] Exiting consensus routine")
-            return
-        }
-
-        if (
+        const invalid =
             error instanceof BlockInvalidError ||
             error instanceof AbortConsensusError
-        ) {
-            exitReason = "abortConsensus"
-            // INFO: If we're past merge mempools phase
 
-            if (manager && manager.ourValidatorPhase) {
+        if (aborted || invalid) {
+            exitReason = "abortConsensus"
+            if (aborted) {
+                log.error(error)
+                log.error("[consensusRoutine] Exiting consensus routine")
+            }
+            if (manager?.ourValidatorPhase) {
                 log.warn(
                     "[consensusRoutine] Aborted consensus routine at phase: " +
                         manager.ourValidatorPhase.currentPhase,
                 )
-                if (manager.ourValidatorPhase.currentPhase <= 3) {
-                    return
-                }
+            }
+            // Nothing persisted yet: nothing to undo.
+            if (successfulTxs.length === 0) {
+                return
             }
 
             log.warn(
-                "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
+                `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
             )
 
             // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
             // Getting the txs from the hashes
             const txsToRollback: Transaction[] = []
 
-            if (successfulTxs.length > 0) {
-                for (const txHash of successfulTxs) {
-                    const tx = txMap.get(txHash)
-                    if (tx) {
-                        txsToRollback.push(tx)
-                    }
+            for (const txHash of successfulTxs) {
+                const tx = txMap.get(txHash)
+                if (tx) {
+                    txsToRollback.push(tx)
                 }
-
-                await rollbackGCREditsFromTxs(txsToRollback)
             }
+            await rollbackGCREditsFromTxs(txsToRollback)
+            await HandleGCR.deleteAssignedTxsForBlock(blockRef)
 
             // Also rollback any L2PS proofs that were applied
             await L2PSConsensus.rollbackProofsForBlock(blockRef)

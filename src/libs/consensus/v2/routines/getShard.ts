@@ -223,15 +223,25 @@ export default async function getShard(
 
     const selfId = getSharedState.publicKeyHex
     const candidates: Peer[] = []
+    let behind = 0
     for (const identity of pool) {
         if (identity === selfId) {
             candidates.push(peerman.getPeer(identity) ?? new Peer("", identity))
             continue
         }
         const online = onlineByIdentity.get(identity)
-        if (online) {
-            candidates.push(online)
+        if (!online) continue
+        // A peer whose last known head is below the tip cannot validate
+        // the next block.
+        const knownHeight = Math.max(
+            online.sync.block ?? 0,
+            online.gossip?.height ?? 0,
+        )
+        if (knownHeight < lastBlockNumber) {
+            behind++
+            continue
         }
+        candidates.push(online)
     }
 
     let committeeSize = getSharedState.shardSize
@@ -253,7 +263,7 @@ export default async function getShard(
 
     log.debug(
         `[getShard] pool at block ${lastBlockNumber}: ${pool.length}; ` +
-            `online candidates: ${candidates.length}; shard: ${shard.length}; ` +
+            `online candidates: ${candidates.length} (${behind} behind the tip); shard: ${shard.length}; ` +
             `pins: ${pinOutcome}`,
     )
 

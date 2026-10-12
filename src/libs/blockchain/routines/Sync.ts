@@ -119,7 +119,9 @@ const peerHeight = (peer: Peer) =>
     Math.max(peer.sync.block ?? 0, peer.gossip?.height ?? 0)
 
 const latestBlock = () =>
-    peerManager.getAll().reduce((max, peer) => Math.max(max, peerHeight(peer)), 0)
+    peerManager
+        .getAll()
+        .reduce((max, peer) => Math.max(max, peerHeight(peer)), 0)
 
 const highestBlockPeer = () =>
     peerManager.getAll().find(peer => peerHeight(peer) === latestBlock())
@@ -986,16 +988,62 @@ async function assertNoUnreconciledGcrState(): Promise<void> {
     }
 
     const orphanedBlock = await findOrphanedGcrBlock()
-    if (orphanedBlock !== null) {
-        unreconciledGcrBlock = orphanedBlock
-        getSharedState.syncStatus = false
-        throw new Error(
-            "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
-                `${orphanedBlock} exists but the block does not (chain tip is ` +
-                `${await Chain.getLastBlockNumber()}). Local state has drifted from the ` +
-                "chain — the node must be resynced from scratch.",
+    if (orphanedBlock === null) return
+
+    const tip = await Chain.getLastBlockNumber()
+    getSharedState.syncStatus = false
+    log.warning(
+        `[applySyncedBlock] GCR state for block ${orphanedBlock} exists but the block does not (chain tip is ${tip}); rolling it back`,
+    )
+    const recovered = await rollbackOrphanedGcrState(tip)
+    if (recovered) return
+
+    unreconciledGcrBlock = orphanedBlock
+    throw new Error(
+        "[applySyncedBlock] refusing to apply further blocks: GCR state for block " +
+            `${orphanedBlock} exists but the block does not (chain tip is ${tip}) ` +
+            "and its transactions are no longer in the mempool. Local state has drifted " +
+            "from the chain — the node must be resynced from scratch.",
+    )
+}
+
+/**
+ * Undo GCR edits stamped above `tip` using the tx bodies still in the
+ * mempool. False when any body is missing; nothing is changed in that case.
+ */
+async function rollbackOrphanedGcrState(tip: number): Promise<boolean> {
+    const db = await Datasource.getInstance()
+    const repo = db.getDataSource().getRepository(GCRAssignedTx)
+    const rows = await repo
+        .createQueryBuilder("a")
+        .select("DISTINCT a.tx_hash", "hash")
+        .addSelect("a.block_number", "block")
+        .where("a.block_number > :tip", { tip })
+        .getRawMany<{ hash: string; block: number | string }>()
+    const hashes = [...new Set(rows.map(r => r.hash))]
+    const blocks = [...new Set(rows.map(r => Number(r.block)))]
+
+    const txs = await Mempool.getTransactionsByHashes(hashes)
+    const found = new Set(txs.map(tx => tx.hash))
+    const missing = hashes.filter(h => !found.has(h))
+    if (missing.length > 0) {
+        log.error(
+            `[applySyncedBlock] cannot roll back orphaned GCR state: ${missing.length}/${hashes.length} tx bodies missing from the mempool`,
         )
+        return false
     }
+
+    await HandleGCR.applyTransactions(
+        orderDeterministically(txs as unknown as Transaction[]),
+        true,
+    )
+    for (const block of blocks) {
+        await HandleGCR.deleteAssignedTxsForBlock(block)
+    }
+    log.info(
+        `[applySyncedBlock] rolled back ${txs.length} tx(s) stamped for block(s) ${blocks.join(", ")}; resuming sync at tip ${tip}`,
+    )
+    return true
 }
 
 /**
@@ -1047,15 +1095,27 @@ async function insertBlockOrHalt(
     try {
         await Chain.insertBlock(block, blockTxs)
     } catch (e) {
-        unreconciledGcrBlock = block.number
         getSharedState.syncStatus = false
         log.error(
-            `[applySyncedBlock] FATAL: GCR state for block ${block.number} was applied ` +
-                "but the block failed to insert; local state has drifted from the chain. " +
-                "Marking the node unsynced and refusing further block application — " +
-                "it must be resynced from scratch: " +
+            `[applySyncedBlock] block ${block.number} failed to insert after its GCR edits were applied; rolling them back: ` +
                 `${e instanceof Error ? e.message : String(e)}`,
         )
+        try {
+            const confirmed = blockTxs.filter(
+                tx => tx.status === TRANSACTION_STATUS.CONFIRMED,
+            )
+            await HandleGCR.applyTransactions(
+                orderDeterministically(confirmed),
+                true,
+            )
+            await HandleGCR.deleteAssignedTxsForBlock(block.number)
+        } catch (rollbackError) {
+            unreconciledGcrBlock = block.number
+            log.error(
+                `[applySyncedBlock] FATAL: rollback of block ${block.number} failed; local state has drifted from the chain and the node must be resynced from scratch: ` +
+                    `${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+            )
+        }
         throw e
     }
 
@@ -1269,9 +1329,7 @@ function findNextAvailablePeer(seenPeers: Set<string>): Peer | null {
         return null
     }
 
-    log.info(
-        "[fastSync] Switched to peer: " + next.connection.string,
-    )
+    log.info("[fastSync] Switched to peer: " + next.connection.string)
     return next
 }
 
