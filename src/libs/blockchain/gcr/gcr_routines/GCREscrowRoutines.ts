@@ -1,4 +1,4 @@
-import { GCREdit } from "@kynesyslabs/demosdk/types"
+import { GCREdit, Transaction } from "@kynesyslabs/demosdk/types"
 
 // REVIEW: Extract escrow-specific type from GCREdit union since GCREditEscrow is not exported
 type GCREditEscrow = Extract<GCREdit, { type: "escrow" }>
@@ -20,7 +20,14 @@ import {
 const DEFAULT_EXPIRY_DAYS = 30
 const MIN_EXPIRY_DAYS = 1
 const MAX_EXPIRY_DAYS = 365 // 1 year maximum to prevent fund locking
-const MS_PER_DAY = 24 * 60 * 60 * 1000
+// Escrow expiry is counted in blocks so every node reaches the same verdict
+// from chain state alone. 10 s is the protocol block time in
+// sharedState.ts (`block_time = 10`, "TODO Get it from the genesis").
+// Not read at runtime: getConsensusTime() lets each node override it via
+// CONSENSUS_TIME, which would make expiry differ between nodes.
+// Blocks are forged at most every 10 s, so a "day" is at least 24 h.
+const BLOCK_TIME_SECONDS = 10
+const BLOCKS_PER_DAY = (24 * 60 * 60) / BLOCK_TIME_SECONDS // 8640
 const MAX_BALANCE = BigInt("1000000000000000000000") // 1 sextillion DEM maximum
 const MAX_PLATFORM_LENGTH = 20
 const MAX_USERNAME_LENGTH = 100
@@ -32,10 +39,12 @@ export default class GCREscrowRoutines {
     /**
      * Gets an existing escrow account or creates a new one within a transaction.
      * Handles race conditions from concurrent account creation.
+     * In simulate mode a new account is only built in memory, never saved.
      */
     private static async getOrCreateEscrowAccount(
         transactionalEntityManager: any,
         escrowAddress: string,
+        simulate: boolean,
     ): Promise<GCRMain> {
         let escrowAccount = await transactionalEntityManager.findOne(GCRMain, {
             where: { pubkey: escrowAddress },
@@ -43,9 +52,17 @@ export default class GCREscrowRoutines {
         })
 
         if (!escrowAccount) {
+            // Build without saving: createAccount would otherwise commit the
+            // row outside this transaction, even when simulating
+            escrowAccount = await HandleGCR.createAccount(
+                escrowAddress,
+                {},
+                false,
+            )
             try {
-                escrowAccount = await HandleGCR.createAccount(escrowAddress)
-                await transactionalEntityManager.save(escrowAccount)
+                if (!simulate) {
+                    await transactionalEntityManager.save(escrowAccount)
+                }
             } catch (error: any) {
                 // Handle race condition: another transaction created the account
                 if (error.code === "23505") {
@@ -80,7 +97,7 @@ export default class GCREscrowRoutines {
         username: string,
         expiryDays: number | undefined,
         amount: string | number,
-        currentTimestamp: number,
+        applyHeight: number,
     ): EscrowData {
         const requestedExpiry = expiryDays || DEFAULT_EXPIRY_DAYS
 
@@ -97,7 +114,6 @@ export default class GCREscrowRoutines {
             )
         }
 
-        const expiryMs = requestedExpiry * MS_PER_DAY
         return {
             claimableBy: {
                 platform: platform as "twitter" | "github" | "telegram" | "discord",
@@ -105,8 +121,8 @@ export default class GCREscrowRoutines {
             },
             balance: "0",
             deposits: [],
-            expiryTimestamp: currentTimestamp + expiryMs,
-            createdAt: currentTimestamp,
+            expiryBlock: applyHeight + requestedExpiry * BLOCKS_PER_DAY,
+            createdBlock: applyHeight,
         }
     }
 
@@ -116,13 +132,11 @@ export default class GCREscrowRoutines {
      */
     private static validateExistingEscrowForDeposit(
         escrow: EscrowData,
-        currentTimestamp: number,
+        applyHeight: number,
     ): void {
-        if (currentTimestamp > escrow.expiryTimestamp) {
+        if (applyHeight >= escrow.expiryBlock) {
             throw new Error(
-                `Cannot deposit to expired escrow. Expired on ${new Date(
-                    escrow.expiryTimestamp,
-                ).toISOString()}`,
+                `Cannot deposit to expired escrow. Expired at block ${escrow.expiryBlock}`,
             )
         }
         if (escrow.claimed) {
@@ -130,6 +144,23 @@ export default class GCREscrowRoutines {
                 `Cannot deposit to claimed escrow. Claimed by ${escrow.claimedBy}`,
             )
         }
+    }
+
+    /**
+     * A claimed escrow, or an expired one whose deposits were all refunded,
+     * holds no funds and is replaced by a new escrow on the next deposit.
+     */
+    private static isSpentEscrow(
+        escrow: EscrowData,
+        applyHeight: number,
+    ): boolean {
+        if (escrow.claimed) {
+            return true
+        }
+        return (
+            applyHeight >= escrow.expiryBlock &&
+            escrow.deposits.every(d => d.refunded)
+        )
     }
 
     private static parseAmount(value?: string | number | bigint): bigint {
@@ -146,6 +177,13 @@ export default class GCREscrowRoutines {
 
     private static formatAmount(value: bigint): string {
         return value.toString()
+    }
+
+    /** Sum of the deposits that have not been refunded */
+    private static activeDepositsTotal(deposits: EscrowDeposit[]): bigint {
+        return deposits
+            .filter(d => !d.refunded)
+            .reduce((sum, d) => sum + this.parseAmount(d.amount), 0n)
     }
 
     /**
@@ -193,12 +231,16 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "deposit"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes (used for pre-validation)
+     * @param applyHeight - Height of the block this edit is applied in
+     * @param txTimestamp - Signed tx timestamp, stored for display only
      * @returns Success/failure result
      */
     static async applyEscrowDeposit(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
+        txTimestamp: number,
     ): Promise<GCRResult> {
         const { sender, platform, username, amount, expiryDays, message } =
             editOperation.data
@@ -250,9 +292,6 @@ export default class GCREscrowRoutines {
                 ` → escrow address: ${escrowAddress}`,
         )
 
-        // REVIEW: Capture timestamp once for consistency across the operation
-        const currentTimestamp = Date.now()
-
         // REVIEW: Execute entire deposit operation in a transaction with locking
         // to prevent race conditions from concurrent deposits
         const result = await gcrMainRepository.manager.transaction(
@@ -280,21 +319,26 @@ export default class GCREscrowRoutines {
                 const escrowAccount = await this.getOrCreateEscrowAccount(
                     transactionalEntityManager,
                     escrowAddress,
+                    simulate,
                 )
 
-                // Create new escrow or validate existing one
-                if (!escrowAccount.escrows[escrowAddress]) {
+                // Create new escrow (or replace a spent one) or validate existing one
+                const existingEscrow = escrowAccount.escrows[escrowAddress]
+                if (
+                    !existingEscrow ||
+                    this.isSpentEscrow(existingEscrow, applyHeight)
+                ) {
                     escrowAccount.escrows[escrowAddress] = this.createNewEscrowData(
                         platform,
                         username,
                         expiryDays,
                         amount,
-                        currentTimestamp,
+                        applyHeight,
                     )
                 } else {
                     this.validateExistingEscrowForDeposit(
                         escrowAccount.escrows[escrowAddress],
-                        currentTimestamp,
+                        applyHeight,
                     )
                 }
 
@@ -313,7 +357,8 @@ export default class GCREscrowRoutines {
                 const deposit: EscrowDeposit = {
                     from: sender,
                     amount: BigInt(amount).toString(),
-                    timestamp: currentTimestamp,
+                    block: applyHeight,
+                    timestamp: txTimestamp,
                 }
 
                 if (message) {
@@ -381,12 +426,14 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "claim"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param applyHeight - Height of the block this edit is applied in
      * @returns Success/failure result with claimed amount
      */
     static async applyEscrowClaim(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
     ): Promise<GCRResult> {
         const { claimant, platform, username } = editOperation.data
 
@@ -402,9 +449,6 @@ export default class GCREscrowRoutines {
             `[EscrowClaim] ${claimant} attempting to claim ${platform}:${username}` +
                 ` → escrow address: ${escrowAddress}`,
         )
-
-        // REVIEW: Capture timestamp once for consistency across the operation
-        const currentTimestamp = Date.now()
 
         // CRITICAL SECURITY CHECK: Verify claimant has proven ownership of social identity
         // This uses the existing Web2 identity verification system (GCRIdentityRoutines)
@@ -478,28 +522,25 @@ export default class GCREscrowRoutines {
 
                 // Check if already claimed (prevents race condition - now under lock)
                 if (escrow.claimed) {
-                    const claimedAt = escrow.claimedAt
-                        ? new Date(escrow.claimedAt).toISOString()
-                        : "unknown time"
+                    const claimedIn =
+                        escrow.claimedBlock !== undefined
+                            ? `block ${escrow.claimedBlock}`
+                            : "unknown block"
                     log.warning(
-                        `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedAt}`,
+                        `[EscrowClaim] ✗ Escrow already claimed by ${escrow.claimedBy} at ${claimedIn}`,
                     )
                     throw new Error(
                         `Escrow already claimed by ${escrow.claimedBy}`,
                     )
                 }
 
-                // Check expiry using consistent timestamp
-                if (currentTimestamp > escrow.expiryTimestamp) {
+                // Check expiry against the height of the applying block
+                if (applyHeight >= escrow.expiryBlock) {
                     log.warning(
-                        `[EscrowClaim] ✗ Escrow expired at ${new Date(
-                            escrow.expiryTimestamp,
-                        )}`,
+                        `[EscrowClaim] ✗ Escrow expired at block ${escrow.expiryBlock}`,
                     )
                     throw new Error(
-                        `Escrow expired on ${new Date(
-                            escrow.expiryTimestamp,
-                        ).toISOString()}. ` +
+                        `Escrow expired at block ${escrow.expiryBlock}. ` +
                             "Original depositors can reclaim funds.",
                     )
                 }
@@ -545,7 +586,7 @@ export default class GCREscrowRoutines {
                     // Mark as claimed (prevents race condition)
                     escrow.claimed = true
                     escrow.claimedBy = claimant
-                    escrow.claimedAt = currentTimestamp
+                    escrow.claimedBlock = applyHeight
                     escrow.balance = this.formatAmount(0n) // Zero out escrow balance
 
                     // Credit claimant's account
@@ -582,12 +623,14 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow", operation "refund"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param applyHeight - Height of the block this edit is applied in
      * @returns Success/failure result
      */
     static async applyEscrowRefund(
         editOperation: GCREditEscrow,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        applyHeight: number,
     ): Promise<GCRResult> {
         const { refunder, platform, username } = editOperation.data
 
@@ -600,9 +643,6 @@ export default class GCREscrowRoutines {
         log.info(
             `[EscrowRefund] ${refunder} attempting to refund ${platform}:${username}`,
         )
-
-        // REVIEW: Capture timestamp once for consistency
-        const currentTimestamp = Date.now()
 
         // REVIEW: Execute refund in a transaction with locking to prevent race condition
         const result = await gcrMainRepository.manager.transaction(
@@ -627,12 +667,10 @@ export default class GCREscrowRoutines {
                     )
                 }
 
-                // Check escrow is expired using consistent timestamp
-                if (currentTimestamp <= escrow.expiryTimestamp) {
+                // Check escrow is expired at the height of the applying block
+                if (applyHeight < escrow.expiryBlock) {
                     throw new Error(
-                        `Escrow not yet expired. Expires: ${new Date(
-                            escrow.expiryTimestamp,
-                        ).toISOString()}`,
+                        `Escrow not yet expired. Expires at block ${escrow.expiryBlock}`,
                     )
                 }
 
@@ -649,7 +687,7 @@ export default class GCREscrowRoutines {
 
                 // Calculate refunder's portion
                 const refunderDeposits = escrow.deposits.filter(
-                    d => d.from === refunder,
+                    d => d.from === refunder && !d.refunded,
                 )
                 const refundAmount = refunderDeposits.reduce(
                     (sum, d) => sum + this.parseAmount(d.amount),
@@ -674,9 +712,8 @@ export default class GCREscrowRoutines {
                 // REVIEW: Only modify state if not simulating
                 if (!simulate) {
                     // REVIEW: Verify balance integrity BEFORE refund to detect accounting drift
-                    const actualBalance = escrow.deposits.reduce(
-                        (sum, d) => sum + this.parseAmount(d.amount),
-                        0n,
+                    const actualBalance = this.activeDepositsTotal(
+                        escrow.deposits,
                     )
                     const storedBalance = this.parseAmount(escrow.balance)
 
@@ -704,23 +741,16 @@ export default class GCREscrowRoutines {
                     // Credit refund to refunder's account
                     refunderAccount.balance = newRefunderBalance
 
-                    // Update escrow (remove refunder's deposits)
-                    escrow.deposits = escrow.deposits.filter(
-                        d => d.from !== refunder,
-                    )
+                    // Mark the refunder's deposits as refunded rather than
+                    // removing them, so rollbackEscrowRefund can restore them
+                    for (const d of refunderDeposits) {
+                        d.refunded = true
+                    }
 
                     // Recalculate balance from remaining deposits (ensures accuracy)
-                    const refundedBalance = escrow.deposits.reduce(
-                        (sum, d) => sum + this.parseAmount(d.amount),
-                        0n,
+                    escrow.balance = this.formatAmount(
+                        this.activeDepositsTotal(escrow.deposits),
                     )
-
-                    escrow.balance = this.formatAmount(refundedBalance)
-
-                    // If no deposits left, delete escrow
-                    if (escrow.deposits.length === 0) {
-                        delete escrowAccount.escrows[escrowAddress]
-                    }
 
                     // Persist both accounts atomically in transaction
                     await transactionalEntityManager.save([
@@ -767,7 +797,6 @@ export default class GCREscrowRoutines {
         }
 
         const escrowAddress = this.getEscrowAddress(platform, username)
-        const currentTimestamp = Date.now()
 
         log.info(
             `[EscrowDepositRollback] Rolling back deposit of ${amount} DEM from ${sender} to ${platform}:${username}`,
@@ -816,6 +845,7 @@ export default class GCREscrowRoutines {
                     .findIndex(
                         d =>
                             d.from === sender &&
+                            !d.refunded &&
                             this.parseAmount(d.amount) === depositAmount,
                     )
 
@@ -832,9 +862,8 @@ export default class GCREscrowRoutines {
                 escrow.deposits.splice(actualIndex, 1)
 
                 // Recalculate escrow balance from remaining deposits
-                const newEscrowBalance = escrow.deposits.reduce(
-                    (sum, d) => sum + this.parseAmount(d.amount),
-                    0n,
+                const newEscrowBalance = this.activeDepositsTotal(
+                    escrow.deposits,
                 )
 
                 escrow.balance = this.formatAmount(newEscrowBalance)
@@ -937,10 +966,7 @@ export default class GCREscrowRoutines {
                 }
 
                 // Recalculate original claimed amount from deposits
-                const claimedAmount = escrow.deposits.reduce(
-                    (sum, d) => sum + this.parseAmount(d.amount),
-                    0n,
-                )
+                const claimedAmount = this.activeDepositsTotal(escrow.deposits)
 
                 // Verify claimant has sufficient balance to return
                 if (claimantAccount.balance < claimedAmount) {
@@ -953,7 +979,7 @@ export default class GCREscrowRoutines {
                 // Restore escrow state
                 escrow.claimed = false
                 escrow.claimedBy = undefined
-                escrow.claimedAt = undefined
+                escrow.claimedBlock = undefined
                 escrow.balance = this.formatAmount(claimedAmount)
 
                 // Deduct from claimant
@@ -1012,15 +1038,111 @@ export default class GCREscrowRoutines {
             `[EscrowRefundRollback] Rolling back refund by ${refunder} for ${platform}:${username}`,
         )
 
-        // PROBLEM: We need the original deposits that were refunded to restore them
-        // But the original refund operation removed them from the escrow
-        // We need to track what was refunded to be able to rollback properly
+        const result = await gcrMainRepository.manager.transaction(
+            async transactionalEntityManager => {
+                // Same lock order as applyEscrowRefund: escrow, then refunder
+                const escrowAccount = await transactionalEntityManager.findOne(
+                    GCRMain,
+                    {
+                        where: { pubkey: escrowAddress },
+                        lock: { mode: "pessimistic_write" },
+                    },
+                )
+
+                const refunderAccount =
+                    await transactionalEntityManager.findOne(GCRMain, {
+                        where: { pubkey: refunder },
+                        lock: { mode: "pessimistic_write" },
+                    })
+
+                if (
+                    !escrowAccount ||
+                    !escrowAccount.escrows?.[escrowAddress]
+                ) {
+                    throw new Error("Escrow not found for refund rollback")
+                }
+
+                if (!refunderAccount) {
+                    throw new Error("Refunder account not found for rollback")
+                }
+
+                const escrow = escrowAccount.escrows[escrowAddress]
+
+                // The refund marked these deposits instead of removing them
+                const refundedDeposits = escrow.deposits.filter(
+                    d => d.from === refunder && d.refunded,
+                )
+
+                if (refundedDeposits.length === 0) {
+                    throw new Error(
+                        `No refunded deposits from ${refunder} to rollback`,
+                    )
+                }
+
+                const refundedAmount = refundedDeposits.reduce(
+                    (sum, d) => sum + this.parseAmount(d.amount),
+                    0n,
+                )
+
+                if (refunderAccount.balance < refundedAmount) {
+                    throw new Error(
+                        "Refunder has insufficient balance to rollback refund. " +
+                            `Has: ${refunderAccount.balance}, needs: ${refundedAmount}`,
+                    )
+                }
+
+                // Restore the deposits and the escrow balance
+                for (const d of refundedDeposits) {
+                    delete d.refunded
+                }
+                escrow.balance = this.formatAmount(
+                    this.activeDepositsTotal(escrow.deposits),
+                )
+
+                // Deduct from refunder
+                refunderAccount.balance -= refundedAmount
+
+                if (!simulate) {
+                    await transactionalEntityManager.save([
+                        escrowAccount,
+                        refunderAccount,
+                    ])
+                }
+
+                return {
+                    amount: refundedAmount.toString(),
+                }
+            },
+        )
+
+        log.info(
+            `[EscrowRefundRollback] ✓ Rolled back refund of ${result.amount} DEM`,
+        )
 
         return {
-            success: false,
-            message:
-                "Refund rollback not fully implemented - requires tracking removed deposits in original operation",
+            success: true,
+            message: `Rolled back refund of ${result.amount} DEM from ${platform}:${username}`,
+            response: result,
         }
+    }
+
+    private static normalizeAddress(address: string): string {
+        return address.toLowerCase().replace(/^0x/, "")
+    }
+
+    /**
+     * Returns the account whose signature authorizes the tx, as checked by
+     * TxUtils.validateSignature: an ed25519 tx is verified against
+     * content.from, other signers are bound to content.from_ed25519_address.
+     */
+    private static getSignerAccount(tx: Transaction): string | null {
+        const signer =
+            tx?.signature?.type === "ed25519"
+                ? tx.content?.from
+                : tx?.content?.from_ed25519_address
+        return typeof signer === "string" && signer
+            ? this.normalizeAddress(signer)
+            : null
     }
 
     /**
@@ -1030,12 +1152,17 @@ export default class GCREscrowRoutines {
      * @param editOperation - GCREdit with type "escrow"
      * @param gcrMainRepository - Database repository
      * @param simulate - If true, don't persist changes
+     * @param tx - Transaction carrying the edit; its signer must be the actor
+     * @param applyHeight - Height of the block the edit is applied in (or
+     *   rolled back from). Expiry is decided by this height, never local time.
      * @returns Success/failure result
      */
     static async apply(
         editOperation: GCREdit,
         gcrMainRepository: Repository<GCRMain>,
         simulate: boolean,
+        tx: Transaction,
+        applyHeight: number,
     ): Promise<GCRResult> {
         if (editOperation.type !== "escrow") {
             return {
@@ -1044,7 +1171,32 @@ export default class GCREscrowRoutines {
             }
         }
 
+        if (!Number.isSafeInteger(applyHeight) || applyHeight < 0) {
+            return {
+                success: false,
+                message: `Invalid block height for escrow edit: ${applyHeight}`,
+            }
+        }
+
         const operation = editOperation.operation
+
+        // SECURITY: The account debited (deposit) or credited (claim, refund)
+        // must be the tx signer. Txs merged from peer mempools are not
+        // re-checked against GCRGeneration, so the edit data is untrusted.
+        const actor = {
+            deposit: editOperation.data?.sender,
+            claim: editOperation.data?.claimant,
+            refund: editOperation.data?.refunder,
+        }[operation]
+        if (typeof actor === "string" && actor) {
+            const signer = this.getSignerAccount(tx)
+            if (!signer || signer !== this.normalizeAddress(actor)) {
+                return {
+                    success: false,
+                    message: `Escrow ${operation} actor does not match the transaction signer`,
+                }
+            }
+        }
 
         // REVIEW: Handle rollbacks by performing inverse operations
         if (editOperation.isRollback) {
@@ -1089,6 +1241,10 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
+                    typeof tx?.content?.timestamp === "number"
+                        ? tx.content.timestamp
+                        : 0,
                 )
 
             case "claim":
@@ -1096,6 +1252,7 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
                 )
 
             case "refund":
@@ -1103,6 +1260,7 @@ export default class GCREscrowRoutines {
                     editOperation,
                     gcrMainRepository,
                     simulate,
+                    applyHeight,
                 )
 
             default:

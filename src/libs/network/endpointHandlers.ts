@@ -400,6 +400,8 @@ export default class ServerHandlers {
                 queriedTx,
                 false, // isRollback
                 simulate,
+                // Advisory: the tx is applied for real at its block's height in consensus
+                (await Chain.getLastBlockNumber()) + 1,
             )
 
             if (!editsResults.success) {
@@ -729,16 +731,17 @@ function buildSentEscrowRecord(
     escrow: {
         claimableBy: { platform: string; username: string }
         balance: { toString(): string }
-        expiryTimestamp: number
+        expiryBlock: number
     },
     escrowAddr: string,
     senderDeposits: Array<{
         amount: { toString(): string }
+        block: number
         timestamp: number
         message?: string
     }>,
     totalSent: bigint,
-    nowTimestamp: number,
+    nextBlockHeight: number,
 ) {
     return {
         platform: escrow.claimableBy.platform,
@@ -747,12 +750,13 @@ function buildSentEscrowRecord(
         totalSent: totalSent.toString(),
         deposits: senderDeposits.map(d => ({
             amount: d.amount.toString(),
+            block: d.block,
             timestamp: d.timestamp,
             message: d.message,
         })),
         totalEscrowBalance: escrow.balance.toString(),
-        expired: nowTimestamp > escrow.expiryTimestamp,
-        expiryTimestamp: escrow.expiryTimestamp,
+        expired: nextBlockHeight >= escrow.expiryBlock,
+        expiryBlock: escrow.expiryBlock,
     }
 }
 
@@ -806,25 +810,28 @@ export async function handleGetEscrowBalance(params: {
                 exists: false,
                 balance: "0",
                 deposits: [],
-                expiryTimestamp: 0,
+                expiryBlock: 0,
                 expired: false,
             }
         }
 
         const escrow = account.escrows[escrowAddress]
+        // Expired for a tx in the next block, the earliest it could be applied
+        const nextBlockHeight = (await Chain.getLastBlockNumber()) + 1
 
         return {
             escrowAddress,
             exists: true,
             balance: escrow.balance.toString(),
-            deposits: escrow.deposits.map(d => ({
+            deposits: escrow.deposits.filter(d => !d.refunded).map(d => ({
                 from: d.from,
                 amount: d.amount.toString(),
+                block: d.block,
                 timestamp: d.timestamp,
                 message: d.message,
             })),
-            expiryTimestamp: escrow.expiryTimestamp,
-            expired: Date.now() > escrow.expiryTimestamp,
+            expiryBlock: escrow.expiryBlock,
+            expired: nextBlockHeight >= escrow.expiryBlock,
         }
     } catch (error) {
         log.error(
@@ -899,6 +906,7 @@ export async function handleGetClaimableEscrows(params: {
 
     // Build claimable array from batched results
     const claimable: ClaimableEscrow[] = []
+    const nextBlockHeight = (await Chain.getLastBlockNumber()) + 1
 
     for (const escrowAccount of escrowAccounts) {
         const escrowAddress = escrowAccount.pubkey
@@ -923,14 +931,17 @@ export async function handleGetClaimableEscrows(params: {
                 username: identity.username,
                 balance: escrow.balance.toString(),
                 escrowAddress,
-                deposits: escrow.deposits.map(d => ({
-                    from: d.from,
-                    amount: d.amount.toString(),
-                    timestamp: d.timestamp,
-                    message: d.message,
-                })),
-                expiryTimestamp: escrow.expiryTimestamp,
-                expired: Date.now() > escrow.expiryTimestamp,
+                deposits: escrow.deposits
+                    .filter(d => !d.refunded)
+                    .map(d => ({
+                        from: d.from,
+                        amount: d.amount.toString(),
+                        block: d.block,
+                        timestamp: d.timestamp,
+                        message: d.message,
+                    })),
+                expiryBlock: escrow.expiryBlock,
+                expired: nextBlockHeight >= escrow.expiryBlock,
             })
         }
     }
@@ -973,8 +984,8 @@ export async function handleGetSentEscrows(params: {
         )
         const normalizedOffset = offset && offset > 0 ? offset : 0
 
-        // REVIEW: Capture timestamp once for consistency
-        const nowTimestamp = Date.now()
+        // REVIEW: Capture the height once for consistency
+        const nextBlockHeight = (await Chain.getLastBlockNumber()) + 1
         const sentEscrows = []
         let skippedMatches = 0
         const batchSize = 500
@@ -1005,7 +1016,9 @@ export async function handleGetSentEscrows(params: {
                 )) {
                     // Skip escrows without sender deposits or valid claimableBy
                     const senderDeposits =
-                        escrow.deposits?.filter(d => d.from === sender) || []
+                        escrow.deposits?.filter(
+                            d => d.from === sender && !d.refunded,
+                        ) || []
                     if (senderDeposits.length === 0) continue
                     if (!escrow.claimableBy?.platform || !escrow.claimableBy?.username) continue
 
@@ -1021,7 +1034,7 @@ export async function handleGetSentEscrows(params: {
                         escrowAddr,
                         senderDeposits,
                         totalSent,
-                        nowTimestamp,
+                        nextBlockHeight,
                     )
 
                     sentEscrows.push(record)

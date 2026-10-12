@@ -998,6 +998,7 @@ export default class GCR {
             structuredClone(tx),
             false,
             true,
+            (await Chain.getLastBlockNumber()) + 1,
         )
 
         if (!editResults.success) {

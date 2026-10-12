@@ -8,12 +8,12 @@ export interface EscrowData {
     }
     balance: string // Stringified bigint for JSONB compatibility
     deposits: EscrowDeposit[]
-    expiryTimestamp: number // Unix timestamp in milliseconds
-    createdAt: number
+    expiryBlock: number // First block height at which the escrow is expired
+    createdBlock: number // Height of the block that created the escrow
     // Claimed status to prevent race conditions
     claimed?: boolean
     claimedBy?: string // Address that claimed the escrow
-    claimedAt?: number // Unix timestamp when claimed
+    claimedBlock?: number // Height of the block that applied the claim
 }
 
 /**
@@ -22,8 +22,10 @@ export interface EscrowData {
 export interface EscrowDeposit {
     from: string // Sender's Ed25519 public key (hex)
     amount: string // Stringified bigint
-    timestamp: number
+    block: number // Height of the block that applied the deposit
+    timestamp: number // Signer-chosen tx timestamp, display only (never used for validity)
     message?: string // Optional memo from sender
+    refunded?: boolean // Refunded to the depositor; kept so the refund can be rolled back
 }
 
 /**
@@ -48,9 +50,10 @@ export interface ClaimableEscrow {
     deposits: Array<{
         from: string
         amount: string
+        block: number
         timestamp: number
         message?: string
     }>
-    expiryTimestamp: number
+    expiryBlock: number
     expired: boolean
 }
