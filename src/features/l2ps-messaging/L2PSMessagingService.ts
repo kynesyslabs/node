@@ -35,6 +35,8 @@ type MessageRepo = ReturnType<typeof dataSource.getRepository<L2PSMessage>>
 export class L2PSMessagingService {
     private static instance: L2PSMessagingService
     private offlineMessageCounts = new Map<string, number>()
+    /** Attempts still waiting for their L2PS outcome, by message identity. */
+    private inFlight = new Map<string, Promise<ProcessMessageResult>>()
 
     static getInstance(): L2PSMessagingService {
         if (!L2PSMessagingService.instance) {
@@ -64,8 +66,35 @@ export class L2PSMessagingService {
         encrypted: SerializedEncryptedMessage,
         recipientOnline: boolean,
     ): Promise<ProcessMessageResult> {
-        const repo = dataSource.getRepository(L2PSMessage)
         const identity = { l2psUid, fromKey, toKey, messageHash }
+        const key = [l2psUid, canonicalizeKey(fromKey), canonicalizeKey(toKey), messageHash].join("|")
+
+        // A resend that arrives while the first attempt is still being
+        // submitted gets that attempt's outcome, whatever it turns out to be,
+        // rather than an acknowledgement for something that may yet fail.
+        const pending = this.inFlight.get(key)
+        if (pending) {
+            const outcome = await pending
+            return outcome.success ? { ...outcome, duplicate: true } : outcome
+        }
+
+        const attempt = this.attempt(identity, messageId, encrypted, recipientOnline)
+        this.inFlight.set(key, attempt)
+        try {
+            return await attempt
+        } finally {
+            this.inFlight.delete(key)
+        }
+    }
+
+    private async attempt(
+        identity: { l2psUid: string; fromKey: string; toKey: string; messageHash: string },
+        messageId: string,
+        encrypted: SerializedEncryptedMessage,
+        recipientOnline: boolean,
+    ): Promise<ProcessMessageResult> {
+        const { l2psUid, fromKey, toKey, messageHash } = identity
+        const repo = dataSource.getRepository(L2PSMessage)
 
         const existing = await this.findExisting(repo, identity)
         if (existing && existing.status !== "failed") {
