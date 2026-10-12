@@ -505,29 +505,37 @@ export async function consensusRoutine(): Promise<void> {
                 )
             }
             // Nothing persisted yet: nothing to undo.
-            if (successfulTxs.length === 0) {
-                return
-            }
+            if (successfulTxs.length > 0) {
+                log.warn(
+                    `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
+                )
 
-            log.warn(
-                `[consensusRoutine] Round ended after GCR edits were applied for block ${blockRef}. Rolling back ${successfulTxs.length} tx(s)`,
-            )
+                // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
+                // Getting the txs from the hashes
+                const txsToRollback: Transaction[] = []
 
-            // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
-            // Getting the txs from the hashes
-            const txsToRollback: Transaction[] = []
-
-            for (const txHash of successfulTxs) {
-                const tx = txMap.get(txHash)
-                if (tx) {
-                    txsToRollback.push(tx)
+                for (const txHash of successfulTxs) {
+                    const tx = txMap.get(txHash)
+                    if (tx) {
+                        txsToRollback.push(tx)
+                    }
                 }
-            }
-            await rollbackGCREditsFromTxs(txsToRollback)
-            await HandleGCR.deleteAssignedTxsForBlock(blockRef)
+                await rollbackGCREditsFromTxs(txsToRollback)
+                await HandleGCR.deleteAssignedTxsForBlock(blockRef)
 
-            // Also rollback any L2PS proofs that were applied
-            await L2PSConsensus.rollbackProofsForBlock(blockRef)
+                // Also rollback any L2PS proofs that were applied
+                await L2PSConsensus.rollbackProofsForBlock(blockRef)
+            }
+
+            if (
+                debugAssertionsEnabled() &&
+                error instanceof BlockInvalidError
+            ) {
+                log.error(
+                    `[consensusRoutine] Block ${blockRef} rejected by vote, exiting`,
+                )
+                process.exit(1)
+            }
             return
         }
 
@@ -565,7 +573,7 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             if (
-                !new Set(["blockTimestampNotReceived", "abortConsensus", "voteError"]).has(
+                !new Set(["blockTimestampNotReceived", "abortConsensus"]).has(
                     exitReason,
                 ) &&
                 txs.length !== blockTxs.length
