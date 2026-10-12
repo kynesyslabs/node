@@ -897,6 +897,25 @@ export default class HandleGCR {
     }
 
     /**
+     * Returns the txs with their token edits removed (copies; inputs are not mutated).
+     * Token edits are only simulated before forge and persisted at finalize, so the native
+     * batch apply, and any rollback of it, must not touch them: reversing a token edit that
+     * was never persisted would invert a transfer that never happened.
+     */
+    static stripTokenEdits(txs: Transaction[]): Transaction[] {
+        return txs.map(tx => {
+            const txGCREdits = tx.content?.gcr_edits
+            if (!Array.isArray(txGCREdits)) return tx
+            const nonTokenEdits = txGCREdits.filter((e: any) => e?.type !== "token")
+            if (nonTokenEdits.length === txGCREdits.length) return tx
+            return {
+                ...tx,
+                content: { ...tx.content, gcr_edits: nonTokenEdits },
+            } as Transaction
+        })
+    }
+
+    /**
      * Process side-effects for native transactions that aren't captured in GCR edits
      * Currently handles:
      * - tlsn_request: Creates attestation token when tx enters mempool (simulate=true)

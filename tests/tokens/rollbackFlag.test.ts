@@ -194,3 +194,27 @@ describe("client-supplied isRollback on token edits is ignored", () => {
         expect(tx.content.gcr_edits[0].isRollback).toBe(false)
     })
 })
+
+// Consensus rollback (vote failure, finalize failure) reverses only the native edits applied
+// before forge; token edits were never persisted there, so they must be stripped first.
+describe("HandleGCR.stripTokenEdits", () => {
+    const nativeEdit = { type: "balance", operation: "remove", account: ATTACKER, amount: 1 }
+
+    it("drops token edits, keeps native edits and does not mutate the input", () => {
+        const tx = forgedRollbackTx()
+        tx.content.gcr_edits.unshift(nativeEdit)
+        const [stripped] = HandleGCR.stripTokenEdits([tx])
+
+        expect(stripped.content.gcr_edits).toEqual([nativeEdit])
+        expect(tx.content.gcr_edits).toHaveLength(2)
+        expect(stripped.hash).toBe(tx.hash)
+    })
+
+    it("returns txs without token edits unchanged", () => {
+        const tx = { hash: "0xn", content: { gcr_edits: [nativeEdit] } } as any
+        const noEdits = { hash: "0xe", content: {} } as any
+        const out = HandleGCR.stripTokenEdits([tx, noEdits])
+        expect(out[0]).toBe(tx)
+        expect(out[1]).toBe(noEdits)
+    })
+})

@@ -217,8 +217,11 @@ export async function consensusRoutine(): Promise<void> {
             )
             if (!finalized) {
                 log.warning(
-                    "[consensusRoutine] Failed to finalize block locally (missing tx bodies / deterministic apply guard); falling back to fastSync",
+                    "[consensusRoutine] Failed to finalize block locally (missing tx bodies / deterministic apply guard); rolling back the GCREdits and falling back to fastSync",
                 )
+                // The native edits were persisted before forge but the block was not committed.
+                // fastSync re-applies the block from peers, so undo our copy first.
+                await rollbackConsensusEdits(rollbackEligibleTxs, tempMempool, blockRef)
                 await fastSync(manager.shard.members, "finalizeBlock")
                 return
             }
@@ -259,20 +262,8 @@ export async function consensusRoutine(): Promise<void> {
             log.info(
                 "[consensusRoutine] Block is invalid. Rolling back the GCREdits",
             )
-            // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
-            // Getting the txs from the hashes
-            const txsToRollback: Transaction[] = []
-            for (const txHash of rollbackEligibleTxs) {
-                const tx = tempMempool.find(tx => tx.hash === txHash)
-                if (tx) {
-                    txsToRollback.push(tx)
-                }
-            }
-            await rollbackGCREditsFromTxs(txsToRollback)
+            await rollbackConsensusEdits(rollbackEligibleTxs, tempMempool, blockRef)
             // await Mempool.removeTransactionsByHashes(successfulTxs)
-
-            // Also rollback any L2PS proofs that were applied
-            await L2PSConsensus.rollbackProofsForBlock(blockRef)
             return
         }
 
@@ -387,7 +378,32 @@ async function mergeAndOrderMempools(
  * @returns The successful and failed GCREdits
  */
 async function rollbackGCREditsFromTxs(txs: Transaction[]) {
-    return await HandleGCR.applyTransactions(txs, true)
+    // Only the native edits were persisted before forge; see HandleGCR.stripTokenEdits.
+    return await HandleGCR.applyTransactions(HandleGCR.stripTokenEdits(txs), true)
+}
+
+/**
+ * Undo the native GCR edits and L2PS proofs applied before forge for a block that
+ * was not committed locally (vote failed, or finalize failed).
+ */
+async function rollbackConsensusEdits(
+    rollbackEligibleTxs: string[],
+    tempMempool: Transaction[],
+    blockRef: number,
+) {
+    // REVIEW Using the successfulTxs to rollback the GCREdits derived from those txs
+    // Getting the txs from the hashes
+    const txsToRollback: Transaction[] = []
+    for (const txHash of rollbackEligibleTxs) {
+        const tx = tempMempool.find(tx => tx.hash === txHash)
+        if (tx) {
+            txsToRollback.push(tx)
+        }
+    }
+    await rollbackGCREditsFromTxs(txsToRollback)
+
+    // Also rollback any L2PS proofs that were applied
+    await L2PSConsensus.rollbackProofsForBlock(blockRef)
 }
 
 /**
@@ -456,22 +472,7 @@ async function applyGCREditsFromMergedMempool(
     }
 
     // REVIEW: Strip token edits before batch GCR processing (they are handled at block finalization)
-    const batchTxs = tokenValidatedTxs.map(tx => {
-        const txGCREdits = tx.content.gcr_edits
-        if (txGCREdits && Array.isArray(txGCREdits)) {
-            const nonTokenEdits = txGCREdits.filter((e: any) => e?.type !== "token")
-            if (nonTokenEdits.length !== txGCREdits.length) {
-                return {
-                    ...tx,
-                    content: {
-                        ...tx.content,
-                        gcr_edits: nonTokenEdits,
-                    },
-                } as any as Transaction
-            }
-        }
-        return tx
-    })
+    const batchTxs = HandleGCR.stripTokenEdits(tokenValidatedTxs)
 
     const res = await HandleGCR.applyTransactions(batchTxs, false)
     failedTxs.push(...res.failedTxs)
