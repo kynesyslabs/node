@@ -3,6 +3,7 @@ import { Shard } from "./shardTypes"
 import { Peer } from "src/libs/peer"
 import { getSharedState } from "src/utilities/sharedState"
 import getShard from "../routines/getShard"
+import Chain from "src/libs/blockchain/chain"
 import _ from "lodash"
 import { forgeToHex } from "src/libs/crypto/forgeUtils"
 import { Waiter } from "src/utilities/waiter"
@@ -54,6 +55,24 @@ export default class SecretaryManager {
     public ended = false
 
     constructor() {}
+
+    /** Throws when the network clock is still inside the parent block's interval. */
+    private async assertParentIntervalElapsed(
+        lastBlockNumber: number,
+    ): Promise<void> {
+        const parent = await Chain.getBlockByNumber(lastBlockNumber)
+        const parentTimestamp = parent?.content?.timestamp
+        if (typeof parentTimestamp !== "number") return
+
+        const interval = getSharedState.getConsensusTime()
+        const floor = parentTimestamp + interval
+        const now = getNetworkTimestamp()
+        if (now < floor) {
+            throw new AbortConsensusError(
+                `Too early to forge block ${this.shard.blockRef}: now ${now} is below the floor of ${floor} (parent ${parentTimestamp} + ${interval}s)`,
+            )
+        }
+    }
 
     /**
      * Initializes the shard, including the members and the validation phases.
@@ -124,6 +143,10 @@ export default class SecretaryManager {
             )}`,
         )
         log.only(`SECRETARY: ${this.secretary.identity}`)
+
+        if (this.checkIfWeAreSecretary() && !this.blockTimestamp) {
+            await this.assertParentIntervalElapsed(lastBlockNumber)
+        }
 
         // INFO: Start the secretary routine
         if (this.checkIfWeAreSecretary()) {

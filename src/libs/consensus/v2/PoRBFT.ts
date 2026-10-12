@@ -129,6 +129,13 @@ export async function consensusRoutine(): Promise<void> {
             return
         }
 
+        if (getSharedState.lastBlockNumber + 1 !== blockRef) {
+            log.warn(
+                `[consensusRoutine] Head moved to ${getSharedState.lastBlockNumber} while preparing block ${blockRef}`,
+            )
+            return
+        }
+
         log.only("[consensusRoutine] Consensus state initialized")
 
         // await fastSync([], "consensusRoutine")
