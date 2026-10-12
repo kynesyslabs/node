@@ -191,14 +191,23 @@ export class L2PSMessagingServer {
             `register:${l2psUid}:${publicKey}:${msg.timestamp}`,
             `register:${publicKey}:${msg.timestamp}`,
         ]
+        let proofBytes: Uint8Array
+        let keyBytes: Uint8Array
+        try {
+            proofBytes = this.hexToUint8Array(proof)
+            keyBytes = this.hexToUint8Array(publicKey)
+        } catch (error) {
+            this.sendError(ws, "INVALID_PROOF", `Proof verification error: ${error}`, msg.requestId)
+            return
+        }
         try {
             let valid = false
             for (const proofMessage of proofMessages) {
                 valid = await ucrypto.verify({
                     algorithm: getSharedState.signingAlgorithm,
                     message: new TextEncoder().encode(proofMessage),
-                    publicKey: this.hexToUint8Array(publicKey),
-                    signature: this.hexToUint8Array(proof),
+                    publicKey: keyBytes,
+                    signature: proofBytes,
                 })
                 if (valid) break
             }
@@ -212,10 +221,11 @@ export class L2PSMessagingServer {
         }
 
         // ed25519 signatures are deterministic, so a replayed proof is
-        // byte-identical to the one already accepted. Tracked per subnet: a
-        // legacy proof does not name one, and a client may register one key
-        // on two subnets with the same timestamp.
-        const proofKey = `${l2psUid}|${canonicalizeKey(proof)}`
+        // byte-identical to the one already accepted. Keyed on the bytes that
+        // verified, so no re-encoding of an accepted proof counts as a new one.
+        // Tracked per subnet: a legacy proof does not name one, and a client
+        // may register one key on two subnets with the same timestamp.
+        const proofKey = `${l2psUid}|${Buffer.from(proofBytes).toString("hex")}`
         this.pruneRegisterProofs(now)
         if (this.usedRegisterProofs.has(proofKey)) {
             this.sendError(ws, "INVALID_PROOF", "Register proof already used", msg.requestId)
@@ -590,12 +600,14 @@ export class L2PSMessagingServer {
     private hexToUint8Array(hex: string): Uint8Array {
         // Tolerate a leading 0x — the SDK emits 0x-prefixed hex for both
         // addresses and signatures; without stripping it the bytes are
-        // shifted and every proof verification fails.
+        // shifted and every proof verification fails. Anything that is not
+        // whole bytes of hex is refused rather than truncated: a lenient
+        // decoder let a proof with a stray trailing character verify as the
+        // original while looking new to the replay cache.
         const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex
-        const bytes = new Uint8Array(clean.length / 2)
-        for (let i = 0; i < clean.length; i += 2) {
-            bytes[i / 2] = parseInt(clean.slice(i, i + 2), 16)
+        if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
+            throw new Error("Expected whole bytes of hex")
         }
-        return bytes
+        return new Uint8Array(Buffer.from(clean, "hex"))
     }
 }

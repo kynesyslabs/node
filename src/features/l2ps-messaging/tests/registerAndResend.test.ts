@@ -191,6 +191,24 @@ describe("register proof", () => {
         replay.client.close()
     })
 
+    it("refuses a re-encoded copy of an accepted proof", async () => {
+        const owner = identity()
+        const ts = Date.now()
+        const proof = proofFor(owner, ts)
+        const first = await register(owner, "subnet_a", ts, proof)
+        expect(first.reply.type).toBe("registered")
+
+        // A stray character decodes to the same bytes under a lenient decoder,
+        // and would look like a new proof to a cache keyed on text.
+        for (const variant of [proof + "0", proof + "00", "0x" + proof.toUpperCase()]) {
+            const again = await register(owner, "subnet_a", ts, variant)
+            expect(again.reply.type).toBe("error")
+            expect(again.reply.payload.code).toBe("INVALID_PROOF")
+            again.client.close()
+        }
+        first.client.close()
+    })
+
     it("accepts the form that names the subnet, only for that subnet", async () => {
         const owner = identity()
         const ts = Date.now()
@@ -383,6 +401,45 @@ describe("messageHash scope", () => {
         expect(results.filter((r: any) => r.success && !r.duplicate)).toHaveLength(1)
         expect(results.filter((r: any) => r.duplicate)).toHaveLength(1)
         expect([...rows.values()]).toHaveLength(1)
+    })
+
+    it("a resend during an in-flight attempt gets that attempt's outcome", async () => {
+        let settle!: (r: { success: boolean; txHash?: string; error?: string }) => void
+        submitToL2PS.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+
+        const first = service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-inflight", encrypted, true)
+        await Bun.sleep(20)
+        const second = service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-inflight", encrypted, true)
+        await Bun.sleep(20)
+        settle({ success: false, error: "mempool unavailable" })
+
+        const [r1, r2] = await Promise.all([first, second])
+        expect(r1.success).toBe(false)
+        expect(r2.success).toBe(false)
+        expect(r2.duplicate).toBeUndefined()
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
+
+        submitResult = { success: true, txHash: "0xtx4" }
+        const retry = await service.processMessage("aa", "bb", "subnet_a", crypto.randomUUID(), "h-inflight", encrypted, true)
+        expect(retry.success).toBe(true)
+        expect(retry.duplicate).toBeUndefined()
+        expect(retry.l2psTxHash).toBe("0xtx4")
+    })
+
+    it("a resend during a succeeding attempt is answered as its duplicate", async () => {
+        let settle!: (r: { success: boolean; txHash?: string }) => void
+        submitToL2PS.mockImplementationOnce(() => new Promise(resolve => { settle = resolve }))
+
+        const first = service.processMessage("aa", "cc", "subnet_a", crypto.randomUUID(), "h-inflight-ok", encrypted, true)
+        await Bun.sleep(20)
+        const second = service.processMessage("aa", "cc", "subnet_a", crypto.randomUUID(), "h-inflight-ok", encrypted, true)
+        await Bun.sleep(20)
+        settle({ success: true, txHash: "0xtx5" })
+
+        const [r1, r2] = await Promise.all([first, second])
+        expect(r1).toMatchObject({ success: true, l2psTxHash: "0xtx5" })
+        expect(r2).toMatchObject({ success: true, duplicate: true, l2psTxHash: "0xtx5" })
+        expect(submitToL2PS).toHaveBeenCalledTimes(1)
     })
 
     it("does not let another sender's message with the same hash block this one", async () => {
