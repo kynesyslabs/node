@@ -64,7 +64,8 @@ jest.mock("./routines/transactions/handleWeb2ProxyRequest", () => ({ handleWeb2P
 jest.mock("../utils/web2RequestUtils", () => ({ parseWeb2ProxyRequest: jest.fn() }))
 jest.mock("./routines/transactions/handleIdentityRequest", () => ({ __esModule: true, default: jest.fn() }))
 jest.mock("./routines/transactions/handleNativeBridgeTx", () => ({ __esModule: true, default: jest.fn() }))
-jest.mock("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: jest.fn() }))
+const handleL2PS = jest.fn(async (..._args: unknown[]) => ({ result: 200, response: "ok" }))
+jest.mock("./routines/transactions/handleL2PS", () => ({ __esModule: true, default: handleL2PS }))
 
 const { handleExecuteTransaction } = await import("./endpointExecution")
 
@@ -126,6 +127,18 @@ describe("broadcastTx disposition", () => {
         const reply = await handleExecuteTransaction(validityData(), "sender")
 
         expect(reply.extra).toEqual({ confirmationBlock: 103, hash: HASH, disposition: "held" })
+    })
+
+    it("mempool: an L2PS transaction accepted into this node's L2PS mempool", async () => {
+        const data = validityData()
+        data.data.transaction.content = { type: "l2psEncryptedTx", from: "0xaa", data: ["l2psEncryptedTx", { ciphertext: "x" }] }
+        data.data.transaction.signature = { type: "ed25519", data: "cc".repeat(64) }
+
+        const reply = await handleExecuteTransaction(data, "sender")
+
+        expect(reply.success).toBe(true)
+        expect(reply.extra).toMatchObject({ hash: HASH, disposition: "mempool" })
+        expect(handleL2PS).toHaveBeenCalledTimes(1)
     })
 
     it("names no disposition when the mempool refuses it", async () => {

@@ -46,7 +46,9 @@ function check(name: string, ok: boolean, detail?: unknown): void {
         console.log(`  ok   ${name}`)
     } else {
         failures++
-        console.log(`  FAIL ${name}${detail === undefined ? "" : ` — ${JSON.stringify(detail)}`}`)
+        // One line per finding: nothing the node sent can break the log's structure.
+        const shown = detail === undefined ? "" : ` — ${JSON.stringify(detail).replace(/[\r\n]+/g, " ")}`
+        console.log(`  FAIL ${name}${shown}`)
     }
 }
 

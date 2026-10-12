@@ -233,7 +233,9 @@ export async function handleExecuteTransaction(
             result.response = l2psResult
             if (l2psResult.result === 200) {
                 result.success = true
-                return result
+                // Accepted into this node's L2PS mempool; named like every
+                // other acceptance so clients read one shape.
+                return withDisposition(result, tx.hash, "mempool")
             } else {
                 result.success = false
             }
