@@ -346,6 +346,7 @@ export async function handleExecuteTransaction(
             result.extra = {
                 ...(result.extra ? result.extra : {}),
                 confirmationBlock: submission.confirmationBlock ?? null,
+                lastBlockNumber: getSharedState.lastBlockNumber,
                 ...(submission.error ? { error: submission.error } : {}),
             }
         } catch (e) {
