@@ -565,7 +565,7 @@ export async function consensusRoutine(): Promise<void> {
             }
 
             if (
-                !new Set(["blockTimestampNotReceived", "abortConsensus"]).has(
+                !new Set(["blockTimestampNotReceived", "abortConsensus", "voteError"]).has(
                     exitReason,
                 ) &&
                 txs.length !== blockTxs.length
