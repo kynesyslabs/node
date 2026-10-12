@@ -322,7 +322,7 @@ export async function syncBlock(block: Block, peer: Peer) {
         }
 
         // ! Sync the native tables
-        await syncGCRTables(orderedTxs)
+        if (!(await applySyncedBlockTxs(block, orderedTxs))) return false
 
         // IMPORTANT: Insert the block only AFTER applying GCR/token edits.
         // Token scripts derive prevBlockHash from shared state; inserting the block first would
@@ -560,7 +560,7 @@ async function batchDownloadBlocks(
         }
 
         // Sync GCR tables
-        await syncGCRTables(blockTxs)
+        if (!(await applySyncedBlockTxs(block, blockTxs))) return false
 
         // IMPORTANT: Insert the block only AFTER applying GCR/token edits (see syncBlock rationale).
         // IMPORTANT: When batch syncing, do not persist block transactions from local mempool.
@@ -707,7 +707,15 @@ async function requestBlocks(): Promise<boolean> {
 
         try {
             // Download batch of blocks
-            await batchDownloadBlocks(peer, startBlock, endBlock)
+            const batchOk = await batchDownloadBlocks(peer, startBlock, endBlock)
+            if (!batchOk) {
+                // A block failed to apply (and was rolled back) or the batch was unusable.
+                // Return so fastSync retries after its back-off instead of spinning here.
+                log.error(
+                    `[requestBlocks] Batch sync stopped at block ${getSharedState.lastBlockNumber + 1}`,
+                )
+                return false
+            }
             await BroadcastManager.broadcastOurSyncData()
 
             // Trigger L2PS sync
@@ -774,6 +782,28 @@ async function requestBlocks(): Promise<boolean> {
 // REVIEW Applying GCREdits to the tables
 export async function syncGCRTables(txs: Transaction[]) {
     return await HandleGCR.applyTransactions(txs, false)
+}
+
+/**
+ * Apply a synced block's txs. Every tx in a committed block applied on the proposer, so a
+ * failure here means local state disagrees with the chain. In that case undo the txs that
+ * did apply (native and token edits, newest first) and return false so the caller does not
+ * insert the block; a retry then starts from the same state instead of applying twice.
+ */
+async function applySyncedBlockTxs(
+    block: Block,
+    txs: Transaction[],
+): Promise<boolean> {
+    const { successfulTxs, failedTxs } = await syncGCRTables(txs)
+    if (failedTxs.length === 0) return true
+
+    log.error(
+        `[sync] Block ${block.number} (${block.hash}): ${failedTxs.length}/${txs.length} txs failed to apply (${failedTxs.join(", ")}). Rolling back the block's applied edits and not inserting it.`,
+    )
+    const applied = new Set(successfulTxs)
+    const toUndo = txs.filter(tx => applied.has(tx.hash)).reverse()
+    await HandleGCR.applyTransactions(toUndo, true)
+    return false
 }
 
 // Helper function to ask for the transactions in a block
