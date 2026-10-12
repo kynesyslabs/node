@@ -120,6 +120,10 @@ export default class GCRTokenRoutines {
         }
     }
 
+    private static isSameAddress(a: unknown, b: unknown): boolean {
+        return typeof a === "string" && typeof b === "string" && a.toLowerCase() === b.toLowerCase()
+    }
+
     /**
      * Get or create the HookExecutor instance
      */
@@ -442,6 +446,11 @@ export default class GCRTokenRoutines {
             return { success: true, message: "Token creation rolled back" }
         }
 
+        // The signer can only deploy a token in its own name.
+        if (!this.isSameAddress(tokenData?.metadata?.deployer, edit.account)) {
+            return { success: false, message: "Token deployer must match the signer (edit.account)" }
+        }
+
         // Check if token already exists
         const existing = await gcrTokenRepository.findOneBy({ address: tokenAddress })
         if (existing) {
@@ -527,6 +536,11 @@ export default class GCRTokenRoutines {
         const transferAmount = BigInt(amount)
         if (transferAmount <= 0n) {
             return { success: false, message: "Transfer amount must be positive" }
+        }
+
+        // The signer may only move its own balance (there is no allowance-based transferFrom path).
+        if (!edit.isRollback && !this.isSameAddress(from, edit.account)) {
+            return { success: false, message: "Token transfer from must match the signer (edit.account)" }
         }
 
         // For rollback, reverse the direction

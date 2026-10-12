@@ -670,19 +670,22 @@ export default class HandleGCR {
     ): Promise<GCRResult> {
         const repositories = await this.getRepositories()
 
-        // NOTE The rollbacks are applied within the single routines based on the isRollback flag
-        if (isRollback) {
-            editOperation.isRollback = true
-        }
         // REVIEW: Handle token operations first (SDK GCREdit does not include token type yet)
         // REVIEW: Phase 5.1 - Pass transaction for script execution context
         if (isGCREditToken(editOperation)) {
+            // Token edits skip the ingress edit-hash check, so a client-set isRollback must not
+            // survive: take it from the caller only, on a copy so the tx object is not mutated.
             return GCRTokenRoutines.apply(
-                editOperation,
+                { ...editOperation, isRollback } as GCREditToken,
                 repositories.token as Repository<GCRToken>,
                 simulate,
                 tx, // Pass transaction for hook execution context
             )
+        }
+
+        // NOTE The rollbacks are applied within the single routines based on the isRollback flag
+        if (isRollback) {
+            editOperation.isRollback = true
         }
 
         // Cast to SDK GCREdit for the switch statement
@@ -873,8 +876,8 @@ export default class HandleGCR {
         if (entityManager) {
             const tokenRepo = entityManager.getRepository(GCRToken)
             for (const edit of tokenEdits) {
-                const editOp = { ...(edit as any) }
-                if (isRollback) editOp.isRollback = true
+                // Caller decides rollback; a client-set isRollback on a token edit is ignored.
+                const editOp = { ...(edit as any), isRollback }
                 const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
                 if (!result.success) return result
             }
@@ -885,8 +888,7 @@ export default class HandleGCR {
         const repositories = await this.getRepositories()
         const tokenRepo = repositories.token as Repository<GCRToken>
         for (const edit of tokenEdits) {
-            const editOp = { ...(edit as any) }
-            if (isRollback) editOp.isRollback = true
+            const editOp = { ...(edit as any), isRollback }
             const result = await GCRTokenRoutines.apply(editOp as any, tokenRepo, simulate, tx)
             if (!result.success) return result
         }
