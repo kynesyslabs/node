@@ -42,6 +42,7 @@ import {
     GCREditTokenUpgradeScript,
     GCREditTokenTransferOwnership,
     GCREditTokenCustom,
+    getScriptedTokenEditRejection,
 } from "../types/token/GCREditToken"
 import type { TokenPermission, TokenHolderReference, TokenScript } from "../types/token/TokenTypes"
 import { hasPermission } from "../types/token/TokenTypes"
@@ -286,6 +287,11 @@ export default class GCRTokenRoutines {
     ): Promise<GCRResult> {
         if (editOperation.type !== "token") {
             return { success: false, message: "Invalid GCREdit type for token routine" }
+        }
+
+        const scriptRejection = getScriptedTokenEditRejection(editOperation)
+        if (scriptRejection) {
+            return { success: false, message: scriptRejection }
         }
 
         if (tx) {

@@ -9,6 +9,7 @@ import type {
 } from "./TokenTypes"
 import type { TokenPermission } from "./TokenPermissions"
 import { GCREdit as SDKGCREdit } from "@kynesyslabs/demosdk/types"
+import { TOKEN_SCRIPTS_ENABLED } from "@/utilities/constants"
 
 /**
  * Token operation types for GCREdit
@@ -222,6 +223,35 @@ export type GCREditToken =
  */
 export function isGCREditToken(edit: { type: string }): edit is GCREditToken {
     return edit.type === "token"
+}
+
+/**
+ * Returns a rejection reason when a token edit would install or run a token script while
+ * TOKEN_SCRIPTS_ENABLED is false, otherwise null. Used by both ingress validation and
+ * GCRTokenRoutines.apply so every node reaches the same verdict. Rollback flags are ignored:
+ * none of these edits can have been applied while scripts are disabled.
+ */
+export function getScriptedTokenEditRejection(edit: {
+    operation?: unknown
+    data?: any
+}): string | null {
+    if (TOKEN_SCRIPTS_ENABLED) return null
+
+    switch (edit?.operation) {
+        case "create": {
+            const tokenData = edit.data?.tokenData
+            if (tokenData?.metadata?.hasScript || tokenData?.script != null) {
+                return "Scripted tokens are disabled: token create must not carry a script"
+            }
+            return null
+        }
+        case "upgradeScript":
+            return "Scripted tokens are disabled: upgradeScript is not allowed"
+        case "custom":
+            return "Scripted tokens are disabled: custom script methods are not allowed"
+        default:
+            return null
+    }
 }
 
 /**

@@ -8,6 +8,7 @@ import log from "src/utilities/logger"
 import { GCRMain } from "@/model/entities/GCRv2/GCR_Main"
 import Datasource from "@/model/datasource"
 import { GCRGeneration } from "@kynesyslabs/demosdk/websdk"
+import { getScriptedTokenEditRejection } from "@/libs/blockchain/gcr/types/token/GCREditToken"
 import {
     hexToUint8Array,
     ucrypto,
@@ -42,6 +43,11 @@ export async function handleValidateTransaction(
         const txEdits = Array.isArray(tx.content.gcr_edits)
             ? (tx.content.gcr_edits as any[])
             : []
+        for (const edit of txEdits) {
+            if (edit?.type !== "token") continue
+            const scriptRejection = getScriptedTokenEditRejection(edit)
+            if (scriptRejection) throw new Error(scriptRejection)
+        }
         const txNonTokenEdits = txEdits.filter(edit => edit?.type !== "token")
         const tokenEditsCount = txEdits.length - txNonTokenEdits.length
         const txGcrEditsHash = Hashing.sha256(JSON.stringify(txNonTokenEdits))

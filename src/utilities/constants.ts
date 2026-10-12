@@ -14,6 +14,18 @@ export const DEFAULT_SIGNING_ALGORITHM = "ed25519" as const
 /** Default block time in seconds (should come from genesis in the future) */
 export const DEFAULT_BLOCK_TIME = 10
 
+// --- Tokens ---
+/**
+ * Protocol switch for scripted tokens (token scripts/hooks and custom methods).
+ * Off for mainnet: hook outcomes depend on wall-clock timeouts and node load, and token
+ * state is outside the consensus integrity hash, so nodes could diverge silently.
+ * When false, every node rejects (at ingress and at GCR apply) a token create that carries
+ * a script or hasScript, any upgradeScript edit and any custom-method edit.
+ * Re-enable only once script execution has deterministic metering (gas/step limits).
+ * This is a protocol constant on purpose: it must be identical on every node, never an env var.
+ */
+export const TOKEN_SCRIPTS_ENABLED = false
+
 // --- Peer management ---
 /** How often to recheck peers (ms) */
 export const PEER_RECHECK_INTERVAL_MS = 10_000
