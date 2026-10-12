@@ -218,6 +218,7 @@ export default async function manageConsensusRoutines(
                     payload.params[0],
                     payload.params[1] as ValidationData,
                     payload.params[2] as string,
+                    sender,
                 )
             } catch (error) {
                 log.error(
@@ -501,6 +502,12 @@ export default async function manageConsensusRoutines(
             if (!getSharedState.petriConsensus) {
                 response.result = 400
                 response.response = "Petri consensus not enabled"
+                break
+            }
+
+            if (!shard.some(member => member.identity === sender)) {
+                response.result = 401
+                response.response = "Sender is not in the shard"
                 break
             }
 

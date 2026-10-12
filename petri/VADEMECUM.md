@@ -160,7 +160,7 @@ src/libs/consensus/petri/
   arbitration/bftArbitrator.ts
   routing/petriRouter.ts
   routing/shardMapper.ts
-  coordination/petriSecretary.ts      # Secretary election + accept-and-sign
+  coordination/petriSecretary.ts      # Secretary election + hash collection
 ```
 
 ### Existing Code We Touch

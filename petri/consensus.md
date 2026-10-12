@@ -7,7 +7,7 @@
 
 ## Overview
 
-Petri runs a **secretary-driven, accept-and-sign** consensus model. Every ~10 seconds, the deterministically elected secretary compiles a block from the mempool, broadcasts its hash to shard peers, collects BFT signatures, and inserts the finalized block. Members sign the secretary's hash without independent verification (accept-and-sign), then wait for the finalized block via sync.
+Petri runs a **secretary-driven, verify-then-sign** consensus model. Every ~10 seconds, the deterministically elected secretary compiles a block from the mempool, broadcasts its hash to shard peers, collects BFT signatures, and inserts the finalized block. Members sign the secretary's hash only if it matches the block they compiled themselves (verify-then-sign), then wait for the finalized block via sync.
 
 ```
 mainLoop (1s tick)
@@ -145,16 +145,16 @@ Secretary broadcasts block hash to all shard peers in parallel:
    - Add valid signatures to `block.validation_data.signatures`
 4. Return `[proCount, conCount]`
 
-### 8. Accept-and-Sign Handler
+### 8. Verify-then-Sign Handler
 
 **File:** `src/libs/consensus/v2/routines/manageProposeBlockHash.ts` — `manageProposeBlockHash()`
 
 RPC handler invoked when secretary broadcasts. Dual-mode:
 
 **Petri mode** (`getSharedState.petriConsensus === true`):
-- Sign the secretary's hash directly without verification
-- Return signature in response — **accept-and-sign model**
-- Trusts the secretary because only one deterministic secretary proposes per round
+- Refuse if the claimed proposer differs from the authenticated sender
+- Refuse if the proposer is not the elected secretary
+- Compare the hash with our own compiled candidate block and sign only if they match — **verify-then-sign model**
 
 **PoRBFT v2 mode** (fallback):
 - Compile own candidate block, compare hashes

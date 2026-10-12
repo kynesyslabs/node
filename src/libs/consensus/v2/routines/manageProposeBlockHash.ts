@@ -5,15 +5,17 @@ import { emptyResponse } from "src/libs/network/server_rpc"
 import { RPCResponse } from "@kynesyslabs/demosdk/types"
 import _ from "lodash"
 import ensureCandidateBlockFormed from "./ensureCandidateBlockFormed"
-import { hexToUint8Array, ucrypto, uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { hexToUint8Array, ucrypto } from "@kynesyslabs/demosdk/encryption"
 import PeerManager from "@/libs/peer/PeerManager"
 import getCommonValidatorSeed from "./getCommonValidatorSeed"
 import getShard from "./getShard"
+import { getSecretaryIdentity } from "@/libs/consensus/petri/coordination/petriSecretary"
 
 export default async function manageProposeBlockHash(
     blockHash: string,
     validationData: ValidationData,
     peerId: string,
+    sender?: string,
 ): Promise<RPCResponse> {
     const response = _.cloneDeep(emptyResponse)
     log.info("[Consensus Message Received] Propose Block Hash")
@@ -42,34 +44,43 @@ export default async function manageProposeBlockHash(
         "[manageProposeBlockHash] Validator is in the shard: voting for the block hash",
     )
 
-    // REVIEW: Petri Consensus — accept-and-sign model (Phase 9)
-    // In Petri, the elected secretary compiles the block and broadcasts its hash.
-    // Members trust the secretary's hash and sign it directly (accept-and-sign).
-    // This is safe because only one deterministically-elected secretary proposes per round.
+    // REVIEW: Petri Consensus — verify-then-sign (secretary model)
+    // In Petri, every shard member compiles the block deterministically
+    // (PetriBlockCompiler) and only the elected secretary broadcasts its hash.
+    // We refuse proposals that do not come from the secretary (or whose claimed
+    // proposer differs from the authenticated sender) and then fall through to
+    // the candidate comparison below, so we only ever sign a hash that matches
+    // the block we compiled ourselves.
     if (getSharedState.petriConsensus) {
-        log.info(
-            "[manageProposeBlockHash] Petri active — accept-and-sign (secretary model)",
-        )
-
-        const blockSignature = await ucrypto.sign(
-            getSharedState.signingAlgorithm,
-            new TextEncoder().encode(blockHash),
-        )
-
-        log.info(
-            "[manageProposeBlockHash] Petri: signing secretary's block hash",
-        )
-        response.result = 200
-        response.response = getSharedState.publicKeyHex
-        response.extra = {
-            signatures: {
-                [getSharedState.publicKeyHex]: uint8ArrayToHex(blockSignature.signature),
-            },
+        if (sender && sender !== peerId) {
+            log.error(
+                `[manageProposeBlockHash] Petri: claimed proposer ${peerId} ` +
+                    `does not match authenticated sender ${sender}: refusing the block hash`,
+            )
+            response.result = 401
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Proposer does not match authenticated sender"
+            return response
         }
-        return response
+
+        const secretaryId = getSecretaryIdentity(shard)
+        if (peerId !== secretaryId) {
+            log.error(
+                `[manageProposeBlockHash] Petri: proposer ${peerId} is not the ` +
+                    `elected secretary (${secretaryId}): refusing the block hash`,
+            )
+            response.result = 401
+            response.response = getSharedState.publicKeyHex
+            response.extra = "Proposer is not the elected secretary"
+            return response
+        }
+
+        log.info(
+            "[manageProposeBlockHash] Petri: proposer is the secretary — verifying against our candidate block",
+        )
     }
 
-    // PoRBFT v2 path: compare with our own candidate block
+    // Compare with our own candidate block (PoRBFT v2 and Petri)
     // ? Should we check for the block number as well? Or we cancel the candidateBlock at the end of the consensus?
     // Vote for the block hash
     // We must ensure we generated a block indeed

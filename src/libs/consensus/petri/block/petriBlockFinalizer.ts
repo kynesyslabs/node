@@ -83,8 +83,9 @@ async function secretaryFinalize(
     getSharedState.candidateBlock = block
 
     // Broadcast our block hash to all shard peers.
-    // Each peer runs manageProposeBlockHash which, with Petri active,
-    // compiles its own block, compares hashes, and only signs if they match.
+    // Each peer runs manageProposeBlockHash which, with Petri active, checks
+    // that we are the elected secretary, compares our hash with the block it
+    // compiled itself, and only signs if they match.
     const [pro, con] = await broadcastBlockHash(block, shard)
 
     const signatureCount = Object.keys(block.validation_data.signatures).length

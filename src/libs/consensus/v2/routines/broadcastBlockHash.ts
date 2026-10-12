@@ -13,6 +13,8 @@ export async function broadcastBlockHash(
     let pro = 0
     let con = 0
     const ourId = getSharedState.publicKeyHex
+    // Only shard members (and ourselves) may contribute to the quorum
+    const allowedSigners = new Set([...shard.map(peer => peer.identity), ourId])
     const proposeParams = [block.hash, block.validation_data, ourId]
 
     // Send proposeBlockHash to all shard peers in parallel
@@ -51,6 +53,12 @@ export async function broadcastBlockHash(
                 response.extra?.["signatures"] ?? {}
 
             for (const [identity, signature] of Object.entries(incomingSignatures)) {
+                if (!allowedSigners.has(identity)) {
+                    log.error(
+                        `Signature from non-shard key ${identity.substring(0, 16)}... — not added`,
+                    )
+                    continue
+                }
                 try {
                     const isValid = await ucrypto.verify({
                         algorithm: getSharedState.signingAlgorithm,
