@@ -150,6 +150,11 @@ export interface L2PSConfig {
      * only to answer an authenticated read from the account it belongs to.
      */
     historyStorePlaintext: boolean
+    /**
+     * Refuse the unversioned history signature, which names neither the node
+     * nor the page. Off while existing clients still send it.
+     */
+    historyRequireV2: boolean
 }
 
 // --- Metrics & Monitoring ---

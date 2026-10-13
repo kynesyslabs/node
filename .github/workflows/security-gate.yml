@@ -1,0 +1,14 @@
+name: Security gate
+
+on:
+  pull_request:
+  push:
+    branches: [stabilisation, testnet, main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  gate:
+    uses: kynesyslabs/.github/.github/workflows/security-gate.yml@main
