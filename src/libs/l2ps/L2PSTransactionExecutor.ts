@@ -670,11 +670,10 @@ export default class L2PSTransactionExecutor {
      * Blank the plaintext on rows that also hold their ciphertext.
      *
      * Rows written before payloads were kept encrypted carry the decrypted
-     * content, and the migration that added the ciphertext copied it in from
-     * the queue where it could. Those rows are what the privacy change was
-     * meant to retire, but nothing rewrote them. A row is only blanked when
-     * the envelope is there to read instead; a row whose ciphertext was
-     * already swept keeps its plaintext, because that is its only copy.
+     * content next to the ciphertext that was later backfilled. A row is only
+     * blanked when the envelope is there to read instead; a row whose
+     * ciphertext was already swept keeps its plaintext, because that is its
+     * only copy.
      *
      * Does nothing when the node is configured to store plaintext.
      */
@@ -685,20 +684,25 @@ export default class L2PSTransactionExecutor {
         const dsInstance = await Datasource.getInstance()
         const ds = dsInstance.getDataSource()
 
-        // Batched so a large table is not locked and rewritten in one go.
+        // Batched by id so a large table is neither locked nor rewritten in one
+        // go, and so each batch resumes after the last one instead of
+        // rescanning the rows it already blanked.
         let total = 0
+        let lastId = 0
         for (;;) {
-            const [, affected] = await ds.query(
+            const [rows] = (await ds.query(
                 `UPDATE "l2ps_transactions" SET "content" = NULL
                   WHERE "id" IN (
                     SELECT "id" FROM "l2ps_transactions"
-                     WHERE "content" IS NOT NULL AND "encrypted_payload" IS NOT NULL
-                     LIMIT $1)`,
-                [batchSize],
-            )
-            const count = Number(affected) || 0
+                     WHERE "id" > $2 AND "content" IS NOT NULL AND "encrypted_payload" IS NOT NULL
+                     ORDER BY "id" LIMIT $1)
+                  RETURNING "id"`,
+                [batchSize, lastId],
+            )) as [Array<{ id: number | string }>, number]
+            const count = rows.length
             total += count
             if (count < batchSize) return total
+            lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
         }
     }
 
