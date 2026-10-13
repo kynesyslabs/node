@@ -2,7 +2,7 @@ import { getSharedState } from "src/utilities/sharedState"
 import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
-import { resolveHistoryMessage, subnetDecryptor } from "@/libs/l2ps/historyPayload"
+import { resolveHistoryEntry, subnetDecryptor } from "@/libs/l2ps/historyPayload"
 import { historyAuthMessageV2, isOwnHistoryHost, readPageValue } from "@/libs/l2ps/historyAuth"
 import { Config } from "src/config"
 
@@ -307,12 +307,13 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             const hasMore = fetched.length > limit
             const transactions = hasMore ? fetched.slice(0, limit) : fetched
 
-            // The payload is stored encrypted, so the message is decrypted
-            // here — after the signature proved the caller owns the address —
-            // rather than kept readable on disk.
+            // The payload is stored encrypted, so the message and content are
+            // decrypted here — after the signature proved the caller owns the
+            // address — rather than kept readable on disk. One decrypt per row
+            // feeds both.
             const decrypt = await subnetDecryptor(data.l2psUid)
-            const messages = await Promise.all(
-                transactions.map(tx => resolveHistoryMessage(tx, decrypt)),
+            const entries = await Promise.all(
+                transactions.map(tx => resolveHistoryEntry(tx, decrypt)),
             )
 
             response.result = 200
@@ -331,7 +332,8 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                     status: tx.status,
                     timestamp: tx.timestamp?.toString() || "0",
                     l1_block_number: tx.l1_block_number,
-                    execution_message: messages[index],
+                    execution_message: entries[index].message,
+                    content: entries[index].content,
                     // The stored ciphertext, as the unauthenticated subnet
                     // listing already serves it. A member holding the subnet
                     // key decrypts it locally and verifies the hash, instead

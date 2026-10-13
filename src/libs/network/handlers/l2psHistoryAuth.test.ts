@@ -23,7 +23,7 @@ jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({
 }))
 
 jest.mock("@/libs/l2ps/historyPayload", () => ({
-    resolveHistoryMessage: jest.fn(async () => null),
+    resolveHistoryEntry: jest.fn(async () => ({ message: null, content: null })),
     subnetDecryptor: jest.fn(async () => undefined),
 }))
 
