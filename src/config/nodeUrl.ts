@@ -11,8 +11,13 @@ export function isLoopbackHost(hostname: string): boolean {
     const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
     if (LOOPBACK_HOSTS.has(host)) return true
     // The whole 127/8 block loops back, not only .0.0.1, and so does its
-    // IPv4-mapped IPv6 form; a name from that block is every machine's own.
-    return /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+    // IPv4-mapped IPv6 form, which the URL parser rewrites to hex
+    // (::ffff:127.0.0.1 becomes ::ffff:7f00:1); a name from that block is
+    // every machine's own.
+    return (
+        /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+        /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host)
+    )
 }
 
 /**

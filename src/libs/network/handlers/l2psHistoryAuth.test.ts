@@ -161,12 +161,14 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         expect(getAccountTransactions).not.toHaveBeenCalled()
     })
 
-    it.each([["localhost"], ["127.0.0.2"], ["[::1]"], ["::ffff:127.0.0.1"]])(
+    it.each([["localhost"], ["127.0.0.2"], ["[::1]"], ["[::ffff:127.0.0.1]"], ["0177.0.0.1"]])(
         "does not treat the loopback advertised URL %s as an identity",
         async loopback => {
             sharedState.exposedUrl = `http://${loopback}:53550`
+            // The request names the host exactly as the URL parser normalises
+            // it, so only the loopback rule can refuse the binding.
+            const host = new URL(sharedState.exposedUrl as string).host
             const ts = String(Date.now())
-            const host = `${loopback}:53550`
             const response = await call(v2Request(v2Message(host, ts), ts, { host }))
 
             expect(response.result).toBe(403)
