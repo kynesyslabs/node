@@ -13,6 +13,7 @@ import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import type { L2PSBatchPayload } from "./types"
 import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
+import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 // Re-export for backward compatibility
@@ -76,8 +77,8 @@ export class L2PSBatchAggregator {
     private readonly HISTORY_RETENTION_DAYS =
         Config.getInstance().l2ps.historyRetentionDays
 
-    /** When the retention sweep last ran (epoch ms); 0 means never. */
-    private lastRetentionSweep = 0
+    /** Lets the retention sweep run at most once an hour. */
+    private readonly retentionSweep = new RetentionSweepGate(HISTORY_RETENTION_SWEEP_INTERVAL_MS)
 
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
@@ -837,9 +838,7 @@ export class L2PSBatchAggregator {
      */
     private async pruneHistoryRetention(): Promise<void> {
         if (!this.HISTORY_RETENTION_DAYS || this.HISTORY_RETENTION_DAYS <= 0) return
-        const now = Date.now()
-        if (now - this.lastRetentionSweep < HISTORY_RETENTION_SWEEP_INTERVAL_MS) return
-        this.lastRetentionSweep = now
+        if (!this.retentionSweep.due()) return
         try {
             const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
             const pruned = await L2PSTransactionExecutor.pruneHistory(
