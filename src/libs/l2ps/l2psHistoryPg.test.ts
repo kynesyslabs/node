@@ -133,4 +133,56 @@ describe.skipIf(!PG_URL)(`L2PS history on Postgres (TZ=${process.env.TZ ?? "unse
         expect(await L2PSTransactionExecutor.hasExecuted("paid-out")).toBe(true)
         expect(await L2PSTransactionExecutor.hasExecuted("never-ran")).toBe(false)
     })
+
+    describe("account history paging", () => {
+        async function insertAt(hash: string, timestamp: number, from = "alice", to = "bob"): Promise<void> {
+            await ds.getRepository(L2PSTransaction).insert({
+                l2ps_uid: "subnet-1",
+                hash,
+                type: "native",
+                from_address: from,
+                to_address: to,
+                amount: 0n,
+                nonce: 0n,
+                timestamp: BigInt(timestamp),
+            } as never)
+        }
+
+        it("pages through rows that share a timestamp without losing or repeating any", async () => {
+            for (let i = 0; i < 7; i++) await insertAt(`tie-${i}`, 1000)
+            await insertAt("newer", 2000)
+
+            const seen: string[] = []
+            for (let offset = 0; offset < 8; offset += 3) {
+                const page = await L2PSTransactionExecutor.getAccountTransactions("subnet-1", "alice", 3, offset)
+                seen.push(...page.map(r => r.hash))
+            }
+
+            expect(seen[0]).toBe("newer")
+            expect(new Set(seen).size).toBe(8)
+            expect(seen.slice(1)).toEqual(["tie-6", "tie-5", "tie-4", "tie-3", "tie-2", "tie-1", "tie-0"])
+        })
+
+        it("applies since in the query and keeps the other subnets and parties out", async () => {
+            await insertAt("old", 1000)
+            await insertAt("edge", 2000)
+            await insertAt("new", 3000)
+            await insertAt("stranger", 3000, "carol", "dave")
+            await insertAt("self", 4000, "alice", "alice")
+
+            const page = await L2PSTransactionExecutor.getAccountTransactions("subnet-1", "alice", 100, 0, 2000)
+            expect(page.map(r => r.hash)).toEqual(["self", "new"])
+
+            const other = await L2PSTransactionExecutor.getAccountTransactions("subnet-2", "alice")
+            expect(other).toEqual([])
+        })
+
+        it("serves history after the aggregation queue has swept its rows", async () => {
+            // The queue table is not even present in this schema: history
+            // must not depend on it.
+            await insertAt("kept", 1000)
+            const page = await L2PSTransactionExecutor.getAccountTransactions("subnet-1", "bob")
+            expect(page.map(r => r.hash)).toEqual(["kept"])
+        })
+    })
 })

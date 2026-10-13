@@ -557,8 +557,12 @@ export default class L2PSTransactionExecutor {
             query.andWhere("tx.timestamp > :since", { since: String(since) })
         }
 
+        // Several rows can share a timestamp (a batch lands in one tick), so
+        // the id breaks the tie. Without it two pages can disagree on where a
+        // tied run ends and a row is served twice or never.
         return query
             .orderBy("tx.timestamp", "DESC")
+            .addOrderBy("tx.id", "DESC")
             .take(limit)
             .skip(offset)
             .getMany()

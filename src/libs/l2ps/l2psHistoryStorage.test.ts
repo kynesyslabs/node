@@ -16,6 +16,7 @@ const getMany = jest.fn(async () => [])
 const rawQuery = jest.fn(async (_sql: string, _params: unknown[]) => [{ pruned: 3 }])
 
 const whereClauses: Array<{ clause: string; params: any }> = []
+const orderings: string[] = []
 
 const queryBuilder = {
     where(clause: string, params: any) {
@@ -32,7 +33,12 @@ const queryBuilder = {
     from() {
         return this
     },
-    orderBy() {
+    orderBy(column: string, direction: string) {
+        orderings.push(`${column} ${direction}`)
+        return this
+    },
+    addOrderBy(column: string, direction: string) {
+        orderings.push(`${column} ${direction}`)
         return this
     },
     take() {
@@ -109,6 +115,7 @@ beforeEach(() => {
     execute.mockClear()
     rawQuery.mockClear()
     whereClauses.length = 0
+    orderings.length = 0
     storePlaintext.value = false
     // The executor caches its L1 repository handle across calls.
     ;(L2PSTransactionExecutor as unknown as { l1Repo: unknown }).l1Repo = {}
@@ -287,5 +294,11 @@ describe("getAccountTransactions", () => {
         await L2PSTransactionExecutor.getAccountTransactions("subnet-1", "sender")
 
         expect(whereClauses.some(c => c.clause.includes(":since"))).toBe(false)
+    })
+
+    it("orders newest first and breaks timestamp ties by row id", async () => {
+        await L2PSTransactionExecutor.getAccountTransactions("subnet-1", "sender")
+
+        expect(orderings).toEqual(["tx.timestamp DESC", "tx.id DESC"])
     })
 })
