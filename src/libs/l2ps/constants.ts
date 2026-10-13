@@ -35,3 +35,14 @@ export const HASH_RELAY_AUTH_TIMEOUT_MS = 5_000
 
 /** Timeout when sending a hash update via OmniProtocol (ms) */
 export const HASH_RELAY_OMNI_REQUEST_TIMEOUT_MS = 10_000
+
+// ---------------------------------------------------------------------------
+// History retention
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimum gap between history retention sweeps (ms) – 1 hour.
+ * Retention is measured in days, so sweeping on every aggregation cycle only
+ * repeats the same delete scan.
+ */
+export const HISTORY_RETENTION_SWEEP_INTERVAL_MS = 60 * 60 * 1000

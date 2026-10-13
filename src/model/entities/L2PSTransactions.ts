@@ -39,10 +39,11 @@ import { bigintNumericTransformer } from "./transformers"
 @Index("IDX_L2PS_TX_FROM", ["from_address"])
 @Index("IDX_L2PS_TX_TO", ["to_address"])
 @Index("IDX_L2PS_TX_L1_BATCH", ["l1_batch_hash"])
-@Index("IDX_L2PS_TX_UID_FROM", ["l2ps_uid", "from_address"])
-@Index("IDX_L2PS_TX_UID_TO", ["l2ps_uid", "to_address"])
+@Index("IDX_L2PS_TX_UID_FROM_TIMESTAMP", ["l2ps_uid", "from_address", "timestamp"])
+@Index("IDX_L2PS_TX_UID_TO_TIMESTAMP", ["l2ps_uid", "to_address", "timestamp"])
 @Index("IDX_L2PS_TX_BLOCK", ["l1_block_number"])
 @Index("IDX_L2PS_TX_UID_TIMESTAMP", ["l2ps_uid", "timestamp"])
+@Index("IDX_L2PS_TX_CREATED_AT", ["created_at"])
 export class L2PSTransaction {
     /**
      * Auto-generated primary key
