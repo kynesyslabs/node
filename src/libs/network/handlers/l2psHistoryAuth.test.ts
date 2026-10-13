@@ -32,6 +32,11 @@ const NODE_KEY = "0x" + "ab".repeat(32)
 const sharedState: Record<string, unknown> = {}
 jest.mock("src/utilities/sharedState", () => ({ getSharedState: sharedState }))
 
+const l2psConfig = { historyRequireV2: false }
+jest.mock("src/config", () => ({
+    Config: { getInstance: () => ({ l2ps: l2psConfig }) },
+}))
+
 jest.mock("src/utilities/logger", () => ({
     __esModule: true,
     default: {
@@ -87,7 +92,8 @@ beforeEach(() => {
     getAccountTransactions.mockReset()
     getAccountTransactions.mockResolvedValue([])
     sharedState.publicKeyHex = NODE_KEY
-    sharedState.exposedUrl = "https://node-a.example.org:53550"
+    sharedState.exposedUrl = "https://node-a.example.org"
+    l2psConfig.historyRequireV2 = false
 })
 
 describe("getL2PSAccountTransactions, version 2 signature", () => {
@@ -107,8 +113,8 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         expect(response.result).toBe(200)
     })
 
-    it("accepts the advertised hostname, with or without the port", async () => {
-        for (const host of ["node-a.example.org", "node-a.example.org:53550"]) {
+    it("accepts the advertised hostname, by its bare name when the port is the default", async () => {
+        for (const host of ["node-a.example.org"]) {
             const ts = String(Date.now())
             const response = await call(v2Request(v2Message(host, ts), ts, { host }))
             expect(response.result).toBe(200)
@@ -228,6 +234,92 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         expect(response.result).toBe(403)
     })
 
+    it("accepts signatureVersion given as the string 2", async () => {
+        const ts = String(Date.now())
+        const response = await call(v2Request(v2Message(NODE_KEY, ts), ts, { signatureVersion: "2" }))
+
+        expect(response.result).toBe(200)
+    })
+
+    it.each([[3], [1], ["v2"], [[2]], [true], [0], [{}]])(
+        "refuses the unsupported signatureVersion %j instead of falling back to legacy",
+        async version => {
+            const ts = String(Date.now())
+            const legacy = `getL2PSHistory:${UID}:${address}:${ts}`
+            const response = await call({
+                timestamp: ts,
+                signature: sign(legacy),
+                signatureVersion: version,
+            })
+
+            expect(response.result).toBe(400)
+            expect(response.response).toBe("Unsupported signatureVersion.")
+            expect(getAccountTransactions).not.toHaveBeenCalled()
+        },
+    )
+
+    it.each([
+        ["a colon", (ts: string) => `${ts}:abc`],
+        ["trailing garbage", (ts: string) => `${ts}abc`],
+    ])("refuses a timestamp with %s", async (_name, mutate) => {
+        const ts = mutate(String(Date.now()))
+        const response = await call(v2Request(v2Message(NODE_KEY, ts), ts))
+
+        expect(response.result).toBe(400)
+        expect(getAccountTransactions).not.toHaveBeenCalled()
+    })
+
+    it("refuses a subnet uid that contains the delimiter", async () => {
+        const ts = String(Date.now())
+        const response = await call({
+            ...v2Request(v2Message(NODE_KEY, ts), ts),
+            l2psUid: "subnet:1",
+        })
+
+        expect(response.result).toBe(400)
+        expect(getAccountTransactions).not.toHaveBeenCalled()
+    })
+
+    it("refuses an object page value without throwing", async () => {
+        const ts = String(Date.now())
+        const hostile = { toString: 1, valueOf: 1 }
+        const response = await call(v2Request(v2Message(NODE_KEY, ts), ts, { limit: hostile }))
+
+        expect(response.result).toBe(400)
+        expect(getAccountTransactions).not.toHaveBeenCalled()
+    })
+
+    it("accepts the node address while the advertised URL is loopback or empty", async () => {
+        for (const exposedUrl of ["http://localhost:53550", ""]) {
+            sharedState.exposedUrl = exposedUrl
+            const ts = String(Date.now())
+            const response = await call(v2Request(v2Message(NODE_KEY, ts), ts))
+            expect(response.result).toBe(200)
+        }
+    })
+
+    it("accepts the advertised hostname while the node key is unknown", async () => {
+        sharedState.publicKeyHex = null
+        const host = "node-a.example.org"
+        const ts = String(Date.now())
+        const response = await call(v2Request(v2Message(host, ts), ts, { host }))
+
+        expect(response.result).toBe(200)
+    })
+
+    it("requires host:port when the advertised URL has a non-default port", async () => {
+        sharedState.exposedUrl = "http://203.0.113.7:53550"
+
+        const ts = String(Date.now())
+        const bare = await call(v2Request(v2Message("203.0.113.7", ts), ts, { host: "203.0.113.7" }))
+        expect(bare.result).toBe(403)
+        expect(bare.response).toBe("Signature is bound to another host.")
+
+        const withPort = "203.0.113.7:53550"
+        const accepted = await call(v2Request(v2Message(withPort, ts), ts, { host: withPort }))
+        expect(accepted.result).toBe(200)
+    })
+
     it("refuses a stale timestamp", async () => {
         const ts = String(Date.now() - 6 * 60 * 1000)
         const response = await call(v2Request(v2Message(NODE_KEY, ts), ts))
@@ -275,6 +367,45 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
 
         expect(response.result).toBe(401)
         expect(response.response).toBe("Request expired or invalid timestamp.")
+    })
+
+    it("is not thrown off by an object page value", async () => {
+        const ts = String(Date.now())
+        const hostile = { toString: 1, valueOf: 1 }
+        const response = await call(legacyRequest(ts, { limit: hostile, offset: hostile, since: hostile }))
+
+        expect(response.result).toBe(200)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 101, 0, 0)
+    })
+
+    it("gives a bad signature with an object page value the usual 403", async () => {
+        const ts = String(Date.now())
+        const response = await call({
+            timestamp: ts,
+            signature: sign("something else"),
+            limit: { toString: 1, valueOf: 1 },
+        })
+
+        expect(response.result).toBe(403)
+    })
+
+    it("is refused with a version 2 hint when the node requires version 2", async () => {
+        l2psConfig.historyRequireV2 = true
+        const ts = String(Date.now())
+        const response = await call(legacyRequest(ts))
+
+        expect(response.result).toBe(401)
+        expect(response.extra.messageV2).toContain("getL2PSHistory/2:")
+        expect(Object.keys(response.extra)[0]).toBe("messageV2")
+        expect(getAccountTransactions).not.toHaveBeenCalled()
+    })
+
+    it("leaves version 2 working when the node requires version 2", async () => {
+        l2psConfig.historyRequireV2 = true
+        const ts = String(Date.now())
+        const response = await call(v2Request(v2Message(NODE_KEY, ts), ts))
+
+        expect(response.result).toBe(200)
     })
 
     it("refuses a bad signature", async () => {

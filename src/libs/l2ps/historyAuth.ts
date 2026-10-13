@@ -46,10 +46,26 @@ function stripHexPrefix(value: string): string {
 }
 
 /**
- * Whether `host` names this node: its ed25519 address, or the hostname (with
- * or without port) of its advertised URL. A loopback advertised URL is not an
- * identity (every node on every machine would answer to it), so it never
- * matches.
+ * A page value as the request carried it: a number or a numeric string.
+ * Anything else yields undefined, so a hostile value (an object with its own
+ * valueOf, say) is never coerced and cannot throw before the signature check.
+ */
+export function readPageValue(raw: unknown): number | undefined {
+    if (typeof raw === "number") return raw
+    if (typeof raw === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(raw)) {
+        return Number(raw)
+    }
+    return undefined
+}
+
+/**
+ * Whether `host` names this node: its ed25519 address, or the advertised
+ * hostname. A loopback advertised URL is not an identity (every node on every
+ * machine would answer to it), so it never matches.
+ *
+ * The bare hostname is accepted only when the advertised URL uses the default
+ * port of its scheme. Otherwise two nodes behind one address on different
+ * ports would share a binding, so host:port is required.
  */
 export function isOwnHistoryHost(host: unknown): boolean {
     if (typeof host !== "string" || host.length === 0) return false
@@ -66,5 +82,6 @@ export function isOwnHistoryHost(host: unknown): boolean {
     if (!advertised || isLoopbackHost(advertised.hostname)) return false
 
     const wanted = host.toLowerCase()
-    return wanted === advertised.hostname.toLowerCase() || wanted === advertised.host.toLowerCase()
+    if (wanted === advertised.host.toLowerCase()) return true
+    return advertised.port === "" && wanted === advertised.hostname.toLowerCase()
 }

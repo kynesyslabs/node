@@ -3,7 +3,15 @@ import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 import { resolveHistoryMessage, subnetDecryptor } from "@/libs/l2ps/historyPayload"
-import { historyAuthMessageV2, isOwnHistoryHost } from "@/libs/l2ps/historyAuth"
+import { historyAuthMessageV2, isOwnHistoryHost, readPageValue } from "@/libs/l2ps/historyAuth"
+import { Config } from "src/config"
+
+const historyAuthHint = (data: any) => ({
+    messageV2:
+        "Set signatureVersion to 2 and sign 'getL2PSHistory/2:{l2psUid}:{address}:{timestamp}:{host}:{limit}:{offset}:{since}'. host is the node's ed25519 address (the identity /info reports), which is always accepted, or its advertised hostname. limit, offset and since are the applied page values (defaults 100, 0, 0)",
+    message: "Sign the message 'getL2PSHistory:{l2psUid}:{address}:{timestamp}' with your wallet (legacy)",
+    example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
+})
 
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
@@ -154,16 +162,14 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         if (!data.signature || !data.timestamp) {
             response.result = 401
             response.response = "Authentication required. Provide signature and timestamp."
-            response.extra = {
-                message: "Sign the message 'getL2PSHistory:{l2psUid}:{address}:{timestamp}' with your wallet",
-                example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
-                messageV2:
-                    "Set signatureVersion to 2 and sign 'getL2PSHistory/2:{l2psUid}:{address}:{timestamp}:{host}:{limit}:{offset}:{since}' with the node address or advertised hostname as host and the applied page values (defaults 100, 0, 0)",
-            }
+            response.extra = historyAuthHint(data)
             return response
         }
 
-        const requestTime = Number.parseInt(data.timestamp, 10)
+        const requestTime =
+            typeof data.timestamp === "string" || typeof data.timestamp === "number"
+                ? Number.parseInt(String(data.timestamp), 10)
+                : Number.NaN
         const now = Date.now()
         if (Number.isNaN(requestTime) || now - requestTime > 5 * 60 * 1000 || requestTime > now + 60 * 1000) {
             response.result = 401
@@ -171,18 +177,60 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             return response
         }
 
-        const maxLimit = 1000
-        const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
-        const offset = Math.max(0, data.offset || 0)
-        const since = Math.max(0, Number(data.since) || 0)
-
+        // This runs before the signature is verified, so a hostile value must
+        // not be able to throw here: page values are read without coercion
+        // and the version is compared strictly.
+        const hasVersion = data.signatureVersion !== undefined && data.signatureVersion !== null
+        if (hasVersion && data.signatureVersion !== 2 && data.signatureVersion !== "2") {
+            response.result = 400
+            response.response = "Unsupported signatureVersion."
+            return response
+        }
         // Version 2 is chosen by the request, never inferred from the
         // signature: the two strings differ in their first segment, so a
         // signature made for one version cannot verify as the other, and a
         // relay that strips the marker only turns the request into a refusal.
-        const isV2 = Number(data.signatureVersion) === 2
+        const isV2 = hasVersion
+
+        if (!isV2 && Config.getInstance().l2ps.historyRequireV2) {
+            response.result = 401
+            response.response = "This node requires a version 2 history signature."
+            response.extra = historyAuthHint(data)
+            return response
+        }
+
+        const rawLimit = readPageValue(data.limit)
+        const rawOffset = readPageValue(data.offset)
+        const rawSince = readPageValue(data.since)
+
+        const maxLimit = 1000
+        const limit = Math.min(Math.max(1, rawLimit || 100), maxLimit)
+        const offset = Math.max(0, rawOffset || 0)
+        const since = Math.max(0, rawSince || 0)
 
         if (isV2) {
+            // The message is joined with ":", so a segment that can carry one
+            // would let two different requests produce the same string.
+            const timestamp = String(data.timestamp)
+            if (
+                !/^\d+$/.test(timestamp) ||
+                typeof data.l2psUid !== "string" ||
+                data.l2psUid.includes(":") ||
+                typeof data.address !== "string" ||
+                data.address.includes(":")
+            ) {
+                response.result = 400
+                response.response = "Malformed timestamp, subnet or address."
+                return response
+            }
+            // A supplied page value that is not a number would otherwise fall
+            // back to a default the caller never signed.
+            const supplied = [data.limit, data.offset, data.since]
+            const parsed = [rawLimit, rawOffset, rawSince]
+            const unreadable = supplied.some(
+                (value, index) =>
+                    value !== undefined && value !== null && parsed[index] === undefined,
+            )
             if (!data.host) {
                 response.result = 401
                 response.response = "A version 2 signature requires the host it is bound to."
@@ -195,7 +243,7 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                 response.response = "Signature is bound to another host."
                 return response
             }
-            if (![limit, offset, since].every(Number.isSafeInteger)) {
+            if (unreadable || ![limit, offset, since].every(Number.isSafeInteger)) {
                 response.result = 400
                 response.response = "limit, offset and since must be integers."
                 return response
@@ -207,10 +255,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // would authorize a read of any subnet this node serves, so
             // anything able to relay the request could repoint it and still
             // present a signature that verifies.
+            //
             // The legacy form leaves the host and the page parameters unsigned
             // and is kept only so existing clients keep working.
             const expectedMessage = isV2
-                ? historyAuthMessageV2(data.l2psUid, data.address, data.timestamp, data.host, {
+                ? historyAuthMessageV2(data.l2psUid, data.address, String(data.timestamp), data.host, {
                     limit,
                     offset,
                     since,
