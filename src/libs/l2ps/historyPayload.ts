@@ -32,34 +32,78 @@ export function messageFromContent(
     return typeof message === "string" && message.length > 0 ? message : null
 }
 
+/** What an authenticated history read returns for one row's payload. */
+export interface HistoryEntry {
+    message: string | null
+    content: Record<string, any> | null
+}
+
+function isContent(value: unknown): value is Record<string, any> {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /**
- * The message for one history row.
+ * Message and transaction content for one history row, from a single decrypt.
  *
- * Order matters: an execution message is the node's own account of what
- * happened and wins over the payload, then any plaintext still on the row,
- * then the ciphertext. A row that decrypts to nothing yields null rather
- * than an error — one unreadable row should not fail a page of history.
+ * Message order matters: an execution message is the node's own account of
+ * what happened and wins over the payload, then any plaintext still on the
+ * row, then the ciphertext. Content has no node-authored override, so it is
+ * the plaintext on the row or the decrypted envelope. The envelope is
+ * decrypted at most once and only when something still needs it. A row that
+ * decrypts to nothing yields nulls rather than an error — one unreadable row
+ * should not fail a page of history.
  */
+export async function resolveHistoryEntry(
+    row: HistoryRow,
+    decrypt: EnvelopeDecryptor,
+): Promise<HistoryEntry> {
+    let decrypted: Promise<Record<string, any> | null> | null = null
+    const readEnvelope = (): Promise<Record<string, any> | null> => {
+        if (!row.encrypted_payload) return Promise.resolve(null)
+        const envelope = row.encrypted_payload
+        decrypted ??= Promise.resolve()
+            .then(() => decrypt(envelope))
+            .then(plain => (isContent(plain?.content) ? plain.content : null))
+            .catch(error => {
+                log.debug(
+                    `[L2PS History] Could not decrypt a stored payload: ${error instanceof Error ? error.message : "unknown error"}`,
+                )
+                return null
+            })
+        return decrypted
+    }
+
+    const plaintext = isContent(row.content) ? row.content : null
+    const content = plaintext ?? (await readEnvelope())
+
+    const message =
+        row.execution_message ||
+        messageFromContent(plaintext) ||
+        messageFromContent(await readEnvelope())
+
+    return { message: message || null, content }
+}
+
+/** The message for one history row. */
 export async function resolveHistoryMessage(
     row: HistoryRow,
     decrypt: EnvelopeDecryptor,
 ): Promise<string | null> {
+    // Nothing else is wanted here, so do not decrypt just to fill content.
     if (row.execution_message) return row.execution_message
+    return (await resolveHistoryEntry(row, decrypt)).message
+}
 
-    const fromPlaintext = messageFromContent(row.content)
-    if (fromPlaintext) return fromPlaintext
-
-    if (!row.encrypted_payload) return null
-
-    try {
-        const decrypted = await decrypt(row.encrypted_payload)
-        return messageFromContent(decrypted?.content)
-    } catch (error) {
-        log.debug(
-            `[L2PS History] Could not decrypt a stored payload: ${error instanceof Error ? error.message : "unknown error"}`,
-        )
-        return null
-    }
+/**
+ * The transaction content for one history row, or null when it cannot be
+ * read. Lets a member recover a structured payload — not just the message
+ * string — that was sent to them through the subnet.
+ */
+export async function resolveHistoryContent(
+    row: HistoryRow,
+    decrypt: EnvelopeDecryptor,
+): Promise<Record<string, any> | null> {
+    return (await resolveHistoryEntry(row, decrypt)).content
 }
 
 /**
