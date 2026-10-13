@@ -27,6 +27,13 @@ const MAX_MESSAGE_SIZE = 256 * 1024
 const MAX_CIPHERTEXT_SIZE = 128 * 1024
 /** Min valid hex public key length (ed25519 = 64 hex chars) */
 const MIN_PUBLIC_KEY_LENGTH = 64
+/**
+ * How far a register frame's timestamp may sit from the node clock. The proof
+ * signs only the key, that timestamp and (in the bound form) the subnet, so
+ * without a window a proof seen once would register its key forever, taking
+ * over the owner's queued messages. Same allowance as history reads.
+ */
+export const REGISTER_PROOF_MAX_SKEW_MS = 5 * 60_000
 
 interface WSData {
     publicKey: string | null
@@ -37,8 +44,19 @@ interface WSData {
 // from the server module; the service imports it from ./keys directly.
 export { canonicalizeKey }
 
+/**
+ * A key may be registered on several subnets at once, one socket per subnet,
+ * so the peer table is keyed by both. Hex keys never contain "|".
+ */
+function peerId(l2psUid: string, publicKey: string): string {
+    return `${publicKey}|${l2psUid}`
+}
+
 export class L2PSMessagingServer {
     private peers = new Map<string, ConnectedPeer>()
+    /** Register proofs already accepted per subnet, until their timestamp leaves the window. */
+    private usedRegisterProofs = new Map<string, number>()
+    private lastProofPrune = 0
     // Bun.Server / Bun.serve dropped the WSData generic; the cast on
     // `ws.data` accesses at call sites still narrows correctly because
     // we set ws.data in `upgrade()`.
@@ -151,15 +169,48 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Verify proof of key ownership: sign("register:{publicKey}:{timestamp}")
-        const proofMessage = `register:${publicKey}:${msg.timestamp}`
+        const now = Date.now()
+        if (
+            typeof msg.timestamp !== "number" ||
+            !Number.isFinite(msg.timestamp) ||
+            Math.abs(now - msg.timestamp) > REGISTER_PROOF_MAX_SKEW_MS
+        ) {
+            this.sendError(
+                ws,
+                "INVALID_PROOF",
+                `Register timestamp must be within ${REGISTER_PROOF_MAX_SKEW_MS / 1000}s of the node clock`,
+                msg.requestId,
+            )
+            return
+        }
+
+        // Verify proof of key ownership. The bound form names the subnet:
+        // sign("register:{l2psUid}:{publicKey}:{timestamp}"); the legacy
+        // sign("register:{publicKey}:{timestamp}") is still accepted.
+        const proofMessages = [
+            `register:${l2psUid}:${publicKey}:${msg.timestamp}`,
+            `register:${publicKey}:${msg.timestamp}`,
+        ]
+        let proofBytes: Uint8Array
+        let keyBytes: Uint8Array
         try {
-            const valid = await ucrypto.verify({
-                algorithm: getSharedState.signingAlgorithm,
-                message: new TextEncoder().encode(proofMessage),
-                publicKey: this.hexToUint8Array(publicKey),
-                signature: this.hexToUint8Array(proof),
-            })
+            proofBytes = this.hexToUint8Array(proof)
+            keyBytes = this.hexToUint8Array(publicKey)
+        } catch (error) {
+            this.sendError(ws, "INVALID_PROOF", `Proof verification error: ${error}`, msg.requestId)
+            return
+        }
+        try {
+            let valid = false
+            for (const proofMessage of proofMessages) {
+                valid = await ucrypto.verify({
+                    algorithm: getSharedState.signingAlgorithm,
+                    message: new TextEncoder().encode(proofMessage),
+                    publicKey: keyBytes,
+                    signature: proofBytes,
+                })
+                if (valid) break
+            }
             if (!valid) {
                 this.sendError(ws, "INVALID_PROOF", "Signature verification failed", msg.requestId)
                 return
@@ -169,9 +220,28 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Remove old connection if re-registering (canonical identity)
-        const existing = this.peers.get(canonicalKey)
-        if (existing) {
+        // ed25519 signatures are deterministic, so a replayed proof is
+        // byte-identical to the one already accepted. Keyed on the bytes that
+        // verified, so no re-encoding of an accepted proof counts as a new one.
+        // Tracked per subnet: a legacy proof does not name one, and a client
+        // may register one key on two subnets with the same timestamp.
+        const proofKey = `${l2psUid}|${Buffer.from(proofBytes).toString("hex")}`
+        this.pruneRegisterProofs(now)
+        if (this.usedRegisterProofs.has(proofKey)) {
+            this.sendError(ws, "INVALID_PROOF", "Register proof already used", msg.requestId)
+            return
+        }
+        this.usedRegisterProofs.set(proofKey, msg.timestamp + REGISTER_PROOF_MAX_SKEW_MS)
+
+        // A socket re-registering moves to the new identity; drop the old one.
+        if (ws.data.publicKey && ws.data.l2psUid) {
+            this.detach(ws)
+        }
+
+        // Remove old connection if re-registering on this subnet (canonical identity)
+        const id = peerId(l2psUid, canonicalKey)
+        const existing = this.peers.get(id)
+        if (existing && existing.ws !== ws) {
             // Closing an already-dead socket can throw; we're replacing this
             // connection regardless, so a close failure here is irrelevant.
             try {
@@ -184,7 +254,7 @@ export class L2PSMessagingServer {
         // Register peer under the canonical identity
         ws.data.publicKey = canonicalKey
         ws.data.l2psUid = l2psUid
-        this.peers.set(canonicalKey, {
+        this.peers.set(id, {
             publicKey: canonicalKey,
             l2psUid,
             ws,
@@ -206,7 +276,7 @@ export class L2PSMessagingServer {
 
         // Notify others of new peer
         for (const peerKey of onlinePeers) {
-            const peer = this.peers.get(peerKey)
+            const peer = this.peers.get(peerId(l2psUid, peerKey))
             if (peer) {
                 this.send(peer.ws as ServerWebSocket<WSData>, {
                     type: "peer_joined",
@@ -256,8 +326,8 @@ export class L2PSMessagingServer {
 
         const l2psUid = ws.data.l2psUid!
         const messageId = crypto.randomUUID()
-        const recipientPeer = this.peers.get(toKey)
-        const recipientOnline = !!recipientPeer && recipientPeer.l2psUid === l2psUid
+        const recipientPeer = this.peers.get(peerId(l2psUid, toKey))
+        const recipientOnline = !!recipientPeer
 
         // Process through service (DB + L2PS mempool) before delivering
         const result = await this.service.processMessage(
@@ -269,13 +339,39 @@ export class L2PSMessagingServer {
             return
         }
 
-        // Route to recipient only after successful persistence
-        if (recipientOnline) {
-            this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
-                type: "message",
-                payload: { from: senderKey, encrypted, messageHash, offline: false },
-                timestamp: Date.now(),
-            })
+        // A resend of an accepted message gets the original answer and is not
+        // routed again: the recipient already has it or will get it from the queue.
+        if (result.duplicate) {
+            this.send(ws, result.status === "queued" || result.status === "sent"
+                ? {
+                    type: "message_queued",
+                    payload: { messageHash, status: "queued", duplicate: true },
+                    timestamp: Date.now(),
+                    requestId: msg.requestId,
+                }
+                : {
+                    type: "message_sent",
+                    // A failed original is retried, never answered as a duplicate.
+                    payload: { messageHash, l2psStatus: "submitted", duplicate: true },
+                    timestamp: Date.now(),
+                    requestId: msg.requestId,
+                })
+            return
+        }
+
+        // Route to recipient only after successful persistence. A socket the
+        // node still lists can already be gone; then the message waits in the
+        // queue instead of being recorded as delivered.
+        const routed = recipientOnline && this.send(recipientPeer!.ws as ServerWebSocket<WSData>, {
+            type: "message",
+            payload: { from: senderKey, encrypted, messageHash, offline: false },
+            timestamp: Date.now(),
+        })
+        if (recipientOnline && !routed) {
+            await this.service.requeue(result.messageId!, senderKey)
+        }
+
+        if (routed) {
             this.send(ws, {
                 type: "message_sent",
                 payload: {
@@ -382,13 +478,12 @@ export class L2PSMessagingServer {
         }
 
         // Only return peers in the same L2PS network (canonical lookup)
-        const peer = this.peers.get(canonicalizeKey(targetId))
-        const sameNetwork = peer && peer.l2psUid === ws.data.l2psUid
+        const peer = this.peers.get(peerId(ws.data.l2psUid!, canonicalizeKey(targetId)))
         this.send(ws, {
             type: "public_key_response",
             payload: {
                 targetId,
-                publicKey: sameNetwork ? peer.publicKey : null,
+                publicKey: peer ? peer.publicKey : null,
             },
             timestamp: Date.now(),
             requestId,
@@ -398,17 +493,22 @@ export class L2PSMessagingServer {
     // ─── Connection Close ────────────────────────────────────────
 
     private handleClose(ws: ServerWebSocket<WSData>): void {
-        const publicKey = ws.data.publicKey
-        if (!publicKey) return
+        this.detach(ws)
+    }
 
-        const peer = this.peers.get(publicKey)
+    /** Remove the socket's current registration and tell its subnet. */
+    private detach(ws: ServerWebSocket<WSData>): void {
+        const { publicKey, l2psUid } = ws.data
+        if (!publicKey || !l2psUid) return
+
+        const id = peerId(l2psUid, publicKey)
+        const peer = this.peers.get(id)
         if (!peer) return
 
         // Only remove if this is the current socket (not a stale one after re-register)
         if (peer.ws !== ws) return
 
-        const l2psUid = peer.l2psUid
-        this.peers.delete(publicKey)
+        this.peers.delete(id)
 
         // Notify peers in same L2PS network
         for (const [, p] of this.peers) {
@@ -438,22 +538,19 @@ export class L2PSMessagingServer {
         const senderKeys = new Set<string>()
 
         for (const msg of queued) {
-            try {
-                this.send(ws, {
-                    type: "message",
-                    payload: {
-                        from: msg.from,
-                        encrypted: msg.encrypted,
-                        messageHash: msg.messageHash,
-                        offline: true,
-                    },
-                    timestamp: Date.now(),
-                })
-                deliveredIds.push(msg.id)
-                senderKeys.add(msg.from)
-            } catch {
-                break // Maintain order — stop on first failure
-            }
+            const sent = this.send(ws, {
+                type: "message",
+                payload: {
+                    from: msg.from,
+                    encrypted: msg.encrypted,
+                    messageHash: msg.messageHash,
+                    offline: true,
+                },
+                timestamp: Date.now(),
+            })
+            if (!sent) break // Maintain order — stop on first failure
+            deliveredIds.push(msg.id)
+            senderKeys.add(msg.from)
         }
 
         if (deliveredIds.length > 0) {
@@ -468,11 +565,21 @@ export class L2PSMessagingServer {
 
     // ─── Helpers ─────────────────────────────────────────────────
 
-    private send(ws: ServerWebSocket<WSData>, frame: ProtocolFrame): void {
+    private pruneRegisterProofs(now: number): void {
+        if (now - this.lastProofPrune < 1000) return
+        this.lastProofPrune = now
+        for (const [proof, expiresAt] of this.usedRegisterProofs) {
+            if (expiresAt < now) this.usedRegisterProofs.delete(proof)
+        }
+    }
+
+    /** False when the frame was dropped (Bun returns 0 for a closed socket). */
+    private send(ws: ServerWebSocket<WSData>, frame: ProtocolFrame): boolean {
         try {
-            ws.send(JSON.stringify(frame))
+            return ws.send(JSON.stringify(frame)) !== 0
         } catch (error) {
             log.debug(`[L2PS-IM] Send error: ${error}`)
+            return false
         }
     }
 
@@ -493,12 +600,14 @@ export class L2PSMessagingServer {
     private hexToUint8Array(hex: string): Uint8Array {
         // Tolerate a leading 0x — the SDK emits 0x-prefixed hex for both
         // addresses and signatures; without stripping it the bytes are
-        // shifted and every proof verification fails.
+        // shifted and every proof verification fails. Anything that is not
+        // whole bytes of hex is refused rather than truncated: a lenient
+        // decoder let a proof with a stray trailing character verify as the
+        // original while looking new to the replay cache.
         const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex
-        const bytes = new Uint8Array(clean.length / 2)
-        for (let i = 0; i < clean.length; i += 2) {
-            bytes[i / 2] = parseInt(clean.slice(i, i + 2), 16)
+        if (clean.length === 0 || clean.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(clean)) {
+            throw new Error("Expected whole bytes of hex")
         }
-        return bytes
+        return new Uint8Array(Buffer.from(clean, "hex"))
     }
 }
