@@ -12,7 +12,8 @@ import L2PSProofManager from "./L2PSProofManager"
 import type { GCREdit } from "@kynesyslabs/demosdk/types"
 import { Config } from "src/config"
 import type { L2PSBatchPayload } from "./types"
-import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN } from "./constants"
+import { ZK_CIRCUIT_MAX_BATCH_SIZE, BATCH_SIGNATURE_DOMAIN, HISTORY_RETENTION_SWEEP_INTERVAL_MS } from "./constants"
+import { RetentionSweepGate } from "./retentionSweepGate"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 
 // Re-export for backward compatibility
@@ -76,6 +77,9 @@ export class L2PSBatchAggregator {
     private readonly HISTORY_RETENTION_DAYS =
         Config.getInstance().l2ps.historyRetentionDays
 
+    /** Lets the retention sweep run at most once an hour. */
+    private readonly retentionSweep = new RetentionSweepGate(HISTORY_RETENTION_SWEEP_INTERVAL_MS)
+
     /** Domain separator for batch transaction signatures */
     private readonly SIGNATURE_DOMAIN = BATCH_SIGNATURE_DOMAIN
 
@@ -136,6 +140,8 @@ export class L2PSBatchAggregator {
 
         // Reset statistics using helper method
         this.stats = this.createInitialStats()
+
+        void this.scrubLegacyPlaintext()
 
         // Start the interval timer
         this.intervalId = setInterval(async () => {
@@ -832,6 +838,7 @@ export class L2PSBatchAggregator {
      */
     private async pruneHistoryRetention(): Promise<void> {
         if (!this.HISTORY_RETENTION_DAYS || this.HISTORY_RETENTION_DAYS <= 0) return
+        if (!this.retentionSweep.due()) return
         try {
             const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
             const pruned = await L2PSTransactionExecutor.pruneHistory(
@@ -842,6 +849,22 @@ export class L2PSBatchAggregator {
             }
         } catch (error: unknown) {
             log.error(`[L2PS Batch Aggregator] History retention sweep failed: ${getErrorMessage(error)}`)
+        }
+    }
+
+    /**
+     * Retire plaintext that older rows still hold next to their ciphertext.
+     * Runs once at start; a failure only means it is tried again next start.
+     */
+    private async scrubLegacyPlaintext(): Promise<void> {
+        try {
+            const { default: L2PSTransactionExecutor } = await import("./L2PSTransactionExecutor")
+            const scrubbed = await L2PSTransactionExecutor.scrubStoredPlaintext()
+            if (scrubbed > 0) {
+                log.info(`[L2PS Batch Aggregator] Removed stored plaintext from ${scrubbed} history rows that keep their ciphertext`)
+            }
+        } catch (error: unknown) {
+            log.error(`[L2PS Batch Aggregator] Plaintext scrub failed: ${getErrorMessage(error)}`)
         }
     }
 

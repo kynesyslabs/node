@@ -557,8 +557,12 @@ export default class L2PSTransactionExecutor {
             query.andWhere("tx.timestamp > :since", { since: String(since) })
         }
 
+        // Several rows can share a timestamp (a batch lands in one tick), so
+        // the id breaks the tie. Without it two pages can disagree on where a
+        // tied run ends and a row is served twice or never.
         return query
             .orderBy("tx.timestamp", "DESC")
+            .addOrderBy("tx.id", "DESC")
             .take(limit)
             .skip(offset)
             .getMany()
@@ -660,6 +664,46 @@ export default class L2PSTransactionExecutor {
         )
 
         return Number(pruned) || 0
+    }
+
+    /**
+     * Blank the plaintext on rows that also hold their ciphertext.
+     *
+     * Rows written before payloads were kept encrypted carry the decrypted
+     * content next to the ciphertext that was later backfilled. A row is only
+     * blanked when the envelope is there to read instead; a row whose
+     * ciphertext was already swept keeps its plaintext, because that is its
+     * only copy.
+     *
+     * Does nothing when the node is configured to store plaintext.
+     */
+    static async scrubStoredPlaintext(batchSize = 1000): Promise<number> {
+        if (Config.getInstance().l2ps.historyStorePlaintext) return 0
+
+        await this.init()
+        const dsInstance = await Datasource.getInstance()
+        const ds = dsInstance.getDataSource()
+
+        // Batched by id so a large table is neither locked nor rewritten in one
+        // go, and so each batch resumes after the last one instead of
+        // rescanning the rows it already blanked.
+        let total = 0
+        let lastId = 0
+        for (;;) {
+            const [rows] = (await ds.query(
+                `UPDATE "l2ps_transactions" SET "content" = NULL
+                  WHERE "id" IN (
+                    SELECT "id" FROM "l2ps_transactions"
+                     WHERE "id" > $2 AND "content" IS NOT NULL AND "encrypted_payload" IS NOT NULL
+                     ORDER BY "id" LIMIT $1)
+                  RETURNING "id"`,
+                [batchSize, lastId],
+            )) as [Array<{ id: number | string }>, number]
+            const count = rows.length
+            total += count
+            if (count < batchSize) return total
+            lastId = rows.reduce((max, r) => Math.max(max, Number(r.id)), lastId)
+        }
     }
 
     /**
