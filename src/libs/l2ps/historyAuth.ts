@@ -51,7 +51,7 @@ function stripHexPrefix(value: string): string {
  * valueOf, say) is never coerced and cannot throw before the signature check.
  */
 export function readPageValue(raw: unknown): number | undefined {
-    if (typeof raw === "number") return raw
+    if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined
     if (typeof raw === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(raw)) {
         return Number(raw)
     }

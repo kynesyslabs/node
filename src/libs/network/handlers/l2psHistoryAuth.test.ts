@@ -161,13 +161,31 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         expect(getAccountTransactions).not.toHaveBeenCalled()
     })
 
-    it("does not treat a loopback advertised URL as an identity", async () => {
-        sharedState.exposedUrl = "http://localhost:53550"
-        const ts = String(Date.now())
-        const response = await call(v2Request(v2Message("localhost", ts), ts, { host: "localhost" }))
+    it.each([["localhost"], ["127.0.0.2"], ["[::1]"], ["::ffff:127.0.0.1"]])(
+        "does not treat the loopback advertised URL %s as an identity",
+        async loopback => {
+            sharedState.exposedUrl = `http://${loopback}:53550`
+            const ts = String(Date.now())
+            const host = `${loopback}:53550`
+            const response = await call(v2Request(v2Message(host, ts), ts, { host }))
 
-        expect(response.result).toBe(403)
-        expect(response.response).toBe("Signature is bound to another host.")
+            expect(response.result).toBe(403)
+            expect(response.response).toBe("Signature is bound to another host.")
+        },
+    )
+
+    it.each([[0], ["0"]])("clamps a supplied limit of %j to one row and signs that value", async limit => {
+        const ts = String(Date.now())
+        const response = await call(v2Request(v2Message(NODE_KEY, ts, 1), ts, { limit }))
+
+        expect(response.result).toBe(200)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 2, 0, 0)
+    })
+
+    it("falls back to the default limit only when none is supplied", async () => {
+        const ts = String(Date.now())
+        const asDefault = await call(v2Request(v2Message(NODE_KEY, ts, 100), ts, { limit: 0 }))
+        expect(asDefault.result).toBe(403)
     })
 
     it.each([
@@ -241,7 +259,7 @@ describe("getL2PSAccountTransactions, version 2 signature", () => {
         expect(response.result).toBe(200)
     })
 
-    it.each([[3], [1], ["v2"], [[2]], [true], [0], [{}]])(
+    it.each([[3], [1], ["v2"], [[2]], [true], [0], [{}], [null]])(
         "refuses the unsupported signatureVersion %j instead of falling back to legacy",
         async version => {
             const ts = String(Date.now())
@@ -350,6 +368,14 @@ describe("getL2PSAccountTransactions, unversioned signature", () => {
 
         expect(response.result).toBe(200)
         expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 8, 3, 9)
+    })
+
+    it("clamps a zero limit to one row instead of the default page", async () => {
+        const ts = String(Date.now())
+        const response = await call(legacyRequest(ts, { limit: "0" }))
+
+        expect(response.result).toBe(200)
+        expect(getAccountTransactions).toHaveBeenCalledWith(UID, address, 2, 0, 0)
     })
 
     it("does not need a host", async () => {

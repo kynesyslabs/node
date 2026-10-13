@@ -8,7 +8,11 @@ export const LOOPBACK_HOSTS = new Set([
 ])
 
 export function isLoopbackHost(hostname: string): boolean {
-    return LOOPBACK_HOSTS.has(hostname.toLowerCase())
+    const host = hostname.toLowerCase().replace(/^\[|\]$/g, "")
+    if (LOOPBACK_HOSTS.has(host)) return true
+    // The whole 127/8 block loops back, not only .0.0.1, and so does its
+    // IPv4-mapped IPv6 form; a name from that block is every machine's own.
+    return /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
 }
 
 /**

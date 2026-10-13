@@ -180,7 +180,9 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         // This runs before the signature is verified, so a hostile value must
         // not be able to throw here: page values are read without coercion
         // and the version is compared strictly.
-        const hasVersion = data.signatureVersion !== undefined && data.signatureVersion !== null
+        // An explicit null is a malformed version, not an omitted one, so it is
+        // refused rather than quietly served with the weaker legacy form.
+        const hasVersion = data.signatureVersion !== undefined
         if (hasVersion && data.signatureVersion !== 2 && data.signatureVersion !== "2") {
             response.result = 400
             response.response = "Unsupported signatureVersion."
@@ -204,9 +206,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         const rawSince = readPageValue(data.since)
 
         const maxLimit = 1000
-        const limit = Math.min(Math.max(1, rawLimit || 100), maxLimit)
-        const offset = Math.max(0, rawOffset || 0)
-        const since = Math.max(0, rawSince || 0)
+        // Only a missing value takes the default: a supplied zero is clamped to
+        // the documented minimum, so the signed value and the applied value agree.
+        const limit = Math.min(Math.max(1, rawLimit ?? 100), maxLimit)
+        const offset = Math.max(0, rawOffset ?? 0)
+        const since = Math.max(0, rawSince ?? 0)
 
         if (isV2) {
             // The message is joined with ":", so a segment that can carry one
