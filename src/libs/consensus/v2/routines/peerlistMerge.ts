@@ -38,20 +38,46 @@ export function compareIdentities(a: string, b: string): number {
 
 let contributionsBlockRef: number | null = null
 let contributions = new Map<string, SyncObservation[]>()
+let snapshotBlockRef: number | null = null
+let snapshot: SyncObservation[] | null = null
 
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export function __resetPeerlistMerge(): void {
     contributionsBlockRef = null
     contributions = new Map()
+    snapshotBlockRef = null
+    snapshot = null
 }
 
 /**
- * Our own observations for the exchange: ourselves plus every known peer
- * whose gossiped sync state sits at our current tip, each carrying the
- * (block, block_hash) we observed. Pubkeys only — connection strings are
- * observer-dependent and must not enter consensus data.
+ * Takes our observation table for a round once, so every member receives
+ * the same copy whether it reads our request or our response.
  */
-export function getLocalSyncObservations(): SyncObservation[] {
+export function freezeLocalSyncObservations(blockRef: number): void {
+    snapshotBlockRef = blockRef
+    snapshot = collectLocalSyncObservations()
+}
+
+/**
+ * Our own observations for the exchange: the frozen snapshot for
+ * `blockRef` when one exists, otherwise a live read.
+ */
+export function getLocalSyncObservations(
+    blockRef?: number,
+): SyncObservation[] {
+    if (blockRef !== undefined && blockRef === snapshotBlockRef && snapshot) {
+        return snapshot
+    }
+    return collectLocalSyncObservations()
+}
+
+/**
+ * Ourselves plus every known peer whose gossiped sync state sits at our
+ * current tip, each carrying the (block, block_hash) we observed. Pubkeys
+ * only — connection strings are observer-dependent and must not enter
+ * consensus data.
+ */
+function collectLocalSyncObservations(): SyncObservation[] {
     const seen = new Set<string>([getSharedState.publicKeyHex])
     const observations: SyncObservation[] = [
         {
@@ -259,4 +285,47 @@ export async function computeMergedPeerlist(
     )
 
     return [...merged].filter(id => validatorAddresses.has(id)).sort()
+}
+
+/**
+ * Checks a merged peerlist dictated by the secretary: well-formed, sorted,
+ * unique, and staked at the round's parent height when a validator set
+ * exists. Returns the list or null when it fails.
+ */
+export async function validateMergedPeerlist(
+    blockRef: number,
+    peerlist: unknown,
+): Promise<string[] | null> {
+    if (!Array.isArray(peerlist)) return null
+    if (peerlist.length > MERGE_PEERLIST_MAX_ENTRIES_PER_PEER) return null
+
+    for (const [index, entry] of peerlist.entries()) {
+        if (
+            typeof entry !== "string" ||
+            entry.length === 0 ||
+            entry.length > MAX_IDENTITY_LENGTH ||
+            !HEX_IDENTITY_REGEX.test(entry) ||
+            entry !== entry.toLowerCase()
+        ) {
+            return null
+        }
+        if (index > 0 && compareIdentities(peerlist[index - 1], entry) >= 0) {
+            return null
+        }
+    }
+
+    const activeValidators = (await GCR.getGCRValidatorsAtBlock(
+        blockRef - 1,
+    )) as Validators[]
+    if (activeValidators.length === 0) {
+        return peerlist as string[]
+    }
+    const validatorAddresses = new Set<string>(
+        activeValidators
+            .map(v => v.address)
+            .filter((a): a is string => a !== null),
+    )
+    return (peerlist as string[]).every(id => validatorAddresses.has(id))
+        ? (peerlist as string[])
+        : null
 }

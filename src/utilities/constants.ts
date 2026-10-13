@@ -17,6 +17,8 @@ export const DEFAULT_BLOCK_TIME = 10
 // --- Peer management ---
 /** How often to recheck peers (ms) */
 export const PEER_RECHECK_INTERVAL_MS = 10_000
+/** A peer not heard from for this long no longer counts as online. */
+export const PEER_LIVENESS_WINDOW_MS = 30_000
 
 /**
  * Max transactions accepted from a single peer in one mergeMempools round.

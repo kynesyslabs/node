@@ -11,7 +11,10 @@ import { createBlock } from "./routines/createBlock"
 import { getEligiblePool } from "./routines/getShard"
 import { broadcastBlockHash } from "./routines/broadcastBlockHash"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
-import SecretaryManager, { AbortConsensusError } from "./types/secretaryManager"
+import SecretaryManager, {
+    AbortConsensusError,
+    PEERLIST_PHASE,
+} from "./types/secretaryManager"
 import {
     BlockInvalidError,
     ErrorCode,
@@ -43,7 +46,6 @@ import {
     debugAssertionsEnabled,
     readNonces,
 } from "@/libs/debug/nonceTrace"
-import { computeMergedPeerlist } from "./routines/peerlistMerge"
 import { markStep } from "@/utilities/loopScheduler"
 
 export type { FailedTranscation } from "./routines/mempoolFilters"
@@ -707,12 +709,15 @@ async function mergeAndOrderMempools(
 
     // Merge with peers
     await mergeMempools(outboundPool, shard, blockRef)
-    await updateValidatorPhase(3, blockRef)
+    await updateValidatorPhase(PEERLIST_PHASE, blockRef)
 
-    const mergedPeerlist = await computeMergedPeerlist(
-        blockRef,
-        shard.map(member => member.identity),
-    )
+    // The secretary merges the contributions; members adopt the list it
+    // sent with the phase 3 greenlight.
+    const manager = SecretaryManager.getInstance(blockRef)
+    if (!manager) {
+        throw new ForgingEndedError("Secretary manager not found")
+    }
+    const mergedPeerlist = await manager.resolveMergedPeerlist()
     log.only(
         `[mergeAndOrderMempools] Merged peerlist: ${mergedPeerlist.length} validators`,
     )

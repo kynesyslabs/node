@@ -2,8 +2,10 @@ import {
     __resetPeerlistMerge,
     computeMergedPeerlist,
     contributePeerlist,
+    freezeLocalSyncObservations,
     getLocalSyncObservations,
     MERGE_PEERLIST_MAX_ENTRIES_PER_PEER,
+    validateMergedPeerlist,
     type SyncObservation,
 } from "./peerlistMerge"
 
@@ -17,6 +19,8 @@ const TIP_BLOCK = 100
 const TIP_HASH = "tiphash"
 
 let validatorAddresses: (string | null)[] = []
+let peers: { identity: string; sync: { block: number; block_hash: string } }[] =
+    []
 
 const obs = (
     identity: string,
@@ -47,16 +51,7 @@ jest.mock("src/libs/peer/PeerManager", () => ({
     __esModule: true,
     default: {
         getInstance: () => ({
-            getPeers: () => [
-                {
-                    identity: "bb".repeat(32),
-                    sync: { block: 100, block_hash: "tiphash" },
-                },
-                {
-                    identity: "cc".repeat(32),
-                    sync: { block: 99, block_hash: "oldhash" },
-                },
-            ],
+            getPeers: () => peers,
         }),
     },
 }))
@@ -82,6 +77,10 @@ jest.mock("src/libs/blockchain/gcr/gcr", () => ({
 beforeEach(() => {
     __resetPeerlistMerge()
     validatorAddresses = [OUR_KEY, SYNCED_PEER, STALE_PEER, REPORTED_PEER]
+    peers = [
+        { identity: SYNCED_PEER, sync: { block: 100, block_hash: "tiphash" } },
+        { identity: STALE_PEER, sync: { block: 99, block_hash: "oldhash" } },
+    ]
 })
 
 describe("getLocalSyncObservations", () => {
@@ -89,6 +88,55 @@ describe("getLocalSyncObservations", () => {
         expect(getLocalSyncObservations()).toEqual([
             obs(OUR_KEY),
             obs(SYNCED_PEER),
+        ])
+    })
+
+    it("returns the frozen snapshot for the round even after the view changes", () => {
+        freezeLocalSyncObservations(101)
+        peers[1].sync = { block: 100, block_hash: "tiphash" }
+        expect(getLocalSyncObservations(101)).toEqual([
+            obs(OUR_KEY),
+            obs(SYNCED_PEER),
+        ])
+        expect(getLocalSyncObservations(102)).toEqual([
+            obs(OUR_KEY),
+            obs(SYNCED_PEER),
+            obs(STALE_PEER),
+        ])
+        expect(getLocalSyncObservations()).toHaveLength(3)
+    })
+})
+
+describe("validateMergedPeerlist", () => {
+    it("accepts a sorted, unique list of staked validators", async () => {
+        const list = [OUR_KEY, SYNCED_PEER].sort()
+        expect(await validateMergedPeerlist(101, list)).toEqual(list)
+    })
+
+    it("accepts an empty list", async () => {
+        expect(await validateMergedPeerlist(101, [])).toEqual([])
+    })
+
+    it("rejects unsorted, duplicated, upper-case or malformed entries", async () => {
+        expect(await validateMergedPeerlist(101, [SYNCED_PEER, OUR_KEY])).toBeNull()
+        expect(await validateMergedPeerlist(101, [OUR_KEY, OUR_KEY])).toBeNull()
+        expect(
+            await validateMergedPeerlist(101, [OUR_KEY.toUpperCase()]),
+        ).toBeNull()
+        expect(await validateMergedPeerlist(101, ["zz"])).toBeNull()
+        expect(await validateMergedPeerlist(101, "nope")).toBeNull()
+    })
+
+    it("rejects identities outside the validator set", async () => {
+        expect(
+            await validateMergedPeerlist(101, [OUR_KEY, NON_VALIDATOR].sort()),
+        ).toBeNull()
+    })
+
+    it("skips the validator filter when no validators exist", async () => {
+        validatorAddresses = []
+        expect(await validateMergedPeerlist(101, [NON_VALIDATOR])).toEqual([
+            NON_VALIDATOR,
         ])
     })
 })

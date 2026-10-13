@@ -346,6 +346,11 @@ export default class Peer {
                 )
             }
 
+            // Any answer proves the peer is alive.
+            if (!this.isLocalNode) {
+                PeerManager.getInstance().updatePeerLastSeen(this.identity)
+            }
+
             return response.data
         } catch (error) {
             if (timeoutId) {

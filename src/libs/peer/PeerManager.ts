@@ -26,6 +26,7 @@ import {
 } from "@kynesyslabs/demosdk/encryption"
 import TxValidatorPool from "../blockchain/validation/txValidatorPool"
 import { Config } from "src/config"
+import { PEER_LIVENESS_WINDOW_MS } from "src/utilities/constants"
 
 export type HelloVerdict =
     | "verified"
@@ -246,8 +247,36 @@ export default class PeerManager {
         log.custom("peer_list", JSON.stringify(jsonPeerList), false, true)
     }
 
+    /** How long a peer stays online after its last contact. */
+    static livenessWindowMs(): number {
+        return Math.max(
+            PEER_LIVENESS_WINDOW_MS,
+            3 * getSharedState.getConsensusTime() * 1000,
+        )
+    }
+
+    /** True when the peer is ourselves or was heard from inside the liveness window. */
+    isPeerFresh(peer: Peer, now = Date.now()): boolean {
+        if (peer.identity === getSharedState.publicKeyHex) {
+            return true
+        }
+        return now - (peer.status.timestamp ?? 0) <= PeerManager.livenessWindowMs()
+    }
+
+    /** Peers heard from inside the liveness window. */
     async getOnlinePeers(): Promise<Peer[]> {
-        return this.getPeers()
+        const now = Date.now()
+        return this.getPeers().filter(peer => this.isPeerFresh(peer, now))
+    }
+
+    /** Peers still listed online that have gone silent past the liveness window. */
+    getQuietPeers(): Peer[] {
+        const now = Date.now()
+        return this.getPeers().filter(
+            peer =>
+                peer.identity !== getSharedState.publicKeyHex &&
+                !this.isPeerFresh(peer, now),
+        )
     }
 
     addPeer(peer: Peer, urlSignedByOwner = false): [boolean, string] {

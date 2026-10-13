@@ -50,10 +50,11 @@ async function handleGreenlight(
     try {
         // TODO: Check if the sender is the secretary (without verifying the signature
         // as we have already done that) in validateHeaders
-        const [blockRef, timestamp, validatorPhase] = params as [
+        const [blockRef, timestamp, validatorPhase, peerlist] = params as [
             number, // blockRef
             number, // timestamp
             number, // validatorPhase
+            unknown?, // merged peerlist, phase 3 only
         ]
 
         const manager = SecretaryManager.getInstance(blockRef)
@@ -85,6 +86,7 @@ async function handleGreenlight(
         const greenLightReceived = await manager.receiveGreenLight(
             timestamp,
             validatorPhase,
+            peerlist,
         )
         response.result = greenLightReceived ? 200 : 400
         response.response = greenLightReceived
@@ -440,6 +442,9 @@ export default async function manageConsensusRoutines(
                 // NOTE: We also attach the block timestamp to the response
                 data["timestamp"] = manager.blockTimestamp
                 data["blockRef"] = manager.shard.blockRef
+                if (manager.mergedPeerlist) {
+                    data["peerlist"] = manager.mergedPeerlist
+                }
                 response.extra = data
             } catch (error) {
                 // INFO: Node is secretary, but hasn't started the secretary routine yet!

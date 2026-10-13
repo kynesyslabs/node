@@ -143,17 +143,17 @@ export default class ServerHandlers {
             log.error("[handleMempool] Error receiving mempool: " + error)
         }
 
-        // Receiver-side mirror of the guard in mergeMempools: a failed
-        // exchange must not influence block content. The caller discards
-        // its reciprocal contribution on a non-200, so recording ours here
-        // would leave the two ends with different peerlists and therefore
-        // different candidate block hashes.
-        if (envelope && sender && response.success) {
+        // The contribution feeds the secretary's merge only, so it is
+        // recorded independently of what happens to the transactions.
+        if (envelope && sender) {
             contributePeerlist(envelope.blockRef, sender, envelope.peerlist)
         }
 
         const responsePayload = envelope
-            ? { txs: response.mempool, peerlist: getLocalSyncObservations() }
+            ? {
+                  txs: response.mempool,
+                  peerlist: getLocalSyncObservations(envelope.blockRef),
+              }
             : response.mempool
 
         const ourId = getSharedState.publicKeyHex
