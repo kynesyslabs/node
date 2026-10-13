@@ -3,6 +3,7 @@ import L2PSMempool, { L2PS_STATUS } from "../../blockchain/l2ps_mempool"
 import log from "src/utilities/logger"
 import type { NodeCallHandler } from "./types"
 import { resolveHistoryMessage, subnetDecryptor } from "@/libs/l2ps/historyPayload"
+import { historyAuthMessageV2, isOwnHistoryHost } from "@/libs/l2ps/historyAuth"
 
 export const l2psHandlers: Record<string, NodeCallHandler> = {
     getL2PSParticipationById: async (data, response) => {
@@ -156,6 +157,8 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             response.extra = {
                 message: "Sign the message 'getL2PSHistory:{l2psUid}:{address}:{timestamp}' with your wallet",
                 example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
+                messageV2:
+                    "Set signatureVersion to 2 and sign 'getL2PSHistory/2:{l2psUid}:{address}:{timestamp}:{host}:{limit}:{offset}:{since}' with the node address or advertised hostname as host and the applied page values (defaults 100, 0, 0)",
             }
             return response
         }
@@ -168,12 +171,51 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             return response
         }
 
+        const maxLimit = 1000
+        const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
+        const offset = Math.max(0, data.offset || 0)
+        const since = Math.max(0, Number(data.since) || 0)
+
+        // Version 2 is chosen by the request, never inferred from the
+        // signature: the two strings differ in their first segment, so a
+        // signature made for one version cannot verify as the other, and a
+        // relay that strips the marker only turns the request into a refusal.
+        const isV2 = Number(data.signatureVersion) === 2
+
+        if (isV2) {
+            if (!data.host) {
+                response.result = 401
+                response.response = "A version 2 signature requires the host it is bound to."
+                return response
+            }
+            // Bound to the node so a signature collected by or relayed through
+            // one node cannot be presented to another serving the same subnet.
+            if (!isOwnHistoryHost(data.host)) {
+                response.result = 403
+                response.response = "Signature is bound to another host."
+                return response
+            }
+            if (![limit, offset, since].every(Number.isSafeInteger)) {
+                response.result = 400
+                response.response = "limit, offset and since must be integers."
+                return response
+            }
+        }
+
         try {
             // The subnet is part of what is signed. Without it one signature
             // would authorize a read of any subnet this node serves, so
             // anything able to relay the request could repoint it and still
             // present a signature that verifies.
-            const expectedMessage = `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
+            // The legacy form leaves the host and the page parameters unsigned
+            // and is kept only so existing clients keep working.
+            const expectedMessage = isV2
+                ? historyAuthMessageV2(data.l2psUid, data.address, data.timestamp, data.host, {
+                    limit,
+                    offset,
+                    since,
+                })
+                : `getL2PSHistory:${data.l2psUid}:${data.address}:${data.timestamp}`
 
             const Cryptography = (await import("../../crypto/cryptography")).default
 
@@ -198,11 +240,6 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             }
 
             log.info(`[L2PS] Authenticated request for ${data.address.slice(0, 16)}...`)
-
-            const maxLimit = 1000
-            const limit = Math.min(Math.max(1, data.limit || 100), maxLimit)
-            const offset = Math.max(0, data.offset || 0)
-            const since = Math.max(0, Number(data.since) || 0)
 
             const { default: L2PSTransactionExecutor } = await import("../../l2ps/L2PSTransactionExecutor")
             // One past the page, so a full last page can say there is nothing
