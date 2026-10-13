@@ -302,3 +302,13 @@ describe("getAccountTransactions", () => {
         expect(orderings).toEqual(["tx.timestamp DESC", "tx.id DESC"])
     })
 })
+
+describe("scrubStoredPlaintext", () => {
+    it("leaves stored plaintext alone on a node configured to keep it", async () => {
+        storePlaintext.value = true
+
+        await expect(L2PSTransactionExecutor.scrubStoredPlaintext()).resolves.toBe(0)
+
+        expect(rawQuery).not.toHaveBeenCalled()
+    })
+})
