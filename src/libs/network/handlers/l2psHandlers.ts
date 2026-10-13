@@ -244,6 +244,11 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
                     l1_block_number: tx.l1_block_number,
                     execution_message: entries[index].message,
                     content: entries[index].content,
+                    // The stored ciphertext, as the unauthenticated subnet
+                    // listing already serves it. A member holding the subnet
+                    // key decrypts it locally and verifies the hash, instead
+                    // of trusting a plaintext this node would hand back.
+                    encrypted_payload: tx.encrypted_payload ?? null,
                 })),
                 count: transactions.length,
                 hasMore,

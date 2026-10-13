@@ -99,6 +99,7 @@ describe("getL2PSAccountTransactions", () => {
                 l1_block_number: null,
                 execution_message: "rfq",
                 content: structured,
+                encrypted_payload: { id: 1 },
             },
         ])
         expect(decryptTx).toHaveBeenCalledTimes(1)
