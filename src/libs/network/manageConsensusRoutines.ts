@@ -66,8 +66,8 @@ async function handleGreenlight(
         if (sender !== manager.secretary.identity) {
             log.debug("returning a 401")
             response.result = 401
-            response.response = "Greenlight not accepted"
-            response.extra = "Secretary identity mismatch"
+            response.response = "Greenlight not accepted: secretary identity mismatch"
+            response.extra = manager.committeeView("committeeMismatch")
             response.require_reply = false
             return response
         }
@@ -358,7 +358,7 @@ export default async function manageConsensusRoutines(
                     return {
                         result: 200,
                         response: "Invalid seed detected",
-                        extra: 450,
+                        extra: manager.committeeView("seedMismatch"),
                         require_reply: false,
                     }
                 }
@@ -415,7 +415,7 @@ export default async function manageConsensusRoutines(
                 if (!manager.shard.members.some(m => m.identity === sender)) {
                     response.result = 401
                     response.response = "Sender not in the consensus"
-                    response.extra = "Sender not in the consensus"
+                    response.extra = manager.committeeView("committeeMismatch")
                     return response
                 }
 

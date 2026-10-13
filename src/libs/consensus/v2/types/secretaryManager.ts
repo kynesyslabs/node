@@ -14,12 +14,31 @@ import { TimeoutError, AbortError, NotInShardError } from "@/errors"
 import getCommonValidatorSeed from "../routines/getCommonValidatorSeed"
 import { getNetworkTimestamp } from "src/libs/utils/calibrateTime"
 import { getCommitteeFloor } from "../routines/getShard"
+import { debugAssertionsEnabled } from "@/libs/debug/nonceTrace"
 
 export class AbortConsensusError extends Error {
     constructor(message: string) {
         super(message)
         this.name = "AbortConsensusError"
     }
+}
+
+/** A node's view of the round, attached to rejections of a peer that drew a different one. */
+export interface CommitteeView {
+    reason: "committeeMismatch" | "seedMismatch"
+    blockRef: number
+    seed: string
+    secretary: string
+    shard: string[]
+}
+
+function isCommitteeView(value: unknown): value is CommitteeView {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        Array.isArray((value as CommitteeView).shard) &&
+        typeof (value as CommitteeView).reason === "string"
+    )
 }
 
 // ANCHOR SecretaryManager
@@ -55,6 +74,43 @@ export default class SecretaryManager {
     public ended = false
 
     constructor() {}
+
+    /** Our view of the round, for the peer we are rejecting. */
+    public committeeView(reason: CommitteeView["reason"]): CommitteeView {
+        return {
+            reason,
+            blockRef: this.shard?.blockRef ?? null,
+            seed: this.shard?.CVSA ?? "",
+            secretary: this.shard?.secretaryKey ?? "",
+            shard: (this.shard?.members ?? []).map(m => m.identity),
+        }
+    }
+
+    /**
+     * Logs both views of the round side by side. Exits under debug
+     * assertions, since one of the two nodes drew the wrong committee.
+     */
+    public reportCommitteeMismatch(
+        peerId: string,
+        theirs: unknown,
+        context: string,
+    ): void {
+        const ours = this.committeeView("committeeMismatch")
+        log.error(
+            `[COMMITTEE MISMATCH] ${context}: ${peerId} rejected us for block ${ours.blockRef}`,
+        )
+        log.error(`Our view: ${JSON.stringify(ours, null, 2)}`)
+        log.error(
+            `Their view: ${JSON.stringify(
+                isCommitteeView(theirs) ? theirs : { raw: theirs },
+                null,
+                2,
+            )}`,
+        )
+        if (debugAssertionsEnabled()) {
+            process.exit(1)
+        }
+    }
 
     /** Throws when the network clock is still inside the parent block's interval. */
     private async assertParentIntervalElapsed(
@@ -681,7 +737,7 @@ export default class SecretaryManager {
                 member.longCall(request, true, {
                     sleepTime: 250,
                     retries: 4,
-                    allowedCodes: [400],
+                    allowedCodes: [400, 401],
                 }),
             )
         }
@@ -702,6 +758,12 @@ export default class SecretaryManager {
             }
 
             if (result.result === 200) {
+                continue
+            }
+
+            if (result.result === 401) {
+                // The member follows another secretary: one of us drew the wrong committee.
+                this.reportCommitteeMismatch(pubKey, result.extra, "greenlight")
                 continue
             }
 
@@ -893,7 +955,7 @@ export default class SecretaryManager {
             return await this.secretary.longCall(request, true, {
                 retries,
                 sleepTime: 250,
-                allowedCodes: [400],
+                allowedCodes: [400, 401],
             })
         }
 
@@ -909,6 +971,23 @@ export default class SecretaryManager {
                 log.debug(
                     "[SEND OUR VALIDATOR PHASE] Key has already been resolved, doing nothing",
                 )
+                return null
+            }
+
+            if (res.result === 401) {
+                if (isCommitteeView(res.extra)) {
+                    // The secretary we drew does not have us in its committee.
+                    this.reportCommitteeMismatch(
+                        this.secretary?.identity ?? "unknown",
+                        res.extra,
+                        "setValidatorPhase",
+                    )
+                } else {
+                    log.error(
+                        `[SEND OUR VALIDATOR PHASE] Secretary refused us: ${JSON.stringify(res)}`,
+                    )
+                }
+                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
                 return null
             }
 
@@ -956,13 +1035,17 @@ export default class SecretaryManager {
                 `[SEND OUR VALIDATOR PHASE] SendStatus callback got response: ${JSON.stringify(res)}`,
             )
 
-            if (res.extra === 450) {
-                log.debug("[SEND OUR VALIDATOR PHASE] Invalid seed detected")
-                // process.exit(0)
+            if (isCommitteeView(res.extra) && res.extra.reason === "seedMismatch") {
                 // INFO: Logs parts used to create the current CVSA
                 await getCommonValidatorSeed(null, (message: string) => {
-                    log.debug(message)
+                    log.error(message)
                 })
+                this.reportCommitteeMismatch(
+                    this.secretary?.identity ?? "unknown",
+                    res.extra,
+                    "setValidatorPhase seed",
+                )
+                Waiter.resolve<number>(waiterKey, "abortConsensus" as any)
                 return null
             }
 
