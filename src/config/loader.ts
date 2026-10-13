@@ -298,6 +298,10 @@ export function loadConfig(): Readonly<AppConfig> {
                 EnvKey.L2PS_HISTORY_STORE_PLAINTEXT,
                 d.l2ps.historyStorePlaintext,
             ),
+            historyRequireV2: envBool(
+                EnvKey.L2PS_HISTORY_REQUIRE_V2,
+                d.l2ps.historyRequireV2,
+            ),
         },
 
         metrics: {

@@ -123,6 +123,7 @@ export const DEFAULT_CONFIG: AppConfig = {
         cleanupAgeMs: 300000,
         historyRetentionDays: 0,
         historyStorePlaintext: false,
+        historyRequireV2: false,
     },
 
     metrics: {
