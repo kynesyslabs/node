@@ -11,10 +11,7 @@ const getAccountTransactions = jest.fn()
 const decryptTx = jest.fn()
 const verify = jest.fn(() => true)
 
-jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({
-    __esModule: true,
-    default: { getAccountTransactions },
-}))
+jest.mock("../../l2ps/L2PSTransactionExecutor", () => ({ __esModule: true, default: { getAccountTransactions } }))
 
 jest.mock("../../blockchain/l2ps_mempool", () => ({
     __esModule: true,
@@ -39,17 +36,8 @@ jest.mock("@/libs/l2ps/parallelNetworks", () => ({
 
 jest.mock("src/utilities/sharedState", () => ({ getSharedState: {} }))
 
-jest.mock("src/utilities/logger", () => ({
-    __esModule: true,
-    default: {
-        debug: jest.fn(),
-        info: jest.fn(),
-        warn: jest.fn(),
-        warning: jest.fn(),
-        error: jest.fn(),
-        only: jest.fn(),
-    },
-}))
+// Every log level is a no-op; the handler's logging is not under test here.
+jest.mock("src/utilities/logger", () => ({ __esModule: true, default: new Proxy({}, { get: () => jest.fn() }) }))
 
 const { l2psHandlers } = await import("./l2psHandlers")
 
