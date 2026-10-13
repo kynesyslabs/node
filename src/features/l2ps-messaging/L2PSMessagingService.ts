@@ -73,7 +73,7 @@ export class L2PSMessagingService {
         // submitted gets that attempt's outcome, whatever it turns out to be,
         // rather than an acknowledgement for something that may yet fail.
         const pending = this.inFlight.get(key)
-        if (pending) {
+        if (pending !== undefined) {
             const outcome = await pending
             return outcome.success ? { ...outcome, duplicate: true } : outcome
         }
