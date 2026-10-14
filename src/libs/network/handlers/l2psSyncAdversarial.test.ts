@@ -55,19 +55,39 @@ describe("getL2PSTransactions, hostile paging values", () => {
         expect(lastCall().limit).toBe(applied)
     })
 
-    it.each([-1, "abc", {}, [], NaN, Infinity, -Infinity, 1e308, "1e308", 2 ** 53, null, true])(
-        "cursor %j and since_timestamp %j reach the table as safe, non-negative whole numbers",
+    it.each(["abc", {}, [], NaN, Infinity, -Infinity, "1e308", null, true])(
+        "a cursor or since_timestamp of %j that is not a number reads as omitted",
         async value => {
             const response = await call({ cursor: value, since_timestamp: value })
 
             expect(response.result).toBe(200)
-            const { afterId, sinceMs } = lastCall()
-            for (const n of [afterId, sinceMs]) {
-                expect(Number.isSafeInteger(n)).toBe(true)
-                expect(n).toBeGreaterThanOrEqual(0)
-            }
+            expect(lastCall()).toMatchObject({ afterId: 0, sinceMs: 0 })
         },
     )
+
+    // The row cursor is compared with a 32-bit serial and the time cursor is
+    // converted to a timestamp, so each has the bound of its own column.
+    it.each([
+        ["cursor", 2_147_483_647, 2_147_483_648],
+        ["since_timestamp", 8.64e15, 8.64e15 + 1e3],
+    ])("%s is accepted at its bound and refused one past it, before the table is read", async (field, bound, over) => {
+        const ok = await call({ [field]: bound })
+        expect(ok.result).toBe(200)
+        expect(getSubnetTransactions).toHaveBeenCalledTimes(1)
+
+        getSubnetTransactions.mockClear()
+        for (const refused of [over, 1e308, 2 ** 53, -1, "9999999999999999"]) {
+            const response = await call({ [field]: refused })
+            expect(response.result).toBe(400)
+        }
+        expect(getSubnetTransactions).not.toHaveBeenCalled()
+    })
+
+    it("one cursor out of range refuses the call even when the other is fine", async () => {
+        expect((await call({ cursor: 2_147_483_648, since_timestamp: 5 })).result).toBe(400)
+        expect((await call({ cursor: 5, since_timestamp: 8.64e15 + 1e3 })).result).toBe(400)
+        expect(getSubnetTransactions).not.toHaveBeenCalled()
+    })
 
     it.each([[{}], [["a"]], [5], [true]])("a subnet of %j is refused before the table is read", async uid => {
         const response = await call({ l2psUid: uid })

@@ -14,11 +14,22 @@ const historyAuthHint = (data: any) => ({
     example: `getL2PSHistory:${data.l2psUid}:${data.address}:${Date.now()}`,
 })
 
-/** A number or numeric string as a whole number in [0, MAX_SAFE_INTEGER]; anything else is 0. */
-function nonNegativeWhole(raw: unknown): number {
+/** `l2ps_transactions.id` is a 32-bit serial: a cursor above this is not a row id the table can compare. */
+export const MAX_ROW_CURSOR = 2_147_483_647
+/** The latest instant a JS Date, and so a millisecond timestamp the node issues, can name. */
+export const MAX_EPOCH_MS = 8.64e15
+
+/**
+ * A number or numeric string as a whole number in [0, max]. Something that is
+ * not a number at all reads as 0, like an omitted field; a number outside the
+ * bound is null, because clamping it would hide that the peer's cursor is not
+ * one this node issued.
+ */
+function boundedWhole(raw: unknown, max: number): number | null {
     const value = readPageValue(raw)
     if (value === undefined) return 0
-    return Math.min(Math.max(0, Math.floor(value)), Number.MAX_SAFE_INTEGER)
+    const whole = Math.floor(value)
+    return whole < 0 || whole > max ? null : whole
 }
 
 /**
@@ -174,10 +185,16 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
             // cursor, but it is their clock, so it can only be honoured as a
             // starting point, never as a running high-water mark.
             // This is open to any caller, so a value the table cannot take
-            // (NaN, an object, a number past the integer range) must reach it
-            // as a number it can, not as an error that comes back to the caller.
-            const afterId = nonNegativeWhole(data.cursor)
-            const sinceMs = nonNegativeWhole(data.since_timestamp)
+            // must not reach it: an error from the comparison would come back
+            // as a 500. Each cursor has the bound of the column it is compared
+            // with.
+            const afterId = boundedWhole(data.cursor, MAX_ROW_CURSOR)
+            const sinceMs = boundedWhole(data.since_timestamp, MAX_EPOCH_MS)
+            if (afterId === null || sinceMs === null) {
+                response.result = 400
+                response.response = "cursor or since_timestamp is out of range"
+                return response
+            }
             const limit = Math.min(Math.max(1, Math.floor(readPageValue(data.limit) || 500)), 1000)
 
             // Served from the durable history table, not the aggregation
