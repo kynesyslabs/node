@@ -71,12 +71,14 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
             peerGenesisDataHash,
             {
                 fetchPeerGenesis: async () => {
-                    log.error("[BOOTSTRAP] Genesis data hash does not match")
                     log.warn(
-                        "[BOOTSTRAP] Expected: " +
+                        "[BOOTSTRAP] Genesis data hash differs from the one " +
+                            verifiedPeer.connection.string +
+                            " advertises (ours " +
                             ourGenesisDataHash +
-                            " Got: " +
-                            peerGenesisDataHash,
+                            ", theirs " +
+                            peerGenesisDataHash +
+                            "); comparing the data it serves",
                     )
                     log.debug(
                         "[BOOTSTRAP] Fetching new genesis data from peer: " +

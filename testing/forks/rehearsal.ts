@@ -24,6 +24,7 @@ import { promisify } from "node:util"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
+import { hashGenesisData } from "../../src/libs/blockchain/genesis/normalizeGenesisForHash"
 import { txSignaturePreimage } from "../../src/libs/crypto/txSignaturePreimage"
 
 const env = (k: string) => {
@@ -225,6 +226,7 @@ say(`rehearsal: forks at ${H}, chain id ${CHAIN_ID}, ~${BLOCK_SECS}s per block, 
 
 // ---- upgrade path only: add the schedule to a running chain ----------------
 let restartsBaseline = startupRestarts
+let preUpgradeHash = ""
 if (UPGRADE) {
     step("U1 a chain that starts without a fork schedule")
     const info0 = await Promise.all(PORTS.map(p => nodeCall(p, "getNetworkInfo")))
@@ -243,6 +245,8 @@ if (UPGRADE) {
     const tipAtEdit = await tipOf(PORTS[0])
     H = tipAtEdit + UPGRADE_LEAD
     const base = JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.json`, "utf8"))
+    // What every node stored as block 0 and still advertises after the edit.
+    preUpgradeHash = hashGenesisData(base)
     base.properties.id = CHAIN_ID
     base.forks.signatureDomain = { activationHeight: H }
     base.forks.web2ProofBinding = { activationHeight: H }
@@ -273,14 +277,19 @@ if (UPGRADE) {
             n,
             sig: new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(n, at)),
             web2: new RegExp(`Loaded fork "web2ProofBinding" with activationHeight=${H}`).test(nodeLog(n, at)),
-            mismatch: /Genesis data hash does not match/.test(nodeLog(n, at)),
+            kept: /differs from ours only in the fork schedule or chain id/.test(nodeLog(n, at)),
+            replaced: /Replaced data\/genesis\.json|Genesis data hash mismatch after download/.test(nodeLog(n, at)),
         }))
         record(`boot-log-${round}-restart`, logged)
         check(logged.every(l => l.sig && l.web2), `${round} restart: every node loaded both forks at ${H} from its genesis file`)
         const files = [1, 2, 3, 4].map(fileCarries)
         record(`genesis-files-after-${round}-restart`, files)
         check(files.every(Boolean), `${round} restart: after bootstrap every node's genesis file still carries properties.id and both activation heights`)
-        check(!logged.some(l => l.mismatch), `${round} restart: no node reported a genesis data hash mismatch`)
+        check(logged.every(l => l.kept), `${round} restart: every node found the peers' genesis differs only in the schedule and chain id, and kept its own file`)
+        check(!logged.some(l => l.replaced), `${round} restart: no node replaced its genesis file or found a served genesis inconsistent with its advertised hash`)
+        const advertised = await Promise.all(PORTS.map(async p => (await nodeCall(p, "getGenesisDataHash")).response))
+        record(`advertised-hash-${round}-restart`, { expected: preUpgradeHash, advertised })
+        check(advertised.every(h => h === preUpgradeHash), `${round} restart: every node still advertises the hash of the genesis it was created with, which a node without this change compares against`)
         const infos2 = await Promise.all(PORTS.map(p => nodeCall(p, "getNetworkInfo")))
         check(
             infos2.every(i => i.response.forks.signatureDomain.activationHeight === H && i.response.chainId === CHAIN_ID),
@@ -312,6 +321,12 @@ check(
 check(
     infos.every(i => i.response.forks.web2ProofBinding?.activationHeight === H),
     `all 4 nodes report web2ProofBinding at ${H} through getNetworkInfo`,
+)
+check(
+    infos.every(i => Object.keys(i.response.forks).length === 7) &&
+        new Set(infos.map(i => i.response.forkScheduleDigest)).size === 1 &&
+        /^[0-9a-f]{64}$/.test(infos[0].response.forkScheduleDigest),
+    "all 4 nodes report all 7 forks and one and the same schedule digest",
 )
 const loaded = (n: number) =>
     execFileSync(DOCKER, ["logs", `${PROJECT}-node-${n}`], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
@@ -490,8 +505,12 @@ check(
     "the warning names both forks with this node's null against the peers' height",
 )
 check(
-    !/Genesis data hash does not match/.test(bootLog4),
-    "no genesis data hash mismatch: the fork schedule is not part of the hash, so pairing succeeds",
+    /differs from ours only in the fork schedule or chain id/.test(bootLog4) && !/Replaced data\/genesis\.json/.test(bootLog4),
+    "pairing succeeds: the peers' genesis differs only in the schedule, so the file is kept and not replaced",
+)
+check(
+    /schedule digest: ours [0-9a-f]{64}, theirs [0-9a-f]{64}/.test(bootLog4),
+    "the mismatch line carries this node's digest and the peers'",
 )
 const staleFile = JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.node4.json`, "utf8"))
 check(
@@ -500,6 +519,10 @@ check(
 )
 const info4 = (await nodeCall(PORTS[3], "getNetworkInfo")).response
 record("getNetworkInfo-node4", info4.forks.signatureDomain)
+check(
+    info4.forkScheduleDigest !== infos[0].response.forkScheduleDigest,
+    "node 4's schedule digest differs from the quorum's",
+)
 check(
     info4.forks.signatureDomain.activationHeight === null,
     "node 4 reports signatureDomain unscheduled, as its file says",
@@ -610,6 +633,10 @@ const info4b = await until(
     3000,
 )
 check(info4b, `node 4 reports signatureDomain at ${H} again`)
+check(
+    (await nodeCall(PORTS[3], "getNetworkInfo")).response.forkScheduleDigest === infos[0].response.forkScheduleDigest,
+    "and the same schedule digest as the quorum",
+)
 const tipTarget = async () => Math.min(...(await Promise.all(PORTS.slice(0, 3).map(tipOf))))
 check(await until(async () => (await tipOf(PORTS[3])) >= (await tipTarget()) - 1, 180, 3000), "node 4 catches up with the quorum")
 const stateAfter = await settledStates()
