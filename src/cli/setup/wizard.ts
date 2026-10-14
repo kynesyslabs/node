@@ -25,6 +25,8 @@ import {
 import { isInsideDir, readTextIfExists, resolveSymlink, writeFileGuarded, type WriteOutcome } from "./files"
 import {
     buildSubnetFiles,
+    type SubnetFile,
+    type SubnetStatus,
     generateKeyMaterial,
     inspectSubnet,
     inspectSubnets,
@@ -196,35 +198,50 @@ function readSecretFile(file: string, label: string): string {
     }
 }
 
-async function l2psSection(
-    deps: WizardDeps,
-    result: WizardResult,
-    wantedEnv: Record<string, string>,
-    state: { activeSubnets: Set<string> },
-): Promise<void> {
-    const { ctx, opts, prompter, say } = deps
-    say("")
-    say("L2PS (private subnets)")
+const subnetLabel = (state: SubnetStatus["state"]): string => {
+    if (state === "ok") return "ready"
+    if (state === "disabled") return "disabled"
+    return "needs repair"
+}
 
+/** Lists what is already under data/l2ps and returns the ones that need repair. */
+function reportExistingSubnets(deps: WizardDeps): SubnetStatus[] {
+    const { ctx, say } = deps
     const subnets = inspectSubnets(ctx.root).filter(s => s.state !== "placeholder")
     for (const s of subnets) {
-        say(
-            `  Found subnet ${s.uid}: ${s.state === "ok" ? "ready" : s.state === "disabled" ? "disabled" : "needs repair"}`,
-        )
+        say(`  Found subnet ${s.uid}: ${subnetLabel(s.state)}`)
         for (const p of s.problems) say(`    - ${p}`)
     }
-    const broken = subnets.filter(s => s.state === "invalid" || s.state === "missing-files")
+    return subnets.filter(s => s.state === "invalid" || s.state === "missing-files")
+}
 
-    // History and messaging flags are node-wide: they apply to a healthy
-    // existing subnet too, so they must not depend on adding or repairing one.
+function enableQuestion(activeCount: number, brokenCount: number): string {
+    if (activeCount > 0) return "Add or change an L2PS subnet?"
+    if (brokenCount > 0) return "Repair the broken subnet now?"
+    return "Enable L2PS on this node?"
+}
+
+/**
+ * Whether to set a subnet up. History and messaging flags are node-wide: they
+ * apply to a healthy existing subnet too, so they are applied here even when
+ * no subnet is wanted.
+ */
+async function shouldSetUpSubnet(
+    deps: WizardDeps,
+    wantedEnv: Record<string, string>,
+    state: { activeSubnets: Set<string> },
+    broken: SubnetStatus[],
+): Promise<boolean> {
+    const { opts, prompter, say } = deps
     const envFlagGiven =
         opts.retentionDays !== undefined ||
         opts.storePlaintext !== undefined ||
         opts.requireV2 !== undefined ||
         opts.messaging !== undefined ||
         opts.messagingPort !== undefined
-    const applyFlagsOnly = () =>
-        envFlagGiven ? collectL2psEnv({ ...deps, prompter: undefined }, wantedEnv) : Promise.resolve()
+    const applyFlagsOnly = async () => {
+        if (envFlagGiven) await collectL2psEnv({ ...deps, prompter: undefined }, wantedEnv)
+    }
 
     let enable = opts.l2ps ?? (opts.uid !== undefined ? true : undefined)
     if (enable === undefined) {
@@ -235,108 +252,105 @@ async function l2psSection(
                     ? "  No subnet requested (use --l2ps-uid <id> to set one up); only the options you gave are applied."
                     : "  Nothing requested (use --l2ps-uid <id> to set up a subnet). Left as it is.",
             )
-            return
+            return false
         }
-        const question =
-            state.activeSubnets.size > 0
-                ? "Add or change an L2PS subnet?"
-                : broken.length > 0
-                  ? "Repair the broken subnet now?"
-                  : "Enable L2PS on this node?"
+        const question = enableQuestion(state.activeSubnets.size, broken.length)
         enable = await confirm(prompter, question, broken.length > 0, say)
     }
     if (!enable) {
         await applyFlagsOnly()
         say("  L2PS subnets left as they are.")
-        return
+        return false
     }
+    return true
+}
 
-    const uid =
-        opts.uid ??
-        (prompter
-            ? await ask(prompter, "Subnet id (letters, digits, _ and -)", {
-                  default: broken.length === 1 ? broken[0].uid : undefined,
-                  validate: v => {
-                      const r = validateUid(v)
-                      return r.ok ? null : r.error
-                  },
-                  say,
-              })
-            : missing("--l2ps-uid", "DEMOS_SETUP_L2PS_UID"))
+async function chooseUid(deps: WizardDeps, broken: SubnetStatus[]): Promise<string> {
+    const { opts, prompter, say } = deps
+    if (opts.uid !== undefined) return opts.uid
+    if (!prompter) return missing("--l2ps-uid", "DEMOS_SETUP_L2PS_UID")
+    return ask(prompter, "Subnet id (letters, digits, _ and -)", {
+        default: broken.length === 1 ? broken[0].uid : undefined,
+        validate: v => {
+            const r = validateUid(v)
+            return r.ok ? null : r.error
+        },
+        say,
+    })
+}
 
-    const existing = inspectSubnet(ctx.root, uid)
+async function chooseRole(deps: WizardDeps, existing: SubnetStatus): Promise<"create" | "join"> {
+    const { opts, prompter, say } = deps
     const hasKeyInput =
         opts.keyFile !== undefined || opts.keyHex !== undefined ||
         opts.ivFile !== undefined || opts.ivHex !== undefined
+    const given = opts.role ?? (hasKeyInput ? "join" : undefined)
+    if (given !== undefined) return given
+    if (existing.state === "ok" || !prompter) return "create"
+    return select(
+        prompter,
+        "Is this a new subnet or one you are joining?",
+        [
+            { value: "create", label: "Create a new subnet (a fresh key is generated)" },
+            { value: "join", label: "Join an existing subnet (import its key and IV)" },
+        ],
+        "create",
+        say,
+    )
+}
 
-    let role = opts.role ?? (hasKeyInput ? "join" : undefined)
-    if (role === undefined) {
-        role =
-            existing.state === "ok" || !prompter
-                ? "create"
-                : await select(
-                      prompter,
-                      "Is this a new subnet or one you are joining?",
-                      [
-                          { value: "create", label: "Create a new subnet (a fresh key is generated)" },
-                          { value: "join", label: "Join an existing subnet (import its key and IV)" },
-                      ],
-                      "create",
-                      say,
-                  )
+async function importKeyMaterial(deps: WizardDeps): Promise<{ key?: string; iv?: string }> {
+    const { opts } = deps
+    const key = await secretInput(deps, "key", opts.keyHex, opts.keyFile, validateKeyHex,
+        "Subnet key (hex, input is hidden)", "--l2ps-key-file", "DEMOS_SETUP_L2PS_KEY")
+    const iv = await secretInput(deps, "IV", opts.ivHex, opts.ivFile, validateIvHex,
+        "Subnet IV (hex, input is hidden)", "--l2ps-iv-file", "DEMOS_SETUP_L2PS_IV")
+    return { key, iv }
+}
+
+async function chooseRpcs(deps: WizardDeps, existingConfig: any): Promise<string[]> {
+    const { ctx, opts, prompter, say } = deps
+    if (opts.rpcs !== undefined) return opts.rpcs
+    const known = existingConfig?.config?.known_rpcs
+    const knownRpcs: string[] | undefined = Array.isArray(known) && known.length > 0 ? known : undefined
+    if (!prompter) {
+        return knownRpcs ?? orThrow(
+            validateRpcList([ownRpcUrl(ctx.env)]),
+            "EXPOSED_URL or RPC_PORT does not give a usable RPC URL for this subnet (pass --l2ps-rpc)",
+        )
     }
+    const fallback = knownRpcs ?? [ownRpcUrl(ctx.env)]
+    const answer = await ask(prompter, "RPC URLs of the subnet members, comma separated", {
+        default: fallback.join(","),
+        validate: v => {
+            const r = validateRpcList(v)
+            return r.ok ? null : r.error
+        },
+        say,
+    })
+    return orThrow(validateRpcList(answer), "RPC list")
+}
 
-    let importedKey: string | undefined
-    let importedIv: string | undefined
-    if (role === "join") {
-        importedKey = await secretInput(deps, "key", opts.keyHex, opts.keyFile, validateKeyHex,
-            "Subnet key (hex, input is hidden)", "--l2ps-key-file", "DEMOS_SETUP_L2PS_KEY")
-        importedIv = await secretInput(deps, "IV", opts.ivHex, opts.ivFile, validateIvHex,
-            "Subnet IV (hex, input is hidden)", "--l2ps-iv-file", "DEMOS_SETUP_L2PS_IV")
-    }
-
-    const existingConfig = readExistingConfig(ctx.root, uid)
-    const knownRpcs: string[] | undefined =
-        Array.isArray(existingConfig?.config?.known_rpcs) &&
-        existingConfig.config.known_rpcs.length > 0
-            ? existingConfig.config.known_rpcs
-            : undefined
-    let rpcs = opts.rpcs
-    if (rpcs === undefined) {
-        const fallback = knownRpcs ?? [ownRpcUrl(ctx.env)]
-        rpcs = prompter
-            ? orThrow(
-                  validateRpcList(
-                      await ask(prompter, "RPC URLs of the subnet members, comma separated", {
-                          default: fallback.join(","),
-                          validate: v => {
-                              const r = validateRpcList(v)
-                              return r.ok ? null : r.error
-                          },
-                          say,
-                      }),
-                  ),
-                  "RPC list",
-              )
-            : knownRpcs ?? orThrow(
-                  validateRpcList(fallback),
-                  "EXPOSED_URL or RPC_PORT does not give a usable RPC URL for this subnet (pass --l2ps-rpc)",
-              )
-    }
-
-    await collectL2psEnv(deps, wantedEnv)
-
-    // Honour key locations an existing config.json already names, as long as
-    // they stay inside the node directory (the loader refuses anything else).
+/** Where the key and IV live: what an existing config.json names if that stays inside the node directory, else the standard layout. */
+function keyLocations(root: string, uid: string, existingConfig: any): { keyRel: string; ivRel: string } {
     const configured = (rel: unknown): string | undefined => {
         if (typeof rel !== "string" || rel === "") return undefined
-        const abs = path.resolve(ctx.root, rel)
-        return abs.startsWith(path.resolve(ctx.root) + path.sep) ? rel : undefined
+        const abs = path.resolve(root, rel)
+        return abs.startsWith(path.resolve(root) + path.sep) ? rel : undefined
     }
-    const keyRel = configured(existingConfig?.keys?.private_key_path) ?? `data/l2ps/${uid}/private_key.txt`
-    const ivRel = configured(existingConfig?.keys?.iv_path) ?? `data/l2ps/${uid}/iv.txt`
+    return {
+        keyRel: configured(existingConfig?.keys?.private_key_path) ?? `data/l2ps/${uid}/private_key.txt`,
+        ivRel: configured(existingConfig?.keys?.iv_path) ?? `data/l2ps/${uid}/iv.txt`,
+    }
+}
 
-    // Reuse what is already on disk before generating anything new.
+/** The key and IV to write: imported, else already on disk, else new. Says so when only one half is new. */
+function planKeyMaterial(
+    deps: WizardDeps,
+    imported: { key?: string; iv?: string },
+    where: { keyRel: string; ivRel: string },
+): { keyHex: string; ivHex: string } {
+    const { ctx, opts, say } = deps
     const reuse = (rel: string): string | undefined => {
         const text = readTextIfExists(path.resolve(ctx.root, rel))
         const parsed = text === undefined ? undefined : parseHex(text, "value")
@@ -345,115 +359,125 @@ async function l2psSection(
     const generated = opts.dryRun
         ? { keyHex: "<new random key>", ivHex: "<new random iv>" }
         : generateKeyMaterial(deps.randomBytes)
-    const haveKey = importedKey ?? reuse(keyRel)
-    const haveIv = importedIv ?? reuse(ivRel)
+    const haveKey = imported.key ?? reuse(where.keyRel)
+    const haveIv = imported.iv ?? reuse(where.ivRel)
     // Key and IV belong together. One of them being new next to an old other
     // half is a subnet this node can no longer share with its members.
     for (const [have, other, label, rel] of [
-        [haveIv, haveKey, "IV", ivRel],
-        [haveKey, haveIv, "key", keyRel],
+        [haveIv, haveKey, "IV", where.ivRel],
+        [haveKey, haveIv, "key", where.keyRel],
     ] as const) {
         if (have === undefined && other !== undefined) {
             say(`  Warning: ${rel} was missing or unusable, so a new random ${label} is generated. If other nodes share this subnet, get the original ${label} from its owner and import it; this node cannot read their traffic with a different one.`)
         }
     }
-    const files = buildSubnetFiles({
-        uid,
-        rpcs,
-        keyHex: haveKey ?? generated.keyHex,
-        ivHex: haveIv ?? generated.ivHex,
-        existingConfig,
-        keyRel,
-        ivRel,
-    })
+    return { keyHex: haveKey ?? generated.keyHex, ivHex: haveIv ?? generated.ivHex }
+}
 
-    // Decide every file before writing any, so a refused key leaves the
-    // subnet exactly as it was.
-    interface Decision {
-        file: (typeof files)[number]
-        abs: string
-        current?: string
-        differs: boolean
-        overwrite: boolean
-        sameData: boolean
-    }
+interface Decision {
+    file: SubnetFile
+    abs: string
+    current?: string
+    differs: boolean
+    overwrite: boolean
+    sameData: boolean
+}
+
+/**
+ * Key material is compared as normalised hex, so a missing trailing newline is
+ * not a difference; config as data, so layout is not either.
+ */
+function sameContent(f: SubnetFile, current: string): boolean {
+    if (f.secret) return normalizeHex(current) === normalizeHex(f.content)
+    if (f.rel.endsWith(".json")) return sameJson(current, f.content)
+    return current === f.content
+}
+
+/** Whether a differing file may be replaced: --force, or an explicit yes when there is someone to ask. */
+async function mayReplace(deps: WizardDeps, rel: string): Promise<boolean> {
+    const { opts, prompter, say } = deps
+    if (opts.force) return true
+    if (!prompter || opts.dryRun) return false
+    return confirm(prompter, `${rel} already exists with different content. Replace it? (the old file is kept as .bak)`, false, say)
+}
+
+/** Decides every file before any is written, so a refused key leaves the subnet exactly as it was. */
+async function decideFiles(
+    deps: WizardDeps,
+    files: SubnetFile[],
+    keyRel: string,
+): Promise<{ decisions: Decision[]; blocked: string[] }> {
     const decisions: Decision[] = []
     const blocked: string[] = []
     for (const f of files) {
-        const abs = path.resolve(ctx.root, f.rel)
+        const abs = path.resolve(deps.ctx.root, f.rel)
         const current = readTextIfExists(abs)
-        // Key material is compared as normalised hex, so a missing trailing
-        // newline is not a difference; config as data, so layout is not either.
-        const sameData =
-            current !== undefined &&
-            (f.secret
-                ? normalizeHex(current) === normalizeHex(f.content)
-                : f.rel.endsWith(".json")
-                  ? sameJson(current, f.content)
-                  : current === f.content)
+        const sameData = current !== undefined && sameContent(f, current)
         const differs = current !== undefined && !sameData
-        let overwrite = false
-        if (differs) {
-            if (opts.force) overwrite = true
-            else if (prompter && !opts.dryRun) {
-                overwrite = await confirm(
-                    prompter,
-                    `${f.rel} already exists with different content. Replace it? (the old file is kept as .bak)`,
-                    false,
-                    say,
-                )
-            }
-        }
+        const overwrite = differs && (await mayReplace(deps, f.rel))
         if (differs && !overwrite && f.secret) {
             blocked.push(`${f.rel === keyRel ? "key" : "IV"} differs`)
         }
         decisions.push({ file: f, abs, current, differs, overwrite, sameData })
     }
-    if (blocked.length > 0) {
-        const msg = `Subnet ${uid}: ${blocked.join(", ")}; re-run with --force to replace it (the old file is kept as .bak). Nothing was changed.`
-        say(`  ${msg}`)
-        result.problems.push(msg)
+    return { decisions, blocked }
+}
+
+function dryRunOutcome(d: Decision): FileResult["outcome"] {
+    if (d.current === undefined) return "would-create"
+    return d.differs && d.overwrite ? "would-replace" : "would-keep"
+}
+
+/** Carries out one decision: a plan line on a dry run, otherwise the write. */
+function applyDecision(deps: WizardDeps, result: WizardResult, d: Decision): void {
+    const { opts, say } = deps
+    const f = d.file
+    if (opts.dryRun) {
+        const outcome = dryRunOutcome(d)
+        result.files.push({ rel: f.rel, outcome })
+        say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
         return
     }
+    if (d.sameData) {
+        // Same data, possibly a different layout: keep the operator's text and
+        // only tighten the file mode if it was too open.
+        const outcome = writeFileGuarded(d.abs, d.current as string, { mode: f.mode, overwrite: false })
+        result.files.push({ rel: f.rel, outcome: outcome.status })
+        say(`  unchanged ${f.rel}`)
+        return
+    }
+    const outcome = writeFileGuarded(d.abs, f.content, { mode: f.mode, overwrite: d.overwrite }, deps.now)
+    result.files.push({
+        rel: f.rel,
+        outcome: outcome.status,
+        backup: outcome.status === "replaced" ? outcome.backup : undefined,
+    })
+    say(describe(f.rel, outcome, f.secret, d.differs && !d.overwrite))
+}
 
-    // Secrets first, config last: a half-finished run then leaves key files
-    // nobody points at instead of a config that names keys which do not exist.
+/** Writes the decisions, secrets first and config last. Returns false (with a problem recorded) when a write failed. */
+function applyDecisions(deps: WizardDeps, result: WizardResult, uid: string, decisions: Decision[]): boolean {
+    // A half-finished run then leaves key files nobody points at instead of a
+    // config that names keys which do not exist.
     const ordered = [...decisions].sort((a, b) => Number(!a.file.secret) - Number(!b.file.secret))
     let current = ""
     try {
         for (const d of ordered) {
-            const f = d.file
-            current = f.rel
-            if (opts.dryRun) {
-                const outcome =
-                    d.current === undefined ? "would-create" : d.differs && d.overwrite ? "would-replace" : "would-keep"
-                result.files.push({ rel: f.rel, outcome })
-                say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
-                continue
-            }
-            if (d.sameData) {
-                // Same data, possibly a different layout: keep the operator's text
-                // and only tighten the file mode if it was too open.
-                const outcome = writeFileGuarded(d.abs, d.current as string, { mode: f.mode, overwrite: false })
-                result.files.push({ rel: f.rel, outcome: outcome.status })
-                say(`  unchanged ${f.rel}`)
-                continue
-            }
-            const outcome = writeFileGuarded(d.abs, f.content, { mode: f.mode, overwrite: d.overwrite }, deps.now)
-            result.files.push({
-                rel: f.rel,
-                outcome: outcome.status,
-                backup: outcome.status === "replaced" ? outcome.backup : undefined,
-            })
-            say(describe(f.rel, outcome, f.secret, d.differs && !d.overwrite))
+            current = d.file.rel
+            applyDecision(deps, result, d)
         }
+        return true
     } catch (e) {
         const msg = `Subnet ${uid}: could not write ${current} (${e instanceof Error ? e.message : String(e)}). Fix that and run the setup again.`
-        say(`  ${msg}`)
+        deps.say(`  ${msg}`)
         result.problems.push(msg)
-        return
+        return false
     }
+}
 
+/** Re-reads the subnet after the write and reports whether the node would load it. */
+function verifySubnet(deps: WizardDeps, result: WizardResult, state: { activeSubnets: Set<string> }, uid: string): void {
+    const { ctx, opts, say } = deps
     if (opts.dryRun) {
         state.activeSubnets.add(uid)
         return
@@ -463,11 +487,46 @@ async function l2psSection(
         state.activeSubnets.add(uid)
         say(`  Subnet ${uid} is ready.`)
         for (const w of after.warnings) say(`  Warning: ${w}`)
-    } else {
-        result.problems.push(`Subnet ${uid} is still not usable: ${after.problems.join("; ")}`)
-        say(`  Subnet ${uid} is still not usable:`)
-        for (const p of after.problems) say(`    - ${p}`)
+        return
     }
+    result.problems.push(`Subnet ${uid} is still not usable: ${after.problems.join("; ")}`)
+    say(`  Subnet ${uid} is still not usable:`)
+    for (const p of after.problems) say(`    - ${p}`)
+}
+
+async function l2psSection(
+    deps: WizardDeps,
+    result: WizardResult,
+    wantedEnv: Record<string, string>,
+    state: { activeSubnets: Set<string> },
+): Promise<void> {
+    const { ctx, say } = deps
+    say("")
+    say("L2PS (private subnets)")
+
+    const broken = reportExistingSubnets(deps)
+    if (!(await shouldSetUpSubnet(deps, wantedEnv, state, broken))) return
+
+    const uid = await chooseUid(deps, broken)
+    const role = await chooseRole(deps, inspectSubnet(ctx.root, uid))
+    const imported = role === "join" ? await importKeyMaterial(deps) : {}
+    const existingConfig = readExistingConfig(ctx.root, uid)
+    const rpcs = await chooseRpcs(deps, existingConfig)
+    await collectL2psEnv(deps, wantedEnv)
+
+    const where = keyLocations(ctx.root, uid, existingConfig)
+    const { keyHex, ivHex } = planKeyMaterial(deps, imported, where)
+    const files = buildSubnetFiles({ uid, rpcs, keyHex, ivHex, existingConfig, ...where })
+
+    const { decisions, blocked } = await decideFiles(deps, files, where.keyRel)
+    if (blocked.length > 0) {
+        const msg = `Subnet ${uid}: ${blocked.join(", ")}; re-run with --force to replace it (the old file is kept as .bak). Nothing was changed.`
+        say(`  ${msg}`)
+        result.problems.push(msg)
+        return
+    }
+    if (!applyDecisions(deps, result, uid, decisions)) return
+    verifySubnet(deps, result, state, uid)
 }
 
 function describe(rel: string, o: WriteOutcome, secret: boolean, keptDiffering: boolean): string {
