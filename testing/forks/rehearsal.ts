@@ -3,17 +3,24 @@
  * Start it with ./rehearsal.sh, which brings up the 4-validator devnet and
  * sets the environment this reads.
  *
- * Steps (each writes its own log and raw responses under $RUN_DIR/steps):
+ * Steps (each writes its own log and raw responses under $RUN_DIR/steps).
+ * With UPGRADE_PATH=1 the chain starts with no schedule and steps U1 and U2 come first:
+ *   U1  the chain runs without any fork schedule or chain id
+ *   U2  the schedule is added to the genesis file of every node, which are restarted
+ *       twice; the file must keep the schedule and the nodes must keep loading it
+ * Then, in both modes:
  *   1  fork configuration as the nodes and the loader see it
  *   2  before the activation height: legacy-signed accepted, domain-signed refused
  *   3  the activation block itself: judged at tip H-1, the rule of block H
  *   4  after the activation height: legacy refused, domain accepted
  *   5  every validator agrees on block hashes across the activation height
+ * and only without UPGRADE_PATH:
  *   6  one validator that boots without the fork schedule cannot vote with the rest
- *   7  its stall watchdog ends it, the engine restarts it, and it rejoins on the corrected genesis
+ *   7  its stall watchdog ends it, and it rejoins once its genesis is corrected
  *   8  nothing else restarted or ran out of memory
  */
-import { execFileSync } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
+import { promisify } from "node:util"
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { Demos, DemosTransactions } from "@kynesyslabs/demosdk/websdk"
 import { uint8ArrayToHex } from "@kynesyslabs/demosdk/encryption"
@@ -27,7 +34,10 @@ const env = (k: string) => {
 const ROOT = env("ROOT")
 const RUN_DIR = env("RUN_DIR")
 const PROJECT = env("PROJECT")
-const H = Number(env("ACTIVATION_HEIGHT"))
+const UPGRADE = process.env.UPGRADE_PATH === "1"
+const UPGRADE_LEAD = Number(process.env.UPGRADE_LEAD ?? 30)
+// In the upgrade path the height is only known once the schedule is added to the running chain.
+let H = Number(env("ACTIVATION_HEIGHT"))
 const CHAIN_ID = Number(env("CHAIN_ID"))
 const BLOCK_SECS = Number(env("CONSENSUS_TIME"))
 const PORTS = [53551, 53553, 53555, 53557]
@@ -67,6 +77,7 @@ function record(label: string, value: unknown) {
     writeFileSync(`${stepFile.replace(/\.log$/, "")}.${label.replace(/\W+/g, "-")}.json`, text + "\n")
     say(`   ${label}: ${text.replace(/\s+/g, " ").slice(0, 600)}`)
 }
+const execFileAsync = promisify(execFile)
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 async function until(fn: () => boolean | Promise<boolean>, secs: number, everyMs = 2000) {
     const deadline = Date.now() + secs * 1000
@@ -211,6 +222,80 @@ const NODE4_KEY = identity("node4", "pubkey")
 const alice = await client(PORTS[0], "alice")
 let aliceNonce = Number((await alice.getAddressInfo(ALICE))?.nonce ?? 0)
 say(`rehearsal: forks at ${H}, chain id ${CHAIN_ID}, ~${BLOCK_SECS}s per block, alice nonce ${aliceNonce}`)
+
+// ---- U ---------------------------------------------------------------------
+let restartsBaseline = startupRestarts
+if (UPGRADE) {
+    step("U1 a chain that starts without a fork schedule")
+    const info0 = await Promise.all(PORTS.map(p => nodeCall(p, "getNetworkInfo")))
+    record("getNetworkInfo-node1-before-upgrade", info0[0].response)
+    check(
+        info0.every(i => i.response.forks.signatureDomain.activationHeight === null && i.response.chainId === null),
+        "every node reports signatureDomain unscheduled and no chain id: the chain started without either",
+    )
+    check(await until(async () => (await tipOf(PORTS[0])) >= 10, 240, 3000), "the chain produced 10 blocks")
+    check(
+        [8, 9, 10].every(n => signersOf(n).length === 4),
+        "blocks 8 to 10 carry all four validator signatures",
+    )
+
+    step("U2 the schedule is added to the running chain")
+    const tipAtEdit = await tipOf(PORTS[0])
+    H = tipAtEdit + UPGRADE_LEAD
+    const base = JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.json`, "utf8"))
+    base.properties.id = CHAIN_ID
+    base.forks.signatureDomain = { activationHeight: H }
+    base.forks.web2ProofBinding = { activationHeight: H }
+    const upgraded = JSON.stringify(base, null, 2) + "\n"
+    writeFileSync(`${RUN_DIR}/data/genesis.json`, upgraded)
+    // In place, so the containers' bind mounts see the new content.
+    for (let n = 1; n <= 4; n++) writeFileSync(`${RUN_DIR}/data/genesis.node${n}.json`, upgraded)
+    say(`   tip ${tipAtEdit}: properties.id=${CHAIN_ID} and both activation heights ${H} written to all four genesis files`)
+
+    const fileCarries = (n: number) => {
+        const g = JSON.parse(readFileSync(`${RUN_DIR}/data/genesis.node${n}.json`, "utf8"))
+        return g.properties?.id === CHAIN_ID && g.forks?.signatureDomain?.activationHeight === H && g.forks?.web2ProofBinding?.activationHeight === H
+    }
+    const restartAll = async () => {
+        const at = new Date().toISOString()
+        await Promise.all([1, 2, 3, 4].map(n => execFileAsync(DOCKER, ["restart", "-t", "2", `${PROJECT}-node-${n}`])))
+        return at
+    }
+    for (const round of ["first", "second"]) {
+        const at = await restartAll()
+        const booted = await until(
+            () => [1, 2, 3, 4].every(n => /Valid peers found/.test(nodeLog(n, at))),
+            240,
+            4000,
+        )
+        check(booted, `${round} restart: all four nodes finished peer bootstrap`)
+        const logged = [1, 2, 3, 4].map(n => ({
+            n,
+            sig: new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(n, at)),
+            web2: new RegExp(`Loaded fork "web2ProofBinding" with activationHeight=${H}`).test(nodeLog(n, at)),
+            mismatch: /Genesis data hash does not match/.test(nodeLog(n, at)),
+        }))
+        record(`boot-log-${round}-restart`, logged)
+        check(logged.every(l => l.sig && l.web2), `${round} restart: every node loaded both forks at ${H} from its genesis file`)
+        const files = [1, 2, 3, 4].map(fileCarries)
+        record(`genesis-files-after-${round}-restart`, files)
+        check(files.every(Boolean), `${round} restart: after bootstrap every node's genesis file still carries properties.id and both activation heights`)
+        check(!logged.some(l => l.mismatch), `${round} restart: no node reported a genesis data hash mismatch`)
+        const infos2 = await Promise.all(PORTS.map(p => nodeCall(p, "getNetworkInfo")))
+        check(
+            infos2.every(i => i.response.forks.signatureDomain.activationHeight === H && i.response.chainId === CHAIN_ID),
+            `${round} restart: getNetworkInfo reports signatureDomain at ${H} and chain id ${CHAIN_ID} on every node`,
+        )
+    }
+    const tipAfterRestarts = await tipOf(PORTS[0])
+    check(tipAfterRestarts < H - 8, `both restarts finished before the height (tip ${tipAfterRestarts}, height ${H})`)
+    check(await until(async () => (await Promise.all(PORTS.map(tipOf))).every(t => t >= tipAfterRestarts + 3), 120, 3000), "the chain keeps producing blocks after the restarts")
+    const tipNow = Math.min(...(await Promise.all(PORTS.map(tipOf))))
+    const recent = [tipNow - 1, tipNow].map(n => ({ n, signers: signersOf(n).length }))
+    record("signers-after-restarts", recent)
+    check(recent.every(b => b.signers === 4), `blocks ${tipNow - 1} and ${tipNow} carry all four signatures`)
+    restartsBaseline = restartCounts()
+}
 
 // ---- 1 ---------------------------------------------------------------------
 step("fork configuration")
@@ -363,8 +448,8 @@ record("signers-per-block-healthy", signerGrid)
 const last = await Promise.all(PORTS.map(p => nodeCall(p, "getLastBlock")))
 const lastAt = (r: any) => `${r.response.number}:${r.response.hash}`
 say(`   getLastBlock per node: ${last.map(lastAt).join("  ")}`)
-const states = everyDb(`select md5(coalesce(string_agg(pubkey||balance||nonce, ',' order by pubkey),'')) from gcr_main`)
-check(new Set(states).size === 1, "balances and nonces identical on all 4 nodes")
+const states = await settledStates()
+check(states !== null && new Set(states).size === 1, "balances and nonces identical on all 4 nodes, read while all four tips agreed and held still")
 const aliceRow = everyDb(`select balance||':'||nonce from gcr_main where pubkey='${ALICE}'`)
 record("alice-per-node", aliceRow)
 check(
@@ -374,7 +459,9 @@ check(
 const bobTotal = everyDb(`select balance from gcr_main where pubkey='${BOB}'`)
 check(bobTotal.every(b => BigInt(b) === AMOUNT * 3n), `bob received exactly ${AMOUNT * 3n} (three transfers)`)
 
-// ---- 6 ---------------------------------------------------------------------
+// ---- 6 and 7 --------------------------------------------------------------
+let restartsAfterManual = restartsBaseline
+if (!UPGRADE) {
 step("a validator that boots without the fork schedule")
 // A binary or genesis from before the forks schedules nothing. Node 4 gets
 // exactly that: its genesis loses both entries, then it restarts.
@@ -384,11 +471,13 @@ delete genesis4.forks.signatureDomain
 delete genesis4.forks.web2ProofBinding
 // In place, so the container's bind mount sees it.
 writeFileSync(`${RUN_DIR}/data/genesis.node4.json`, JSON.stringify(genesis4, null, 2) + "\n")
+execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`])
+// Taken after the restart returns, so the old process's last lines and its kill
+// event fall before both marks.
 const restartedAt = new Date().toISOString()
 const restartedEpoch = Math.floor(Date.now() / 1000)
-execFileSync(DOCKER, ["restart", `${PROJECT}-node-4`])
 // A manual restart zeroes the engine's restart counter; count from here.
-const restartsAfterManual = restartCounts()
+restartsAfterManual = restartCounts()
 const back = await until(async () => (await tipOf(PORTS[3])) >= common - 1, 150, 3000)
 check(back, "node 4 restarted and is serving again")
 // The hash comparison happens during peer bootstrap, some seconds after the RPC is up.
@@ -433,15 +522,15 @@ check(r4Legacy.accepted, "node 4 accepts the very same legacy-signed transfer: t
 
 // Node 4 keeps being drawn into shards with a candidate block nobody else agrees
 // with; after three such draws its stall watchdog ends the process.
-const stalled = await until(() => /exiting for log investigation/.test(nodeLog(4, restartedAt)), 180, 3000)
-check(stalled, "after three shard draws without its signature, node 4's stall watchdog ends the process")
+const stalled = await until(() => /Missed 3 consecutive shard selections.*exiting for log investigation/.test(nodeLog(4, restartedAt)), 180, 3000)
+check(stalled, "node 4 logged the stall watchdog's exit after three shard draws without its signature")
 const log4s = nodeLog(4, restartedAt)
 const stallBlocks = [...log4s.matchAll(/Drawn into the shard for block (\d+) but our signature is missing/g)].map(m => Number(m[1]))
 const refusedCandidates = (log4s.match(/Hash does not correspond to our candidate block/g) ?? []).length
 say(`   node 4 log since the restart: ${refusedCandidates} candidate-block refusals by peers; missing-signature stalls at blocks ${stallBlocks.join(", ")}`)
 check(
     refusedCandidates > 0 && stallBlocks.length >= 3,
-    "node 4's own candidate blocks were refused by the other validators in every round it was drawn into",
+    "peers refused node 4's candidate blocks, and it was drawn into at least three shards without signing",
 )
 const incl = landed(splitBase.hash)
 record("split-tx-block-per-node", incl)
@@ -478,7 +567,10 @@ const exits = () =>
     readFileSync(`${RUN_DIR}/logs/docker-events.log`, "utf8")
         .split("\n")
         .filter(l => / die forkrehearsal-node-4 exit=0/.test(l) && Number(l.split(" ")[0]) >= restartedEpoch)
-check(await until(() => exits().length >= 1, 30, 1000), "the stall exit was a clean exit (code 0), which the engine's restart policy treats as a stop to undo")
+check(
+    await until(() => exits().length === 1, 30, 1000),
+    "the engine saw exactly one exit with code 0 from node 4 since its manual restart: the watchdog's process.exit(0)",
+)
 const reloaded = await until(
     () => new RegExp(`Loaded fork "signatureDomain" with activationHeight=${H}`).test(nodeLog(4, restartedAt)),
     120,
@@ -521,9 +613,11 @@ const tail7 = Array.from({ length: 2 }, (_, i) => common2 - 1 + i).map(n => ({ n
 record("signers-per-block-after-recovery", tail7)
 check(tail7.every(b => b.signers === 4 && b.node4), `blocks ${tail7[0].n} and ${tail7[1].n}, four blocks after the catch-up, carry all four signatures, node 4's again`)
 
+}
+
 step("container health")
 const endRestarts = restartCounts()
-record("restart-counts-and-oom", { atScenarioStart: startupRestarts, afterManualRestart: restartsAfterManual, atEnd: endRestarts })
+record("restart-counts-and-oom", { atScenarioStart: restartsBaseline, afterManualRestart: restartsAfterManual, atEnd: endRestarts })
 if (existsSync(`${RUN_DIR}/logs/docker-events.log`)) {
     record(
         "engine-events",
@@ -534,14 +628,21 @@ if (existsSync(`${RUN_DIR}/logs/docker-events.log`)) {
             .slice(-14),
     )
 }
-check(
-    [0, 1, 2].every(i => endRestarts[i] === startupRestarts[i]) && endRestarts.every(h => h.endsWith("false")),
-    "nodes 1-3 were never restarted and no container was killed for memory while the scenario ran",
-)
-check(
-    endRestarts[3] === `${Number(restartsAfterManual[3].split(" ")[0]) + 1} false`,
-    "node 4 was restarted by the engine exactly once after the manual restart: the stall exit",
-)
+if (UPGRADE) {
+    check(
+        endRestarts.every((h, i) => h === restartsBaseline[i] && h.endsWith("false")),
+        "no node was restarted by the engine or killed for memory after the last restart this scenario issued",
+    )
+} else {
+    check(
+        [0, 1, 2].every(i => endRestarts[i] === restartsBaseline[i]) && endRestarts.every(h => h.endsWith("false")),
+        "nodes 1-3 were never restarted and no container was killed for memory while the scenario ran",
+    )
+    check(
+        endRestarts[3] === `${Number(restartsAfterManual[3].split(" ")[0]) + 1} false`,
+        "node 4 was restarted by the engine exactly once after the manual restart: the stall exit",
+    )
+}
 
 say(process.exitCode ? "\nREHEARSAL FAILED" : "\nREHEARSAL PASSED")
 process.exit(process.exitCode ?? 0)
