@@ -29,6 +29,17 @@
  *   4. The original `genesisData` object is left untouched (deep
  *      cloning happens internally).
  *
+ * The same reasoning removes the fork schedule (`forks`) and the chain id
+ * (`properties.id`). A peer's hash is computed from the genesis block stored
+ * in its database when the chain was created, and that block is never
+ * refreshed. An operator who schedules a fork on a running chain edits the
+ * genesis FILE, so with those fields in the hash every node's file differs
+ * from every peer's stored block, each node "corrects" its file from a peer,
+ * and the schedule is silently dropped on the next restart. Neither field is
+ * peering metadata that all nodes must have had since block 0: they are read
+ * from the file at every boot, and agreement on them is checked separately by
+ * `forkScheduleAgreement.ts`.
+ *
  * Callers
  * -------
  * Every site that computes a genesis-data hash for inter-peer
@@ -69,7 +80,15 @@ export function canonicalGenesisForHashing(
     const out: Record<string, unknown> = {}
 
     for (const key of Object.keys(src)) {
-        if (key === "validators") continue
+        if (key === "validators" || key === "forks") continue
+        if (key === "properties") {
+            const props = src.properties
+            if (props !== null && typeof props === "object" && !Array.isArray(props)) {
+                const { id: _chainId, ...rest } = props as Record<string, unknown>
+                out.properties = rest
+                continue
+            }
+        }
         // Shallow copy; nested objects/arrays inside genesis are
         // already content-addressed (balances, forks, properties,
         // mutables) — their authoring order is fixed by the genesis

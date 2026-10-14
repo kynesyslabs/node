@@ -19,6 +19,12 @@ import { sleep } from "@kynesyslabs/demosdk/utils"
 import { RPCRequest } from "@kynesyslabs/demosdk/types"
 import { getSharedState } from "@/utilities/sharedState"
 import { hashGenesisData } from "@/libs/blockchain/genesis/normalizeGenesisForHash"
+import { resolveGenesisMismatch } from "./genesisMismatch"
+import {
+    diffSchedules,
+    localScheduleView,
+    peerScheduleView,
+} from "./forkScheduleAgreement"
 
 let ourGenesisDataHash = ""
 const genesisFile = "data/genesis.json"
@@ -58,68 +64,60 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
     if (res.result === 200) {
         const peerGenesisDataHash = res.response
 
-        if (peerGenesisDataHash !== ourGenesisDataHash) {
-            log.error("[BOOTSTRAP] Genesis data hash does not match")
-            log.warn(
-                "[BOOTSTRAP] Expected: " +
-                    ourGenesisDataHash +
-                    " Got: " +
-                    peerGenesisDataHash,
-            )
-            log.debug(
-                "[BOOTSTRAP] Fetching new genesis data from peer: " +
-                    verifiedPeer.connection.string,
-            )
-
-            const res = await axios.get(
-                verifiedPeer.connection.string + "/genesis",
-            )
-
-            if (res.status === 200) {
-                // INFO: Save the new genesis data to the file
-                fs.writeFileSync(genesisFile, JSON.stringify(res.data, null, 2))
+        const verdict = await resolveGenesisMismatch(
+            ourGenesisDataHash,
+            peerGenesisDataHash,
+            {
+                fetchPeerGenesis: async () => {
+                    log.error("[BOOTSTRAP] Genesis data hash does not match")
+                    log.warn(
+                        "[BOOTSTRAP] Expected: " +
+                            ourGenesisDataHash +
+                            " Got: " +
+                            peerGenesisDataHash,
+                    )
+                    log.debug(
+                        "[BOOTSTRAP] Fetching new genesis data from peer: " +
+                            verifiedPeer.connection.string,
+                    )
+                    const served = await axios.get(
+                        verifiedPeer.connection.string + "/genesis",
+                    )
+                    return served.status === 200 ? served.data : null
+                },
+                writeGenesis: data =>
+                    fs.writeFileSync(genesisFile, JSON.stringify(data, null, 2)),
                 // Re-hash through the canonical normalizer so connection_url
                 // differences between this node and the source peer do not
                 // produce a spurious mismatch (see normalizeGenesisForHash.ts).
-                const ourNewGenesisDataHash = hashGenesisData(
-                    JSON.parse(fs.readFileSync(genesisFile, "utf8")),
-                )
+                hashLocalFile: () =>
+                    hashGenesisData(JSON.parse(fs.readFileSync(genesisFile, "utf8"))),
+                hash: hashGenesisData,
+            },
+        )
 
-                // INFO: Update discovered genesis hashes and current genesis hash
-                discoveredGenesisDataHashes.add(ourNewGenesisDataHash)
-                ourGenesisDataHash = ourNewGenesisDataHash
+        if (verdict.outcome === "unhashed-fields-only") {
+            log.warn(
+                "[BOOTSTRAP] Peer " +
+                    verifiedPeer.connection.string +
+                    " serves genesis data that differs from ours only in the fork schedule or chain id; " +
+                    "keeping our data/genesis.json as it is",
+            )
+        } else if (verdict.outcome === "replaced") {
+            // INFO: Update discovered genesis hashes and current genesis hash
+            discoveredGenesisDataHashes.add(verdict.servedHash)
+            ourGenesisDataHash = verdict.servedHash
 
-                // INFO: Ensure all peers have the same genesis data
-                if (discoveredGenesisDataHashes.size > 1) {
-                    log.error(
-                        "[BOOTSTRAP] Conflicting genesis data hashes found",
-                    )
-                    throw new Error("Conflicting genesis data hashes found across peers")
-                }
-
-                log.debug(
-                    "[BOOTSTRAP] Downloaded genesis data with hash: " +
-                        ourNewGenesisDataHash,
-                )
-
-                if (ourNewGenesisDataHash !== peerGenesisDataHash) {
-                    log.error(
-                        "[BOOTSTRAP] New genesis data hash still does not match: " +
-                            ourNewGenesisDataHash +
-                            " != " +
-                            peerGenesisDataHash,
-                    )
-                    throw new Error(`Genesis data hash mismatch after download: ${ourNewGenesisDataHash} != ${peerGenesisDataHash}`)
-                }
-
-                return
+            // INFO: Ensure all peers have the same genesis data
+            if (discoveredGenesisDataHashes.size > 1) {
+                log.error("[BOOTSTRAP] Conflicting genesis data hashes found")
+                throw new Error("Conflicting genesis data hashes found across peers")
             }
 
-            log.error(
-                "[BOOTSTRAP] Failed to download genesis data from peer: " +
-                    verifiedPeer.connection.string,
+            log.debug(
+                "[BOOTSTRAP] Downloaded genesis data with hash: " +
+                    verdict.servedHash,
             )
-            throw new Error(`Failed to download genesis data from peer: ${verifiedPeer.connection.string}`)
         }
     } else {
         log.error(
@@ -127,6 +125,51 @@ async function ensureGenesisDataMatch(verifiedPeer: Peer) {
                 verifiedPeer.connection.string +
                 " response=" +
                 JSON.stringify(res),
+        )
+    }
+
+    await warnOnForkScheduleMismatch(verifiedPeer)
+}
+
+/**
+ * The fork schedule is not in the genesis data hash, so pairing does not
+ * catch a node that missed the genesis edit. Compare it here and say so
+ * loudly; never refuse to boot over it, because during a rolling genesis edit
+ * peers legitimately disagree for a while.
+ */
+async function warnOnForkScheduleMismatch(peer: Peer) {
+    try {
+        const answer = await peer.call({
+            method: "nodeCall",
+            params: [{ message: "getNetworkInfo" }],
+        } as RPCRequest)
+        if (answer?.result !== 200) return
+        const theirs = peerScheduleView(answer.response)
+        if (!theirs) return
+        const ours = localScheduleView(
+            getSharedState.forkConfig as unknown as Record<
+                string,
+                { activationHeight: number | null } | undefined
+            >,
+            getSharedState.chainId,
+        )
+        const differences = diffSchedules(ours, theirs)
+        if (differences.length > 0) {
+            log.error(
+                "[BOOTSTRAP] FORK SCHEDULE MISMATCH with " +
+                    peer.connection.string +
+                    ": " +
+                    differences.join("; ") +
+                    ". This node will split from its peers at the first activation height that differs. " +
+                    "Fix the forks entries and properties.id in data/genesis.json and restart.",
+            )
+        }
+    } catch (error) {
+        log.warn(
+            "[BOOTSTRAP] Could not compare fork schedules with " +
+                peer.connection.string +
+                ": " +
+                (error instanceof Error ? error.message : String(error)),
         )
     }
 }

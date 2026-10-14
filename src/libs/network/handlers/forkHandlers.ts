@@ -47,6 +47,12 @@ export interface NetworkInfo {
     forks: {
         osDenomination: ForkStatus
         signatureDomain: ForkStatus
+        /**
+         * Reported so an operator can read the schedule of every fork a
+         * genesis edit introduces from the node itself, and so peers can
+         * compare it at bootstrap. Absent on nodes older than this field.
+         */
+        web2ProofBinding: ForkStatus
     }
     /**
      * Network identity from genesis `properties.id`. A signer needs it to
@@ -92,6 +98,10 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
             getSharedState.forkConfig?.signatureDomain?.activationHeight ??
             null
 
+        const web2ProofBindingHeight =
+            getSharedState.forkConfig?.web2ProofBinding?.activationHeight ??
+            null
+
         const networkInfo: NetworkInfo = {
             forks: {
                 osDenomination: {
@@ -108,6 +118,13 @@ export const forkHandlers: Record<string, NodeCallHandler> = {
                     // preimage for the activation block and have the node
                     // reject it.
                     activated: isForkActive("signatureDomain", currentHeight + 1),
+                    currentHeight,
+                },
+                web2ProofBinding: {
+                    activationHeight: web2ProofBindingHeight,
+                    // Same convention as signatureDomain: the block a
+                    // proof admitted now would land in.
+                    activated: isForkActive("web2ProofBinding", currentHeight + 1),
                     currentHeight,
                 },
             },

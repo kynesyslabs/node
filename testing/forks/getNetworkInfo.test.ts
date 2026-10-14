@@ -215,4 +215,29 @@ describe("getNetworkInfo RPC handler", () => {
         expect(response.require_reply).toBe(false)
         expect(response.extra).toBeNull()
     })
+
+    it("reports web2ProofBinding with the same next-block convention as signatureDomain", async () => {
+        getSharedState.forkConfig.web2ProofBinding.activationHeight = 1000
+        getSharedState.lastBlockNumber = 999
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as {
+            forks: { web2ProofBinding: ForkStatusResponse }
+        }
+
+        expect(body.forks.web2ProofBinding.activationHeight).toBe(1000)
+        expect(body.forks.web2ProofBinding.activated).toBe(true)
+    })
+
+    it("reports an unscheduled web2ProofBinding as null and inactive", async () => {
+        getSharedState.lastBlockNumber = 5_000_000
+
+        const response = await getNetworkInfo({}, makeResponse())
+        const body = response.response as {
+            forks: { web2ProofBinding: ForkStatusResponse }
+        }
+
+        expect(body.forks.web2ProofBinding.activationHeight).toBeNull()
+        expect(body.forks.web2ProofBinding.activated).toBe(false)
+    })
 })
