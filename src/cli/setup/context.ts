@@ -1,3 +1,4 @@
+import * as fs from "node:fs"
 import * as path from "node:path"
 import { readEnvFile } from "./envFile"
 
@@ -9,12 +10,25 @@ export interface SetupContext {
     env: Record<string, string | undefined>
     /** The real process environment alone; it overrides the env file. */
     processEnv: Record<string, string | undefined>
+    /** Running inside the container image, where /app/.env is not the operator's file. */
+    inDocker: boolean
+}
+
+/** The Dockerfile sets DEMOS_IN_DOCKER; /.dockerenv covers images built without it. */
+export function detectDocker(
+    env: Record<string, string | undefined> = process.env,
+): boolean {
+    const flag = env.DEMOS_IN_DOCKER?.toLowerCase()
+    if (flag === "true" || flag === "1") return true
+    if (flag === "false" || flag === "0") return false
+    return fs.existsSync("/.dockerenv")
 }
 
 export function createContext(
     root: string,
     envFileName = ".env",
     processEnv: Record<string, string | undefined> = process.env,
+    inDocker: boolean = detectDocker(processEnv),
 ): SetupContext {
     const envFilePath = path.resolve(root, envFileName)
     return {
@@ -22,6 +36,7 @@ export function createContext(
         envFilePath,
         env: { ...readEnvFile(envFilePath), ...processEnv },
         processEnv,
+        inDocker,
     }
 }
 

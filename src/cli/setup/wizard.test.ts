@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { runCli } from "./cli"
 import { parseEnv } from "./envFile"
-import { HEX_IV, HEX_KEY, fakeRunner, installZkTools, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
+import { HEX_IV, HEX_KEY, fakeRunner, installZkTools, writeZkBatch, makeRoot, recorder, removeRoot, scriptedPrompter, writeSubnet } from "./testSupport"
 import type { Prompter } from "./prompt"
 
 let root: string
@@ -12,7 +12,7 @@ beforeEach(() => {
 })
 afterEach(() => removeRoot(root))
 
-function cli(argv: string[], extra: { env?: Record<string, string>; isTTY?: boolean; prompter?: Prompter; runner?: ReturnType<typeof fakeRunner> } = {}) {
+function cli(argv: string[], extra: { env?: Record<string, string>; isTTY?: boolean; prompter?: Prompter; runner?: ReturnType<typeof fakeRunner>; inDocker?: boolean } = {}) {
     const r = recorder()
     const run = runCli(argv, {
         cwd: root,
@@ -21,6 +21,7 @@ function cli(argv: string[], extra: { env?: Record<string, string>; isTTY?: bool
         say: r.say,
         prompter: extra.prompter,
         runner: extra.runner ?? fakeRunner(),
+        inDocker: extra.inDocker ?? false,
     })
     return run.then(code => ({ code, out: r.text(), lines: r.lines }))
 }
@@ -134,7 +135,7 @@ describe("joining with an imported key", () => {
             env: { DEMOS_SETUP_L2PS_KEY: "nothex", DEMOS_SETUP_L2PS_IV: HEX_IV },
         })
         expect(code).toBe(1)
-        expect(out).toContain("hexadecimal")
+        expect(out).toContain("non-hex")
         expect(fs.existsSync(path.join(root, "data"))).toBe(false)
     })
 
@@ -151,14 +152,33 @@ describe("the do-not-overwrite guard", () => {
     const otherKey = "11".repeat(32)
     const joinArgs = ["--yes", "--l2ps-uid", "keep_me", "--l2ps-role", "join"]
 
-    it("keeps an existing key that differs from the answers", async () => {
+    it("refuses a join whose key differs, exits 1 and never says ready", async () => {
         writeSubnet(root, "keep_me")
         const { code, out } = await cli(joinArgs, { env: { DEMOS_SETUP_L2PS_KEY: otherKey, DEMOS_SETUP_L2PS_IV: HEX_IV } })
-        expect(code).toBe(0)
-        expect(out).toContain("kept data/l2ps/keep_me/private_key.txt")
-        expect(out).toContain("--force")
+        expect(code).toBe(1)
+        expect(out).toContain("key differs; re-run with --force")
+        expect(out).not.toContain("is ready")
         expect(fs.readFileSync(subnetFile("keep_me", "private_key.txt"), "utf8").trim()).toBe(HEX_KEY)
         expect(fs.readdirSync(path.dirname(subnetFile("keep_me", "x"))).filter(f => f.includes(".bak-"))).toEqual([])
+    })
+
+    it("also refuses a differing IV, and changes nothing else when it refuses", async () => {
+        writeSubnet(root, "keep_me")
+        const cfgBefore = fs.readFileSync(subnetFile("keep_me", "config.json"), "utf8")
+        const { code, out } = await cli([...joinArgs, "--l2ps-rpc", "http://other:1"], { env: { DEMOS_SETUP_L2PS_KEY: HEX_KEY, DEMOS_SETUP_L2PS_IV: "11".repeat(16) } })
+        expect(code).toBe(1)
+        expect(out).toContain("IV differs; re-run with --force")
+        expect(fs.readFileSync(subnetFile("keep_me", "config.json"), "utf8")).toBe(cfgBefore)
+    })
+
+    it("does not call a trailing-newline-only difference a difference", async () => {
+        const dir = writeSubnet(root, "keep_me")
+        fs.writeFileSync(path.join(dir, "private_key.txt"), HEX_KEY, { mode: 0o600 }) // no newline
+        const { code, out } = await cli(joinArgs, { env: { DEMOS_SETUP_L2PS_KEY: "0x" + HEX_KEY.toUpperCase() + "\n", DEMOS_SETUP_L2PS_IV: HEX_IV } })
+        expect(code).toBe(0)
+        expect(out).toContain("unchanged data/l2ps/keep_me/private_key.txt")
+        expect(out).toContain("is ready")
+        expect(fs.readFileSync(path.join(dir, "private_key.txt"), "utf8")).toBe(HEX_KEY)
     })
 
     it("replaces it with --force and keeps the old one as a backup", async () => {
@@ -238,13 +258,11 @@ describe("interactive setup (mocked prompts)", () => {
         expect(code).toBe(0)
         const cfg = JSON.parse(fs.readFileSync(subnetFile("demo_1", "config.json"), "utf8"))
         expect(cfg.config.known_rpcs).toEqual(["http://10.0.0.5:53550", "http://10.0.0.6:53550"])
-        expect(envOf()).toMatchObject({
+        // Only what differs from the built-in defaults is written.
+        expect(envOf()).toEqual({
             L2PS_HISTORY_RETENTION_DAYS: "7",
-            L2PS_HISTORY_STORE_PLAINTEXT: "false",
-            L2PS_HISTORY_REQUIRE_V2: "false",
             L2PS_MESSAGING_ENABLED: "true",
             L2PS_MESSAGING_PORT: "3100",
-            L2PS_ZK_ENABLED: "false",
         })
         expect(out).toContain("Identity proofs: ready")
         expect(p.asked.join("\n")).not.toContain("hidden") // create path asks for no secrets
@@ -253,7 +271,7 @@ describe("interactive setup (mocked prompts)", () => {
     it("re-asks on an invalid subnet id and port", async () => {
         const p = scriptedPrompter(["y", "bad id", "ok_1", "", "http://a:1", "0", "n", "n", "y", "99999", "3000", "n"])
         const { out } = await cli([], { isTTY: true, prompter: p })
-        expect(out).toContain("Use 1-64 characters")
+        expect(out).toContain("Use letters, digits")
         expect(out).toContain("Port must be 1-65535")
         expect(envOf().L2PS_MESSAGING_PORT).toBe("3000")
     })
@@ -295,11 +313,54 @@ describe("ZK step", () => {
         installZkTools(root)
         seedVkeys()
         const runner = fakeRunner()
-        const { code, out } = await cli(["--yes", "--zk"], { runner })
+        const { code, out } = await cli(["--yes", "--zk", "--zk-generate"], { runner })
         expect(code).toBe(0)
         expect(runner.calls.filter(c => c.startsWith("download"))).toHaveLength(2)
         expect(envOf().L2PS_ZK_ENABLED).toBe("true")
         expect(out).not.toContain("MISSING")
+    })
+
+    it("--yes --zk alone never downloads and leaves L2PS_ZK_ENABLED untouched", async () => {
+        writeSubnet(root, "good")
+        installZkTools(root)
+        const runner = fakeRunner()
+        const { code, out } = await cli(["--yes", "--zk"], { runner })
+        expect(code).toBe(0)
+        expect(runner.calls).toEqual([])
+        expect(out).toContain("--zk-generate")
+        expect(out).toContain("L2PS_ZK_ENABLED was left unchanged")
+        expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+    })
+
+    it("leaves L2PS_ZK_ENABLED untouched when the build fails", async () => {
+        writeSubnet(root, "good")
+        installZkTools(root)
+        seedVkeys()
+        fs.writeFileSync(path.join(root, ".env"), "L2PS_ZK_ENABLED=false\n")
+        const { code, out } = await cli(["--yes", "--zk", "--zk-generate"], { runner: fakeRunner({ failOn: "plonk setup" }) })
+        expect(code).toBe(1)
+        expect(out).toContain("L2PS_ZK_ENABLED was left unchanged")
+        expect(envOf().L2PS_ZK_ENABLED).toBe("false")
+    })
+
+    it("leaves it untouched when the user declines to build", async () => {
+        writeSubnet(root, "good")
+        installZkTools(root)
+        const p = scriptedPrompter(["y", "n"]) // Use ZK proofs? yes; build now? no
+        const { out } = await cli(["--l2ps", "--l2ps-uid", "good", "--l2ps-rpc", "http://127.0.0.1:53550", "--history-retention-days", "0", "--no-history-store-plaintext", "--no-history-require-v2", "--no-messaging"], { isTTY: true, prompter: p })
+        expect(out).toContain("L2PS_ZK_ENABLED was left unchanged")
+        expect(fs.existsSync(path.join(root, ".env")) ? envOf().L2PS_ZK_ENABLED : undefined).toBeUndefined()
+    })
+
+    it("does not build again when every size is already in place", async () => {
+        writeSubnet(root, "good")
+        installZkTools(root)
+        writeZkBatch(root, 5)
+        writeZkBatch(root, 10)
+        const runner = fakeRunner()
+        await cli(["--yes", "--zk", "--zk-generate"], { runner })
+        expect(runner.calls).toEqual([])
+        expect(envOf().L2PS_ZK_ENABLED).toBe("true")
     })
 
     it("does not build when --no-zk-generate is given and says how to do it later", async () => {
@@ -331,7 +392,8 @@ describe("ZK step", () => {
         const runner = fakeRunner()
         const { code, out } = await cli(["--yes", "--only", "zk"], { runner })
         expect(code).toBe(1)
-        expect(out).toContain("git checkout -- src/features/zk/keys/verification_key_merkle.json")
+        expect(out).toContain("restore the committed src/features/zk/keys/verification_key_merkle.json")
+        expect(out).not.toContain("git checkout")
         expect(runner.calls).toEqual([])
     })
 })
@@ -405,5 +467,122 @@ describe("repairing an existing subnet", () => {
         const { out } = await cli(["--yes", "--l2ps-uid", "keepcfg", "--l2ps-rpc", "http://new:9"])
         expect(out).toContain("kept data/l2ps/keepcfg/config.json")
         expect(JSON.parse(fs.readFileSync(subnetFile("keepcfg", "config.json"), "utf8")).config.known_rpcs).toEqual(["http://127.0.0.1:53550"])
+    })
+})
+
+
+describe("defaults are not written", () => {
+    it("accepting every default in an interactive run leaves no .env behind", async () => {
+        // enable L2PS, id, new subnet, rpc, retention, plaintext, v2, messaging, zk
+        const p = scriptedPrompter(["y", "demo_1", "", "", "", "", "", "", ""])
+        const { code } = await cli([], { isTTY: true, prompter: p })
+        expect(code).toBe(0)
+        expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+    })
+
+    it("still writes a value that differs from what is in effect", async () => {
+        fs.writeFileSync(path.join(root, ".env"), "L2PS_HISTORY_RETENTION_DAYS=90\n")
+        // ... then the confirmation to change the existing value
+        const p = scriptedPrompter(["y", "demo_1", "", "", "0", "", "", "", "", "y"])
+        await cli([], { isTTY: true, prompter: p, env: { L2PS_HISTORY_RETENTION_DAYS: "90" } })
+        expect(envOf().L2PS_HISTORY_RETENTION_DAYS).toBe("0")
+    })
+
+    it("explicit flags are written even when they equal a default", async () => {
+        await cli(["--yes", "--l2ps-uid", "demo_1", "--history-retention-days", "0"])
+        expect(envOf().L2PS_HISTORY_RETENTION_DAYS).toBe("0")
+    })
+})
+
+describe("the result table shows what was just written", () => {
+    it("overrides a stale process environment for the keys the wizard wrote", async () => {
+        // `bun run` has already loaded the old .env into the environment.
+        fs.writeFileSync(path.join(root, ".env"), "L2PS_MESSAGING_ENABLED=false\n")
+        const { out } = await cli(["--yes", "--l2ps-uid", "demo_1", "--messaging", "--force"], {
+            env: { L2PS_MESSAGING_ENABLED: "false" },
+        })
+        expect(envOf().L2PS_MESSAGING_ENABLED).toBe("true")
+        expect(out).toContain("Subnet for messaging")
+        expect(out).not.toContain("Messaging          off")
+    })
+})
+
+describe("inside the container image", () => {
+    it("does not write /app/.env and hands over the lines for the host", async () => {
+        const { code, out } = await cli(["--yes", "--l2ps-uid", "demo_1", "--messaging"], { inDocker: true })
+        expect(code).toBe(0)
+        expect(fs.existsSync(path.join(root, ".env"))).toBe(false)
+        expect(out).toContain("container image")
+        expect(out).toContain("L2PS_MESSAGING_ENABLED=true")
+        // The subnet files do go to the data volume.
+        expect(fs.existsSync(subnetFile("demo_1", "private_key.txt"))).toBe(true)
+    })
+
+    it("writes the file when the operator names one explicitly", async () => {
+        await cli(["--yes", "--l2ps-uid", "demo_1", "--messaging", "--env-file", "custom.env"], { inDocker: true })
+        expect(parseEnv(fs.readFileSync(path.join(root, "custom.env"), "utf8")).L2PS_MESSAGING_ENABLED).toBe("true")
+    })
+})
+
+describe("custom key paths in an existing config.json", () => {
+    const custom = (extra: object = {}) => ({
+        uid: "cust", enabled: true,
+        config: { created_at_block: 0, known_rpcs: ["http://127.0.0.1:53550"] },
+        keys: { private_key_path: "data/l2ps/cust/keys/k.txt", iv_path: "data/l2ps/cust/keys/i.txt" },
+        ...extra,
+    })
+
+    it("reuses the key at the configured location and fills in the missing IV there", async () => {
+        const dir = writeSubnet(root, "cust", { config: custom(), key: null, iv: null })
+        fs.mkdirSync(path.join(dir, "keys"))
+        fs.writeFileSync(path.join(dir, "keys/k.txt"), HEX_KEY + "\n", { mode: 0o600 })
+        const { code } = await cli(["--yes", "--l2ps-uid", "cust"])
+        expect(code).toBe(0)
+        expect(fs.readFileSync(path.join(dir, "keys/k.txt"), "utf8").trim()).toBe(HEX_KEY)
+        expect(fs.existsSync(path.join(dir, "keys/i.txt"))).toBe(true)
+        expect(fs.existsSync(path.join(dir, "private_key.txt"))).toBe(false)
+    })
+
+    it("--force replaces the key at the configured location, with a backup there", async () => {
+        const dir = writeSubnet(root, "cust", { config: custom(), key: null, iv: null })
+        fs.mkdirSync(path.join(dir, "keys"))
+        fs.writeFileSync(path.join(dir, "keys/k.txt"), HEX_KEY + "\n", { mode: 0o600 })
+        fs.writeFileSync(path.join(dir, "keys/i.txt"), HEX_IV + "\n", { mode: 0o600 })
+        const other = "11".repeat(32)
+        const { code } = await cli(["--yes", "--l2ps-uid", "cust", "--l2ps-role", "join", "--force"], { env: { DEMOS_SETUP_L2PS_KEY: other, DEMOS_SETUP_L2PS_IV: HEX_IV } })
+        expect(code).toBe(0)
+        expect(fs.readFileSync(path.join(dir, "keys/k.txt"), "utf8").trim()).toBe(other)
+        expect(fs.readdirSync(path.join(dir, "keys")).some(f => f.startsWith("k.txt.bak-"))).toBe(true)
+        expect(JSON.parse(fs.readFileSync(path.join(dir, "config.json"), "utf8")).keys.private_key_path).toBe("data/l2ps/cust/keys/k.txt")
+    })
+})
+
+describe("file modes", () => {
+    it("does not widen an operator's 600 config.json", async () => {
+        const dir = writeSubnet(root, "keep_me")
+        fs.chmodSync(path.join(dir, "config.json"), 0o600)
+        await cli(["--yes", "--l2ps-uid", "keep_me"])
+        expect(fs.statSync(path.join(dir, "config.json")).mode & 0o777).toBe(0o600)
+    })
+
+    it("tightens a key file that was too open", async () => {
+        const dir = writeSubnet(root, "keep_me")
+        fs.chmodSync(path.join(dir, "private_key.txt"), 0o644)
+        await cli(["--yes", "--l2ps-uid", "keep_me"])
+        expect(fs.statSync(path.join(dir, "private_key.txt")).mode & 0o777).toBe(0o600)
+    })
+})
+
+describe("matching the loader", () => {
+    it("rejects a subnet id the loader would refuse and accepts a long one", async () => {
+        expect((await cli(["--yes", "--l2ps-uid", "has.dot"])).code).toBe(2)
+        expect((await cli(["--yes", "--l2ps-uid", "a".repeat(80)])).code).toBe(0)
+    })
+
+    it("accepts an imported key with a 0X prefix and inner whitespace", async () => {
+        const spaced = "0X" + HEX_KEY.slice(0, 32) + " \n" + HEX_KEY.slice(32)
+        const { code } = await cli(["--yes", "--l2ps-uid", "shared_1", "--l2ps-role", "join"], { env: { DEMOS_SETUP_L2PS_KEY: spaced, DEMOS_SETUP_L2PS_IV: HEX_IV } })
+        expect(code).toBe(0)
+        expect(fs.readFileSync(subnetFile("shared_1", "private_key.txt"), "utf8").trim()).toBe(HEX_KEY)
     })
 })

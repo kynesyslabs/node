@@ -20,6 +20,8 @@ export interface SetupOptions {
     help: boolean
     only?: Section
     envFile: string
+    /** The operator named the file, so even a container may write it. */
+    envFileGiven: boolean
     // L2PS answers
     l2ps?: boolean
     uid?: string
@@ -107,6 +109,8 @@ L2PS
 ZK
   --zk / --no-zk          Use ZK proofs for L2PS batches.
   --zk-generate           Build the missing proving keys (about 200 MB download, several minutes).
+                          With --yes nothing is downloaded unless this is given; L2PS_ZK_ENABLED
+                          is only switched on once the keys exist.
   --ptau-url <base>       Mirror of the Hermez Powers of Tau files, if the default hosts are down.
 
 Other
@@ -193,6 +197,7 @@ export function parseSetupArgs(
         force: raw.force === true,
         help: raw.help === true,
         envFile: (raw.envFile as string | undefined) ?? ".env",
+        envFileGiven: raw.envFile !== undefined,
     }
     const bools = ["l2ps", "storePlaintext", "requireV2", "messaging", "zk", "zkGenerate"] as const
     for (const k of bools) if (raw[k] !== undefined) o[k] = raw[k] as boolean

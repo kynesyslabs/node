@@ -21,10 +21,12 @@ export interface CliDeps {
     /** Replaces the terminal prompter; tests inject scripted answers here. */
     prompter?: Prompter
     runner?: ZkRunner
+    /** Override container detection; tests set it so they behave the same anywhere. */
+    inDocker?: boolean
 }
 
 export function runCheck(deps: CliDeps, envFile: string, json: boolean): number {
-    const ctx = createContext(deps.cwd, envFile, deps.env)
+    const ctx = createContext(deps.cwd, envFile, deps.env, deps.inDocker)
     const report = collectChecks(ctx)
     const problems = report.items.filter(isProblem)
     if (json) {
@@ -59,7 +61,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
             deps.say("No terminal detected: using flags and DEMOS_SETUP_* variables only, no questions will be asked.")
         }
         const result = await runWizard({
-            ctx: createContext(deps.cwd, opts.envFile, deps.env),
+            ctx: createContext(deps.cwd, opts.envFile, deps.env, deps.inDocker),
             opts,
             prompter,
             say: deps.say,

@@ -5,6 +5,7 @@ import type { SetupOptions } from "./args"
 import {
     collectChecks,
     fixesFor,
+    IDENTITY_KEY_FIX,
     renderTable,
     summarize,
 } from "./checks"
@@ -25,6 +26,8 @@ import {
 } from "./l2ps"
 import { ask, confirm, select, type Prompter } from "./prompt"
 import {
+    normalizeHex,
+    parseHex,
     validateIvHex,
     validateKeyHex,
     validateNonNegativeInt,
@@ -108,10 +111,12 @@ export async function runWizard(deps: WizardDeps): Promise<WizardResult> {
     if (opts.dryRun) {
         say("Dry run finished. Run again without --dry-run to apply.")
     } else {
-        // Same precedence the node applies: the real environment over the env file.
+        // The real environment normally wins over the env file, but `bun run`
+        // loads the old .env into it first; what was just written must show.
+        const written = Object.fromEntries(result.envApplied.map(c => [c.key, c.to]))
         const report = collectChecks({
             ...deps.ctx,
-            env: { ...readEnvFile(deps.ctx.envFilePath), ...deps.ctx.processEnv },
+            env: { ...readEnvFile(deps.ctx.envFilePath), ...deps.ctx.processEnv, ...written },
         })
         say("Result")
         say(renderTable(report.items))
@@ -210,7 +215,6 @@ async function l2psSection(
               })
             : missing("--l2ps-uid", "DEMOS_SETUP_L2PS_UID"))
 
-    const dir = path.join(ctx.root, "data", "l2ps", uid)
     const existing = inspectSubnet(ctx.root, uid)
     const hasKeyInput =
         opts.keyFile !== undefined || opts.keyHex !== undefined ||
@@ -270,30 +274,60 @@ async function l2psSection(
 
     await collectL2psEnv(deps, wantedEnv)
 
+    // Honour key locations an existing config.json already names, as long as
+    // they stay inside the node directory (the loader refuses anything else).
+    const configured = (rel: unknown): string | undefined => {
+        if (typeof rel !== "string" || rel === "") return undefined
+        const abs = path.resolve(ctx.root, rel)
+        return abs.startsWith(path.resolve(ctx.root) + path.sep) ? rel : undefined
+    }
+    const keyRel = configured(existingConfig?.keys?.private_key_path) ?? `data/l2ps/${uid}/private_key.txt`
+    const ivRel = configured(existingConfig?.keys?.iv_path) ?? `data/l2ps/${uid}/iv.txt`
+
     // Reuse what is already on disk before generating anything new.
-    const keyPath = path.join(dir, "private_key.txt")
-    const ivPath = path.join(dir, "iv.txt")
-    const onDiskKey = readTextIfExists(keyPath)
-    const onDiskIv = readTextIfExists(ivPath)
-    const reuseKey = onDiskKey !== undefined && validateKeyHex(onDiskKey).ok ? onDiskKey.trim() : undefined
-    const reuseIv = onDiskIv !== undefined && validateIvHex(onDiskIv).ok ? onDiskIv.trim() : undefined
+    const reuse = (rel: string): string | undefined => {
+        const text = readTextIfExists(path.join(ctx.root, rel))
+        const parsed = text === undefined ? undefined : parseHex(text, "value")
+        return parsed?.ok ? parsed.value : undefined
+    }
     const generated = opts.dryRun
         ? { keyHex: "<new random key>", ivHex: "<new random iv>" }
         : generateKeyMaterial(deps.randomBytes)
     const files = buildSubnetFiles({
         uid,
         rpcs,
-        keyHex: importedKey ?? reuseKey ?? generated.keyHex,
-        ivHex: importedIv ?? reuseIv ?? generated.ivHex,
+        keyHex: importedKey ?? reuse(keyRel) ?? generated.keyHex,
+        ivHex: importedIv ?? reuse(ivRel) ?? generated.ivHex,
         existingConfig,
+        keyRel,
+        ivRel,
     })
 
+    // Decide every file before writing any, so a refused key leaves the
+    // subnet exactly as it was.
+    interface Decision {
+        file: (typeof files)[number]
+        abs: string
+        current?: string
+        differs: boolean
+        overwrite: boolean
+        sameData: boolean
+    }
+    const decisions: Decision[] = []
+    const blocked: string[] = []
     for (const f of files) {
         const abs = path.join(ctx.root, f.rel)
         const current = readTextIfExists(abs)
-        const differs =
+        // Key material is compared as normalised hex, so a missing trailing
+        // newline is not a difference; config as data, so layout is not either.
+        const sameData =
             current !== undefined &&
-            (f.rel.endsWith(".json") ? !sameJson(current, f.content) : current !== f.content)
+            (f.secret
+                ? normalizeHex(current) === normalizeHex(f.content)
+                : f.rel.endsWith(".json")
+                  ? sameJson(current, f.content)
+                  : current === f.content)
+        const differs = current !== undefined && !sameData
         let overwrite = false
         if (differs) {
             if (opts.force) overwrite = true
@@ -306,26 +340,42 @@ async function l2psSection(
                 )
             }
         }
+        if (differs && !overwrite && f.secret) {
+            blocked.push(`${f.rel === keyRel ? "key" : "IV"} differs`)
+        }
+        decisions.push({ file: f, abs, current, differs, overwrite, sameData })
+    }
+    if (blocked.length > 0) {
+        const msg = `Subnet ${uid}: ${blocked.join(", ")}; re-run with --force to replace it (the old file is kept as .bak). Nothing was changed.`
+        say(`  ${msg}`)
+        result.problems.push(msg)
+        return
+    }
+
+    for (const d of decisions) {
+        const f = d.file
         if (opts.dryRun) {
             const outcome =
-                current === undefined ? "would-create" : !differs ? "would-keep" : overwrite ? "would-replace" : "would-keep"
+                d.current === undefined ? "would-create" : d.differs && d.overwrite ? "would-replace" : "would-keep"
             result.files.push({ rel: f.rel, outcome })
             say(`  ${outcome.replace("-", " ")}: ${f.rel}${f.secret ? " (mode 600, contents never shown)" : ""}`)
             continue
         }
-        if (current !== undefined && !differs && current !== f.content) {
-            // Same data, different layout: leave the operator's file as written.
-            result.files.push({ rel: f.rel, outcome: "unchanged" })
+        if (d.sameData) {
+            // Same data, possibly a different layout: keep the operator's text
+            // and only tighten the file mode if it was too open.
+            const outcome = writeFileGuarded(d.abs, d.current as string, { mode: f.mode, overwrite: false })
+            result.files.push({ rel: f.rel, outcome: outcome.status })
             say(`  unchanged ${f.rel}`)
             continue
         }
-        const outcome = writeFileGuarded(abs, f.content, { mode: f.mode, overwrite }, deps.now)
+        const outcome = writeFileGuarded(d.abs, f.content, { mode: f.mode, overwrite: d.overwrite }, deps.now)
         result.files.push({
             rel: f.rel,
             outcome: outcome.status,
             backup: outcome.status === "replaced" ? outcome.backup : undefined,
         })
-        say(describe(f.rel, outcome, f.secret, differs && !overwrite))
+        say(describe(f.rel, outcome, f.secret, d.differs && !d.overwrite))
     }
 
     if (opts.dryRun) {
@@ -393,11 +443,20 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
     const { opts, prompter, ctx, say } = deps
     const env = ctx.env
     const num = (r: Result<number>) => (r.ok ? r.value : undefined)
+    const flag = (key: string) => String(parseBool(env[key]) ?? false)
+    // An explicit flag is always written. A prompted answer is written only
+    // when it differs from what is in effect now, so the env file does not
+    // fill up with the built-in defaults the operator accepted.
+    const put = (key: string, value: string, current: string, prompted: boolean) => {
+        if (!prompted || value !== current) wanted[key] = value
+    }
 
     let retention = opts.retentionDays
-    if (retention === undefined && prompter) {
+    const retentionCurrent = env[EnvKey.L2PS_HISTORY_RETENTION_DAYS] ?? "0"
+    const retentionPrompted = retention === undefined && prompter !== undefined
+    if (retentionPrompted) {
         const v = await ask(prompter, "Days to keep subnet history (0 keeps it forever)", {
-            default: env[EnvKey.L2PS_HISTORY_RETENTION_DAYS] ?? "0",
+            default: retentionCurrent,
             validate: x => {
                 const r = validateNonNegativeInt(x)
                 return r.ok ? null : r.error
@@ -406,10 +465,13 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
         })
         retention = num(validateNonNegativeInt(v))
     }
-    if (retention !== undefined) wanted[EnvKey.L2PS_HISTORY_RETENTION_DAYS] = String(retention)
+    if (retention !== undefined) {
+        put(EnvKey.L2PS_HISTORY_RETENTION_DAYS, String(retention), String(Number(retentionCurrent)), retentionPrompted)
+    }
 
     let plaintext = opts.storePlaintext
-    if (plaintext === undefined && prompter) {
+    const plaintextPrompted = plaintext === undefined && prompter !== undefined
+    if (plaintextPrompted) {
         plaintext = await confirm(
             prompter,
             "Also store decrypted message bodies in the database? (not recommended)",
@@ -420,10 +482,13 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
             plaintext = false
         }
     }
-    if (plaintext !== undefined) wanted[EnvKey.L2PS_HISTORY_STORE_PLAINTEXT] = String(plaintext)
+    if (plaintext !== undefined) {
+        put(EnvKey.L2PS_HISTORY_STORE_PLAINTEXT, String(plaintext), flag(EnvKey.L2PS_HISTORY_STORE_PLAINTEXT), plaintextPrompted)
+    }
 
     let requireV2 = opts.requireV2
-    if (requireV2 === undefined && prompter) {
+    const v2Prompted = requireV2 === undefined && prompter !== undefined
+    if (v2Prompted) {
         requireV2 = await confirm(
             prompter,
             "Refuse the old history signature? (turn on only once clients sign the new form)",
@@ -431,10 +496,13 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
             say,
         )
     }
-    if (requireV2 !== undefined) wanted[EnvKey.L2PS_HISTORY_REQUIRE_V2] = String(requireV2)
+    if (requireV2 !== undefined) {
+        put(EnvKey.L2PS_HISTORY_REQUIRE_V2, String(requireV2), flag(EnvKey.L2PS_HISTORY_REQUIRE_V2), v2Prompted)
+    }
 
     let messaging = opts.messaging
-    if (messaging === undefined && prompter) {
+    const messagingPrompted = messaging === undefined && prompter !== undefined
+    if (messagingPrompted) {
         messaging = await confirm(
             prompter,
             "Enable the instant-messaging server on top of L2PS?",
@@ -442,12 +510,16 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
             say,
         )
     }
-    if (messaging !== undefined) wanted[EnvKey.L2PS_MESSAGING_ENABLED] = String(messaging)
+    if (messaging !== undefined) {
+        put(EnvKey.L2PS_MESSAGING_ENABLED, String(messaging), flag(EnvKey.L2PS_MESSAGING_ENABLED), messagingPrompted)
+    }
     if (messaging) {
         let port = opts.messagingPort
-        if (port === undefined && prompter) {
+        const portCurrent = env[EnvKey.L2PS_MESSAGING_PORT] ?? "3006"
+        const portPrompted = port === undefined && prompter !== undefined
+        if (portPrompted) {
             const v = await ask(prompter, "Messaging port", {
-                default: env[EnvKey.L2PS_MESSAGING_PORT] ?? "3006",
+                default: portCurrent,
                 validate: x => {
                     const r = validatePort(x)
                     return r.ok ? null : r.error
@@ -456,7 +528,7 @@ async function collectL2psEnv(deps: WizardDeps, wanted: Record<string, string>):
             })
             port = num(validatePort(v))
         }
-        if (port !== undefined) wanted[EnvKey.L2PS_MESSAGING_PORT] = String(port)
+        if (port !== undefined) put(EnvKey.L2PS_MESSAGING_PORT, String(port), portCurrent, portPrompted)
     }
 }
 
@@ -479,8 +551,8 @@ async function zkSection(
         say("  Identity proofs: ready (only the committed verification key is needed on a node).")
     } else {
         say(`  Identity proofs: ${identity.state.toUpperCase()} - ${identity.detail}`)
-        say("  This key is shared by every validator and is never regenerated here. Restore it with:")
-        say("    git checkout -- src/features/zk/keys/verification_key_merkle.json")
+        say("  This key is shared by every validator and is never regenerated here.")
+        say(`  ${IDENTITY_KEY_FIX}`)
         result.problems.push(`ZK identity verification key is ${identity.state}`)
     }
 
@@ -506,7 +578,11 @@ async function zkSection(
         return
     }
     if (!want) {
-        wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "false"
+        // Without an explicit choice, "off" is only worth writing when proofs
+        // would otherwise be in use.
+        if (opts.zk !== undefined || currentlyOn || ready.length > 0) {
+            wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "false"
+        }
         say("  ZK proofs for L2PS batches: off.")
         return
     }
@@ -514,9 +590,13 @@ async function zkSection(
         say("  No L2PS subnet is configured, so there are no batches to prove. Skipping.")
         return
     }
-    wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
+
+    // Requiring proofs before the keys exist would only make the node complain
+    // at every start, so the switch is flipped last.
+    const untouched = "  L2PS_ZK_ENABLED was left unchanged."
     if (batches.every(b => b.complete)) {
         say("  All batch keys are in place.")
+        wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
         return
     }
 
@@ -524,6 +604,7 @@ async function zkSection(
     if (tools.length > 0) {
         const msg = `Missing ${tools.join(", ")}. Run "bun install" first.`
         say(`  ${msg}`)
+        say(untouched)
         result.problems.push(msg)
         return
     }
@@ -537,13 +618,16 @@ async function zkSection(
                   true,
                   say,
               )
-            : true)
+            : false)
     if (!generate) {
-        say("  Not building. Later: bun run setup --only zk --zk --zk-generate")
+        say("  The batch keys are not built, and building them downloads about 200 MB.")
+        say("  Build them with: bun run setup --only zk --zk --zk-generate")
+        say(untouched)
         return
     }
     if (opts.dryRun) {
         say(`  would download two Powers of Tau files and build the missing keys under ${L2PS_ZK_DIR}/keys`)
+        say("  would then set L2PS_ZK_ENABLED=true")
         return
     }
 
@@ -553,6 +637,7 @@ async function zkSection(
     } catch {
         const msg = `${L2PS_ZK_DIR} is not writable here (read-only image?). Build the keys on a machine with a writable checkout.`
         say(`  ${msg}`)
+        say(untouched)
         result.problems.push(msg)
         return
     }
@@ -570,6 +655,11 @@ async function zkSection(
         const msg = `Building the ZK keys failed: ${e instanceof Error ? e.message : e}`
         say(`  ${msg}`)
         result.problems.push(msg)
+    }
+    if (inspectBatchArtifacts(ctx.root).every(b => b.complete)) {
+        wantedEnv[EnvKey.L2PS_ZK_ENABLED] = "true"
+    } else {
+        say(untouched)
     }
 }
 
@@ -619,6 +709,20 @@ async function applyEnv(
     }
     if (applied.length === 0) return
 
+    // Inside the image /app/.env is not the operator's file and would vanish
+    // with the container, so the lines are handed over instead.
+    if (ctx.inDocker && !opts.envFileGiven) {
+        say(
+            opts.dryRun
+                ? "  Running inside the container image: .env would not be written; you would be given these lines for the host .env or the compose environment:"
+                : "  Running inside the container image, so .env is not written. Put these lines in the host .env (or the compose environment) and recreate the container:",
+        )
+        for (const c of applied) {
+            say(`    ${c.key}=${c.to}`)
+            if (!opts.dryRun) result.manualEnv[c.key] = c.to
+        }
+        return
+    }
     if (opts.dryRun) {
         for (const c of applied) say(`  would set ${c.key}=${c.to} in ${envName}`)
         return

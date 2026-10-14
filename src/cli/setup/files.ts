@@ -23,12 +23,18 @@ export function writeFileGuarded(
     content: string,
     opts: WriteOptions,
     now: () => number = Date.now,
+    rename: (from: string, to: string) => void = fs.renameSync,
 ): WriteOutcome {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     const exists = fs.existsSync(file)
+    // Modes only ever tighten: an operator's 600 config stays 600, a 644 key
+    // is brought down to 600, nothing is made more readable.
+    let mode = opts.mode
     if (exists) {
+        const current = fs.statSync(file).mode & 0o777
+        mode = current & opts.mode
         if (fs.readFileSync(file, "utf8") === content) {
-            fs.chmodSync(file, opts.mode)
+            if (mode !== current) fs.chmodSync(file, mode)
             return { status: "unchanged" }
         }
         if (!opts.overwrite) return { status: "kept" }
@@ -42,9 +48,14 @@ export function writeFileGuarded(
     }
 
     const tmp = `${file}.tmp-${process.pid}`
-    fs.writeFileSync(tmp, content, { mode: opts.mode, flag: "wx" })
-    fs.chmodSync(tmp, opts.mode)
-    fs.renameSync(tmp, file)
+    try {
+        fs.writeFileSync(tmp, content, { mode, flag: "wx" })
+        fs.chmodSync(tmp, mode)
+        rename(tmp, file)
+    } catch (e) {
+        fs.rmSync(tmp, { force: true })
+        throw e
+    }
     return exists ? { status: "replaced", backup } : { status: "created" }
 }
 

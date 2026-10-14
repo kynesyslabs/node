@@ -33,6 +33,7 @@ blocked_ips.json
 .env
 .env.local
 .env.*.local
+.env.bak-*
 mnemonic.txt
 certs/
 *.pem

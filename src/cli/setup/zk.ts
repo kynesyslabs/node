@@ -9,10 +9,9 @@ export type BatchSize = (typeof BATCH_SIZES)[number]
 const PTAU_POWER: Record<BatchSize, number> = { 5: 16, 10: 17 }
 const PTAU_MIN_BYTES = 1_000_000
 
-// The ceremony file is public and the same everywhere; the committed
-// verification keys only match files from the Hermez ceremony. Hosts come and
-// go (the first one answers 403 at the time of writing), so the base URL can
-// be replaced with --ptau-url.
+// The committed verification keys only match files from the Hermez ceremony,
+// and the hosts serving them can disappear. Each one is tried in turn and the
+// list can be replaced with --ptau-url, so a dead host never blocks the setup.
 export const PTAU_BASE_URLS = [
     "https://storage.googleapis.com/zkevm/ptau",
     "https://hermez.s3-eu-west-1.amazonaws.com",
@@ -100,6 +99,15 @@ export async function downloadWithFetch(
     fs.renameSync(tmp, dest)
 }
 
+function vkeyParses(root: string, size: BatchSize): boolean {
+    try {
+        JSON.parse(fs.readFileSync(path.join(batchDir(root, size), "verification_key.json"), "utf8"))
+        return true
+    } catch {
+        return false
+    }
+}
+
 export function missingZkTools(root: string): string[] {
     const need = [
         path.join("node_modules", ".bin", "circom2"),
@@ -130,7 +138,14 @@ export async function runL2psZkSetup(
     const snarkjs = path.join(root, "node_modules", ".bin", "snarkjs")
     fs.mkdirSync(ptauDir, { recursive: true })
 
+    const existing = inspectBatchArtifacts(root)
     for (const size of sizes) {
+        const have = existing.find(b => b.size === size)
+        if (have?.complete && vkeyParses(root, size)) {
+            say(`batch_${size} is already built, skipping`)
+            messages.push(`batch_${size}: already built`)
+            continue
+        }
         const power = PTAU_POWER[size]
         const ptauName = `powersOfTau28_hez_final_${power}.ptau`
         const ptau = path.join(ptauDir, ptauName)
@@ -169,6 +184,9 @@ export async function runL2psZkSetup(
         fs.mkdirSync(out, { recursive: true })
         const r1cs = path.join(out, `${name}.r1cs`)
         const zkey = path.join(out, `${name}.zkey`)
+        // Built under a temporary name: a good zkey is only ever replaced by a
+        // new one that has been checked against the committed key.
+        const zkeyTmp = `${zkey}.building`
         const generatedVkey = path.join(out, "verification_key.generated.json")
         const committedVkey = path.join(out, "verification_key.json")
 
@@ -190,40 +208,44 @@ export async function runL2psZkSetup(
             [
                 `Generating the proving key for ${name}`,
                 snarkjs,
-                ["plonk", "setup", r1cs, ptau, zkey],
+                ["plonk", "setup", r1cs, ptau, zkeyTmp],
             ],
             [
                 `Exporting the verification key for ${name}`,
                 snarkjs,
-                ["zkey", "export", "verificationkey", zkey, generatedVkey],
+                ["zkey", "export", "verificationkey", zkeyTmp, generatedVkey],
             ],
         ]
         for (const [label, cmd, args] of steps) {
             say(`${label}...`)
             const code = await runner.exec(cmd, args, root)
             if (code !== 0) {
+                fs.rmSync(zkeyTmp, { force: true })
+                fs.rmSync(generatedVkey, { force: true })
                 messages.push(`${label} failed (exit code ${code})`)
                 return { ok: false, messages }
             }
         }
 
-        if (!fs.existsSync(committedVkey)) {
+        if (!vkeyParses(root, size)) {
             fs.renameSync(generatedVkey, committedVkey)
-            messages.push(`batch_${size}: no committed verification key, wrote the generated one`)
+            messages.push(`batch_${size}: no usable verification key on disk, wrote the generated one`)
         } else {
             const same =
                 JSON.stringify(JSON.parse(fs.readFileSync(committedVkey, "utf8"))) ===
                 JSON.stringify(JSON.parse(fs.readFileSync(generatedVkey, "utf8")))
             fs.rmSync(generatedVkey, { force: true })
             if (!same) {
-                // The zkey just built would produce proofs peers reject.
-                fs.rmSync(zkey, { force: true })
+                // Proofs from this key would be rejected by peers; any earlier
+                // zkey stays untouched.
+                fs.rmSync(zkeyTmp, { force: true })
                 messages.push(
-                    `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The proving key was removed. Update the repository (git pull) and run the setup again.`,
+                    `batch_${size}: the verification key built here differs from the committed one, so proofs from it would be rejected by peers. The new proving key was discarded. Update the repository (git pull) and run the setup again.`,
                 )
                 return { ok: false, messages }
             }
         }
+        fs.renameSync(zkeyTmp, zkey)
         messages.push(`batch_${size}: ready`)
     }
     return { ok: true, messages }

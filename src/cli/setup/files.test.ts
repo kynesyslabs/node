@@ -47,6 +47,33 @@ describe("writeFileGuarded", () => {
     })
 })
 
+describe("file modes and failure cleanup", () => {
+    it("never widens a mode: an operator's 600 config stays 600, a 644 key is tightened", () => {
+        const cfg = path.join(root, "config.json")
+        fs.writeFileSync(cfg, "{}\n", { mode: 0o600 })
+        expect(writeFileGuarded(cfg, "{}\n", { mode: 0o644, overwrite: false }).status).toBe("unchanged")
+        expect(fs.statSync(cfg).mode & 0o777).toBe(0o600)
+        writeFileGuarded(cfg, "{\"a\":1}\n", { mode: 0o644, overwrite: true })
+        expect(fs.statSync(cfg).mode & 0o777).toBe(0o600)
+
+        const key = path.join(root, "key.txt")
+        fs.writeFileSync(key, "k\n", { mode: 0o644 })
+        fs.chmodSync(key, 0o644)
+        writeFileGuarded(key, "k\n", { mode: 0o600, overwrite: false })
+        expect(fs.statSync(key).mode & 0o777).toBe(0o600)
+    })
+
+    it("removes its temporary file when the final rename fails", () => {
+        const file = path.join(root, "k.txt")
+        const failing = () => {
+            throw new Error("rename failed")
+        }
+        expect(() => writeFileGuarded(file, "v\n", { mode: 0o600, overwrite: false }, Date.now, failing)).toThrow("rename failed")
+        expect(fs.readdirSync(root).filter(f => f.includes(".tmp-"))).toEqual([])
+        expect(fs.existsSync(file)).toBe(false)
+    })
+})
+
 describe("subnet file generation", () => {
     it("writes a layout the node loader accepts, with valid key material", () => {
         const { keyHex, ivHex } = generateKeyMaterial()
@@ -101,6 +128,26 @@ describe("env file editing", () => {
         expect(out.split("\n").indexOf("L2PS_ZK_ENABLED=true")).toBe(1)
         expect(out).toContain("# --- L2PS / ZK (written by `bun run setup`) ---")
         expect(out.endsWith("\n")).toBe(true)
+    })
+
+    it("strips the quotes of a quoted value that carries a trailing comment", () => {
+        expect(parseEnv("KEY=\"v\" # why\nOTHER='o p' # c\nPLAIN=x # c\n")).toEqual({ KEY: "v", OTHER: "o p", PLAIN: "x" })
+    })
+
+    it("edits the last duplicate, which is the one dotenv uses", () => {
+        const text = "X=first\nA=1\nX=second\n"
+        expect(parseEnv(text).X).toBe("second")
+        const out = applyEnvChanges(text, { X: "new" })
+        expect(out).toBe("X=first\nA=1\nX=new\n")
+        expect(parseEnv(out).X).toBe("new")
+    })
+
+    it("keeps CRLF line endings, for edited and appended lines alike", () => {
+        const out = applyEnvChanges("A=1\r\nL2PS_ZK_ENABLED=false\r\n", { L2PS_ZK_ENABLED: "true", NEW_KEY: "1" })
+        expect(out.replaceAll("\r\n", "")).not.toContain("\n")
+        expect(out).toContain("L2PS_ZK_ENABLED=true\r\n")
+        expect(out).toContain("NEW_KEY=1\r\n")
+        expect(parseEnv(out)).toMatchObject({ A: "1", L2PS_ZK_ENABLED: "true", NEW_KEY: "1" })
     })
 
     it("starts a fresh file when there is none", () => {

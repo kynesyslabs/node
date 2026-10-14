@@ -6,12 +6,10 @@ export function parseEnv(text: string): Record<string, string> {
         const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line)
         if (!m) continue
         let value = m[2].trim()
-        const quote = value[0]
-        if ((quote === "\"" || quote === "'") && value.endsWith(quote) && value.length >= 2) {
-            value = value.slice(1, -1)
-        } else {
-            value = value.replace(/\s+#.*$/, "")
-        }
+        // A quoted value ends at its closing quote; anything after is a comment.
+        const quoted = /^(["'])(.*?)\1/.exec(value)
+        if (quoted) value = quoted[2]
+        else value = value.replace(/\s+#.*$/, "")
         out[m[1]] = value
     }
     return out
@@ -58,26 +56,35 @@ const SECTION_TITLE = "# --- L2PS / ZK (written by `bun run setup`) ---"
 
 /**
  * Sets the given keys in an env file's text, touching nothing else. An active
- * `KEY=` line is edited in place, a commented `#KEY=` example is switched on,
- * anything new goes to a labelled block at the end.
+ * `KEY=` line is edited in place (the last one, because dotenv lets the last
+ * duplicate win), a commented `#KEY=` example is switched on, anything new goes
+ * to a labelled block at the end. CRLF files stay CRLF.
  */
 export function applyEnvChanges(
     text: string,
     changes: Record<string, string>,
 ): string {
+    const crlf = text.includes("\r\n")
+    const cr = crlf ? "\r" : ""
     const lines = text.length > 0 ? text.split("\n") : []
     const appended: string[] = []
+    const lastIndex = (re: RegExp) => {
+        for (let i = lines.length - 1; i >= 0; i--) if (re.test(lines[i])) return i
+        return -1
+    }
     for (const [key, value] of Object.entries(changes)) {
         const active = new RegExp(`^\\s*(?:export\\s+)?${key}\\s*=`)
         const commented = new RegExp(`^\\s*#\\s*${key}\\s*=`)
-        let idx = lines.findIndex(l => active.test(l))
-        if (idx === -1) idx = lines.findIndex(l => commented.test(l))
-        if (idx !== -1) lines[idx] = `${key}=${value}`
-        else appended.push(`${key}=${value}`)
+        let idx = lastIndex(active)
+        if (idx === -1) idx = lastIndex(commented)
+        if (idx !== -1) lines[idx] = `${key}=${value}${cr}`
+        else appended.push(`${key}=${value}${cr}`)
     }
     if (appended.length > 0) {
-        if (lines.length > 0 && lines[lines.length - 1] !== "") lines.push("")
-        lines.push(SECTION_TITLE, ...appended, "")
+        // Drop the empty piece a trailing newline leaves, then restore it last.
+        if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop()
+        if (lines.length > 0) lines.push(cr)
+        lines.push(`${SECTION_TITLE}${cr}`, ...appended, "")
     }
     const out = lines.join("\n")
     return out.endsWith("\n") || out === "" ? out : out + "\n"

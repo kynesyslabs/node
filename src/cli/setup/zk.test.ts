@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { inspectBatchArtifacts, missingZkTools, runL2psZkSetup } from "./zk"
-import { fakeRunner, makeRoot, recorder, removeRoot } from "./testSupport"
+import { fakeRunner, makeRoot, recorder, removeRoot, writeZkBatch } from "./testSupport"
 
 let root: string
 beforeEach(() => {
@@ -94,6 +94,50 @@ describe("runL2psZkSetup", () => {
         }
         await runL2psZkSetup(root, runner, recorder().say, [5], ["https://mirror.example/ptau/"])
         expect(urls).toEqual(["https://mirror.example/ptau/powersOfTau28_hez_final_16.ptau"])
+    })
+
+    it("skips batch sizes that are already built and valid", async () => {
+        writeZkBatch(root, 5)
+        const runner = fakeRunner()
+        const r = recorder()
+        const out = await runL2psZkSetup(root, runner, r.say, [5])
+        expect(out.ok).toBe(true)
+        expect(runner.calls).toEqual([])
+        expect(r.text()).toContain("already built")
+    })
+
+    it("rebuilds a size whose verification key is unreadable", async () => {
+        writeZkBatch(root, 5)
+        fs.writeFileSync(path.join(keysDir(5), "verification_key.json"), "{ nope")
+        const runner = fakeRunner()
+        await runL2psZkSetup(root, runner, recorder().say, [5])
+        expect(runner.calls.length).toBeGreaterThan(0)
+    })
+
+    it("never deletes a good proving key when a new build does not match", async () => {
+        seedCommittedVkeys({ protocol: "plonk", power: 14 })
+        // zkey present but wasm missing: the size counts as incomplete and is rebuilt.
+        fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "previous-good")
+        const out = await runL2psZkSetup(root, fakeRunner({ vkeyJson: JSON.stringify({ protocol: "plonk", power: 15 }) }), recorder().say, [5])
+        expect(out.ok).toBe(false)
+        expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("previous-good")
+        expect(fs.readdirSync(keysDir(5)).filter(f => f.endsWith(".building"))).toEqual([])
+    })
+
+    it("builds under a temporary name and swaps it in only after the key matches", async () => {
+        seedCommittedVkeys({ protocol: "plonk" })
+        fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "old")
+        const runner = fakeRunner()
+        const seen: string[] = []
+        const realExec = runner.exec
+        runner.exec = async (cmd, args, cwd) => {
+            if (args[0] === "plonk") seen.push(args[args.length - 1])
+            return realExec(cmd, args, cwd)
+        }
+        await runL2psZkSetup(root, runner, recorder().say, [5])
+        expect(seen).toEqual([path.join(keysDir(5), "l2ps_batch_5.zkey.building")])
+        expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("zkey")
+        expect(fs.readdirSync(keysDir(5)).filter(f => f.endsWith(".building"))).toEqual([])
     })
 
     it("skips a ptau file that is already downloaded", async () => {

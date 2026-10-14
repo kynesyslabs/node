@@ -555,7 +555,7 @@ bun run setup --yes ...  # no questions; answers come from flags and DEMOS_SETUP
 What the setup does:
 
 - **L2PS:** creates `data/l2ps/<id>/` (config, subnet key, IV) with a fresh key, or imports the key and IV you received from the subnet owner when you join an existing subnet. Key files get mode 600 and are never printed. It also sets the history retention, plaintext history, messaging and port options in `.env`.
-- **ZK batch proofs:** turns `L2PS_ZK_ENABLED` on and builds the proving keys (about 200 MB download, several minutes). The identity verification key is committed to the repository and is only checked, never regenerated.
+- **ZK batch proofs:** builds the proving keys (about 200 MB download, several minutes; with `--yes` only when you pass `--zk-generate`) and turns `L2PS_ZK_ENABLED` on once they exist. The identity verification key is committed to the repository and is only checked, never regenerated.
 - Nothing that already exists is replaced unless you say yes or pass `--force`. A replaced file is kept next to the original as `<name>.bak-<time>`. Add `--dry-run` to see what would be written.
 
 Examples:
@@ -565,16 +565,23 @@ Examples:
 bun run setup --yes --l2ps-uid my_subnet --l2ps-rpc http://node2.example.com:53550 \
     --messaging --zk
 
-# Join an existing subnet (key and IV from the owner, kept out of the process list)
-DEMOS_SETUP_L2PS_KEY=<hex> DEMOS_SETUP_L2PS_IV=<hex> \
-    bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join
+# Join an existing subnet: put the key and IV you received in files (chmod 600,
+# delete them afterwards) so they never appear on a command line
+bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join \
+    --l2ps-key-file ./subnet.key --l2ps-iv-file ./subnet.iv
+
+# Or read them silently into the shell's environment (not shown in `ps`)
+read -rs -p "Subnet key: " DEMOS_SETUP_L2PS_KEY; echo
+read -rs -p "Subnet IV: " DEMOS_SETUP_L2PS_IV; echo
+export DEMOS_SETUP_L2PS_KEY DEMOS_SETUP_L2PS_IV
+bun run setup --yes --l2ps-uid shared_subnet --l2ps-role join
 
 bun run setup --help     # every flag and its DEMOS_SETUP_* variable
 ```
 
-When the node starts in a terminal and L2PS or ZK is configured but incomplete, it offers to run the setup first. Without a terminal (Docker, systemd, CI) it stops with one message listing what is missing. Set `DEMOS_SKIP_SETUP_CHECK=true` to start anyway; the affected features then stay unavailable.
+At start the node checks this setup. If L2PS, messaging or explicitly enabled ZK batch proofs are incomplete, it prints a loud banner (and logs it) listing what is missing and the fix command, then keeps booting: the affected features stay unavailable, the rest of the node is not affected. In a terminal it also offers to run the setup (default no after 30 seconds; Ctrl-C aborts the start). Set `DEMOS_SETUP_STRICT=true` to stop the node instead (CI, fail-fast operators), or `DEMOS_SKIP_SETUP_CHECK=true` to silence the banner. A missing or corrupt ZK identity verification key always stops the node (the skip switch does not apply), because every validator must verify with the same committed key; restore the committed file from the repository (in Docker, rebuild or re-pull the image).
 
-**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. The container cannot write your host `.env`, so the setup prints the lines to add there; recreate the container afterwards. The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
+**Docker:** run the same commands inside the container, for example `docker compose exec node bun run setup --check`. Subnet files go into the `demos_node_data` volume. Inside the image the setup does not write `/app/.env`; it prints the lines to put in your host `.env` (or the compose environment), and you recreate the container afterwards. The image has no writable ZK key directory, so build the ZK keys on a checkout and not in the image.
 
 ---
 
