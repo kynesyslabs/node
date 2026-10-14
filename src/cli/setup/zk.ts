@@ -128,6 +128,63 @@ export function missingZkTools(root: string): string[] {
 }
 
 /**
+ * Puts a finished circuit directory and proving key at their final paths. The
+ * new files are first renamed to a temporary name next to their destination, so
+ * nothing at the final paths changes until both are ready. The old files are
+ * then moved aside (the batch reads as unfinished from here until the very last
+ * step, so a process killed halfway never leaves a new circuit next to an old
+ * key), the new ones are renamed in, and only then are the old ones deleted. A
+ * failed step puts the old files back; the previous keys survive.
+ */
+export function swapIntoPlace(
+    newWasmDir: string,
+    wasmDir: string,
+    newZkey: string,
+    zkey: string,
+    rename: (from: string, to: string) => void = fs.renameSync,
+): void {
+    const pairs: Array<{ fresh: string; final: string; next: string; old: string }> = [
+        { fresh: newWasmDir, final: wasmDir, next: `${wasmDir}.next`, old: `${wasmDir}.old` },
+        { fresh: newZkey, final: zkey, next: `${zkey}.next`, old: `${zkey}.old` },
+    ]
+    const undo: Array<() => void> = []
+    try {
+        for (const p of pairs) {
+            fs.rmSync(p.next, { recursive: true, force: true })
+            fs.rmSync(p.old, { recursive: true, force: true })
+            rename(p.fresh, p.next)
+            undo.push(() => fs.rmSync(p.next, { recursive: true, force: true }))
+        }
+        const hadOld = new Set<string>()
+        for (const p of pairs) {
+            if (fs.existsSync(p.final)) {
+                hadOld.add(p.final)
+                rename(p.final, p.old)
+                undo.push(() => {
+                    fs.rmSync(p.final, { recursive: true, force: true })
+                    rename(p.old, p.final)
+                })
+            }
+        }
+        for (const p of pairs) {
+            rename(p.next, p.final)
+            // With nothing to restore, a half-installed new file must go.
+            if (!hadOld.has(p.final)) undo.push(() => fs.rmSync(p.final, { recursive: true, force: true }))
+        }
+    } catch (e) {
+        for (const step of undo.reverse()) {
+            try {
+                step()
+            } catch {
+                /* keep restoring the rest */
+            }
+        }
+        throw e
+    }
+    for (const p of pairs) fs.rmSync(p.old, { recursive: true, force: true })
+}
+
+/**
  * Builds the L2PS batch circuits (compile, PLONK setup, vkey export) with the
  * circom2 and snarkjs already in node_modules, so no native circom is needed.
  * The vkey it derives must equal the committed one: peers verify our proofs
@@ -270,13 +327,7 @@ export async function runL2psZkSetup(
                 )
                 return { ok: false, messages }
             }
-            // The old proving key goes first: a process killed halfway then leaves
-            // a batch that reads as unfinished, never a new circuit beside an old
-            // key, which would look complete and prove nothing.
-            fs.rmSync(zkey, { force: true })
-            fs.rmSync(path.join(out, wasmDirName), { recursive: true, force: true })
-            fs.renameSync(path.join(staging, wasmDirName), path.join(out, wasmDirName))
-            fs.renameSync(zkeyNew, zkey)
+            swapIntoPlace(path.join(staging, wasmDirName), path.join(out, wasmDirName), zkeyNew, zkey)
         } finally {
             // Whatever ended the batch, a staging directory must not outlive it.
             abandon()

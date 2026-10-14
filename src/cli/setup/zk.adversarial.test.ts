@@ -3,7 +3,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import { spawnSync } from "node:child_process"
 import { runCli } from "./cli"
-import { inspectBatchArtifacts, runL2psZkSetup, type ZkRunner } from "./zk"
+import { inspectBatchArtifacts, runL2psZkSetup, swapIntoPlace, type ZkRunner } from "./zk"
 import { fakeRunner, installZkTools, makeRoot, recorder, removeRoot, writeSubnet, writeZkBatch } from "./testSupport"
 
 let root: string
@@ -261,5 +261,71 @@ describe.skipIf(!hasGit)("what git is told to ignore", () => {
     it("still tracks the committed verification keys", () => {
         expect(ignored("src/libs/l2ps/zk/keys/batch_5/verification_key.json")).toBe(false)
         expect(ignored("src/features/zk/keys/verification_key_merkle.json")).toBe(false)
+    })
+})
+
+describe("swapIntoPlace keeps the previous keys when any step fails", () => {
+    function layout(withOld: boolean) {
+        const dir = path.join(root, "swap")
+        fs.mkdirSync(path.join(dir, "stage", "wasm_js"), { recursive: true })
+        fs.writeFileSync(path.join(dir, "stage", "wasm_js", "c.wasm"), "NEW-WASM")
+        fs.writeFileSync(path.join(dir, "stage", "k.zkey"), "NEW-ZKEY")
+        if (withOld) {
+            fs.mkdirSync(path.join(dir, "wasm_js"), { recursive: true })
+            fs.writeFileSync(path.join(dir, "wasm_js", "c.wasm"), "OLD-WASM")
+            fs.writeFileSync(path.join(dir, "k.zkey"), "OLD-ZKEY")
+        }
+        return {
+            dir,
+            run: (rename?: (a: string, b: string) => void) => swapIntoPlace(path.join(dir, "stage", "wasm_js"), path.join(dir, "wasm_js"), path.join(dir, "stage", "k.zkey"), path.join(dir, "k.zkey"), rename),
+            files: () => ({
+                wasm: fs.existsSync(path.join(dir, "wasm_js", "c.wasm")) ? fs.readFileSync(path.join(dir, "wasm_js", "c.wasm"), "utf8") : null,
+                zkey: fs.existsSync(path.join(dir, "k.zkey")) ? fs.readFileSync(path.join(dir, "k.zkey"), "utf8") : null,
+                strays: fs.readdirSync(dir).filter(f => /\.(next|old)$/.test(f)),
+            }),
+        }
+    }
+
+    it("installs both new files and leaves no temporary name behind", () => {
+        const l = layout(true)
+        l.run()
+        expect(l.files()).toEqual({ wasm: "NEW-WASM", zkey: "NEW-ZKEY", strays: [] })
+    })
+
+    for (const withOld of [true, false]) {
+        for (let failAt = 1; failAt <= (withOld ? 6 : 4); failAt++) {
+            it(`a rename that throws as call ${failAt} (${withOld ? "old keys present" : "no old keys"}) leaves the previous state intact`, () => {
+                const l = layout(withOld)
+                let calls = 0
+                expect(() =>
+                    l.run((a, b) => {
+                        if (++calls === failAt) throw new Error("rename failed")
+                        fs.renameSync(a, b)
+                    }),
+                ).toThrow("rename failed")
+                // With old keys: exactly the old pair. Without: nothing at the final paths.
+                expect(l.files()).toEqual(withOld ? { wasm: "OLD-WASM", zkey: "OLD-ZKEY", strays: [] } : { wasm: null, zkey: null, strays: [] })
+            })
+        }
+    }
+
+    it("through the real build: a rename that throws on the second call keeps the old proving key", async () => {
+        seedCommitted()
+        fs.writeFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "OLD-ZKEY")
+        const real = fs.renameSync
+        let calls = 0
+        const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+            // The downloads and the fake toolchain write files; only the swap renames.
+            if (++calls === 2) throw new Error("second rename failed")
+            return real(from, to)
+        }) as typeof fs.renameSync)
+        try {
+            await expect(runL2psZkSetup(root, toolchain(), recorder().say, [5])).rejects.toThrow("second rename failed")
+        } finally {
+            spy.mockRestore()
+        }
+        expect(fs.readFileSync(path.join(keysDir(5), "l2ps_batch_5.zkey"), "utf8")).toBe("OLD-ZKEY")
+        expect(stagingLeft()).toEqual([])
+        expect(fs.readdirSync(keysDir(5)).filter(f => /\.(next|old)$/.test(f))).toEqual([])
     })
 })
