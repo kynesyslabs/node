@@ -219,11 +219,17 @@ export const l2psHandlers: Record<string, NodeCallHandler> = {
         const rawSince = readPageValue(data.since)
 
         const maxLimit = 1000
+        // The unversioned form signs none of these, so a fractional or
+        // out-of-range value cannot be refused without breaking existing
+        // clients; it is made a whole number the table can take instead. A
+        // version 2 value is checked as supplied, below, and refused.
+        const whole = (value: number) =>
+            isV2 ? value : Math.min(Math.floor(value), Number.MAX_SAFE_INTEGER)
         // Only a missing value takes the default: a supplied zero is clamped to
         // the documented minimum, so the signed value and the applied value agree.
-        const limit = Math.min(Math.max(1, rawLimit ?? 100), maxLimit)
-        const offset = Math.max(0, rawOffset ?? 0)
-        const since = Math.max(0, rawSince ?? 0)
+        const limit = whole(Math.min(Math.max(1, rawLimit ?? 100), maxLimit))
+        const offset = whole(Math.max(0, rawOffset ?? 0))
+        const since = whole(Math.max(0, rawSince ?? 0))
 
         if (isV2) {
             // The message is joined with ":", so a segment that can carry one

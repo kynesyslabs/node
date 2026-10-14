@@ -397,3 +397,23 @@ describe("no 5xx from a malformed request", () => {
         }
     })
 })
+
+describe("unversioned request, page values the node applies", () => {
+    const ts = String(NOW)
+    const legacy = () => ({ timestamp: ts, signature: sign(`getL2PSHistory:${UID}:${address}:${ts}`) })
+
+    it("hands the table whole numbers inside the safe range for a hostile offset and since", async () => {
+        const response = await call({ ...legacy(), offset: 1e308, since: 1e308, limit: 2.5 })
+        expect(response.result).toBe(200)
+
+        const [, , limit, offset, since] = getAccountTransactions.mock.calls[0] as number[]
+        for (const value of [limit, offset, since]) {
+            expect(Number.isSafeInteger(value)).toBe(true)
+        }
+    })
+
+    it("rounds a fractional offset down so the row it names is not skipped", async () => {
+        await call({ ...legacy(), offset: "1.5" })
+        expect(getAccountTransactions.mock.calls[0][3]).toBe(1)
+    })
+})
