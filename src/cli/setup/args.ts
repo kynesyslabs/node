@@ -5,6 +5,7 @@ import {
     validateRpcList,
     validateRpcUrl,
     validateUid,
+    type Result,
 } from "./validate"
 
 export class UsageError extends Error {}
@@ -222,17 +223,11 @@ export function peekModes(argv: string[]): { check: boolean; json: boolean; help
     return { check: raw.check === true, json: raw.json === true, help: raw.help === true }
 }
 
-export function parseSetupArgs(
-    argv: string[],
-    env: Record<string, string | undefined> = process.env,
-): SetupOptions {
-    const { raw, fromCli } = readFlags(argv, false)
-    // Which answers came from the command line and which from the environment,
-    // so a contradiction is only reported within one source (flags win over
-    // variables, so a lingering variable never blocks a flag).
-    const fromEnv = new Set<keyof SetupOptions>()
+type Source = Set<keyof SetupOptions>
 
-    // Fall back to the environment for anything the command line left unset.
+/** Fills in what the command line left unset from DEMOS_SETUP_*; returns which answers came from the environment. */
+function mergeEnvironment(raw: RawAnswers, env: Record<string, string | undefined>): Source {
+    const fromEnv: Source = new Set()
     for (const s of SPECS) {
         if (raw[s.key] !== undefined || !s.env) continue
         const v = env[s.env]
@@ -242,7 +237,24 @@ export function parseSetupArgs(
         else if (s.kind === "list") raw[s.key] = [v]
         else raw[s.key] = v
     }
+    return fromEnv
+}
 
+/** The value of a validated answer, or a usage error naming the flag. */
+function accepted<T>(flag: string, r: Result<T>): T {
+    if (!r.ok) throw new UsageError(`--${flag}: ${r.error}`)
+    return r.value
+}
+
+function oneOf<T extends string>(flag: string, value: string, allowed: readonly T[]): T {
+    if (!allowed.includes(value as T)) {
+        throw new UsageError(`--${flag} must be ${allowed.join(" or ")}, got "${value}"`)
+    }
+    return value as T
+}
+
+/** Turns the raw strings into typed, validated options. */
+function buildOptions(raw: RawAnswers, env: Record<string, string | undefined>): SetupOptions {
     const o: SetupOptions = {
         check: raw.check === true,
         json: raw.json === true,
@@ -256,70 +268,66 @@ export function parseSetupArgs(
     const bools = ["l2ps", "storePlaintext", "requireV2", "messaging", "zk", "zkGenerate"] as const
     for (const k of bools) if (raw[k] !== undefined) o[k] = raw[k] as boolean
 
-    if (raw.only !== undefined) {
-        if (raw.only !== "l2ps" && raw.only !== "zk") {
-            throw new UsageError(`--only must be l2ps or zk, got "${raw.only}"`)
-        }
-        o.only = raw.only
-    }
-    if (raw.uid !== undefined) {
-        const r = validateUid(raw.uid as string)
-        if (!r.ok) throw new UsageError(`--l2ps-uid: ${r.error}`)
-        o.uid = r.value
-    }
-    if (raw.role !== undefined) {
-        if (raw.role !== "create" && raw.role !== "join") {
-            throw new UsageError(`--l2ps-role must be create or join, got "${raw.role}"`)
-        }
-        o.role = raw.role
-    }
-    if (raw.rpcs !== undefined) {
-        const r = validateRpcList(raw.rpcs as string[])
-        if (!r.ok) throw new UsageError(`--l2ps-rpc: ${r.error}`)
-        o.rpcs = r.value
-    }
-    if (raw.ptauUrl !== undefined) {
-        const r = validateRpcUrl(raw.ptauUrl as string)
-        if (!r.ok) throw new UsageError(`--ptau-url: ${r.error}`)
-        o.ptauUrl = r.value
-    }
+    if (raw.only !== undefined) o.only = oneOf("only", raw.only as string, ["l2ps", "zk"] as const)
+    if (raw.uid !== undefined) o.uid = accepted("l2ps-uid", validateUid(raw.uid as string))
+    if (raw.role !== undefined) o.role = oneOf("l2ps-role", raw.role as string, ["create", "join"] as const)
+    if (raw.rpcs !== undefined) o.rpcs = accepted("l2ps-rpc", validateRpcList(raw.rpcs as string[]))
+    if (raw.ptauUrl !== undefined) o.ptauUrl = accepted("ptau-url", validateRpcUrl(raw.ptauUrl as string))
     if (raw.keyFile !== undefined) o.keyFile = raw.keyFile as string
     if (raw.ivFile !== undefined) o.ivFile = raw.ivFile as string
+    // The key material only ever comes from the environment, never from argv.
     if (env.DEMOS_SETUP_L2PS_KEY) o.keyHex = env.DEMOS_SETUP_L2PS_KEY
     if (env.DEMOS_SETUP_L2PS_IV) o.ivHex = env.DEMOS_SETUP_L2PS_IV
     if (raw.retentionDays !== undefined) {
-        const r = validateNonNegativeInt(raw.retentionDays as string)
-        if (!r.ok) throw new UsageError(`--history-retention-days: ${r.error}`)
-        o.retentionDays = r.value
+        o.retentionDays = accepted("history-retention-days", validateNonNegativeInt(raw.retentionDays as string))
     }
     if (raw.messagingPort !== undefined) {
-        const r = validatePort(raw.messagingPort as string)
-        if (!r.ok) throw new UsageError(`--messaging-port: ${r.error}`)
-        o.messagingPort = r.value
+        o.messagingPort = accepted("messaging-port", validatePort(raw.messagingPort as string))
     }
+    return o
+}
+
+/** Answers that contradict each other, reported only within one source (flags win over variables, so a lingering variable never blocks a flag). */
+function rejectContradictions(o: SetupOptions, fromCli: Source, fromEnv: Source): void {
     for (const source of [fromCli, fromEnv]) {
         const given = (...keys: Array<keyof SetupOptions>) => keys.some(k => source.has(k))
         if (source.has("l2ps") && o.l2ps === false && given("uid", "role", "rpcs", "keyFile", "ivFile")) {
             throw new UsageError("--no-l2ps cannot be combined with subnet answers such as --l2ps-uid")
         }
-        if (o.role === "create" && source.has("role") && (given("keyFile", "ivFile") || (source === fromEnv && (o.keyHex || o.ivHex)))) {
+        const importsKey = given("keyFile", "ivFile") || (source === fromEnv && Boolean(o.keyHex || o.ivHex))
+        if (o.role === "create" && source.has("role") && importsKey) {
             throw new UsageError("--l2ps-role create makes a new key; it cannot be combined with an imported key or IV (use --l2ps-role join)")
-        }
-    }
-    // --check only reports. Anything that asks for a change next to it is a
-    // contradiction the operator should hear about, not silently lose.
-    if (o.check || fromCli.has("json")) {
-        const allowed = new Set<keyof SetupOptions>(["check", "json", "envFile"])
-        const extra = [...fromCli].filter(k => !allowed.has(k) && k !== "help")
-        if (!o.check) throw new UsageError("--json only applies to --check")
-        if (o.help) throw new UsageError("--help cannot be combined with --check")
-        if (extra.length > 0) {
-            const names = extra.map(k => `--${SPECS.find(sp => sp.key === k)?.flag ?? String(k)}`)
-            throw new UsageError(`--check only reports and cannot be combined with ${names.join(", ")}`)
         }
     }
     if (o.only === "zk" && (o.l2ps !== undefined || o.uid !== undefined)) {
         throw new UsageError("--only zk cannot be combined with L2PS subnet options")
     }
+}
+
+/**
+ * --check only reports. Anything that asks for a change next to it is a
+ * contradiction the operator should hear about, not silently lose.
+ */
+function rejectCheckExtras(o: SetupOptions, fromCli: Source): void {
+    if (!o.check && !fromCli.has("json")) return
+    if (!o.check) throw new UsageError("--json only applies to --check")
+    if (o.help) throw new UsageError("--help cannot be combined with --check")
+    const allowed = new Set<keyof SetupOptions>(["check", "json", "envFile", "help"])
+    const extra = [...fromCli].filter(k => !allowed.has(k))
+    if (extra.length > 0) {
+        const names = extra.map(k => `--${SPECS.find(sp => sp.key === k)?.flag ?? String(k)}`)
+        throw new UsageError(`--check only reports and cannot be combined with ${names.join(", ")}`)
+    }
+}
+
+export function parseSetupArgs(
+    argv: string[],
+    env: Record<string, string | undefined> = process.env,
+): SetupOptions {
+    const { raw, fromCli } = readFlags(argv, false)
+    const fromEnv = mergeEnvironment(raw, env)
+    const o = buildOptions(raw, env)
+    rejectContradictions(o, fromCli, fromEnv)
+    rejectCheckExtras(o, fromCli)
     return o
 }
