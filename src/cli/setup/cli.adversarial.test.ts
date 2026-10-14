@@ -99,7 +99,7 @@ describe("--check writes nothing", () => {
         fs.writeFileSync(path.join(root, ".env"), "L2PS_MESSAGING_ENABLED=true\n")
         const before = tree(root)
         await cli(["--check"])
-        await cli(["--check", "--json", "--force", "--dry-run", "--yes"])
+        expect((await cli(["--check", "--json", "--force", "--dry-run", "--yes"])).code).toBe(2)
         expect(tree(root)).toEqual(before)
     })
 })
@@ -268,5 +268,80 @@ describe("the RPC address used when none is given", () => {
             expect(out).toContain("--l2ps-rpc")
             expect(fs.existsSync(path.join(root, "data/l2ps/s/config.json"))).toBe(false)
         }
+    })
+})
+
+describe("--check --json however it is spelled", () => {
+    const doc = (out: string) => JSON.parse(out) as { ok: boolean; error?: string }
+
+    it("every spelling of the two flags gives a document, on success and next to a mistake", async () => {
+        const spellings = [["--check=true", "--json"], ["--check", "--json=true"], ["--check", "--json", "true"], ["--json", "--check"], ["--check", "true", "--json", "true"]]
+        for (const base of spellings) {
+            const good = await cli(base)
+            expect([base.join(" "), good.code, doc(good.out).ok]).toEqual([base.join(" "), 0, true])
+            for (const mistake of [["--bogus"], ["--only", "nope"], ["--l2ps-uid"], ["stray"]]) {
+                for (const argv of [[...base, ...mistake], [...mistake, ...base]]) {
+                    const bad = await cli(argv)
+                    expect([argv.join(" "), bad.code, doc(bad.out).ok]).toEqual([argv.join(" "), 2, false])
+                }
+            }
+        }
+    })
+
+    it("--help next to --check is a contradiction reported as JSON, not the help text", async () => {
+        for (const help of ["-h", "--help"]) {
+            const { code, out } = await cli(["--check", "--json", help])
+            expect(code).toBe(2)
+            expect(doc(out).ok).toBe(false)
+        }
+    })
+
+    it("--json without --check is refused instead of being ignored", async () => {
+        const { code, out } = await cli(["--json"])
+        expect(code).toBe(2)
+        expect(out).toContain("--check")
+    })
+})
+
+describe("--check only reports", () => {
+    it("refuses every flag that asks for a change", async () => {
+        const asks = [["--yes"], ["-y"], ["--dry-run"], ["--force"], ["--only", "l2ps"], ["--l2ps-uid", "x"], ["--no-l2ps"], ["--messaging"], ["--zk"], ["--zk-generate"], ["--history-retention-days", "3"], ["--l2ps-rpc", "http://a:1"], ["--yes", "--dry-run"]]
+        for (const extra of asks) {
+            const { code, out } = await cli(["--check", ...extra])
+            expect([extra.join(" "), code]).toEqual([extra.join(" "), 2])
+            expect(out).toContain("--check")
+        }
+    })
+
+    it("still takes --env-file, and ignores answer variables left in the environment", async () => {
+        fs.writeFileSync(path.join(root, "other.env"), "L2PS_MESSAGING_ENABLED=true\n")
+        const { code, out } = await cli(["--check", "--env-file", "other.env"], { DEMOS_SETUP_YES: "true", DEMOS_SETUP_L2PS_UID: "x" })
+        expect(code).toBe(1)
+        expect(out).toContain("messaging is on but no usable subnet exists")
+    })
+})
+
+describe("an env file that cannot be read", () => {
+    it("is a reported error in check mode, never an all-clear", async () => {
+        fs.mkdirSync(path.join(root, "adir"))
+        for (const target of ["adir", root, "/etc"]) {
+            const { code, out } = await cli(["--check", "--json", "--env-file", target])
+            expect([target, code]).toEqual([target, 2])
+            const j = JSON.parse(out) as { ok: boolean; error: string }
+            expect(j.ok).toBe(false)
+            expect(j.error).toContain("cannot be read")
+        }
+        const text = await cli(["--check", "--env-file", "adir"])
+        expect(text.code).toBe(2)
+    })
+
+    it.skipIf(process.getuid?.() === 0)("also when it exists but is not readable", async () => {
+        fs.writeFileSync(path.join(root, "locked.env"), "A=1\n", { mode: 0o000 })
+        const { code } = await cli(["--check", "--json", "--env-file", "locked.env"])
+        expect(code).toBe(2)
+    })
+
+    it("a missing env file is simply empty", async () => {
+        expect((await cli(["--check", "--env-file", "nope.env"])).code).toBe(0)
     })
 })

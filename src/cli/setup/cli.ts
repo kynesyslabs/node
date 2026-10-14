@@ -1,4 +1,4 @@
-import { HELP, parseSetupArgs, UsageError } from "./args"
+import { HELP, parseSetupArgs, peekModes, UsageError } from "./args"
 import {
     collectChecks,
     fixesFor,
@@ -8,6 +8,7 @@ import {
     SETUP_COMMAND,
 } from "./checks"
 import { createContext } from "./context"
+import { readEnvFileStrict } from "./envFile"
 import { createReadlinePrompter, SetupAborted, type Prompter } from "./prompt"
 import { createDefaultRunner } from "./runner"
 import { runWizard, SetupError } from "./wizard"
@@ -27,6 +28,11 @@ export interface CliDeps {
 
 export function runCheck(deps: CliDeps, envFile: string, json: boolean): number {
     const ctx = createContext(deps.cwd, envFile, deps.env, deps.inDocker)
+    try {
+        readEnvFileStrict(ctx.envFilePath)
+    } catch (e) {
+        throw new UsageError(`--env-file ${envFile} cannot be read (${e instanceof Error ? e.message : String(e)})`)
+    }
     const report = collectChecks(ctx)
     const problems = report.items.filter(isProblem)
     if (json) {
@@ -49,7 +55,8 @@ function jsonFailure(deps: CliDeps, message: string): void {
 
 /** Returns the process exit code. */
 export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
-    const wantsJson = argv.includes("--check") && argv.includes("--json")
+    const modes = peekModes(argv)
+    const wantsJson = modes.check && modes.json
     try {
         const opts = parseSetupArgs(argv, deps.env)
         if (opts.help) {

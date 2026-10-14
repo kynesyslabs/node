@@ -87,7 +87,8 @@ Sets up L2PS (private subnets) and ZK (proofs) for this node. Without flags it
 asks questions; with --yes it uses the flags and DEMOS_SETUP_* variables only.
 
 Modes
-  --check                 Report what is configured, missing or invalid. Writes nothing.
+  --check                 Report what is configured, missing or invalid. Writes nothing,
+                          so it cannot be combined with options that ask for a change.
   --json                  With --check, print the report as JSON.
   --dry-run               Show what would be written, change nothing.
   --yes, -y               Never ask; answer from flags and DEMOS_SETUP_* variables.
@@ -135,18 +136,22 @@ function coerceBool(name: string, raw: string): boolean {
     return b
 }
 
-export function parseSetupArgs(
-    argv: string[],
-    env: Record<string, string | undefined> = process.env,
-): SetupOptions {
-    const raw: Partial<Record<keyof SetupOptions, string | string[] | boolean>> = {}
-    // Which answers came from the command line and which from the environment,
-    // so a contradiction is only reported within one source (flags win over
-    // variables, so a lingering variable never blocks a flag).
+type RawAnswers = Partial<Record<keyof SetupOptions, string | string[] | boolean>>
+
+/**
+ * Reads the command line into raw answers. Strict mode throws at the first
+ * mistake; lenient mode skips what it cannot read and keeps going, which lets a
+ * caller learn which mode was asked for (--check --json) even when another
+ * part of the line is wrong.
+ */
+function readFlags(argv: string[], lenient: boolean): { raw: RawAnswers; fromCli: Set<keyof SetupOptions> } {
+    const raw: RawAnswers = {}
     const fromCli = new Set<keyof SetupOptions>()
-    const fromEnv = new Set<keyof SetupOptions>()
     const bySpec = new Map<string, Spec>()
     for (const s of SPECS) bySpec.set(s.flag, s)
+    const bad = (message: string): void => {
+        if (!lenient) throw new UsageError(message)
+    }
 
     for (let i = 0; i < argv.length; i++) {
         const arg = argv[i]
@@ -157,9 +162,13 @@ export function parseSetupArgs(
         }
         if (arg === "-h") {
             raw.help = true
+            fromCli.add("help")
             continue
         }
-        if (!arg.startsWith("--")) throw new UsageError(`Unexpected argument: ${arg}`)
+        if (!arg.startsWith("--")) {
+            bad(`Unexpected argument: ${arg}`)
+            continue
+        }
         const eq = arg.indexOf("=")
         const name = arg.slice(2, eq === -1 ? undefined : eq)
         let inline = eq === -1 ? undefined : arg.slice(eq + 1)
@@ -171,20 +180,29 @@ export function parseSetupArgs(
             negated = true
             if (spec?.kind !== "bool") spec = undefined
         }
-        if (!spec) throw new UsageError(`Unknown option: --${name}`)
+        if (!spec) {
+            bad(`Unknown option: --${name}`)
+            continue
+        }
         fromCli.add(spec.key)
 
         if (spec.kind === "bool") {
             if (inline === undefined && argv[i + 1] !== undefined && /^(true|false)$/i.test(argv[i + 1])) {
                 inline = argv[++i]
             }
-            const value = inline === undefined ? true : coerceBool(`--${name}`, inline)
-            raw[spec.key] = negated ? !value : value
+            const parsed = inline === undefined ? true : parseBool(inline)
+            if (parsed === undefined) {
+                bad(`--${name}: expected true or false, got "${inline}"`)
+                continue
+            }
+            raw[spec.key] = negated ? !parsed : parsed
         } else {
             if (inline === undefined) {
                 inline = argv[++i]
                 if (inline === undefined || inline.startsWith("--")) {
-                    throw new UsageError(`--${name} needs a value`)
+                    bad(`--${name} needs a value`)
+                    if (inline !== undefined) i--
+                    continue
                 }
             }
             if (spec.kind === "list") {
@@ -195,6 +213,24 @@ export function parseSetupArgs(
             }
         }
     }
+    return { raw, fromCli }
+}
+
+/** Which mode the command line asks for, even when the rest of it is wrong. */
+export function peekModes(argv: string[]): { check: boolean; json: boolean; help: boolean } {
+    const { raw } = readFlags(argv, true)
+    return { check: raw.check === true, json: raw.json === true, help: raw.help === true }
+}
+
+export function parseSetupArgs(
+    argv: string[],
+    env: Record<string, string | undefined> = process.env,
+): SetupOptions {
+    const { raw, fromCli } = readFlags(argv, false)
+    // Which answers came from the command line and which from the environment,
+    // so a contradiction is only reported within one source (flags win over
+    // variables, so a lingering variable never blocks a flag).
+    const fromEnv = new Set<keyof SetupOptions>()
 
     // Fall back to the environment for anything the command line left unset.
     for (const s of SPECS) {
@@ -268,6 +304,18 @@ export function parseSetupArgs(
         }
         if (o.role === "create" && source.has("role") && (given("keyFile", "ivFile") || (source === fromEnv && (o.keyHex || o.ivHex)))) {
             throw new UsageError("--l2ps-role create makes a new key; it cannot be combined with an imported key or IV (use --l2ps-role join)")
+        }
+    }
+    // --check only reports. Anything that asks for a change next to it is a
+    // contradiction the operator should hear about, not silently lose.
+    if (o.check || fromCli.has("json")) {
+        const allowed = new Set<keyof SetupOptions>(["check", "json", "envFile"])
+        const extra = [...fromCli].filter(k => !allowed.has(k) && k !== "help")
+        if (!o.check) throw new UsageError("--json only applies to --check")
+        if (o.help) throw new UsageError("--help cannot be combined with --check")
+        if (extra.length > 0) {
+            const names = extra.map(k => `--${SPECS.find(sp => sp.key === k)?.flag ?? String(k)}`)
+            throw new UsageError(`--check only reports and cannot be combined with ${names.join(", ")}`)
         }
     }
     if (o.only === "zk" && (o.l2ps !== undefined || o.uid !== undefined)) {

@@ -25,6 +25,20 @@ export function readEnvFile(path: string): Record<string, string> {
     }
 }
 
+/**
+ * Like readEnvFile, but a file that exists and cannot be read (a directory, no
+ * permission) is an error rather than "empty": a report built on it would say
+ * everything is fine without having looked.
+ */
+export function readEnvFileStrict(path: string): Record<string, string> {
+    try {
+        return parseEnv(fs.readFileSync(path, "utf8"))
+    } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === "ENOENT") return {}
+        throw e
+    }
+}
+
 export interface EnvChange {
     key: string
     from?: string
